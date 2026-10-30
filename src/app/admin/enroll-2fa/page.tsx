@@ -6,19 +6,20 @@ import { authClient } from "@/lib/auth-client";
 
 export default function Enroll2FA() {
   const router = useRouter();
+  const [password, setPassword] = useState("");
   const [totpUri, setTotpUri] = useState<string | null>(null);
-  const [secret, setSecret] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
 
-  async function startEnrollment() {
+  async function startEnrollment(e: React.FormEvent) {
+    e.preventDefault();
     setEnrolling(true);
     setError("");
     try {
       const result = await authClient.twoFactor.enable({
-        password: "",
+        password,
       });
       if (result.error) {
         setError(result.error.message ?? "Failed to start enrollment");
@@ -28,7 +29,6 @@ export default function Enroll2FA() {
       const data = result.data;
       if (data && "totpURI" in data) {
         setTotpUri(data.totpURI ?? null);
-        setSecret(null);
       }
     } catch {
       setError("Failed to start enrollment");
@@ -74,13 +74,27 @@ export default function Enroll2FA() {
         )}
 
         {!totpUri && (
-          <button
-            onClick={startEnrollment}
-            disabled={enrolling}
-            className="w-full rounded-full bg-[#1F5A43] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
-          >
-            {enrolling ? "Setting up..." : "Begin setup"}
-          </button>
+          <form onSubmit={startEnrollment}>
+            <label className="mb-1 block text-sm font-medium text-[#15201A]">
+              Current password
+            </label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="mb-4 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+              autoComplete="current-password"
+              placeholder="Enter your password"
+            />
+            <button
+              type="submit"
+              disabled={enrolling}
+              className="w-full rounded-full bg-[#1F5A43] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
+            >
+              {enrolling ? "Setting up..." : "Begin setup"}
+            </button>
+          </form>
         )}
 
         {totpUri && (
@@ -92,11 +106,6 @@ export default function Enroll2FA() {
               <code className="block break-all rounded bg-white px-2 py-1 text-xs text-[#55625A]">
                 {totpUri}
               </code>
-              {secret && (
-                <p className="mt-2 text-xs text-[#55625A]">
-                  Secret: <code className="font-mono">{secret}</code>
-                </p>
-              )}
             </div>
 
             <form onSubmit={verifyCode}>

@@ -319,6 +319,15 @@ describe("createStore", () => {
     }
   });
 
+  it("rejects protocol-relative logo URL (//host/path)", async () => {
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, logoUrl: "//evil.example.com/logo.png" }),
+    );
+    expect(result.fieldErrors?.logoUrl).toBeDefined();
+    expect(result.fieldErrors?.logoUrl).toContain("Protocol-relative");
+  });
+
   it("accepts local logo path", async () => {
     mockFindUnique.mockResolvedValueOnce(null);
     mockCreate.mockResolvedValueOnce({

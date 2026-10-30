@@ -2,15 +2,15 @@ import { test, expect } from "@playwright/test";
 import { generateTOTP } from "./totp";
 
 const ADMIN_EMAIL = "admin@platform.test";
-const ADMIN_PASSWORD = "Test1234!";
-const SEED_TOTP_SECRET = "seed-totp-secret-for-e2e-tests!";
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
+const SEED_TOTP_SECRET = process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP";
 
 function generateTotpCode(): string {
   return generateTOTP(SEED_TOTP_SECRET);
 }
 
 async function adminSignIn(page: import("@playwright/test").Page) {
-  await page.goto("http://localhost:3000/admin/sign-in");
+  await page.goto("/admin/sign-in");
   await page.fill("input[type='email']", ADMIN_EMAIL);
   await page.fill("input[type='password']", ADMIN_PASSWORD);
   await page.click("button[type='submit']");
@@ -21,17 +21,17 @@ async function adminSignIn(page: import("@playwright/test").Page) {
     .catch(() => false);
 
   if (totpVisible) {
-    const code = await generateTotpCode();
+    const code = generateTotpCode();
     await page.fill("input[inputmode='numeric']", code);
     await page.click("button[type='submit']");
   }
 
-  await page.waitForURL("**/admin/stores", { timeout: 10000 });
+  await page.waitForURL("**/admin/stores", { timeout: 15000 });
 }
 
 test.describe("Platform admin console", () => {
   test("sign-in page renders email and password fields", async ({ page }) => {
-    await page.goto("http://localhost:3000/admin/sign-in");
+    await page.goto("/admin/sign-in");
     await expect(page.locator("h1")).toHaveText("Platform Admin");
     await expect(page.locator("input[type='email']")).toBeVisible();
     await expect(page.locator("input[type='password']")).toBeVisible();
@@ -41,14 +41,14 @@ test.describe("Platform admin console", () => {
   test("unauthenticated access to /admin redirects to sign-in", async ({
     page,
   }) => {
-    await page.goto("http://localhost:3000/admin");
+    await page.goto("/admin");
     await expect(page).toHaveURL(/\/admin\/sign-in/);
   });
 
   test("unauthenticated access to /admin/stores redirects to sign-in", async ({
     page,
   }) => {
-    await page.goto("http://localhost:3000/admin/stores");
+    await page.goto("/admin/stores");
     await expect(page).toHaveURL(/\/admin\/sign-in/);
   });
 
@@ -158,5 +158,43 @@ test.describe("Store management (authenticated)", () => {
 
     await expect(page.locator("text=adjusted")).toBeVisible({ timeout: 5000 });
     await expect(page.locator("text=contrast")).toBeVisible();
+  });
+});
+
+test.describe("2FA enrollment (unenrolled admin)", () => {
+  const UNENROLLED_EMAIL = "unenrolled-admin@platform.test";
+
+  test("unenrolled admin is redirected to enroll-2fa, completes enrollment, reaches stores", async ({
+    page,
+  }) => {
+    await page.goto("/admin/sign-in");
+    await page.fill("input[type='email']", UNENROLLED_EMAIL);
+    await page.fill("input[type='password']", ADMIN_PASSWORD);
+    await page.click("button[type='submit']");
+
+    await page.waitForURL("**/admin/enroll-2fa", { timeout: 10000 });
+    await expect(page.locator("h1")).toContainText("two-factor");
+
+    await page.fill("input[type='password']", ADMIN_PASSWORD);
+    await page.click("button:has-text('Begin setup')");
+
+    await expect(page.locator("text=Scan this URI")).toBeVisible({
+      timeout: 10000,
+    });
+
+    const totpUriEl = page.locator("code").first();
+    const totpUri = await totpUriEl.textContent();
+    expect(totpUri).toBeTruthy();
+
+    const secretMatch = totpUri!.match(/secret=([A-Z2-7]+)/i);
+    expect(secretMatch).toBeTruthy();
+    const enrolledSecret = secretMatch![1];
+
+    const code = generateTOTP(enrolledSecret);
+    await page.fill("input[inputmode='numeric']", code);
+    await page.click("button:has-text('Verify and continue')");
+
+    await page.waitForURL("**/admin/stores", { timeout: 15000 });
+    await expect(page.locator("h1")).toHaveText("Stores");
   });
 });

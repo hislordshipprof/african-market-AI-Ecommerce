@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { storeScoped, platform, platformAdmin } from "./db";
+import { storeScoped, platform, platformAdmin, authPrisma } from "./db";
 import { runtimeDatabaseUrl } from "./env";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -231,11 +231,15 @@ describe.skipIf(!hasDb)("Platform admin RLS (DB-backed)", () => {
   });
 
   it("platform admin flag does not persist after transaction", async () => {
+    // Prove SET LOCAL scopes the flag to the transaction. Uses authPrisma
+    // (the same pool platformAdmin wraps) so a leaked SET (without LOCAL)
+    // would be visible on the reused connection. Mutation proof: changing
+    // set_config's third arg from true to false in db.ts makes this fail.
     await platformAdmin.store.findUnique({ where: { id: testStoreId } });
 
-    const result = await rawPrisma.$transaction([
-      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
-      rawPrisma.$queryRaw`SELECT current_setting('app.is_platform_admin', true) as admin_flag`,
+    const result = await authPrisma.$transaction([
+      authPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      authPrisma.$queryRaw`SELECT current_setting('app.is_platform_admin', true) as admin_flag`,
     ]);
     const rows = result[1] as Array<{ admin_flag: string | null }>;
     expect(rows[0].admin_flag === "" || rows[0].admin_flag === null).toBe(true);

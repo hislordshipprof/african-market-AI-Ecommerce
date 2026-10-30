@@ -107,6 +107,10 @@ jobs:
       APP_RUNTIME_PASSWORD: app_runtime_ci
       BETTER_AUTH_SECRET: ci-e2e-test-secret-do-not-use-in-prod
       BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_TRUSTED_ORIGINS: http://localhost:3000
+      SEED_TEST_ADMIN: "1"
+      SEED_ADMIN_PASSWORD: CiTestPass99!
+      SEED_ADMIN_TOTP_SECRET: JBSWY3DPEHPK3PXP
 
     steps:
       - uses: actions/checkout@v4

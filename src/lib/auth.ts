@@ -41,6 +41,9 @@ export const auth = betterAuth({
   trustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
     ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",")
     : [],
+  advanced: {
+    useSecureCookies: process.env.BETTER_AUTH_URL?.startsWith("https://") ?? process.env.NODE_ENV === "production",
+  },
 });
 
 export type Session = typeof auth.$Infer.Session;

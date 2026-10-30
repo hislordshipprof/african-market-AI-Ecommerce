@@ -78,8 +78,10 @@ function validateStoreFields(data: FormData): {
   else if (RESERVED_SLUGS.has(slug)) errors.slug = "This slug is reserved and cannot be used";
 
   if (logoUrl) {
-    if (logoUrl.startsWith("/")) {
+    if (logoUrl.startsWith("/") && !logoUrl.startsWith("//")) {
       // local path — always allowed
+    } else if (logoUrl.startsWith("//")) {
+      errors.logoUrl = "Protocol-relative URLs are not allowed; use a local path like /logos/store-logo.svg";
     } else {
       try {
         const parsed = new URL(logoUrl);
