@@ -341,20 +341,24 @@ AuditLog(id, tenant_id, actor, action, entity, before, after, at)
 
 ## 14. Architecture & stack
 
-- **Web:** Next.js (App Router, TypeScript), Tailwind + shadcn/ui; PWA for store staff (push, add-to-home-screen).
-- **API:** Next.js route handlers / server actions for v1 (single deployable); background work in a worker (queues).
-- **DB:** Postgres (Neon or RDS) + Prisma; Row-Level Security for tenant isolation.
-- **Queue/jobs:** Inngest or BullMQ (Redis) for timers (substitution timeout, courier failover, confidence decay, digests).
-- **Realtime:** Pusher/Ably or Supabase Realtime for order board, live courier location.
-- **Storage:** S3/R2 for images, proof photos; image CDN.
-- **Search:** Postgres full-text + trigram + synonym table (v1); Typesense/Meilisearch if needed.
+Designed for ~1,000 stores, ~1M customers, ~20k orders/day (ADR-0012). Each choice's scale limits, cost and best practices are in ADRs 0013-0017.
+
+- **Web:** Next.js (App Router, TypeScript) on Vercel Pro, one app for storefront, admin and API; middleware resolves the store from the host name. Tailwind + shadcn/ui; PWA for store staff (ADR-0013).
+- **Custom domains:** Vercel domains API, queued during onboarding (ADR-0013).
+- **DB:** Neon Postgres via its pooled endpoint, branch per PR; Prisma 7; row-level security per store via a transaction-scoped setting (ADR-0014).
+- **Auth:** Better Auth: phone one-time codes for customers, organizations and roles for stores, 2FA for owners and staff, built-in rate limiting (ADR-0015).
+- **Jobs:** Inngest Cloud free tier for timers and retries (substitution timeout, courier failover, confidence decay, digests) (ADR-0016).
+- **Live updates:** Web Push + SMS alerts, ~10 s polling on open boards, courier tracking pages; self-hosted Centrifugo later if needed (ADR-0016).
+- **Storage:** Cloudflare R2 + Cloudflare image CDN; private bucket with signed URLs for proof photos (ADR-0013).
+- **Search:** Postgres full-text + pg_trgm + synonym table, per-store indexes; pgvector for AI matching; Typesense only if p95 > 300 ms (ADR-0014).
+- **Caching:** Next.js cache tagged per store; no Redis until needed (ADR-0017).
 - **AI:** Anthropic API (Claude) with tool use; prompt caching for catalog/recipe context; embeddings for product matching.
 - **Payments:** Stripe Connect, Stripe Tax, Stripe Billing.
 - **Delivery:** Uber Direct API, DoorDash Drive API.
-- **Comms:** Resend, Twilio (SMS + WhatsApp).
-- **Maps:** Google Maps Platform (address autocomplete, geocoding, distance) or Mapbox.
-- **Hosting:** Vercel (web) + managed Postgres + worker on Fly/Render; custom domains via Vercel domains API.
-- **Observability:** Sentry, structured logs, uptime checks on webhooks.
+- **Comms:** Resend (email), Telnyx (SMS), Meta WhatsApp Cloud API (ADR-0017).
+- **Maps:** Google Maps Platform with billing caps, session tokens and cached geocodes (ADR-0017).
+- **DNS:** Cloudflare.
+- **Observability:** Sentry free tier, Vercel logs, Inngest run history, uptime checks on webhooks; budget alerts on every metered service (ADR-0017).
 
 ---
 
