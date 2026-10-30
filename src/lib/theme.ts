@@ -158,29 +158,63 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
+function passesAA(color: string, bgColor: string): boolean {
+  return (
+    contrastRatio(color, bgColor) >= 4.5 &&
+    contrastRatio(color, readableFillColor(color)) >= 4.5
+  );
+}
+
+function lerpChannel(a: number, b: number, t: number): number {
+  return Math.round(a + (b - a) * t);
+}
+
+function lerpHex(hex1: string, hex2: string, t: number): string {
+  const r = lerpChannel(
+    parseInt(hex1.slice(1, 3), 16),
+    parseInt(hex2.slice(1, 3), 16),
+    t,
+  );
+  const g = lerpChannel(
+    parseInt(hex1.slice(3, 5), 16),
+    parseInt(hex2.slice(3, 5), 16),
+    t,
+  );
+  const b = lerpChannel(
+    parseInt(hex1.slice(5, 7), 16),
+    parseInt(hex2.slice(5, 7), 16),
+    t,
+  );
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
 export function nudgeForContrast(
   brandColor: string,
   bgColor: string,
 ): { color: string; nudged: boolean } {
-  const MIN_RATIO = 4.5;
-  let color = brandColor;
-  const bgLum = luminance(bgColor);
-  let nudged = false;
-
-  for (let i = 0; i < 20; i++) {
-    const textColor = readableFillColor(color);
-    const bgRatio = contrastRatio(color, bgColor);
-    const textRatio = contrastRatio(color, textColor);
-    if (bgRatio >= MIN_RATIO && textRatio >= MIN_RATIO) break;
-    nudged = true;
-    const [h, s, l] = hexToHsl(color);
-    if (bgLum > 0.5) {
-      color = hslToHex(h, s, Math.max(0, l - 0.03));
-    } else {
-      color = hslToHex(h, s, Math.min(1, l + 0.03));
-    }
+  if (passesAA(brandColor, bgColor)) {
+    return { color: brandColor, nudged: false };
   }
-  return { color, nudged };
+
+  const bgLum = luminance(bgColor);
+  const isLightBg = bgLum > 0.5;
+
+  let color = brandColor;
+  for (;;) {
+    const [h, s, l] = hexToHsl(color);
+    const newL = isLightBg ? l - 0.03 : l + 0.03;
+    if (newL <= 0 || newL >= 1) break;
+    color = hslToHex(h, s, newL);
+    if (passesAA(color, bgColor)) return { color, nudged: true };
+  }
+
+  const fallback = isLightBg ? "#000000" : "#ffffff";
+  for (let step = 1; step <= 100; step++) {
+    const c = lerpHex(brandColor, fallback, step / 100);
+    if (passesAA(c, bgColor)) return { color: c, nudged: true };
+  }
+
+  return { color: fallback, nudged: true };
 }
 
 export function readableFillColor(fillColor: string): string {

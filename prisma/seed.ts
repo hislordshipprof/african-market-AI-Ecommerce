@@ -1,11 +1,8 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { resolveDirectUrl } from "../src/lib/env";
 
-const connectionUrl =
-  process.env.DATABASE_URL_UNPOOLED ??
-  process.env.DIRECT_URL ??
-  process.env.DATABASE_URL!;
-const adapter = new PrismaPg(connectionUrl);
+const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
