@@ -29,13 +29,22 @@ A multi-tenant e-commerce platform for independent African grocery markets in th
 
 | # | Decision | Choice |
 |---|---|---|
-| D1 | Launch metro | **DMV (DC/MD/VA) or Houston**: final pick open (see §17) |
-| D2 | How customers find stores | Branded store per market first; combined marketplace app once ≥3 stores in a metro |
-| D3 | Revenue | Low monthly subscription + small per-order platform fee; courier fee passed through at cost (+ optional small margin) |
-| D4 | Heavy items (>50 lb / ~23 kg per order) | Not courier-eligible: pickup, store's own driver, or scheduled van slot |
-| D5 | Catalog onboarding | Platform-led, AI-assisted (shelf photos → draft listings), store reviews |
-| D6 | Couriers | Uber Direct primary, DoorDash Drive automatic fallback |
-| D7 | Payments | Stripe Connect; each market is a connected account |
+| D1 | Launch geography | **US only; stores onboarded in any state**: no single launch metro ([ADR-0001](../adr/0001-us-only-nationwide-onboarding.md)) |
+| D2 | How customers find stores | Each store's own branded storefront; Phase 2 **Store directory** (search by state / near me → store's site), not a combined marketplace ([ADR-0007](../adr/0007-store-directory-instead-of-marketplace.md)) |
+| D3 | Revenue | Low monthly subscription + small per-order platform fee; courier fee = real quote, **no markup** ([ADR-0006](../adr/0006-delivery-options-and-courier-selection.md)) |
+| D4 | Heavy items (>50 lb item or order) | Not courier-eligible: Store delivery or Pickup. 50 lb is an adjustable platform setting ([ADR-0006](../adr/0006-delivery-options-and-courier-selection.md)) |
+| D5 | Store & catalog onboarding | Platform team sets up every store (no self-serve sign-up in v1); AI-assisted catalog (shelf photos → draft listings), store reviews |
+| D6 | Couriers | Platform picks the cheaper available of Uber Direct / DoorDash Drive, auto-failover; customer sees the brand, doesn't choose it ([ADR-0006](../adr/0006-delivery-options-and-courier-selection.md)) |
+| D7 | Payments | Stripe Connect; each store is a connected account |
+| D8 | Who can join | Any independent US grocery/food store; no restaurants in v1 ([ADR-0004](../adr/0004-any-independent-grocery-or-food-store.md)) |
+| D9 | Customer accounts | One account across all stores + guest checkout ([ADR-0002](../adr/0002-platform-wide-customer-account-with-guest-checkout.md)) |
+| D10 | Branding | Store's brand only; small "Powered by" footer ([ADR-0003](../adr/0003-store-branded-storefronts.md)) |
+| D11 | System shape | One shared system for all stores ([ADR-0005](../adr/0005-one-shared-system-for-all-stores.md)) |
+| D12 | Phase 1 order | Core loop first; Store delivery (simple) in Phase 1; AI shopper is the last Phase 1 slice |
+| D13 | Stock & POS | No POS sync in v1: online sales auto-deduct, proactive Store copilot + owner reports, pick-time check ([ADR-0009](../adr/0009-stock-without-pos-sync.md)) |
+| D14 | AI channels | Shopper assistant: storefront (Phase 1), store's own WhatsApp number (Phase 2). Store copilot: admin app + platform WhatsApp number (Phase 1) ([ADR-0010](../adr/0010-whatsapp-channels.md)) |
+| D15 | Shopper assistant scope | Builds carts and answers order status, hours, delivery area and policies from real data; complaints and refunds go to the store |
+| D16 | Promotions | None in Phase 1 (no coupons, points, store credit) |
 
 ---
 
@@ -86,6 +95,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ### 5.4 Checkout
 - Fulfillment: **Delivery** (address validated, within store radius, courier-eligible weight) or **Pickup** (time slot).
 - If cart > 50 lb: delivery options become *Pickup*, *Store delivery* (if store has a driver), or *Scheduled van* (if offered).
+- **Store closed:** orders are still accepted. The customer sees when the store opens and an estimated ready time. The card is authorized now and the order joins the queue at opening. Scheduled delivery slots come later.
 - Payment: card / Apple Pay / Google Pay via Stripe. **Authorize at checkout (total + small buffer), capture the final amount after picking** (see §10). Auth window 7 days; pickup orders > 6 days out not allowed.
 - Delivery instructions, apartment/gate code, leave-at-door toggle (disabled when frozen items present).
 - Tip (default 15%, editable), passed 100% to courier.
@@ -236,7 +246,8 @@ Unanswered store: if not ACCEPTED within 15 min (store hours), alert owner by SM
 - **Manual capture:** authorize the order total **plus a buffer of 10% (capped at $20)** at checkout, disclosed to the customer ("you'll be charged the final amount after picking"). Capture the final amount at READY; the unused buffer is released. A swap that costs more (e.g. +$4) needs the customer's tap and must fit within the buffer; swaps that would exceed it are not offered.
 - **Refunds:** issue from the order; the platform fee is refunded proportionally per policy; courier fee non-refundable when delivery completed.
 - **Tips:** collected with the order, passed to provider tip field.
-- **Sales tax:** Stripe Tax. Grocery tax rules vary by state (e.g. DC, MD, VA, TX differ on food). Most launch states have **marketplace facilitator** laws that may make the platform responsible for collecting/remitting. **Needs tax advisor sign-off before launch.**
+- **Card processing fees:** paid by the store, deducted from its payout. No customer surcharge (shelf price = checkout price).
+- **Sales tax:** Stripe Tax. Grocery tax rules vary by state (e.g. DC, MD, VA, TX differ on food). Most launch states have **marketplace facilitator** laws that may make the platform responsible for collecting/remitting. Platform is built to collect and remit; **no real order until a tax advisor signs off per state** ([ADR-0008](../adr/0008-platform-built-to-collect-sales-tax.md)).
 - **Subscriptions:** Stripe Billing for tenant monthly plans.
 - **Payouts:** weekly to the store's bank via Connect.
 - Interac/e-Transfer style manual payments: **not supported** (US launch; manual matching was a Danlex pain point).
@@ -386,16 +397,20 @@ Repo, multi-tenant schema + RLS, auth, tenant routing/branding, Stripe Connect o
 ### Phase 1: MVP, one store end-to-end (weeks 3–8)
 - Storefront: browse, search with synonyms, product pages, cart with swap rules, checkout (auth/capture), pickup + delivery.
 - Store admin (phone-first): catalog/stock, order inbox, pick list, short → customer prompt, Ready, handoff.
-- Uber Direct integration (quote, create, webhooks, tracking), DoorDash fallback.
+- Courier delivery: Uber Direct + DoorDash Drive, cheaper available wins, auto-failover (ADR-0006).
+- Store delivery (simple): store sets fee, taps out-for-delivery / delivered with photo; customer gets SMS updates.
 - Notifications (email + SMS), order tracking page, issue reporting + refunds.
-- AI shopper v1 (search, recipe-to-cart, gaps/substitutes, prepare checkout).
-- Pilot with 1 friendly market.
+- Store copilot v1 (ADR-0009): online sales auto-deduct stock; stock confidence; proactive alerts (sold out, running low, new orders) + daily digest; asks owner to confirm uncertain items; owner reports restocks/counter sales by text, voice or photo in the app or on WhatsApp, one-tap confirm.
+- AI shopper v1 (search, recipe-to-cart, gaps/substitutes, prepare checkout, answers status/hours/delivery-area/policy questions), built **last**, after the core loop works.
+- Pilot with **1 friendly store** end to end; onboard the next known owners only once it's stable.
+- No coupons, loyalty points or store credit in Phase 1 (refunds go back to the card); promotions are a Phase 2 candidate.
 
 ### Phase 2: Multi-store launch (weeks 9–14)
 - Onboard 4 more markets; AI photo-to-listing onboarding.
-- Store AI copilot (summaries, pick lists, low stock, inventory movement), daily digest.
-- Stock confidence scoring + morning quick-check.
-- Combined marketplace view for the metro; WhatsApp notifications; own-driver link.
+- Store copilot, rest of it: weekly reports, sales trends, inventory movement, reorder suggestions.
+- WhatsApp ordering for customers on the store's own number (ADR-0010).
+- Store directory (search stores by state / near me → storefront; ADR-0007); WhatsApp notifications.
+- Promotions: store coupons first.
 - Reports & payouts dashboard; platform admin console.
 
 ### Phase 3: Scale
@@ -405,11 +420,11 @@ Second metro, native apps, batch picking, scheduled van slots, nationwide shippi
 
 ## 18. Open questions
 
-1. **Launch metro:** DMV vs Houston. Need: which market owners we already know, current ACS B05006 data, Uber Direct/DoorDash coverage check for target store addresses.
+1. ~~Launch metro~~ **Resolved:** US-wide (ADR-0001). Was: DMV vs Houston. Need: which market owners we already know, current ACS B05006 data, Uber Direct/DoorDash coverage check for target store addresses.
 2. **Pricing numbers:** subscription tier ($49? $99?) and per-order fee ($1–2? 3%?). Validate with 3–5 store owners.
-3. **Merchant of record & tax:** confirm destination-charge setup and marketplace-facilitator obligations per state with a tax advisor.
+3. **Merchant of record & tax:** (build approach settled in ADR-0008; advisor sign-off still needed) confirm destination-charge setup and marketplace-facilitator obligations per state with a tax advisor.
 4. **Uber Direct account:** confirm multi-location/organization setup and US pricing for platform accounts; confirm weight limits with both providers.
-5. **Brand:** platform name and whether customers see the platform brand at all on tenant stores ("powered by").
-6. **Customer accounts across stores:** one platform login (current spec) vs per-store accounts; affects phase-2 marketplace.
-7. **Who handles customer support at launch:** platform team, store, or both (tiered)?
-8. **Delivery fee policy:** flat by distance band vs pass-through quote; who pays above free-delivery threshold.
+5. **Brand:** (storefronts are store-branded per ADR-0003; only the platform name remains open) platform name and whether customers see the platform brand at all on tenant stores ("powered by").
+6. ~~Customer accounts~~ **Resolved:** ADR-0002. Was: one platform login (current spec) vs per-store accounts; affects phase-2 marketplace.
+7. ~~Customer support~~ **Resolved:** the store is first line (in-app chat, refunds). The platform team handles payment, courier and app issues, or steps in when a store doesn't respond within the SLA.
+8. ~~Delivery fee policy~~ **Resolved:** ADR-0006. Was: flat by distance band vs pass-through quote; who pays above free-delivery threshold.
