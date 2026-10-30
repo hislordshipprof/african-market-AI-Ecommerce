@@ -1,0 +1,215 @@
+<title>Phase 1 Build Board</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: summary strip, then dependency waves top to bottom; tickets in a wave sit side by side because they can build in parallel. */
+:root{
+  --bg:#F3F4EF;--surface:#FFFFFF;--raised:#E7E9E2;--ink:#15201A;--muted:#55625A;--line:#DCDFD6;
+  --primary:#1F5A43;--soft:#E1EEE3;
+  --ok:#2E7D4F;--ok-bg:#E1EEE3;--run:#23415C;--run-bg:#E1E7EE;--review:#7A4E00;--review-bg:#F3EAD9;
+  --stop:#B42335;--stop-bg:#F6E1E3;--idle:#55625A;--idle-bg:#ECEEE8;
+  --f-display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --f-body:"Figtree","Segoe UI",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0F1712;--surface:#16211A;--raised:#1F2C24;--ink:#EEF2EC;--muted:#A3B1A7;--line:#2A3A30;
+  --primary:#6CC08F;--soft:#1B2E23;
+  --ok:#6CC08F;--ok-bg:#1B2E23;--run:#8FB3D6;--run-bg:#1B2A38;--review:#E3B868;--review-bg:#33291A;
+  --stop:#F0707E;--stop-bg:#3A1C22;--idle:#A3B1A7;--idle-bg:#1F2C24;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1712;--surface:#16211A;--raised:#1F2C24;--ink:#EEF2EC;--muted:#A3B1A7;--line:#2A3A30;
+  --primary:#6CC08F;--soft:#1B2E23;
+  --ok:#6CC08F;--ok-bg:#1B2E23;--run:#8FB3D6;--run-bg:#1B2A38;--review:#E3B868;--review-bg:#33291A;
+  --stop:#F0707E;--stop-bg:#3A1C22;--idle:#A3B1A7;--idle-bg:#1F2C24;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5}
+.wrap{max-width:1180px;margin:0 auto;padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:28px}
+h1{font-family:var(--f-display);font-size:clamp(26px,3.4vw,36px);line-height:1.1;margin:0;text-wrap:balance}
+h2{font-family:var(--f-display);font-size:19px;margin:0}
+p{margin:0}
+.lede{color:var(--muted);max-width:68ch}
+.top{display:grid;gap:10px}
+.live{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
+.live.on .dot{background:var(--ok);box-shadow:0 0 0 4px var(--ok-bg)}
+/* summary */
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:2px}
+.stat b{font-family:var(--f-display);font-size:28px;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat span{color:var(--muted);font-size:13px}
+.bar{height:10px;border-radius:999px;background:var(--raised);overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:10px;height:10px;border-radius:3px}
+/* now */
+.now{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:10px}
+.now ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.now li{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.now .empty{color:var(--muted)}
+/* waves */
+.waves{display:grid;gap:22px}
+.wave{display:grid;grid-template-columns:120px minmax(0,1fr);gap:16px;align-items:start}
+.whead{display:grid;gap:2px;position:sticky;top:env(safe-area-inset-top,0px)}
+.whead b{font-family:var(--f-display);font-size:17px}
+.whead span{font-size:12.5px;color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;display:grid}
+.card[data-s="merged"]{background:var(--soft)}
+.card summary{list-style:none;cursor:pointer;padding:14px 16px;display:grid;gap:8px}
+.card summary::-webkit-details-marker{display:none}
+.card summary:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:12px}
+.row1{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.num{font-family:var(--f-mono);font-size:13px;color:var(--muted)}
+.title{font-weight:600;line-height:1.35}
+.meta{display:flex;flex-wrap:wrap;gap:6px;font-size:12.5px;color:var(--muted)}
+.prog{height:4px;border-radius:999px;background:var(--raised);overflow:hidden}
+.prog i{display:block;height:100%;background:var(--ok)}
+.pill{font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.s-merged{color:var(--ok);background:var(--ok-bg)}
+.s-building{color:var(--run);background:var(--run-bg)}
+.s-review{color:var(--review);background:var(--review-bg)}
+.s-blocked{color:var(--stop);background:var(--stop-bg)}
+.s-ready{color:var(--primary);background:var(--soft)}
+.s-waiting,.s-human{color:var(--idle);background:var(--idle-bg)}
+.body{padding:0 16px 16px;display:grid;gap:12px;border-top:1px solid var(--line);padding-top:12px}
+.body .sum{color:var(--muted);font-size:14px}
+.ac{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.ac li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;font-size:14px}
+.box{width:18px;height:18px;border-radius:5px;border:1.5px solid var(--line);display:grid;place-items:center;margin-top:1px}
+.ac li.done .box{background:var(--ok);border-color:var(--ok)}
+.ac li.done .box::after{content:"";width:5px;height:9px;border:solid var(--surface);border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.ac li.done span{color:var(--muted)}
+.keys{display:flex;flex-wrap:wrap;gap:6px}
+.key{font-family:var(--f-mono);font-size:11.5px;padding:2px 6px;border-radius:6px;background:var(--raised);color:var(--muted)}
+.note{font-size:13.5px;background:var(--raised);border-radius:8px;padding:8px 10px}
+a{color:var(--primary);font-weight:600}
+.lbl{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.foot{font-size:13px;color:var(--muted)}
+@media (max-width:640px){.wave{grid-template-columns:1fr;gap:8px}.whead{position:static;display:flex;gap:10px;align-items:baseline}}
+@media (prefers-reduced-motion:no-preference){.bar i,.prog i{transition:width .4s cubic-bezier(.4,.4,0,1)}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>Phase 1 Build Board</h1>
+    <p class="lede">All 26 Phase 1 tickets in build order. Tickets in the same wave don't depend on each other, so they can be built at the same time. Each card lists the ticket's acceptance criteria; they're checked off as the builder verifies them.</p>
+    <span class="live" id="live"><span class="dot"></span><span id="liveText">Connecting to live status…</span></span>
+  </header>
+
+  <section class="summary" id="summary" aria-label="Progress"></section>
+  <div class="bar" id="bar" aria-hidden="true"></div>
+  <div class="legend" id="legend"></div>
+
+  <section class="now" aria-labelledby="nowH">
+    <h2 id="nowH">In progress</h2>
+    <ul id="now"></ul>
+  </section>
+
+  <section class="waves" id="waves" aria-label="Build waves"></section>
+  <p class="foot" id="foot">Status is written by the coordinator session after each builder run. Merging stays with the project owner.</p>
+</div>
+
+<script>
+const PLAN = [{"n": 1, "title": "Walking skeleton: storefront shows a store's brand at its subdomain", "summary": "", "ac": ["Two seeded stores each render their own brand at their own subdomain", "An unknown subdomain shows a not-found page", "Every store-owned table carries the store id and is protected by Postgres row-level security; no store-scoped query runs without a resolved store", "A CI test proves a query scoped to store A cannot read store B's rows", "CI runs lint, typecheck and tests on every push; app deploys to a preview environment"], "deps": [], "human": false, "env": ["DATABASE_URL", "DIRECT_URL"], "wave": 1}, {"n": 2, "title": "Platform admin creates and configures a store", "summary": "", "ac": ["Platform admin signs in with password + 2FA", "Creating a store validates a unique slug and makes the storefront reachable", "Editing branding/settings updates the storefront", "A store can be suspended, which takes its storefront offline", "Every create/edit is written to the audit log"], "deps": [1], "human": false, "env": ["DATABASE_URL", "DIRECT_URL"], "wave": 2}, {"n": 3, "title": "Store owner and staff sign in to the store admin", "summary": "", "ac": ["Invite email → set password → enroll 2FA → land in that store's admin", "Owner can invite and remove staff; staff cannot manage staff, payouts or settings", "A user who belongs to store A gets no access to store B's admin (tested)", "Store admin is usable at phone width"], "deps": [2], "human": false, "env": ["DATABASE_URL", "DIRECT_URL", "TELNYX_API_KEY", "TELNYX_FROM_NUMBER", "RESEND_API_KEY"], "wave": 3}, {"n": 4, "title": "Store owner connects payouts (Stripe Connect)", "summary": "", "ac": ["Owner starts onboarding from the admin and returns to see status (pending / complete / needs info)", "The connected account id is stored on the store; webhooks keep status current (signature verified)", "A store without completed onboarding cannot take orders (storefront checkout disabled with a clear message)"], "deps": [3], "human": false, "env": ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"], "wave": 4}, {"n": 5, "title": "Custom domain for a store", "summary": "", "ac": ["Admin adds a domain and sees the DNS record to create and its verification status", "Once verified, the storefront resolves to the right store on the custom domain over HTTPS", "The subdomain keeps working (or redirects to the custom domain)"], "deps": [2], "human": false, "env": ["VERCEL_TOKEN", "VERCEL_PROJECT_ID", "VERCEL_TEAM_ID"], "wave": 3}, {"n": 6, "title": "Store owner manages listings", "summary": "", "ac": ["Create, edit, deactivate a listing with variants", "Listing can be linked to a master product or stay custom", "Stock mode counted vs status both work", "Weight and frozen flags are required inputs for courier eligibility later", "Price and stock changes are written to the audit log"], "deps": [3], "human": false, "env": ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"], "wave": 4}, {"n": 7, "title": "Master catalog seed and CSV import", "summary": "", "ac": ["~500 master products with categories, units and synonyms are seeded (content drafted with AI, reviewed by a human)", "CSV import previews matches/new items/errors before committing", "Imported rows become listings in that store only"], "deps": [6], "human": true, "env": [], "wave": 5}, {"n": 8, "title": "Customer browses and searches a storefront", "summary": "", "ac": ["Category pages list active listings", "Searching a synonym finds the listing linked to that master product", "Product page shows variant prices and stock badge", "Storefront meets LCP < 2.5s on a throttled 4G profile for the home and product pages"], "deps": [6], "human": false, "env": [], "wave": 5}, {"n": 9, "title": "Cart with swap rules", "summary": "", "ac": ["Cart persists for a guest across page loads", "Each line has a swap rule; default is exact item only", "Checkout is blocked below the minimum order with a clear message", "Max-per-order limits are enforced"], "deps": [8], "human": false, "env": [], "wave": 6}, {"n": 10, "title": "Guest checkout for Pickup", "summary": "", "ac": ["Order is created with status AUTHORIZED after a successful card hold (destination charge on behalf of the store)", "Buffer amount and 'charged the final amount after picking' are disclosed before paying", "Tax lines and the liable party (store or platform) are stored on the order", "Closed-store orders show opening time and queue for opening", "Phone number is required", "A feature flag blocks real-money orders until tax sign-off (test mode only)"], "deps": [4, 9], "human": false, "env": ["STRIPE_SECRET_KEY", "GOOGLE_MAPS_API_KEY"], "wave": 7}, {"n": 11, "title": "Order inbox, pick list, Ready, and completing a pickup", "summary": "", "ac": ["New order alert with sound in the store admin", "Accept sets a prep estimate; auto-accept setting works", "Pick list orders lines frozen/chilled last", "Ready is only possible when every line is resolved; it captures the final amount", "Owner is alerted at 15 min if not accepted; at 30 min the order auto-cancels and the hold is voided", "Pickup handover moves the order to COMPLETED"], "deps": [10], "human": false, "env": [], "wave": 8}, {"n": 12, "title": "Order notifications and tracking page", "summary": "Customers get email and SMS at each order state; the store gets push notifications. Every order has a tracking page showing its current state.", "ac": ["Email (Resend) and SMS (Telnyx, behind one notifications interface so providers can be swapped; ADR-0017) sent for placed / accepted / ready / completed / cancelled", "Store receives web push for new orders", "Messages carry the store's brand, not the platform's (ADR-0003)", "Tracking page reachable from every message without signing in (unguessable link)"], "deps": [11], "human": false, "env": ["TELNYX_API_KEY", "RESEND_API_KEY", "INNGEST_EVENT_KEY", "INNGEST_SIGNING_KEY"], "wave": 9}, {"n": 13, "title": "Short → substitution prompt", "summary": "", "ac": ["Marking a line short moves the order to SUBSTITUTION_PENDING and sends the prompt", "Customer can approve swap or refund from the link; picker screen updates live", "Timeout applies the swap rule", "Final captured amount reflects swaps/refunds", "Metric: orders with an unapproved substitution = 0 (tested)"], "deps": [12], "human": false, "env": [], "wave": 10}, {"n": 14, "title": "Customer accounts", "summary": "", "ac": ["Sign in by magic link or SMS code", "The same account works on two different stores' storefronts", "Store A's admin never sees that the customer buys from store B (tested)", "Past guest orders with the same verified email/phone are attached"], "deps": [10], "human": false, "env": [], "wave": 8}, {"n": 15, "title": "Store delivery", "summary": "", "ac": ["Store delivery appears at checkout only when the store offers it", "Address autocomplete + geocode; out-of-radius addresses are rejected", "Out for delivery / delivered transitions notify the customer", "Delivered requires a photo, shown on the tracking page", "Leave-at-door is disabled when the order has frozen items"], "deps": [11], "human": false, "env": ["GOOGLE_MAPS_API_KEY"], "wave": 9}, {"n": 16, "title": "Courier delivery via DoorDash Drive", "summary": "", "ac": ["Orders over the courier weight limit (platform setting, default 50 lb per item and per order) do not get the Courier option", "Customer-facing fee equals the quote (itemized)", "Webhooks are signature-verified and idempotent", "Proof: photo by default; PIN for frozen or orders over $150", "The store location is registered with DoorDash Drive"], "deps": [15], "human": false, "env": ["DOORDASH_DEVELOPER_ID", "DOORDASH_KEY_ID", "DOORDASH_SIGNING_SECRET"], "wave": 10}, {"n": 17, "title": "Uber Direct, cheapest-available selection, and failover", "summary": "", "ac": ["Both providers quoted; cheaper available is used and its brand shown", "Failover after 10 min without assignment, and on provider error", "Both-fail path notifies store and customer with options", "The store location is registered with Uber Direct"], "deps": [16], "human": false, "env": ["UBER_DIRECT_CLIENT_ID", "UBER_DIRECT_CLIENT_SECRET", "UBER_DIRECT_CUSTOMER_ID"], "wave": 11}, {"n": 18, "title": "Issue report and refunds", "summary": "", "ac": ["Report form with type, lines and photo from the tracking page", "Auto-refund under the limit, back to the card", "Store review queue with approve / partial / decline", "Refund records and order state (PARTIALLY_REFUNDED / REFUNDED) are correct"], "deps": [12], "human": false, "env": [], "wave": 10}, {"n": 19, "title": "Customer ↔ store chat, escalating to the platform", "summary": "", "ac": ["Customer can message from the tracking page; store sees threads in the admin with alerts", "Unanswered threads escalate after the configured time", "Platform admin sees and can answer escalated threads across stores"], "deps": [12], "human": false, "env": [], "wave": 10}, {"n": 20, "title": "Store copilot: stock tracking and text owner reports", "summary": "", "ac": ["Completed orders write sale stock events; shorts write short events", "Stock events record source (online sale, owner report, recount, short) so a POS source can be added later", "Stock confidence is computed per listing and drives the storefront stock badge", "Copilot never writes stock without the owner's tap; AI proposals and confirmations are audit-logged"], "deps": [11], "human": false, "env": ["ANTHROPIC_API_KEY"], "wave": 9}, {"n": 21, "title": "Store copilot: voice and photo owner reports", "summary": "", "ac": ["Voice note is transcribed and mapped to listings", "Invoice/shelf photo produces proposed restocks with matched listings", "Unmatched items are shown for the owner to resolve, never silently dropped"], "deps": [20], "human": false, "env": [], "wave": 10}, {"n": 22, "title": "Store copilot: proactive alerts and daily digest", "summary": "", "ac": ["Alerts for sold out / running low / new orders needing low-stock items", "Confirm-requests for low-confidence listings, answerable in one tap", "Daily digest at a store-configurable time", "Alert volume is capped/batched so owners aren't spammed"], "deps": [20], "human": false, "env": [], "wave": 10}, {"n": 23, "title": "Store copilot on WhatsApp (platform number)", "summary": "", "ac": ["Owner's WhatsApp number is linked and verified to their store membership", "Owner reports and confirms work over WhatsApp", "Alerts and digest delivered on WhatsApp when the owner opts in", "Messages from unknown numbers get no store data"], "deps": [21, 22], "human": false, "env": ["WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"], "wave": 11}, {"n": 24, "title": "Shopper assistant builds carts", "summary": "", "ac": ["Tools are store-scoped and permission-checked; no other store's data reachable", "Items with stock confidence below 0.6 are added with a 'may be unavailable' note and a backup", "Golden evaluation set (~200 requests) runs in CI; hallucinated items must be 0", "Hands off to checkout; cannot submit payment"], "deps": [9], "human": false, "env": ["ANTHROPIC_API_KEY"], "wave": 7}, {"n": 25, "title": "Shopper assistant: recipe-to-cart and photo lists", "summary": "", "ac": ["Curated recipe base seeded with ingredient mappings to master products", "Servings scaling, and asks when servings are unclear", "Photo list → cart with gaps reported"], "deps": [24], "human": false, "env": [], "wave": 8}, {"n": 26, "title": "Shopper assistant answers store questions", "summary": "", "ac": ["Order status only for the customer's own orders", "Delivery-area answer uses the store's radius/geocoding", "Complaints open a store chat thread with context"], "deps": [19, 24], "human": false, "env": [], "wave": 11}];
+const S = {
+  merged:{label:"Merged",color:"var(--ok)"},
+  review:{label:"PR in review",color:"var(--review)"},
+  building:{label:"Building",color:"var(--run)"},
+  blocked:{label:"Needs attention",color:"var(--stop)"},
+  ready:{label:"Ready to build",color:"var(--primary)"},
+  waiting:{label:"Waiting on earlier tickets",color:"var(--line)"},
+  human:{label:"Needs a human",color:"var(--idle)"}
+};
+let live = {};
+
+function statusOf(t){
+  const r = live[t.n] || {};
+  if (r.status && r.status !== "todo") return r.status;
+  if (t.human) return "human";
+  const depsDone = t.deps.every(d => (live[d]||{}).status === "merged");
+  return depsDone ? "ready" : "waiting";
+}
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+function render(){
+  const stat = PLAN.map(t => ({t, s: statusOf(t), r: live[t.n] || {}}));
+  const count = k => stat.filter(x => x.s === k).length;
+  const totalAC = PLAN.reduce((a,t)=>a+t.ac.length,0);
+  const doneAC = stat.reduce((a,x)=>a+Math.min((x.r.checked||[]).length, x.t.ac.length),0);
+
+  const sum = document.getElementById("summary"); sum.replaceChildren();
+  [[count("merged")+" / "+PLAN.length,"tickets merged"],[doneAC+" / "+totalAC,"criteria verified"],
+   [count("building")+count("review"),"building or in review"],[count("ready"),"ready to start now"]]
+   .forEach(([b,s])=>{const d=el("div","stat");d.append(el("b",null,b),el("span",null,s));sum.append(d)});
+
+  const bar = document.getElementById("bar"); bar.replaceChildren();
+  const legend = document.getElementById("legend"); legend.replaceChildren();
+  Object.keys(S).forEach(k=>{
+    const c = count(k); if (!c) return;
+    const i = el("i"); i.style.width = (c/PLAN.length*100)+"%"; i.style.background = S[k].color; bar.append(i);
+    const l = el("span"); const sw = el("i","sw"); sw.style.background = S[k].color; l.append(sw, document.createTextNode(S[k].label+" · "+c)); legend.append(l);
+  });
+
+  const now = document.getElementById("now"); now.replaceChildren();
+  const active = stat.filter(x => ["building","review","blocked"].includes(x.s));
+  if (!active.length) now.append(el("li","empty", count("ready") ? "Nothing running. Ready to start: "+stat.filter(x=>x.s==="ready").map(x=>"#"+x.t.n).join(", ")+"." : "Nothing running."));
+  active.forEach(x=>{
+    const li = el("li"); li.append(el("span","pill s-"+x.s,S[x.s].label), el("span","num","#"+x.t.n), el("span",null,x.t.title));
+    if (x.r.pr){ const a = el("a",null,"PR"); a.href = x.r.pr; a.target="_blank"; a.rel="noopener"; li.append(a); }
+    if (x.r.note) li.append(el("span","foot",x.r.note));
+    now.append(li);
+  });
+
+  const waves = document.getElementById("waves"); waves.replaceChildren();
+  const maxW = Math.max(...PLAN.map(t=>t.wave));
+  for (let w=1; w<=maxW; w++){
+    const ts = stat.filter(x=>x.t.wave===w);
+    const sec = el("div","wave");
+    const h = el("div","whead"); h.append(el("b",null,"Wave "+w), el("span",null, ts.length>1 ? ts.length+" in parallel" : "1 ticket"));
+    const cards = el("div","cards");
+    ts.forEach(x=>{
+      const t=x.t, checked=new Set(x.r.checked||[]);
+      const d = el("details","card"); d.dataset.s = x.s;
+      try { if (localStorage.getItem("open-"+t.n)==="1") d.open = true; } catch(e){}
+      d.addEventListener("toggle",()=>{ try{ localStorage.setItem("open-"+t.n, d.open?"1":"0") }catch(e){} });
+      const s = el("summary");
+      const r1 = el("div","row1"); r1.append(el("span","num","#"+t.n), el("span","pill s-"+x.s,S[x.s].label));
+      const meta = el("div","meta");
+      meta.append(el("span",null, Math.min(checked.size,t.ac.length)+"/"+t.ac.length+" criteria"));
+      if (t.deps.length) meta.append(el("span",null,"after "+t.deps.map(d=>"#"+d).join(", ")));
+      const pg = el("div","prog"); const pi = el("i"); pi.style.width = (t.ac.length? Math.min(checked.size,t.ac.length)/t.ac.length*100 : 0)+"%"; pg.append(pi);
+      s.append(r1, el("div","title",t.title), meta, pg);
+      const b = el("div","body");
+      if (t.summary) b.append(el("p","sum",t.summary));
+      b.append(el("span","lbl","Acceptance criteria"));
+      const ul = el("ul","ac");
+      t.ac.forEach((a,i)=>{ const li = el("li", checked.has(i)?"done":""); li.append(el("span","box"), el("span",null,a)); ul.append(li); });
+      b.append(ul);
+      if (t.env.length){ b.append(el("span","lbl","Keys needed")); const k = el("div","keys"); t.env.forEach(v=>k.append(el("span","key",v))); b.append(k); }
+      if (x.r.note) b.append(el("p","note",x.r.note));
+      if (x.r.pr){ const a = el("a",null,"Open the pull request"); a.href=x.r.pr; a.target="_blank"; a.rel="noopener"; b.append(a); }
+      d.append(s,b); cards.append(d);
+    });
+    sec.append(h,cards); waves.append(sec);
+  }
+}
+
+render();
+
+(async()=>{
+  const liveEl = document.getElementById("live"), txt = document.getElementById("liveText");
+  const db = window.claude ? await window.claude.use("db") : null;
+  if (!db){ txt.textContent = "Showing the plan only. Live status appears when you're signed in to claude.ai."; return; }
+  db.collection("tickets").onSnapshot(snap=>{
+    live = {};
+    snap.docs.forEach(d=>{ live[Number(d.id)] = d.data(); });
+    liveEl.classList.add("on");
+    const ts = snap.docs.map(d=>d.data().updatedAt||"").sort().pop();
+    txt.textContent = "Live" + (ts ? " · last update " + new Date(ts).toLocaleString() : "");
+    render();
+  }, ()=>{ txt.textContent = "Live status couldn't load. Showing the plan only."; });
+})();
+</script>
