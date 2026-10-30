@@ -1,8 +1,26 @@
 import Image from "next/image";
-import { getStore } from "@/lib/get-store";
+import { getStoreWithStatus } from "@/lib/get-store";
 
 export default async function StorefrontPage() {
-  const store = await getStore();
+  const { store, suspended } = await getStoreWithStatus();
+
+  if (suspended) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-bg">
+        <div className="text-center">
+          <h1
+            className="font-display text-ink mb-sm"
+            style={{ fontSize: "clamp(28px, 4vw, 40px)", fontWeight: 700 }}
+          >
+            {store.name}
+          </h1>
+          <p className="text-muted">
+            This store is temporarily offline. Please check back later.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-bg">

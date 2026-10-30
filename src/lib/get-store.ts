@@ -74,3 +74,11 @@ export async function getStore(): Promise<ValidatedStore> {
   if (!store) notFound();
   return store;
 }
+
+export async function getStoreWithStatus(): Promise<{
+  store: ValidatedStore;
+  suspended: boolean;
+}> {
+  const store = await getStore();
+  return { store, suspended: store.status === "suspended" };
+}
