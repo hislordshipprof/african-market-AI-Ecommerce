@@ -119,6 +119,15 @@ describe("runtimeDatabaseUrl", () => {
     ).toThrow(/APP_RUNTIME_PASSWORD is required/);
   });
 
+  it("falls back during build phase even in preview", () => {
+    const result = runtimeDatabaseUrl({
+      DATABASE_URL: BASE,
+      VERCEL_ENV: "preview",
+      NEXT_PHASE: "phase-production-build",
+    });
+    expect(result).toBe(BASE);
+  });
+
   it("falls back in VERCEL_ENV=development without password", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = runtimeDatabaseUrl({

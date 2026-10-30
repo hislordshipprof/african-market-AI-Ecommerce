@@ -6,15 +6,20 @@ export function runtimeDatabaseUrl(env: Record<string, string | undefined>): str
 
   const password = env.APP_RUNTIME_PASSWORD;
   if (!password) {
-    if (env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") {
+    const isDeployedRuntime =
+      (env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") &&
+      env.NEXT_PHASE !== "phase-production-build";
+    if (isDeployedRuntime) {
       throw new Error(
         "APP_RUNTIME_PASSWORD is required in production/preview. " +
           "The app must connect as app_runtime to enforce RLS.",
       );
     }
-    console.warn(
-      "APP_RUNTIME_PASSWORD not set — falling back to DATABASE_URL (dev only).",
-    );
+    if (env.NEXT_PHASE !== "phase-production-build") {
+      console.warn(
+        "APP_RUNTIME_PASSWORD not set — falling back to DATABASE_URL (dev only).",
+      );
+    }
     return baseUrl;
   }
 
