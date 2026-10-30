@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { hashPassword } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
 
 const adapter = new PrismaPg(resolveDirectUrl());
@@ -15,6 +16,12 @@ async function main() {
       brandColor: "#1F5A43",
       themePreset: "palm-and-shea",
       logoUrl: "/logos/mama-ngozi-logo.svg",
+      status: "active",
+      prepTimeMinutes: 30,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 3500,
+      pickupEnabled: true,
+      autoRefundLimitCents: 2500,
     },
   });
 
@@ -27,6 +34,12 @@ async function main() {
       brandColor: "#0F4A57",
       themePreset: "lagoon-and-coral",
       logoUrl: "/logos/tante-marie-logo.svg",
+      status: "active",
+      prepTimeMinutes: 25,
+      deliveryRadiusMi: 6,
+      minimumOrderCents: 3000,
+      pickupEnabled: false,
+      autoRefundLimitCents: 2000,
     },
   });
 
@@ -58,7 +71,41 @@ async function main() {
     }),
   ]);
 
+  const adminId = "seed-platform-admin";
+  const adminEmail = "admin@platform.test";
+  const adminPassword = await hashPassword("Test1234!");
+
+  await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {},
+    create: {
+      id: adminId,
+      name: "Platform Admin",
+      email: adminEmail,
+      emailVerified: true,
+      role: "platform_admin",
+      updatedAt: new Date(),
+    },
+  });
+
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: adminId, providerId: "credential" },
+  });
+  if (!existingAccount) {
+    await prisma.account.create({
+      data: {
+        id: "seed-admin-account",
+        accountId: adminId,
+        providerId: "credential",
+        userId: adminId,
+        password: adminPassword,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
   console.log("Seeded 2 stores: mama-ngozi, tante-marie");
+  console.log("Seeded platform admin: admin@platform.test / Test1234!");
 }
 
 main()
