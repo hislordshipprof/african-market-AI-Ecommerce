@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, platform } from "./db";
+import { runtimeDatabaseUrl } from "./env";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -15,7 +16,7 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
     rawPrisma = new PrismaClient({ adapter });
     await rawPrisma.$connect();
 
-    const storeA = await platform.store.upsert({
+    const storeA = await rawPrisma.store.upsert({
       where: { slug: "test-store-a" },
       update: {},
       create: {
@@ -26,7 +27,7 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
     });
     storeAId = storeA.id;
 
-    const storeB = await platform.store.upsert({
+    const storeB = await rawPrisma.store.upsert({
       where: { slug: "test-store-b" },
       update: {},
       create: {
@@ -152,4 +153,82 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
       }),
     ).rejects.toThrow();
   });
+
+  it("platform.store resolves stores via SET ROLE (app_runtime)", async () => {
+    const store = await platform.store.findUnique({
+      where: { slug: "test-store-a" },
+    });
+    expect(store).not.toBeNull();
+    expect(store!.id).toBe(storeAId);
+  });
 });
+
+const hasRuntime = hasDb && !!process.env.APP_RUNTIME_PASSWORD;
+
+describe.skipIf(!hasRuntime)(
+  "app_runtime security constraints",
+  () => {
+    let runtimePrisma: PrismaClient;
+
+    beforeAll(async () => {
+      const runtimeUrl = runtimeDatabaseUrl(process.env);
+      const adapter = new PrismaPg(runtimeUrl);
+      runtimePrisma = new PrismaClient({ adapter });
+      await runtimePrisma.$connect();
+    });
+
+    afterAll(async () => {
+      await runtimePrisma.$disconnect();
+    });
+
+    it("cannot DISABLE ROW LEVEL SECURITY (not the owner)", async () => {
+      await expect(
+        runtimePrisma.$executeRaw`ALTER TABLE store_content DISABLE ROW LEVEL SECURITY`,
+      ).rejects.toThrow(/permission denied|must be owner/i);
+    });
+
+    it("cannot SET ROLE to the table owner", async () => {
+      await expect(
+        runtimePrisma.$executeRaw`SET ROLE app_owner`,
+      ).rejects.toThrow(/permission denied|not a member/i);
+    });
+
+    it("without storeScoped returns 0 rows", async () => {
+      const rows = await runtimePrisma.$transaction([
+        runtimePrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        runtimePrisma.$queryRaw`SELECT * FROM store_content`,
+      ]);
+      expect(rows[1]).toHaveLength(0);
+    });
+
+    it("without storeScoped rejects inserts", async () => {
+      await expect(
+        runtimePrisma.$transaction([
+          runtimePrisma.$executeRaw`SET LOCAL ROLE app_user`,
+          runtimePrisma.$executeRaw`INSERT INTO store_content (id, store_id, key, value, created_at, updated_at) VALUES ('rt_test', 'fake', 'rt_key', 'x', NOW(), NOW())`,
+        ]),
+      ).rejects.toThrow(/42501|row-level security/i);
+    });
+
+    it("through storeScoped reads only own store rows", async () => {
+      const ownerAdapter = new PrismaPg(process.env.DATABASE_URL!);
+      const ownerPrisma = new PrismaClient({ adapter: ownerAdapter });
+      await ownerPrisma.$connect();
+
+      const store = await ownerPrisma.store.findFirst({
+        where: { slug: "mama-ngozi" },
+      });
+
+      if (!store) {
+        await ownerPrisma.$disconnect();
+        return;
+      }
+
+      const scoped = storeScoped(store.id);
+      const rows = await scoped.rlsTestFixture.findMany();
+      expect(rows.every((r) => r.storeId === store.id)).toBe(true);
+
+      await ownerPrisma.$disconnect();
+    });
+  },
+);

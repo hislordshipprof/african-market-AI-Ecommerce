@@ -40,12 +40,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup database owner role
+      - name: Setup database roles
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
             CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
             GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
             ALTER SCHEMA public OWNER TO app_owner;
+            CREATE ROLE app_runtime LOGIN PASSWORD 'app_runtime_ci' NOSUPERUSER NOBYPASSRLS;
           SQL
 
       - name: Generate Prisma client
@@ -72,12 +73,14 @@ jobs:
         run: pnpm test
         env:
           DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+          APP_RUNTIME_PASSWORD: app_runtime_ci
 
       - name: Build
         run: pnpm build
         env:
           DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
           DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+          APP_RUNTIME_PASSWORD: app_runtime_ci
 
   e2e:
     runs-on: ubuntu-latest
@@ -101,6 +104,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
       DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+      APP_RUNTIME_PASSWORD: app_runtime_ci
 
     steps:
       - uses: actions/checkout@v4
@@ -117,12 +121,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup database owner role
+      - name: Setup database roles
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
             CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
             GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
             ALTER SCHEMA public OWNER TO app_owner;
+            CREATE ROLE app_runtime LOGIN PASSWORD 'app_runtime_ci' NOSUPERUSER NOBYPASSRLS;
           SQL
 
       - name: Generate Prisma client
