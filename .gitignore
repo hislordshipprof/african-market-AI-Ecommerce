@@ -1,2 +1,9 @@
 # Impeccable engine binary (re-downloaded on first run)
 .claude/skills/impeccable/scripts/bin/
+
+# Secrets: never commit
+.env
+.env*.local
+
+# Builder run logs and reports
+.builder/
