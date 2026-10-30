@@ -1,0 +1,174 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup database roles
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
+            CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
+            GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
+            ALTER SCHEMA public OWNER TO app_owner;
+            CREATE ROLE app_runtime LOGIN PASSWORD 'app_runtime_ci' NOSUPERUSER NOBYPASSRLS;
+          SQL
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run migrations
+        run: npx prisma migrate deploy
+        env:
+          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+
+      - name: Seed database
+        run: pnpm db:seed
+        env:
+          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+        env:
+          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+          APP_RUNTIME_PASSWORD: app_runtime_ci
+
+      - name: Build
+        run: pnpm build
+        env:
+          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+          APP_RUNTIME_PASSWORD: app_runtime_ci
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: ci
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+      DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+      APP_RUNTIME_PASSWORD: app_runtime_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup database roles
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
+            CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
+            GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
+            ALTER SCHEMA public OWNER TO app_owner;
+            CREATE ROLE app_runtime LOGIN PASSWORD 'app_runtime_ci' NOSUPERUSER NOBYPASSRLS;
+          SQL
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run migrations
+        run: npx prisma migrate deploy
+
+      - name: Seed database
+        run: pnpm db:seed
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Start production server
+        run: |
+          npx next start -p 3000 > /tmp/next-stdout.log 2>&1 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null --max-time 2 http://127.0.0.1:3000/ 2>/dev/null; then
+              echo "Server ready after $((i*2))s"
+              break
+            fi
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              echo "::error::Server process exited unexpectedly"
+              cat /tmp/next-stdout.log
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Run E2E tests
+        run: pnpm test:e2e
+
+      - name: Show server logs
+        if: always()
+        run: |
+          echo "=== next start output ==="
+          cat /tmp/next-stdout.log 2>/dev/null || echo "(no output)"
+          kill $SERVER_PID 2>/dev/null || true
