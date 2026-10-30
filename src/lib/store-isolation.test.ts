@@ -37,13 +37,15 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
     });
     storeBId = storeB.id;
 
-    await rawPrisma.rlsTestFixture.upsert({
+    const scopedA = storeScoped(storeAId);
+    await scopedA.rlsTestFixture.upsert({
       where: { storeId_key: { storeId: storeAId, key: "test_key" } },
       update: { value: "Store A value" },
       create: { storeId: storeAId, key: "test_key", value: "Store A value" },
     });
 
-    await rawPrisma.rlsTestFixture.upsert({
+    const scopedB = storeScoped(storeBId);
+    await scopedB.rlsTestFixture.upsert({
       where: { storeId_key: { storeId: storeBId, key: "test_key" } },
       update: { value: "Store B value" },
       create: { storeId: storeBId, key: "test_key", value: "Store B value" },
@@ -51,9 +53,12 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
   });
 
   afterAll(async () => {
-    await rawPrisma.rlsTestFixture.deleteMany({
-      where: { storeId: { in: [storeAId, storeBId] } },
-    });
+    const scopedA = storeScoped(storeAId);
+    await scopedA.rlsTestFixture.deleteMany({});
+
+    const scopedB = storeScoped(storeBId);
+    await scopedB.rlsTestFixture.deleteMany({});
+
     await rawPrisma.store.deleteMany({
       where: { slug: { in: ["test-store-a", "test-store-b"] } },
     });
@@ -129,5 +134,22 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
         rawPrisma.$executeRaw`INSERT INTO store_content (id, store_id, key, value, created_at, updated_at) VALUES ('rls_no_store', ${storeAId}, 'rls_no_store', 'x', NOW(), NOW())`,
       ]),
     ).rejects.toThrow(/42501|row-level security/i);
+  });
+
+  it("owner role without storeScoped reads 0 rows from store_content", async () => {
+    const rows = await rawPrisma.rlsTestFixture.findMany();
+    expect(rows).toHaveLength(0);
+  });
+
+  it("owner role without storeScoped cannot insert into store_content", async () => {
+    await expect(
+      rawPrisma.rlsTestFixture.create({
+        data: {
+          storeId: storeAId,
+          key: `rls_owner_bypass_${Date.now()}`,
+          value: "should fail",
+        },
+      }),
+    ).rejects.toThrow();
   });
 });

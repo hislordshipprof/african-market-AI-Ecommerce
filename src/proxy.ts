@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { slugFromHost } from "@/lib/slug";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.delete("x-store-slug");
 
