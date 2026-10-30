@@ -140,5 +140,30 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      - name: Start production server
+        run: |
+          npx next start -p 3000 > /tmp/next-stdout.log 2>&1 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null --max-time 2 http://127.0.0.1:3000/ 2>/dev/null; then
+              echo "Server ready after $((i*2))s"
+              break
+            fi
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              echo "::error::Server process exited unexpectedly"
+              cat /tmp/next-stdout.log
+              exit 1
+            fi
+            sleep 2
+          done
+
       - name: Run E2E tests
         run: pnpm test:e2e
+
+      - name: Show server logs
+        if: always()
+        run: |
+          echo "=== next start output ==="
+          cat /tmp/next-stdout.log 2>/dev/null || echo "(no output)"
+          kill $SERVER_PID 2>/dev/null || true

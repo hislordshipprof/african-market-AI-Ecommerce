@@ -19,10 +19,12 @@ export default defineConfig({
   ],
   webServer: process.env.CI
     ? {
-        command: "pnpm start",
-        url: "http://localhost:3000",
-        reuseExistingServer: false,
+        command: "npx next start -p 3000",
+        url: "http://127.0.0.1:3000",
+        reuseExistingServer: true,
         timeout: 120_000,
+        stdout: "pipe",
+        stderr: "pipe",
       }
     : undefined,
 });

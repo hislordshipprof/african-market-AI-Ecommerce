@@ -54,6 +54,7 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
   });
 
   test("?store= fallback works in development", async ({ page }) => {
+    test.skip(!!process.env.CI, "?store= disabled in production mode");
     await page.goto("http://localhost:3000/?store=mama-ngozi");
     await expect(page.locator("h1")).toHaveText("Mama Ngozi African Market");
   });
