@@ -40,5 +40,5 @@ If something fails and you cannot fix it, report it as failing with the output. 
 ## Finish
 1. Commit in small, meaningful commits. End each message with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 2. Push the branch and open a PR: title = issue title; body = what changed, how each acceptance criterion is verified, anything deferred, `Closes #<n>`, ending with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
-3. Never push to `main`, never merge, never close issues by hand.
+3. Never push to `main` (a pre-push hook blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), never merge, never close issues by hand.
 4. Write `.builder/report-<n>.md` in the main checkout (the script tells you its path): status (done / blocked / failing), PR URL, checks run with pass/fail, open questions. Keep it under 40 lines.
