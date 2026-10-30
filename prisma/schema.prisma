@@ -3,28 +3,26 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
 }
 
 model Store {
-  id           String   @id @default(cuid())
-  slug         String   @unique
-  name         String
-  logoUrl      String?  @map("logo_url")
-  brandColor   String?  @map("brand_color")
-  themePreset  String   @default("palm-and-shea") @map("theme_preset")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  logoUrl     String?  @map("logo_url")
+  brandColor  String?  @map("brand_color")
+  themePreset String   @default("palm-and-shea") @map("theme_preset")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  content StoreContent[]
+  rlsFixtures RlsTestFixture[]
 
   @@map("stores")
 }
 
-/// Store-owned: each row belongs to one store. RLS-protected by store_id.
-model StoreContent {
+/// RLS test fixture: placeholder store-owned table for isolation tests until real entities exist.
+model RlsTestFixture {
   id        String   @id @default(cuid())
   storeId   String   @map("store_id")
   key       String
@@ -35,6 +33,5 @@ model StoreContent {
   store Store @relation(fields: [storeId], references: [id])
 
   @@unique([storeId, key])
-  @@index([storeId])
   @@map("store_content")
 }

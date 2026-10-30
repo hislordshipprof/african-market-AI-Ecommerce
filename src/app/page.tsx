@@ -17,32 +17,20 @@ export default async function StorefrontPage() {
               className="mb-sm h-16 w-auto"
             />
           )}
-          <h1
-            className="font-display text-on-primary"
-            style={{
-              fontSize: "clamp(28px, 4vw, 40px)",
-              fontWeight: 700,
-              lineHeight: 1.1,
-            }}
-          >
-            {store.name}
-          </h1>
+          <h1 className="text-display text-on-primary">{store.name}</h1>
         </div>
       </header>
 
       <section className="mx-auto max-w-5xl px-md py-xl">
-        <div
-          className="rounded-lg bg-surface p-lg"
-          style={{ borderRadius: "var(--radius-lg)" }}
-        >
-          <p className="text-muted text-sm font-body">
+        <div className="rounded-lg bg-surface p-lg">
+          <p className="text-body text-muted">
             Storefront coming soon. Check back for listings.
           </p>
         </div>
       </section>
 
       <footer className="border-t border-line px-md py-lg text-center">
-        <p className="text-muted text-sm">Powered by the Platform</p>
+        <p className="text-body text-muted">Powered by the Platform</p>
       </footer>
     </main>
   );

@@ -25,10 +25,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/test_db
-
     steps:
       - uses: actions/checkout@v4
 
@@ -44,19 +40,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Setup database owner role
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
+            CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
+            GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
+            ALTER SCHEMA public OWNER TO app_owner;
+          SQL
+
       - name: Generate Prisma client
         run: npx prisma generate
 
       - name: Run migrations
         run: npx prisma migrate deploy
-
-      - name: Grant app_user role and seed
-        run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db -c "GRANT app_user TO postgres;"
-          pnpm db:seed
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+
+      - name: Seed database
+        run: pnpm db:seed
+        env:
+          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
 
       - name: Typecheck
         run: pnpm typecheck
@@ -66,9 +70,14 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
 
       - name: Build
         run: pnpm build
+        env:
+          DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+          DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
 
   e2e:
     runs-on: ubuntu-latest
@@ -90,8 +99,8 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/test_db
+      DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
+      DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
 
     steps:
       - uses: actions/checkout@v4
@@ -108,19 +117,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Setup database owner role
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
+            CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
+            GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
+            ALTER SCHEMA public OWNER TO app_owner;
+          SQL
+
       - name: Generate Prisma client
         run: npx prisma generate
 
       - name: Run migrations
         run: npx prisma migrate deploy
 
-      - name: Grant app_user role and seed
-        run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d test_db -c "GRANT app_user TO postgres;"
-          pnpm db:seed
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/test_db
+      - name: Seed database
+        run: pnpm db:seed
+
+      - name: Build application
+        run: pnpm build
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium

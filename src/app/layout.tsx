@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Figtree } from "next/font/google";
-import { getStore } from "@/lib/get-store";
-import { resolveStoreTheme, type ThemePreset } from "@/lib/theme";
+import { headers } from "next/headers";
+import { findStore } from "@/lib/get-store";
+import { resolveStoreTheme } from "@/lib/theme";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({
@@ -17,14 +18,11 @@ const figtree = Figtree({
 });
 
 export async function generateMetadata(): Promise<Metadata> {
-  let title = "Store not found";
-  try {
-    const store = await getStore();
-    title = store.name;
-  } catch {
-    // notFound() throws — caught by not-found page
-  }
-  return { title };
+  const headerList = await headers();
+  const slug = headerList.get("x-store-slug");
+  if (!slug) return { title: "Store not found" };
+  const store = await findStore(slug);
+  return { title: store?.name ?? "Store not found" };
 }
 
 export default async function RootLayout({
@@ -33,14 +31,14 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   let themeVars: Record<string, string> = {};
-  try {
-    const store = await getStore();
-    themeVars = resolveStoreTheme(
-      store.themePreset as ThemePreset,
-      store.brandColor,
-    );
-  } catch {
-    // notFound() throws — layout still renders for the not-found page
+
+  const headerList = await headers();
+  const slug = headerList.get("x-store-slug");
+  if (slug) {
+    const store = await findStore(slug);
+    if (store) {
+      themeVars = resolveStoreTheme(store.validPreset, store.validBrandColor);
+    }
   }
 
   return (

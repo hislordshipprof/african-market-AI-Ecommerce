@@ -1,28 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { slugFromHost } from "@/lib/slug";
 
 export function middleware(request: NextRequest) {
-  const host = request.headers.get("host");
-  const { searchParams } = request.nextUrl;
+  const headers = new Headers(request.headers);
+  headers.delete("x-store-slug");
 
+  const host = request.headers.get("host");
   let slug: string | null = null;
 
-  if (process.env.VERCEL_ENV !== "production") {
-    slug = searchParams.get("store") ?? null;
+  if (
+    process.env.VERCEL_ENV === "preview" ||
+    process.env.NODE_ENV === "development"
+  ) {
+    slug = request.nextUrl.searchParams.get("store") ?? null;
   }
 
   if (!slug && host) {
-    const firstLabel = host.split(".")[0];
-    if (
-      firstLabel &&
-      firstLabel !== "localhost" &&
-      firstLabel !== "www" &&
-      !firstLabel.match(/^\d+$/)
-    ) {
-      slug = firstLabel;
-    }
+    slug = slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN);
   }
 
-  const headers = new Headers(request.headers);
   if (slug) {
     headers.set("x-store-slug", slug);
   }

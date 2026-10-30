@@ -1,6 +1,10 @@
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
-const prisma = new PrismaClient();
+const adapter = new PrismaPg(
+  process.env.DIRECT_URL ?? process.env.DATABASE_URL!,
+);
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   const storeA = await prisma.store.upsert({
@@ -11,6 +15,7 @@ async function main() {
       name: "Mama Ngozi African Market",
       brandColor: "#1F5A43",
       themePreset: "palm-and-shea",
+      logoUrl: "/logos/mama-ngozi-logo.svg",
     },
   });
 
@@ -22,10 +27,11 @@ async function main() {
       name: "Tante Marie Caribbean Grocer",
       brandColor: "#0F4A57",
       themePreset: "lagoon-and-coral",
+      logoUrl: "/logos/tante-marie-logo.svg",
     },
   });
 
-  await prisma.storeContent.upsert({
+  await prisma.rlsTestFixture.upsert({
     where: { storeId_key: { storeId: storeA.id, key: "hero_text" } },
     update: {},
     create: {
@@ -35,7 +41,7 @@ async function main() {
     },
   });
 
-  await prisma.storeContent.upsert({
+  await prisma.rlsTestFixture.upsert({
     where: { storeId_key: { storeId: storeB.id, key: "hero_text" } },
     update: {},
     create: {

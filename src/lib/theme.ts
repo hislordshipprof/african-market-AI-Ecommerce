@@ -1,4 +1,7 @@
-export type ThemePreset = "palm-and-shea" | "cocoa-and-bottle-green" | "lagoon-and-coral";
+export type ThemePreset =
+  | "palm-and-shea"
+  | "cocoa-and-bottle-green"
+  | "lagoon-and-coral";
 
 interface ThemeTokens {
   bg: string;
@@ -155,13 +158,21 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-export function nudgeForContrast(brandColor: string, bgColor: string): string {
+export function nudgeForContrast(
+  brandColor: string,
+  bgColor: string,
+): { color: string; nudged: boolean } {
   const MIN_RATIO = 4.5;
   let color = brandColor;
   const bgLum = luminance(bgColor);
+  let nudged = false;
 
   for (let i = 0; i < 20; i++) {
-    if (contrastRatio(color, bgColor) >= MIN_RATIO) break;
+    const textColor = readableFillColor(color);
+    const bgRatio = contrastRatio(color, bgColor);
+    const textRatio = contrastRatio(color, textColor);
+    if (bgRatio >= MIN_RATIO && textRatio >= MIN_RATIO) break;
+    nudged = true;
     const [h, s, l] = hexToHsl(color);
     if (bgLum > 0.5) {
       color = hslToHex(h, s, Math.max(0, l - 0.03));
@@ -169,7 +180,7 @@ export function nudgeForContrast(brandColor: string, bgColor: string): string {
       color = hslToHex(h, s, Math.min(1, l + 0.03));
     }
   }
-  return color;
+  return { color, nudged };
 }
 
 export function readableFillColor(fillColor: string): string {
@@ -196,7 +207,8 @@ export function resolveStoreTheme(
   const tokens = { ...presets[preset].light };
 
   if (brandColor) {
-    tokens.primary = nudgeForContrast(brandColor, tokens.bg);
+    const { color: nudgedColor } = nudgeForContrast(brandColor, tokens.bg);
+    tokens.primary = nudgedColor;
     tokens["primary-deep"] = deriveDeep(tokens.primary);
   }
 
@@ -212,7 +224,7 @@ export function resolveStoreTheme(
   return cssVars;
 }
 
-export const VALID_PRESETS: ThemePreset[] = [
+export const VALID_PRESETS: readonly ThemePreset[] = [
   "palm-and-shea",
   "cocoa-and-bottle-green",
   "lagoon-and-coral",

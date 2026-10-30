@@ -1,12 +1,18 @@
 import { beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
-const prisma = new PrismaClient();
+let prisma: PrismaClient | undefined;
 
-beforeAll(async () => {
-  await prisma.$connect();
-});
+if (process.env.DATABASE_URL) {
+  const adapter = new PrismaPg(process.env.DATABASE_URL);
+  prisma = new PrismaClient({ adapter });
 
-afterAll(async () => {
-  await prisma.$disconnect();
-});
+  beforeAll(async () => {
+    await prisma!.$connect();
+  });
+
+  afterAll(async () => {
+    await prisma!.$disconnect();
+  });
+}

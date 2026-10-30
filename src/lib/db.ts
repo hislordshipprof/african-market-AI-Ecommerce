@@ -1,31 +1,47 @@
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient();
+if (!globalForPrisma.prisma) {
+  const adapter = new PrismaPg(process.env.DATABASE_URL!);
+  globalForPrisma.prisma = new PrismaClient({ adapter });
+}
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+const prisma = globalForPrisma.prisma;
+
+export const platform = {
+  store: prisma.store,
+};
+
+function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
+  return new Proxy(delegate as Record<string, unknown>, {
+    get(target, prop: string) {
+      const val = target[prop];
+      if (typeof val !== "function") return val;
+      return (...args: unknown[]) => {
+        const prismaPromise = (val as (...a: unknown[]) => unknown).apply(
+          target,
+          args,
+        );
+        return prisma
+          .$transaction([
+            prisma.$executeRaw`SET LOCAL ROLE app_user`,
+            prisma.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`,
+            prismaPromise as ReturnType<typeof prisma.$queryRaw>,
+          ])
+          .then(([, , result]) => result);
+      };
+    },
+  }) as unknown as D;
+}
 
 export function storeScoped(storeId: string) {
-  return prisma.$extends({
-    query: {
-      $allOperations({ args, query, operation }) {
-        const readOps = ["findUnique", "findFirst", "findMany", "count", "aggregate", "groupBy"];
-        const isRead = readOps.includes(operation);
-
-        return prisma.$transaction(
-          async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
-            await tx.$executeRaw`SET ROLE app_user`;
-            return query(args);
-          },
-          { isolationLevel: isRead ? Prisma.TransactionIsolationLevel.ReadCommitted : undefined },
-        );
-      },
-    },
-  });
+  return {
+    rlsTestFixture: wrapDelegate(storeId, prisma.rlsTestFixture),
+  };
 }
 
 export type StoreScopedClient = ReturnType<typeof storeScoped>;
