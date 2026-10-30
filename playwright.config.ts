@@ -17,14 +17,5 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: process.env.CI
-    ? {
-        command: "npx next start -p 3000",
-        url: "http://127.0.0.1:3000",
-        reuseExistingServer: true,
-        timeout: 120_000,
-        stdout: "pipe",
-        stderr: "pipe",
-      }
-    : undefined,
+  webServer: undefined,
 });
