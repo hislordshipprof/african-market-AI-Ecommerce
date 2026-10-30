@@ -1,7 +1,18 @@
 {
-  "mode": "auto",
-  "claude": { "model": null, "effort": "high" },
-  "codex": { "model": null, "effort": "high" },
-  "cursor": { "model": null },
-  "omp": { "model": null, "effort": "high" }
+  "mode": "codex",
+  "claude": {
+    "model": null,
+    "effort": "high"
+  },
+  "codex": {
+    "model": "gpt-6-astra",
+    "effort": "medium"
+  },
+  "cursor": {
+    "model": null
+  },
+  "omp": {
+    "model": null,
+    "effort": "high"
+  }
 }
