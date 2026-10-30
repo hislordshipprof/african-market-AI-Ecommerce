@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Figtree", "Segoe UI", system-ui, sans-serif;
+
+  --color-bg: #F3F4EF;
+  --color-surface: #FFFFFF;
+  --color-raised: #E7E9E2;
+  --color-ink: #15201A;
+  --color-muted: #55625A;
+  --color-line: #DCDFD6;
+  --color-primary: #1F5A43;
+  --color-primary-deep: #123726;
+  --color-on-primary: #FFFFFF;
+  --color-accent: #A8DDB5;
+  --color-on-accent: #0F2A1B;
+  --color-soft: #E1EEE3;
+  --color-deal: #B42335;
+  --color-success: #2E7D4F;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  --ease-std: cubic-bezier(0.4, 0.4, 0, 1);
+  --ease-out: cubic-bezier(0, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-large: cubic-bezier(0.45, 0, 0.05, 1);
+}
+
+@layer base {
+  body {
+    --color-bg: var(--store-bg, #F3F4EF);
+    --color-surface: var(--store-surface, #FFFFFF);
+    --color-raised: var(--store-raised, #E7E9E2);
+    --color-ink: var(--store-ink, #15201A);
+    --color-muted: var(--store-muted, #55625A);
+    --color-line: var(--store-line, #DCDFD6);
+    --color-primary: var(--store-primary, #1F5A43);
+    --color-primary-deep: var(--store-primary-deep, #123726);
+    --color-on-primary: var(--store-on-primary, #FFFFFF);
+    --color-accent: var(--store-accent, #A8DDB5);
+    --color-on-accent: var(--store-on-accent, #0F2A1B);
+    --color-soft: var(--store-soft, #E1EEE3);
+    --color-deal: var(--store-deal, #B42335);
+    --color-success: var(--store-success, #2E7D4F);
+
+    font-family: var(--font-body);
+    background-color: var(--color-bg);
+    color: var(--color-ink);
+    line-height: 1.5;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

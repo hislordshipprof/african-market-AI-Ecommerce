@@ -1,9 +1,37 @@
-# Impeccable engine binary (re-downloaded on first run)
-.claude/skills/impeccable/scripts/bin/
+# dependencies
+node_modules/
+.pnp
+.pnp.*
 
-# Secrets: never commit
+# next.js
+.next/
+out/
+
+# production
+build/
+
+# env files (secrets / local overrides)
 .env
 .env*.local
+.env.test
+
+# debug
+npm-debug.log*
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Prisma
+prisma/generated/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+
+# Impeccable engine binary
+.claude/skills/impeccable/scripts/bin/
 
 # Builder run logs and reports
 .builder/

@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Store {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  name         String
+  logoUrl      String?  @map("logo_url")
+  brandColor   String?  @map("brand_color")
+  themePreset  String   @default("palm-and-shea") @map("theme_preset")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  content StoreContent[]
+
+  @@map("stores")
+}
+
+/// Store-owned: each row belongs to one store. RLS-protected by store_id.
+model StoreContent {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  key       String
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, key])
+  @@index([storeId])
+  @@map("store_content")
+}
