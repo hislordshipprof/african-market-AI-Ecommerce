@@ -101,22 +101,60 @@ describe("runtimeDatabaseUrl", () => {
 
   it("falls back to DATABASE_URL in dev when APP_RUNTIME_PASSWORD is missing", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const result = runtimeDatabaseUrl({ DATABASE_URL: BASE });
+    const result = runtimeDatabaseUrl({
+      DATABASE_URL: BASE,
+      NODE_ENV: "development",
+    });
     expect(result).toBe(BASE);
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
   });
 
-  it("throws in production when APP_RUNTIME_PASSWORD is missing", () => {
+  it("throws when NODE_ENV is unset and APP_RUNTIME_PASSWORD is missing", () => {
+    expect(() => runtimeDatabaseUrl({ DATABASE_URL: BASE })).toThrow(
+      /APP_RUNTIME_PASSWORD is required/,
+    );
+  });
+
+  it("throws in NODE_ENV=production when APP_RUNTIME_PASSWORD is missing", () => {
     expect(() =>
-      runtimeDatabaseUrl({ DATABASE_URL: BASE, VERCEL_ENV: "production" }),
+      runtimeDatabaseUrl({ DATABASE_URL: BASE, NODE_ENV: "production" }),
     ).toThrow(/APP_RUNTIME_PASSWORD is required/);
   });
 
-  it("throws in preview when APP_RUNTIME_PASSWORD is missing", () => {
+  it("throws in NODE_ENV=production even when VERCEL_ENV is unset", () => {
     expect(() =>
-      runtimeDatabaseUrl({ DATABASE_URL: BASE, VERCEL_ENV: "preview" }),
+      runtimeDatabaseUrl({ DATABASE_URL: BASE, NODE_ENV: "production" }),
     ).toThrow(/APP_RUNTIME_PASSWORD is required/);
+  });
+
+  it("throws in NODE_ENV=production with VERCEL_ENV=preview", () => {
+    expect(() =>
+      runtimeDatabaseUrl({
+        DATABASE_URL: BASE,
+        NODE_ENV: "production",
+        VERCEL_ENV: "preview",
+      }),
+    ).toThrow(/APP_RUNTIME_PASSWORD is required/);
+  });
+
+  it("throws in NODE_ENV=production with VERCEL_ENV=production", () => {
+    expect(() =>
+      runtimeDatabaseUrl({
+        DATABASE_URL: BASE,
+        NODE_ENV: "production",
+        VERCEL_ENV: "production",
+      }),
+    ).toThrow(/APP_RUNTIME_PASSWORD is required/);
+  });
+
+  it("falls back during build phase even with NODE_ENV=production", () => {
+    const result = runtimeDatabaseUrl({
+      DATABASE_URL: BASE,
+      NODE_ENV: "production",
+      NEXT_PHASE: "phase-production-build",
+    });
+    expect(result).toBe(BASE);
   });
 
   it("falls back during build phase even in preview", () => {
@@ -128,11 +166,32 @@ describe("runtimeDatabaseUrl", () => {
     expect(result).toBe(BASE);
   });
 
+  it("falls back in NODE_ENV=development without password", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = runtimeDatabaseUrl({
+      DATABASE_URL: BASE,
+      NODE_ENV: "development",
+    });
+    expect(result).toBe(BASE);
+    warn.mockRestore();
+  });
+
+  it("falls back in NODE_ENV=test without password", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = runtimeDatabaseUrl({
+      DATABASE_URL: BASE,
+      NODE_ENV: "test",
+    });
+    expect(result).toBe(BASE);
+    warn.mockRestore();
+  });
+
   it("falls back in VERCEL_ENV=development without password", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = runtimeDatabaseUrl({
       DATABASE_URL: BASE,
       VERCEL_ENV: "development",
+      NODE_ENV: "development",
     });
     expect(result).toBe(BASE);
     warn.mockRestore();

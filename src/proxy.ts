@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { slugFromHost } from "@/lib/slug";
 
+export function allowStoreOverride(
+  env: Record<string, string | undefined>,
+): boolean {
+  if (env.VERCEL_ENV === "preview") return true;
+  if (env.NODE_ENV === "development") return true;
+  return false;
+}
+
 export function proxy(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.delete("x-store-slug");
@@ -8,10 +16,7 @@ export function proxy(request: NextRequest) {
   const host = request.headers.get("host");
   let slug: string | null = null;
 
-  if (
-    process.env.VERCEL_ENV === "preview" ||
-    process.env.NODE_ENV === "development"
-  ) {
+  if (allowStoreOverride(process.env)) {
     slug = request.nextUrl.searchParams.get("store") ?? null;
   }
 
