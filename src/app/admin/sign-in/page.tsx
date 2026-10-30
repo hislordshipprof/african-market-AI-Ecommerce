@@ -27,11 +27,9 @@ export default function AdminSignIn() {
       });
 
       if (result.error) {
-        if (result.error.message?.includes("two factor")) {
-          setStep("totp");
-        } else {
-          setError(result.error.message ?? "Sign-in failed");
-        }
+        setError(result.error.message ?? "Sign-in failed");
+      } else if ((result.data as Record<string, unknown>)?.twoFactorRedirect) {
+        setStep("totp");
       } else {
         router.push("/admin/stores");
       }

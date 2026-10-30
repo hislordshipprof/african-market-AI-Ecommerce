@@ -1,10 +1,13 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
+import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
+
+const SEED_TOTP_SECRET = "seed-totp-secret-for-e2e-tests!";
 
 async function main() {
   const storeA = await prisma.store.upsert({
@@ -77,13 +80,14 @@ async function main() {
 
   await prisma.user.upsert({
     where: { email: adminEmail },
-    update: {},
+    update: { twoFactorEnabled: true },
     create: {
       id: adminId,
       name: "Platform Admin",
       email: adminEmail,
       emailVerified: true,
       role: "platform_admin",
+      twoFactorEnabled: true,
       updatedAt: new Date(),
     },
   });
@@ -104,8 +108,37 @@ async function main() {
     });
   }
 
+  const authSecret = process.env.BETTER_AUTH_SECRET;
+  if (!authSecret) {
+    console.warn("BETTER_AUTH_SECRET not set; skipping 2FA seed enrollment");
+  } else {
+    const encryptedSecret = await symmetricEncrypt({
+      key: authSecret,
+      data: SEED_TOTP_SECRET,
+    });
+    const encryptedBackupCodes = await symmetricEncrypt({
+      key: authSecret,
+      data: JSON.stringify(["BACKUP1234", "BACKUP5678"]),
+    });
+
+    const existingTwoFactor = await prisma.twoFactor.findFirst({
+      where: { userId: adminId },
+    });
+    if (!existingTwoFactor) {
+      await prisma.twoFactor.create({
+        data: {
+          id: "seed-admin-totp",
+          secret: encryptedSecret,
+          backupCodes: encryptedBackupCodes,
+          userId: adminId,
+          verified: true,
+        },
+      });
+    }
+  }
+
   console.log("Seeded 2 stores: mama-ngozi, tante-marie");
-  console.log("Seeded platform admin: admin@platform.test / Test1234!");
+  console.log("Seeded platform admin: admin@platform.test / Test1234! (2FA enrolled)");
 }
 
 main()

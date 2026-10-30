@@ -26,7 +26,7 @@ vi.mock("../get-store", () => ({
 
 vi.mock("./session", () => ({
   requirePlatformAdmin: vi.fn().mockResolvedValue({
-    user: { id: "admin-1", email: "admin@platform.test", role: "platform_admin" },
+    user: { id: "admin-1", email: "admin@platform.test", role: "platform_admin", twoFactorEnabled: true },
   }),
 }));
 
@@ -200,6 +200,163 @@ describe("createStore", () => {
       formData({ ...VALID_STORE, hours: "not json" }),
     );
     expect(result.fieldErrors?.hours).toBeDefined();
+  });
+
+  it("accepts zero for minimumOrder", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "zero-min",
+      name: "Zero Min Store",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, slug: "zero-min", name: "Zero Min Store", minimumOrder: "0" }),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCreate.mock.calls[0][0].data.minimumOrderCents).toBe(0);
+  });
+
+  it("accepts zero for autoRefundLimit", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "zero-refund",
+      name: "Zero Refund Store",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, slug: "zero-refund", name: "Zero Refund Store", autoRefundLimit: "0" }),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCreate.mock.calls[0][0].data.autoRefundLimitCents).toBe(0);
+  });
+
+  it("accepts zero for prepTimeMinutes", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "zero-prep",
+      name: "Zero Prep Store",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, slug: "zero-prep", name: "Zero Prep Store", prepTimeMinutes: "0" }),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCreate.mock.calls[0][0].data.prepTimeMinutes).toBe(0);
+  });
+
+  it("accepts zero for deliveryRadiusMi", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "zero-radius",
+      name: "Zero Radius Store",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, slug: "zero-radius", name: "Zero Radius Store", deliveryRadiusMi: "0" }),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCreate.mock.calls[0][0].data.deliveryRadiusMi).toBe(0);
+  });
+
+  it("rejects non-numeric minimumOrder", async () => {
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, minimumOrder: "abc" }),
+    );
+    expect(result.fieldErrors?.minimumOrder).toBeDefined();
+  });
+
+  it("rejects reserved slug 'admin'", async () => {
+    const result = await createStore({}, formData({ ...VALID_STORE, slug: "admin" }));
+    expect(result.fieldErrors?.slug).toContain("reserved");
+  });
+
+  it("rejects reserved slug 'www'", async () => {
+    const result = await createStore({}, formData({ ...VALID_STORE, slug: "www" }));
+    expect(result.fieldErrors?.slug).toContain("reserved");
+  });
+
+  it("rejects reserved slug 'api'", async () => {
+    const result = await createStore({}, formData({ ...VALID_STORE, slug: "api" }));
+    expect(result.fieldErrors?.slug).toContain("reserved");
+  });
+
+  it("rejects remote logo URL when LOGO_HOSTS is not set", async () => {
+    const original = process.env.LOGO_HOSTS;
+    delete process.env.LOGO_HOSTS;
+    try {
+      const result = await createStore(
+        {},
+        formData({ ...VALID_STORE, logoUrl: "https://example.com/logo.png" }),
+      );
+      expect(result.fieldErrors?.logoUrl).toBeDefined();
+    } finally {
+      if (original !== undefined) process.env.LOGO_HOSTS = original;
+    }
+  });
+
+  it("accepts local logo path", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "local-logo",
+      name: "Local Logo Store",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, slug: "local-logo", name: "Local Logo Store", logoUrl: "/logos/my-logo.svg" }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("clears hours when input is empty", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "no-hours",
+      name: "No Hours Store",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, slug: "no-hours", name: "No Hours Store", hours: "" }),
+    );
+    expect(result.success).toBe(true);
+    const createArg = mockCreate.mock.calls[0][0].data;
+    expect(createArg.hours).toBeDefined();
   });
 });
 

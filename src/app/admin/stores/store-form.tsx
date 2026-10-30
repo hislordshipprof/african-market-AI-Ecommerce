@@ -159,6 +159,11 @@ export function StoreForm({
               className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               placeholder="/logos/store-logo.svg"
             />
+            {state.fieldErrors?.logoUrl && (
+              <p className="mt-1 text-xs text-red-600">
+                {state.fieldErrors.logoUrl}
+              </p>
+            )}
           </div>
         </div>
       </fieldset>
@@ -231,6 +236,11 @@ export function StoreForm({
                 defaultValue={store ? store.minimumOrderCents / 100 : 35}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               />
+              {state.fieldErrors?.minimumOrder && (
+                <p className="mt-1 text-xs text-red-600">
+                  {state.fieldErrors.minimumOrder}
+                </p>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-[#15201A]">
@@ -244,6 +254,11 @@ export function StoreForm({
                 defaultValue={store ? store.autoRefundLimitCents / 100 : 25}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               />
+              {state.fieldErrors?.autoRefundLimit && (
+                <p className="mt-1 text-xs text-red-600">
+                  {state.fieldErrors.autoRefundLimit}
+                </p>
+              )}
             </div>
           </div>
 

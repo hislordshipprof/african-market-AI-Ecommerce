@@ -13,6 +13,16 @@ export const auth = betterAuth({
       issuer: "African Markets Platform",
     }),
   ],
+  rateLimit: {
+    storage: "database",
+    modelName: "rateLimit",
+    window: 60,
+    max: 10,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 5 },
+      "/two-factor/verify-totp": { window: 60, max: 5 },
+    },
+  },
   user: {
     additionalFields: {
       role: {

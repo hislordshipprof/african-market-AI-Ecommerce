@@ -5,10 +5,28 @@ import { platformAdmin } from "../db";
 import { writeAuditLog } from "./audit";
 import { requirePlatformAdmin } from "./session";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
+import { RESERVED_SLUGS } from "../slug";
 import type { ThemePreset } from "../theme";
+import { Prisma } from "@prisma/client";
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+
+function parseFloatOrDefault(raw: string | null | undefined, defaultValue: number): number {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") return defaultValue;
+  const n = parseFloat(trimmed);
+  if (!Number.isFinite(n)) return NaN;
+  return n;
+}
+
+function parseIntOrDefault(raw: string | null | undefined, defaultValue: number): number {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") return defaultValue;
+  const n = parseInt(trimmed, 10);
+  if (!Number.isFinite(n)) return NaN;
+  return n;
+}
 
 export type StoreFormState = {
   error?: string;
@@ -45,18 +63,44 @@ function validateStoreFields(data: FormData): {
   const themePreset = (data.get("themePreset") as string)?.trim() || "palm-and-shea";
   const status = (data.get("status") as string)?.trim() || "active";
   const hoursRaw = (data.get("hours") as string)?.trim() || "";
-  const prepTimeMinutes = parseInt(data.get("prepTimeMinutes") as string) || 30;
-  const deliveryRadiusMi = parseFloat(data.get("deliveryRadiusMi") as string) || 8;
+  const prepTimeMinutes = parseIntOrDefault(data.get("prepTimeMinutes") as string, 30);
+  const deliveryRadiusMi = parseFloatOrDefault(data.get("deliveryRadiusMi") as string, 8);
   const minimumOrderCents = Math.round(
-    (parseFloat(data.get("minimumOrder") as string) || 35) * 100,
+    parseFloatOrDefault(data.get("minimumOrder") as string, 35) * 100,
   );
   const pickupEnabled = data.get("pickupEnabled") === "on";
   const autoRefundLimitCents = Math.round(
-    (parseFloat(data.get("autoRefundLimit") as string) || 25) * 100,
+    parseFloatOrDefault(data.get("autoRefundLimit") as string, 25) * 100,
   );
 
   if (!slug) errors.slug = "Slug is required";
   else if (!SLUG_RE.test(slug)) errors.slug = "Slug must be lowercase alphanumeric with hyphens, 1-63 characters";
+  else if (RESERVED_SLUGS.has(slug)) errors.slug = "This slug is reserved and cannot be used";
+
+  if (logoUrl) {
+    if (logoUrl.startsWith("/")) {
+      // local path — always allowed
+    } else {
+      try {
+        const parsed = new URL(logoUrl);
+        if (parsed.protocol !== "https:") {
+          errors.logoUrl = "Logo URL must use HTTPS or be a local path";
+        } else {
+          const allowedHosts = (process.env.LOGO_HOSTS ?? "")
+            .split(",")
+            .map((h) => h.trim())
+            .filter(Boolean);
+          if (allowedHosts.length === 0) {
+            errors.logoUrl = "Remote logo URLs are not allowed until LOGO_HOSTS is configured; use a local path like /logos/store-logo.svg";
+          } else if (!allowedHosts.includes(parsed.hostname)) {
+            errors.logoUrl = `Logo host '${parsed.hostname}' is not in the allowed list`;
+          }
+        }
+      } catch {
+        errors.logoUrl = "Logo URL must be a valid URL or a local path starting with /";
+      }
+    }
+  }
 
   if (!name) errors.name = "Name is required";
 
@@ -72,12 +116,20 @@ function validateStoreFields(data: FormData): {
     errors.status = "Status must be active or suspended";
   }
 
-  if (prepTimeMinutes < 1 || prepTimeMinutes > 480) {
-    errors.prepTimeMinutes = "Prep time must be 1-480 minutes";
+  if (!Number.isFinite(prepTimeMinutes) || prepTimeMinutes < 0 || prepTimeMinutes > 480) {
+    errors.prepTimeMinutes = "Prep time must be 0-480 minutes";
   }
 
-  if (deliveryRadiusMi < 1 || deliveryRadiusMi > 15) {
-    errors.deliveryRadiusMi = "Delivery radius must be 1-15 miles";
+  if (!Number.isFinite(deliveryRadiusMi) || deliveryRadiusMi < 0 || deliveryRadiusMi > 15) {
+    errors.deliveryRadiusMi = "Delivery radius must be 0-15 miles";
+  }
+
+  if (!Number.isFinite(minimumOrderCents) || minimumOrderCents < 0) {
+    errors.minimumOrder = "Minimum order must be a non-negative number";
+  }
+
+  if (!Number.isFinite(autoRefundLimitCents) || autoRefundLimitCents < 0) {
+    errors.autoRefundLimit = "Auto-refund limit must be a non-negative number";
   }
 
   let hours: unknown = null;
@@ -147,7 +199,7 @@ export async function createStore(
       brandColor: finalBrandColor,
       themePreset: values.themePreset,
       status: values.status,
-      hours: values.hours ?? undefined,
+      hours: values.hours !== null ? values.hours : Prisma.JsonNull,
       prepTimeMinutes: values.prepTimeMinutes,
       deliveryRadiusMi: values.deliveryRadiusMi,
       minimumOrderCents: values.minimumOrderCents,
@@ -232,7 +284,7 @@ export async function updateStore(
       brandColor: finalBrandColor,
       themePreset: values.themePreset,
       status: values.status,
-      hours: values.hours ?? undefined,
+      hours: values.hours !== null ? values.hours : Prisma.JsonNull,
       prepTimeMinutes: values.prepTimeMinutes,
       deliveryRadiusMi: values.deliveryRadiusMi,
       minimumOrderCents: values.minimumOrderCents,

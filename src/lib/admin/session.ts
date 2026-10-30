@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "../auth";
 
-export async function requirePlatformAdmin() {
+export async function requirePlatformAdmin(opts?: { allowUnenrolled2FA?: boolean }) {
   const session = await auth.api.getSession({
     headers: await headers(),
   });
@@ -13,6 +13,10 @@ export async function requirePlatformAdmin() {
 
   if (session.user.role !== "platform_admin") {
     redirect("/admin/sign-in");
+  }
+
+  if (!opts?.allowUnenrolled2FA && !session.user.twoFactorEnabled) {
+    redirect("/admin/enroll-2fa");
   }
 
   return session;

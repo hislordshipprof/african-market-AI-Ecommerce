@@ -1,7 +1,33 @@
 import { test, expect } from "@playwright/test";
+import { generateTOTP } from "./totp";
 
 const ADMIN_EMAIL = "admin@platform.test";
 const ADMIN_PASSWORD = "Test1234!";
+const SEED_TOTP_SECRET = "seed-totp-secret-for-e2e-tests!";
+
+function generateTotpCode(): string {
+  return generateTOTP(SEED_TOTP_SECRET);
+}
+
+async function adminSignIn(page: import("@playwright/test").Page) {
+  await page.goto("http://localhost:3000/admin/sign-in");
+  await page.fill("input[type='email']", ADMIN_EMAIL);
+  await page.fill("input[type='password']", ADMIN_PASSWORD);
+  await page.click("button[type='submit']");
+
+  const totpVisible = await page
+    .locator("text=Enter the 6-digit code")
+    .isVisible({ timeout: 5000 })
+    .catch(() => false);
+
+  if (totpVisible) {
+    const code = await generateTotpCode();
+    await page.fill("input[inputmode='numeric']", code);
+    await page.click("button[type='submit']");
+  }
+
+  await page.waitForURL("**/admin/stores", { timeout: 10000 });
+}
 
 test.describe("Platform admin console", () => {
   test("sign-in page renders email and password fields", async ({ page }) => {
@@ -26,38 +52,17 @@ test.describe("Platform admin console", () => {
     await expect(page).toHaveURL(/\/admin\/sign-in/);
   });
 
-  test("sign-in with valid credentials reaches stores or 2FA", async ({
+  test("sign-in with valid credentials and TOTP reaches stores", async ({
     page,
   }) => {
-    await page.goto("http://localhost:3000/admin/sign-in");
-    await page.fill("input[type='email']", ADMIN_EMAIL);
-    await page.fill("input[type='password']", ADMIN_PASSWORD);
-    await page.click("button[type='submit']");
-
-    await page.waitForURL(/\/(admin\/stores|admin\/sign-in)/, {
-      timeout: 10000,
-    });
-
-    const url = page.url();
-    const atStores = url.includes("/admin/stores");
-    const at2FA =
-      url.includes("/admin/sign-in") &&
-      (await page
-        .locator("text=Enter the 6-digit code")
-        .isVisible()
-        .catch(() => false));
-
-    expect(atStores || at2FA).toBe(true);
+    await adminSignIn(page);
+    await expect(page.locator("h1")).toHaveText("Stores");
   });
 });
 
 test.describe("Store management (authenticated)", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("http://localhost:3000/admin/sign-in");
-    await page.fill("input[type='email']", ADMIN_EMAIL);
-    await page.fill("input[type='password']", ADMIN_PASSWORD);
-    await page.click("button[type='submit']");
-    await page.waitForURL("**/admin/stores", { timeout: 10000 });
+    await adminSignIn(page);
   });
 
   test("stores list page shows seeded stores", async ({ page }) => {
@@ -75,6 +80,15 @@ test.describe("Store management (authenticated)", () => {
     await page.click("button[type='submit']:has-text('Create store')");
 
     await expect(page.locator("text=already exists")).toBeVisible();
+  });
+
+  test("create store form rejects reserved slug", async ({ page }) => {
+    await page.click("text=Create store");
+    await page.fill("input[name='slug']", "admin");
+    await page.fill("input[name='name']", "Reserved Slug Test");
+    await page.click("button[type='submit']:has-text('Create store')");
+
+    await expect(page.locator("text=reserved")).toBeVisible();
   });
 
   test("create and then edit a store", async ({ page }) => {
