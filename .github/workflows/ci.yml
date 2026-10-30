@@ -105,6 +105,8 @@ jobs:
       DATABASE_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
       DIRECT_URL: postgresql://app_owner:app_owner@localhost:5432/test_db
       APP_RUNTIME_PASSWORD: app_runtime_ci
+      BETTER_AUTH_SECRET: ci-e2e-test-secret-do-not-use-in-prod
+      BETTER_AUTH_URL: http://localhost:3000
 
     steps:
       - uses: actions/checkout@v4
