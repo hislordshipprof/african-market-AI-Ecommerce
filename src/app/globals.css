@@ -53,6 +53,7 @@
     --color-deal: var(--store-deal, #B42335);
     --color-success: var(--store-success, #2E7D4F);
 
+    color-scheme: light dark;
     font-family: var(--font-body);
     background-color: var(--color-bg);
     color: var(--color-ink);

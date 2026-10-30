@@ -64,4 +64,51 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
     await page.goto("http://localhost:3000/?store=mama-ngozi");
     await expect(page.locator("h1")).toHaveText("Store not found");
   });
+
+  test("dark mode switches to dark theme tokens", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("http://mama-ngozi.localhost:3000/");
+
+    const bgColor = await page.locator("body").evaluate((el) =>
+      getComputedStyle(el).getPropertyValue("--store-bg").trim(),
+    );
+    expect(bgColor).toBe("#0F1712");
+  });
+
+  test("light mode uses light theme tokens", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.goto("http://mama-ngozi.localhost:3000/");
+
+    const bgColor = await page.locator("body").evaluate((el) =>
+      getComputedStyle(el).getPropertyValue("--store-bg").trim(),
+    );
+    expect(bgColor).toBe("#F3F4EF");
+  });
+
+  test("dark mode brand color passes WCAG AA contrast", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("http://mama-ngozi.localhost:3000/");
+
+    const [primary, bg] = await page.locator("body").evaluate((el) => {
+      const s = getComputedStyle(el);
+      return [
+        s.getPropertyValue("--store-primary").trim(),
+        s.getPropertyValue("--store-bg").trim(),
+      ];
+    });
+
+    function lum(hex: string): number {
+      const rgb = [
+        parseInt(hex.slice(1, 3), 16) / 255,
+        parseInt(hex.slice(3, 5), 16) / 255,
+        parseInt(hex.slice(5, 7), 16) / 255,
+      ].map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    }
+
+    const l1 = lum(primary);
+    const l2 = lum(bg);
+    const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
 });

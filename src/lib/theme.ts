@@ -230,32 +230,49 @@ export function deriveDeep(primary: string): string {
   return hslToHex(h, s, Math.max(0, l * 0.6));
 }
 
-export function getThemeTokens(preset: ThemePreset): ThemeTokens {
-  return presets[preset].light;
+export function getThemeTokens(
+  preset: ThemePreset,
+  mode: "light" | "dark" = "light",
+): ThemeTokens {
+  return presets[preset][mode];
+}
+
+function buildCssVars(tokens: ThemeTokens): Record<string, string> {
+  const cssVars: Record<string, string> = {};
+  for (const [key, value] of Object.entries(tokens)) {
+    cssVars[`--store-${key}`] = value;
+  }
+  cssVars["--store-on-primary"] = readableFillColor(tokens.primary);
+  cssVars["--store-on-accent"] = readableFillColor(tokens.accent);
+  return cssVars;
+}
+
+export interface ResolvedTheme {
+  light: Record<string, string>;
+  dark: Record<string, string>;
 }
 
 export function resolveStoreTheme(
   preset: ThemePreset,
   brandColor: string | null,
-): Record<string, string> {
-  const tokens = { ...presets[preset].light };
+): ResolvedTheme {
+  const lightTokens = { ...presets[preset].light };
+  const darkTokens = { ...presets[preset].dark };
 
   if (brandColor) {
-    const { color: nudgedColor } = nudgeForContrast(brandColor, tokens.bg);
-    tokens.primary = nudgedColor;
-    tokens["primary-deep"] = deriveDeep(tokens.primary);
+    const { color: nudgedLight } = nudgeForContrast(brandColor, lightTokens.bg);
+    lightTokens.primary = nudgedLight;
+    lightTokens["primary-deep"] = deriveDeep(lightTokens.primary);
+
+    const { color: nudgedDark } = nudgeForContrast(brandColor, darkTokens.bg);
+    darkTokens.primary = nudgedDark;
+    darkTokens["primary-deep"] = deriveDeep(darkTokens.primary);
   }
 
-  const onPrimary = readableFillColor(tokens.primary);
-
-  const cssVars: Record<string, string> = {};
-  for (const [key, value] of Object.entries(tokens)) {
-    cssVars[`--store-${key}`] = value;
-  }
-  cssVars["--store-on-primary"] = onPrimary;
-  cssVars["--store-on-accent"] = readableFillColor(tokens.accent);
-
-  return cssVars;
+  return {
+    light: buildCssVars(lightTokens),
+    dark: buildCssVars(darkTokens),
+  };
 }
 
 export const VALID_PRESETS: readonly ThemePreset[] = [
