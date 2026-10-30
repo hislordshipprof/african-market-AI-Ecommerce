@@ -1,0 +1,472 @@
+<title>Storefront Palette Studio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a working studio. Controls rail on top, two live phone mocks (shop + cart) that take the chosen palette, notes + contrast beside them. Page chrome stays neutral so only the mocks carry color. */
+:root{
+  --page:#F2F1EE; --panel:#FFFFFF; --panel-2:#E9E7E2; --text:#1B1A18; --text-2:#5F5B55; --rule:#DAD7D0; --focus:#1B1A18;
+  --font-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body:"Figtree", "Segoe UI", system-ui, sans-serif;
+  --ease-out:cubic-bezier(0,0,0,1); --ease-std:cubic-bezier(0.4,0.4,0,1); --ease-exit:cubic-bezier(0.4,0,1,1);
+  --spring:linear(0, 0.006 1.2%, 0.026 2.5%, 0.111 5.5%, 0.591 16.8%, 0.785 22.3%, 0.859 25%, 0.918 27.7%, 0.965 30.5%, 1.002 33.5%, 1.038 38.7%, 1.049 44.9%, 1.004 72.8%, 1);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--page:#141413;--panel:#1D1C1A;--panel-2:#272623;--text:#EEECE7;--text-2:#A9A59D;--rule:#34322E;--focus:#EEECE7;color-scheme:dark}}
+:root[data-theme="dark"]{--page:#141413;--panel:#1D1C1A;--panel-2:#272623;--text:#EEECE7;--text-2:#A9A59D;--rule:#34322E;--focus:#EEECE7;color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--text);font:15px/1.5 var(--font-body);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 64px}
+::selection{background:var(--text);color:var(--page)}
+.wrap{max-width:1240px;margin:0 auto;display:grid;gap:28px}
+h1,h2,h3{font-family:var(--font-display);text-wrap:balance;margin:0}
+h1{font-size:clamp(28px,4vw,40px);font-weight:800;letter-spacing:-0.02em;line-height:1.05}
+.lede{max-width:66ch;color:var(--text-2);margin:8px 0 0}
+button,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* palette picker */
+.picker{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+@media (max-width:1100px){.picker{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:560px){.picker{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.pal{all:unset;cursor:pointer;display:grid;gap:8px;padding:10px;border-radius:14px;background:var(--panel);border:1px solid var(--rule);transition:border-color 150ms var(--ease-std),transform 200ms var(--ease-std)}
+.pal:active{transform:scale(.98);transition-duration:50ms}
+.pal:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.pal[aria-pressed="true"]{border-color:var(--text);box-shadow:inset 0 0 0 1px var(--text)}
+.pal .strip{display:flex;height:34px;border-radius:8px;overflow:hidden}
+.pal .strip i{flex:1}
+.pal .strip i:nth-child(2){flex:1.6}
+.pal b{font-family:var(--font-display);font-size:15px;font-weight:700}
+.pal .status{font-size:12px;font-weight:600;color:var(--text-2)}
+.pal .status.on{color:var(--text)}
+.pal small{color:var(--text-2);font-size:12.5px;line-height:1.35}
+
+.controls{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center}
+.seg{display:inline-flex;background:var(--panel-2);border-radius:999px;padding:3px}
+.seg button{border:0;background:transparent;padding:6px 14px;border-radius:999px;cursor:pointer;font-weight:600;font-size:13.5px;color:var(--text-2);transition:background 150ms var(--ease-std),color 150ms}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+label.sel{display:inline-flex;gap:8px;align-items:center;font-size:13.5px;color:var(--text-2);font-weight:600}
+label.sel select{background:var(--panel);border:1px solid var(--rule);border-radius:999px;padding:6px 12px;color:var(--text)}
+
+.stage{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,360px);gap:24px;align-items:start}
+@media (max-width:980px){.stage{grid-template-columns:minmax(0,1fr)}}
+.phones{display:flex;flex-wrap:wrap;gap:24px;justify-content:center}
+.notes{background:var(--panel);border:1px solid var(--rule);border-radius:16px;padding:20px;display:grid;gap:16px;min-width:0}
+.notes h2{font-size:22px;font-weight:800;letter-spacing:-0.01em}
+.notes p{margin:0;color:var(--text-2)}
+.notes h3{font-size:14px;font-weight:700}
+.notes ul{margin:6px 0 0;padding-left:18px;color:var(--text-2)}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.sw{display:grid;gap:4px;font-size:12px}
+.sw span{height:36px;border-radius:8px;border:1px solid var(--rule)}
+.sw code{font:600 11.5px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--text)}
+.sw em{font-style:normal;color:var(--text-2)}
+table.cx{width:100%;border-collapse:collapse;font-size:13px}
+table.cx td{padding:6px 0;border-bottom:1px solid var(--rule);vertical-align:middle}
+table.cx td:nth-child(2){text-align:right;font-variant-numeric:tabular-nums;font-weight:600;padding-right:8px}
+.pill{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px}
+.pill.ok{background:#DCEFE2;color:#14532D}.pill.lg{background:#E7EAF0;color:#1F2A44}.pill.no{background:#F6DADA;color:#7A1414}
+.foot{color:var(--text-2);font-size:13px;max-width:80ch}
+
+/* ===== phone mock: everything inside uses the palette tokens set on .phone ===== */
+.phone{--bg:#F7F4EC;width:360px;max-width:100%;border-radius:36px;padding:10px;background:#0E0E0D;box-shadow:0 18px 40px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.12)}
+.screen{position:relative;height:720px;border-radius:28px;overflow:hidden;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;font-family:var(--font-body);transition:background-color 280ms var(--ease-std),color 280ms var(--ease-std)}
+.screen *{transition:background-color 280ms var(--ease-std),color 280ms var(--ease-std),border-color 280ms var(--ease-std)}
+.screen ::selection{background:var(--primary);color:var(--onPrimary)}
+.scroll{flex:1;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.caption{text-align:center;font-size:12.5px;color:var(--text-2);margin-top:10px;font-weight:600}
+
+.sh{padding:14px 16px 10px;display:flex;align-items:center;gap:10px;background:var(--bg);position:sticky;top:0;z-index:2}
+.logo{width:40px;height:40px;border-radius:50%;background:var(--primary);color:var(--onPrimary);display:grid;place-items:center;font:800 17px var(--font-display);flex:none}
+.sname{min-width:0;flex:1}
+.sname b{display:block;font:700 16.5px/1.15 var(--font-display);letter-spacing:-0.01em}
+.sname span{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:5px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--success);flex:none}
+.cartpill{border:0;display:inline-flex;align-items:center;gap:6px;background:var(--raised);color:var(--ink);border-radius:999px;padding:8px 12px;font-weight:700;font-size:13.5px;cursor:pointer}
+.cartpill svg{width:18px;height:18px}
+.count{display:inline-block;min-width:18px;text-align:center}
+.bump{animation:bump 420ms var(--spring)}
+@keyframes bump{0%{transform:scale(1)}40%{transform:scale(1.25)}100%{transform:scale(1)}}
+
+.search{margin:2px 16px 10px;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:10px 14px;color:var(--muted);font-size:14px}
+.search svg{width:18px;height:18px;flex:none}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:0 16px 12px;scroll-snap-type:x mandatory;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{scroll-snap-align:start;flex:none;border:0;border-radius:999px;padding:8px 14px;font-weight:600;font-size:13.5px;background:var(--raised);color:var(--ink);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+.band{margin:0 16px 14px;border-radius:16px;background:var(--primaryDeep);color:var(--onDeep);padding:16px;display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:end;overflow:hidden;position:relative}
+.band h3{font:800 20px/1.1 var(--font-display);letter-spacing:-0.015em;color:inherit}
+.band p{margin:0;font-size:13px;opacity:.86}
+.band .bowl{grid-row:span 2;width:84px;height:84px}
+.band button{grid-column:1;justify-self:start;border:0;border-radius:999px;background:var(--accent);color:var(--onAccent);font-weight:700;font-size:13.5px;padding:8px 14px;cursor:pointer}
+
+.secthead{display:flex;justify-content:space-between;align-items:baseline;padding:0 16px 8px}
+.secthead h3{font:700 17px var(--font-display)}
+.secthead a{font-size:13px;color:var(--primary);font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 12px;padding:0 16px 110px}
+.card{display:grid;gap:4px;min-width:0}
+.well{position:relative;aspect-ratio:1;border-radius:12px;background:var(--soft);display:grid;place-items:center}
+.well svg.prod{width:64%;height:64%}
+.add{position:absolute;right:8px;bottom:8px;height:36px;min-width:36px;border:0;border-radius:999px;background:var(--surface);color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;gap:4px;cursor:pointer;font-weight:700;font-size:14px;padding:0;overflow:hidden;transition:min-width 360ms var(--spring),background-color 200ms var(--ease-std),transform 200ms var(--ease-std)}
+.add:active{transform:scale(.94);transition-duration:50ms}
+.add svg{width:18px;height:18px}
+.add.on{min-width:104px;background:var(--primary);color:var(--onPrimary);justify-content:space-between;padding:0 4px}
+.add .q{display:none}
+.add.on .q{display:inline}
+.add.on .pl{display:none}
+.add .mi,.add .pl2{display:none;width:28px;height:28px;border-radius:50%;place-items:center}
+.add.on .mi,.add.on .pl2{display:grid}
+.badge{position:absolute;left:8px;top:8px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:var(--surface);color:var(--ink)}
+.badge.low{background:var(--deal);color:var(--onDeal)}
+.pname{font-weight:600;font-size:14px;line-height:1.3;margin-top:4px}
+.local{font-size:12.5px;color:var(--muted);line-height:1.25}
+.price{display:flex;align-items:baseline;gap:6px;margin-top:2px}
+.price b{font:700 18px var(--font-body);font-variant-numeric:tabular-nums}
+.price b sup{font-size:.6em;vertical-align:.55em;margin-left:1px}
+.price s{font-size:12.5px;color:var(--muted)}
+.unit{font-size:12px;color:var(--muted)}
+
+.cartbar{position:absolute;left:12px;right:12px;bottom:12px;background:var(--primary);color:var(--onPrimary);border-radius:18px;padding:12px 14px 12px 16px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 8px 24px rgba(0,0,0,.22);z-index:3}
+.cartbar small{display:block;font-size:12px;opacity:.85}
+.cartbar b{font-size:16px;font-variant-numeric:tabular-nums}
+.cartbar button{border:0;border-radius:999px;background:var(--onPrimary);color:var(--primary);font-weight:800;padding:10px 16px;cursor:pointer;font-size:14px}
+.toast{position:absolute;left:50%;bottom:86px;transform:translate(-50%,16px);opacity:0;background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:999px;font-size:13px;font-weight:600;pointer-events:none;white-space:nowrap;z-index:4;transition:transform 300ms var(--ease-out),opacity 200ms var(--ease-out)}
+.toast.show{transform:translate(-50%,0);opacity:1}
+
+/* cart screen */
+.ch{padding:14px 16px 6px;display:flex;align-items:center;justify-content:space-between}
+.ch h3{font:800 22px var(--font-display);letter-spacing:-0.015em}
+.ch span{font-size:13px;color:var(--muted)}
+.prompt{margin:8px 16px 14px;border-radius:16px;background:var(--soft);padding:14px;display:grid;gap:10px}
+.prompt .top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.prompt .top b{font-size:14px}
+.timer{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink);background:var(--surface);padding:3px 8px;border-radius:999px}
+.prompt p{margin:0;font-size:13.5px;line-height:1.4}
+.prompt .acts{display:flex;gap:8px}
+.btn{border:0;border-radius:999px;font-weight:700;font-size:14px;padding:10px 16px;cursor:pointer;transition:transform 200ms var(--ease-std),background-color 200ms var(--ease-std)}
+.btn:active{transform:scale(.97);transition-duration:50ms}
+.btn.p{background:var(--primary);color:var(--onPrimary)}
+.btn.g{background:var(--surface);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+.line{display:grid;grid-template-columns:56px 1fr auto;gap:12px;padding:12px 16px;border-top:1px solid var(--line);align-items:start}
+.line .thumb{width:56px;height:56px;border-radius:10px;background:var(--soft);display:grid;place-items:center}
+.line .thumb svg{width:70%;height:70%}
+.line b{font-size:14px;font-weight:600;display:block}
+.line .meta{font-size:12.5px;color:var(--muted)}
+.line .amt{font-weight:700;font-variant-numeric:tabular-nums;font-size:14px}
+.swap{grid-column:2 / -1;display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.swap button{border:0;border-radius:999px;font-size:12px;font-weight:600;padding:5px 10px;background:var(--raised);color:var(--ink);cursor:pointer}
+.swap button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.totals{padding:12px 16px 120px;border-top:1px solid var(--line);display:grid;gap:6px;font-size:13.5px}
+.totals div{display:flex;justify-content:space-between;gap:12px}
+.totals span:last-child{font-variant-numeric:tabular-nums}
+.totals .muted{color:var(--muted);font-size:12.5px}
+.totals .sum{font-weight:800;font-size:16px;padding-top:6px}
+.paybar{position:absolute;left:12px;right:12px;bottom:12px;z-index:3}
+.pay{position:relative;width:100%;border:0;border-radius:18px;background:var(--primary);color:var(--onPrimary);padding:16px;font-weight:800;font-size:15.5px;cursor:pointer;overflow:hidden;isolation:isolate;box-shadow:0 8px 24px rgba(0,0,0,.22)}
+.pay::before{content:"";position:absolute;inset:0;background:var(--success);transform:scaleX(0);transform-origin:left;z-index:-1;transition:transform 900ms var(--ease-std)}
+.pay.go::before{transform:scaleX(1)}
+.pay.go{color:var(--onSuccess)}
+.pay span{display:inline-flex;gap:8px;align-items:center}
+.pay svg{width:18px;height:18px}
+.paynote{text-align:center;font-size:11.5px;color:var(--muted);margin-top:6px}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{transition:none!important;animation:none!important}
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Storefront Palette Studio</h1>
+    <p class="lede">Decision made: Palm &amp; Shea is the default Theme preset, with Cocoa &amp; Bottle Green and Lagoon &amp; Coral as the other two, and Night Market as the dark theme (ADR-0011). Six directions from the Dribbble, delivery-app and African-market research, each applied to a real storefront and cart. Each was revised after a critique pass with the Impeccable and Taste design skills. Pick a palette, switch light and dark, and try it under another store's brand color to see how the shared system holds up. The contrast checks are recomputed live.</p>
+  </header>
+
+  <div class="picker" id="picker" role="group" aria-label="Palette"></div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Preview theme">
+      <button type="button" id="m-light" aria-pressed="true">Light</button>
+      <button type="button" id="m-dark" aria-pressed="false">Dark</button>
+    </div>
+    <label class="sel" for="store">Store brand
+      <select id="store">
+        <option value="">Palette default</option>
+        <option value="#7A2E1F">Kumasi Corner: kola brown</option>
+        <option value="#0E6B5C">Island Pot: Caribbean green</option>
+        <option value="#5B3A1E">Addis Spice House: coffee</option>
+        <option value="#1E3A8A">Harbor Asian Mart: royal blue</option>
+        <option value="#C33A5A">Rose Market: bright rose</option>
+      </select>
+    </label>
+  </div>
+
+  <section class="stage">
+    <div class="phones">
+      <div>
+        <div class="phone" id="ph1"><div class="screen" id="shop"></div></div>
+        <div class="caption">Shop: browse, search by local name, quick-add</div>
+      </div>
+      <div>
+        <div class="phone" id="ph2"><div class="screen" id="cart"></div></div>
+        <div class="caption">Cart: swap rules, a substitution prompt, honest fees</div>
+      </div>
+    </div>
+    <aside class="notes" id="notes" aria-live="polite"></aside>
+  </section>
+
+  <p class="foot">Store names, prices and products are examples. Product art is placeholder line drawings; real storefronts use catalog photos. Type is fixed here (Bricolage Grotesque with Figtree) so the comparison stays about color. Motion uses the timings measured from DoorDash and Instacart: 50 ms press and 200 ms release, a spring for the quantity stepper and cart count, and a 300 ms slide-up toast. All motion turns off under reduced-motion.</p>
+</div>
+
+<script>
+const P = [
+ {id:"palm",name:"Palm & Shea",short:"Deep palm green on a pale stone ground, with a mint accent. Fresh, modern grocer.",
+  from:"Dodolland and Musemind (your picks), Bantutaste, and the market-sites review's 'palm forest'.",
+  revised:"Ground moved from yellow-cream to a green-tinted stone, and the rust deal badge became a clean red, after the Taste Skill's cream-plus-rust warning.",
+  good:["Closest to the shots you picked, and reads as fresh food at a glance","Green is native to the category without the flag-green-plus-yellow cliché","Mint accent gives the promo band life without any yellow"],
+  watch:["Green is what 6 of 9 African sites use, so the store's logo and photos must do the differentiating","Keep the mint off text: it's a fill only"],
+  light:{bg:"#F3F4EF",surface:"#FFFFFF",raised:"#E7E9E2",ink:"#15201A",muted:"#55625A",line:"#DCDFD6",primary:"#1F5A43",primaryDeep:"#123726",onPrimary:"#FFFFFF",accent:"#A8DDB5",onAccent:"#0F2A1B",soft:"#E1EEE3",deal:"#B42335",success:"#2E7D4F"},
+  dark:{bg:"#0F1712",surface:"#16211A",raised:"#1F2C24",ink:"#EEF2EC",muted:"#A3B1A7",line:"#2A3A30",primary:"#6CC08F",primaryDeep:"#1D3A2B",onPrimary:"#08150D",accent:"#A8DDB5",onAccent:"#0F2A1B",soft:"#1B2E23",deal:"#F0707E",success:"#6CC08F"}},
+ {id:"cocoa",name:"Cocoa & Bottle Green",short:"Bottle green and cocoa-brown ink on putty, with a dusty-rose field. Earthy heritage pantry.",
+  from:"Afrocart, Naija Bites, the Behance African & Caribbean supermarket, and Sahadi's low-color heritage look.",
+  revised:"Was 'Clay & Bottle Green' (cream with terracotta), which the Taste Skill rejects outright. Warmth now comes from cocoa ink on a low-chroma putty ground and a dusty-rose field.",
+  good:["Heritage and warm without beige, orange or pattern","Cocoa-brown ink feels like a family pantry, not a tech app","The dusty-rose field marks promos softly and isn't amber"],
+  watch:["The quietest palette, so photography and the store logo must carry the energy","Rose field needs ink text, never white"],
+  light:{bg:"#EFEDE8",surface:"#FBFAF7",raised:"#E4E1DA",ink:"#2A1D17",muted:"#6A5C53",line:"#DAD5CC",primary:"#0E3B2A",primaryDeep:"#072419",onPrimary:"#FBFAF7",accent:"#E6C8BF",onAccent:"#2A1D17",soft:"#E9E3DA",deal:"#A1302A",success:"#2F6B45"},
+  dark:{bg:"#151210",surface:"#1F1A17",raised:"#2A241F",ink:"#F1ECE5",muted:"#B3A69A",line:"#38302A",primary:"#5FB08A",primaryDeep:"#1E3A2D",onPrimary:"#0A1A12",accent:"#E6C8BF",onAccent:"#2A1D17",soft:"#2C2520",deal:"#EF7B72",success:"#5FB08A"}},
+ {id:"zobo",name:"Zobo & Moss",short:"Hibiscus red with moss green. Bold, celebratory, restaurant-grade.",
+  from:"KUTOA and Taste Africana; hibiscus is the zobo/sorrel drink.",
+  revised:"Ground cooled from cream to a rose-tinted neutral; the rust deal color was dropped so deals use the store's own deep red.",
+  good:["The most memorable direction, and nobody in the category owns it","Works for stores that want a strong brand voice","Moss handles success states, so red never doubles as 'go'"],
+  watch:["Red primary sits close to error red: errors must always carry an icon and text","Can feel loud on long browsing sessions, so give it to bands and buttons, not to backgrounds"],
+  light:{bg:"#F6F3F2",surface:"#FFFFFF",raised:"#ECE6E4",ink:"#1E1416",muted:"#68575A",line:"#E4DAD8",primary:"#9E2B3F",primaryDeep:"#6E1A2A",onPrimary:"#FFFFFF",accent:"#2F4A2F",onAccent:"#FFFFFF",soft:"#F3E0E2",deal:"#6E1A2A",success:"#2F6B3A"},
+  dark:{bg:"#170E10",surface:"#221517",raised:"#2E1E21",ink:"#F6E9EA",muted:"#BBA3A7",line:"#3D292D",primary:"#E88A9A",primaryDeep:"#4A1A24",onPrimary:"#2A0910",accent:"#8DB98A",onAccent:"#0E1B0E",soft:"#3A1C22",deal:"#F08A9A",success:"#8DB98A"}},
+ {id:"adire",name:"Adire & Pepper",short:"Adire-dye navy with a pepper-red accent on cool stone. Calm, crafted, distinctive.",
+  from:"The market-sites review's adire indigo, after Yoruba adire cloth.",
+  revised:"Was 'Adire & Clay'. The clay-orange accent became pepper red, and the navy was kept steel-blue, well away from violet and indigo, which the Taste Skill flags as generated-page colors.",
+  good:["Stands apart from the sea of green grocers","Navy is calm and trustworthy for checkout and payments","Pepper red keeps it appetizing"],
+  watch:["Blue is rarely used for food: photos must carry the appetite","Flat navy only, never in a gradient, so it can't drift toward the AI-blue look"],
+  light:{bg:"#F1F2F2",surface:"#FFFFFF",raised:"#E5E7E8",ink:"#141A22",muted:"#55606C",line:"#D9DCDE",primary:"#23415C",primaryDeep:"#152A3D",onPrimary:"#FFFFFF",accent:"#B1283A",onAccent:"#FFFFFF",soft:"#E1E7EE",deal:"#B1283A",success:"#2E6B47"},
+  dark:{bg:"#0E1319",surface:"#151C24",raised:"#1E2731",ink:"#E9EEF3",muted:"#9EABB8",line:"#283442",primary:"#8FB3D6",primaryDeep:"#1B2E42",onPrimary:"#0A1622",accent:"#EC7A88",onAccent:"#24060B",soft:"#1C2A38",deal:"#EC7A88",success:"#79BF94"}},
+ {id:"lagoon",name:"Lagoon & Coral",short:"Deep teal with a coral-rose accent. Crisp, cosmopolitan, any cuisine.",
+  from:"Musemind, Gawula, and ETNOWE's teal on cream.",
+  revised:"Was 'Lagoon & Ginger'. Ginger is a burnt orange, so it was swapped for coral rose; the ground moved to a cool, near-neutral stone.",
+  good:["Neutral enough for Caribbean, Asian and mixed stores, which fits ADR-0004","Teal with coral is a classic complementary pair that stays calm","Clean in both light and dark"],
+  watch:["Teal is also Mercato's color, the anti-pattern for store identity, so lean on the store's own logo","Coral is for small accents and deals only"],
+  light:{bg:"#F1F3F2",surface:"#FFFFFF",raised:"#E4E8E7",ink:"#13252A",muted:"#51666C",line:"#D6DCDB",primary:"#0F4A57",primaryDeep:"#082F38",onPrimary:"#FFFFFF",accent:"#C23B52",onAccent:"#FFFFFF",soft:"#E0ECEC",deal:"#C23B52",success:"#0F6B3A"},
+  dark:{bg:"#0C1619",surface:"#122024",raised:"#1B2C31",ink:"#E7F0F1",muted:"#9BB0B4",line:"#24383D",primary:"#6FC2CF",primaryDeep:"#103540",onPrimary:"#052228",accent:"#F07F92",onAccent:"#26060C",soft:"#16303A",deal:"#F07F92",success:"#6FC79A"}},
+ {id:"night",name:"Night Market",short:"Charcoal with leaf green and pepper red. Moody and premium, with a bone-white day version.",
+  from:"Naija Bites and Meaty. Dark-first.",
+  revised:"The day version moved from parchment (cream) to bone white, and its rust accent became pepper red.",
+  good:["Food photography pops hardest on dark","Premium, evening-market mood that stands out","A ready-made dark mode for any palette"],
+  watch:["Dark-first is less familiar for groceries; better as hero bands and dark mode than as the default","Needs real photography to justify the mood"],
+  defaultDark:true,
+  light:{bg:"#EFEEEB",surface:"#FFFFFF",raised:"#E3E1DC",ink:"#14110E",muted:"#625A52",line:"#D8D5CF",primary:"#2E6B43",primaryDeep:"#1C4A2C",onPrimary:"#FFFFFF",accent:"#B3262E",onAccent:"#FFFFFF",soft:"#E6E3DD",deal:"#B3262E",success:"#2E6B43"},
+  dark:{bg:"#14110E",surface:"#1F1A16",raised:"#2A231E",ink:"#F1ECE4",muted:"#A89C8C",line:"#3A322B",primary:"#5DB277",primaryDeep:"#22301F",onPrimary:"#08140C",accent:"#EC5A5F",onAccent:"#1A0507",soft:"#2C231C",deal:"#EC5A5F",success:"#5DB277"}}
+];
+
+/* ---------- icons + product art (one stroke system) ---------- */
+const I = {
+ search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+ bag:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>',
+ plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+ minus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>',
+ check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+ lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>'
+};
+const S='fill="none" stroke="var(--primaryDeep)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"';
+const A={ /* placeholder product drawings */
+ egusi:`<svg class="prod" viewBox="0 0 64 64" ${S}><path d="M10 32h44a22 22 0 0 1-44 0z" fill="var(--surface)"/><ellipse cx="32" cy="32" rx="22" ry="5"/><g fill="var(--primaryDeep)" stroke="none"><ellipse cx="24" cy="31" rx="2.4" ry="1.4"/><ellipse cx="31" cy="30" rx="2.4" ry="1.4"/><ellipse cx="38" cy="31.5" rx="2.4" ry="1.4"/><ellipse cx="28" cy="33.5" rx="2.4" ry="1.4"/><ellipse cx="35" cy="34" rx="2.4" ry="1.4"/></g></svg>`,
+ ugu:`<svg class="prod" viewBox="0 0 64 64" ${S}><path d="M32 54V26"/><path d="M32 40c-10 0-16-8-16-16 9 0 16 6 16 16z" fill="var(--surface)"/><path d="M32 34c9 0 15-7 15-15-8 0-15 6-15 15z" fill="var(--surface)"/><path d="M32 26c-3-6-1-12 3-16 3 5 2 11-3 16z" fill="var(--surface)"/></svg>`,
+ pepper:`<svg class="prod" viewBox="0 0 64 64" ${S}><path d="M22 30c0-8 5-12 10-12s10 4 10 12c0 10-6 20-10 20s-10-10-10-20z" fill="var(--surface)"/><path d="M32 18c0-4 2-7 6-8"/><path d="M27 20c3 2 7 2 10 0"/></svg>`,
+ oil:`<svg class="prod" viewBox="0 0 64 64" ${S}><path d="M27 8h10v6l4 6v32a4 4 0 0 1-4 4H27a4 4 0 0 1-4-4V20l4-6z" fill="var(--surface)"/><path d="M23 30h18v14H23z" fill="var(--accent)" stroke="var(--primaryDeep)"/><path d="M27 14h10"/></svg>`,
+ garri:`<svg class="prod" viewBox="0 0 64 64" ${S}><path d="M16 20c0-4 4-6 16-6s16 2 16 6l-3 32a4 4 0 0 1-4 4H23a4 4 0 0 1-4-4z" fill="var(--surface)"/><path d="M16 20c6 3 26 3 32 0"/><path d="M24 34h16M26 40h12"/></svg>`,
+ plantain:`<svg class="prod" viewBox="0 0 64 64" ${S}><path d="M12 22c8 22 28 30 42 24-14-2-26-10-34-26z" fill="var(--surface)"/><path d="M18 20c10 18 22 24 34 24"/><path d="M12 22l-2-6 6 2"/></svg>`,
+ yam:`<svg class="prod" viewBox="0 0 64 64" ${S}><path d="M14 38c-2-10 6-20 18-22s22 4 20 14-12 16-22 16-15-2-16-8z" fill="var(--surface)"/><path d="M24 30l2 2M34 26l2 2M40 34l2 2M28 38l2 2"/></svg>`,
+ bowl:`<svg class="bowl" viewBox="0 0 84 84" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M10 42h64a32 32 0 0 1-64 0z"/><ellipse cx="42" cy="42" rx="32" ry="7"/><path d="M30 30c0-6 4-8 4-14M42 30c0-6 4-8 4-14M54 30c0-6 4-8 4-14" opacity=".7"/></svg>`
+};
+const items=[
+ {k:"egusi",n:"Egusi, ground",l:"Melon seed · 1 lb",p:"7.49",u:"$7.49/lb",b:"In stock"},
+ {k:"ugu",n:"Ugu leaves",l:"Fluted pumpkin · bunch",p:"4.99",u:"$4.99 each",b:"Fresh today"},
+ {k:"pepper",n:"Ata rodo",l:"Scotch bonnet · 8 oz",p:"3.29",u:"$0.41/oz",b:"Limited",low:true},
+ {k:"oil",n:"Red palm oil",l:"Zomi style · 1 L",p:"9.99",s:"11.49",u:"$0.29/fl oz",b:"Deal",low:true},
+ {k:"garri",n:"Ijebu garri",l:"Yellow-free white · 4 lb",p:"8.49",u:"$2.12/lb",b:"In stock"},
+ {k:"plantain",n:"Green plantain",l:"Each",p:"0.89",u:"$0.89 each",b:"In stock"}
+];
+const money=v=>{const [d,c]=Number(v).toFixed(2).split(".");return `$${d}<sup>${c}</sup>`};
+
+/* ---------- render the two screens ---------- */
+function renderShop(){
+ const el=document.getElementById("shop");
+ el.innerHTML=`
+ <div class="scroll">
+  <div class="sh">
+   <div class="logo" aria-hidden="true">MN</div>
+   <div class="sname"><b>Mama Nkechi's Market</b><span><i class="dot"></i>Open until 8 pm</span></div>
+   <button class="cartpill" type="button" aria-label="Cart">${I.bag}<span class="count" id="cnt">3</span></button>
+  </div>
+  <div class="search">${I.search}<span>Search ugu, garri, ata rodo…</span></div>
+  <div class="chips" role="group" aria-label="Categories">
+   ${["All","Soups & stews","Tubers","Spices","Frozen fish","Drinks"].map((c,i)=>`<button class="chip" type="button" aria-pressed="${i===0}">${c}</button>`).join("")}
+  </div>
+  <div class="band">
+   <div><h3>Egusi soup kit</h3><p>Everything for 6 servings, picked fresh. $38</p></div>
+   ${A.bowl}
+   <button type="button">Add the kit</button>
+  </div>
+  <div class="secthead"><h3>Sunday soup staples</h3><a href="#" onclick="return false">See all</a></div>
+  <div class="grid">
+   ${items.map((it,i)=>`
+   <div class="card">
+    <div class="well">${A[it.k]}<span class="badge ${it.low?"low":""}">${it.b}</span>
+     <button class="add" type="button" data-i="${i}" aria-label="Add ${it.n}">
+      <span class="mi" data-act="-">${I.minus}</span><span class="pl">${I.plus}</span><span class="q">1</span><span class="pl2" data-act="+">${I.plus}</span>
+     </button>
+    </div>
+    <div class="pname">${it.n}</div>
+    <div class="local">${it.l}</div>
+    <div class="price"><b>${money(it.p)}</b>${it.s?`<s>$${it.s}</s>`:""}</div>
+    <div class="unit">${it.u}</div>
+   </div>`).join("")}
+  </div>
+ </div>
+ <div class="toast" id="toast">Added to cart</div>
+ <div class="cartbar"><div><small>3 items · Pickup or delivery</small><b id="tot">$42.50</b></div><button type="button">View cart</button></div>`;
+ el.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{el.querySelectorAll(".chip").forEach(x=>x.setAttribute("aria-pressed","false"));c.setAttribute("aria-pressed","true")});
+ let count=3,total=42.5;const qty={};
+ el.querySelectorAll(".add").forEach(b=>b.addEventListener("click",e=>{
+  const i=b.dataset.i,act=e.target.closest("[data-act]")?.dataset.act,price=Number(items[i].p);
+  let q=qty[i]||0;
+  if(!b.classList.contains("on")){q=1;b.classList.add("on")}
+  else if(act==="+"){q++}
+  else if(act==="-"){q--; if(q<=0){q=0;b.classList.remove("on")}}
+  else return;
+  const d=q-(qty[i]||0);qty[i]=q;count+=d;total+=d*price;
+  b.querySelector(".q").textContent=q;
+  const c=document.getElementById("cnt");c.textContent=count;c.classList.remove("bump");void c.offsetWidth;c.classList.add("bump");
+  document.getElementById("tot").textContent="$"+total.toFixed(2);
+  if(d>0){const t=document.getElementById("toast");t.textContent=`${items[i].n} added`;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),1600)}
+ }));
+}
+function renderCart(){
+ const el=document.getElementById("cart");
+ const lines=[
+  {k:"egusi",n:"Egusi, ground 1 lb",m:"Qty 2",a:"14.98",r:1},
+  {k:"oil",n:"Red palm oil 1 L",m:"Qty 1",a:"9.99",r:0},
+  {k:"yam",n:"Puna yam",m:"About 3 lb · weighed at pick",a:"8.97",r:2}
+ ];
+ const rules=["Exact item only","Store suggests","Choose a swap"];
+ el.innerHTML=`
+ <div class="scroll">
+  <div class="ch"><h3>Your cart</h3><span>Mama Nkechi's Market</span></div>
+  <div class="prompt" role="region" aria-label="Item short">
+   <div class="top"><b>Egusi 1 lb is short</b><span class="timer" id="tmr">9:42</span></div>
+   <p>The store has 1 of 2. Swap the missing one for Egusi 2 lb (+$4.00), or refund it?</p>
+   <div class="acts"><button class="btn p" type="button">Swap it</button><button class="btn g" type="button">Refund it</button></div>
+  </div>
+  ${lines.map((ln,i)=>`
+  <div class="line">
+   <div class="thumb">${A[ln.k]}</div>
+   <div><b>${ln.n}</b><div class="meta">${ln.m}</div></div>
+   <div class="amt">$${ln.a}</div>
+   <div class="swap" role="group" aria-label="If unavailable">${rules.map((r,j)=>`<button type="button" aria-pressed="${j===ln.r}">${r}</button>`).join("")}</div>
+  </div>`).join("")}
+  <div class="totals">
+   <div><span>Items</span><span>$33.94</span></div>
+   <div><span>Courier delivery (Uber)</span><span>$7.85</span></div>
+   <div class="muted"><span>The courier's real quote. No markup.</span><span></span></div>
+   <div><span>Tax</span><span>$0.71</span></div>
+   <div class="sum"><span>Total</span><span>$42.50</span></div>
+   <div class="muted"><span>Card held for $46.75; you pay the final amount after picking.</span><span></span></div>
+  </div>
+ </div>
+ <div class="paybar"><button class="pay" type="button" id="pay"><span>${I.lock}Place order · $42.50</span></button><div class="paynote">Nothing is swapped without your OK.</div></div>`;
+ el.querySelectorAll(".swap").forEach(g=>g.querySelectorAll("button").forEach(b=>b.onclick=()=>{g.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed","true")}));
+ const pay=document.getElementById("pay");
+ pay.onclick=()=>{ if(pay.classList.contains("go")){pay.classList.remove("go");pay.querySelector("span").innerHTML=`${I.lock}Place order · $42.50`;return}
+  pay.classList.add("go"); const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+  setTimeout(()=>{pay.querySelector("span").innerHTML=`${I.check}Order placed`},reduce?0:900)};
+ let s=582; clearInterval(window._tm); window._tm=setInterval(()=>{s=s>0?s-1:582;const t=document.getElementById("tmr");if(t)t.textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`},1000);
+}
+
+/* ---------- contrast ---------- */
+const hex2rgb=h=>{h=h.replace("#","");return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16)/255)};
+const lum=h=>{const [r,g,b]=hex2rgb(h).map(c=>c<=.03928?c/12.92:((c+.055)/1.055)**2.4);return .2126*r+.7152*g+.0722*b};
+const ratio=(a,b)=>{const [x,y]=[lum(a),lum(b)].sort((m,n)=>n-m);return (x+.05)/(y+.05)};
+const shade=(h,f)=>"#"+hex2rgb(h).map(c=>Math.round(Math.max(0,Math.min(1,c*f))*255).toString(16).padStart(2,"0")).join("");
+
+/* ---------- state ---------- */
+let cur=P[0], mode="light", store="";
+/* the readable text color for any fill: white or near-black, whichever contrasts more */
+const best=h=>ratio("#FFFFFF",h)>=ratio("#0B0B0B",h)?"#FFFFFF":"#0B0B0B";
+const bestR=h=>Math.max(ratio("#FFFFFF",h),ratio("#0B0B0B",h));
+const toWhite=(h,a)=>"#"+hex2rgb(h).map(v=>Math.round((v+(1-v)*a)*255).toString(16).padStart(2,"0")).join("");
+let adjusted=null;
+function tokens(){
+ const t={...cur[mode]};adjusted=null;
+ if(store){
+  let c=store,k=0;
+  if(mode==="light"){ while((ratio(c,t.bg)<4.5||bestR(c)<4.5)&&k++<30) c=shade(c,.94); t.primaryDeep=shade(c,.68) }
+  else{ while((ratio(c,t.bg)<4.5||bestR(c)<4.5)&&k++<30) c=toWhite(c,.07); t.primaryDeep=shade(store,.5) }
+  if(c.toLowerCase()!==store.toLowerCase()) adjusted=c;
+  t.primary=c; t.onPrimary=best(c);
+ }
+ /* every text-on-color pair resolves its own readable ink, so store colors and dark mode can't break it */
+ t.onDeep=best(t.primaryDeep); t.onDeal=best(t.deal); t.onSuccess=best(t.success);
+ return t;
+}
+function apply(){
+ const t=tokens();
+ ["ph1","ph2"].forEach(id=>{const s=document.getElementById(id).style;Object.entries(t).forEach(([k,v])=>s.setProperty("--"+k,v))});
+ document.querySelectorAll(".pal").forEach(b=>b.setAttribute("aria-pressed",b.dataset.id===cur.id));
+ document.getElementById("m-light").setAttribute("aria-pressed",mode==="light");
+ document.getElementById("m-dark").setAttribute("aria-pressed",mode==="dark");
+ renderNotes(t);
+}
+function renderNotes(t){
+ const pairs=[
+  ["Body text on page",t.ink,t.bg,4.5],
+  ["Secondary text on page",t.muted,t.bg,4.5],
+  ["Button text on primary",t.onPrimary,t.primary,4.5],
+  ["Band text on deep primary",t.onDeep,t.primaryDeep,4.5],
+  ["Links in primary on page",t.primary,t.bg,4.5],
+  ["Text on accent",t.onAccent,t.accent,4.5],
+  ["Deal badge text",t.onDeal,t.deal,4.5],
+  ["Card text on soft well",t.ink,t.soft,4.5]
+ ];
+ const row=([label,f,b,min])=>{const r=ratio(f,b);const cls=r>=min?"ok":r>=3?"lg":"no";const tag=r>=min?"AA":r>=3?"Large only":"Fails";return `<tr><td>${label}</td><td>${r.toFixed(2)}:1</td><td><span class="pill ${cls}">${tag}</span></td></tr>`};
+ const sw=[["Page","bg"],["Surface","surface"],["Ink","ink"],["Muted","muted"],["Primary","primary"],["Deep","primaryDeep"],["Accent","accent"],["Soft","soft"],["Deal","deal"]];
+ document.getElementById("notes").innerHTML=`
+  <h2>${cur.name}</h2>
+  <p><strong>${STATUS[cur.id].note}</strong></p>
+  <p>${cur.short}</p>
+  <div class="swatches">${sw.map(([n,k])=>`<div class="sw"><span style="background:${t[k]}"></span><code>${t[k].toUpperCase()}</code><em>${n}</em></div>`).join("")}</div>
+  <div><h3>Why it works</h3><ul>${cur.good.map(g=>`<li>${g}</li>`).join("")}</ul></div>
+  <div><h3>Watch out for</h3><ul>${cur.watch.map(g=>`<li>${g}</li>`).join("")}</ul></div>
+  <div><h3>Contrast, ${mode} preview${store?", store brand applied":""}</h3>
+   <table class="cx"><tbody>${pairs.map(row).join("")}</tbody></table>
+   ${adjusted?`<p style="font-size:12.5px;margin-top:8px">The store's color ${store.toUpperCase()} was nudged to ${adjusted.toUpperCase()} so buttons and links pass AA here. The system does this automatically for every store.</p>`:""}</div>
+  <div><h3>Revised after critique</h3><p>${cur.revised}</p></div>
+  <p style="font-size:12.5px">Source: ${cur.from}</p>`;
+}
+
+/* ---------- decision (ADR-0011) ---------- */
+const STATUS={
+ palm:{on:1,tag:"Chosen: default preset",note:"Chosen as the default Theme preset (ADR-0011)."},
+ cocoa:{on:1,tag:"Chosen: heritage preset",note:"Chosen as the heritage Theme preset (ADR-0011)."},
+ lagoon:{on:1,tag:"Chosen: any-cuisine preset",note:"Chosen as the any-cuisine Theme preset (ADR-0011)."},
+ night:{on:0,tag:"Kept as the dark theme",note:"Not a preset. Its approach became the dark theme for all three presets (ADR-0011)."},
+ zobo:{on:0,tag:"Not chosen",note:"Not chosen: a red primary competes with deal and error states (ADR-0011)."},
+ adire:{on:0,tag:"Not chosen",note:"Not chosen: blue fights appetite on a grocery storefront (ADR-0011)."}
+};
+/* ---------- picker ---------- */
+const picker=document.getElementById("picker");
+picker.innerHTML=P.map(p=>{const c=p.defaultDark?p.dark:p.light;return `<button class="pal" type="button" data-id="${p.id}" aria-pressed="false">
+ <span class="strip" aria-hidden="true"><i style="background:${c.bg}"></i><i style="background:${c.primary}"></i><i style="background:${c.primaryDeep}"></i><i style="background:${c.accent}"></i><i style="background:${c.soft}"></i></span>
+ <b>${p.name}</b><span class="status${STATUS[p.id].on?" on":""}">${STATUS[p.id].tag}</span><small>${p.short}</small></button>`}).join("");
+picker.querySelectorAll(".pal").forEach(b=>b.onclick=()=>{cur=P.find(p=>p.id===b.dataset.id);mode=cur.defaultDark?"dark":"light";apply()});
+document.getElementById("m-light").onclick=()=>{mode="light";apply()};
+document.getElementById("m-dark").onclick=()=>{mode="dark";apply()};
+document.getElementById("store").onchange=e=>{store=e.target.value;apply()};
+
+renderShop();renderCart();apply();
+</script>

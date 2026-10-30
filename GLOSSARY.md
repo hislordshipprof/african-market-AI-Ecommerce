@@ -16,6 +16,10 @@ _Avoid_: Tenant, Market, Vendor, Merchant
 A store's customer-facing website, carrying only that store's brand.
 _Avoid_: Shop site, store app
 
+**Theme preset**:
+One of the platform's ready-made storefront color sets (Palm & Shea, Cocoa & Bottle Green, Lagoon & Coral) that a store owner picks at setup. A store's own brand color replaces the preset's primary color.
+_Avoid_: Template, skin
+
 **Store owner**:
 The person who runs a store and controls everything about it on the platform.
 
