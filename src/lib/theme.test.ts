@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { nudgeForContrast, readableFillColor } from "./theme";
+import {
+  nudgeForContrast,
+  readableFillColor,
+  resolveStoreTheme,
+  getThemeTokens,
+  VALID_PRESETS,
+} from "./theme";
 
 function luminance(hex: string): number {
   const rgb = [
@@ -103,5 +109,50 @@ describe("nudgeForContrast", () => {
     expect(nudged).toBe(true);
     const ratio = contrastRatio(color, "#F3F4EF");
     expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("resolveStoreTheme", () => {
+  it("returns both light and dark CSS var sets", () => {
+    const theme = resolveStoreTheme("palm-and-shea", null);
+    expect(theme.light["--store-bg"]).toBe("#F3F4EF");
+    expect(theme.dark["--store-bg"]).toBe("#0F1712");
+    expect(theme.light["--store-on-primary"]).toBeDefined();
+    expect(theme.dark["--store-on-primary"]).toBeDefined();
+  });
+
+  it("nudges brand color against the dark background", () => {
+    const theme = resolveStoreTheme("palm-and-shea", "#1F5A43");
+    const darkBg = theme.dark["--store-bg"];
+    const darkPrimary = theme.dark["--store-primary"];
+    const ratio = contrastRatio(darkPrimary, darkBg);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
+  for (const preset of VALID_PRESETS) {
+    for (const brand of [...PROBLEM_COLORS, ...NORMAL_COLORS]) {
+      it(`dark primary for ${brand} on ${preset} passes AA`, () => {
+        const theme = resolveStoreTheme(preset, brand);
+        const darkBg = theme.dark["--store-bg"];
+        const darkPrimary = theme.dark["--store-primary"];
+        expect(contrastRatio(darkPrimary, darkBg)).toBeGreaterThanOrEqual(4.5);
+        const textOnPrimary = readableFillColor(darkPrimary);
+        expect(contrastRatio(darkPrimary, textOnPrimary)).toBeGreaterThanOrEqual(
+          4.5,
+        );
+      });
+    }
+  }
+});
+
+describe("getThemeTokens", () => {
+  it("returns light tokens by default", () => {
+    const tokens = getThemeTokens("palm-and-shea");
+    expect(tokens.bg).toBe("#F3F4EF");
+  });
+
+  it("returns dark tokens when requested", () => {
+    const tokens = getThemeTokens("palm-and-shea", "dark");
+    expect(tokens.bg).toBe("#0F1712");
   });
 });

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Bricolage_Grotesque, Figtree } from "next/font/google";
 import { headers } from "next/headers";
 import { findStore } from "@/lib/get-store";
-import { resolveStoreTheme } from "@/lib/theme";
+import { resolveStoreTheme, type ResolvedTheme } from "@/lib/theme";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({
@@ -25,25 +25,40 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: store?.name ?? "Store not found" };
 }
 
+function themeToCss(vars: Record<string, string>): string {
+  return Object.entries(vars)
+    .map(([k, v]) => `${k}:${v}`)
+    .join(";");
+}
+
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  let themeVars: Record<string, string> = {};
+  let theme: ResolvedTheme | null = null;
 
   const headerList = await headers();
   const slug = headerList.get("x-store-slug");
   if (slug) {
     const store = await findStore(slug);
     if (store) {
-      themeVars = resolveStoreTheme(store.validPreset, store.validBrandColor);
+      theme = resolveStoreTheme(store.validPreset, store.validBrandColor);
     }
   }
 
+  const themeStyle = theme
+    ? `body{${themeToCss(theme.light)}}@media(prefers-color-scheme:dark){body{${themeToCss(theme.dark)}}}`
+    : "";
+
   return (
     <html lang="en" className={`${bricolage.variable} ${figtree.variable}`}>
-      <body style={themeVars}>{children}</body>
+      <head>
+        {themeStyle && (
+          <style dangerouslySetInnerHTML={{ __html: themeStyle }} />
+        )}
+      </head>
+      <body>{children}</body>
     </html>
   );
 }
