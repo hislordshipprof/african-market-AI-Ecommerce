@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/build.mjs",
+    "build": "dotenv -e .env.local -- node scripts/build.mjs",
     "postbuild": "node scripts/seed-preview.mjs",
     "start": "next start",
     "lint": "eslint .",
@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "db:migrate": "dotenv -e .env.local -- prisma migrate dev",
     "db:push": "dotenv -e .env.local -- prisma db push",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "dotenv -e .env.local -- tsx prisma/seed.ts",
     "db:generate": "prisma generate"
   },
   "dependencies": {
