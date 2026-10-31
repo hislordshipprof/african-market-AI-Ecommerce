@@ -33,6 +33,13 @@ Next.js App Router + TypeScript (strict) on Vercel · Tailwind + shadcn/ui · Ne
 
 Write the question in your report and end the run. Do not invent product decisions.
 
+## Local e2e setup
+`.env.e2e` (committed) supplies the seven auth/seed vars that CI sets at the job level (`SEED_TEST_ADMIN`, `SEED_ADMIN_PASSWORD`, `SEED_ADMIN_TOTP_SECRET`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_TRUSTED_ORIGINS`, `AUTH_RATE_LIMIT_RELAXED`). Playwright loads it automatically via `playwright.config.ts`, seeds the database in `globalSetup`, and starts the app server via `webServer`. The local e2e flow is:
+1. `pnpm build`
+2. `pnpm test:e2e` (seeds, starts server, runs tests — no manual server start needed)
+
+Stop any other server on port 3000 before running `pnpm test:e2e`. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
+
 ## Verify before you claim done
 Run and pass all of these, in the worktree:
 1. `pnpm typecheck`

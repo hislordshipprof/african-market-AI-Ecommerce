@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
 import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
+import { assertNotProduction } from "../src/lib/seed-guard";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
@@ -76,6 +77,8 @@ async function seedDemoStores() {
 }
 
 async function seedTestAdmin() {
+  assertNotProduction(process.env);
+
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
   if (!adminPassword) {
     throw new Error("SEED_ADMIN_PASSWORD is required when SEED_TEST_ADMIN=1");
@@ -112,7 +115,12 @@ async function seedTestAdmin() {
   const existingAccount = await prisma.account.findFirst({
     where: { userId: adminId, providerId: "credential" },
   });
-  if (!existingAccount) {
+  if (existingAccount) {
+    await prisma.account.update({
+      where: { id: existingAccount.id },
+      data: { password: hashedPassword, updatedAt: new Date() },
+    });
+  } else {
     await prisma.account.create({
       data: {
         id: "seed-admin-account",
@@ -137,7 +145,12 @@ async function seedTestAdmin() {
   const existingTwoFactor = await prisma.twoFactor.findFirst({
     where: { userId: adminId },
   });
-  if (!existingTwoFactor) {
+  if (existingTwoFactor) {
+    await prisma.twoFactor.update({
+      where: { id: existingTwoFactor.id },
+      data: { secret: encryptedSecret, backupCodes: encryptedBackupCodes },
+    });
+  } else {
     await prisma.twoFactor.create({
       data: {
         id: "seed-admin-totp",
@@ -155,35 +168,44 @@ async function seedTestAdmin() {
   const unenrolledId = "seed-unenrolled-admin";
   const unenrolledEmail = "unenrolled-admin@platform.test";
 
-  await prisma.user.upsert({
-    where: { email: unenrolledEmail },
-    update: {},
-    create: {
-      id: unenrolledId,
-      name: "Unenrolled Admin",
-      email: unenrolledEmail,
-      emailVerified: true,
-      role: "platform_admin",
-      twoFactorEnabled: false,
-      updatedAt: new Date(),
-    },
-  });
+  await prisma.$transaction(async (tx) => {
+    await tx.twoFactor.deleteMany({ where: { userId: unenrolledId } });
 
-  const existingUnenrolledAccount = await prisma.account.findFirst({
-    where: { userId: unenrolledId, providerId: "credential" },
-  });
-  if (!existingUnenrolledAccount) {
-    await prisma.account.create({
-      data: {
-        id: "seed-unenrolled-account",
-        accountId: unenrolledId,
-        providerId: "credential",
-        userId: unenrolledId,
-        password: hashedPassword,
+    await tx.user.upsert({
+      where: { email: unenrolledEmail },
+      update: { twoFactorEnabled: false, updatedAt: new Date() },
+      create: {
+        id: unenrolledId,
+        name: "Unenrolled Admin",
+        email: unenrolledEmail,
+        emailVerified: true,
+        role: "platform_admin",
+        twoFactorEnabled: false,
         updatedAt: new Date(),
       },
     });
-  }
+
+    const existingUnenrolledAccount = await tx.account.findFirst({
+      where: { userId: unenrolledId, providerId: "credential" },
+    });
+    if (existingUnenrolledAccount) {
+      await tx.account.update({
+        where: { id: existingUnenrolledAccount.id },
+        data: { password: hashedPassword, updatedAt: new Date() },
+      });
+    } else {
+      await tx.account.create({
+        data: {
+          id: "seed-unenrolled-account",
+          accountId: unenrolledId,
+          providerId: "credential",
+          userId: unenrolledId,
+          password: hashedPassword,
+          updatedAt: new Date(),
+        },
+      });
+    }
+  });
 
   console.log("Seeded unenrolled admin: unenrolled-admin@platform.test");
 }
