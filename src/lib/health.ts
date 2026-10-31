@@ -3,19 +3,28 @@ type QueryRawFn = (
   ...values: unknown[]
 ) => Promise<unknown[]>;
 
-const REQUIRED_ENV_VARS = [
+const CORE_ENV_VARS = ["DATABASE_URL", "DATABASE_URL_UNPOOLED"] as const;
+const DEPLOY_ENV_VARS = [
   "BETTER_AUTH_SECRET",
   "APP_RUNTIME_PASSWORD",
   "RESEND_API_KEY",
-  "DATABASE_URL",
-  "DATABASE_URL_UNPOOLED",
 ] as const;
+
+export function requiredEnvVars(
+  env: Record<string, string | undefined>,
+): readonly string[] {
+  const vercelEnv = env.VERCEL_ENV;
+  if (vercelEnv === "production" || vercelEnv === "preview") {
+    return [...CORE_ENV_VARS, ...DEPLOY_ENV_VARS];
+  }
+  return [...CORE_ENV_VARS];
+}
 
 export function checkEnv(
   env: Record<string, string | undefined>,
 ): Record<string, boolean> {
   const result: Record<string, boolean> = {};
-  for (const name of REQUIRED_ENV_VARS) {
+  for (const name of requiredEnvVars(env)) {
     if (name === "DATABASE_URL_UNPOOLED") {
       result[name] = !!(env.DATABASE_URL_UNPOOLED || env.DIRECT_URL);
     } else {
@@ -59,6 +68,21 @@ export interface HealthResult {
   database: { reachable: boolean; user: string | null };
   migrations: { upToDate: boolean };
   env: Record<string, boolean>;
+}
+
+export interface MinimalHealthResult {
+  status: "ok" | "degraded";
+  version: string;
+}
+
+export function toMinimalResult(
+  httpStatus: number,
+  body: HealthResult,
+): MinimalHealthResult {
+  return {
+    status: httpStatus === 200 ? "ok" : "degraded",
+    version: body.version,
+  };
 }
 
 export async function runHealthChecks(deps: {

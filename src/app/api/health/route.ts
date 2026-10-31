@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { healthQueryRaw } from "@/lib/db";
-import { runHealthChecks } from "@/lib/health";
+import { runHealthChecks, toMinimalResult } from "@/lib/health";
 import { isRateLimited } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -23,5 +23,10 @@ export async function GET(req: NextRequest) {
     queryRaw: healthQueryRaw,
   });
 
-  return NextResponse.json(body, { status });
+  const responseBody =
+    process.env.VERCEL_ENV === "production"
+      ? toMinimalResult(status, body)
+      : body;
+
+  return NextResponse.json(responseBody, { status });
 }

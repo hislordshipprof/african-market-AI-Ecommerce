@@ -1,12 +1,54 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { checkEnv, checkDatabase, checkMigrations, runHealthChecks } from "./health";
+import {
+  checkEnv,
+  checkDatabase,
+  checkMigrations,
+  runHealthChecks,
+  requiredEnvVars,
+  toMinimalResult,
+} from "./health";
+import type { HealthResult } from "./health";
 import { runtimeDatabaseUrl } from "./env";
 
+describe("requiredEnvVars", () => {
+  it("returns only core vars when VERCEL_ENV is absent", () => {
+    expect(requiredEnvVars({})).toEqual(["DATABASE_URL", "DATABASE_URL_UNPOOLED"]);
+  });
+
+  it("returns all vars when VERCEL_ENV is production", () => {
+    const vars = requiredEnvVars({ VERCEL_ENV: "production" });
+    expect(vars).toContain("DATABASE_URL");
+    expect(vars).toContain("BETTER_AUTH_SECRET");
+    expect(vars).toContain("APP_RUNTIME_PASSWORD");
+    expect(vars).toContain("RESEND_API_KEY");
+    expect(vars).toHaveLength(5);
+  });
+
+  it("returns all vars when VERCEL_ENV is preview", () => {
+    const vars = requiredEnvVars({ VERCEL_ENV: "preview" });
+    expect(vars).toHaveLength(5);
+  });
+
+  it("returns only core vars when VERCEL_ENV is development", () => {
+    expect(requiredEnvVars({ VERCEL_ENV: "development" })).toHaveLength(2);
+  });
+});
+
 describe("checkEnv", () => {
-  it("returns all true when every required var is present", () => {
+  it("checks only core vars in CI/local (no VERCEL_ENV)", () => {
+    const env = { DATABASE_URL: "postgres://x", DATABASE_URL_UNPOOLED: "postgres://y" };
+    const result = checkEnv(env);
+    expect(result).toEqual({ DATABASE_URL: true, DATABASE_URL_UNPOOLED: true });
+    expect(result).not.toHaveProperty("BETTER_AUTH_SECRET");
+    expect(result).not.toHaveProperty("APP_RUNTIME_PASSWORD");
+    expect(result).not.toHaveProperty("RESEND_API_KEY");
+  });
+
+  it("checks all vars in production", () => {
     const env = {
+      VERCEL_ENV: "production",
       BETTER_AUTH_SECRET: "s",
       APP_RUNTIME_PASSWORD: "p",
       RESEND_API_KEY: "r",
@@ -22,40 +64,34 @@ describe("checkEnv", () => {
     });
   });
 
-  it("reports missing vars as false", () => {
+  it("reports missing deploy vars in production", () => {
     const env = {
+      VERCEL_ENV: "production",
       DATABASE_URL: "postgres://x",
+      DATABASE_URL_UNPOOLED: "postgres://y",
     };
     const result = checkEnv(env);
     expect(result.BETTER_AUTH_SECRET).toBe(false);
     expect(result.APP_RUNTIME_PASSWORD).toBe(false);
     expect(result.RESEND_API_KEY).toBe(false);
     expect(result.DATABASE_URL).toBe(true);
-    expect(result.DATABASE_URL_UNPOOLED).toBe(false);
   });
 
   it("accepts DIRECT_URL as satisfying DATABASE_URL_UNPOOLED", () => {
-    const env = {
-      BETTER_AUTH_SECRET: "s",
-      APP_RUNTIME_PASSWORD: "p",
-      RESEND_API_KEY: "r",
-      DATABASE_URL: "postgres://x",
-      DIRECT_URL: "postgres://z",
-    };
-    const result = checkEnv(env);
-    expect(result.DATABASE_URL_UNPOOLED).toBe(true);
+    const env = { DATABASE_URL: "postgres://x", DIRECT_URL: "postgres://z" };
+    expect(checkEnv(env).DATABASE_URL_UNPOOLED).toBe(true);
   });
 
   it("never exposes env var values", () => {
     const env = {
+      VERCEL_ENV: "production",
       BETTER_AUTH_SECRET: "super-secret",
       APP_RUNTIME_PASSWORD: "pw",
       RESEND_API_KEY: "key",
       DATABASE_URL: "postgres://user:pass@host/db",
       DATABASE_URL_UNPOOLED: "postgres://user:pass@host/db",
     };
-    const result = checkEnv(env);
-    const json = JSON.stringify(result);
+    const json = JSON.stringify(checkEnv(env));
     expect(json).not.toContain("super-secret");
     expect(json).not.toContain("pw");
     expect(json).not.toContain("postgres://");
@@ -97,13 +133,18 @@ describe("checkMigrations", () => {
 });
 
 describe("runHealthChecks", () => {
-  const fullEnv = {
-    BETTER_AUTH_SECRET: "s",
-    APP_RUNTIME_PASSWORD: "p",
-    RESEND_API_KEY: "r",
+  const ciEnv = {
     DATABASE_URL: "postgres://x",
     DATABASE_URL_UNPOOLED: "postgres://y",
     VERCEL_GIT_COMMIT_SHA: "abc123",
+  };
+
+  const productionEnv = {
+    ...ciEnv,
+    VERCEL_ENV: "production",
+    BETTER_AUTH_SECRET: "s",
+    APP_RUNTIME_PASSWORD: "p",
+    RESEND_API_KEY: "r",
   };
 
   function makeQueryRaw(user = "app_runtime", pendingCount = BigInt(0)) {
@@ -119,9 +160,9 @@ describe("runHealthChecks", () => {
     });
   }
 
-  it("returns 200 when all checks pass", async () => {
+  it("returns 200 in CI when only core env vars are present", async () => {
     const result = await runHealthChecks({
-      env: fullEnv,
+      env: ciEnv,
       queryRaw: makeQueryRaw(),
     });
     expect(result.status).toBe(200);
@@ -131,8 +172,17 @@ describe("runHealthChecks", () => {
     expect(Object.values(result.body.env).every(Boolean)).toBe(true);
   });
 
-  it("returns 503 when a required env var is missing", async () => {
-    const env = { ...fullEnv };
+  it("returns 200 in production when all vars present", async () => {
+    const result = await runHealthChecks({
+      env: productionEnv,
+      queryRaw: makeQueryRaw(),
+    });
+    expect(result.status).toBe(200);
+    expect(Object.keys(result.body.env)).toHaveLength(5);
+  });
+
+  it("returns 503 in production when a deploy env var is missing", async () => {
+    const env = { ...productionEnv };
     delete (env as Record<string, string | undefined>).RESEND_API_KEY;
     const result = await runHealthChecks({
       env,
@@ -145,7 +195,7 @@ describe("runHealthChecks", () => {
   it("returns 503 when database is unreachable", async () => {
     const queryRaw = vi.fn().mockRejectedValue(new Error("connection refused"));
     const result = await runHealthChecks({
-      env: fullEnv,
+      env: ciEnv,
       queryRaw,
     });
     expect(result.status).toBe(503);
@@ -154,7 +204,7 @@ describe("runHealthChecks", () => {
 
   it("returns 503 when migrations are pending", async () => {
     const result = await runHealthChecks({
-      env: fullEnv,
+      env: ciEnv,
       queryRaw: makeQueryRaw("app_runtime", BigInt(1)),
     });
     expect(result.status).toBe(503);
@@ -162,13 +212,42 @@ describe("runHealthChecks", () => {
   });
 
   it("uses 'unknown' version when VERCEL_GIT_COMMIT_SHA is absent", async () => {
-    const env = { ...fullEnv };
-    delete (env as Record<string, string | undefined>).VERCEL_GIT_COMMIT_SHA;
+    const env = { DATABASE_URL: "postgres://x", DATABASE_URL_UNPOOLED: "postgres://y" };
     const result = await runHealthChecks({
       env,
       queryRaw: makeQueryRaw(),
     });
     expect(result.body.version).toBe("unknown");
+  });
+});
+
+describe("toMinimalResult", () => {
+  const body: HealthResult = {
+    version: "abc123",
+    database: { reachable: true, user: "app_runtime" },
+    migrations: { upToDate: true },
+    env: { DATABASE_URL: true },
+  };
+
+  it("returns ok for healthy status", () => {
+    expect(toMinimalResult(200, body)).toEqual({
+      status: "ok",
+      version: "abc123",
+    });
+  });
+
+  it("returns degraded for unhealthy status", () => {
+    expect(toMinimalResult(503, body)).toEqual({
+      status: "degraded",
+      version: "abc123",
+    });
+  });
+
+  it("never includes database or env details", () => {
+    const result = toMinimalResult(200, body);
+    expect(result).not.toHaveProperty("database");
+    expect(result).not.toHaveProperty("env");
+    expect(result).not.toHaveProperty("migrations");
   });
 });
 
