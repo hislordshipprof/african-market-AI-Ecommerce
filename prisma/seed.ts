@@ -4,6 +4,7 @@ import { hashPassword } from "better-auth/crypto";
 import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
 import { assertNotProduction } from "../src/lib/seed-guard";
+import { seedDemoCatalog } from "./seed-demo-catalog";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
@@ -313,6 +314,7 @@ async function seedStoreOwner() {
 
 async function main() {
   await seedDemoStores();
+  await seedDemoCatalog(prisma);
 
   if (process.env.SEED_TEST_ADMIN === "1") {
     await seedTestAdmin();
