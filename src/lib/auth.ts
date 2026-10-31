@@ -62,8 +62,7 @@ export const auth = betterAuth({
   },
   session: {
     cookieCache: {
-      enabled: true,
-      maxAge: 300,
+      enabled: false,
     },
     additionalFields: {
       twoFactorVerified: {

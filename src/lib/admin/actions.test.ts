@@ -295,6 +295,50 @@ describe("createStore", () => {
     expect(result.fieldErrors?.minimumOrder).toBeDefined();
   });
 
+  it("parses '1e2' correctly as 100 for integer field prepTimeMinutes", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "sci-prep",
+      name: "Sci Prep Store",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, slug: "sci-prep", name: "Sci Prep Store", prepTimeMinutes: "1e2" }),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCreate.mock.calls[0][0].data.prepTimeMinutes).toBe(100);
+  });
+
+  it("rejects decimal '12.5' for integer field prepTimeMinutes", async () => {
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, prepTimeMinutes: "12.5" }),
+    );
+    expect(result.fieldErrors?.prepTimeMinutes).toBeDefined();
+  });
+
+  it("rejects non-numeric 'abc' for prepTimeMinutes", async () => {
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, prepTimeMinutes: "abc" }),
+    );
+    expect(result.fieldErrors?.prepTimeMinutes).toBeDefined();
+  });
+
+  it("rejects 'abc' for deliveryRadiusMi", async () => {
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, deliveryRadiusMi: "abc" }),
+    );
+    expect(result.fieldErrors?.deliveryRadiusMi).toBeDefined();
+  });
+
   it("returns submittedValues alongside fieldErrors", async () => {
     const result = await createStore({}, formData({ ...VALID_STORE, slug: "" }));
     expect(result.fieldErrors?.slug).toBeDefined();

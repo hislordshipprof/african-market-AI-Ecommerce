@@ -14,7 +14,7 @@ const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 function parseFloatOrDefault(raw: string | null | undefined, defaultValue: number): number {
   const trimmed = (raw ?? "").trim();
   if (trimmed === "") return defaultValue;
-  const n = parseFloat(trimmed);
+  const n = Number(trimmed);
   if (!Number.isFinite(n)) return NaN;
   return n;
 }
@@ -22,8 +22,8 @@ function parseFloatOrDefault(raw: string | null | undefined, defaultValue: numbe
 function parseIntOrDefault(raw: string | null | undefined, defaultValue: number): number {
   const trimmed = (raw ?? "").trim();
   if (trimmed === "") return defaultValue;
-  const n = parseInt(trimmed, 10);
-  if (!Number.isFinite(n)) return NaN;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return NaN;
   return n;
 }
 
