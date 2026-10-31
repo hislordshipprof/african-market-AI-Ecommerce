@@ -40,9 +40,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup database roles
+      - name: Setup database roles and extensions
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
             CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
             GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
             ALTER SCHEMA public OWNER TO app_owner;
@@ -129,9 +130,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup database roles
+      - name: Setup database roles and extensions
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -d test_db <<SQL
+            CREATE EXTENSION IF NOT EXISTS pg_trgm;
             CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEROLE;
             GRANT ALL PRIVILEGES ON DATABASE test_db TO app_owner;
             ALTER SCHEMA public OWNER TO app_owner;

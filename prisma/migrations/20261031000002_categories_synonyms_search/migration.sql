@@ -1,5 +1,17 @@
--- Enable pg_trgm extension for fuzzy/typo-tolerant search
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Enable pg_trgm extension for fuzzy/typo-tolerant search.
+-- Wrapped in DO block: on managed hosts (Neon) or CI the migrating role may
+-- not have CREATE privilege on extensions, but the extension may already exist
+-- (pre-installed by the platform or by the superuser setup step).
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_trgm;
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') THEN
+      RAISE EXCEPTION 'pg_trgm extension is required but the current role cannot create it and it is not pre-installed';
+    END IF;
+END
+$$;
 
 -- Category: shared platform table (no store_id)
 CREATE TABLE "categories" (
