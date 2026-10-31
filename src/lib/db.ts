@@ -113,7 +113,7 @@ export async function platformAdminTransaction<T>(
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-    return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, $queryRaw: tx.$queryRaw.bind(tx) });
+    return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, masterProduct: tx.masterProduct, $queryRaw: tx.$queryRaw.bind(tx) });
   });
 }
 
