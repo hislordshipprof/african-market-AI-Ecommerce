@@ -66,8 +66,9 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
 
   if (banners.length === 0) return null;
 
-  const banner = banners[index];
-  const nextBanner = banners[(index + 1) % banners.length];
+  const safeIndex = index >= banners.length ? 0 : index;
+  const banner = banners[safeIndex];
+  const nextBanner = banners[(safeIndex + 1) % banners.length];
   const hasMultiple = banners.length > 1;
 
   return (
@@ -94,8 +95,8 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
               dragElastic={0.12}
               onDragEnd={(_e, info) => {
                 const swipe = info.offset.x;
-                if (swipe < -50) go(index + 1, 1);
-                else if (swipe > 50) go(index - 1, -1);
+                if (swipe < -50) go(safeIndex + 1, 1);
+                else if (swipe > 50) go(safeIndex - 1, -1);
               }}
               transition={
                 reduced
@@ -112,7 +113,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
             <>
               <button
                 type="button"
-                onClick={() => go(index - 1, -1)}
+                onClick={() => go(safeIndex - 1, -1)}
                 className="absolute left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 md:flex"
                 aria-label="Previous slide"
               >
@@ -120,7 +121,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
               </button>
               <button
                 type="button"
-                onClick={() => go(index + 1, 1)}
+                onClick={() => go(safeIndex + 1, 1)}
                 className="absolute right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 md:flex"
                 aria-label="Next slide"
               >
@@ -134,7 +135,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
         {hasMultiple && (
           <button
             type="button"
-            onClick={() => go(index + 1, 1)}
+            onClick={() => go(safeIndex + 1, 1)}
             className="relative hidden w-1/3 overflow-hidden rounded-lg lg:block"
             aria-label={`Next: ${nextBanner.title}`}
           >
@@ -166,14 +167,14 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
               key={b.id}
               type="button"
               data-testid="carousel-dot"
-              onClick={() => go(i, i > index ? 1 : -1)}
-              aria-current={i === index ? "true" : undefined}
+              onClick={() => go(i, i > safeIndex ? 1 : -1)}
+              aria-current={i === safeIndex ? "true" : undefined}
               className="flex min-h-[44px] min-w-[44px] items-center justify-center"
               aria-label={`Go to slide ${i + 1}`}
             >
               <span
                 className={`block h-2 rounded-pill transition-all ${
-                  i === index
+                  i === safeIndex
                     ? "w-6 bg-primary"
                     : "w-2 bg-muted/40 hover:bg-muted/60"
                 }`}
