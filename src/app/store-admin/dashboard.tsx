@@ -78,19 +78,23 @@ export function StoreAdminDashboard({
             </Link>
           )}
 
-          <Card className="opacity-60">
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Package className="size-5 text-primary" />
+          <Link href={`/store-admin/listings?store=${storeParam}`}>
+            <Card className="transition-shadow hover:shadow-md">
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                    <Package className="size-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">Products</CardTitle>
+                    <CardDescription>
+                      Manage your listings and stock
+                    </CardDescription>
+                  </div>
                 </div>
-                <div>
-                  <CardTitle className="text-base">Products</CardTitle>
-                  <CardDescription>Coming soon</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
+              </CardHeader>
+            </Card>
+          </Link>
 
           <Card className="opacity-60">
             <CardHeader>

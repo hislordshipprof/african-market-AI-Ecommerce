@@ -27,6 +27,8 @@ model Store {
   auditLogs    AuditLog[]
   memberships  StoreMembership[]
   invites      StoreInvite[]
+  listings     Listing[]
+  stockEvents  StockEvent[]
 
   @@map("stores")
 }
@@ -63,6 +65,7 @@ model User {
   auditLogs   AuditLog[]
   memberships StoreMembership[]
   invitesSent StoreInvite[]
+  stockEvents StockEvent[]
 
   @@map("users")
 }
@@ -196,4 +199,80 @@ model StoreInvite {
   @@index([storeId])
   @@index([email])
   @@map("store_invites")
+}
+
+model MasterProduct {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  listings Listing[]
+
+  @@map("master_products")
+}
+
+model Listing {
+  id                    String    @id @default(cuid())
+  storeId               String    @map("store_id")
+  masterProductId       String?   @map("master_product_id")
+  customName            String?   @map("custom_name")
+  price                 Int
+  stockMode             String    @map("stock_mode")
+  qty                   Int?
+  status                String?
+  frozen                Boolean   @default(false)
+  perishable            Boolean   @default(false)
+  maxPerOrder           Int?      @map("max_per_order")
+  active                Boolean   @default(true)
+  confidence            Float     @default(1.0)
+  confidenceUpdatedAt   DateTime  @default(now()) @map("confidence_updated_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  store          Store          @relation(fields: [storeId], references: [id])
+  masterProduct  MasterProduct? @relation(fields: [masterProductId], references: [id])
+  variants       ListingVariant[]
+  stockEvents    StockEvent[]
+
+  @@index([storeId])
+  @@index([storeId, active])
+  @@index([masterProductId])
+  @@map("listings")
+}
+
+model ListingVariant {
+  id        String   @id @default(cuid())
+  listingId String   @map("listing_id")
+  label     String
+  price     Int
+  weightG   Int      @map("weight_g")
+  sku       String?
+  barcode   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@map("listing_variants")
+}
+
+model StockEvent {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  listingId String   @map("listing_id")
+  type      String
+  delta     Int
+  actorId   String   @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store   Store   @relation(fields: [storeId], references: [id])
+  listing Listing @relation(fields: [listingId], references: [id])
+  actor   User    @relation(fields: [actorId], references: [id])
+
+  @@index([storeId])
+  @@index([listingId])
+  @@index([actorId])
+  @@map("stock_events")
 }

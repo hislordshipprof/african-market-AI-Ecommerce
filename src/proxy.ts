@@ -6,6 +6,7 @@ export function allowStoreOverride(
 ): boolean {
   if (env.VERCEL_ENV === "preview") return true;
   if (env.NODE_ENV === "development") return true;
+  if (env.E2E_STORE_OVERRIDE === "1" && !env.VERCEL) return true;
   return false;
 }
 
