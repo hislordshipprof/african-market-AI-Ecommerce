@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
 import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
+import { assertNotProduction } from "../src/lib/seed-guard";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
@@ -76,6 +77,8 @@ async function seedDemoStores() {
 }
 
 async function seedTestAdmin() {
+  assertNotProduction(process.env);
+
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
   if (!adminPassword) {
     throw new Error("SEED_ADMIN_PASSWORD is required when SEED_TEST_ADMIN=1");
