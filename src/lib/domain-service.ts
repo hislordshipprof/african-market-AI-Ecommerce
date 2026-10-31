@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { platformAdmin } from "./db";
 import { getVercelDomainsAdapter, VercelApiError } from "./vercel-domains";
 import { revalidateStore } from "./get-store";
@@ -32,10 +33,20 @@ export async function addDomainToStore(
   try {
     const result = await adapter.addDomain(domain);
 
-    await platformAdmin.store.update({
-      where: { id: storeId },
-      data: { customDomain: domain },
-    });
+    try {
+      await platformAdmin.store.update({
+        where: { id: storeId },
+        data: { customDomain: domain },
+      });
+    } catch (dbErr) {
+      if (
+        dbErr instanceof Prisma.PrismaClientKnownRequestError &&
+        dbErr.code === "P2002"
+      ) {
+        return { ok: false, error: "Domain is already assigned to another store", status: 409 };
+      }
+      throw dbErr;
+    }
 
     revalidateStore({ id: storeId, slug: store.slug, customDomain: domain });
 
@@ -91,8 +102,12 @@ export async function removeDomainFromStore(
   try {
     await adapter.removeDomain(oldDomain);
   } catch (e) {
-    if (e instanceof VercelApiError && e.status !== 404) {
+    if (e instanceof VercelApiError && e.status === 404) {
+      // Domain already gone from Vercel — proceed to clean up DB
+    } else if (e instanceof VercelApiError) {
       return { ok: false, error: e.message, status: e.status };
+    } else {
+      throw e;
     }
   }
 

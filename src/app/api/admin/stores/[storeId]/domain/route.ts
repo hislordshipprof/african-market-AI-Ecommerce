@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
 import {
   addDomainToStore,
   getDomainStatus,
@@ -7,10 +9,37 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const MAX_DOMAIN_LENGTH = 253;
+
+async function requireAdmin(): Promise<NextResponse | null> {
+  try {
+    const reqHeaders = await headers();
+    const session = await auth.api.getSession({
+      headers: reqHeaders,
+      query: { disableCookieCache: true },
+    });
+    if (!session || session.user.role !== "platform_admin") {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+    if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
+      return NextResponse.json(
+        { error: "Two-factor authentication required" },
+        { status: 403 },
+      );
+    }
+    return null;
+  } catch {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ storeId: string }> },
 ) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const { storeId } = await params;
 
   let body: { domain?: string };
@@ -29,7 +58,10 @@ export async function POST(
   }
 
   const domainLower = domain.toLowerCase().trim();
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domainLower)) {
+  if (
+    domainLower.length > MAX_DOMAIN_LENGTH ||
+    !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domainLower)
+  ) {
     return NextResponse.json(
       { error: "Invalid domain format" },
       { status: 400 },
@@ -52,6 +84,9 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ storeId: string }> },
 ) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const { storeId } = await params;
 
   const result = await getDomainStatus(storeId);
@@ -70,6 +105,9 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ storeId: string }> },
 ) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const { storeId } = await params;
 
   const result = await removeDomainFromStore(storeId);

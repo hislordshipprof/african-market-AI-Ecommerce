@@ -49,7 +49,7 @@ export default async function RootLayout({
   let theme: ResolvedTheme | null = null;
 
   const store = await resolveStoreFromHeaders();
-  if (store && "validPreset" in store) {
+  if (store) {
     theme = resolveStoreTheme(
       store.validPreset,
       store.validBrandColor,
