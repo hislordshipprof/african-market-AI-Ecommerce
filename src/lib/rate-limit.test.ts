@@ -45,4 +45,40 @@ describe.skipIf(!hasDb)("Rate limit storage (database)", () => {
     });
     expect(updated.count).toBe(2);
   });
+
+  it("unique constraint rejects duplicate key", async () => {
+    await prisma.rateLimit.create({
+      data: {
+        key: "test_rl_unique",
+        count: 1,
+        lastRequest: BigInt(Date.now()),
+      },
+    });
+
+    await expect(
+      prisma.rateLimit.create({
+        data: {
+          key: "test_rl_unique",
+          count: 1,
+          lastRequest: BigInt(Date.now()),
+        },
+      }),
+    ).rejects.toThrow(/unique constraint/i);
+  });
+
+  it("concurrent sign-in attempts produce exactly one row per key", async () => {
+    const key = `test_rl_concurrent_${Date.now()}`;
+    const attempts = Array.from({ length: 6 }, () =>
+      prisma.rateLimit.upsert({
+        where: { key },
+        create: { key, count: 1, lastRequest: BigInt(Date.now()) },
+        update: { count: { increment: 1 }, lastRequest: BigInt(Date.now()) },
+      }),
+    );
+    await Promise.allSettled(attempts);
+
+    const rows = await prisma.rateLimit.findMany({ where: { key } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].count).toBeGreaterThanOrEqual(1);
+  });
 });

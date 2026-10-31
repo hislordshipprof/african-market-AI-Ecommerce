@@ -31,11 +31,21 @@ function parseIntOrDefault(raw: string | null | undefined, defaultValue: number)
 export type StoreFormState = {
   error?: string;
   fieldErrors?: Record<string, string>;
+  submittedValues?: Record<string, string>;
   success?: boolean;
   storeId?: string;
   brandColorNudged?: boolean;
   nudgedColor?: string;
 };
+
+function extractRawValues(data: FormData): Record<string, string> {
+  const raw: Record<string, string> = {};
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit"]) {
+    const v = data.get(key);
+    if (v != null) raw[key] = String(v);
+  }
+  return raw;
+}
 
 function validateStoreFields(data: FormData): {
   errors: Record<string, string>;
@@ -168,16 +178,17 @@ export async function createStore(
 ): Promise<StoreFormState> {
   const session = await requirePlatformAdmin();
 
+  const raw = extractRawValues(data);
   const { errors, values } = validateStoreFields(data);
   if (Object.keys(errors).length > 0) {
-    return { fieldErrors: errors };
+    return { fieldErrors: errors, submittedValues: raw };
   }
 
   const existing = await platformAdmin.store.findUnique({
     where: { slug: values.slug },
   });
   if (existing) {
-    return { fieldErrors: { slug: "A store with this slug already exists" } };
+    return { fieldErrors: { slug: "A store with this slug already exists" }, submittedValues: raw };
   }
 
   let brandColorNudged = false;
@@ -257,9 +268,10 @@ export async function updateStore(
   });
   if (!before) return { error: "Store not found" };
 
+  const raw = extractRawValues(data);
   const { errors, values } = validateStoreFields(data);
   if (Object.keys(errors).length > 0) {
-    return { fieldErrors: errors };
+    return { fieldErrors: errors, submittedValues: raw };
   }
 
   if (values.slug !== before.slug) {
@@ -267,7 +279,7 @@ export async function updateStore(
       where: { slug: values.slug },
     });
     if (slugTaken && slugTaken.id !== storeId) {
-      return { fieldErrors: { slug: "A store with this slug already exists" } };
+      return { fieldErrors: { slug: "A store with this slug already exists" }, submittedValues: raw };
     }
   }
 

@@ -95,6 +95,19 @@ test.describe("Store management (authenticated)", () => {
     await expect(page.locator("text=reserved")).toBeVisible();
   });
 
+  test("form preserves entered values after validation error", async ({ page }) => {
+    await page.click("text=Create store");
+    await expect(page).toHaveURL(/\/admin\/stores\/new/);
+
+    const testName = `Preserved Store ${Date.now()}`;
+    await page.getByLabel("Slug").fill("mama-ngozi");
+    await page.getByLabel("Store name").fill(testName);
+    await page.click("button[type='submit']:has-text('Create store')");
+
+    await expect(page.locator("text=already exists")).toBeVisible();
+    await expect(page.getByLabel("Store name")).toHaveValue(testName);
+  });
+
   test("create and then edit a store", async ({ page }) => {
     const slug = `e2e-test-${Date.now()}`;
 

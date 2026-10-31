@@ -5,6 +5,7 @@ import { auth } from "../auth";
 export async function requirePlatformAdmin(opts?: { allowUnenrolled2FA?: boolean }) {
   const session = await auth.api.getSession({
     headers: await headers(),
+    query: { disableCookieCache: true },
   });
 
   if (!session) {

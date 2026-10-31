@@ -290,6 +290,22 @@ describe("createStore", () => {
     expect(result.fieldErrors?.minimumOrder).toBeDefined();
   });
 
+  it("returns submittedValues alongside fieldErrors", async () => {
+    const result = await createStore({}, formData({ ...VALID_STORE, slug: "" }));
+    expect(result.fieldErrors?.slug).toBeDefined();
+    expect(result.submittedValues).toBeDefined();
+    expect(result.submittedValues?.name).toBe("Mama Ngozi African Market");
+    expect(result.submittedValues?.slug).toBe("");
+  });
+
+  it("returns submittedValues on duplicate slug", async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: "existing", slug: "mama-ngozi" });
+    const result = await createStore({}, formData(VALID_STORE));
+    expect(result.fieldErrors?.slug).toContain("already exists");
+    expect(result.submittedValues).toBeDefined();
+    expect(result.submittedValues?.name).toBe("Mama Ngozi African Market");
+  });
+
   it("rejects reserved slug 'admin'", async () => {
     const result = await createStore({}, formData({ ...VALID_STORE, slug: "admin" }));
     expect(result.fieldErrors?.slug).toContain("reserved");
@@ -386,6 +402,19 @@ describe("updateStore", () => {
       formData({ ...VALID_STORE, storeId: "nonexistent" }),
     );
     expect(result.error).toContain("not found");
+  });
+
+  it("returns submittedValues on validation error", async () => {
+    const before = { id: "store-1", slug: "old-slug", name: "Old" };
+    mockFindUnique.mockResolvedValueOnce(before);
+
+    const result = await updateStore(
+      {},
+      formData({ ...VALID_STORE, storeId: "store-1", slug: "" }),
+    );
+    expect(result.fieldErrors?.slug).toBeDefined();
+    expect(result.submittedValues).toBeDefined();
+    expect(result.submittedValues?.name).toBe("Mama Ngozi African Market");
   });
 
   it("detects slug conflict on update", async () => {

@@ -80,4 +80,45 @@ describe("requirePlatformAdmin", () => {
     await expect(requirePlatformAdmin()).rejects.toThrow("REDIRECT:/admin/sign-in");
     expect(mockRedirect).toHaveBeenCalledWith("/admin/sign-in");
   });
+
+  it("passes disableCookieCache: true to getSession", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      session: { twoFactorVerified: true },
+      user: { id: "u1", role: "platform_admin", twoFactorEnabled: true },
+    });
+    await requirePlatformAdmin();
+    expect(mockGetSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: { disableCookieCache: true },
+      }),
+    );
+  });
+
+  it("rejects immediately after demotion (no cache)", async () => {
+    const adminSession = {
+      session: { twoFactorVerified: true },
+      user: { id: "u1", role: "platform_admin", twoFactorEnabled: true },
+    };
+    mockGetSession.mockResolvedValueOnce(adminSession);
+    await requirePlatformAdmin();
+
+    const demotedSession = {
+      session: { twoFactorVerified: true },
+      user: { id: "u1", role: "customer", twoFactorEnabled: true },
+    };
+    mockGetSession.mockResolvedValueOnce(demotedSession);
+    await expect(requirePlatformAdmin()).rejects.toThrow("REDIRECT:/admin/sign-in");
+  });
+
+  it("rejects immediately after session deletion", async () => {
+    const adminSession = {
+      session: { twoFactorVerified: true },
+      user: { id: "u1", role: "platform_admin", twoFactorEnabled: true },
+    };
+    mockGetSession.mockResolvedValueOnce(adminSession);
+    await requirePlatformAdmin();
+
+    mockGetSession.mockResolvedValueOnce(null);
+    await expect(requirePlatformAdmin()).rejects.toThrow("REDIRECT:/admin/sign-in");
+  });
 });

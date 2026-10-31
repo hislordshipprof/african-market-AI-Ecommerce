@@ -33,6 +33,8 @@ export function StoreForm({
     }
   }, [state.success, state.brandColorNudged, router]);
 
+  const sv = state.submittedValues;
+
   return (
     <form action={formAction} className="space-y-5">
       {mode === "edit" && store && (
@@ -73,7 +75,7 @@ export function StoreForm({
           name="slug"
           type="text"
           required
-          defaultValue={store?.slug ?? ""}
+          defaultValue={sv?.slug ?? store?.slug ?? ""}
           pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
           className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
           placeholder="mama-ngozi"
@@ -95,7 +97,7 @@ export function StoreForm({
           name="name"
           type="text"
           required
-          defaultValue={store?.name ?? ""}
+          defaultValue={sv?.name ?? store?.name ?? ""}
           className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
           placeholder="Mama Ngozi African Market"
         />
@@ -116,7 +118,7 @@ export function StoreForm({
             <select
               id="themePreset"
               name="themePreset"
-              defaultValue={store?.themePreset ?? "palm-and-shea"}
+              defaultValue={sv?.themePreset ?? store?.themePreset ?? "palm-and-shea"}
               className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
             >
               {PRESETS.map((p) => (
@@ -136,7 +138,7 @@ export function StoreForm({
                 id="brandColor"
                 name="brandColor"
                 type="text"
-                defaultValue={store?.brandColor ?? ""}
+                defaultValue={sv?.brandColor ?? store?.brandColor ?? ""}
                 pattern="#[0-9A-Fa-f]{6}"
                 className="flex-1 rounded-md border border-[#e2e4e9] px-3 py-2 font-mono text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
                 placeholder="#1F5A43"
@@ -160,7 +162,7 @@ export function StoreForm({
               id="logoUrl"
               name="logoUrl"
               type="text"
-              defaultValue={store?.logoUrl ?? ""}
+              defaultValue={sv?.logoUrl ?? store?.logoUrl ?? ""}
               className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               placeholder="/logos/store-logo.svg"
             />
@@ -187,7 +189,7 @@ export function StoreForm({
               name="hours"
               rows={3}
               defaultValue={
-                store?.hours ? JSON.stringify(store.hours, null, 2) : ""
+                sv?.hours ?? (store?.hours ? JSON.stringify(store.hours, null, 2) : "")
               }
               className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 font-mono text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               placeholder='{"mon": "9:00-21:00", "tue": "9:00-21:00"}'
@@ -210,7 +212,7 @@ export function StoreForm({
                 type="number"
                 min={1}
                 max={480}
-                defaultValue={store?.prepTimeMinutes ?? 30}
+                defaultValue={sv?.prepTimeMinutes ?? store?.prepTimeMinutes ?? 30}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               />
             </div>
@@ -225,7 +227,7 @@ export function StoreForm({
                 min={1}
                 max={15}
                 step={0.5}
-                defaultValue={store ? Number(store.deliveryRadiusMi) : 8}
+                defaultValue={sv?.deliveryRadiusMi ?? (store ? Number(store.deliveryRadiusMi) : 8)}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               />
             </div>
@@ -242,7 +244,7 @@ export function StoreForm({
                 type="number"
                 min={0}
                 step={0.01}
-                defaultValue={store ? store.minimumOrderCents / 100 : 35}
+                defaultValue={sv?.minimumOrder ?? (store ? store.minimumOrderCents / 100 : 35)}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               />
               {state.fieldErrors?.minimumOrder && (
@@ -261,7 +263,7 @@ export function StoreForm({
                 type="number"
                 min={0}
                 step={0.01}
-                defaultValue={store ? store.autoRefundLimitCents / 100 : 25}
+                defaultValue={sv?.autoRefundLimit ?? (store ? store.autoRefundLimitCents / 100 : 25)}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               />
               {state.fieldErrors?.autoRefundLimit && (
@@ -293,7 +295,7 @@ export function StoreForm({
               <select
                 id="status"
                 name="status"
-                defaultValue={store?.status ?? "active"}
+                defaultValue={sv?.status ?? store?.status ?? "active"}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
               >
                 <option value="active">Active</option>
