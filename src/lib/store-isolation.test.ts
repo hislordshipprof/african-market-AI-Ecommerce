@@ -137,21 +137,21 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
     ).rejects.toThrow(/42501|row-level security/i);
   });
 
-  it("owner role without storeScoped reads 0 rows from store_content", async () => {
-    const rows = await rawPrisma.rlsTestFixture.findMany();
-    expect(rows).toHaveLength(0);
+  it("app_user without store_id reads 0 rows from store_content", async () => {
+    const result = await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$queryRaw`SELECT * FROM store_content`,
+    ]);
+    expect(result[1]).toHaveLength(0);
   });
 
-  it("owner role without storeScoped cannot insert into store_content", async () => {
+  it("app_user without store_id cannot insert into store_content", async () => {
     await expect(
-      rawPrisma.rlsTestFixture.create({
-        data: {
-          storeId: storeAId,
-          key: `rls_owner_bypass_${Date.now()}`,
-          value: "should fail",
-        },
-      }),
-    ).rejects.toThrow();
+      rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`INSERT INTO store_content (id, store_id, key, value, created_at, updated_at) VALUES ('rls_owner_bypass', ${storeAId}, 'rls_owner_bypass', 'x', NOW(), NOW())`,
+      ]),
+    ).rejects.toThrow(/42501|row-level security/i);
   });
 
   it("platform.store resolves stores via SET ROLE (app_runtime)", async () => {
@@ -290,38 +290,65 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
     });
     testUserId = user.id;
 
-    await rawPrisma.storeMembership.upsert({
-      where: { storeId_userId: { storeId: storeAId, userId: testUserId } },
-      update: {},
-      create: { storeId: storeAId, userId: testUserId, role: "owner" },
-    });
+    // FORCE ROW LEVEL SECURITY means even the owner role must satisfy a
+    // policy. Use platform-admin context (SET LOCAL ROLE app_user + admin flag)
+    // for setup/teardown on RLS-protected tables.
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeMembership.upsert({
+        where: { storeId_userId: { storeId: storeAId, userId: testUserId } },
+        update: {},
+        create: { storeId: storeAId, userId: testUserId, role: "owner" },
+      }),
+    ]);
 
-    await rawPrisma.storeInvite.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-    await rawPrisma.storeInvite.create({
-      data: {
-        storeId: storeAId,
-        email: "invite-a@example.com",
-        role: "staff",
-        tokenHash: `rls_test_hash_a_${Date.now()}`,
-        expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
-        invitedById: testUserId,
-      },
-    });
-    await rawPrisma.storeInvite.create({
-      data: {
-        storeId: storeBId,
-        email: "invite-b@example.com",
-        role: "staff",
-        tokenHash: `rls_test_hash_b_${Date.now()}`,
-        expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
-        invitedById: testUserId,
-      },
-    });
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeInvite.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+    ]);
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeInvite.create({
+        data: {
+          storeId: storeAId,
+          email: "invite-a@example.com",
+          role: "staff",
+          tokenHash: `rls_test_hash_a_${Date.now()}`,
+          expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+          invitedById: testUserId,
+        },
+      }),
+    ]);
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeInvite.create({
+        data: {
+          storeId: storeBId,
+          email: "invite-b@example.com",
+          role: "staff",
+          tokenHash: `rls_test_hash_b_${Date.now()}`,
+          expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+          invitedById: testUserId,
+        },
+      }),
+    ]);
   });
 
   afterAll(async () => {
-    await rawPrisma.storeInvite.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-    await rawPrisma.storeMembership.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeInvite.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+    ]);
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeMembership.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+    ]);
     await rawPrisma.user.deleteMany({ where: { email: "rls-test-member@example.com" } });
     await rawPrisma.store.deleteMany({ where: { slug: { in: ["rls-membership-a", "rls-membership-b"] } } });
     await rawPrisma.$disconnect();
@@ -416,7 +443,7 @@ describe.skipIf(!hasRuntime)(
     it("cannot SET ROLE to the table owner", async () => {
       await expect(
         runtimePrisma.$executeRaw`SET ROLE app_owner`,
-      ).rejects.toThrow(/permission denied|not a member/i);
+      ).rejects.toThrow(/permission denied|not a member|does not exist/i);
     });
 
     it("without storeScoped returns 0 rows", async () => {

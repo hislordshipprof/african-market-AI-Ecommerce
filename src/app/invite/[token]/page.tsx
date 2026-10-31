@@ -1,6 +1,11 @@
+import type { Metadata } from "next";
 import { validateInviteToken } from "@/lib/invite/service";
 import { InviteAcceptForm } from "./invite-accept-form";
 import { InviteErrorCard } from "./invite-error-card";
+
+export const metadata: Metadata = {
+  title: "Accept Invitation",
+};
 
 interface Props {
   params: Promise<{ token: string }>;
