@@ -131,6 +131,22 @@ describe("resolveStoreTheme", () => {
 
   for (const preset of VALID_PRESETS) {
     for (const brand of [...PROBLEM_COLORS, ...NORMAL_COLORS]) {
+      it(`light primary for ${brand} on ${preset} passes AA vs background`, () => {
+        const theme = resolveStoreTheme(preset, brand);
+        const lightPrimary = theme.light["--store-primary"];
+        const lightBg = theme.light["--store-bg"];
+        expect(contrastRatio(lightPrimary, lightBg)).toBeGreaterThanOrEqual(
+          4.5,
+        );
+      });
+
+      it(`dark primary for ${brand} on ${preset} passes AA vs background`, () => {
+        const theme = resolveStoreTheme(preset, brand);
+        const darkPrimary = theme.dark["--store-primary"];
+        const darkBg = theme.dark["--store-bg"];
+        expect(contrastRatio(darkPrimary, darkBg)).toBeGreaterThanOrEqual(4.5);
+      });
+
       it(`light on-primary for ${brand} on ${preset} passes AA`, () => {
         const theme = resolveStoreTheme(preset, brand);
         const lightPrimary = theme.light["--store-primary"];
