@@ -233,8 +233,14 @@ export async function updateListing(input: UpdateListingInput) {
         ),
       );
 
-      const oldPrices = existingVariants.map((v) => ({ label: v.label, price: v.price }));
-      const newPrices = input.variants.map((v) => ({ label: v.label, price: v.price }));
+      const sortByLabel = (a: { label: string }, b: { label: string }) =>
+        a.label.localeCompare(b.label);
+      const oldPrices = existingVariants
+        .map((v) => ({ label: v.label, price: v.price }))
+        .sort(sortByLabel);
+      const newPrices = input.variants
+        .map((v) => ({ label: v.label, price: v.price }))
+        .sort(sortByLabel);
       const pricesChanged =
         oldPrices.length !== newPrices.length ||
         oldPrices.some((old, i) => old.label !== newPrices[i]?.label || old.price !== newPrices[i]?.price);

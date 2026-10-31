@@ -427,6 +427,41 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     expect(logs).toHaveLength(0);
   });
 
+  it("reordered variants with same prices creates no audit entry", async () => {
+    const listing = await createListing({
+      storeId,
+      customName: "Reorder Variant",
+      price: 500,
+      stockMode: "counted",
+      qty: 10,
+      frozen: false,
+      perishable: false,
+      variants: [
+        { label: "250g", price: 500, weightG: 250 },
+        { label: "1kg", price: 1800, weightG: 1000 },
+      ],
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    await updateListing({
+      storeId,
+      listingId: listing.id,
+      variants: [
+        { label: "1kg", price: 1800, weightG: 1000 },
+        { label: "250g", price: 500, weightG: 250 },
+      ],
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    const scoped = storeScoped(storeId);
+    const logs = await scoped.auditLog.findMany({
+      where: { entityId: listing.id, action: "listing.variant_price_change" },
+    });
+    expect(logs).toHaveLength(0);
+  });
+
   it("creates a listing linked to a master product", async () => {
     const mp = await platformAdmin.masterProduct.create({
       data: { name: "E2E Master Egusi" },

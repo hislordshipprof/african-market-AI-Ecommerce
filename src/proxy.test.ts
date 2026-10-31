@@ -18,8 +18,12 @@ describe("allowStoreOverride", () => {
     expect(allowStoreOverride({ NODE_ENV: "production" })).toBe(false);
   });
 
-  it("returns true for E2E_STORE_OVERRIDE=1", () => {
+  it("returns true for E2E_STORE_OVERRIDE=1 outside Vercel", () => {
     expect(allowStoreOverride({ NODE_ENV: "production", E2E_STORE_OVERRIDE: "1" })).toBe(true);
+  });
+
+  it("returns false for E2E_STORE_OVERRIDE=1 on Vercel", () => {
+    expect(allowStoreOverride({ NODE_ENV: "production", E2E_STORE_OVERRIDE: "1", VERCEL: "1" })).toBe(false);
   });
 
   it("returns false when both are unset", () => {
