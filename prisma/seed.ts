@@ -165,9 +165,11 @@ async function seedTestAdmin() {
   const unenrolledId = "seed-unenrolled-admin";
   const unenrolledEmail = "unenrolled-admin@platform.test";
 
+  await prisma.twoFactor.deleteMany({ where: { userId: unenrolledId } });
+
   await prisma.user.upsert({
     where: { email: unenrolledEmail },
-    update: {},
+    update: { twoFactorEnabled: false, updatedAt: new Date() },
     create: {
       id: unenrolledId,
       name: "Unenrolled Admin",
@@ -182,7 +184,12 @@ async function seedTestAdmin() {
   const existingUnenrolledAccount = await prisma.account.findFirst({
     where: { userId: unenrolledId, providerId: "credential" },
   });
-  if (!existingUnenrolledAccount) {
+  if (existingUnenrolledAccount) {
+    await prisma.account.update({
+      where: { id: existingUnenrolledAccount.id },
+      data: { password: hashedPassword, updatedAt: new Date() },
+    });
+  } else {
     await prisma.account.create({
       data: {
         id: "seed-unenrolled-account",
