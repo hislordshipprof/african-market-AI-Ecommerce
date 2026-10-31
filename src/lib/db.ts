@@ -117,3 +117,10 @@ export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId:
 }
 
 export { prisma as authPrisma };
+
+export function healthQueryRaw(
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+): Promise<unknown[]> {
+  return prisma.$queryRaw(strings, ...values) as Promise<unknown[]>;
+}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authPrisma } from "@/lib/db";
+import { healthQueryRaw } from "@/lib/db";
 import { runHealthChecks } from "@/lib/health";
 import { isRateLimited } from "@/lib/rate-limit";
 
@@ -15,14 +15,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const queryRaw = authPrisma.$queryRaw.bind(authPrisma) as (
-    strings: TemplateStringsArray,
-    ...values: unknown[]
-  ) => Promise<unknown[]>;
-
   const { status, body } = await runHealthChecks({
     env: process.env as Record<string, string | undefined>,
-    queryRaw,
+    queryRaw: healthQueryRaw,
   });
 
   return NextResponse.json(body, { status });
