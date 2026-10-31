@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getStoreById } from "@/lib/admin/actions";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import { StoreForm } from "../store-form";
+import { InviteOwnerForm } from "./invite-owner-form";
 
 export default async function EditStorePage({
   params,
@@ -19,6 +20,9 @@ export default async function EditStorePage({
         Edit: {store.name}
       </h1>
       <StoreForm mode="edit" store={store} />
+      <div className="mt-8">
+        <InviteOwnerForm storeId={store.id} />
+      </div>
     </div>
   );
 }

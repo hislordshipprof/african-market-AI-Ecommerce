@@ -102,26 +102,7 @@ export function InviteAcceptForm({
     }
   }
 
-  async function handleTotpEnroll(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      const result = await authClient.twoFactor.verifyTotp({ code: totpCode });
-      if (result.error) {
-        setError(result.error.message ?? "Invalid code");
-        return;
-      }
-      await acceptAndRedirect();
-    } catch {
-      setError("Verification failed. Try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleTotpVerify(e: React.FormEvent) {
+  async function handleTotpSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
@@ -234,7 +215,7 @@ export function InviteAcceptForm({
         )}
 
         {step === "totp-enroll" && (
-          <form onSubmit={handleTotpEnroll} className="flex flex-col gap-4">
+          <form onSubmit={handleTotpSubmit} className="flex flex-col gap-4">
             <div className="flex items-center gap-2 rounded-md bg-muted p-3">
               <ShieldCheck className="size-5 shrink-0 text-primary" />
               <p className="text-sm text-muted-foreground">
@@ -277,7 +258,7 @@ export function InviteAcceptForm({
         )}
 
         {step === "totp-verify" && (
-          <form onSubmit={handleTotpVerify} className="flex flex-col gap-4">
+          <form onSubmit={handleTotpSubmit} className="flex flex-col gap-4">
             <div className="flex items-center gap-2 rounded-md bg-muted p-3">
               <ShieldCheck className="size-5 shrink-0 text-primary" />
               <p className="text-sm text-muted-foreground">

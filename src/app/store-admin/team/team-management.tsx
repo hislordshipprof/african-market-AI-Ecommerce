@@ -61,7 +61,7 @@ export function TeamManagement({
   const storeParam = searchParams.get("store") ?? storeSlug;
   const [isPending, startTransition] = useTransition();
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"staff" | "owner">("staff");
+  const inviteRole = "staff" as const;
 
   function handleInvite(e: React.FormEvent) {
     e.preventDefault();
@@ -136,21 +136,6 @@ export function TeamManagement({
                     onChange={(e) => setInviteEmail(e.target.value)}
                     placeholder="team@example.com"
                   />
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="invite-role">Role</Label>
-                  <select
-                    id="invite-role"
-                    value={inviteRole}
-                    onChange={(e) =>
-                      setInviteRole(e.target.value as "staff" | "owner")
-                    }
-                    className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  >
-                    <option value="staff">Staff</option>
-                    <option value="owner">Owner</option>
-                  </select>
                 </div>
 
                 <Button type="submit" disabled={isPending}>

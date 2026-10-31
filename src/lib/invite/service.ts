@@ -1,5 +1,5 @@
 import { randomBytes, createHash } from "crypto";
-import { platformAdmin, platformAdminTransaction, storeScoped } from "../db";
+import { platformAdmin, platformAdminTransaction, storeScoped, lockStoreRow } from "../db";
 import { sendEmail } from "../email/send";
 import { normalizeEmail } from "../email";
 
@@ -38,6 +38,16 @@ export async function createInvite(input: CreateInviteInput): Promise<{ id: stri
     });
     if (existing) {
       throw new Error("User is already a member of this store");
+    }
+
+    const pendingInvite = await tx.storeInvite.findFirst({
+      where: { storeId: input.storeId, email, usedAt: null, expiresAt: { gt: new Date() } },
+    });
+    if (pendingInvite) {
+      await tx.storeInvite.update({
+        where: { id: pendingInvite.id },
+        data: { usedAt: new Date() },
+      });
     }
 
     return tx.storeInvite.create({
@@ -228,6 +238,7 @@ export async function removeStoreMember(
     }
 
     if (membership.role === "owner") {
+      await lockStoreRow(tx, storeId);
       const ownerCount = await tx.storeMembership.count({
         where: { storeId, role: "owner" },
       });
