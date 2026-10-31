@@ -12,6 +12,7 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/get-store", () => ({
   getStore: vi.fn(),
+  revalidateStore: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -20,6 +21,7 @@ vi.mock("@/lib/db", () => ({
     store: {
       update: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
     },
   },
 }));

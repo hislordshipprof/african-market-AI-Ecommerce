@@ -1,4 +1,5 @@
 import { platformAdmin } from "../db";
+import { revalidateStore } from "../get-store";
 import { deriveOnboardingStatus } from "./types";
 import type { OnboardingStatus } from "./types";
 
@@ -24,6 +25,8 @@ export async function updateStoreOnboardingStatus(
     where: { id: store.id },
     data: { stripeOnboardingStatus: status },
   });
+
+  revalidateStore({ id: store.id, slug: store.slug });
 
   return { storeId: store.id, status };
 }

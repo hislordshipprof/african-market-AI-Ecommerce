@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { getStore } from "@/lib/get-store";
+import { getStore, revalidateStore } from "@/lib/get-store";
 import { storeScoped, platformAdmin } from "@/lib/db";
 import { getStripeProvider } from "@/lib/stripe";
 
@@ -44,6 +44,14 @@ export async function POST(req: NextRequest) {
   let stripeAccountId = store.stripeAccountId;
 
   if (!stripeAccountId) {
+    const fresh = await platformAdmin.store.findUnique({
+      where: { id: store.id },
+      select: { stripeAccountId: true },
+    });
+    stripeAccountId = fresh?.stripeAccountId ?? null;
+  }
+
+  if (!stripeAccountId) {
     const account = await stripe.createConnectAccount({
       email: session.user.email,
       businessName: store.name,
@@ -58,6 +66,7 @@ export async function POST(req: NextRequest) {
         stripeOnboardingStatus: "pending",
       },
     });
+    revalidateStore({ id: store.id, slug: store.slug });
   }
 
   const origin = req.nextUrl.origin;
@@ -65,7 +74,7 @@ export async function POST(req: NextRequest) {
   const link = await stripe.createAccountLink({
     accountId: stripeAccountId,
     returnUrl: `${origin}/api/stripe/return?store=${storeParam}`,
-    refreshUrl: `${origin}/api/stripe/connect?store=${storeParam}`,
+    refreshUrl: `${origin}/store-admin/payouts?store=${storeParam}`,
   });
 
   return NextResponse.json({ url: link.url });

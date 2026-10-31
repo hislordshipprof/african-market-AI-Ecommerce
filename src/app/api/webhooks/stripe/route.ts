@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       chargesEnabled: account.charges_enabled,
       payoutsEnabled: account.payouts_enabled,
       detailsSubmitted: account.details_submitted,
-      requirementsCurrentlyDue: account.requirements.currently_due,
+      requirementsCurrentlyDue: account.requirements?.currently_due ?? [],
     });
   }
 
