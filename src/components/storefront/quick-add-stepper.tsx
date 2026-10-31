@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { Plus, Minus } from "lucide-react";
 
 export function QuickAddStepper({ productName }: { productName: string }) {
   const [qty, setQty] = useState(0);
+  const reduced = useReducedMotion();
 
   return (
     <AnimatePresence mode="wait" initial={false}>
@@ -15,8 +16,8 @@ export function QuickAddStepper({ productName }: { productName: string }) {
           type="button"
           data-testid="quick-add-btn"
           onClick={() => setQty(1)}
-          exit={{ scale: 0.8, opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          exit={reduced ? { opacity: 0 } : { scale: 0.8, opacity: 0 }}
+          transition={{ duration: reduced ? 0 : 0.15 }}
           className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-on-primary shadow-sm transition-transform duration-150 hover:scale-110 active:scale-95"
           aria-label={`Add ${productName} to cart`}
         >
@@ -26,9 +27,9 @@ export function QuickAddStepper({ productName }: { productName: string }) {
         <motion.div
           key="stepper"
           data-testid="quick-add-stepper"
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "spring", stiffness: 400, damping: 25 }}
+          initial={reduced ? { opacity: 0 } : { scale: 0.8, opacity: 0 }}
+          animate={reduced ? { opacity: 1 } : { scale: 1, opacity: 1 }}
+          transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 400, damping: 25 }}
           className="flex h-11 items-center gap-1 rounded-full bg-primary px-1 shadow-sm"
         >
           <button

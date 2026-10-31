@@ -375,9 +375,11 @@ export async function getListingsByCategory(
     byCategory.set(catName, existing);
   }
 
-  return Array.from(byCategory.entries()).map(([name, data]) => ({
-    categoryName: name,
-    categorySlug: data.slug,
-    listings: data.listings,
-  }));
+  return Array.from(byCategory.entries())
+    .map(([name, data]) => ({
+      categoryName: name,
+      categorySlug: data.slug,
+      listings: data.listings,
+    }))
+    .sort((a, b) => a.categoryName.localeCompare(b.categoryName));
 }

@@ -34,13 +34,14 @@ export function PromoBand({ store }: { store: ValidatedStore }) {
               Store hours
             </h3>
             <dl className="space-y-1 font-body text-sm text-on-primary/90">
-              {Object.entries(store.hours as Record<string, string>).map(
-                ([day, time]) => (
-                  <div key={day} className="flex justify-between gap-4">
-                    <dt className="capitalize">{day}</dt>
-                    <dd className="text-right">{time}</dd>
-                  </div>
-                ),
+              {Object.entries(store.hours as Record<string, unknown>).map(
+                ([day, time]) =>
+                  typeof time === "string" ? (
+                    <div key={day} className="flex justify-between gap-4">
+                      <dt className="capitalize">{day}</dt>
+                      <dd className="text-right">{time}</dd>
+                    </div>
+                  ) : null,
               )}
             </dl>
           </div>
