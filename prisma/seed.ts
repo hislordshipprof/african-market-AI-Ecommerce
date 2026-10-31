@@ -210,11 +210,113 @@ async function seedTestAdmin() {
   console.log("Seeded unenrolled admin: unenrolled-admin@platform.test");
 }
 
+async function seedStoreOwner() {
+  assertNotProduction(process.env);
+
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminPassword) {
+    throw new Error("SEED_ADMIN_PASSWORD is required when SEED_TEST_ADMIN=1");
+  }
+  const authSecret = process.env.BETTER_AUTH_SECRET;
+  if (!authSecret) {
+    throw new Error("BETTER_AUTH_SECRET is required when SEED_TEST_ADMIN=1");
+  }
+  const totpSecret = process.env.SEED_ADMIN_TOTP_SECRET;
+  if (!totpSecret) {
+    throw new Error("SEED_ADMIN_TOTP_SECRET is required when SEED_TEST_ADMIN=1");
+  }
+
+  const ownerId = "seed-store-owner";
+  const ownerEmail = "owner@mama-ngozi.test";
+  const hashedPassword = await hashPassword(adminPassword);
+
+  await prisma.user.upsert({
+    where: { email: ownerEmail },
+    update: { twoFactorEnabled: true },
+    create: {
+      id: ownerId,
+      name: "Mama Ngozi Owner",
+      email: ownerEmail,
+      emailVerified: true,
+      role: "user",
+      twoFactorEnabled: true,
+      updatedAt: new Date(),
+    },
+  });
+
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: ownerId, providerId: "credential" },
+  });
+  if (existingAccount) {
+    await prisma.account.update({
+      where: { id: existingAccount.id },
+      data: { password: hashedPassword, updatedAt: new Date() },
+    });
+  } else {
+    await prisma.account.create({
+      data: {
+        id: "seed-store-owner-account",
+        accountId: ownerId,
+        providerId: "credential",
+        userId: ownerId,
+        password: hashedPassword,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  const encryptedSecret = await symmetricEncrypt({
+    key: authSecret,
+    data: `base32:${totpSecret}`,
+  });
+  const encryptedBackupCodes = await symmetricEncrypt({
+    key: authSecret,
+    data: JSON.stringify(["OWNERBACKUP1", "OWNERBACKUP2"]),
+  });
+
+  const existingTwoFactor = await prisma.twoFactor.findFirst({
+    where: { userId: ownerId },
+  });
+  if (existingTwoFactor) {
+    await prisma.twoFactor.update({
+      where: { id: existingTwoFactor.id },
+      data: { secret: encryptedSecret, backupCodes: encryptedBackupCodes },
+    });
+  } else {
+    await prisma.twoFactor.create({
+      data: {
+        id: "seed-store-owner-totp",
+        secret: encryptedSecret,
+        backupCodes: encryptedBackupCodes,
+        userId: ownerId,
+        verified: true,
+      },
+    });
+  }
+
+  const mamaNgozi = await prisma.store.findUnique({ where: { slug: "mama-ngozi" } });
+  if (!mamaNgozi) throw new Error("mama-ngozi store not found; run seedDemoStores first");
+
+  await prisma.$transaction([
+    prisma.$executeRaw`SET LOCAL ROLE app_user`,
+    prisma.$executeRaw`SELECT set_config('app.store_id', ${mamaNgozi.id}, true)`,
+    prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+    prisma.storeMembership.upsert({
+      where: { storeId_userId: { storeId: mamaNgozi.id, userId: ownerId } },
+      update: { role: "owner" },
+      create: { storeId: mamaNgozi.id, userId: ownerId, role: "owner" },
+    }),
+  ]);
+
+  console.log("Seeded store owner: owner@mama-ngozi.test (2FA enrolled, mama-ngozi owner)");
+}
+
 async function main() {
   await seedDemoStores();
 
   if (process.env.SEED_TEST_ADMIN === "1") {
     await seedTestAdmin();
+    await seedStoreOwner();
   }
 }
 

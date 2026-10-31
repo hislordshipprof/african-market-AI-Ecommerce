@@ -10,7 +10,9 @@ import {
   listListings,
   getListing,
   updateVariants,
+  listMasterProducts,
 } from "./service";
+import { platformAdmin } from "../db";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -423,6 +425,51 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       where: { entityId: listing.id, action: "listing.variant_price_change" },
     });
     expect(logs).toHaveLength(0);
+  });
+
+  it("creates a listing linked to a master product", async () => {
+    const mp = await platformAdmin.masterProduct.create({
+      data: { name: "E2E Master Egusi" },
+    });
+
+    try {
+      const listing = await createListing({
+        storeId,
+        masterProductId: mp.id,
+        customName: null,
+        price: 1200,
+        stockMode: "counted",
+        qty: 20,
+        frozen: false,
+        perishable: false,
+        variants: [{ label: "500g", price: 1200, weightG: 500 }],
+        actorId: userId,
+        actorEmail: "svc-listing-user@example.com",
+      });
+
+      expect(listing.masterProductId).toBe(mp.id);
+      const found = await getListing(storeId, listing.id);
+      expect(found!.masterProduct).not.toBeNull();
+      expect(found!.masterProduct!.name).toBe("E2E Master Egusi");
+    } finally {
+      await rawPrisma.masterProduct.deleteMany({ where: { id: mp.id } });
+    }
+  });
+
+  it("listMasterProducts returns products ordered by name", async () => {
+    const mpA = await platformAdmin.masterProduct.create({ data: { name: "AAA Test Product" } });
+    const mpZ = await platformAdmin.masterProduct.create({ data: { name: "ZZZ Test Product" } });
+
+    try {
+      const products = await listMasterProducts();
+      expect(products.length).toBeGreaterThanOrEqual(2);
+      const names = products.map((p) => p.name);
+      const idxA = names.indexOf("AAA Test Product");
+      const idxZ = names.indexOf("ZZZ Test Product");
+      expect(idxA).toBeLessThan(idxZ);
+    } finally {
+      await rawPrisma.masterProduct.deleteMany({ where: { id: { in: [mpA.id, mpZ.id] } } });
+    }
   });
 
   it("updateVariants replaces all variants", async () => {
