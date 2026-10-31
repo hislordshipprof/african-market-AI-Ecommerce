@@ -8,6 +8,7 @@ export function ListingCard({ listing }: { listing: StorefrontListing }) {
     <Link
       href={`/listings/${listing.id}`}
       className="group flex flex-col overflow-hidden rounded-md bg-surface transition-shadow hover:shadow-sm"
+      data-testid="listing-card"
     >
       <div className="flex aspect-square w-full items-center justify-center bg-raised">
         <svg

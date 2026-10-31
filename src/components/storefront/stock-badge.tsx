@@ -19,6 +19,7 @@ export function StockBadgeChip({ badge }: { badge: StockBadge }) {
   const { label, className } = config[badge];
   return (
     <span
+      data-testid="stock-badge"
       className={`inline-flex items-center rounded-pill px-2 py-0.5 font-label text-[13px] font-semibold leading-tight ${className}`}
     >
       {label}
