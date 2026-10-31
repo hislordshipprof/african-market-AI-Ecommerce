@@ -279,7 +279,7 @@ export function StoreForm({
               name="pickupEnabled"
               type="checkbox"
               id="pickupEnabled"
-              defaultChecked={store?.pickupEnabled ?? false}
+              defaultChecked={sv ? sv.pickupEnabled === "on" : (store?.pickupEnabled ?? false)}
               className="h-4 w-4 rounded border-[#e2e4e9] text-[#1F5A43] focus:ring-[#1F5A43]"
             />
             <label htmlFor="pickupEnabled" className="text-sm text-[#15201A]">

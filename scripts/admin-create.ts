@@ -12,12 +12,14 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
 import { randomBytes } from "node:crypto";
 import { resolveDirectUrl } from "../src/lib/env";
+import { normalizeEmail } from "../src/lib/email";
 
-const email = process.argv[2];
-if (!email || !email.includes("@")) {
+const rawEmail = process.argv[2];
+if (!rawEmail || !rawEmail.includes("@")) {
   console.error("Usage: pnpm admin:create <email>");
   process.exit(1);
 }
+const email = normalizeEmail(rawEmail);
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });

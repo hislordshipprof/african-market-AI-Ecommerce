@@ -298,6 +298,18 @@ describe("createStore", () => {
     expect(result.submittedValues?.slug).toBe("");
   });
 
+  it("includes pickupEnabled in submittedValues on validation error", async () => {
+    const result = await createStore({}, formData({ ...VALID_STORE, slug: "", pickupEnabled: "on" }));
+    expect(result.fieldErrors?.slug).toBeDefined();
+    expect(result.submittedValues?.pickupEnabled).toBe("on");
+  });
+
+  it("omits pickupEnabled from submittedValues when unchecked", async () => {
+    const result = await createStore({}, formData({ ...VALID_STORE, slug: "" }));
+    expect(result.fieldErrors?.slug).toBeDefined();
+    expect(result.submittedValues?.pickupEnabled).toBeUndefined();
+  });
+
   it("returns submittedValues on duplicate slug", async () => {
     mockFindUnique.mockResolvedValueOnce({ id: "existing", slug: "mama-ngozi" });
     const result = await createStore({}, formData(VALID_STORE));
