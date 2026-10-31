@@ -286,7 +286,7 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
     const user = await rawPrisma.user.upsert({
       where: { email: "rls-test-member@example.com" },
       update: {},
-      create: { email: "rls-test-member@example.com", name: "RLS Test Member", emailVerified: true },
+      create: { id: "rls-test-member-id", email: "rls-test-member@example.com", name: "RLS Test Member", emailVerified: true },
     });
     testUserId = user.id;
 

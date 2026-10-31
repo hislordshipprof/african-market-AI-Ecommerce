@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import Image from "next/image";
 import { UserPlus, ShieldCheck } from "lucide-react";
 
 type Step = "signup" | "totp-enroll" | "totp-verify" | "accepting";
@@ -238,12 +239,13 @@ export function InviteAcceptForm({
 
             {totpUri && (
               <div className="flex justify-center rounded-md border border-border bg-card p-4">
-                <img
+                <Image
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(totpUri)}`}
                   alt="QR Code for authenticator app"
                   width={200}
                   height={200}
                   className="rounded"
+                  unoptimized
                 />
               </div>
             )}
