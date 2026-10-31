@@ -1174,42 +1174,32 @@ export async function seedDemoCatalog(prisma: PrismaClient) {
       await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
         await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+        const listingData = {
+          price: l.price,
+          stockMode: l.stockMode,
+          qty: l.qty,
+          status: l.status,
+          frozen: l.frozen,
+          perishable: l.perishable,
+          active: l.active,
+        };
         await tx.listing.upsert({
           where: { id: l.id },
-          update: {
-            price: l.price,
-            stockMode: l.stockMode,
-            qty: l.qty,
-            status: l.status,
-            frozen: l.frozen,
-            perishable: l.perishable,
-            active: l.active,
-          },
+          update: listingData,
           create: {
             id: l.id,
             storeId: store.id,
             masterProductId: l.masterProductId,
             customName: l.customName,
-            price: l.price,
-            stockMode: l.stockMode,
-            qty: l.qty,
-            status: l.status,
-            frozen: l.frozen,
-            perishable: l.perishable,
-            active: l.active,
+            ...listingData,
           },
         });
         for (const v of l.variants) {
+          const variantData = { label: v.label, price: v.price, weightG: v.weightG };
           await tx.listingVariant.upsert({
             where: { id: v.id },
-            update: { label: v.label, price: v.price, weightG: v.weightG },
-            create: {
-              id: v.id,
-              listingId: l.id,
-              label: v.label,
-              price: v.price,
-              weightG: v.weightG,
-            },
+            update: variantData,
+            create: { id: v.id, listingId: l.id, ...variantData },
           });
         }
       });

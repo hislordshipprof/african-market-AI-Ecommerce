@@ -8,6 +8,9 @@ import {
   getListingDetail,
   searchListings,
   getActiveListings,
+  getActiveCollections,
+  getCollectionListings,
+  getListingsByCategory,
 } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -22,6 +25,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let listingAId: string;
   let listingBId: string;
   let inactiveListingId: string;
+  let collectionId: string;
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -156,10 +160,44 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       }),
     ]);
     inactiveListingId = (inactiveListing[2] as { id: string }).id;
+
+    // Create a collection in store A with an item
+    const collection = await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.storeCollection.create({
+        data: {
+          storeId: storeAId,
+          title: "Test Soup Kit",
+          slug: "test-soup-kit",
+          active: true,
+          sortOrder: 0,
+        },
+      }),
+    ]);
+    collectionId = (collection[2] as { id: string }).id;
+
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.storeCollectionListing.create({
+        data: { collectionId, listingId: listingAId, sortOrder: 0 },
+      }),
+    ]);
   });
 
   afterAll(async () => {
     // Clean up in reverse order of dependencies
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeCollectionListing.deleteMany({ where: { collectionId } }),
+    ]);
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeCollection.deleteMany({ where: { id: collectionId } }),
+    ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
@@ -302,5 +340,45 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     const listings = await getActiveListings(storeAId);
     expect(listings.length).toBeGreaterThanOrEqual(1);
     expect(listings.every((l) => l.id !== listingBId)).toBe(true);
+  });
+
+  // Collection service tests (S9)
+  it("getActiveCollections returns store A collections", async () => {
+    const collections = await getActiveCollections(storeAId);
+    expect(collections.length).toBeGreaterThanOrEqual(1);
+    expect(collections.some((c) => c.slug === "test-soup-kit")).toBe(true);
+  });
+
+  it("getActiveCollections isolates by store", async () => {
+    const collections = await getActiveCollections(storeBId);
+    expect(collections.every((c) => c.slug !== "test-soup-kit")).toBe(true);
+  });
+
+  it("getCollectionListings returns listings for a collection", async () => {
+    const result = await getCollectionListings(storeAId, "test-soup-kit");
+    expect(result.collection).not.toBeNull();
+    expect(result.collection!.title).toBe("Test Soup Kit");
+    expect(result.listings.length).toBeGreaterThanOrEqual(1);
+    expect(result.listings.some((l) => l.id === listingAId)).toBe(true);
+  });
+
+  it("getCollectionListings returns null for nonexistent slug", async () => {
+    const result = await getCollectionListings(storeAId, "nonexistent-collection");
+    expect(result.collection).toBeNull();
+    expect(result.listings).toHaveLength(0);
+  });
+
+  it("getCollectionListings excludes inactive listings", async () => {
+    const result = await getCollectionListings(storeAId, "test-soup-kit");
+    expect(result.listings.every((l) => l.id !== inactiveListingId)).toBe(true);
+  });
+
+  // getListingsByCategory (new return type)
+  it("getListingsByCategory returns category rails with slugs", async () => {
+    const rails = await getListingsByCategory(storeAId);
+    expect(rails.length).toBeGreaterThanOrEqual(1);
+    const vegRail = rails.find((r) => r.categorySlug === "vegetables");
+    expect(vegRail).toBeDefined();
+    expect(vegRail!.listings.length).toBeGreaterThanOrEqual(1);
   });
 });
