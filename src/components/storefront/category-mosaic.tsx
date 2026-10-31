@@ -32,7 +32,7 @@ export function CategoryMosaic({
           <Link
             key={cat.id}
             href={`/categories/${cat.slug}`}
-            className={`group relative overflow-hidden rounded-md ${bentoSpan(i, categories.length)}`}
+            className={`group relative overflow-hidden rounded-md focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${bentoSpan(i, categories.length)}`}
           >
             <div
               className="absolute inset-0 bg-primary-deep bg-cover bg-center transition-transform duration-200 group-hover:scale-[1.03]"

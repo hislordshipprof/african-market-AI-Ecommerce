@@ -40,12 +40,12 @@ export function ListingCard({
       <div className="flex flex-1 flex-col gap-0.5 p-3">
         <Link
           href={`/listings/${listing.id}`}
-          className="font-body text-sm font-medium leading-snug text-ink line-clamp-2 hover:text-primary"
+          className="font-body text-sm font-medium leading-snug text-ink line-clamp-2 hover:text-primary focus-visible:text-primary focus-visible:outline-none"
         >
           {listing.displayName}
         </Link>
         {listing.altName && (
-          <span className="font-label text-[13px] tracking-wider text-muted-foreground">
+          <span className="font-label text-[13px] tracking-wider text-muted-foreground line-clamp-1">
             {listing.altName}
           </span>
         )}

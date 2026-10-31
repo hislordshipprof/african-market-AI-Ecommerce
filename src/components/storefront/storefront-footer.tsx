@@ -26,17 +26,17 @@ export function StorefrontFooter({ store }: { store: ValidatedStore }) {
           </div>
 
           <div>
-            <h3 className="font-label text-xs uppercase tracking-wider text-on-primary/60">
+            <h3 className="font-label text-[13px] uppercase tracking-wider text-on-primary/70">
               Quick links
             </h3>
             <ul className="mt-2 space-y-1.5 font-body text-sm text-on-primary/80">
               <li>
-                <Link href="/" className="hover:text-on-primary">
+                <Link href="/" className="hover:text-on-primary focus-visible:text-on-primary focus-visible:outline-none focus-visible:underline">
                   Home
                 </Link>
               </li>
               <li>
-                <Link href="/search" className="hover:text-on-primary">
+                <Link href="/search" className="hover:text-on-primary focus-visible:text-on-primary focus-visible:outline-none focus-visible:underline">
                   Search
                 </Link>
               </li>
@@ -44,7 +44,7 @@ export function StorefrontFooter({ store }: { store: ValidatedStore }) {
           </div>
 
           <div>
-            <h3 className="font-label text-xs uppercase tracking-wider text-on-primary/60">
+            <h3 className="font-label text-[13px] uppercase tracking-wider text-on-primary/70">
               About
             </h3>
             <p className="mt-2 font-body text-sm text-on-primary/70">
@@ -55,7 +55,7 @@ export function StorefrontFooter({ store }: { store: ValidatedStore }) {
       </div>
 
       <div className="border-t border-on-primary/10 px-4 py-4 text-center">
-        <p className="font-body text-xs text-on-primary/50">
+        <p className="font-body text-[13px] text-on-primary/60">
           &copy; {new Date().getFullYear()} {store.name}. All rights reserved.
         </p>
       </div>

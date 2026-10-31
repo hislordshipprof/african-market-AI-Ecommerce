@@ -34,14 +34,14 @@ export function StorefrontHeader({ store }: { store: ValidatedStore }) {
             </h1>
           </Link>
 
-          <span className="hidden items-center gap-1.5 rounded-pill bg-white/15 px-3 py-1 font-label text-xs text-on-primary sm:inline-flex">
+          <span className="hidden items-center gap-1.5 rounded-pill bg-white/15 px-3 py-1 font-label text-[13px] text-on-primary sm:inline-flex">
             <Truck className="h-3.5 w-3.5" aria-hidden="true" />
             {store.deliveryInfo || "Pickup & delivery"}
           </span>
 
           <button
             type="button"
-            className="relative flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-on-primary transition-colors hover:bg-white/25"
+            className="relative flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-on-primary transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-on-primary focus-visible:ring-offset-2 focus-visible:ring-offset-primary"
             aria-label="Shopping cart"
           >
             <ShoppingBag className="h-5 w-5" />

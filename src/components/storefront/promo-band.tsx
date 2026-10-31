@@ -30,7 +30,7 @@ export function PromoBand({ store }: { store: ValidatedStore }) {
 
         {store.hours && typeof store.hours === "object" && !Array.isArray(store.hours) && (
           <div className="shrink-0 rounded-md bg-white/10 px-5 py-4">
-            <h3 className="mb-2 font-label text-xs uppercase tracking-wider text-on-primary/70">
+            <h3 className="mb-2 font-label text-[13px] uppercase tracking-wider text-on-primary/70">
               Store hours
             </h3>
             <dl className="space-y-1 font-body text-sm text-on-primary/90">

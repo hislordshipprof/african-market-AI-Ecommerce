@@ -24,7 +24,7 @@ export function CollectionBanners({
           <Link
             key={col.id}
             href={`/collections/${col.slug}`}
-            className="group relative overflow-hidden rounded-lg"
+            className="group relative overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
             style={{ aspectRatio: "21/9" }}
           >
             <div

@@ -114,7 +114,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
               <button
                 type="button"
                 onClick={() => go(safeIndex - 1, -1)}
-                className="absolute left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 md:flex"
+                className="absolute left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface text-ink shadow-md transition-colors hover:bg-raised focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 md:flex"
                 aria-label="Previous slide"
               >
                 <ChevronLeft className="h-5 w-5" />
@@ -122,7 +122,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
               <button
                 type="button"
                 onClick={() => go(safeIndex + 1, 1)}
-                className="absolute right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 md:flex"
+                className="absolute right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface text-ink shadow-md transition-colors hover:bg-raised focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 md:flex"
                 aria-label="Next slide"
               >
                 <ChevronRight className="h-5 w-5" />
@@ -136,7 +136,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
           <button
             type="button"
             onClick={() => go(safeIndex + 1, 1)}
-            className="relative hidden w-1/3 overflow-hidden rounded-lg lg:block"
+            className="relative hidden w-1/3 overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 lg:block"
             aria-label={`Next: ${nextBanner.title}`}
           >
             <div
@@ -166,7 +166,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
               data-testid="carousel-dot"
               onClick={() => go(i, i > safeIndex ? 1 : -1)}
               aria-current={i === safeIndex ? "true" : undefined}
-              className="flex min-h-[44px] min-w-[44px] items-center justify-center"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
               aria-label={`Go to slide ${i + 1}`}
             >
               <span

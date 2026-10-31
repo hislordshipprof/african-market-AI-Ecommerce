@@ -55,30 +55,52 @@ export default async function StorefrontPage() {
     "Pantry Staples": "Stock Up — Pantry Staples",
   };
 
+  const MAX_HOME_RAILS = 4;
+  const visibleRails = listingsByCategory.slice(0, MAX_HOME_RAILS);
+  const hasMoreRails = listingsByCategory.length > MAX_HOME_RAILS;
+
   return (
     <main className="min-h-screen bg-bg">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-on-primary focus:shadow-lg"
+      >
+        Skip to content
+      </a>
       <StorefrontHeader store={store} />
 
       <HeroCarousel banners={banners} />
 
-      <div className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-6">
+      <div id="main-content" className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-6">
         <CategoryMosaic categories={categories} />
 
-        {listingsByCategory.map((rail) => (
+        <TrustStoryStrip profile={profile} />
+
+        {visibleRails.map((rail) => (
           <ProductRail
             key={rail.categorySlug}
             title={CURATED_LABELS[rail.categoryName] ?? rail.categoryName}
             categorySlug={rail.categorySlug}
             listings={rail.listings}
+            seeAllHref={`/categories/${rail.categorySlug}`}
           />
         ))}
+
+        {hasMoreRails && (
+          <div className="flex justify-center">
+            <a
+              href="/categories"
+              className="inline-flex h-12 items-center rounded-pill bg-soft px-8 font-label text-sm font-semibold text-primary transition-colors hover:bg-raised"
+            >
+              Browse all categories &rarr;
+            </a>
+          </div>
+        )}
 
         <CollectionBanners collections={collections} />
       </div>
 
       <PromoBand store={store} />
-
-      <TrustStoryStrip profile={profile} />
 
       <StorefrontFooter store={store} />
     </main>
