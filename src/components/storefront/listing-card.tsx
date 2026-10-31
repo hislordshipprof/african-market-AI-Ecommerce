@@ -1,13 +1,13 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
 import type { StorefrontListing } from "@/lib/storefront/service";
 import { PriceDisplay } from "./price-display";
 import { StockBadgeChip } from "./stock-badge";
+import { QuickAddStepper } from "./quick-add-stepper";
 
 export function ListingCard({ listing }: { listing: StorefrontListing }) {
   return (
     <div
-      className="group flex flex-col overflow-hidden rounded-md bg-surface transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+      className="group flex flex-col overflow-hidden rounded-md bg-surface transition-all duration-200 hover:-translate-y-0.5 hover:bg-raised"
       style={{ transitionTimingFunction: "var(--ease-std)" }}
       data-testid="listing-card"
     >
@@ -28,19 +28,14 @@ export function ListingCard({ listing }: { listing: StorefrontListing }) {
           />
         </svg>
 
-        <button
-          type="button"
-          data-testid="quick-add-btn"
-          className="absolute bottom-2 right-2 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-on-primary shadow-sm transition-transform duration-150 hover:scale-110 active:scale-95"
-          aria-label={`Add ${listing.displayName} to cart`}
-        >
-          <Plus className="h-5 w-5" />
-        </button>
+        <div className="absolute bottom-2 right-2">
+          <QuickAddStepper productName={listing.displayName} />
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col gap-0.5 p-3">
         {listing.altName && (
-          <span className="font-label text-[11px] uppercase tracking-wider text-muted-foreground">
+          <span className="font-label text-[13px] uppercase tracking-wider text-muted-foreground">
             {listing.altName}
           </span>
         )}
@@ -61,7 +56,7 @@ export function ListingCard({ listing }: { listing: StorefrontListing }) {
         </div>
 
         {listing.frozen && (
-          <span className="font-label text-[11px] text-muted-foreground">
+          <span className="font-label text-[13px] text-muted-foreground">
             Frozen
           </span>
         )}

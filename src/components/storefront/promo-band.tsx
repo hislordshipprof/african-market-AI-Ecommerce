@@ -5,7 +5,7 @@ export function PromoBand({ store }: { store: ValidatedStore }) {
   return (
     <section
       data-testid="promo-band"
-      className="rounded-lg bg-primary-deep px-6 py-8 text-on-primary sm:px-10"
+      className="bg-primary-deep px-6 py-8 text-on-primary sm:px-10"
     >
       <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -13,22 +13,22 @@ export function PromoBand({ store }: { store: ValidatedStore }) {
             Why shop with {store.name}?
           </h2>
           <ul className="mt-4 space-y-3">
-            <li className="flex items-center gap-3 font-body text-sm text-on-primary/90">
+            <li className="flex items-center gap-3 font-body text-base text-on-primary/90">
               <Package className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
               Fresh from source &mdash; direct imports every week
             </li>
-            <li className="flex items-center gap-3 font-body text-sm text-on-primary/90">
+            <li className="flex items-center gap-3 font-body text-base text-on-primary/90">
               <Truck className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
               {store.deliveryInfo || "Local delivery available"}
             </li>
-            <li className="flex items-center gap-3 font-body text-sm text-on-primary/90">
+            <li className="flex items-center gap-3 font-body text-base text-on-primary/90">
               <Store className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
               Real store prices &mdash; no platform markup
             </li>
           </ul>
         </div>
 
-        {store.hours && typeof store.hours === "object" && (
+        {store.hours && typeof store.hours === "object" && !Array.isArray(store.hours) && (
           <div className="shrink-0 rounded-md bg-white/10 px-5 py-4">
             <h3 className="mb-2 font-label text-xs uppercase tracking-wider text-on-primary/70">
               Store hours

@@ -61,9 +61,9 @@ export default async function StorefrontPage() {
         ))}
 
         <CollectionBanners collections={collections} />
-
-        <PromoBand store={store} />
       </div>
+
+      <PromoBand store={store} />
 
       <TrustStoryStrip profile={profile} />
 

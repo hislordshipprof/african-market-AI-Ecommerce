@@ -1,12 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import type { StorefrontBanner } from "@/lib/storefront/service";
-
-const INTERVAL = 5000;
 
 const variants = {
   enter: (dir: number) => ({ x: dir > 0 ? "100%" : "-100%", opacity: 0 }),
@@ -18,7 +16,6 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
   const reduced = useReducedMotion();
   const [index, setIndex] = useState(0);
   const [dir, setDir] = useState(1);
-  const paused = useRef(false);
 
   const go = useCallback(
     (next: number, direction: number) => {
@@ -27,14 +24,6 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
     },
     [banners.length],
   );
-
-  useEffect(() => {
-    if (reduced || banners.length <= 1) return;
-    const id = setInterval(() => {
-      if (!paused.current) go(index + 1, 1);
-    }, INTERVAL);
-    return () => clearInterval(id);
-  }, [index, reduced, banners.length, go]);
 
   if (banners.length === 0) return null;
 
@@ -45,10 +34,6 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
       data-testid="hero-carousel"
       className="relative w-full overflow-hidden bg-raised"
       style={{ aspectRatio: "16/9", maxHeight: 400 }}
-      onMouseEnter={() => (paused.current = true)}
-      onMouseLeave={() => (paused.current = false)}
-      onFocus={() => (paused.current = true)}
-      onBlur={() => (paused.current = false)}
     >
       <AnimatePresence initial={false} custom={dir} mode="popLayout">
         <motion.div
@@ -104,7 +89,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
           <button
             type="button"
             onClick={() => go(index - 1, -1)}
-            className="absolute left-3 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 md:flex"
+            className="absolute left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 md:flex"
             aria-label="Previous slide"
           >
             <ChevronLeft className="h-5 w-5" />
@@ -112,7 +97,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
           <button
             type="button"
             onClick={() => go(index + 1, 1)}
-            className="absolute right-3 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 md:flex"
+            className="absolute right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition-colors hover:bg-black/50 md:flex"
             aria-label="Next slide"
           >
             <ChevronRight className="h-5 w-5" />
@@ -126,13 +111,17 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
                 data-testid="carousel-dot"
                 onClick={() => go(i, i > index ? 1 : -1)}
                 aria-current={i === index ? "true" : undefined}
-                className={`h-2 rounded-pill transition-all ${
-                  i === index
-                    ? "w-6 bg-white"
-                    : "w-2 bg-white/50 hover:bg-white/70"
-                }`}
+                className={`min-h-[44px] min-w-[44px] flex items-center justify-center`}
                 aria-label={`Go to slide ${i + 1}`}
-              />
+              >
+                <span
+                  className={`block h-2 rounded-pill transition-all ${
+                    i === index
+                      ? "w-6 bg-white"
+                      : "w-2 bg-white/50 hover:bg-white/70"
+                  }`}
+                />
+              </button>
             ))}
           </div>
         </>

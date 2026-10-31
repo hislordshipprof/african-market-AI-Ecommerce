@@ -42,7 +42,11 @@ export function ProductRail({
   function scroll(direction: number) {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: "smooth" });
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollBy({
+      left: direction * el.clientWidth * 0.8,
+      behavior: prefersReduced ? "instant" : "smooth",
+    });
   }
 
   if (listings.length === 0) return null;
@@ -70,12 +74,12 @@ export function ProductRail({
         <div
           ref={scrollRef}
           data-testid="rail-scroll"
-          className="flex gap-3 overflow-x-auto scroll-smooth snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+          className="flex gap-3 overflow-x-auto scroll-smooth snap-x snap-mandatory motion-reduce:scroll-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         >
           {listings.map((listing) => (
             <div
               key={listing.id}
-              className="w-40 shrink-0 snap-start sm:w-48"
+              className="w-[42%] shrink-0 snap-start sm:w-48"
             >
               <ListingCard listing={listing} />
             </div>
@@ -86,7 +90,7 @@ export function ProductRail({
           <button
             type="button"
             onClick={() => scroll(-1)}
-            className="absolute -left-3 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-surface shadow-md transition-opacity hover:bg-raised md:group-hover/rail:flex"
+            className="absolute -left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface shadow-md transition-opacity hover:bg-raised md:group-hover/rail:flex"
             aria-label="Scroll left"
           >
             <ChevronLeft className="h-5 w-5 text-ink" />
@@ -96,7 +100,7 @@ export function ProductRail({
           <button
             type="button"
             onClick={() => scroll(1)}
-            className="absolute -right-3 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-surface shadow-md transition-opacity hover:bg-raised md:group-hover/rail:flex"
+            className="absolute -right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface shadow-md transition-opacity hover:bg-raised md:group-hover/rail:flex"
             aria-label="Scroll right"
           >
             <ChevronRight className="h-5 w-5 text-ink" />

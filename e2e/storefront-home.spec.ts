@@ -99,13 +99,36 @@ test.describe("Quick-add button (#55)", () => {
     await expect(addBtn).toBeVisible();
   });
 
-  test("quick-add button is clickable without error", async ({ page }) => {
+  test("clicking quick-add shows stepper with quantity 1", async ({ page }) => {
     await page.goto(`${BASE}/`);
     const card = page.locator("[data-testid='listing-card']").first();
     await expect(card).toBeVisible({ timeout: 15000 });
 
     const addBtn = card.locator("[data-testid='quick-add-btn']");
     await addBtn.click();
+
+    const stepper = card.locator("[data-testid='quick-add-stepper']");
+    await expect(stepper).toBeVisible({ timeout: 3000 });
+
+    const qty = card.locator("[data-testid='stepper-qty']");
+    await expect(qty).toHaveText("1");
+  });
+
+  test("stepper minus returns to add button at zero", async ({ page }) => {
+    await page.goto(`${BASE}/`);
+    const card = page.locator("[data-testid='listing-card']").first();
+    await expect(card).toBeVisible({ timeout: 15000 });
+
+    const addBtn = card.locator("[data-testid='quick-add-btn']");
+    await addBtn.click();
+
+    const minus = card.locator("[data-testid='stepper-minus']");
+    await expect(minus).toBeVisible({ timeout: 3000 });
+    await minus.click();
+
+    await expect(card.locator("[data-testid='quick-add-btn']")).toBeVisible({
+      timeout: 3000,
+    });
   });
 });
 

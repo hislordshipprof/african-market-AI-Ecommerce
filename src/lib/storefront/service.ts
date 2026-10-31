@@ -349,6 +349,7 @@ export async function getListingsByCategory(
   storeId: string,
 ): Promise<Map<string, StorefrontListing[]>> {
   const scoped = storeScoped(storeId);
+  const MAX_HOMEPAGE_LISTINGS = 120;
   const listings = await scoped.listing.findMany({
     where: { active: true },
     include: {
@@ -356,6 +357,7 @@ export async function getListingsByCategory(
       variants: { select: { price: true } },
     },
     orderBy: { createdAt: "desc" },
+    take: MAX_HOMEPAGE_LISTINGS,
   });
 
   const byCategory = new Map<string, StorefrontListing[]>();
