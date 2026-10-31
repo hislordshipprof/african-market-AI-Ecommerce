@@ -4,22 +4,10 @@ import { auth } from "../auth";
 
 export async function requirePlatformAdmin(opts?: { allowUnenrolled2FA?: boolean }) {
   const reqHeaders = await headers();
-  const hasCookie = reqHeaders.has("cookie");
-  const cookieSnippet = reqHeaders.get("cookie")?.slice(0, 80) ?? "(none)";
 
   const session = await auth.api.getSession({
     headers: reqHeaders,
     query: { disableCookieCache: true },
-  });
-
-  // TEMP DIAGNOSTIC — remove after CI is green
-  console.log("[requirePlatformAdmin]", {
-    hasCookie,
-    cookieSnippet,
-    hasSession: !!session,
-    userId: session?.user?.id?.slice(0, 8),
-    role: session?.user?.role,
-    twoFA: session?.session?.twoFactorVerified,
   });
 
   if (!session) {
