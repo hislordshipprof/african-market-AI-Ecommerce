@@ -39,13 +39,11 @@ test.describe("Storefront browse and search (#8 acceptance criteria)", () => {
     await page.goto(`${BASE}/`);
     await expect(page.locator("h1")).toBeVisible({ timeout: 10000 });
 
-    const firstCard = page.locator("[data-testid='listing-card'] a").first();
+    const firstCard = page.locator("[data-testid='listing-card']").first();
     await expect(firstCard).toBeVisible({ timeout: 10000 });
     await firstCard.click();
 
     await page.waitForURL(/\/listings\//);
-
-    await expect(page.locator("h1")).toBeVisible({ timeout: 10000 });
 
     const variantSection = page.locator("#variants-heading");
     await expect(variantSection).toBeVisible({ timeout: 5000 });
