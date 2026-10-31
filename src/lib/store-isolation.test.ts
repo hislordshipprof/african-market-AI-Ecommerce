@@ -258,6 +258,137 @@ describe.skipIf(!hasDb)("Platform admin RLS (DB-backed)", () => {
   });
 });
 
+describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
+  let rawPrisma: PrismaClient;
+  let storeAId: string;
+  let storeBId: string;
+  let testUserId: string;
+
+  beforeAll(async () => {
+    const adapter = new PrismaPg(process.env.DATABASE_URL!);
+    rawPrisma = new PrismaClient({ adapter });
+    await rawPrisma.$connect();
+
+    const storeA = await rawPrisma.store.upsert({
+      where: { slug: "rls-membership-a" },
+      update: {},
+      create: { slug: "rls-membership-a", name: "Membership Store A", themePreset: "palm-and-shea" },
+    });
+    storeAId = storeA.id;
+
+    const storeB = await rawPrisma.store.upsert({
+      where: { slug: "rls-membership-b" },
+      update: {},
+      create: { slug: "rls-membership-b", name: "Membership Store B", themePreset: "lagoon-and-coral" },
+    });
+    storeBId = storeB.id;
+
+    const user = await rawPrisma.user.upsert({
+      where: { email: "rls-test-member@example.com" },
+      update: {},
+      create: { email: "rls-test-member@example.com", name: "RLS Test Member", emailVerified: true },
+    });
+    testUserId = user.id;
+
+    await rawPrisma.storeMembership.upsert({
+      where: { storeId_userId: { storeId: storeAId, userId: testUserId } },
+      update: {},
+      create: { storeId: storeAId, userId: testUserId, role: "owner" },
+    });
+
+    await rawPrisma.storeInvite.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
+    await rawPrisma.storeInvite.create({
+      data: {
+        storeId: storeAId,
+        email: "invite-a@example.com",
+        role: "staff",
+        tokenHash: `rls_test_hash_a_${Date.now()}`,
+        expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+        invitedById: testUserId,
+      },
+    });
+    await rawPrisma.storeInvite.create({
+      data: {
+        storeId: storeBId,
+        email: "invite-b@example.com",
+        role: "staff",
+        tokenHash: `rls_test_hash_b_${Date.now()}`,
+        expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+        invitedById: testUserId,
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await rawPrisma.storeInvite.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
+    await rawPrisma.storeMembership.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
+    await rawPrisma.user.deleteMany({ where: { email: "rls-test-member@example.com" } });
+    await rawPrisma.store.deleteMany({ where: { slug: { in: ["rls-membership-a", "rls-membership-b"] } } });
+    await rawPrisma.$disconnect();
+  });
+
+  it("storeScoped(A) sees only store A memberships", async () => {
+    const scoped = storeScoped(storeAId);
+    const rows = await scoped.storeMembership.findMany();
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.every((r) => r.storeId === storeAId)).toBe(true);
+  });
+
+  it("storeScoped(A) sees only store A invites", async () => {
+    const scoped = storeScoped(storeAId);
+    const rows = await scoped.storeInvite.findMany();
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.every((r) => r.storeId === storeAId)).toBe(true);
+  });
+
+  it("storeScoped(B) cannot see store A memberships", async () => {
+    const scoped = storeScoped(storeBId);
+    const rows = await scoped.storeMembership.findMany();
+    expect(rows.every((r) => r.storeId === storeBId)).toBe(true);
+  });
+
+  it("cross-store membership insert fails", async () => {
+    const scoped = storeScoped(storeAId);
+    await expect(
+      scoped.storeMembership.create({
+        data: { storeId: storeBId, userId: testUserId, role: "staff" },
+      }),
+    ).rejects.toThrow(/42501|row-level security/i);
+  });
+
+  it("cross-store invite insert fails", async () => {
+    const scoped = storeScoped(storeAId);
+    await expect(
+      scoped.storeInvite.create({
+        data: {
+          storeId: storeBId,
+          email: "cross-store@example.com",
+          role: "staff",
+          tokenHash: `cross_store_${Date.now()}`,
+          expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+          invitedById: testUserId,
+        },
+      }),
+    ).rejects.toThrow(/42501|row-level security/i);
+  });
+
+  it("platformAdmin can read memberships across stores", async () => {
+    const memberships = await platformAdmin.storeMembership.findMany({
+      where: { storeId: { in: [storeAId, storeBId] } },
+    });
+    expect(memberships.some((m) => m.storeId === storeAId)).toBe(true);
+  });
+
+  it("platformAdmin can read invites across stores", async () => {
+    const invites = await platformAdmin.storeInvite.findMany({
+      where: { storeId: { in: [storeAId, storeBId] } },
+    });
+    const storeIds = new Set(invites.map((i) => i.storeId));
+    expect(storeIds.has(storeAId)).toBe(true);
+    expect(storeIds.has(storeBId)).toBe(true);
+  });
+});
+
 const hasRuntime = hasDb && !!process.env.APP_RUNTIME_PASSWORD;
 
 describe.skipIf(!hasRuntime)(
