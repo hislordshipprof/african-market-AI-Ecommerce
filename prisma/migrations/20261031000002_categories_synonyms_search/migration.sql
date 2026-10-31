@@ -69,6 +69,20 @@ ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "search_vector" tsvector
     GENERATED ALWAYS AS (to_tsvector('english', coalesce("custom_name", ''))) STORED;
 CREATE INDEX "listings_search_idx" ON "listings" USING gin ("search_vector");
 
+-- Seed the 10 categories from spec 5.1 (before RLS is forced, so the
+-- migrating role can INSERT without needing a matching policy).
+INSERT INTO "categories" ("id", "name", "slug", "sort_order", "created_at", "updated_at") VALUES
+  ('cat_tubers',        'Tubers',           'tubers',           1,  NOW(), NOW()),
+  ('cat_grains',        'Grains & Flours',  'grains-and-flours', 2, NOW(), NOW()),
+  ('cat_spices',        'Spices',           'spices',           3,  NOW(), NOW()),
+  ('cat_oils',          'Oils',             'oils',             4,  NOW(), NOW()),
+  ('cat_vegetables',    'Vegetables',       'vegetables',       5,  NOW(), NOW()),
+  ('cat_fish_meat',     'Fish & Meat',      'fish-and-meat',    6,  NOW(), NOW()),
+  ('cat_frozen',        'Frozen',           'frozen',           7,  NOW(), NOW()),
+  ('cat_snacks',        'Snacks',           'snacks',           8,  NOW(), NOW()),
+  ('cat_drinks',        'Drinks',           'drinks',           9,  NOW(), NOW()),
+  ('cat_beauty',        'Beauty',           'beauty',           10, NOW(), NOW());
+
 -- RLS: categories — any authenticated user can read; only platform admin can write
 ALTER TABLE "categories" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "categories" FORCE ROW LEVEL SECURITY;
@@ -98,16 +112,3 @@ CREATE POLICY product_synonyms_platform_admin ON "product_synonyms"
 -- Grant app_user access to new tables
 GRANT SELECT, INSERT, UPDATE, DELETE ON "categories" TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON "product_synonyms" TO app_user;
-
--- Seed the 10 categories from spec 5.1
-INSERT INTO "categories" ("id", "name", "slug", "sort_order", "created_at", "updated_at") VALUES
-  ('cat_tubers',        'Tubers',           'tubers',           1,  NOW(), NOW()),
-  ('cat_grains',        'Grains & Flours',  'grains-and-flours', 2, NOW(), NOW()),
-  ('cat_spices',        'Spices',           'spices',           3,  NOW(), NOW()),
-  ('cat_oils',          'Oils',             'oils',             4,  NOW(), NOW()),
-  ('cat_vegetables',    'Vegetables',       'vegetables',       5,  NOW(), NOW()),
-  ('cat_fish_meat',     'Fish & Meat',      'fish-and-meat',    6,  NOW(), NOW()),
-  ('cat_frozen',        'Frozen',           'frozen',           7,  NOW(), NOW()),
-  ('cat_snacks',        'Snacks',           'snacks',           8,  NOW(), NOW()),
-  ('cat_drinks',        'Drinks',           'drinks',           9,  NOW(), NOW()),
-  ('cat_beauty',        'Beauty',           'beauty',           10, NOW(), NOW());
