@@ -127,7 +127,7 @@ async function seedTestAdmin() {
 
   const encryptedSecret = await symmetricEncrypt({
     key: authSecret,
-    data: totpSecret,
+    data: `base32:${totpSecret}`,
   });
   const encryptedBackupCodes = await symmetricEncrypt({
     key: authSecret,
