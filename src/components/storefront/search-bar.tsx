@@ -34,7 +34,7 @@ export function SearchBar() {
         type="search"
         placeholder="Search by name, e.g. ugu, garri, egusi..."
         autoComplete="off"
-        className="w-full rounded-pill border border-line bg-surface px-4 py-3 pl-10 font-body text-sm text-ink placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        className="w-full min-h-[44px] rounded-pill border border-line bg-surface px-4 py-3 pl-10 font-body text-sm text-ink placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
       />
       <svg
         className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
