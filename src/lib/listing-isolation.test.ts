@@ -239,7 +239,7 @@ describe.skipIf(!hasDb)("MasterProduct RLS (shared read)", () => {
     const result = await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
-      rawPrisma.$queryRaw`SELECT * FROM master_products WHERE id = ${masterProductId}`,
+      rawPrisma.$queryRaw`SELECT id, name FROM master_products WHERE id = ${masterProductId}`,
     ]);
     const rows = result[2] as Array<{ id: string }>;
     expect(rows.length).toBe(1);
