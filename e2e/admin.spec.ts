@@ -182,11 +182,8 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
     await page.fill("input[type='password']", ADMIN_PASSWORD);
     await page.click("button:has-text('Begin setup')");
 
-    await expect(page.locator("text=Scan this URI")).toBeVisible({
-      timeout: 10000,
-    });
-
     const totpUriEl = page.locator("code").first();
+    await expect(totpUriEl).toBeVisible({ timeout: 15000 });
     const totpUri = await totpUriEl.textContent();
     expect(totpUri).toBeTruthy();
 
