@@ -26,6 +26,8 @@ Blocks merge (fixed on the branch):
 
 Everything else becomes **one follow-up issue** (`ready-for-agent`, blocked by the merged ticket), and the PR merges.
 
+Keyless builds: when a ticket's provider keys aren't available yet, `NO_KEYS=1 scripts/build-ticket.sh <n>` builds it against a fake behind a small interface. The PR is titled `[needs keys]`, lists the real-key checks, and stays unmerged until the human runs them. Tickets blocked by it wait too.
+
 Anti-drip: one full review inside `implement`; follow-up reviews cover only the fix diff; **at most two fix rounds**. A third round means the ticket is too big: split it at triage. Any ticket with more than about 5 acceptance criteria, or more than one security-sensitive system, is split at triage.
 
 ## Concurrency (this PC)

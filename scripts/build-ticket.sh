@@ -4,6 +4,7 @@
 #   scripts/build-ticket.sh <issue>                      # build with /supermatt:implement
 #   scripts/build-ticket.sh <issue> --resume "<findings>"  # fix round in the same session
 #   scripts/build-ticket.sh <issue> --continue            # resume a killed run
+#   NO_KEYS=1 scripts/build-ticket.sh <issue>             # build against fakes; real-key testing later, PR stays unmerged
 # Writes: .builder/logs/ticket-<n>-<time>.json, .builder/session-<n>.txt, .builder/report-<n>.md
 set -euo pipefail
 REPO="hislordshipprof/african-market-AI-Ecommerce"
@@ -34,7 +35,10 @@ if [ "$MODE" = "build" ]; then
   need=$(awk -v n="$N" '$1==n {for (i=2;i<=NF;i++) print $i}' scripts/ticket-env.txt)
   missing=()
   for k in $need; do grep -Eq "^$k=.+" .env.local 2>/dev/null || missing+=("$k"); done
-  [ ${#missing[@]} -eq 0 ] || { echo "Ticket #$N needs these keys in .env.local first: ${missing[*]}"; exit 2; }
+  if [ ${#missing[@]} -gt 0 ] && [ "${NO_KEYS:-}" != "1" ]; then
+    echo "Ticket #$N needs these keys in .env.local first: ${missing[*]} (or NO_KEYS=1 to build against fakes)"; exit 2
+  fi
+  [ ${#missing[@]} -eq 0 ] || KEYLESS="These keys are not available yet: ${missing[*]}. Build against the provider through a small interface with a fake for tests; unit, integration and e2e tests use the fake. Tests that need the real provider skip with a clear message when the keys are unset. The app must build and start without the keys: read them lazily and fail at call time with a clear error, never at import. Prefix the PR title with '[needs keys]' and list in the PR body exactly what the human must test with real keys. The coordinator will not merge until that testing is done."
 fi
 
 # Worktree (created once, reused by fix rounds).
@@ -53,6 +57,7 @@ case "$MODE" in
     PROMPT="/supermatt:implement #$N
 Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build && pnpm start on http://localhost:3000 using .env.local.
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
+${KEYLESS:-}
 $RULES"
     claude -p "$PROMPT" --dangerously-skip-permissions --output-format json > "$LOG" 2>&1 || status=$?
     ;;
