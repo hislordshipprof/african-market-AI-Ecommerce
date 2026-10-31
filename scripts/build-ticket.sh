@@ -50,7 +50,7 @@ git fetch -q origin main
 cp .env.local "$WT/.env.local"
 cd "$WT"
 
-RULES="Run headless: never ask the user. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Commit and push early so a killed run loses little. Keep $REPORT updated with: the commit SHA you checked, QA and code-review verdict lines, every finding code with how it ended, and the PR URL."
+RULES="Run headless: never ask the user. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Commit and push early so a killed run loses little. Keep $REPORT updated with: the commit SHA you checked, QA and code-review verdict lines, every finding code with how it ended, and the PR URL."
 
 case "$MODE" in
   build)
