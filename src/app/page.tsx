@@ -4,19 +4,6 @@ import { listCategories, getActiveListings } from "@/lib/storefront/service";
 import { StorefrontHeader } from "@/components/storefront/storefront-header";
 import { ListingCard } from "@/components/storefront/listing-card";
 
-const CATEGORY_ICONS: Record<string, string> = {
-  tubers: "🫚",
-  "grains-and-flours": "🌾",
-  spices: "🌶️",
-  oils: "🫒",
-  vegetables: "🥬",
-  "fish-and-meat": "🐟",
-  frozen: "❄️",
-  snacks: "🍿",
-  drinks: "🥤",
-  beauty: "✨",
-};
-
 export default async function StorefrontPage() {
   const { store, suspended } = await getStoreWithStatus();
 
@@ -62,10 +49,10 @@ export default async function StorefrontPage() {
               <Link
                 key={cat.id}
                 href={`/categories/${cat.slug}`}
-                className="flex flex-col items-center gap-2 rounded-md bg-surface p-4 text-center transition-colors hover:bg-soft"
+                className="flex items-center gap-2.5 rounded-md bg-surface px-4 py-3 transition-colors hover:bg-soft"
               >
-                <span className="text-2xl" role="img" aria-hidden="true">
-                  {CATEGORY_ICONS[cat.slug] ?? "📦"}
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-soft font-display text-sm font-bold text-primary">
+                  {cat.name.charAt(0)}
                 </span>
                 <span className="font-label text-xs font-semibold text-ink">
                   {cat.name}
