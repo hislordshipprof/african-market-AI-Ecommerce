@@ -54,13 +54,12 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
   });
 
   test("?store= fallback works in development", async ({ page }) => {
-    test.skip(!!process.env.CI, "?store= disabled in production mode");
+    test.skip(true, "requires next dev; e2e always uses next start (production mode)");
     await page.goto("http://localhost:3000/?store=mama-ngozi");
     await expect(page.locator("h1")).toHaveText("Mama Ngozi African Market");
   });
 
   test("?store= override is blocked in production mode", async ({ page }) => {
-    test.skip(!process.env.CI, "only runs in CI (production mode)");
     await page.goto("http://localhost:3000/?store=mama-ngozi");
     await expect(page.locator("h1")).toHaveText("Store not found");
   });
