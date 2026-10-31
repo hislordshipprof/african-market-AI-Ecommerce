@@ -46,10 +46,11 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.auditLog.deleteMany({ where: { storeId } }),
+      rawPrisma.stockEvent.deleteMany({ where: { storeId } }),
+      rawPrisma.stockEvent.deleteMany({ where: { actorId: userId } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId } } }),
+      rawPrisma.listing.deleteMany({ where: { storeId } }),
     ]);
-    await rawPrisma.stockEvent.deleteMany({ where: { storeId } });
-    await rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId } } });
-    await rawPrisma.listing.deleteMany({ where: { storeId } });
     await rawPrisma.user.deleteMany({ where: { email: "svc-listing-user@example.com" } });
     await rawPrisma.store.deleteMany({ where: { slug: "svc-listing-test" } });
     await rawPrisma.$disconnect();

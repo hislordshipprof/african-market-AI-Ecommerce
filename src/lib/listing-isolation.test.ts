@@ -89,10 +89,11 @@ describe.skipIf(!hasDb)("Listing RLS isolation", () => {
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.auditLog.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+      rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+      rawPrisma.stockEvent.deleteMany({ where: { actorId: testUserId } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } }),
+      rawPrisma.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
     ]);
-    await rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
-    await rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } });
-    await rawPrisma.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
     await rawPrisma.user.deleteMany({ where: { email: "rls-listing-test@example.com" } });
     await rawPrisma.store.deleteMany({ where: { slug: { in: ["rls-listing-a", "rls-listing-b"] } } });
     await rawPrisma.$disconnect();
