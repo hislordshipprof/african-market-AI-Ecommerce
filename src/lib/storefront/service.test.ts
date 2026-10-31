@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { storeScoped, platformAdmin } from "../db";
+
 import {
   listCategories,
   listingsByCategory,
@@ -19,7 +19,6 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let rawPrisma: PrismaClient;
   let storeAId: string;
   let storeBId: string;
-  let userId: string;
   let masterProductId: string;
   let synonymId: string;
   let listingAId: string;
@@ -46,12 +45,11 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     });
     storeBId = storeB.id;
 
-    const user = await rawPrisma.user.upsert({
+    await rawPrisma.user.upsert({
       where: { email: "sf-test-user@example.com" },
       update: {},
       create: { id: "sf-test-user", email: "sf-test-user@example.com", name: "SF Test User", emailVerified: true },
     });
-    userId = user.id;
 
     // Get the vegetables category (seeded by migration)
     const vegCat = await rawPrisma.category.findUnique({ where: { slug: "vegetables" } });
@@ -224,20 +222,21 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   // Seam 7: category seed migration
-  it("has exactly 10 categories after migration", async () => {
+  it("has exactly 11 categories after seed", async () => {
     const categories = await listCategories();
-    expect(categories.length).toBe(10);
+    expect(categories.length).toBe(11);
     const slugs = categories.map((c) => c.slug);
-    expect(slugs).toContain("tubers");
+    expect(slugs).toContain("tubers-and-roots");
     expect(slugs).toContain("vegetables");
-    expect(slugs).toContain("spices");
+    expect(slugs).toContain("spices-and-seasonings");
     expect(slugs).toContain("grains-and-flours");
     expect(slugs).toContain("fish-and-meat");
     expect(slugs).toContain("frozen");
     expect(slugs).toContain("snacks");
     expect(slugs).toContain("drinks");
     expect(slugs).toContain("beauty");
-    expect(slugs).toContain("oils");
+    expect(slugs).toContain("oils-and-butters");
+    expect(slugs).toContain("pantry-staples");
   });
 
   // Seam 1: category browse store isolation

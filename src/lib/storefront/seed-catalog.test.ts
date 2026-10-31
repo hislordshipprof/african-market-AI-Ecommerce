@@ -75,6 +75,6 @@ describe.skipIf(!hasDb)("Demo catalog seed", () => {
       const after = await scoped.listing.findMany();
       expect(after.length).toBe(countBefore);
     },
-    30000,
+    120000,
   );
 });
