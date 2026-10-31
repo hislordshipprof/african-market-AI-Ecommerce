@@ -83,8 +83,11 @@ export default async function StorefrontPage() {
         {listings.length === 0 && (
           <section className="mt-8">
             <div className="rounded-md bg-surface p-8 text-center">
-              <p className="font-body text-muted-foreground">
-                No listings yet. Check back soon.
+              <p className="font-body font-medium text-ink">
+                No listings yet
+              </p>
+              <p className="mt-1 font-body text-sm text-muted-foreground">
+                This store is setting up. Check back soon for fresh products.
               </p>
             </div>
           </section>

@@ -50,8 +50,15 @@ export default async function CategoryPage({
           </div>
         ) : (
           <div className="rounded-md bg-surface p-8 text-center">
-            <p className="font-body text-muted-foreground">
-              No listings in this category yet.
+            <p className="font-body font-medium text-ink">
+              No listings in {category.name} yet
+            </p>
+            <p className="mt-1 font-body text-sm text-muted-foreground">
+              Try browsing{" "}
+              <Link href="/" className="text-primary underline underline-offset-2 hover:no-underline">
+                all categories
+              </Link>{" "}
+              or use the search bar above.
             </p>
           </div>
         )}

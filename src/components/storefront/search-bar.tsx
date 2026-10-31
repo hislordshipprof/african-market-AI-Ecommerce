@@ -1,12 +1,26 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useTransition } from "react";
+import { useEffect, useRef, useTransition } from "react";
 
 export function SearchBar() {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key !== "/") return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if ((e.target as HTMLElement)?.isContentEditable) return;
+      e.preventDefault();
+      inputRef.current?.focus();
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, []);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -26,15 +40,16 @@ export function SearchBar() {
       role="search"
     >
       <label htmlFor="storefront-search" className="sr-only">
-        Search listings
+        Search listings — press / to focus
       </label>
       <input
+        ref={inputRef}
         id="storefront-search"
         name="q"
         type="search"
         placeholder="Search by name, e.g. ugu, garri, egusi..."
         autoComplete="off"
-        className="w-full min-h-[44px] rounded-pill border border-line bg-surface px-4 py-3 pl-10 font-body text-sm text-ink placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        className="w-full min-h-[44px] rounded-pill border border-line bg-surface px-4 py-3 pl-10 pr-12 font-body text-sm text-ink placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
       />
       <svg
         className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -51,10 +66,12 @@ export function SearchBar() {
           d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
         />
       </svg>
-      {isPending && (
+      {isPending ? (
         <div className="absolute right-3 top-1/2 -translate-y-1/2">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
         </div>
+      ) : (
+        <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 hidden rounded-sm border border-line bg-raised px-1.5 py-0.5 font-body text-[10px] font-medium text-muted-foreground sm:inline-block">/</kbd>
       )}
     </form>
   );

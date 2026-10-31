@@ -73,15 +73,49 @@ export default async function SearchPage({
           </ul>
         ) : q.trim() ? (
           <div className="rounded-md bg-surface p-8 text-center">
-            <p className="font-body text-muted-foreground">
-              No results for &ldquo;{q.trim()}&rdquo;. Try a different spelling.
+            <svg className="mx-auto mb-3 h-10 w-10 text-muted-foreground/50" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+            <p className="font-body font-medium text-ink">
+              No results for &ldquo;{q.trim()}&rdquo;
             </p>
+            <p className="mt-1 font-body text-sm text-muted-foreground">
+              Check the spelling or try a broader term.
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {["ugu", "garri", "egusi", "plantain", "yam"].map((term) => (
+                <Link
+                  key={term}
+                  href={`/search?q=${encodeURIComponent(term)}`}
+                  className="rounded-pill border border-line bg-raised px-3 py-1 font-body text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  {term}
+                </Link>
+              ))}
+            </div>
           </div>
         ) : (
           <div className="rounded-md bg-surface p-8 text-center">
-            <p className="font-body text-muted-foreground">
-              Type a search term above to find listings.
+            <svg className="mx-auto mb-3 h-10 w-10 text-muted-foreground/50" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+            <p className="font-body font-medium text-ink">
+              Search this store
             </p>
+            <p className="mt-1 font-body text-sm text-muted-foreground">
+              Find products by their local or English name.
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {["ugu", "garri", "egusi", "plantain", "yam"].map((term) => (
+                <Link
+                  key={term}
+                  href={`/search?q=${encodeURIComponent(term)}`}
+                  className="rounded-pill border border-line bg-raised px-3 py-1 font-body text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  Try &ldquo;{term}&rdquo;
+                </Link>
+              ))}
+            </div>
           </div>
         )}
       </div>
