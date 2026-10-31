@@ -9,20 +9,29 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Store, Users, Package, Settings } from "lucide-react";
+import { Store, Users, Package, Settings, CreditCard } from "lucide-react";
 
 interface Props {
   storeName: string;
   storeSlug: string;
   userName: string;
   role: string;
+  stripeOnboardingStatus: string;
 }
+
+const STATUS_LABELS: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  not_started: { label: "Not started", variant: "outline" },
+  pending: { label: "Pending", variant: "secondary" },
+  restricted: { label: "Needs info", variant: "destructive" },
+  complete: { label: "Complete", variant: "default" },
+};
 
 export function StoreAdminDashboard({
   storeName,
   storeSlug,
   userName,
   role,
+  stripeOnboardingStatus,
 }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -70,6 +79,29 @@ export function StoreAdminDashboard({
                       <CardTitle className="text-base">Team</CardTitle>
                       <CardDescription>
                         Manage staff and invitations
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {role === "owner" && (
+            <Link href={`/store-admin/payouts?store=${storeParam}`}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <CreditCard className="size-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">Payouts</CardTitle>
+                      <CardDescription className="flex items-center gap-2">
+                        Connect payments
+                        <Badge variant={STATUS_LABELS[stripeOnboardingStatus]?.variant ?? "outline"}>
+                          {STATUS_LABELS[stripeOnboardingStatus]?.label ?? stripeOnboardingStatus}
+                        </Badge>
                       </CardDescription>
                     </div>
                   </div>

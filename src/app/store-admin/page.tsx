@@ -10,6 +10,7 @@ export default async function StoreAdminPage() {
       storeSlug={session.store.slug}
       userName={session.user.name ?? session.user.email}
       role={session.membership.role}
+      stripeOnboardingStatus={session.store.stripeOnboardingStatus}
     />
   );
 }
