@@ -130,6 +130,20 @@ test.describe("Store management (authenticated)", () => {
     await expect(page.getByLabel("Pickup enabled")).toBeChecked();
   });
 
+  test("create store with zero prep time and delivery radius", async ({ page }) => {
+    const slug = `e2e-zero-${Date.now()}`;
+
+    await page.click("text=Create store");
+    await page.getByLabel("Slug").fill(slug);
+    await page.getByLabel("Store name").fill("E2E Zero Values");
+    await page.getByLabel("Prep time (minutes)").fill("0");
+    await page.getByLabel("Delivery radius (miles)").fill("0");
+    await page.click("button[type='submit']:has-text('Create store')");
+
+    await page.waitForURL("**/admin/stores", { timeout: 10000 });
+    await expect(page.locator(`text=${slug}`)).toBeVisible();
+  });
+
   test("create and then edit a store", async ({ page }) => {
     const slug = `e2e-test-${Date.now()}`;
 
