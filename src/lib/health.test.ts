@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { checkEnv, checkDatabase, checkMigrations, runHealthChecks } from "./health";
+import { runtimeDatabaseUrl } from "./env";
 
 describe("checkEnv", () => {
   it("returns all true when every required var is present", () => {
@@ -166,5 +169,66 @@ describe("runHealthChecks", () => {
       queryRaw: makeQueryRaw(),
     });
     expect(result.body.version).toBe("unknown");
+  });
+});
+
+const hasDb = !!process.env.DATABASE_URL;
+const hasRuntime = hasDb && !!process.env.APP_RUNTIME_PASSWORD;
+
+describe.skipIf(!hasDb)("Health check DB integration", () => {
+  let dbPrisma: PrismaClient;
+
+  beforeAll(async () => {
+    const url = runtimeDatabaseUrl(process.env as Record<string, string | undefined>);
+    const adapter = new PrismaPg(url);
+    dbPrisma = new PrismaClient({ adapter });
+    await dbPrisma.$connect();
+  });
+
+  afterAll(async () => {
+    await dbPrisma?.$disconnect();
+  });
+
+  it("checkDatabase returns reachable true against real DB", async () => {
+    const queryRaw = dbPrisma.$queryRaw.bind(dbPrisma) as (
+      strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) => Promise<unknown[]>;
+    const result = await checkDatabase(queryRaw);
+    expect(result.reachable).toBe(true);
+    expect(typeof result.user).toBe("string");
+  });
+
+  it("checkMigrations returns upToDate true (no pending)", async () => {
+    const queryRaw = dbPrisma.$queryRaw.bind(dbPrisma) as (
+      strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) => Promise<unknown[]>;
+    const result = await checkMigrations(queryRaw);
+    expect(result.upToDate).toBe(true);
+  });
+});
+
+describe.skipIf(!hasRuntime)("Health check proves app_runtime connection", () => {
+  let runtimePrisma: PrismaClient;
+
+  beforeAll(async () => {
+    const url = runtimeDatabaseUrl(process.env as Record<string, string | undefined>);
+    const adapter = new PrismaPg(url);
+    runtimePrisma = new PrismaClient({ adapter });
+    await runtimePrisma.$connect();
+  });
+
+  afterAll(async () => {
+    await runtimePrisma?.$disconnect();
+  });
+
+  it("SELECT current_user returns app_runtime", async () => {
+    const queryRaw = runtimePrisma.$queryRaw.bind(runtimePrisma) as (
+      strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) => Promise<unknown[]>;
+    const result = await checkDatabase(queryRaw);
+    expect(result.user).toBe("app_runtime");
   });
 });
