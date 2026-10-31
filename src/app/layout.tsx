@@ -54,9 +54,9 @@ export default async function RootLayout({
   return (
     <html lang="en" className={`${bricolage.variable} ${figtree.variable}`}>
       <head>
-        {themeStyle && (
+        {themeStyle ? (
           <style dangerouslySetInnerHTML={{ __html: themeStyle }} />
-        )}
+        ) : null}
       </head>
       <body>{children}</body>
     </html>
