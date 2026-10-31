@@ -68,6 +68,10 @@ export function storeScoped(storeId: string) {
     rlsTestFixture: wrapDelegate(storeId, prisma.rlsTestFixture),
     storeMembership: wrapDelegate(storeId, prisma.storeMembership),
     storeInvite: wrapDelegate(storeId, prisma.storeInvite),
+    listing: wrapDelegate(storeId, prisma.listing),
+    listingVariant: wrapDelegate(storeId, prisma.listingVariant),
+    stockEvent: wrapDelegate(storeId, prisma.stockEvent),
+    auditLog: wrapDelegate(storeId, prisma.auditLog),
   };
 }
 
@@ -100,15 +104,33 @@ export const platformAdmin = {
   auditLog: wrapPlatformAdminDelegate(prisma.auditLog),
   storeMembership: wrapPlatformAdminDelegate(prisma.storeMembership),
   storeInvite: wrapPlatformAdminDelegate(prisma.storeInvite),
+  masterProduct: wrapPlatformAdminDelegate(prisma.masterProduct),
 };
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "$queryRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
     return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, $queryRaw: tx.$queryRaw.bind(tx) });
+  });
+}
+
+export async function storeScopedTransaction<T>(
+  storeId: string,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "stockEvent" | "auditLog" | "$queryRaw">) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
+    return fn({
+      listing: tx.listing,
+      listingVariant: tx.listingVariant,
+      stockEvent: tx.stockEvent,
+      auditLog: tx.auditLog,
+      $queryRaw: tx.$queryRaw.bind(tx),
+    });
   });
 }
 
