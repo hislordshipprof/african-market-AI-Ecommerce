@@ -61,6 +61,39 @@ describe("createListingAction", () => {
     expect(result.error).toMatch(/price/i);
   });
 
+  it("rejects negative price", async () => {
+    const result = await createListingAction(formData({ ...VALID_LISTING, price: "-500" }));
+    expect(result.error).toMatch(/price/i);
+    expect(mockCreateListing).not.toHaveBeenCalled();
+  });
+
+  it("rejects negative qty", async () => {
+    const result = await createListingAction(
+      formData({ ...VALID_LISTING, qty: "-10" }),
+    );
+    expect(result.error).toMatch(/qty|quantity/i);
+    expect(mockCreateListing).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid stockMode", async () => {
+    const result = await createListingAction(
+      formData({ ...VALID_LISTING, stockMode: "foobar" }),
+    );
+    expect(result.error).toMatch(/stock mode/i);
+    expect(mockCreateListing).not.toHaveBeenCalled();
+  });
+
+  it("rejects negative variant price", async () => {
+    const result = await createListingAction(
+      formData({
+        ...VALID_LISTING,
+        variants: JSON.stringify([{ label: "1kg", price: -100, weightG: 1000 }]),
+      }),
+    );
+    expect(result.error).toMatch(/variant.*price/i);
+    expect(mockCreateListing).not.toHaveBeenCalled();
+  });
+
   it("rejects empty variants", async () => {
     const result = await createListingAction(formData({ ...VALID_LISTING, variants: "[]" }));
     expect(result.error).toMatch(/variant/i);
@@ -113,9 +146,8 @@ describe("updateListingAction", () => {
     expect(result.error).toMatch(/listing id/i);
   });
 
-  it("updates price and variants", async () => {
+  it("updates price and variants atomically", async () => {
     mockUpdateListing.mockResolvedValueOnce({ id: "listing-1" });
-    mockUpdateVariants.mockResolvedValueOnce([]);
     const newVariants = JSON.stringify([
       { label: "500g", price: 400, weightG: 500 },
       { label: "2kg", price: 1500, weightG: 2000 },
@@ -125,15 +157,16 @@ describe("updateListingAction", () => {
     );
     expect(result).toEqual({ success: true, id: "listing-1" });
     expect(mockUpdateListing).toHaveBeenCalledWith(
-      expect.objectContaining({ listingId: "listing-1", price: 600 }),
-    );
-    expect(mockUpdateVariants).toHaveBeenCalledWith(
       expect.objectContaining({
-        storeId: "store-1",
         listingId: "listing-1",
-        variants: expect.arrayContaining([expect.objectContaining({ label: "500g" })]),
+        price: 600,
+        variants: expect.arrayContaining([
+          expect.objectContaining({ label: "500g" }),
+          expect.objectContaining({ label: "2kg" }),
+        ]),
       }),
     );
+    expect(mockUpdateVariants).not.toHaveBeenCalled();
   });
 
   it("clears maxPerOrder when sent as empty string", async () => {
@@ -152,6 +185,22 @@ describe("updateListingAction", () => {
       formData({ listingId: "listing-1", customName: "" }),
     );
     expect(result.error).toMatch(/name/i);
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid stockMode on update", async () => {
+    const result = await updateListingAction(
+      formData({ listingId: "listing-1", stockMode: "invalid" }),
+    );
+    expect(result.error).toMatch(/stock mode/i);
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+  });
+
+  it("rejects negative price on update", async () => {
+    const result = await updateListingAction(
+      formData({ listingId: "listing-1", price: "-100" }),
+    );
+    expect(result.error).toMatch(/price/i);
     expect(mockUpdateListing).not.toHaveBeenCalled();
   });
 

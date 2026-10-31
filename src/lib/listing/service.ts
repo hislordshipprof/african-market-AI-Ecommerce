@@ -111,6 +111,7 @@ export interface UpdateListingInput {
   maxPerOrder?: number | null;
   actorId: string;
   actorEmail: string;
+  variants?: CreateVariantInput[];
 }
 
 export async function updateListing(input: UpdateListingInput) {
@@ -209,6 +210,24 @@ export async function updateListing(input: UpdateListingInput) {
           },
         });
       }
+    }
+
+    if (input.variants) {
+      await tx.listingVariant.deleteMany({ where: { listingId: input.listingId } });
+      await Promise.all(
+        input.variants.map((v) =>
+          tx.listingVariant.create({
+            data: {
+              listingId: input.listingId,
+              label: v.label,
+              price: v.price,
+              weightG: v.weightG,
+              sku: v.sku ?? null,
+              barcode: v.barcode ?? null,
+            },
+          }),
+        ),
+      );
     }
 
     return updated;

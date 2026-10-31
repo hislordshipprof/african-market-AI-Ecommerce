@@ -6,23 +6,30 @@ import {
   updateListing,
   deactivateListing,
   reactivateListing,
-  updateVariants,
   type StockMode,
   type StockStatus,
   type CreateVariantInput,
 } from "./service";
 
+const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
+
 function parseVariantsJson(raw: string | null): CreateVariantInput[] {
   if (!raw) return [];
   const parsed: unknown = JSON.parse(raw);
   if (!Array.isArray(parsed)) throw new Error("variants must be an array");
-  return parsed.map((v: Record<string, unknown>) => ({
-    label: String(v.label ?? ""),
-    price: Number(v.price),
-    weightG: Number(v.weightG),
-    sku: v.sku ? String(v.sku) : null,
-    barcode: v.barcode ? String(v.barcode) : null,
-  }));
+  return parsed.map((v: Record<string, unknown>, i: number) => {
+    const price = Number(v.price);
+    const weightG = Number(v.weightG);
+    if (!isFinite(price) || price < 0) throw new Error(`Variant ${i + 1}: valid non-negative price is required`);
+    if (!isFinite(weightG) || weightG < 0) throw new Error(`Variant ${i + 1}: valid non-negative weight is required`);
+    return {
+      label: String(v.label ?? ""),
+      price,
+      weightG,
+      sku: v.sku ? String(v.sku) : null,
+      barcode: v.barcode ? String(v.barcode) : null,
+    };
+  });
 }
 
 export async function createListingAction(formData: FormData) {
@@ -42,8 +49,16 @@ export async function createListingAction(formData: FormData) {
   if (!customName && !masterProductId) {
     return { error: "Product name or master product is required" };
   }
-  if (!priceRaw || isNaN(Number(priceRaw))) {
-    return { error: "Valid price is required" };
+  const price = Number(priceRaw);
+  if (!priceRaw || !isFinite(price) || price < 0) {
+    return { error: "Valid non-negative price is required" };
+  }
+  if (!VALID_STOCK_MODES.has(stockMode)) {
+    return { error: "Stock mode must be 'counted' or 'status'" };
+  }
+  const qty = stockMode === "counted" ? Number(qtyRaw ?? 0) : null;
+  if (qty !== null && (!isFinite(qty) || qty < 0)) {
+    return { error: "Quantity must be a non-negative number" };
   }
 
   try {
@@ -56,9 +71,9 @@ export async function createListingAction(formData: FormData) {
       storeId: session.store.id,
       customName: customName || null,
       masterProductId: masterProductId || null,
-      price: Number(priceRaw),
+      price,
       stockMode: stockMode as StockMode,
-      qty: stockMode === "counted" ? Number(qtyRaw ?? 0) : null,
+      qty,
       status: stockMode === "status" ? ((status as StockStatus) ?? "in_stock") : null,
       frozen,
       perishable,
@@ -94,6 +109,27 @@ export async function updateListingAction(formData: FormData) {
   if (customName !== null && !customName.trim() && !masterProductId) {
     return { error: "Product name is required" };
   }
+  if (priceRaw !== null) {
+    const p = Number(priceRaw);
+    if (!isFinite(p) || p < 0) return { error: "Valid non-negative price is required" };
+  }
+  if (stockMode !== null && !VALID_STOCK_MODES.has(stockMode)) {
+    return { error: "Stock mode must be 'counted' or 'status'" };
+  }
+  if (qtyRaw !== null) {
+    const q = Number(qtyRaw);
+    if (!isFinite(q) || q < 0) return { error: "Quantity must be a non-negative number" };
+  }
+
+  let parsedVariants: CreateVariantInput[] | undefined;
+  if (variantsJson !== null) {
+    try {
+      parsedVariants = parseVariantsJson(variantsJson);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Invalid variants";
+      return { error: message };
+    }
+  }
 
   try {
     const updated = await updateListing({
@@ -109,16 +145,8 @@ export async function updateListingAction(formData: FormData) {
       ...(maxPerOrderRaw !== null && { maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null }),
       actorId: session.user.id,
       actorEmail: session.user.email,
+      variants: parsedVariants,
     });
-
-    if (variantsJson !== null) {
-      const variants = parseVariantsJson(variantsJson);
-      await updateVariants({
-        storeId: session.store.id,
-        listingId,
-        variants,
-      });
-    }
 
     return { success: true, id: updated.id };
   } catch (err) {
