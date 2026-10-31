@@ -16,6 +16,10 @@ How tickets get built. Adapted from SuperMatt's `orchestrate` (which needs Herdr
 
 `scripts/codex-review.sh` (standalone Codex, high effort, exhaustive) is now a fallback for when `implement`'s own review can't run, not a default stage: running it on top duplicates review and causes drip.
 
+## Vercel previews
+
+Previews are built only on request, to save the Hobby plan's daily build limit and Neon branches. `vercel.json` runs `scripts/vercel-ignore.sh`: `main` (production) always builds, and a PR branch builds only when the pushed commit message contains `[preview]`. Builders never add it. The coordinator pushes `git commit --allow-empty -m "chore: preview for verification [preview]"` to the PR branch at a milestone it wants to check, or when the user asks to see one. CI (ci and e2e on GitHub Actions) still runs on every push.
+
 ## Merge policy
 
 Merge method: **squash merge**, confirmed by the user on 2026-10-31. Each ticket lands as one commit on `main`, and the builder's individual commits stay in the PR. GitHub deletes the head branch on merge, which triggers Neon's automatic cleanup of that PR's preview database branch.
