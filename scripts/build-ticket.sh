@@ -59,18 +59,18 @@ Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build 
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
 ${KEYLESS:-}
 $RULES"
-    claude -p "$PROMPT" --dangerously-skip-permissions --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    claude -p "$PROMPT" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   --resume)
     [ -n "$FINDINGS" ] || { echo "--resume needs the finding text"; exit 1; }
     SID=$(cat "$SESSION_FILE")
     PROMPT="/supermatt:fix-findings $FINDINGS
 Fix test-first, re-run affected QA, review only the fix diff, commit, push to the same PR. $RULES"
-    claude -p --resume "$SID" "$PROMPT" --dangerously-skip-permissions --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    claude -p --resume "$SID" "$PROMPT" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   --continue)
     SID=$(cat "$SESSION_FILE")
-    claude -p --resume "$SID" "Continue where you stopped. $RULES" --dangerously-skip-permissions --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    claude -p --resume "$SID" "Continue where you stopped. $RULES" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   *) echo "unknown mode $MODE"; exit 1 ;;
 esac

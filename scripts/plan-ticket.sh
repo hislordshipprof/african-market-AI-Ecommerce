@@ -21,7 +21,7 @@ I am away: decide for me, for issue #$N only. Verify the issue's claims against 
 If the ticket has more than about 5 acceptance criteria or more than one security-sensitive system, recommend a split in the brief and create the child issues.
 Label it ready-for-agent when it can be built without a human decision; otherwise needs-info or ready-for-human with the missing facts. Do not change any code or create branches."
 
-claude -p "$PROMPT" --dangerously-skip-permissions --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+claude -p "$PROMPT" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
 echo "Plan finished (exit ${status:-0}). Log: $LOG"
 gh issue view "$N" -R "$REPO" --json labels --jq '"labels: " + ([.labels[].name] | join(", "))'
 exit "${status:-0}"
