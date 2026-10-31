@@ -145,7 +145,8 @@ test.describe("Store management (authenticated)", () => {
   });
 
   test("create and then edit a store", async ({ page }) => {
-    const slug = `e2e-test-${Date.now()}`;
+    const slug = `e2e-edit-${Date.now()}`;
+    const updatedName = `E2E Edited ${slug}`;
 
     await page.click("text=Create store");
     await page.getByLabel("Slug").fill(slug);
@@ -158,11 +159,12 @@ test.describe("Store management (authenticated)", () => {
     await page.locator(`tr:has-text("${slug}") a:has-text("Edit")`).click();
     await page.waitForURL(/\/admin\/stores\//, { timeout: 5000 });
 
-    await page.getByLabel("Store name").fill("E2E Test Store Updated");
+    await page.getByLabel("Store name").fill(updatedName);
     await page.click("button[type='submit']:has-text('Save changes')");
 
     await page.waitForURL("**/admin/stores", { timeout: 10000 });
-    await expect(page.locator("text=E2E Test Store Updated")).toBeVisible();
+    const row = page.locator(`tr:has-text("${slug}")`);
+    await expect(row.getByText(updatedName)).toBeVisible();
   });
 
   test("storefront is reachable after store creation", async ({ page }) => {
