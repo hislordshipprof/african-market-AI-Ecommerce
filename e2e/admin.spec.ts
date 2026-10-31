@@ -182,6 +182,22 @@ test.describe("Store management (authenticated)", () => {
   });
 });
 
+test.describe("Layout regression", () => {
+  test("sign-in card is at least 320px wide at 1280 viewport", async ({ page }) => {
+    await page.goto("/admin/sign-in");
+    const card = page.locator("main > div");
+    await expect(card).toBeVisible();
+    const box = await card.boundingBox();
+    expect(box).toBeTruthy();
+    expect(box!.width).toBeGreaterThanOrEqual(320);
+  });
+
+  test("storefront page still renders", async ({ page }) => {
+    await page.goto("http://mama-ngozi.localhost:3000/");
+    await expect(page.locator("h1")).toHaveText("Mama Ngozi African Market");
+  });
+});
+
 test.describe("2FA enrollment (unenrolled admin)", () => {
   const UNENROLLED_EMAIL = "unenrolled-admin@platform.test";
 
