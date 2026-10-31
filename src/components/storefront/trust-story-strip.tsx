@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { User, MapPin, Truck } from "lucide-react";
+import { User, MapPin, Truck, ShieldCheck, RefreshCw } from "lucide-react";
 import type { StoreProfile } from "@/lib/storefront/service";
 
 export function TrustStoryStrip({ profile }: { profile: StoreProfile }) {
@@ -58,6 +58,16 @@ export function TrustStoryStrip({ profile }: { profile: StoreProfile }) {
               {profile.deliveryInfo}
             </span>
           )}
+          {profile.pickupEnabled && (
+            <span className="inline-flex items-center justify-center gap-1.5 font-label text-xs text-muted-foreground sm:justify-end">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+              Pickup available
+            </span>
+          )}
+          <span className="inline-flex items-center justify-center gap-1.5 font-label text-xs text-muted-foreground sm:justify-end">
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            Wrong item? We swap it free
+          </span>
         </div>
       </div>
     </section>

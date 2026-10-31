@@ -15,8 +15,7 @@ export function CollectionBanners({
     >
       <h2
         id="collections-heading"
-        className="mb-4 font-display text-ink"
-        style={{ fontSize: "22px", fontWeight: 700, lineHeight: 1.2 }}
+        className="mb-4 font-display text-[22px] font-bold leading-[1.2] text-ink"
       >
         Curated collections
       </h2>

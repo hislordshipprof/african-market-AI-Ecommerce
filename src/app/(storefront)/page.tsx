@@ -45,7 +45,15 @@ export default async function StorefrontPage() {
     ]);
 
   const profile = extractStoreProfile(store);
-  const categoryRails = Array.from(listingsByCategory.entries());
+
+  const CURATED_LABELS: Record<string, string> = {
+    "Tubers & Roots": "Fresh Tubers & Roots",
+    "Spices & Seasonings": "Spice Cabinet",
+    "Fish & Meat": "Fresh Catch & Meats",
+    "Vegetables": "Market Vegetables",
+    "Snacks": "Snack Run",
+    "Pantry Staples": "Stock Up — Pantry Staples",
+  };
 
   return (
     <main className="min-h-screen bg-bg">
@@ -56,8 +64,13 @@ export default async function StorefrontPage() {
       <div className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-6">
         <CategoryMosaic categories={categories} />
 
-        {categoryRails.map(([catName, listings]) => (
-          <ProductRail key={catName} title={catName} listings={listings} />
+        {listingsByCategory.map((rail) => (
+          <ProductRail
+            key={rail.categorySlug}
+            title={CURATED_LABELS[rail.categoryName] ?? rail.categoryName}
+            categorySlug={rail.categorySlug}
+            listings={rail.listings}
+          />
         ))}
 
         <CollectionBanners collections={collections} />

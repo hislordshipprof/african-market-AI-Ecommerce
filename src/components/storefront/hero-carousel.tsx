@@ -43,6 +43,14 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
           initial="enter"
           animate="center"
           exit="exit"
+          drag={banners.length > 1 ? "x" : false}
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={0.12}
+          onDragEnd={(_e, info) => {
+            const swipe = info.offset.x;
+            if (swipe < -50) go(index + 1, 1);
+            else if (swipe > 50) go(index - 1, -1);
+          }}
           transition={
             reduced ? { duration: 0 } : { duration: 0.4, ease: [0.4, 0.4, 0, 1] }
           }

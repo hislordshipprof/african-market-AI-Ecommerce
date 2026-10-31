@@ -8,10 +8,12 @@ import { ListingCard } from "./listing-card";
 
 export function ProductRail({
   title,
+  categorySlug,
   listings,
   seeAllHref,
 }: {
   title: string;
+  categorySlug?: string;
   listings: StorefrontListing[];
   seeAllHref?: string;
 }) {
@@ -55,8 +57,7 @@ export function ProductRail({
     <section data-testid="product-rail" aria-label={title}>
       <div className="mb-3 flex items-baseline justify-between gap-4">
         <h2
-          className="font-display text-ink"
-          style={{ fontSize: "22px", fontWeight: 700, lineHeight: 1.2 }}
+          className="font-display text-[22px] font-bold leading-[1.2] text-ink"
         >
           {title}
         </h2>
@@ -81,7 +82,7 @@ export function ProductRail({
               key={listing.id}
               className="w-[42%] shrink-0 snap-start sm:w-48"
             >
-              <ListingCard listing={listing} />
+              <ListingCard listing={listing} categorySlug={categorySlug} />
             </div>
           ))}
         </div>

@@ -345,9 +345,15 @@ export function extractStoreProfile(store: {
   };
 }
 
+export interface CategoryRail {
+  categoryName: string;
+  categorySlug: string;
+  listings: StorefrontListing[];
+}
+
 export async function getListingsByCategory(
   storeId: string,
-): Promise<Map<string, StorefrontListing[]>> {
+): Promise<CategoryRail[]> {
   const scoped = storeScoped(storeId);
   const MAX_HOMEPAGE_LISTINGS = 120;
   const listings = await scoped.listing.findMany({
@@ -360,12 +366,18 @@ export async function getListingsByCategory(
     take: MAX_HOMEPAGE_LISTINGS,
   });
 
-  const byCategory = new Map<string, StorefrontListing[]>();
+  const byCategory = new Map<string, { slug: string; listings: StorefrontListing[] }>();
   for (const listing of listings) {
     const catName = listing.masterProduct?.category?.name ?? "Other";
-    const existing = byCategory.get(catName) ?? [];
-    existing.push(toStorefrontListing(listing));
+    const catSlug = listing.masterProduct?.category?.slug ?? "other";
+    const existing = byCategory.get(catName) ?? { slug: catSlug, listings: [] };
+    existing.listings.push(toStorefrontListing(listing));
     byCategory.set(catName, existing);
   }
-  return byCategory;
+
+  return Array.from(byCategory.entries()).map(([name, data]) => ({
+    categoryName: name,
+    categorySlug: data.slug,
+    listings: data.listings,
+  }));
 }

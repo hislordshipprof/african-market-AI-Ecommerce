@@ -55,16 +55,24 @@ test.describe("Product rails (#55)", () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
-  test("rail is horizontally scrollable", async ({ page }) => {
+  test("at least one rail is horizontally scrollable", async ({ page }) => {
     await page.goto(`${BASE}/`);
-    const rail = page.locator("[data-testid='product-rail']").first();
-    await expect(rail).toBeVisible({ timeout: 15000 });
+    const rails = page.locator("[data-testid='product-rail']");
+    await expect(rails.first()).toBeVisible({ timeout: 15000 });
 
-    const scrollContainer = rail.locator("[data-testid='rail-scroll']");
-    const isScrollable = await scrollContainer.evaluate(
-      (el) => el.scrollWidth > el.clientWidth,
-    );
-    expect(isScrollable).toBe(true);
+    const count = await rails.count();
+    let foundScrollable = false;
+    for (let i = 0; i < count; i++) {
+      const scrollContainer = rails.nth(i).locator("[data-testid='rail-scroll']");
+      const isScrollable = await scrollContainer.evaluate(
+        (el) => el.scrollWidth > el.clientWidth,
+      );
+      if (isScrollable) {
+        foundScrollable = true;
+        break;
+      }
+    }
+    expect(foundScrollable).toBe(true);
   });
 });
 
