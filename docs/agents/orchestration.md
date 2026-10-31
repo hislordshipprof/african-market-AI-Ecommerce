@@ -18,6 +18,8 @@ How tickets get built. Adapted from SuperMatt's `orchestrate` (which needs Herdr
 
 ## Merge policy
 
+Merge method: **squash merge**, confirmed by the user on 2026-10-31. Each ticket lands as one commit on `main`, and the builder's individual commits stay in the PR. GitHub deletes the head branch on merge, which triggers Neon's automatic cleanup of that PR's preview database branch.
+
 Blocks merge (fixed on the branch):
 - security, auth or secret exposure; per-store isolation (RLS) breaks; data loss
 - an acceptance criterion observed failing (QA or preview)
