@@ -222,3 +222,148 @@ export async function getActiveListings(storeId: string): Promise<StorefrontList
 
   return listings.map(toStorefrontListing);
 }
+
+export interface StorefrontBanner {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  ctaText: string | null;
+  ctaHref: string | null;
+  imageUrl: string;
+}
+
+export async function getActiveBanners(storeId: string): Promise<StorefrontBanner[]> {
+  const scoped = storeScoped(storeId);
+  const banners = await scoped.storeBanner.findMany({
+    where: { active: true },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  return banners.map((b) => ({
+    id: b.id,
+    title: b.title,
+    subtitle: b.subtitle,
+    ctaText: b.ctaText,
+    ctaHref: b.ctaHref,
+    imageUrl: b.imageUrl,
+  }));
+}
+
+export interface StorefrontCollection {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  imageUrl: string | null;
+  slug: string;
+}
+
+export async function getActiveCollections(storeId: string): Promise<StorefrontCollection[]> {
+  const scoped = storeScoped(storeId);
+  const collections = await scoped.storeCollection.findMany({
+    where: { active: true },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  return collections.map((c) => ({
+    id: c.id,
+    title: c.title,
+    subtitle: c.subtitle,
+    imageUrl: c.imageUrl,
+    slug: c.slug,
+  }));
+}
+
+export async function getCollectionListings(
+  storeId: string,
+  collectionSlug: string,
+): Promise<{ collection: StorefrontCollection | null; listings: StorefrontListing[] }> {
+  const scoped = storeScoped(storeId);
+  const collection = await scoped.storeCollection.findFirst({
+    where: { slug: collectionSlug, active: true },
+    include: {
+      items: {
+        orderBy: { sortOrder: "asc" },
+        include: {
+          listing: {
+            include: { masterProduct: true, variants: { select: { price: true } } },
+          },
+        },
+      },
+    },
+  });
+
+  if (!collection) return { collection: null, listings: [] };
+
+  return {
+    collection: {
+      id: collection.id,
+      title: collection.title,
+      subtitle: collection.subtitle,
+      imageUrl: collection.imageUrl,
+      slug: collection.slug,
+    },
+    listings: collection.items
+      .map((item) => item.listing)
+      .filter((l) => l.active)
+      .map(toStorefrontListing),
+  };
+}
+
+export interface StoreProfile {
+  ownerName: string | null;
+  ownerStory: string | null;
+  ownerPhotoUrl: string | null;
+  neighborhood: string | null;
+  deliveryInfo: string | null;
+  hours: unknown;
+  pickupEnabled: boolean;
+  deliveryRadiusMi: number;
+  prepTimeMinutes: number;
+}
+
+export function extractStoreProfile(store: {
+  ownerName: string | null;
+  ownerStory: string | null;
+  ownerPhotoUrl: string | null;
+  neighborhood: string | null;
+  deliveryInfo: string | null;
+  hours: unknown;
+  pickupEnabled: boolean;
+  deliveryRadiusMi: unknown;
+  prepTimeMinutes: number;
+}): StoreProfile {
+  return {
+    ownerName: store.ownerName,
+    ownerStory: store.ownerStory,
+    ownerPhotoUrl: store.ownerPhotoUrl,
+    neighborhood: store.neighborhood,
+    deliveryInfo: store.deliveryInfo,
+    hours: store.hours,
+    pickupEnabled: store.pickupEnabled,
+    deliveryRadiusMi: Number(store.deliveryRadiusMi),
+    prepTimeMinutes: store.prepTimeMinutes,
+  };
+}
+
+export async function getListingsByCategory(
+  storeId: string,
+): Promise<Map<string, StorefrontListing[]>> {
+  const scoped = storeScoped(storeId);
+  const listings = await scoped.listing.findMany({
+    where: { active: true },
+    include: {
+      masterProduct: { include: { category: true } },
+      variants: { select: { price: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const byCategory = new Map<string, StorefrontListing[]>();
+  for (const listing of listings) {
+    const catName = listing.masterProduct?.category?.name ?? "Other";
+    const existing = byCategory.get(catName) ?? [];
+    existing.push(toStorefrontListing(listing));
+    byCategory.set(catName, existing);
+  }
+  return byCategory;
+}
