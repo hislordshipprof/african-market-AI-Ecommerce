@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { storeScoped } from "../db";
 
 const hasDb = !!process.env.DATABASE_URL;
+const hasDirectUrl =
+  !!process.env.DATABASE_URL_UNPOOLED || !!process.env.DIRECT_URL;
 
 describe.skipIf(!hasDb)("Demo catalog seed", () => {
   it("mama-ngozi has seeded listings visible through RLS", async () => {
@@ -44,7 +46,7 @@ describe.skipIf(!hasDb)("Demo catalog seed", () => {
     expect(listingsA.some((l) => l.storeId === storeB!.id)).toBe(false);
   });
 
-  it(
+  it.skipIf(!hasDirectUrl)(
     "seed is idempotent — running twice produces same listing count",
     async () => {
       const store = await import("../db").then((m) =>
