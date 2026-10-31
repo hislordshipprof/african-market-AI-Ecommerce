@@ -25,7 +25,7 @@ export interface WebhookEvent {
       charges_enabled: boolean;
       payouts_enabled: boolean;
       details_submitted: boolean;
-      requirements: {
+      requirements?: {
         currently_due: string[];
       };
     };

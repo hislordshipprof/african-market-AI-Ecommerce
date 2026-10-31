@@ -474,17 +474,16 @@ describe.skipIf(!hasDb)("Stripe Connect column RLS isolation", () => {
     expect(store!.stripeOnboardingStatus).toBe("complete");
   });
 
-  it("storeScoped(A) writing store_content cannot affect storeB stripe fields", async () => {
-    const scoped = storeScoped(storeAId);
-    await scoped.rlsTestFixture.upsert({
-      where: { storeId_key: { storeId: storeAId, key: "stripe_test" } },
-      update: { value: "a_value" },
-      create: { storeId: storeAId, key: "stripe_test", value: "a_value" },
-    });
+  it("app_user scoped to store B cannot update store A stripe fields", async () => {
+    const result = await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeBId}, true)`,
+      rawPrisma.$executeRaw`UPDATE stores SET stripe_onboarding_status = 'hacked' WHERE id = ${storeAId}`,
+    ]);
+    expect(result[2]).toBe(0);
 
-    const storeB = await rawPrisma.store.findUnique({ where: { id: storeBId } });
-    expect(storeB!.stripeAccountId).toBe("acct_store_b");
-    expect(storeB!.stripeOnboardingStatus).toBe("pending");
+    const store = await rawPrisma.store.findUnique({ where: { id: storeAId } });
+    expect(store!.stripeOnboardingStatus).toBe("complete");
   });
 
   it("platformAdmin can update stripe fields on any store", async () => {

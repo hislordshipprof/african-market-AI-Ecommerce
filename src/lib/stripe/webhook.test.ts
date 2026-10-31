@@ -81,12 +81,6 @@ describe("Stripe webhook handler", () => {
     expect(res.status).toBe(200);
     expect(updateStoreOnboardingStatus).toHaveBeenCalledWith(
       "acct_fake_store_123",
-      {
-        chargesEnabled: true,
-        payoutsEnabled: true,
-        detailsSubmitted: true,
-        requirementsCurrentlyDue: [],
-      },
     );
   });
 

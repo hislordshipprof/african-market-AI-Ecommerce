@@ -20,7 +20,7 @@ model Store {
   minimumOrderCents    Int      @default(3500) @map("minimum_order_cents")
   pickupEnabled        Boolean  @default(false) @map("pickup_enabled")
   autoRefundLimitCents    Int      @default(2500) @map("auto_refund_limit_cents")
-  stripeAccountId        String?  @map("stripe_account_id")
+  stripeAccountId        String?  @unique @map("stripe_account_id")
   stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")

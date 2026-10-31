@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { getStore, revalidateStore } from "@/lib/get-store";
+import { getStore } from "@/lib/get-store";
 import { storeScoped, platformAdmin } from "@/lib/db";
-import { getStripeProvider, deriveOnboardingStatus } from "@/lib/stripe";
+import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
 
 export const dynamic = "force-dynamic";
 
@@ -48,15 +48,7 @@ export async function GET(req: NextRequest) {
   const stripeAccountId = fresh?.stripeAccountId ?? null;
 
   if (stripeAccountId) {
-    const stripe = getStripeProvider();
-    const account = await stripe.getAccount(stripeAccountId);
-    const status = deriveOnboardingStatus(account);
-
-    await platformAdmin.store.update({
-      where: { id: store.id },
-      data: { stripeOnboardingStatus: status },
-    });
-    revalidateStore({ id: store.id, slug: store.slug });
+    await updateStoreOnboardingStatus(stripeAccountId);
   }
 
   return NextResponse.redirect(

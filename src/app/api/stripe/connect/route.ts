@@ -59,13 +59,24 @@ export async function POST(req: NextRequest) {
     });
     stripeAccountId = account.accountId;
 
-    await platformAdmin.store.update({
-      where: { id: store.id },
-      data: {
-        stripeAccountId: account.accountId,
-        stripeOnboardingStatus: "pending",
-      },
-    });
+    try {
+      await platformAdmin.store.update({
+        where: { id: store.id },
+        data: {
+          stripeAccountId: account.accountId,
+          stripeOnboardingStatus: "pending",
+        },
+      });
+    } catch (err: unknown) {
+      const isUniqueViolation =
+        err instanceof Error && err.message.includes("Unique constraint");
+      if (!isUniqueViolation) throw err;
+      const existing = await platformAdmin.store.findUnique({
+        where: { id: store.id },
+        select: { stripeAccountId: true },
+      });
+      stripeAccountId = existing?.stripeAccountId ?? stripeAccountId;
+    }
     revalidateStore({ id: store.id, slug: store.slug });
   }
 

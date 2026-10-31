@@ -6,14 +6,18 @@ import type {
   WebhookEvent,
 } from "./types";
 
+let _stripeClient: Stripe | null = null;
+
 function getStripeClient(): Stripe {
+  if (_stripeClient) return _stripeClient;
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) {
     throw new Error(
       "STRIPE_SECRET_KEY is not set. Stripe operations require this key at runtime.",
     );
   }
-  return new Stripe(key);
+  _stripeClient = new Stripe(key);
+  return _stripeClient;
 }
 
 function getWebhookSecret(): string {

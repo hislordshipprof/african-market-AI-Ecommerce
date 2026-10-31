@@ -30,13 +30,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (event.type === "account.updated") {
-    const account = event.data.object;
-    await updateStoreOnboardingStatus(account.id, {
-      chargesEnabled: account.charges_enabled,
-      payoutsEnabled: account.payouts_enabled,
-      detailsSubmitted: account.details_submitted,
-      requirementsCurrentlyDue: account.requirements?.currently_due ?? [],
-    });
+    await updateStoreOnboardingStatus(event.data.object.id);
   }
 
   return NextResponse.json({ received: true }, { status: 200 });

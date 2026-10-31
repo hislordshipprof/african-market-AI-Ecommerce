@@ -10,9 +10,12 @@ test.describe("Checkout gate on storefront", () => {
     ).toBeVisible();
   });
 
-  test("store-admin payouts page loads for authenticated owner", async ({
+  test("unauthenticated user accessing payouts page is redirected to sign-in", async ({
     page,
   }) => {
-    test.skip(true, "Requires real Stripe keys for full onboarding flow");
+    const response = await page.goto(
+      "http://mama-ngozi.localhost:3000/store-admin/payouts?store=mama-ngozi",
+    );
+    await expect(page).toHaveURL(/sign-in/);
   });
 });
