@@ -22,7 +22,8 @@ export function proxy(request: NextRequest) {
   let slug: string | null = null;
 
   if (overrideAllowed) {
-    const paramSlug = request.nextUrl.searchParams.get("store");
+    const rawParam = request.nextUrl.searchParams.get("store");
+    const paramSlug = rawParam?.toLowerCase() ?? null;
     if (paramSlug && isSlugRoutable(paramSlug)) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.searchParams.delete("store");
@@ -37,11 +38,9 @@ export function proxy(request: NextRequest) {
       return response;
     }
 
-    if (!paramSlug) {
-      const cookieSlug = request.cookies.get(COOKIE_NAME)?.value;
-      if (cookieSlug && isSlugRoutable(cookieSlug)) {
-        slug = cookieSlug;
-      }
+    const cookieSlug = request.cookies.get(COOKIE_NAME)?.value;
+    if (cookieSlug && isSlugRoutable(cookieSlug)) {
+      slug = cookieSlug;
     }
   }
 

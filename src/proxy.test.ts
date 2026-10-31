@@ -119,6 +119,30 @@ describe("proxy redirect on ?store= (override allowed)", () => {
     expect(cookieStr!.toLowerCase()).toContain("samesite=lax");
     expect(cookieStr).toContain("Path=/");
   });
+
+  it("lowercases mixed-case ?store= param", () => {
+    const req = makeRequest("http://localhost:3000/?store=Mama-Ngozi");
+    const res = proxy(req);
+    expect(res.status).toBe(307);
+    const cookie = res.cookies.get("store_override");
+    expect(cookie!.value).toBe("mama-ngozi");
+  });
+
+  it("sets Secure flag on HTTPS requests", () => {
+    const req = makeRequest("https://localhost:3000/?store=mama-ngozi");
+    const res = proxy(req);
+    const setCookie = res.headers.getSetCookie();
+    const cookieStr = setCookie.find((c) => c.startsWith("store_override="));
+    expect(cookieStr).toContain("Secure");
+  });
+
+  it("omits Secure flag on HTTP requests", () => {
+    const req = makeRequest("http://localhost:3000/?store=mama-ngozi");
+    const res = proxy(req);
+    const setCookie = res.headers.getSetCookie();
+    const cookieStr = setCookie.find((c) => c.startsWith("store_override="));
+    expect(cookieStr).not.toContain("Secure");
+  });
 });
 
 describe("proxy cookie fallback (override allowed)", () => {
@@ -147,7 +171,17 @@ describe("proxy cookie fallback (override allowed)", () => {
     expect(res.status).toBe(200);
     const cookie = res.cookies.get("store_override");
     expect(cookie).toBeUndefined();
-    expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+  });
+
+  it("falls back to cookie when ?store= param is invalid", () => {
+    const req = makeRequest("http://localhost:3000/?store=../evil", {
+      store_override: "mama-ngozi",
+    });
+    const res = proxy(req);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe(
+      "mama-ngozi",
+    );
   });
 
   it("rejects reserved slug in ?store= param (no redirect)", () => {
