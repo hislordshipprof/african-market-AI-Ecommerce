@@ -165,42 +165,44 @@ async function seedTestAdmin() {
   const unenrolledId = "seed-unenrolled-admin";
   const unenrolledEmail = "unenrolled-admin@platform.test";
 
-  await prisma.twoFactor.deleteMany({ where: { userId: unenrolledId } });
+  await prisma.$transaction(async (tx) => {
+    await tx.twoFactor.deleteMany({ where: { userId: unenrolledId } });
 
-  await prisma.user.upsert({
-    where: { email: unenrolledEmail },
-    update: { twoFactorEnabled: false, updatedAt: new Date() },
-    create: {
-      id: unenrolledId,
-      name: "Unenrolled Admin",
-      email: unenrolledEmail,
-      emailVerified: true,
-      role: "platform_admin",
-      twoFactorEnabled: false,
-      updatedAt: new Date(),
-    },
-  });
-
-  const existingUnenrolledAccount = await prisma.account.findFirst({
-    where: { userId: unenrolledId, providerId: "credential" },
-  });
-  if (existingUnenrolledAccount) {
-    await prisma.account.update({
-      where: { id: existingUnenrolledAccount.id },
-      data: { password: hashedPassword, updatedAt: new Date() },
-    });
-  } else {
-    await prisma.account.create({
-      data: {
-        id: "seed-unenrolled-account",
-        accountId: unenrolledId,
-        providerId: "credential",
-        userId: unenrolledId,
-        password: hashedPassword,
+    await tx.user.upsert({
+      where: { email: unenrolledEmail },
+      update: { twoFactorEnabled: false, updatedAt: new Date() },
+      create: {
+        id: unenrolledId,
+        name: "Unenrolled Admin",
+        email: unenrolledEmail,
+        emailVerified: true,
+        role: "platform_admin",
+        twoFactorEnabled: false,
         updatedAt: new Date(),
       },
     });
-  }
+
+    const existingUnenrolledAccount = await tx.account.findFirst({
+      where: { userId: unenrolledId, providerId: "credential" },
+    });
+    if (existingUnenrolledAccount) {
+      await tx.account.update({
+        where: { id: existingUnenrolledAccount.id },
+        data: { password: hashedPassword, updatedAt: new Date() },
+      });
+    } else {
+      await tx.account.create({
+        data: {
+          id: "seed-unenrolled-account",
+          accountId: unenrolledId,
+          providerId: "credential",
+          userId: unenrolledId,
+          password: hashedPassword,
+          updatedAt: new Date(),
+        },
+      });
+    }
+  });
 
   console.log("Seeded unenrolled admin: unenrolled-admin@platform.test");
 }
