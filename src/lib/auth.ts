@@ -25,6 +25,32 @@ export const auth = betterAuth({
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
   },
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          const user = await authPrisma.user.findUnique({
+            where: { id: session.userId },
+            select: { twoFactorEnabled: true },
+          });
+          if (user?.twoFactorEnabled) {
+            return { data: { twoFactorVerified: true } };
+          }
+        },
+        after: async (session) => {
+          if (session.twoFactorVerified) {
+            await authPrisma.session.deleteMany({
+              where: {
+                userId: session.userId,
+                id: { not: session.id },
+                twoFactorVerified: false,
+              },
+            });
+          }
+        },
+      },
+    },
+  },
   user: {
     additionalFields: {
       role: {
