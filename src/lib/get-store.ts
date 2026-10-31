@@ -105,11 +105,22 @@ export function revalidateStore(store: {
 
 export async function getStore(): Promise<ValidatedStore> {
   const headerList = await headers();
+
   const slug = headerList.get("x-store-slug");
-  if (!slug) notFound();
-  const store = await findStore(slug);
-  if (!store) notFound();
-  return store;
+  if (slug) {
+    const store = await findStore(slug);
+    if (!store) notFound();
+    return store;
+  }
+
+  const customDomain = headerList.get("x-custom-domain");
+  if (customDomain) {
+    const store = await findStoreByDomain(customDomain);
+    if (!store) notFound();
+    return store;
+  }
+
+  notFound();
 }
 
 export async function getStoreWithStatus(): Promise<{
