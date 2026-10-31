@@ -97,6 +97,24 @@ test.describe("Store management (authenticated)", () => {
     await expect(page.locator("text=reserved")).toBeVisible();
   });
 
+  test("create store form rejects all-digit slug", async ({ page }) => {
+    await page.click("text=Create store");
+    await page.getByLabel("Slug").fill("123");
+    await page.getByLabel("Store name").fill("Digit Slug Test");
+    await page.click("button[type='submit']:has-text('Create store')");
+
+    await expect(page.locator("text=not allowed")).toBeVisible();
+  });
+
+  test("create store form rejects localhost slug", async ({ page }) => {
+    await page.click("text=Create store");
+    await page.getByLabel("Slug").fill("localhost");
+    await page.getByLabel("Store name").fill("Localhost Slug Test");
+    await page.click("button[type='submit']:has-text('Create store')");
+
+    await expect(page.locator("text=not allowed")).toBeVisible();
+  });
+
   test("form preserves entered values after validation error", async ({ page }) => {
     await page.click("text=Create store");
     await expect(page).toHaveURL(/\/admin\/stores\/new/);
