@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { runtimeDatabaseUrl } from "./env";
 
@@ -145,15 +145,16 @@ export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId:
 
 export async function storeScopedRawQuery<T>(
   storeId: string,
-  query: TemplateStringsArray,
-  ...values: unknown[]
+  sql: Prisma.Sql,
 ): Promise<T[]> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
-    return tx.$queryRaw(query, ...values) as Promise<T[]>;
+    return tx.$queryRaw<T[]>(sql);
   });
 }
+
+export { Prisma };
 
 export { prisma as authPrisma };
 
