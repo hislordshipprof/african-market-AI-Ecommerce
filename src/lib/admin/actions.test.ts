@@ -23,6 +23,15 @@ vi.mock("../db", () => ({
       create: (...args: unknown[]) => mockAuditCreate(...args),
     },
   }),
+  authPrisma: {},
+}));
+
+vi.mock("../invite/service", () => ({
+  createInvite: vi.fn().mockResolvedValue({ id: "inv-1", tokenHash: "hash" }),
+}));
+
+vi.mock("../auth", () => ({
+  resolveAuthBaseUrl: vi.fn().mockReturnValue("http://localhost:3000"),
 }));
 
 vi.mock("../get-store", () => ({

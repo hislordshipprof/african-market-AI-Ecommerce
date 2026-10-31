@@ -7,6 +7,8 @@ import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
 import { RESERVED_SLUGS } from "../slug";
 import type { ThemePreset } from "../theme";
 import { Prisma } from "@prisma/client";
+import { createInvite } from "../invite/service";
+import { resolveAuthBaseUrl } from "../auth";
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
@@ -438,4 +440,37 @@ export async function listStores() {
 export async function getStoreById(id: string) {
   await requirePlatformAdmin();
   return platformAdmin.store.findUnique({ where: { id } });
+}
+
+export async function inviteStoreOwnerAction(formData: FormData) {
+  await requirePlatformAdmin();
+  const storeId = formData.get("storeId") as string | null;
+  const email = formData.get("email") as string | null;
+
+  if (!storeId || !email) {
+    return { error: "Store ID and email are required" };
+  }
+
+  const store = await platformAdmin.store.findUnique({
+    where: { id: storeId },
+  });
+  if (!store) {
+    return { error: "Store not found" };
+  }
+
+  try {
+    const result = await createInvite({
+      storeId: store.id,
+      email,
+      role: "owner",
+      invitedById: "platform",
+      baseUrl: resolveAuthBaseUrl(),
+      storeSlug: store.slug,
+      storeName: store.name,
+    });
+    return { success: true, id: result.id };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to send invite";
+    return { error: message };
+  }
 }

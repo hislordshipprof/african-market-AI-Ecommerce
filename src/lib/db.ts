@@ -66,6 +66,8 @@ function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
 export function storeScoped(storeId: string) {
   return {
     rlsTestFixture: wrapDelegate(storeId, prisma.rlsTestFixture),
+    storeMembership: wrapDelegate(storeId, prisma.storeMembership),
+    storeInvite: wrapDelegate(storeId, prisma.storeInvite),
   };
 }
 
@@ -96,16 +98,22 @@ function wrapPlatformAdminDelegate<D extends object>(delegate: D): D {
 export const platformAdmin = {
   store: wrapPlatformAdminDelegate(prisma.store),
   auditLog: wrapPlatformAdminDelegate(prisma.auditLog),
+  storeMembership: wrapPlatformAdminDelegate(prisma.storeMembership),
+  storeInvite: wrapPlatformAdminDelegate(prisma.storeInvite),
 };
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "auditLog">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "$queryRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-    return fn({ store: tx.store, auditLog: tx.auditLog });
+    return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, $queryRaw: tx.$queryRaw.bind(tx) });
   });
+}
+
+export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
+  await tx.$queryRaw`SELECT 1 FROM "Store" WHERE id = ${storeId} FOR UPDATE`;
 }
 
 export { prisma as authPrisma };
