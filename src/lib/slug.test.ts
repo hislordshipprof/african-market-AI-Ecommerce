@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slugFromHost } from "./slug";
+import { slugFromHost, RESERVED_SLUGS } from "./slug";
 
 describe("slugFromHost", () => {
   it("extracts slug from subdomain with root domain", () => {
@@ -52,5 +52,23 @@ describe("slugFromHost", () => {
     expect(
       slugFromHost("african-markets-platform-git-main.vercel.app"),
     ).toBeNull();
+  });
+
+  for (const slug of RESERVED_SLUGS) {
+    it(`returns null for reserved slug '${slug}' without root domain`, () => {
+      expect(slugFromHost(`${slug}.example.com:3000`)).toBeNull();
+    });
+
+    it(`returns null for reserved slug '${slug}' with root domain`, () => {
+      expect(slugFromHost(`${slug}.example.com`, "example.com")).toBeNull();
+    });
+  }
+});
+
+describe("RESERVED_SLUGS", () => {
+  it("contains www, admin, api, app, mail, static, assets, cdn, vercel", () => {
+    for (const slug of ["www", "admin", "api", "app", "mail", "static", "assets", "cdn", "vercel"]) {
+      expect(RESERVED_SLUGS.has(slug)).toBe(true);
+    }
   });
 });

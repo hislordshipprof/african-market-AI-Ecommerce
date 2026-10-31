@@ -1,11 +1,13 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { hashPassword } from "better-auth/crypto";
+import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
 
-async function main() {
+async function seedDemoStores() {
   const storeA = await prisma.store.upsert({
     where: { slug: "mama-ngozi" },
     update: {},
@@ -15,6 +17,12 @@ async function main() {
       brandColor: "#1F5A43",
       themePreset: "palm-and-shea",
       logoUrl: "/logos/mama-ngozi-logo.svg",
+      status: "active",
+      prepTimeMinutes: 30,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 3500,
+      pickupEnabled: true,
+      autoRefundLimitCents: 2500,
     },
   });
 
@@ -27,6 +35,12 @@ async function main() {
       brandColor: "#0F4A57",
       themePreset: "lagoon-and-coral",
       logoUrl: "/logos/tante-marie-logo.svg",
+      status: "active",
+      prepTimeMinutes: 25,
+      deliveryRadiusMi: 6,
+      minimumOrderCents: 3000,
+      pickupEnabled: false,
+      autoRefundLimitCents: 2000,
     },
   });
 
@@ -58,7 +72,128 @@ async function main() {
     }),
   ]);
 
-  console.log("Seeded 2 stores: mama-ngozi, tante-marie");
+  console.log("Seeded 2 demo stores: mama-ngozi, tante-marie");
+}
+
+async function seedTestAdmin() {
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminPassword) {
+    throw new Error("SEED_ADMIN_PASSWORD is required when SEED_TEST_ADMIN=1");
+  }
+
+  const authSecret = process.env.BETTER_AUTH_SECRET;
+  if (!authSecret) {
+    throw new Error("BETTER_AUTH_SECRET is required when SEED_TEST_ADMIN=1");
+  }
+
+  const totpSecret = process.env.SEED_ADMIN_TOTP_SECRET;
+  if (!totpSecret) {
+    throw new Error("SEED_ADMIN_TOTP_SECRET is required when SEED_TEST_ADMIN=1");
+  }
+
+  const adminId = "seed-platform-admin";
+  const adminEmail = "admin@platform.test";
+  const hashedPassword = await hashPassword(adminPassword);
+
+  await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: { twoFactorEnabled: true },
+    create: {
+      id: adminId,
+      name: "Platform Admin",
+      email: adminEmail,
+      emailVerified: true,
+      role: "platform_admin",
+      twoFactorEnabled: true,
+      updatedAt: new Date(),
+    },
+  });
+
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: adminId, providerId: "credential" },
+  });
+  if (!existingAccount) {
+    await prisma.account.create({
+      data: {
+        id: "seed-admin-account",
+        accountId: adminId,
+        providerId: "credential",
+        userId: adminId,
+        password: hashedPassword,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  const encryptedSecret = await symmetricEncrypt({
+    key: authSecret,
+    data: `base32:${totpSecret}`,
+  });
+  const encryptedBackupCodes = await symmetricEncrypt({
+    key: authSecret,
+    data: JSON.stringify(["BACKUP1234", "BACKUP5678"]),
+  });
+
+  const existingTwoFactor = await prisma.twoFactor.findFirst({
+    where: { userId: adminId },
+  });
+  if (!existingTwoFactor) {
+    await prisma.twoFactor.create({
+      data: {
+        id: "seed-admin-totp",
+        secret: encryptedSecret,
+        backupCodes: encryptedBackupCodes,
+        userId: adminId,
+        verified: true,
+      },
+    });
+  }
+
+  console.log("Seeded test admin: admin@platform.test (2FA enrolled)");
+
+  // Unenrolled admin for 2FA enrollment e2e test
+  const unenrolledId = "seed-unenrolled-admin";
+  const unenrolledEmail = "unenrolled-admin@platform.test";
+
+  await prisma.user.upsert({
+    where: { email: unenrolledEmail },
+    update: {},
+    create: {
+      id: unenrolledId,
+      name: "Unenrolled Admin",
+      email: unenrolledEmail,
+      emailVerified: true,
+      role: "platform_admin",
+      twoFactorEnabled: false,
+      updatedAt: new Date(),
+    },
+  });
+
+  const existingUnenrolledAccount = await prisma.account.findFirst({
+    where: { userId: unenrolledId, providerId: "credential" },
+  });
+  if (!existingUnenrolledAccount) {
+    await prisma.account.create({
+      data: {
+        id: "seed-unenrolled-account",
+        accountId: unenrolledId,
+        providerId: "credential",
+        userId: unenrolledId,
+        password: hashedPassword,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  console.log("Seeded unenrolled admin: unenrolled-admin@platform.test");
+}
+
+async function main() {
+  await seedDemoStores();
+
+  if (process.env.SEED_TEST_ADMIN === "1") {
+    await seedTestAdmin();
+  }
 }
 
 main()

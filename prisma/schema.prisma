@@ -7,16 +7,24 @@ datasource db {
 }
 
 model Store {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  name        String
-  logoUrl     String?  @map("logo_url")
-  brandColor  String?  @map("brand_color")
-  themePreset String   @default("palm-and-shea") @map("theme_preset")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                   String   @id @default(cuid())
+  slug                 String   @unique
+  name                 String
+  logoUrl              String?  @map("logo_url")
+  brandColor           String?  @map("brand_color")
+  themePreset          String   @default("palm-and-shea") @map("theme_preset")
+  status               String   @default("active")
+  hours                Json?
+  prepTimeMinutes      Int      @default(30) @map("prep_time_minutes")
+  deliveryRadiusMi     Decimal  @default(8) @map("delivery_radius_mi")
+  minimumOrderCents    Int      @default(3500) @map("minimum_order_cents")
+  pickupEnabled        Boolean  @default(false) @map("pickup_enabled")
+  autoRefundLimitCents Int      @default(2500) @map("auto_refund_limit_cents")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
   rlsFixtures RlsTestFixture[]
+  auditLogs   AuditLog[]
 
   @@map("stores")
 }
@@ -34,4 +42,119 @@ model RlsTestFixture {
 
   @@unique([storeId, key])
   @@map("store_content")
+}
+
+model User {
+  id               String    @id
+  name             String
+  email            String    @unique
+  emailVerified    Boolean   @default(false) @map("email_verified")
+  image            String?
+  role             String    @default("customer")
+  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  sessions  Session[]
+  accounts  Account[]
+  twoFactor TwoFactor[]
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id                String   @id
+  expiresAt         DateTime @map("expires_at")
+  token             String   @unique
+  ipAddress         String?  @map("ip_address")
+  userAgent         String?  @map("user_agent")
+  userId            String   @map("user_id")
+  twoFactorVerified Boolean  @default(false) @map("two_factor_verified")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id")
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime? @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+
+  @@index([identifier])
+  @@index([expiresAt])
+  @@map("verifications")
+}
+
+model TwoFactor {
+  id                     String    @id
+  secret                 String
+  backupCodes            String    @map("backup_codes")
+  userId                 String    @map("user_id")
+  verified               Boolean   @default(false)
+  failedVerificationCount Int      @default(0) @map("failed_verification_count")
+  lockedUntil            DateTime? @map("locked_until")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("two_factors")
+}
+
+model RateLimit {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  count     Int
+  lastRequest BigInt @map("last_request")
+
+  @@map("rate_limits")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  storeId    String?  @map("store_id")
+  actorId    String   @map("actor_id")
+  actorEmail String   @map("actor_email")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  store Store? @relation(fields: [storeId], references: [id])
+  actor User   @relation(fields: [actorId], references: [id])
+
+  @@index([storeId])
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@map("audit_logs")
 }

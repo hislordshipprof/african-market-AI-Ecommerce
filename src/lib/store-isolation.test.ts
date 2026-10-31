@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { storeScoped, platform } from "./db";
+import { storeScoped, platform, platformAdmin, authPrisma } from "./db";
 import { runtimeDatabaseUrl } from "./env";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -160,6 +160,101 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
     });
     expect(store).not.toBeNull();
     expect(store!.id).toBe(storeAId);
+  });
+});
+
+describe.skipIf(!hasDb)("Platform admin RLS (DB-backed)", () => {
+  let rawPrisma: PrismaClient;
+  let testStoreId: string;
+
+  beforeAll(async () => {
+    const adapter = new PrismaPg(process.env.DATABASE_URL!);
+    rawPrisma = new PrismaClient({ adapter });
+    await rawPrisma.$connect();
+
+    const store = await rawPrisma.store.upsert({
+      where: { slug: "test-admin-rls" },
+      update: {},
+      create: {
+        slug: "test-admin-rls",
+        name: "Admin RLS Test Store",
+        themePreset: "palm-and-shea",
+      },
+    });
+    testStoreId = store.id;
+  });
+
+  afterAll(async () => {
+    await rawPrisma.store.deleteMany({
+      where: { slug: "test-admin-rls" },
+    });
+    await rawPrisma.$disconnect();
+  });
+
+  it("platformAdmin can create a store", async () => {
+    const store = await platformAdmin.store.create({
+      data: {
+        slug: "test-admin-create",
+        name: "Admin Created Store",
+        themePreset: "palm-and-shea",
+      },
+    });
+    expect(store.slug).toBe("test-admin-create");
+
+    await rawPrisma.store.delete({ where: { id: store.id } });
+  });
+
+  it("platformAdmin can update a store", async () => {
+    const updated = await platformAdmin.store.update({
+      where: { id: testStoreId },
+      data: { name: "Admin RLS Test Store Updated" },
+    });
+    expect(updated.name).toBe("Admin RLS Test Store Updated");
+
+    await rawPrisma.store.update({
+      where: { id: testStoreId },
+      data: { name: "Admin RLS Test Store" },
+    });
+  });
+
+  it("platform (app_user without admin flag) cannot insert into stores", async () => {
+    await expect(
+      platform.store.create({
+        data: {
+          slug: `rls-stores-insert-${Date.now()}`,
+          name: "Should Fail",
+          themePreset: "palm-and-shea",
+        },
+      }),
+    ).rejects.toThrow(/42501|row-level security/i);
+  });
+
+  it("platform (app_user without admin flag) update on stores affects 0 rows", async () => {
+    const result = await platform.store.updateMany({
+      where: { id: testStoreId },
+      data: { name: "Hacked" },
+    });
+    expect(result.count).toBe(0);
+
+    const store = await rawPrisma.store.findUnique({
+      where: { id: testStoreId },
+    });
+    expect(store!.name).toBe("Admin RLS Test Store");
+  });
+
+  it("platform admin flag does not persist after transaction", async () => {
+    // Prove SET LOCAL scopes the flag to the transaction. Uses authPrisma
+    // (the same pool platformAdmin wraps) so a leaked SET (without LOCAL)
+    // would be visible on the reused connection. Mutation proof: changing
+    // set_config's third arg from true to false in db.ts makes this fail.
+    await platformAdmin.store.findUnique({ where: { id: testStoreId } });
+
+    const result = await authPrisma.$transaction([
+      authPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      authPrisma.$queryRaw`SELECT current_setting('app.is_platform_admin', true) as admin_flag`,
+    ]);
+    const rows = result[1] as Array<{ admin_flag: string | null }>;
+    expect(rows[0].admin_flag === "" || rows[0].admin_flag === null).toBe(true);
   });
 });
 
