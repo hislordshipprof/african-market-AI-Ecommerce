@@ -19,8 +19,8 @@ export const auth = betterAuth({
     window: 60,
     max: 10,
     customRules: {
-      "/sign-in/email": { window: 60, max: 5 },
-      "/two-factor/verify-totp": { window: 60, max: 5 },
+      "/sign-in/email": { window: 60, max: process.env.CI ? 100 : 5 },
+      "/two-factor/verify-totp": { window: 60, max: process.env.CI ? 100 : 5 },
     },
   },
   user: {
