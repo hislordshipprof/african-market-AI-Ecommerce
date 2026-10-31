@@ -49,11 +49,13 @@ test.describe("Platform admin console", () => {
     await expect(page).toHaveURL(/\/admin\/sign-in/);
   });
 
-  test("unauthenticated access to /admin/stores redirects to sign-in", async ({
+  test("unauthenticated access to /admin/stores redirects to sign-in (not 500)", async ({
     page,
   }) => {
-    await page.goto("/admin/stores");
+    const response = await page.goto("/admin/stores");
+    expect(response?.status()).not.toBe(500);
     await expect(page).toHaveURL(/\/admin\/sign-in/);
+    await expect(page.locator("input[type='email']")).toBeVisible();
   });
 
   test("sign-in with valid credentials and TOTP reaches stores", async ({

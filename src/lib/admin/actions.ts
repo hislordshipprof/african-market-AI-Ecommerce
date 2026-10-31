@@ -10,6 +10,7 @@ import { Prisma } from "@prisma/client";
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
+const MAX_CENTS = 2_147_483_647;
 
 function parseFloatOrDefault(raw: string | null | undefined, defaultValue: number): number {
   const trimmed = (raw ?? "").trim();
@@ -137,10 +138,14 @@ function validateStoreFields(data: FormData): {
 
   if (!Number.isFinite(minimumOrderCents) || minimumOrderCents < 0) {
     errors.minimumOrder = "Minimum order must be a non-negative number";
+  } else if (minimumOrderCents > MAX_CENTS) {
+    errors.minimumOrder = "Minimum order is too large";
   }
 
   if (!Number.isFinite(autoRefundLimitCents) || autoRefundLimitCents < 0) {
     errors.autoRefundLimit = "Auto-refund limit must be a non-negative number";
+  } else if (autoRefundLimitCents > MAX_CENTS) {
+    errors.autoRefundLimit = "Auto-refund limit is too large";
   }
 
   let hours: unknown = null;
@@ -375,10 +380,16 @@ export async function updateStore(
   };
 }
 
+const VALID_STORE_STATUSES = ["active", "suspended"] as const;
+
 export async function setStoreStatus(
   storeId: string,
   targetStatus: "suspended" | "active",
 ): Promise<StoreFormState> {
+  if (!(VALID_STORE_STATUSES as readonly string[]).includes(targetStatus)) {
+    return { error: `Invalid status: must be one of ${VALID_STORE_STATUSES.join(", ")}` };
+  }
+
   const session = await requirePlatformAdmin();
 
   const result = await platformAdminTransaction(async (tx) => {

@@ -287,6 +287,22 @@ describe("createStore", () => {
     expect(mockCreate.mock.calls[0][0].data.deliveryRadiusMi).toBe(0);
   });
 
+  it("rejects minimumOrder that exceeds INT column max", async () => {
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, minimumOrder: "25000000" }),
+    );
+    expect(result.fieldErrors?.minimumOrder).toContain("too large");
+  });
+
+  it("rejects autoRefundLimit that exceeds INT column max", async () => {
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, autoRefundLimit: "25000000" }),
+    );
+    expect(result.fieldErrors?.autoRefundLimit).toContain("too large");
+  });
+
   it("rejects non-numeric minimumOrder", async () => {
     const result = await createStore(
       {},
@@ -674,6 +690,11 @@ describe("setStoreStatus", () => {
     expect(result2.success).toBe(true);
     expect(mockUpdate).toHaveBeenCalledTimes(1);
     expect(mockAuditCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects invalid targetStatus at runtime", async () => {
+    const result = await setStoreStatus("store-1", "deleted" as "suspended");
+    expect(result.error).toContain("Invalid status");
   });
 
   it("audit failure propagates (transaction rolls back status change)", async () => {
