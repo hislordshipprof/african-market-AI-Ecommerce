@@ -76,7 +76,7 @@ export default function StoreAdminSignIn() {
 
   return (
     <StorySurface>
-      <Card className="border-0 shadow-xl backdrop-blur-sm bg-card/95">
+      <Card className="border-0 shadow-2xl backdrop-blur-lg bg-card/80">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-primary/10">
             <Store className="size-6 text-primary" />

@@ -29,7 +29,7 @@ const PALETTE = {
 function Yam({ position, rotation }: { position: [number, number, number]; rotation?: [number, number, number] }) {
   return (
     <mesh position={position} rotation={rotation ?? [0, 0, 0.15]}>
-      <capsuleGeometry args={[0.12, 0.5, 4, 12]} />
+      <capsuleGeometry args={[0.12, 0.5, 8, 16]} />
       <meshStandardMaterial color={PALETTE.yam} roughness={0.85} />
     </mesh>
   );
@@ -38,7 +38,7 @@ function Yam({ position, rotation }: { position: [number, number, number]; rotat
 function Plantain({ position, rotation, ripe }: { position: [number, number, number]; rotation?: [number, number, number]; ripe?: boolean }) {
   return (
     <mesh position={position} rotation={rotation ?? [0, 0, 0.3]}>
-      <capsuleGeometry args={[0.06, 0.45, 4, 8]} />
+      <capsuleGeometry args={[0.06, 0.45, 8, 12]} />
       <meshStandardMaterial color={ripe ? PALETTE.plantain : PALETTE.plantainGreen} roughness={0.7} />
     </mesh>
   );
@@ -47,7 +47,7 @@ function Plantain({ position, rotation, ripe }: { position: [number, number, num
 function Pepper({ position, color }: { position: [number, number, number]; color?: string }) {
   return (
     <mesh position={position}>
-      <sphereGeometry args={[0.06, 8, 8]} />
+      <sphereGeometry args={[0.06, 16, 16]} />
       <meshStandardMaterial color={color ?? PALETTE.pepper} roughness={0.6} />
     </mesh>
   );
@@ -57,11 +57,11 @@ function PalmOilBottle({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
       <mesh position={[0, 0, 0]}>
-        <cylinderGeometry args={[0.06, 0.07, 0.3, 8]} />
+        <cylinderGeometry args={[0.06, 0.07, 0.3, 12]} />
         <meshStandardMaterial color={PALETTE.palm} roughness={0.3} metalness={0.1} transparent opacity={0.85} />
       </mesh>
       <mesh position={[0, 0.18, 0]}>
-        <cylinderGeometry args={[0.03, 0.04, 0.06, 8]} />
+        <cylinderGeometry args={[0.03, 0.04, 0.06, 12]} />
         <meshStandardMaterial color={PALETTE.palmLabel} roughness={0.9} />
       </mesh>
     </group>
@@ -77,7 +77,7 @@ function useBasketGeometry(): BufferGeometry {
       new THREE.Vector2(0.26, 0.15),
       new THREE.Vector2(0.24, 0.18),
     ];
-    return new THREE.LatheGeometry(points, 12);
+    return new THREE.LatheGeometry(points, 24);
   }, []);
 }
 
@@ -99,7 +99,7 @@ function Basket({ position, children }: { position: [number, number, number]; ch
 function SpiceSack({ position, color }: { position: [number, number, number]; color?: string }) {
   return (
     <mesh position={position}>
-      <sphereGeometry args={[0.14, 6, 6]} />
+      <sphereGeometry args={[0.14, 12, 12]} />
       <meshStandardMaterial color={color ?? PALETTE.sack} roughness={0.95} />
     </mesh>
   );
@@ -132,11 +132,11 @@ function MarketStall() {
   });
 
   return (
-    <group ref={groupRef} position={[0, -0.3, 0]}>
+    <group ref={groupRef} position={[0, -0.2, 0]} scale={[1.35, 1.1, 1]}>
       {/* Shelves */}
-      <WoodShelf position={[0, -0.5, 0]} />
-      <WoodShelf position={[0, 0.05, 0]} />
-      <WoodShelf position={[0, 0.6, 0]} />
+      <WoodShelf position={[0, -0.5, 0]} width={1.8} />
+      <WoodShelf position={[0, 0.05, 0]} width={1.8} />
+      <WoodShelf position={[0, 0.6, 0]} width={1.8} />
 
       {/* Shelf legs */}
       {[-0.65, 0.65].map((x) => (
@@ -204,7 +204,7 @@ export function MarketScene() {
       dpr={[1, 1.5]}
       style={{ pointerEvents: "none" }}
     >
-      <fog attach="fog" args={["#2A1A0A", 3, 7]} />
+      <fog attach="fog" args={["#2A1A0A", 3.5, 8]} />
       <ambientLight intensity={0.4} />
       <directionalLight position={[3, 4, 2]} intensity={1.1} color="#FFF0D4" />
       <directionalLight position={[-2, 2, -1]} intensity={0.3} color="#FFD9A0" />
