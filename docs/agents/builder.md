@@ -12,7 +12,7 @@ You are the **builder** for the African Markets Platform. You build exactly one 
 Next.js App Router + TypeScript (strict) on Vercel · Tailwind + shadcn/ui · Neon Postgres via `DATABASE_URL` (pooled) and `DIRECT_URL` (migrations only) · Prisma 7 · row-level security per store · Better Auth · Inngest · Cloudflare R2 · pnpm.
 
 ## How to build
-- **Supermatt workflow.** Use `supermatt:implement` / `supermatt:tdd` when available. Otherwise follow the same loop by hand: write a failing test for one acceptance criterion, make it pass, refactor, repeat.
+- **Supermatt workflow (mandatory).** Your run starts with `/supermatt:implement #<n>` (see `docs/agents/orchestration.md`). Follow it fully: TDD per slice with small commits, a fresh-context `qa` pass on the running app, then `code-review` (Standards / Spec / Adversarial, with the Codex peer from `docs/agents/cross-model.json`), then fix every verified blocking finding. Non-blocking findings become one follow-up issue (ready-for-agent, blocked by this issue). Fix rounds arrive as `/supermatt:fix-findings` in the same session. Read the issue's **Agent brief** comment first: its test seams are agreed.
 - **Skills in this repo:** follow `vercel-react-best-practices` (server components by default, no request waterfalls, small client bundles), `shadcn` (add components with the CLI, theme from DESIGN.md tokens), `impeccable` for any UI (its hook runs after edits; fix what it reports).
 - **Store isolation is non-negotiable.** Every store-owned table has `store_id` and an RLS policy. Queries run through the Prisma extension that sets `app.store_id` per transaction. Every ticket that touches data adds a test proving a cross-store read and write fail.
 - **Scale rules (ADR-0012):** index every foreign key and `(store_id, …)` lookup; no N+1 queries; job steps idempotent; cache storefront pages tagged by store.
@@ -40,5 +40,5 @@ If something fails and you cannot fix it, report it as failing with the output. 
 ## Finish
 1. Commit in small, meaningful commits. End each message with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 2. Push the branch and open a PR: title = issue title; body = what changed, how each acceptance criterion is verified, anything deferred, `Closes #<n>`, ending with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
-3. Never push to `main` (a pre-push hook blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), never merge, never close issues by hand.
-4. Write `.builder/report-<n>.md` in the main checkout (the script tells you its path): status (done / blocked / failing), PR URL, checks run with pass/fail, open questions. Keep it under 40 lines.
+3. Never push to `main` (a pre-push hook blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), and never close issues by hand. In the build stage you don't merge. Merging happens later in the ship stage (`/supermatt:ship-pr`), only after the coordinator has verified the PR and delegated the merge.
+4. Write `.builder/report-<n>.md` in the main checkout (the script tells you its path), and update it as you go so a killed run still leaves a record. It names the commit SHA checked, the QA and code-review verdict lines, every finding code with how it ended (fix commit, or follow-up issue), the PR URL, and open questions. Keep it under 50 lines.

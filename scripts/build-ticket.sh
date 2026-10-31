@@ -1,54 +1,78 @@
 #!/usr/bin/env bash
-# Builds one GitHub issue with a headless Claude Code run in its own git worktree.
-# Usage: scripts/build-ticket.sh <issue-number>
-# Reads: docs/agents/builder.md (brief), .env.local (keys), scripts/ticket-env.txt (keys each ticket needs).
-# Writes: .builder/logs/ticket-<n>-<time>.log and .builder/report-<n>.md
+# Stage A (build) and Fix rounds. See docs/agents/orchestration.md.
+# Usage:
+#   scripts/build-ticket.sh <issue>                      # build with /supermatt:implement
+#   scripts/build-ticket.sh <issue> --resume "<findings>"  # fix round in the same session
+#   scripts/build-ticket.sh <issue> --continue            # resume a killed run
+# Writes: .builder/logs/ticket-<n>-<time>.json, .builder/session-<n>.txt, .builder/report-<n>.md
 set -euo pipefail
 REPO="hislordshipprof/african-market-AI-Ecommerce"
 ROOT="$(git rev-parse --show-toplevel)"
-N="${1:?usage: scripts/build-ticket.sh <issue-number>}"
+N="${1:?usage: scripts/build-ticket.sh <issue> [--resume \"<findings>\" | --continue]}"
+MODE="${2:-build}"
+FINDINGS="${3:-}"
 
 cd "$ROOT"
 mkdir -p .builder/logs
+SESSION_FILE="$ROOT/.builder/session-$N.txt"
+REPORT="$ROOT/.builder/report-$N.md"
+LOG="$ROOT/.builder/logs/ticket-$N-$(date +%Y%m%d-%H%M%S).json"
 
-# 1. Issue must be open and unblocked.
-state=$(gh issue view "$N" -R "$REPO" --json state --jq .state)
-[ "$state" = "OPEN" ] || { echo "Issue #$N is $state"; exit 1; }
-blockers=$(gh api "repos/$REPO/issues/$N/dependencies/blocked_by" --jq '[.[] | select(.state=="open") | .number] | join(",")')
-[ -z "$blockers" ] || { echo "Issue #$N is blocked by open issues: $blockers"; exit 1; }
+if [ "$MODE" = "build" ]; then
+  # Preflight 1: open and unblocked.
+  state=$(gh issue view "$N" -R "$REPO" --json state --jq .state)
+  [ "$state" = "OPEN" ] || { echo "Issue #$N is $state"; exit 1; }
+  blockers=$(gh api "repos/$REPO/issues/$N/dependencies/blocked_by" --jq '[.[] | select(.state=="open") | .number] | join(",")')
+  [ -z "$blockers" ] || { echo "Issue #$N is blocked by open issues: $blockers"; exit 1; }
 
-# 2. Required keys for this ticket must be present in .env.local (values never printed).
-need=$(awk -v n="$N" '$1==n {for (i=2;i<=NF;i++) print $i}' scripts/ticket-env.txt)
-missing=()
-for k in $need; do
-  grep -Eq "^$k=.+" .env.local 2>/dev/null || missing+=("$k")
-done
-if [ ${#missing[@]} -gt 0 ]; then
-  echo "Ticket #$N needs these keys in .env.local first: ${missing[*]}"
-  exit 2
+  # Preflight 2: planner brief exists (stage T).
+  if ! gh issue view "$N" -R "$REPO" --comments --json comments --jq '.comments[].body' | grep -qi "agent brief"; then
+    echo "Issue #$N has no agent brief yet. Run scripts/plan-ticket.sh $N first."; exit 3
+  fi
+
+  # Preflight 3: required keys present in .env.local (values never printed).
+  need=$(awk -v n="$N" '$1==n {for (i=2;i<=NF;i++) print $i}' scripts/ticket-env.txt)
+  missing=()
+  for k in $need; do grep -Eq "^$k=.+" .env.local 2>/dev/null || missing+=("$k"); done
+  [ ${#missing[@]} -eq 0 ] || { echo "Ticket #$N needs these keys in .env.local first: ${missing[*]}"; exit 2; }
 fi
 
-# 3. Fresh worktree from origin/main.
+# Worktree (created once, reused by fix rounds).
 slug=$(gh issue view "$N" -R "$REPO" --json title --jq .title | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g' | cut -c1-40)
 BRANCH="ticket-$N-$slug"
 WT="$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N"
 git fetch -q origin main
-if [ ! -d "$WT" ]; then
-  git worktree add -q -B "$BRANCH" "$WT" origin/main
-fi
+[ -d "$WT" ] || git worktree add -q -B "$BRANCH" "$WT" origin/main
 cp .env.local "$WT/.env.local"
-
-REPORT="$ROOT/.builder/report-$N.md"
-LOG="$ROOT/.builder/logs/ticket-$N-$(date +%Y%m%d-%H%M%S).log"
-
-PROMPT="You are the builder. Read docs/agents/builder.md and follow it exactly.
-Build GitHub issue #$N in this worktree (branch $BRANCH). Repo: $REPO.
-Write your final report to: $REPORT"
-
-# 4. Headless run with full permissions (guardrails: own worktree, test keys only, main is protected, PR review before merge).
-echo "Building #$N in $WT; log: $LOG"
 cd "$WT"
-claude -p "$PROMPT" --dangerously-skip-permissions --output-format text > "$LOG" 2>&1 || true
 
-echo "Run finished. Report: $REPORT"
-[ -f "$REPORT" ] && cat "$REPORT" || echo "No report written; check the log."
+RULES="Run headless: never ask the user. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Commit and push early so a killed run loses little. Keep $REPORT updated with: the commit SHA you checked, QA and code-review verdict lines, every finding code with how it ended, and the PR URL."
+
+case "$MODE" in
+  build)
+    PROMPT="/supermatt:implement #$N
+Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build && pnpm start on http://localhost:3000 using .env.local.
+When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
+$RULES"
+    claude -p "$PROMPT" --dangerously-skip-permissions --output-format json > "$LOG" 2>&1 || status=$?
+    ;;
+  --resume)
+    [ -n "$FINDINGS" ] || { echo "--resume needs the finding text"; exit 1; }
+    SID=$(cat "$SESSION_FILE")
+    PROMPT="/supermatt:fix-findings $FINDINGS
+Fix test-first, re-run affected QA, review only the fix diff, commit, push to the same PR. $RULES"
+    claude -p --resume "$SID" "$PROMPT" --dangerously-skip-permissions --output-format json > "$LOG" 2>&1 || status=$?
+    ;;
+  --continue)
+    SID=$(cat "$SESSION_FILE")
+    claude -p --resume "$SID" "Continue where you stopped. $RULES" --dangerously-skip-permissions --output-format json > "$LOG" 2>&1 || status=$?
+    ;;
+  *) echo "unknown mode $MODE"; exit 1 ;;
+esac
+
+# Keep the session id for --resume / --continue.
+node -e 'const fs=require("fs");try{const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(j.session_id)fs.writeFileSync(process.argv[2],j.session_id)}catch(e){}' "$LOG" "$SESSION_FILE"
+
+echo "Run finished (exit ${status:-0}). Log: $LOG"
+[ -f "$REPORT" ] && head -40 "$REPORT" || echo "No report written; check the log."
+exit "${status:-0}"
