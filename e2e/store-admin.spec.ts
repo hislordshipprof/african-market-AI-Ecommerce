@@ -58,8 +58,8 @@ test.describe("Invite accept page", () => {
   test("shows error card for invalid token", async ({ page }) => {
     await page.goto("/invite/invalid-token-abc123");
 
-    await expect(page.locator("text=Invalid Invitation")).toBeVisible();
-    await expect(page.locator("text=Invalid invitation link")).toBeVisible();
+    await expect(page.getByText("Invalid Invitation", { exact: true })).toBeVisible();
+    await expect(page.getByText("Invalid invitation link")).toBeVisible();
   });
 
   test("error card has story surface background", async ({ page }) => {
