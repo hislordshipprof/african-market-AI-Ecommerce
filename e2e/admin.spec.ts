@@ -11,14 +11,14 @@ function generateTotpCode(): string {
 
 async function adminSignIn(page: import("@playwright/test").Page) {
   await page.goto("/admin/sign-in");
-  await page.fill("input[type='email']", ADMIN_EMAIL);
-  await page.fill("input[type='password']", ADMIN_PASSWORD);
+  await page.getByLabel("Email").fill(ADMIN_EMAIL);
+  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
   await page.click("button[type='submit']");
 
-  await page.locator("input[inputmode='numeric']").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByLabel("Verification code").waitFor({ state: "visible", timeout: 10000 });
 
   const code = generateTotpCode();
-  await page.fill("input[inputmode='numeric']", code);
+  await page.getByLabel("Verification code").fill(code);
   await page.click("button[type='submit']");
 
   try {
@@ -37,8 +37,8 @@ test.describe("Platform admin console", () => {
   test("sign-in page renders email and password fields", async ({ page }) => {
     await page.goto("/admin/sign-in");
     await expect(page.locator("h1")).toHaveText("Platform Admin");
-    await expect(page.locator("input[type='email']")).toBeVisible();
-    await expect(page.locator("input[type='password']")).toBeVisible();
+    await expect(page.getByLabel("Email")).toBeVisible();
+    await expect(page.getByLabel("Password")).toBeVisible();
     await expect(page.locator("button[type='submit']")).toHaveText("Sign in");
   });
 
@@ -55,7 +55,7 @@ test.describe("Platform admin console", () => {
     const response = await page.goto("/admin/stores");
     expect(response?.status()).not.toBe(500);
     await expect(page).toHaveURL(/\/admin\/sign-in/);
-    await expect(page.locator("input[type='email']")).toBeVisible();
+    await expect(page.getByLabel("Email")).toBeVisible();
   });
 
   test("sign-in with valid credentials and TOTP reaches stores", async ({
@@ -97,6 +97,24 @@ test.describe("Store management (authenticated)", () => {
     await expect(page.locator("text=reserved")).toBeVisible();
   });
 
+  test("create store form rejects all-digit slug", async ({ page }) => {
+    await page.click("text=Create store");
+    await page.getByLabel("Slug").fill("123");
+    await page.getByLabel("Store name").fill("Digit Slug Test");
+    await page.click("button[type='submit']:has-text('Create store')");
+
+    await expect(page.locator("text=not allowed")).toBeVisible();
+  });
+
+  test("create store form rejects localhost slug", async ({ page }) => {
+    await page.click("text=Create store");
+    await page.getByLabel("Slug").fill("localhost");
+    await page.getByLabel("Store name").fill("Localhost Slug Test");
+    await page.click("button[type='submit']:has-text('Create store')");
+
+    await expect(page.locator("text=not allowed")).toBeVisible();
+  });
+
   test("form preserves entered values after validation error", async ({ page }) => {
     await page.click("text=Create store");
     await expect(page).toHaveURL(/\/admin\/stores\/new/);
@@ -110,6 +128,20 @@ test.describe("Store management (authenticated)", () => {
     await expect(page.locator("text=already exists")).toBeVisible();
     await expect(page.getByLabel("Store name")).toHaveValue(testName);
     await expect(page.getByLabel("Pickup enabled")).toBeChecked();
+  });
+
+  test("create store with zero prep time and delivery radius", async ({ page }) => {
+    const slug = `e2e-zero-${Date.now()}`;
+
+    await page.click("text=Create store");
+    await page.getByLabel("Slug").fill(slug);
+    await page.getByLabel("Store name").fill("E2E Zero Values");
+    await page.getByLabel("Prep time (minutes)").fill("0");
+    await page.getByLabel("Delivery radius (miles)").fill("0");
+    await page.click("button[type='submit']:has-text('Create store')");
+
+    await page.waitForURL("**/admin/stores", { timeout: 10000 });
+    await expect(page.locator(`text=${slug}`)).toBeVisible();
   });
 
   test("create and then edit a store", async ({ page }) => {
@@ -205,8 +237,8 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
     page,
   }) => {
     await page.goto("/admin/sign-in");
-    await page.fill("input[type='email']", UNENROLLED_EMAIL);
-    await page.fill("input[type='password']", ADMIN_PASSWORD);
+    await page.getByLabel("Email").fill(UNENROLLED_EMAIL);
+    await page.getByLabel("Password").fill(ADMIN_PASSWORD);
     await page.click("button[type='submit']");
 
     await page.waitForURL("**/admin/enroll-2fa", { timeout: 10000 });

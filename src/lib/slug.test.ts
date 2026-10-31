@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slugFromHost, RESERVED_SLUGS } from "./slug";
+import { slugFromHost, RESERVED_SLUGS, isSlugRoutable } from "./slug";
 
 describe("slugFromHost", () => {
   it("extracts slug from subdomain with root domain", () => {
@@ -42,6 +42,14 @@ describe("slugFromHost", () => {
     );
   });
 
+  it("returns null for all-digit slug with root domain", () => {
+    expect(slugFromHost("123.example.com", "example.com")).toBeNull();
+  });
+
+  it("returns null for localhost slug with root domain", () => {
+    expect(slugFromHost("localhost.example.com", "example.com")).toBeNull();
+  });
+
   it("handles port with root domain", () => {
     expect(slugFromHost("tante-marie.example.com:443", "example.com")).toBe(
       "tante-marie",
@@ -61,6 +69,54 @@ describe("slugFromHost", () => {
 
     it(`returns null for reserved slug '${slug}' with root domain`, () => {
       expect(slugFromHost(`${slug}.example.com`, "example.com")).toBeNull();
+    });
+  }
+});
+
+describe("isSlugRoutable", () => {
+  it("accepts a valid slug", () => {
+    expect(isSlugRoutable("mama-ngozi")).toBe(true);
+  });
+
+  it("accepts a single-character slug", () => {
+    expect(isSlugRoutable("a")).toBe(true);
+  });
+
+  it("accepts a slug with numbers and hyphens", () => {
+    expect(isSlugRoutable("store-42")).toBe(true);
+  });
+
+  it("rejects an all-digit slug", () => {
+    expect(isSlugRoutable("123")).toBe(false);
+  });
+
+  it("rejects localhost", () => {
+    expect(isSlugRoutable("localhost")).toBe(false);
+  });
+
+  it("rejects an empty string", () => {
+    expect(isSlugRoutable("")).toBe(false);
+  });
+
+  it("rejects a slug with uppercase letters", () => {
+    expect(isSlugRoutable("Mama-Ngozi")).toBe(false);
+  });
+
+  it("rejects a slug with underscores", () => {
+    expect(isSlugRoutable("mama_ngozi")).toBe(false);
+  });
+
+  it("rejects a slug starting with a hyphen", () => {
+    expect(isSlugRoutable("-mama")).toBe(false);
+  });
+
+  it("rejects a slug ending with a hyphen", () => {
+    expect(isSlugRoutable("mama-")).toBe(false);
+  });
+
+  for (const slug of RESERVED_SLUGS) {
+    it(`rejects reserved slug '${slug}'`, () => {
+      expect(isSlugRoutable(slug)).toBe(false);
     });
   }
 });

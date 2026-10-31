@@ -10,6 +10,17 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "vercel",
 ]);
 
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+// Every slug-rejection rule lives here. validateStoreFields and slugFromHost both call this.
+export function isSlugRoutable(slug: string): boolean {
+  if (!SLUG_RE.test(slug)) return false;
+  if (RESERVED_SLUGS.has(slug)) return false;
+  if (/^\d+$/.test(slug)) return false;
+  if (slug === "localhost") return false;
+  return true;
+}
+
 export function slugFromHost(
   host: string,
   rootDomain?: string,
@@ -23,20 +34,13 @@ export function slugFromHost(
     if (hostname === root || hostname === `www.${root}`) return null;
     if (hostname.endsWith(`.${root}`)) {
       const sub = hostname.slice(0, -(root.length + 1)) || null;
-      if (sub && RESERVED_SLUGS.has(sub)) return null;
+      if (!sub || !isSlugRoutable(sub)) return null;
       return sub;
     }
   }
 
   const firstLabel = hostname.split(".")[0];
-  if (
-    !firstLabel ||
-    firstLabel === "localhost" ||
-    RESERVED_SLUGS.has(firstLabel) ||
-    /^\d+$/.test(firstLabel)
-  ) {
-    return null;
-  }
+  if (!firstLabel || !isSlugRoutable(firstLabel)) return null;
 
   return firstLabel;
 }
