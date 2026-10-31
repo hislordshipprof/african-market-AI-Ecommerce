@@ -6,7 +6,10 @@ import { isRateLimited } from "@/lib/rate-limit";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown";
 
   if (isRateLimited(ip)) {
     return NextResponse.json(

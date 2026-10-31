@@ -118,6 +118,7 @@ export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId:
 
 export { prisma as authPrisma };
 
+// No RLS wrapper: health checks read only system catalogs, not store-scoped tables.
 export function healthQueryRaw(
   strings: TemplateStringsArray,
   ...values: unknown[]

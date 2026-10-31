@@ -33,7 +33,8 @@ export async function checkDatabase(
       current_user: string;
     }[];
     return { reachable: true, user: rows[0]?.current_user ?? null };
-  } catch {
+  } catch (err) {
+    console.error("Health check: database unreachable", err);
     return { reachable: false, user: null };
   }
 }
@@ -47,7 +48,8 @@ export async function checkMigrations(
     }[];
     const count = Number(rows[0]?.count ?? 0);
     return { upToDate: count === 0 };
-  } catch {
+  } catch (err) {
+    console.error("Health check: migration status query failed", err);
     return { upToDate: false };
   }
 }
