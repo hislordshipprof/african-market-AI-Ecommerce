@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MapPin } from "lucide-react";
 import type { ValidatedStore } from "@/lib/get-store";
 
@@ -30,14 +31,14 @@ export function StorefrontFooter({ store }: { store: ValidatedStore }) {
             </h3>
             <ul className="mt-2 space-y-1.5 font-body text-sm text-on-primary/80">
               <li>
-                <a href="/" className="hover:text-on-primary">
+                <Link href="/" className="hover:text-on-primary">
                   Home
-                </a>
+                </Link>
               </li>
               <li>
-                <a href="/search" className="hover:text-on-primary">
+                <Link href="/search" className="hover:text-on-primary">
                   Search
-                </a>
+                </Link>
               </li>
             </ul>
           </div>
