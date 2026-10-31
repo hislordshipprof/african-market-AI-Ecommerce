@@ -213,6 +213,10 @@ export async function updateListing(input: UpdateListingInput) {
     }
 
     if (input.variants) {
+      const existingVariants = await tx.listingVariant.findMany({
+        where: { listingId: input.listingId },
+      });
+
       await tx.listingVariant.deleteMany({ where: { listingId: input.listingId } });
       await Promise.all(
         input.variants.map((v) =>
@@ -228,6 +232,27 @@ export async function updateListing(input: UpdateListingInput) {
           }),
         ),
       );
+
+      const oldPrices = existingVariants.map((v) => ({ label: v.label, price: v.price }));
+      const newPrices = input.variants.map((v) => ({ label: v.label, price: v.price }));
+      const pricesChanged =
+        oldPrices.length !== newPrices.length ||
+        oldPrices.some((old, i) => old.label !== newPrices[i]?.label || old.price !== newPrices[i]?.price);
+
+      if (pricesChanged) {
+        await tx.auditLog.create({
+          data: {
+            storeId: input.storeId,
+            actorId: input.actorId,
+            actorEmail: input.actorEmail,
+            action: "listing.variant_price_change",
+            entityType: "listing",
+            entityId: input.listingId,
+            before: { variants: oldPrices },
+            after: { variants: newPrices },
+          },
+        });
+      }
     }
 
     return updated;

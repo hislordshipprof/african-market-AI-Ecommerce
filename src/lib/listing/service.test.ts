@@ -353,6 +353,78 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     expect(found!.status).toBeNull();
   });
 
+  it("variant price change creates audit entry", async () => {
+    const listing = await createListing({
+      storeId,
+      customName: "Audit Variant Price",
+      price: 500,
+      stockMode: "counted",
+      qty: 10,
+      frozen: false,
+      perishable: false,
+      variants: [
+        { label: "250g", price: 500, weightG: 250 },
+        { label: "1kg", price: 1800, weightG: 1000 },
+      ],
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    await updateListing({
+      storeId,
+      listingId: listing.id,
+      variants: [
+        { label: "250g", price: 600, weightG: 250 },
+        { label: "1kg", price: 1800, weightG: 1000 },
+      ],
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    const scoped = storeScoped(storeId);
+    const logs = await scoped.auditLog.findMany({
+      where: { entityId: listing.id, action: "listing.variant_price_change" },
+    });
+    expect(logs).toHaveLength(1);
+    const before = logs[0].before as Record<string, unknown>;
+    const after = logs[0].after as Record<string, unknown>;
+    expect(before).toHaveProperty("variants");
+    expect(after).toHaveProperty("variants");
+    const beforeVariants = before.variants as Array<{ label: string; price: number }>;
+    const afterVariants = after.variants as Array<{ label: string; price: number }>;
+    expect(beforeVariants.find((v) => v.label === "250g")?.price).toBe(500);
+    expect(afterVariants.find((v) => v.label === "250g")?.price).toBe(600);
+  });
+
+  it("variant update with no price change creates no audit entry", async () => {
+    const listing = await createListing({
+      storeId,
+      customName: "No Audit Variant",
+      price: 700,
+      stockMode: "counted",
+      qty: 5,
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1kg", price: 700, weightG: 1000 }],
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    await updateListing({
+      storeId,
+      listingId: listing.id,
+      variants: [{ label: "1kg", price: 700, weightG: 1000 }],
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    const scoped = storeScoped(storeId);
+    const logs = await scoped.auditLog.findMany({
+      where: { entityId: listing.id, action: "listing.variant_price_change" },
+    });
+    expect(logs).toHaveLength(0);
+  });
+
   it("updateVariants replaces all variants", async () => {
     const listing = await createListing({
       storeId,
