@@ -11,3 +11,7 @@
 | Asset | Source | License |
 |-------|--------|---------|
 | Story surface 3D market scene (shelves, yams, plantains, peppers, baskets, spice sacks, palm oil bottles) | Built in-app with Three.js primitives via `@react-three/fiber` + `@react-three/drei` | N/A (original work) |
+| `product-placeholder.svg` | Designed SVG grocery bag placeholder for products without photos | N/A (original work) |
+| `categories/*.svg` | Designed SVG food illustrations for 9 category cards (tubers, grains, spices, oils, vegetables, fish & meat, snacks, drinks, pantry) | N/A (original work) |
+| `banners/*.svg` | Designed SVG hero banner backgrounds for demo stores (6 banners) | N/A (original work) |
+| `collections/*.svg` | Designed SVG collection card backgrounds (7 collections) | N/A (original work) |
