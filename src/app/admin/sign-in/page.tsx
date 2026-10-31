@@ -77,10 +77,11 @@ export default function AdminSignIn() {
 
         {step === "credentials" && (
           <form onSubmit={handleCredentials}>
-            <label className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-[#15201A]">
               Email
             </label>
             <input
+              id="admin-email"
               type="email"
               required
               value={email}
@@ -89,10 +90,11 @@ export default function AdminSignIn() {
               autoComplete="email"
             />
 
-            <label className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="admin-password" className="mb-1 block text-sm font-medium text-[#15201A]">
               Password
             </label>
             <input
+              id="admin-password"
               type="password"
               required
               value={password}
@@ -116,10 +118,11 @@ export default function AdminSignIn() {
             <p className="mb-4 text-sm text-[#55625A]">
               Enter the 6-digit code from your authenticator app.
             </p>
-            <label className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="admin-totp" className="mb-1 block text-sm font-medium text-[#15201A]">
               Verification code
             </label>
             <input
+              id="admin-totp"
               type="text"
               required
               inputMode="numeric"
