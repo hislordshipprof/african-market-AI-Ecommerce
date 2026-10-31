@@ -1,52 +1,17 @@
 "use client";
 
-import {
-  Suspense,
-  lazy,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { type ReactNode } from "react";
 import Image from "next/image";
 import { motion } from "motion/react";
 import posterSrc from "../../../public/images/market-spices-poster.jpg";
 
-const LazyMarketScene = lazy(() =>
-  import("./market-scene").then((m) => ({ default: m.MarketScene })),
-);
-
-function canShowScene(): boolean {
-  const reducedMotion = window.matchMedia(
-    "(prefers-reduced-motion: reduce)",
-  ).matches;
-  const narrow = window.innerWidth < 768;
-  const saveData = (
-    navigator as unknown as { connection?: { saveData?: boolean } }
-  ).connection?.saveData;
-  return !reducedMotion && !narrow && !saveData;
-}
-
-function subscribeToSceneConditions(callback: () => void) {
-  const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
-  mql.addEventListener("change", callback);
-  window.addEventListener("resize", callback);
-  return () => {
-    mql.removeEventListener("change", callback);
-    window.removeEventListener("resize", callback);
-  };
-}
-
-const SERVER_SNAPSHOT = false;
-function getServerSnapshot() {
-  return SERVER_SNAPSHOT;
-}
+/**
+ * Re-enable when the 3D market scene is rebuilt at higher fidelity (#35).
+ * When false the three/R3F chunk is never imported.
+ */
+export const ENABLE_3D_SCENE = false;
 
 export function StorySurface({ children }: { children: ReactNode }) {
-  const showScene = useSyncExternalStore(
-    subscribeToSceneConditions,
-    canShowScene,
-    getServerSnapshot,
-  );
-
   return (
     <main className="relative flex min-h-dvh items-center justify-center overflow-hidden p-4">
       {/* Poster photograph — first paint, always visible */}
@@ -54,26 +19,25 @@ export function StorySurface({ children }: { children: ReactNode }) {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
       >
-        <Image
-          src={posterSrc}
-          alt=""
-          fill
-          priority
-          sizes="100vw"
-          className="object-cover"
-          placeholder="blur"
-        />
+        <motion.div
+          className="absolute inset-0"
+          initial={{ scale: 1.05 }}
+          animate={{ scale: 1 }}
+          transition={{ duration: 20, ease: "linear", repeat: Infinity, repeatType: "reverse" }}
+          style={{ willChange: "transform" }}
+        >
+          <Image
+            src={posterSrc}
+            alt=""
+            fill
+            priority
+            sizes="100vw"
+            className="object-cover motion-reduce:!transform-none"
+            placeholder="blur"
+          />
+        </motion.div>
         <div className="absolute inset-0 bg-gradient-to-br from-black/50 via-black/30 to-transparent dark:from-black/70 dark:via-black/50" />
       </div>
-
-      {/* 3D scene — lazy, desktop only, skipped on reduced-motion & save-data */}
-      {showScene && (
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-          <Suspense fallback={null}>
-            <LazyMarketScene />
-          </Suspense>
-        </div>
-      )}
 
       {/* Form panel with entrance motion */}
       <motion.div
