@@ -14,6 +14,7 @@ import { CollectionBanners } from "@/components/storefront/collection-banner";
 import { PromoBand } from "@/components/storefront/promo-band";
 import { TrustStoryStrip } from "@/components/storefront/trust-story-strip";
 import { StorefrontFooter } from "@/components/storefront/storefront-footer";
+import Link from "next/link";
 
 export default async function StorefrontPage() {
   const { store, suspended } = await getStoreWithStatus();
@@ -88,12 +89,12 @@ export default async function StorefrontPage() {
 
         {hasMoreRails && (
           <div className="flex justify-center">
-            <a
+            <Link
               href="/categories"
               className="inline-flex h-12 items-center rounded-pill bg-soft px-8 font-label text-sm font-semibold text-primary transition-colors hover:bg-raised"
             >
               Browse all categories &rarr;
-            </a>
+            </Link>
           </div>
         )}
 

@@ -43,6 +43,8 @@ export function QuickAddStepper({ productName }: { productName: string }) {
           </button>
           <span
             data-testid="stepper-qty"
+            aria-live="polite"
+            aria-atomic="true"
             className="min-w-[1.5rem] text-center font-label text-sm font-semibold text-on-primary"
           >
             {qty}

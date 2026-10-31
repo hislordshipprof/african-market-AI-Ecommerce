@@ -91,7 +91,7 @@ export function ProductRail({
           <button
             type="button"
             onClick={() => scroll(-1)}
-            className="absolute -left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface shadow-md transition-opacity hover:bg-raised focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 md:group-hover/rail:flex"
+            className="absolute -left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface transition-opacity hover:bg-raised focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 md:group-hover/rail:flex"
             aria-label="Scroll left"
           >
             <ChevronLeft className="h-5 w-5 text-ink" />
@@ -101,7 +101,7 @@ export function ProductRail({
           <button
             type="button"
             onClick={() => scroll(1)}
-            className="absolute -right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface shadow-md transition-opacity hover:bg-raised focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 md:group-hover/rail:flex"
+            className="absolute -right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface transition-opacity hover:bg-raised focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 md:group-hover/rail:flex"
             aria-label="Scroll right"
           >
             <ChevronRight className="h-5 w-5 text-ink" />

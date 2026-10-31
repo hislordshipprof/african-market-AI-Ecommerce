@@ -24,6 +24,8 @@ export default function HomeLoading() {
         <MosaicSkeleton />
         <RailSkeleton />
         <RailSkeleton />
+        <RailSkeleton />
+        <RailSkeleton />
         <BannerSkeleton />
       </div>
     </main>

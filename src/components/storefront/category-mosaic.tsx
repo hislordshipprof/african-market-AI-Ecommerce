@@ -19,6 +19,8 @@ export function CategoryMosaic({
 }: {
   categories: MosaicCategory[];
 }) {
+  if (categories.length === 0) return null;
+
   return (
     <section data-testid="category-mosaic" aria-labelledby="mosaic-heading">
       <h2
