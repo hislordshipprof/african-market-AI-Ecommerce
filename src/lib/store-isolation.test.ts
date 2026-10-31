@@ -416,6 +416,102 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
   });
 });
 
+describe.skipIf(!hasDb)("Stripe Connect column RLS isolation", () => {
+  let rawPrisma: PrismaClient;
+  let storeAId: string;
+  let storeBId: string;
+
+  beforeAll(async () => {
+    const adapter = new PrismaPg(process.env.DATABASE_URL!);
+    rawPrisma = new PrismaClient({ adapter });
+    await rawPrisma.$connect();
+
+    const storeA = await rawPrisma.store.upsert({
+      where: { slug: "rls-stripe-a" },
+      update: { stripeAccountId: "acct_store_a", stripeOnboardingStatus: "complete" },
+      create: {
+        slug: "rls-stripe-a",
+        name: "Stripe Store A",
+        themePreset: "palm-and-shea",
+        stripeAccountId: "acct_store_a",
+        stripeOnboardingStatus: "complete",
+      },
+    });
+    storeAId = storeA.id;
+
+    const storeB = await rawPrisma.store.upsert({
+      where: { slug: "rls-stripe-b" },
+      update: { stripeAccountId: "acct_store_b", stripeOnboardingStatus: "pending" },
+      create: {
+        slug: "rls-stripe-b",
+        name: "Stripe Store B",
+        themePreset: "lagoon-and-coral",
+        stripeAccountId: "acct_store_b",
+        stripeOnboardingStatus: "pending",
+      },
+    });
+    storeBId = storeB.id;
+  });
+
+  afterAll(async () => {
+    await rawPrisma.rlsTestFixture.deleteMany({
+      where: { storeId: { in: [storeAId, storeBId] } },
+    });
+    await rawPrisma.store.deleteMany({
+      where: { slug: { in: ["rls-stripe-a", "rls-stripe-b"] } },
+    });
+    await rawPrisma.$disconnect();
+  });
+
+  it("platform (non-admin) cannot update store stripe fields", async () => {
+    const result = await platform.store.updateMany({
+      where: { id: storeAId },
+      data: { stripeOnboardingStatus: "hacked" },
+    });
+    expect(result.count).toBe(0);
+
+    const store = await rawPrisma.store.findUnique({ where: { id: storeAId } });
+    expect(store!.stripeOnboardingStatus).toBe("complete");
+  });
+
+  it("storeScoped(A) writing store_content cannot affect storeB stripe fields", async () => {
+    const scoped = storeScoped(storeAId);
+    await scoped.rlsTestFixture.upsert({
+      where: { storeId_key: { storeId: storeAId, key: "stripe_test" } },
+      update: { value: "a_value" },
+      create: { storeId: storeAId, key: "stripe_test", value: "a_value" },
+    });
+
+    const storeB = await rawPrisma.store.findUnique({ where: { id: storeBId } });
+    expect(storeB!.stripeAccountId).toBe("acct_store_b");
+    expect(storeB!.stripeOnboardingStatus).toBe("pending");
+  });
+
+  it("platformAdmin can update stripe fields on any store", async () => {
+    await platformAdmin.store.update({
+      where: { id: storeBId },
+      data: { stripeOnboardingStatus: "restricted" },
+    });
+
+    const store = await rawPrisma.store.findUnique({ where: { id: storeBId } });
+    expect(store!.stripeOnboardingStatus).toBe("restricted");
+
+    await rawPrisma.store.update({
+      where: { id: storeBId },
+      data: { stripeOnboardingStatus: "pending" },
+    });
+  });
+
+  it("platform.store can read all stores including stripe fields", async () => {
+    const store = await platform.store.findUnique({
+      where: { slug: "rls-stripe-a" },
+    });
+    expect(store).not.toBeNull();
+    expect(store!.stripeAccountId).toBe("acct_store_a");
+    expect(store!.stripeOnboardingStatus).toBe("complete");
+  });
+});
+
 const hasRuntime = hasDb && !!process.env.APP_RUNTIME_PASSWORD;
 
 describe.skipIf(!hasRuntime)(
