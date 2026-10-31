@@ -1,10 +1,13 @@
 # Image Credits
 
-All visual assets on story surfaces (sign-in, invite-accept, onboarding) are
-rendered programmatically by the application using React Three Fiber. No external
-stock photography or third-party imagery is used.
+## Photography
+
+| File | Description | Author | Source | License |
+|------|-------------|--------|--------|---------|
+| `market-spices-poster.jpg` | Colorful spices and dried goods at a market stall, Marrakesh, Morocco | Alessio Roversi ([@alessionord](https://unsplash.com/@alessionord)) | [Unsplash](https://unsplash.com/photos/colorful-spices-and-dried-goods-displayed-in-market-3dVx9j1iepM) | [Unsplash License](https://unsplash.com/license) |
+
+## Programmatic Assets
 
 | Asset | Source | License |
 |-------|--------|---------|
-| Story surface 3D scene | Rendered in-app via `@react-three/fiber` + `@react-three/drei` | N/A (original work) |
-| Poster gradient background | CSS gradient using design system tokens | N/A (original work) |
+| Story surface 3D market scene (shelves, yams, plantains, peppers, baskets, spice sacks, palm oil bottles) | Built in-app with Three.js primitives via `@react-three/fiber` + `@react-three/drei` | N/A (original work) |

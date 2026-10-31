@@ -6,7 +6,9 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import Image from "next/image";
 import { motion } from "motion/react";
+import posterSrc from "../../../public/images/market-spices-poster.jpg";
 
 const LazyMarketScene = lazy(() =>
   import("./market-scene").then((m) => ({ default: m.MarketScene })),
@@ -47,11 +49,22 @@ export function StorySurface({ children }: { children: ReactNode }) {
 
   return (
     <main className="relative flex min-h-dvh items-center justify-center overflow-hidden p-4">
-      {/* Poster gradient — first paint, always visible */}
+      {/* Poster photograph — first paint, always visible */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,var(--color-primary-deep)_0%,var(--color-primary)_40%,var(--color-soft)_100%)] opacity-90"
-      />
+        className="pointer-events-none absolute inset-0"
+      >
+        <Image
+          src={posterSrc}
+          alt=""
+          fill
+          priority
+          sizes="100vw"
+          className="object-cover"
+          placeholder="blur"
+        />
+        <div className="absolute inset-0 bg-gradient-to-br from-black/50 via-black/30 to-transparent dark:from-black/70 dark:via-black/50" />
+      </div>
 
       {/* 3D scene — lazy, desktop only, skipped on reduced-motion & save-data */}
       {showScene && (
