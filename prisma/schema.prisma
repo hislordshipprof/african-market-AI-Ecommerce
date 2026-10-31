@@ -23,8 +23,10 @@ model Store {
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
-  rlsFixtures RlsTestFixture[]
-  auditLogs   AuditLog[]
+  rlsFixtures  RlsTestFixture[]
+  auditLogs    AuditLog[]
+  memberships  StoreMembership[]
+  invites      StoreInvite[]
 
   @@map("stores")
 }
@@ -55,10 +57,12 @@ model User {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  sessions  Session[]
-  accounts  Account[]
-  twoFactor TwoFactor[]
-  auditLogs AuditLog[]
+  sessions    Session[]
+  accounts    Account[]
+  twoFactor   TwoFactor[]
+  auditLogs   AuditLog[]
+  memberships StoreMembership[]
+  invitesSent StoreInvite[]
 
   @@map("users")
 }
@@ -157,4 +161,39 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([actorId])
   @@map("audit_logs")
+}
+
+model StoreMembership {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  userId    String   @map("user_id")
+  role      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id])
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, userId])
+  @@index([userId])
+  @@map("store_memberships")
+}
+
+model StoreInvite {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  email       String
+  role        String
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  usedAt      DateTime? @map("used_at")
+  invitedById String    @map("invited_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  store     Store @relation(fields: [storeId], references: [id])
+  invitedBy User  @relation(fields: [invitedById], references: [id])
+
+  @@index([storeId])
+  @@index([email])
+  @@map("store_invites")
 }
