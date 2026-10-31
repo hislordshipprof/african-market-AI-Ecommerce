@@ -2,19 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getStore } from "@/lib/get-store";
 import { getListingDetail } from "@/lib/storefront/service";
+import { formatPrice, formatWeight } from "@/lib/format";
 import { StorefrontHeader } from "@/components/storefront/storefront-header";
 import { StockBadgeChip } from "@/components/storefront/stock-badge";
-
-function formatPrice(cents: number): string {
-  const dollars = Math.floor(cents / 100);
-  const remainder = cents % 100;
-  return `$${dollars}${remainder > 0 ? `.${String(remainder).padStart(2, "0")}` : ""}`;
-}
-
-function formatWeight(grams: number): string {
-  if (grams >= 1000) return `${(grams / 1000).toFixed(1).replace(/\.0$/, "")} kg`;
-  return `${grams} g`;
-}
 
 export default async function ListingDetailPage({
   params,

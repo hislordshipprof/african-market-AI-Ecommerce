@@ -1,12 +1,7 @@
 import Link from "next/link";
 import type { StorefrontListing } from "@/lib/storefront/service";
+import { formatPrice } from "@/lib/format";
 import { StockBadgeChip } from "./stock-badge";
-
-function formatPrice(cents: number): string {
-  const dollars = Math.floor(cents / 100);
-  const remainder = cents % 100;
-  return `$${dollars}${remainder > 0 ? `.${String(remainder).padStart(2, "0")}` : ""}`;
-}
 
 export function ListingCard({ listing }: { listing: StorefrontListing }) {
   return (

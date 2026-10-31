@@ -21,6 +21,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let synonymId: string;
   let listingAId: string;
   let listingBId: string;
+  let inactiveListingId: string;
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -134,6 +135,27 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
         data: { listingId: listingBId, label: "1 bunch", price: 600, weightG: 250 },
       }),
     ]);
+
+    // Create an inactive listing in store A for exclusion tests
+    const inactiveListing = await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.listing.create({
+        data: {
+          storeId: storeAId,
+          masterProductId,
+          customName: "Deactivated Pumpkin",
+          price: 300,
+          stockMode: "counted",
+          qty: 0,
+          frozen: false,
+          perishable: false,
+          confidence: 0.0,
+          active: false,
+        },
+      }),
+    ]);
+    inactiveListingId = (inactiveListing[2] as { id: string }).id;
   });
 
   afterAll(async () => {
@@ -141,12 +163,12 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listingVariant.deleteMany({ where: { listingId: { in: [listingAId, listingBId] } } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listingId: { in: [listingAId, listingBId, inactiveListingId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listing.deleteMany({ where: { id: { in: [listingAId, listingBId] } } }),
+      rawPrisma.listing.deleteMany({ where: { id: { in: [listingAId, listingBId, inactiveListingId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -246,9 +268,9 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     expect(results).toHaveLength(0);
   });
 
-  // Seam 6: pg_trgm fuzzy search
+  // Seam 6: pg_trgm fuzzy search (word_similarity)
   it("fuzzy search 'pumkin' finds 'Fluted Pumpkin Leaves' via trigram", async () => {
-    const results = await searchListings(storeAId, "pumpkin");
+    const results = await searchListings(storeAId, "pumkin");
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results.some((r) => r.id === listingAId)).toBe(true);
   });
@@ -258,6 +280,22 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     const listing = result.listings.find((l) => l.id === listingAId);
     expect(listing).toBeDefined();
     expect(listing!.startingPrice).toBe(500);
+  });
+
+  it("inactive listing excluded from category browse", async () => {
+    const result = await listingsByCategory(storeAId, "vegetables");
+    expect(result.listings.some((l) => l.id === inactiveListingId)).toBe(false);
+    expect(result.listings.some((l) => l.id === listingAId)).toBe(true);
+  });
+
+  it("inactive listing excluded from getListingDetail", async () => {
+    const detail = await getListingDetail(storeAId, inactiveListingId);
+    expect(detail).toBeNull();
+  });
+
+  it("inactive listing excluded from getActiveListings", async () => {
+    const listings = await getActiveListings(storeAId);
+    expect(listings.some((l) => l.id === inactiveListingId)).toBe(false);
   });
 
   it("getActiveListings returns store A listings only", async () => {

@@ -166,9 +166,9 @@ export async function searchListings(
       AND (
         l.search_vector @@ plainto_tsquery('english', ${trimmed})
         OR mp.search_vector @@ plainto_tsquery('english', ${trimmed})
-        OR similarity(ps.term, ${trimmed}) > 0.3
-        OR similarity(mp.name, ${trimmed}) > 0.3
-        OR similarity(COALESCE(l.custom_name, ''), ${trimmed}) > 0.3
+        OR word_similarity(${trimmed}, ps.term) > 0.3
+        OR word_similarity(${trimmed}, mp.name) > 0.3
+        OR word_similarity(${trimmed}, COALESCE(l.custom_name, '')) > 0.3
         OR LOWER(ps.term) = LOWER(${trimmed})
       )
     ORDER BY l.id

@@ -1,21 +1,17 @@
 import Link from "next/link";
 import { getStore } from "@/lib/get-store";
 import { searchListings } from "@/lib/storefront/service";
+import { formatPrice } from "@/lib/format";
 import { StorefrontHeader } from "@/components/storefront/storefront-header";
 import { StockBadgeChip } from "@/components/storefront/stock-badge";
-
-function formatPrice(cents: number): string {
-  const dollars = Math.floor(cents / 100);
-  const remainder = cents % 100;
-  return `$${dollars}${remainder > 0 ? `.${String(remainder).padStart(2, "0")}` : ""}`;
-}
 
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string | string[] }>;
 }) {
-  const { q = "" } = await searchParams;
+  const raw = (await searchParams).q;
+  const q = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] ?? "" : "";
   const store = await getStore();
   const results = q.trim() ? await searchListings(store.id, q) : [];
 
