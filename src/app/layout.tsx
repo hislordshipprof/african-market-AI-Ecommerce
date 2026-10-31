@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Figtree, Geist } from "next/font/google";
 import { headers } from "next/headers";
-import { findStore, findStoreByDomain } from "@/lib/get-store";
+import { findStore, findStoreByDomain, type ValidatedStore } from "@/lib/get-store";
 import { resolveStoreTheme, type ResolvedTheme } from "@/lib/theme";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -21,7 +21,7 @@ const figtree = Figtree({
   display: "swap",
 });
 
-async function resolveStoreFromHeaders(): Promise<{ name: string } | null> {
+async function resolveStoreFromHeaders(): Promise<ValidatedStore | null> {
   const headerList = await headers();
   const slug = headerList.get("x-store-slug");
   if (slug) return findStore(slug);
