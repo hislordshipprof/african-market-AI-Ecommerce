@@ -1,33 +1,30 @@
-import { CardSkeleton, CategoryPillSkeleton } from "@/components/storefront/skeleton";
+import {
+  HeroSkeleton,
+  MosaicSkeleton,
+  RailSkeleton,
+  BannerSkeleton,
+} from "@/components/storefront/skeleton";
 
 export default function HomeLoading() {
   return (
     <main className="min-h-screen bg-bg">
-      <div className="bg-primary">
-        <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
-          <div className="h-7 w-48 skeleton rounded-md" />
-          <div className="mt-4 h-[44px] w-full rounded-pill skeleton" />
+      <div className="sticky top-0 z-40 bg-primary shadow-sm">
+        <div className="mx-auto max-w-6xl px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="h-7 w-48 skeleton rounded-md" />
+            <div className="ml-auto h-11 w-11 rounded-full skeleton" />
+          </div>
+          <div className="mt-2 h-[44px] w-full rounded-pill skeleton" />
         </div>
       </div>
 
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-        <section>
-          <div className="mb-4 h-6 w-40 skeleton" />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-            {Array.from({ length: 10 }, (_, i) => (
-              <CategoryPillSkeleton key={i} />
-            ))}
-          </div>
-        </section>
+      <HeroSkeleton />
 
-        <section className="mt-8">
-          <div className="mb-4 h-6 w-36 skeleton" />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {Array.from({ length: 8 }, (_, i) => (
-              <CardSkeleton key={i} />
-            ))}
-          </div>
-        </section>
+      <div className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-6">
+        <MosaicSkeleton />
+        <RailSkeleton />
+        <RailSkeleton />
+        <BannerSkeleton />
       </div>
     </main>
   );
