@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getStore } from "@/lib/get-store";
 import { getListingDetail } from "@/lib/storefront/service";
-import { formatPrice, formatWeight } from "@/lib/format";
+import { formatWeight } from "@/lib/format";
 import { StorefrontHeader } from "@/components/storefront/storefront-header";
 import { StockBadgeChip } from "@/components/storefront/stock-badge";
+import { PriceDisplay } from "@/components/storefront/price-display";
 
 export default async function ListingDetailPage({
   params,
@@ -40,12 +41,19 @@ export default async function ListingDetailPage({
 
           <div className="space-y-5 p-5">
             <div className="flex items-start justify-between gap-3">
-              <h1
-                className="font-display text-ink"
-                style={{ fontSize: "clamp(22px, 3vw, 28px)", fontWeight: 700, lineHeight: 1.2 }}
-              >
-                {listing.displayName}
-              </h1>
+              <div className="min-w-0">
+                <h1
+                  className="font-display text-ink"
+                  style={{ fontSize: "clamp(22px, 3vw, 28px)", fontWeight: 700, lineHeight: 1.2 }}
+                >
+                  {listing.displayName}
+                </h1>
+                {listing.altName && (
+                  <p className="mt-1 font-label text-sm text-muted-foreground">
+                    {listing.altName}
+                  </p>
+                )}
+              </div>
               <StockBadgeChip badge={listing.badge} />
             </div>
 
@@ -88,9 +96,10 @@ export default async function ListingDetailPage({
                           {formatWeight(v.weightG)}
                         </p>
                       </div>
-                      <span className="font-body text-base font-semibold text-ink">
-                        {formatPrice(v.price)}
-                      </span>
+                      <PriceDisplay
+                        cents={v.price}
+                        className="font-body text-base font-semibold text-ink"
+                      />
                     </li>
                   ))}
                 </ul>

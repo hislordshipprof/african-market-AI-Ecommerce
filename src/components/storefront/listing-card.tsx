@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { StorefrontListing } from "@/lib/storefront/service";
-import { formatPrice } from "@/lib/format";
+import { PriceDisplay } from "./price-display";
 import { StockBadgeChip } from "./stock-badge";
 
 export function ListingCard({ listing }: { listing: StorefrontListing }) {
@@ -15,11 +15,17 @@ export function ListingCard({ listing }: { listing: StorefrontListing }) {
         <h3 className="font-body text-sm font-medium leading-snug text-ink line-clamp-2 group-hover:text-primary">
           {listing.displayName}
         </h3>
+        {listing.altName && (
+          <p className="font-label text-xs text-muted-foreground line-clamp-1">
+            {listing.altName}
+          </p>
+        )}
 
         <div className="mt-auto flex items-end justify-between gap-2 pt-1">
-          <span className="font-body text-base font-semibold text-ink">
-            {formatPrice(listing.startingPrice)}
-          </span>
+          <PriceDisplay
+            cents={listing.startingPrice}
+            className="font-body text-base font-semibold text-ink"
+          />
           <StockBadgeChip badge={listing.badge} />
         </div>
 

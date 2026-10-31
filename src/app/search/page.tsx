@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { getStore } from "@/lib/get-store";
 import { searchListings } from "@/lib/storefront/service";
-import { formatPrice } from "@/lib/format";
 import { StorefrontHeader } from "@/components/storefront/storefront-header";
 import { StockBadgeChip } from "@/components/storefront/stock-badge";
+import { PriceDisplay } from "@/components/storefront/price-display";
 
 export default async function SearchPage({
   searchParams,
@@ -53,9 +53,16 @@ export default async function SearchPage({
                     <p className="truncate font-body text-sm font-medium text-ink">
                       {result.name}
                     </p>
-                    <p className="font-body text-xs text-muted-foreground">
-                      From {formatPrice(result.price)}
-                    </p>
+                    {result.altName && (
+                      <p className="truncate font-label text-xs text-muted-foreground">
+                        {result.altName}
+                      </p>
+                    )}
+                    <PriceDisplay
+                      cents={result.price}
+                      prefix="From "
+                      className="font-body text-xs text-muted-foreground"
+                    />
                   </div>
                   <StockBadgeChip badge={result.badge} />
                 </Link>

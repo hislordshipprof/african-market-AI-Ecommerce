@@ -10,10 +10,23 @@ export async function listCategories() {
 export interface StorefrontListing {
   id: string;
   displayName: string;
+  altName?: string;
   startingPrice: number;
   badge: StockBadge;
   frozen: boolean;
   perishable: boolean;
+}
+
+function deriveNames(
+  customName: string | null,
+  masterProductName: string | null,
+): { displayName: string; altName?: string } {
+  const local = customName?.trim() || null;
+  const english = masterProductName?.trim() || null;
+  if (local && english && local !== english) {
+    return { displayName: local, altName: english };
+  }
+  return { displayName: local || english || "Unnamed" };
 }
 
 function toStorefrontListing(listing: {
@@ -34,9 +47,11 @@ function toStorefrontListing(listing: {
       ? Math.min(...listing.variants.map((v) => v.price))
       : listing.price;
 
+  const names = deriveNames(listing.customName, listing.masterProduct?.name ?? null);
+
   return {
     id: listing.id,
-    displayName: listing.customName || listing.masterProduct?.name || "Unnamed",
+    ...names,
     startingPrice,
     badge: stockBadge({
       confidence: listing.confidence,
@@ -77,6 +92,7 @@ export async function listingsByCategory(
 export interface StorefrontListingDetail {
   id: string;
   displayName: string;
+  altName?: string;
   badge: StockBadge;
   frozen: boolean;
   perishable: boolean;
@@ -100,9 +116,11 @@ export async function getListingDetail(
 
   if (!listing || !listing.active) return null;
 
+  const names = deriveNames(listing.customName, listing.masterProduct?.name ?? null);
+
   return {
     id: listing.id,
-    displayName: listing.customName || listing.masterProduct?.name || "Unnamed",
+    ...names,
     badge: stockBadge({
       confidence: listing.confidence,
       stockMode: listing.stockMode,
@@ -123,6 +141,7 @@ export async function getListingDetail(
 export interface SearchResult {
   id: string;
   name: string;
+  altName?: string;
   price: number;
   badge: StockBadge;
 }
@@ -176,17 +195,21 @@ export async function searchListings(
     `,
   );
 
-  return results.map((row) => ({
-    id: row.id,
-    name: row.custom_name || row.master_product_name || "Unnamed",
-    price: row.min_variant_price ?? row.price,
-    badge: stockBadge({
-      confidence: row.confidence,
-      stockMode: row.stock_mode,
-      qty: row.qty,
-      status: row.status,
-    }),
-  }));
+  return results.map((row) => {
+    const names = deriveNames(row.custom_name, row.master_product_name);
+    return {
+      id: row.id,
+      name: names.displayName,
+      altName: names.altName,
+      price: row.min_variant_price ?? row.price,
+      badge: stockBadge({
+        confidence: row.confidence,
+        stockMode: row.stock_mode,
+        qty: row.qty,
+        status: row.status,
+      }),
+    };
+  });
 }
 
 export async function getActiveListings(storeId: string): Promise<StorefrontListing[]> {
