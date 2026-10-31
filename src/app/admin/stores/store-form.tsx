@@ -65,10 +65,11 @@ export function StoreForm({
       )}
 
       <div>
-        <label className="mb-1 block text-sm font-medium text-[#15201A]">
+        <label htmlFor="slug" className="mb-1 block text-sm font-medium text-[#15201A]">
           Slug
         </label>
         <input
+          id="slug"
           name="slug"
           type="text"
           required
@@ -86,10 +87,11 @@ export function StoreForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium text-[#15201A]">
+        <label htmlFor="storeName" className="mb-1 block text-sm font-medium text-[#15201A]">
           Store name
         </label>
         <input
+          id="storeName"
           name="name"
           type="text"
           required
@@ -108,10 +110,11 @@ export function StoreForm({
         </legend>
         <div className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="themePreset" className="mb-1 block text-sm font-medium text-[#15201A]">
               Theme preset
             </label>
             <select
+              id="themePreset"
               name="themePreset"
               defaultValue={store?.themePreset ?? "palm-and-shea"}
               className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
@@ -125,11 +128,12 @@ export function StoreForm({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="brandColor" className="mb-1 block text-sm font-medium text-[#15201A]">
               Brand color
             </label>
             <div className="flex items-center gap-2">
               <input
+                id="brandColor"
                 name="brandColor"
                 type="text"
                 defaultValue={store?.brandColor ?? ""}
@@ -149,10 +153,11 @@ export function StoreForm({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="logoUrl" className="mb-1 block text-sm font-medium text-[#15201A]">
               Logo URL
             </label>
             <input
+              id="logoUrl"
               name="logoUrl"
               type="text"
               defaultValue={store?.logoUrl ?? ""}
@@ -174,10 +179,11 @@ export function StoreForm({
         </legend>
         <div className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="hours" className="mb-1 block text-sm font-medium text-[#15201A]">
               Hours (JSON)
             </label>
             <textarea
+              id="hours"
               name="hours"
               rows={3}
               defaultValue={
@@ -195,10 +201,11 @@ export function StoreForm({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="prepTimeMinutes" className="mb-1 block text-sm font-medium text-[#15201A]">
                 Prep time (minutes)
               </label>
               <input
+                id="prepTimeMinutes"
                 name="prepTimeMinutes"
                 type="number"
                 min={1}
@@ -208,10 +215,11 @@ export function StoreForm({
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="deliveryRadiusMi" className="mb-1 block text-sm font-medium text-[#15201A]">
                 Delivery radius (miles)
               </label>
               <input
+                id="deliveryRadiusMi"
                 name="deliveryRadiusMi"
                 type="number"
                 min={1}
@@ -225,10 +233,11 @@ export function StoreForm({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="minimumOrder" className="mb-1 block text-sm font-medium text-[#15201A]">
                 Minimum order ($)
               </label>
               <input
+                id="minimumOrder"
                 name="minimumOrder"
                 type="number"
                 min={0}
@@ -243,10 +252,11 @@ export function StoreForm({
               )}
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="autoRefundLimit" className="mb-1 block text-sm font-medium text-[#15201A]">
                 Auto-refund limit ($)
               </label>
               <input
+                id="autoRefundLimit"
                 name="autoRefundLimit"
                 type="number"
                 min={0}
@@ -277,10 +287,11 @@ export function StoreForm({
 
           {mode === "edit" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="status" className="mb-1 block text-sm font-medium text-[#15201A]">
                 Status
               </label>
               <select
+                id="status"
                 name="status"
                 defaultValue={store?.status ?? "active"}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"

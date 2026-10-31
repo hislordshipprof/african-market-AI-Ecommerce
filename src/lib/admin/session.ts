@@ -19,5 +19,9 @@ export async function requirePlatformAdmin(opts?: { allowUnenrolled2FA?: boolean
     redirect("/admin/enroll-2fa");
   }
 
+  if (session.user.twoFactorEnabled && !session.session.twoFactorVerified) {
+    redirect("/admin/sign-in");
+  }
+
   return session;
 }

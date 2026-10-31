@@ -405,9 +405,16 @@ describe("updateStore", () => {
       id: "store-1",
       slug: "mama-ngozi",
       name: "Old Name",
+      logoUrl: null,
       brandColor: null,
       themePreset: "palm-and-shea",
       status: "active",
+      hours: null,
+      prepTimeMinutes: 30,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 3500,
+      pickupEnabled: false,
+      autoRefundLimitCents: 2500,
     };
     mockFindUnique.mockResolvedValueOnce(before);
 
@@ -429,6 +436,38 @@ describe("updateStore", () => {
     expect(auditData.action).toBe("store.update");
     expect(auditData.before).toBeDefined();
     expect(auditData.after).toBeDefined();
+  });
+
+  it("audit log captures autoRefundLimit change in before/after", async () => {
+    const before = {
+      id: "store-1",
+      slug: "mama-ngozi",
+      name: "Mama Ngozi African Market",
+      logoUrl: null,
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+      hours: null,
+      prepTimeMinutes: 30,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 3500,
+      pickupEnabled: false,
+      autoRefundLimitCents: 2500,
+    };
+    mockFindUnique.mockResolvedValueOnce(before);
+
+    const updated = { ...before, autoRefundLimitCents: 5000 };
+    mockUpdate.mockResolvedValueOnce(updated);
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await updateStore(
+      {},
+      formData({ ...VALID_STORE, storeId: "store-1", autoRefundLimit: "50" }),
+    );
+    expect(result.success).toBe(true);
+    const auditData = mockAuditCreate.mock.calls[0][0].data;
+    expect(auditData.before.autoRefundLimitCents).toBe(2500);
+    expect(auditData.after.autoRefundLimitCents).toBe(5000);
   });
 });
 

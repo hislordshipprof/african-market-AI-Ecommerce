@@ -217,17 +217,29 @@ describe.skipIf(!hasDb)("Platform admin RLS (DB-backed)", () => {
     });
   });
 
-  it("app_runtime without admin flag cannot write stores of other stores", async () => {
-    const scoped = storeScoped("nonexistent-store-id");
+  it("platform (app_user without admin flag) cannot insert into stores", async () => {
     await expect(
-      scoped.rlsTestFixture.create({
+      platform.store.create({
         data: {
-          storeId: testStoreId,
-          key: `admin_rls_test_${Date.now()}`,
-          value: "should fail",
+          slug: `rls-stores-insert-${Date.now()}`,
+          name: "Should Fail",
+          themePreset: "palm-and-shea",
         },
       }),
     ).rejects.toThrow(/42501|row-level security/i);
+  });
+
+  it("platform (app_user without admin flag) update on stores affects 0 rows", async () => {
+    const result = await platform.store.updateMany({
+      where: { id: testStoreId },
+      data: { name: "Hacked" },
+    });
+    expect(result.count).toBe(0);
+
+    const store = await rawPrisma.store.findUnique({
+      where: { id: testStoreId },
+    });
+    expect(store!.name).toBe("Admin RLS Test Store");
   });
 
   it("platform admin flag does not persist after transaction", async () => {

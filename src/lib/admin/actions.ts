@@ -222,9 +222,16 @@ export async function createStore(
     after: {
       slug: store.slug,
       name: store.name,
+      logoUrl: store.logoUrl,
       brandColor: store.brandColor,
       themePreset: store.themePreset,
       status: store.status,
+      hours: store.hours,
+      prepTimeMinutes: store.prepTimeMinutes,
+      deliveryRadiusMi: Number(store.deliveryRadiusMi),
+      minimumOrderCents: store.minimumOrderCents,
+      pickupEnabled: store.pickupEnabled,
+      autoRefundLimitCents: store.autoRefundLimitCents,
     },
   });
 
@@ -310,16 +317,30 @@ export async function updateStore(
     before: {
       slug: before.slug,
       name: before.name,
+      logoUrl: before.logoUrl,
       brandColor: before.brandColor,
       themePreset: before.themePreset,
       status: before.status,
+      hours: before.hours,
+      prepTimeMinutes: before.prepTimeMinutes,
+      deliveryRadiusMi: Number(before.deliveryRadiusMi),
+      minimumOrderCents: before.minimumOrderCents,
+      pickupEnabled: before.pickupEnabled,
+      autoRefundLimitCents: before.autoRefundLimitCents,
     },
     after: {
       slug: store.slug,
       name: store.name,
+      logoUrl: store.logoUrl,
       brandColor: store.brandColor,
       themePreset: store.themePreset,
       status: store.status,
+      hours: store.hours,
+      prepTimeMinutes: store.prepTimeMinutes,
+      deliveryRadiusMi: Number(store.deliveryRadiusMi),
+      minimumOrderCents: store.minimumOrderCents,
+      pickupEnabled: store.pickupEnabled,
+      autoRefundLimitCents: store.autoRefundLimitCents,
     },
   });
 

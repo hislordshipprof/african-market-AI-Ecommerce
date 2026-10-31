@@ -111,6 +111,7 @@ jobs:
       SEED_TEST_ADMIN: "1"
       SEED_ADMIN_PASSWORD: CiTestPass99!
       SEED_ADMIN_TOTP_SECRET: JBSWY3DPEHPK3PXP
+      AUTH_RATE_LIMIT_RELAXED: "1"
 
     steps:
       - uses: actions/checkout@v4

@@ -79,8 +79,8 @@ test.describe("Store management (authenticated)", () => {
     await page.click("text=Create store");
     await expect(page).toHaveURL(/\/admin\/stores\/new/);
 
-    await page.fill("input[name='slug']", "mama-ngozi");
-    await page.fill("input[name='name']", "Duplicate Test");
+    await page.getByLabel("Slug").fill("mama-ngozi");
+    await page.getByLabel("Store name").fill("Duplicate Test");
     await page.click("button[type='submit']:has-text('Create store')");
 
     await expect(page.locator("text=already exists")).toBeVisible();
@@ -88,8 +88,8 @@ test.describe("Store management (authenticated)", () => {
 
   test("create store form rejects reserved slug", async ({ page }) => {
     await page.click("text=Create store");
-    await page.fill("input[name='slug']", "admin");
-    await page.fill("input[name='name']", "Reserved Slug Test");
+    await page.getByLabel("Slug").fill("admin");
+    await page.getByLabel("Store name").fill("Reserved Slug Test");
     await page.click("button[type='submit']:has-text('Create store')");
 
     await expect(page.locator("text=reserved")).toBeVisible();
@@ -99,8 +99,8 @@ test.describe("Store management (authenticated)", () => {
     const slug = `e2e-test-${Date.now()}`;
 
     await page.click("text=Create store");
-    await page.fill("input[name='slug']", slug);
-    await page.fill("input[name='name']", "E2E Test Store");
+    await page.getByLabel("Slug").fill(slug);
+    await page.getByLabel("Store name").fill("E2E Test Store");
     await page.click("button[type='submit']:has-text('Create store')");
 
     await page.waitForURL("**/admin/stores", { timeout: 10000 });
@@ -109,7 +109,7 @@ test.describe("Store management (authenticated)", () => {
     await page.locator(`tr:has-text("${slug}") a:has-text("Edit")`).click();
     await page.waitForURL(/\/admin\/stores\//, { timeout: 5000 });
 
-    await page.fill("input[name='name']", "E2E Test Store Updated");
+    await page.getByLabel("Store name").fill("E2E Test Store Updated");
     await page.click("button[type='submit']:has-text('Save changes')");
 
     await page.waitForURL("**/admin/stores", { timeout: 10000 });
@@ -120,8 +120,8 @@ test.describe("Store management (authenticated)", () => {
     const slug = `e2e-live-${Date.now()}`;
 
     await page.click("text=Create store");
-    await page.fill("input[name='slug']", slug);
-    await page.fill("input[name='name']", "E2E Live Store");
+    await page.getByLabel("Slug").fill(slug);
+    await page.getByLabel("Store name").fill("E2E Live Store");
     await page.click("button[type='submit']:has-text('Create store')");
     await page.waitForURL("**/admin/stores", { timeout: 10000 });
 
@@ -133,8 +133,8 @@ test.describe("Store management (authenticated)", () => {
     const slug = `e2e-suspend-${Date.now()}`;
 
     await page.click("text=Create store");
-    await page.fill("input[name='slug']", slug);
-    await page.fill("input[name='name']", "E2E Suspend Store");
+    await page.getByLabel("Slug").fill(slug);
+    await page.getByLabel("Store name").fill("E2E Suspend Store");
     await page.click("button[type='submit']:has-text('Create store')");
     await page.waitForURL("**/admin/stores", { timeout: 10000 });
 
@@ -142,7 +142,7 @@ test.describe("Store management (authenticated)", () => {
       .locator(`tr:has-text("${slug}") button:has-text("Suspend")`)
       .click();
     await expect(
-      page.locator(`tr:has-text("${slug}") text=suspended`),
+      page.locator("tr", { hasText: slug }).getByText("suspended"),
     ).toBeVisible({ timeout: 5000 });
 
     await page.goto(`http://${slug}.localhost:3000/`);
@@ -155,9 +155,9 @@ test.describe("Store management (authenticated)", () => {
     const slug = `e2e-nudge-${Date.now()}`;
 
     await page.click("text=Create store");
-    await page.fill("input[name='slug']", slug);
-    await page.fill("input[name='name']", "E2E Nudge Store");
-    await page.fill("input[name='brandColor']", "#EEEEEE");
+    await page.getByLabel("Slug").fill(slug);
+    await page.getByLabel("Store name").fill("E2E Nudge Store");
+    await page.getByLabel("Brand color").fill("#EEEEEE");
     await page.click("button[type='submit']:has-text('Create store')");
 
     await expect(page.locator("text=adjusted")).toBeVisible({ timeout: 5000 });

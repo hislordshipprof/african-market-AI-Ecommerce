@@ -64,17 +64,19 @@ model User {
 }
 
 model Session {
-  id        String   @id
-  expiresAt DateTime @map("expires_at")
-  token     String   @unique
-  ipAddress String?  @map("ip_address")
-  userAgent String?  @map("user_agent")
-  userId    String   @map("user_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                String   @id
+  expiresAt         DateTime @map("expires_at")
+  token             String   @unique
+  ipAddress         String?  @map("ip_address")
+  userAgent         String?  @map("user_agent")
+  userId            String   @map("user_id")
+  twoFactorVerified Boolean  @default(false) @map("two_factor_verified")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("sessions")
 }
 
@@ -95,6 +97,7 @@ model Account {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("accounts")
 }
 
@@ -120,6 +123,7 @@ model TwoFactor {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("two_factors")
 }
 

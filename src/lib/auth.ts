@@ -3,6 +3,8 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor } from "better-auth/plugins";
 import { authPrisma } from "./db";
 
+const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
+
 export const auth = betterAuth({
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
@@ -19,8 +21,8 @@ export const auth = betterAuth({
     window: 60,
     max: 10,
     customRules: {
-      "/sign-in/email": { window: 60, max: process.env.CI ? 100 : 5 },
-      "/two-factor/verify-totp": { window: 60, max: process.env.CI ? 100 : 5 },
+      "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
+      "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
   },
   user: {
@@ -36,6 +38,13 @@ export const auth = betterAuth({
     cookieCache: {
       enabled: true,
       maxAge: 300,
+    },
+    additionalFields: {
+      twoFactorVerified: {
+        type: "boolean",
+        defaultValue: false,
+        input: false,
+      },
     },
   },
   trustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
