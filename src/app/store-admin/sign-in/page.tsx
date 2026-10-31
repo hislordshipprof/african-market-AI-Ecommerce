@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Store, ShieldCheck } from "lucide-react";
+import { StorySurface } from "@/components/story-surface/story-surface";
 
 type Step = "credentials" | "totp";
 
@@ -74,8 +75,8 @@ export default function StoreAdminSignIn() {
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
+    <StorySurface>
+      <Card className="border-0 shadow-xl backdrop-blur-sm bg-card/95">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-primary/10">
             <Store className="size-6 text-primary" />
@@ -158,6 +159,6 @@ export default function StoreAdminSignIn() {
           )}
         </CardContent>
       </Card>
-    </main>
+    </StorySurface>
   );
 }
