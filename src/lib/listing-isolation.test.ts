@@ -206,6 +206,7 @@ describe.skipIf(!hasDb)("MasterProduct RLS (shared read)", () => {
   let rawPrisma: PrismaClient;
   let storeAId: string;
   let masterProductId: string;
+  const testMpIds: string[] = [];
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -223,10 +224,12 @@ describe.skipIf(!hasDb)("MasterProduct RLS (shared read)", () => {
       data: { name: "Egusi Whole" },
     });
     masterProductId = mp.id;
+    testMpIds.push(mp.id);
   });
 
   afterAll(async () => {
-    await rawPrisma.masterProduct.deleteMany({ where: { id: masterProductId } });
+    await rawPrisma.masterProduct.deleteMany({ where: { id: { in: testMpIds } } });
+    await rawPrisma.masterProduct.deleteMany({ where: { name: { startsWith: "Test Admin Insert" } } });
     await rawPrisma.store.deleteMany({ where: { slug: "rls-master-prod" } });
     await rawPrisma.$disconnect();
   });
@@ -255,7 +258,8 @@ describe.skipIf(!hasDb)("MasterProduct RLS (shared read)", () => {
     const mp = await platformAdmin.masterProduct.create({
       data: { name: "Test Admin Insert" },
     });
+    testMpIds.push(mp.id);
     expect(mp.name).toBe("Test Admin Insert");
-    await rawPrisma.masterProduct.delete({ where: { id: mp.id } });
+    await rawPrisma.masterProduct.deleteMany({ where: { id: mp.id } });
   });
 });
