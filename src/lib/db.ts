@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { runtimeDatabaseUrl } from "./env";
 
@@ -39,6 +39,9 @@ function wrapPlatformDelegate<D extends object>(delegate: D): D {
 
 export const platform = {
   store: wrapPlatformDelegate(prisma.store),
+  category: wrapPlatformDelegate(prisma.category),
+  masterProduct: wrapPlatformDelegate(prisma.masterProduct),
+  productSynonym: wrapPlatformDelegate(prisma.productSynonym),
 };
 
 function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
@@ -105,15 +108,17 @@ export const platformAdmin = {
   storeMembership: wrapPlatformAdminDelegate(prisma.storeMembership),
   storeInvite: wrapPlatformAdminDelegate(prisma.storeInvite),
   masterProduct: wrapPlatformAdminDelegate(prisma.masterProduct),
+  category: wrapPlatformAdminDelegate(prisma.category),
+  productSynonym: wrapPlatformAdminDelegate(prisma.productSynonym),
 };
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "$queryRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-    return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, masterProduct: tx.masterProduct, $queryRaw: tx.$queryRaw.bind(tx) });
+    return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, masterProduct: tx.masterProduct, category: tx.category, productSynonym: tx.productSynonym, $queryRaw: tx.$queryRaw.bind(tx) });
   });
 }
 
@@ -137,6 +142,19 @@ export async function storeScopedTransaction<T>(
 export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
   await tx.$queryRaw`SELECT 1 FROM "Store" WHERE id = ${storeId} FOR UPDATE`;
 }
+
+export async function storeScopedRawQuery<T>(
+  storeId: string,
+  sql: Prisma.Sql,
+): Promise<T[]> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
+    return tx.$queryRaw<T[]>(sql);
+  });
+}
+
+export { Prisma };
 
 export { prisma as authPrisma };
 

@@ -201,15 +201,47 @@ model StoreInvite {
   @@map("store_invites")
 }
 
-model MasterProduct {
+model Category {
   id        String   @id @default(cuid())
-  name      String
+  name      String   @unique
+  slug      String   @unique
+  sortOrder Int      @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  listings Listing[]
+  masterProducts MasterProduct[]
 
+  @@map("categories")
+}
+
+model MasterProduct {
+  id         String    @id @default(cuid())
+  name       String
+  categoryId String?   @map("category_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  category Category?  @relation(fields: [categoryId], references: [id])
+  listings Listing[]
+  synonyms ProductSynonym[]
+
+  @@index([categoryId])
   @@map("master_products")
+}
+
+model ProductSynonym {
+  id        String   @id @default(cuid())
+  productId String   @map("product_id")
+  term      String
+  language  String?
+  region    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  masterProduct MasterProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([term])
+  @@map("product_synonyms")
 }
 
 model Listing {

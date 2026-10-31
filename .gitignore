@@ -33,5 +33,8 @@ blob-report/
 # Impeccable engine binary
 .claude/skills/impeccable/scripts/bin/
 
+# Impeccable critique cache
+.impeccable/
+
 # Builder run logs and reports
 .builder/
