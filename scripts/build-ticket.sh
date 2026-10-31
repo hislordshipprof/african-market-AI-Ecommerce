@@ -44,7 +44,7 @@ fi
 # Worktree (created once, reused by fix rounds).
 slug=$(gh issue view "$N" -R "$REPO" --json title --jq .title | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g' | cut -c1-40)
 BRANCH="ticket-$N-$slug"
-WT="$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N"
+WT="${WT:-$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N}"
 git fetch -q origin main
 [ -d "$WT" ] || git worktree add -q -B "$BRANCH" "$WT" origin/main
 cp .env.local "$WT/.env.local"
@@ -59,24 +59,24 @@ Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build 
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
 ${KEYLESS:-}
 $RULES"
-    claude -p "$PROMPT" --dangerously-skip-permissions --output-format json > "$LOG" 2>&1 || status=$?
+    claude -p "$PROMPT" --dangerously-skip-permissions --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   --resume)
     [ -n "$FINDINGS" ] || { echo "--resume needs the finding text"; exit 1; }
     SID=$(cat "$SESSION_FILE")
     PROMPT="/supermatt:fix-findings $FINDINGS
 Fix test-first, re-run affected QA, review only the fix diff, commit, push to the same PR. $RULES"
-    claude -p --resume "$SID" "$PROMPT" --dangerously-skip-permissions --output-format json > "$LOG" 2>&1 || status=$?
+    claude -p --resume "$SID" "$PROMPT" --dangerously-skip-permissions --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   --continue)
     SID=$(cat "$SESSION_FILE")
-    claude -p --resume "$SID" "Continue where you stopped. $RULES" --dangerously-skip-permissions --output-format json > "$LOG" 2>&1 || status=$?
+    claude -p --resume "$SID" "Continue where you stopped. $RULES" --dangerously-skip-permissions --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   *) echo "unknown mode $MODE"; exit 1 ;;
 esac
 
 # Keep the session id for --resume / --continue.
-node -e 'const fs=require("fs");try{const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(j.session_id)fs.writeFileSync(process.argv[2],j.session_id)}catch(e){}' "$LOG" "$SESSION_FILE"
+node -e 'const fs=require("fs");try{const t=fs.readFileSync(process.argv[1],"utf8");const j=JSON.parse(t.slice(t.indexOf("{")));if(j.session_id)fs.writeFileSync(process.argv[2],j.session_id)}catch(e){}' "$LOG" "$SESSION_FILE"
 
 echo "Run finished (exit ${status:-0}). Log: $LOG"
 [ -f "$REPORT" ] && head -40 "$REPORT" || echo "No report written; check the log."
