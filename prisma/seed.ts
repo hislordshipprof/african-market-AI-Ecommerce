@@ -112,7 +112,12 @@ async function seedTestAdmin() {
   const existingAccount = await prisma.account.findFirst({
     where: { userId: adminId, providerId: "credential" },
   });
-  if (!existingAccount) {
+  if (existingAccount) {
+    await prisma.account.update({
+      where: { id: existingAccount.id },
+      data: { password: hashedPassword, updatedAt: new Date() },
+    });
+  } else {
     await prisma.account.create({
       data: {
         id: "seed-admin-account",
@@ -137,7 +142,12 @@ async function seedTestAdmin() {
   const existingTwoFactor = await prisma.twoFactor.findFirst({
     where: { userId: adminId },
   });
-  if (!existingTwoFactor) {
+  if (existingTwoFactor) {
+    await prisma.twoFactor.update({
+      where: { id: existingTwoFactor.id },
+      data: { secret: encryptedSecret, backupCodes: encryptedBackupCodes },
+    });
+  } else {
     await prisma.twoFactor.create({
       data: {
         id: "seed-admin-totp",
