@@ -291,6 +291,68 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     expect(found!.variants).toHaveLength(1);
   });
 
+  it("switching from counted to status clears qty", async () => {
+    const listing = await createListing({
+      storeId,
+      customName: "Mode Switch Test",
+      price: 500,
+      stockMode: "counted",
+      qty: 20,
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1kg", price: 500, weightG: 1000 }],
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    expect(listing.qty).toBe(20);
+
+    await updateListing({
+      storeId,
+      listingId: listing.id,
+      stockMode: "status",
+      status: "in_stock",
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    const found = await getListing(storeId, listing.id);
+    expect(found!.stockMode).toBe("status");
+    expect(found!.status).toBe("in_stock");
+    expect(found!.qty).toBeNull();
+  });
+
+  it("switching from status to counted clears status", async () => {
+    const listing = await createListing({
+      storeId,
+      customName: "Mode Switch Test 2",
+      price: 600,
+      stockMode: "status",
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1kg", price: 600, weightG: 1000 }],
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    expect(listing.status).toBe("in_stock");
+
+    await updateListing({
+      storeId,
+      listingId: listing.id,
+      stockMode: "counted",
+      qty: 10,
+      actorId: userId,
+      actorEmail: "svc-listing-user@example.com",
+    });
+
+    const found = await getListing(storeId, listing.id);
+    expect(found!.stockMode).toBe("counted");
+    expect(found!.qty).toBe(10);
+    expect(found!.status).toBeNull();
+  });
+
   it("updateVariants replaces all variants", async () => {
     const listing = await createListing({
       storeId,

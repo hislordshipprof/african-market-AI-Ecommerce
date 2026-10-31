@@ -230,7 +230,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     if (stockMode === "status") fd.set("status", status);
     fd.set("frozen", String(frozen));
     fd.set("perishable", String(perishable));
-    if (maxPerOrder) fd.set("maxPerOrder", maxPerOrder);
+    fd.set("maxPerOrder", maxPerOrder);
     fd.set("variants", buildVariantsJson());
 
     startTransition(async () => {

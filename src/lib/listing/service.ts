@@ -129,11 +129,15 @@ export async function updateListing(input: UpdateListingInput) {
     if (input.maxPerOrder !== undefined) data.maxPerOrder = input.maxPerOrder;
 
     const resolvedStockMode = input.stockMode ?? existing.stockMode;
-    if (resolvedStockMode === "counted" && input.qty !== undefined) {
-      data.qty = input.qty;
+    const modeChanged = input.stockMode !== undefined && input.stockMode !== existing.stockMode;
+
+    if (resolvedStockMode === "counted") {
+      if (input.qty !== undefined) data.qty = input.qty;
+      if (modeChanged) data.status = null;
     }
-    if (resolvedStockMode === "status" && input.status !== undefined) {
-      data.status = input.status;
+    if (resolvedStockMode === "status") {
+      if (input.status !== undefined) data.status = input.status;
+      if (modeChanged) data.qty = null;
     }
 
     const updated = await tx.listing.update({

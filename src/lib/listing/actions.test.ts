@@ -136,6 +136,25 @@ describe("updateListingAction", () => {
     );
   });
 
+  it("clears maxPerOrder when sent as empty string", async () => {
+    mockUpdateListing.mockResolvedValueOnce({ id: "listing-1" });
+    const result = await updateListingAction(
+      formData({ listingId: "listing-1", maxPerOrder: "" }),
+    );
+    expect(result).toEqual({ success: true, id: "listing-1" });
+    expect(mockUpdateListing).toHaveBeenCalledWith(
+      expect.objectContaining({ maxPerOrder: null }),
+    );
+  });
+
+  it("rejects blanking customName when no masterProductId", async () => {
+    const result = await updateListingAction(
+      formData({ listingId: "listing-1", customName: "" }),
+    );
+    expect(result.error).toMatch(/name/i);
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+  });
+
   it("returns error on service failure", async () => {
     mockUpdateListing.mockRejectedValueOnce(new Error("Not found"));
     const result = await updateListingAction(formData({ listingId: "x" }));

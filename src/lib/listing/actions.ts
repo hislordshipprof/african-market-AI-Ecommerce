@@ -81,6 +81,7 @@ export async function updateListingAction(formData: FormData) {
   if (!listingId) return { error: "Listing ID is required" };
 
   const customName = formData.get("customName") as string | null;
+  const masterProductId = formData.get("masterProductId") as string | null;
   const priceRaw = formData.get("price") as string | null;
   const stockMode = formData.get("stockMode") as string | null;
   const qtyRaw = formData.get("qty") as string | null;
@@ -89,6 +90,10 @@ export async function updateListingAction(formData: FormData) {
   const perishable = formData.get("perishable") as string | null;
   const maxPerOrderRaw = formData.get("maxPerOrder") as string | null;
   const variantsJson = formData.get("variants") as string | null;
+
+  if (customName !== null && !customName.trim() && !masterProductId) {
+    return { error: "Product name is required" };
+  }
 
   try {
     const updated = await updateListing({
@@ -101,7 +106,7 @@ export async function updateListingAction(formData: FormData) {
       ...(status !== null && { status: status as StockStatus }),
       ...(frozen !== null && { frozen: frozen === "true" }),
       ...(perishable !== null && { perishable: perishable === "true" }),
-      ...(maxPerOrderRaw !== null && { maxPerOrder: Number(maxPerOrderRaw) }),
+      ...(maxPerOrderRaw !== null && { maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null }),
       actorId: session.user.id,
       actorEmail: session.user.email,
     });
