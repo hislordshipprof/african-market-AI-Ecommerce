@@ -148,10 +148,7 @@ export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
             <div className="relative flex h-full flex-col justify-end p-5">
-              <span className="font-label text-[13px] uppercase tracking-wider text-white/70">
-                Up next
-              </span>
-              <span className="mt-1 font-display text-lg font-bold leading-tight text-white">
+              <span className="font-display text-lg font-bold leading-tight text-white">
                 {nextBanner.title}
               </span>
             </div>
