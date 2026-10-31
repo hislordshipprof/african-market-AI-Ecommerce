@@ -194,6 +194,7 @@ export function TeamManagement({
                         <Button
                           variant="ghost"
                           size="icon"
+                          aria-label={`Remove ${member.name}`}
                           className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
                           onClick={() =>
                             handleRemove(member.userId, member.name)

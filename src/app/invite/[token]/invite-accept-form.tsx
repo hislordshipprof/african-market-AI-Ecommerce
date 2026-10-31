@@ -14,7 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import Image from "next/image";
+import { QRCodeSVG } from "qrcode.react";
 import { UserPlus, ShieldCheck } from "lucide-react";
 
 type Step = "signup" | "totp-enroll" | "totp-verify" | "accepting";
@@ -74,7 +74,13 @@ export function InviteAcceptForm({
             setStep("totp-verify");
             return;
           }
-          await acceptAndRedirect();
+          const existingEnrollResult = await authClient.twoFactor.enable({ password });
+          if (existingEnrollResult.error) {
+            setError("Failed to set up two-factor authentication");
+            return;
+          }
+          setTotpUri((existingEnrollResult.data as Record<string, unknown>)?.totpURI as string ?? "");
+          setStep("totp-enroll");
           return;
         }
         setError(signUpResult.error.message ?? "Sign-up failed");
@@ -239,13 +245,11 @@ export function InviteAcceptForm({
 
             {totpUri && (
               <div className="flex justify-center rounded-md border border-border bg-card p-4">
-                <Image
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(totpUri)}`}
-                  alt="QR Code for authenticator app"
-                  width={200}
-                  height={200}
+                <QRCodeSVG
+                  value={totpUri}
+                  size={200}
+                  level="M"
                   className="rounded"
-                  unoptimized
                 />
               </div>
             )}

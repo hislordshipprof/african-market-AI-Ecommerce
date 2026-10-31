@@ -14,6 +14,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
+  if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
+    return NextResponse.json(
+      { error: "Two-factor authentication required" },
+      { status: 403 },
+    );
+  }
+
   const body = await req.json();
   const { token } = body as { token: string };
 

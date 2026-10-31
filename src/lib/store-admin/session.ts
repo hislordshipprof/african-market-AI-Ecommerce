@@ -26,7 +26,7 @@ export async function requireStoreMember(): Promise<StoreSession> {
     redirect(`/store-admin/sign-in?store=${store.slug}`);
   }
 
-  if (session.user.twoFactorEnabled && !session.session.twoFactorVerified) {
+  if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
     redirect(`/store-admin/sign-in?store=${store.slug}`);
   }
 

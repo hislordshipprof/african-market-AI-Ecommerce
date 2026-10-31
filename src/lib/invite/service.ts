@@ -63,17 +63,29 @@ export async function createInvite(input: CreateInviteInput): Promise<{ id: stri
   return { id: invite.id, tokenHash: hash };
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function buildInviteHtml(storeName: string, role: string, url: string): string {
+  const safeName = escapeHtml(storeName);
+  const safeRole = escapeHtml(role);
+  const safeUrl = escapeHtml(url);
   return `
     <div style="font-family: system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 16px;">
       <h1 style="font-size: 22px; font-weight: 700; color: #15201A; margin-bottom: 8px;">
-        Join ${storeName}
+        Join ${safeName}
       </h1>
       <p style="font-size: 16px; color: #55625A; line-height: 1.5; margin-bottom: 24px;">
-        You've been invited as <strong>${role}</strong> for ${storeName} on the African Markets Platform.
+        You've been invited as <strong>${safeRole}</strong> for ${safeName} on the African Markets Platform.
         Click the button below to set up your account.
       </p>
-      <a href="${url}" style="display: inline-block; background: #1F5A43; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 999px; font-size: 16px; font-weight: 600;">
+      <a href="${safeUrl}" style="display: inline-block; background: #1F5A43; color: #fff; text-decoration: none; padding: 12px 32px; border-radius: 999px; font-size: 16px; font-weight: 600;">
         Accept invitation
       </a>
       <p style="font-size: 13px; color: #55625A; margin-top: 24px;">
