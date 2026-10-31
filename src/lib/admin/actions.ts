@@ -1,8 +1,7 @@
 "use server";
 
 import { revalidateStore } from "../get-store";
-import { platformAdmin } from "../db";
-import { writeAuditLog } from "./audit";
+import { platformAdmin, platformAdminTransaction } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
 import { RESERVED_SLUGS } from "../slug";
@@ -204,47 +203,53 @@ export async function createStore(
     }
   }
 
-  const store = await platformAdmin.store.create({
-    data: {
-      slug: values.slug,
-      name: values.name,
-      logoUrl: values.logoUrl,
-      brandColor: finalBrandColor,
-      themePreset: values.themePreset,
-      status: values.status,
-      hours: values.hours !== null ? values.hours : Prisma.JsonNull,
-      prepTimeMinutes: values.prepTimeMinutes,
-      deliveryRadiusMi: values.deliveryRadiusMi,
-      minimumOrderCents: values.minimumOrderCents,
-      pickupEnabled: values.pickupEnabled,
-      autoRefundLimitCents: values.autoRefundLimitCents,
-    },
+  const store = await platformAdminTransaction(async (tx) => {
+    const s = await tx.store.create({
+      data: {
+        slug: values.slug,
+        name: values.name,
+        logoUrl: values.logoUrl,
+        brandColor: finalBrandColor,
+        themePreset: values.themePreset,
+        status: values.status,
+        hours: values.hours !== null ? values.hours : Prisma.JsonNull,
+        prepTimeMinutes: values.prepTimeMinutes,
+        deliveryRadiusMi: values.deliveryRadiusMi,
+        minimumOrderCents: values.minimumOrderCents,
+        pickupEnabled: values.pickupEnabled,
+        autoRefundLimitCents: values.autoRefundLimitCents,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        storeId: s.id,
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "store.create",
+        entityType: "store",
+        entityId: s.id,
+        after: {
+          slug: s.slug,
+          name: s.name,
+          logoUrl: s.logoUrl,
+          brandColor: s.brandColor,
+          themePreset: s.themePreset,
+          status: s.status,
+          hours: s.hours,
+          prepTimeMinutes: s.prepTimeMinutes,
+          deliveryRadiusMi: Number(s.deliveryRadiusMi),
+          minimumOrderCents: s.minimumOrderCents,
+          pickupEnabled: s.pickupEnabled,
+          autoRefundLimitCents: s.autoRefundLimitCents,
+        },
+      },
+    });
+
+    return s;
   });
 
   revalidateStore(store);
-
-  await writeAuditLog({
-    storeId: store.id,
-    actorId: session.user.id,
-    actorEmail: session.user.email,
-    action: "store.create",
-    entityType: "store",
-    entityId: store.id,
-    after: {
-      slug: store.slug,
-      name: store.name,
-      logoUrl: store.logoUrl,
-      brandColor: store.brandColor,
-      themePreset: store.themePreset,
-      status: store.status,
-      hours: store.hours,
-      prepTimeMinutes: store.prepTimeMinutes,
-      deliveryRadiusMi: Number(store.deliveryRadiusMi),
-      minimumOrderCents: store.minimumOrderCents,
-      pickupEnabled: store.pickupEnabled,
-      autoRefundLimitCents: store.autoRefundLimitCents,
-    },
-  });
 
   return {
     success: true,
@@ -296,65 +301,71 @@ export async function updateStore(
     }
   }
 
-  const store = await platformAdmin.store.update({
-    where: { id: storeId },
-    data: {
-      slug: values.slug,
-      name: values.name,
-      logoUrl: values.logoUrl,
-      brandColor: finalBrandColor,
-      themePreset: values.themePreset,
-      status: values.status,
-      hours: values.hours !== null ? values.hours : Prisma.JsonNull,
-      prepTimeMinutes: values.prepTimeMinutes,
-      deliveryRadiusMi: values.deliveryRadiusMi,
-      minimumOrderCents: values.minimumOrderCents,
-      pickupEnabled: values.pickupEnabled,
-      autoRefundLimitCents: values.autoRefundLimitCents,
-    },
+  const store = await platformAdminTransaction(async (tx) => {
+    const s = await tx.store.update({
+      where: { id: storeId },
+      data: {
+        slug: values.slug,
+        name: values.name,
+        logoUrl: values.logoUrl,
+        brandColor: finalBrandColor,
+        themePreset: values.themePreset,
+        status: values.status,
+        hours: values.hours !== null ? values.hours : Prisma.JsonNull,
+        prepTimeMinutes: values.prepTimeMinutes,
+        deliveryRadiusMi: values.deliveryRadiusMi,
+        minimumOrderCents: values.minimumOrderCents,
+        pickupEnabled: values.pickupEnabled,
+        autoRefundLimitCents: values.autoRefundLimitCents,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        storeId: s.id,
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "store.update",
+        entityType: "store",
+        entityId: s.id,
+        before: {
+          slug: before.slug,
+          name: before.name,
+          logoUrl: before.logoUrl,
+          brandColor: before.brandColor,
+          themePreset: before.themePreset,
+          status: before.status,
+          hours: before.hours,
+          prepTimeMinutes: before.prepTimeMinutes,
+          deliveryRadiusMi: Number(before.deliveryRadiusMi),
+          minimumOrderCents: before.minimumOrderCents,
+          pickupEnabled: before.pickupEnabled,
+          autoRefundLimitCents: before.autoRefundLimitCents,
+        },
+        after: {
+          slug: s.slug,
+          name: s.name,
+          logoUrl: s.logoUrl,
+          brandColor: s.brandColor,
+          themePreset: s.themePreset,
+          status: s.status,
+          hours: s.hours,
+          prepTimeMinutes: s.prepTimeMinutes,
+          deliveryRadiusMi: Number(s.deliveryRadiusMi),
+          minimumOrderCents: s.minimumOrderCents,
+          pickupEnabled: s.pickupEnabled,
+          autoRefundLimitCents: s.autoRefundLimitCents,
+        },
+      },
+    });
+
+    return s;
   });
 
   revalidateStore(store);
   if (before.slug !== store.slug) {
     revalidateStore({ id: before.id, slug: before.slug });
   }
-
-  await writeAuditLog({
-    storeId: store.id,
-    actorId: session.user.id,
-    actorEmail: session.user.email,
-    action: "store.update",
-    entityType: "store",
-    entityId: store.id,
-    before: {
-      slug: before.slug,
-      name: before.name,
-      logoUrl: before.logoUrl,
-      brandColor: before.brandColor,
-      themePreset: before.themePreset,
-      status: before.status,
-      hours: before.hours,
-      prepTimeMinutes: before.prepTimeMinutes,
-      deliveryRadiusMi: Number(before.deliveryRadiusMi),
-      minimumOrderCents: before.minimumOrderCents,
-      pickupEnabled: before.pickupEnabled,
-      autoRefundLimitCents: before.autoRefundLimitCents,
-    },
-    after: {
-      slug: store.slug,
-      name: store.name,
-      logoUrl: store.logoUrl,
-      brandColor: store.brandColor,
-      themePreset: store.themePreset,
-      status: store.status,
-      hours: store.hours,
-      prepTimeMinutes: store.prepTimeMinutes,
-      deliveryRadiusMi: Number(store.deliveryRadiusMi),
-      minimumOrderCents: store.minimumOrderCents,
-      pickupEnabled: store.pickupEnabled,
-      autoRefundLimitCents: store.autoRefundLimitCents,
-    },
-  });
 
   return {
     success: true,
@@ -364,34 +375,46 @@ export async function updateStore(
   };
 }
 
-export async function suspendStore(storeId: string): Promise<StoreFormState> {
+export async function setStoreStatus(
+  storeId: string,
+  targetStatus: "suspended" | "active",
+): Promise<StoreFormState> {
   const session = await requirePlatformAdmin();
 
-  const before = await platformAdmin.store.findUnique({
-    where: { id: storeId },
+  const result = await platformAdminTransaction(async (tx) => {
+    const before = await tx.store.findUnique({ where: { id: storeId } });
+    if (!before) return { error: "Store not found" as const };
+
+    if (before.status === targetStatus) {
+      return { noop: true as const, storeId: before.id };
+    }
+
+    const store = await tx.store.update({
+      where: { id: storeId },
+      data: { status: targetStatus },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        storeId: store.id,
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: targetStatus === "suspended" ? "store.suspend" : "store.unsuspend",
+        entityType: "store",
+        entityId: store.id,
+        before: { status: before.status },
+        after: { status: store.status },
+      },
+    });
+
+    return { store };
   });
-  if (!before) return { error: "Store not found" };
 
-  const newStatus = before.status === "suspended" ? "active" : "suspended";
-  const store = await platformAdmin.store.update({
-    where: { id: storeId },
-    data: { status: newStatus },
-  });
+  if ("error" in result) return { error: result.error };
+  if ("noop" in result) return { success: true, storeId: result.storeId };
 
-  revalidateStore(store);
-
-  await writeAuditLog({
-    storeId: store.id,
-    actorId: session.user.id,
-    actorEmail: session.user.email,
-    action: newStatus === "suspended" ? "store.suspend" : "store.unsuspend",
-    entityType: "store",
-    entityId: store.id,
-    before: { status: before.status },
-    after: { status: store.status },
-  });
-
-  return { success: true, storeId: store.id };
+  revalidateStore(result.store);
+  return { success: true, storeId: result.store.id };
 }
 
 export async function listStores() {

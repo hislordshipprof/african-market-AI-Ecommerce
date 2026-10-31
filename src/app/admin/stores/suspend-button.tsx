@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { suspendStore } from "@/lib/admin/actions";
+import { setStoreStatus } from "@/lib/admin/actions";
 
 export function SuspendButton({
   storeId,
@@ -18,7 +18,7 @@ export function SuspendButton({
   async function handleClick() {
     setLoading(true);
     try {
-      await suspendStore(storeId);
+      await setStoreStatus(storeId, isSuspended ? "active" : "suspended");
       router.refresh();
     } finally {
       setLoading(false);
@@ -36,7 +36,7 @@ export function SuspendButton({
       {loading
         ? "..."
         : isSuspended
-          ? "Unsuspend"
+          ? "Reactivate"
           : "Suspend"}
     </button>
   );

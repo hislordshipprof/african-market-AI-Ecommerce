@@ -98,4 +98,14 @@ export const platformAdmin = {
   auditLog: wrapPlatformAdminDelegate(prisma.auditLog),
 };
 
+export async function platformAdminTransaction<T>(
+  fn: (tx: Pick<PrismaClient, "store" | "auditLog">) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    return fn({ store: tx.store, auditLog: tx.auditLog });
+  });
+}
+
 export { prisma as authPrisma };

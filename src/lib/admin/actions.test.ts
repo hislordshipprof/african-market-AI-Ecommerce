@@ -10,14 +10,19 @@ vi.mock("../db", () => ({
   platformAdmin: {
     store: {
       findUnique: (...args: unknown[]) => mockFindUnique(...args),
+      findMany: (...args: unknown[]) => mockFindMany(...args),
+    },
+  },
+  platformAdminTransaction: (fn: (tx: unknown) => unknown) => fn({
+    store: {
+      findUnique: (...args: unknown[]) => mockFindUnique(...args),
       create: (...args: unknown[]) => mockCreate(...args),
       update: (...args: unknown[]) => mockUpdate(...args),
-      findMany: (...args: unknown[]) => mockFindMany(...args),
     },
     auditLog: {
       create: (...args: unknown[]) => mockAuditCreate(...args),
     },
-  },
+  }),
 }));
 
 vi.mock("../get-store", () => ({
@@ -30,7 +35,7 @@ vi.mock("./session", () => ({
   }),
 }));
 
-import { createStore, updateStore, suspendStore } from "./actions";
+import { createStore, updateStore, setStoreStatus } from "./actions";
 
 function formData(entries: Record<string, string>): FormData {
   const fd = new FormData();
@@ -395,6 +400,21 @@ describe("createStore", () => {
     const createArg = mockCreate.mock.calls[0][0].data;
     expect(createArg.hours).toBeDefined();
   });
+
+  it("audit failure propagates (transaction rolls back store creation)", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "mama-ngozi",
+      name: "Mama Ngozi African Market",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+    });
+    mockAuditCreate.mockRejectedValueOnce(new Error("audit insert failed"));
+
+    await expect(createStore({}, formData(VALID_STORE))).rejects.toThrow("audit insert failed");
+  });
 });
 
 describe("updateStore", () => {
@@ -510,16 +530,41 @@ describe("updateStore", () => {
     expect(auditData.before.autoRefundLimitCents).toBe(2500);
     expect(auditData.after.autoRefundLimitCents).toBe(5000);
   });
+
+  it("audit failure propagates (transaction rolls back store update)", async () => {
+    const before = {
+      id: "store-1",
+      slug: "mama-ngozi",
+      name: "Old Name",
+      logoUrl: null,
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+      hours: null,
+      prepTimeMinutes: 30,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 3500,
+      pickupEnabled: false,
+      autoRefundLimitCents: 2500,
+    };
+    mockFindUnique.mockResolvedValueOnce(before);
+    mockUpdate.mockResolvedValueOnce({ ...before, name: "Mama Ngozi African Market" });
+    mockAuditCreate.mockRejectedValueOnce(new Error("audit insert failed"));
+
+    await expect(
+      updateStore({}, formData({ ...VALID_STORE, storeId: "store-1" })),
+    ).rejects.toThrow("audit insert failed");
+  });
 });
 
-describe("suspendStore", () => {
+describe("setStoreStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("returns error when store not found", async () => {
     mockFindUnique.mockResolvedValueOnce(null);
-    const result = await suspendStore("nonexistent");
+    const result = await setStoreStatus("nonexistent", "suspended");
     expect(result.error).toContain("not found");
   });
 
@@ -529,7 +574,7 @@ describe("suspendStore", () => {
     mockUpdate.mockResolvedValueOnce({ ...before, status: "suspended" });
     mockAuditCreate.mockResolvedValueOnce({});
 
-    const result = await suspendStore("store-1");
+    const result = await setStoreStatus("store-1", "suspended");
     expect(result.success).toBe(true);
     expect(mockUpdate).toHaveBeenCalledWith({
       where: { id: "store-1" },
@@ -541,15 +586,57 @@ describe("suspendStore", () => {
     expect(auditData.after).toEqual({ status: "suspended" });
   });
 
-  it("unsuspends a suspended store", async () => {
+  it("reactivates a suspended store", async () => {
     const before = { id: "store-1", slug: "mama-ngozi", status: "suspended" };
     mockFindUnique.mockResolvedValueOnce(before);
     mockUpdate.mockResolvedValueOnce({ ...before, status: "active" });
     mockAuditCreate.mockResolvedValueOnce({});
 
-    const result = await suspendStore("store-1");
+    const result = await setStoreStatus("store-1", "active");
     expect(result.success).toBe(true);
     const auditData = mockAuditCreate.mock.calls[0][0].data;
     expect(auditData.action).toBe("store.unsuspend");
+  });
+
+  it("is idempotent: setting suspended on an already-suspended store is a no-op", async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", status: "suspended" });
+
+    const result = await setStoreStatus("store-1", "suspended");
+    expect(result.success).toBe(true);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockAuditCreate).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent: setting active on an already-active store is a no-op", async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", status: "active" });
+
+    const result = await setStoreStatus("store-1", "active");
+    expect(result.success).toBe(true);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockAuditCreate).not.toHaveBeenCalled();
+  });
+
+  it("two-tab case: two suspend calls leave the store suspended", async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", status: "active" });
+    mockUpdate.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", status: "suspended" });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result1 = await setStoreStatus("store-1", "suspended");
+    expect(result1.success).toBe(true);
+
+    mockFindUnique.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", status: "suspended" });
+
+    const result2 = await setStoreStatus("store-1", "suspended");
+    expect(result2.success).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("audit failure propagates (transaction rolls back status change)", async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", status: "active" });
+    mockUpdate.mockResolvedValueOnce({ id: "store-1", slug: "mama-ngozi", status: "suspended" });
+    mockAuditCreate.mockRejectedValueOnce(new Error("audit insert failed"));
+
+    await expect(setStoreStatus("store-1", "suspended")).rejects.toThrow("audit insert failed");
   });
 });
