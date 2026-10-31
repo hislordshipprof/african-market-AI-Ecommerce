@@ -10,69 +10,26 @@ function generateTotpCode(): string {
 }
 
 async function adminSignIn(page: import("@playwright/test").Page) {
-  const apiResponses: string[] = [];
-  page.on("response", (resp) => {
-    if (resp.url().includes("/api/auth/")) {
-      apiResponses.push(`${resp.status()} ${resp.url()}`);
-    }
-  });
-
   await page.goto("/admin/sign-in");
   await page.fill("input[type='email']", ADMIN_EMAIL);
   await page.fill("input[type='password']", ADMIN_PASSWORD);
+  await page.click("button[type='submit']");
 
-  const [signInResp] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes("/api/auth/") && r.request().method() === "POST", { timeout: 15000 }),
-    page.click("button[type='submit']"),
-  ]);
+  await page.locator("input[inputmode='numeric']").waitFor({ state: "visible", timeout: 10000 });
 
-  const signInBody = await signInResp.text().catch(() => "(unreadable)");
-  const signInStatus = signInResp.status();
+  const code = generateTotpCode();
+  await page.fill("input[inputmode='numeric']", code);
+  await page.click("button[type='submit']");
 
-  const errorEl = page.locator(".bg-red-50");
-  const totpEl = page.locator("text=Enter the 6-digit code");
-
-  const winner = await Promise.race([
-    totpEl.waitFor({ state: "visible", timeout: 10000 }).then(() => "totp" as const),
-    errorEl.waitFor({ state: "visible", timeout: 10000 }).then(() => "error" as const),
-    page.waitForURL("**/admin/stores", { timeout: 10000 }).then(() => "stores" as const),
-  ]).catch(() => "timeout" as const);
-
-  if (winner === "error") {
-    const errText = await errorEl.textContent();
-    throw new Error(`Sign-in failed with error: "${errText}" | API ${signInStatus}: ${signInBody} | responses: ${apiResponses.join(", ")}`);
-  }
-
-  if (winner === "timeout") {
-    const bodyText = await page.locator("body").textContent().catch(() => "(unreadable)");
-    throw new Error(`Sign-in timed out (no TOTP, no error, no redirect) | page URL: ${page.url()} | API ${signInStatus}: ${signInBody} | body: ${bodyText?.slice(0, 500)} | responses: ${apiResponses.join(", ")}`);
-  }
-
-  if (winner === "totp") {
-    const code = generateTotpCode();
-    await page.fill("input[inputmode='numeric']", code);
-
-    const [verifyResp] = await Promise.all([
-      page.waitForResponse((r) => r.url().includes("/api/auth/") && r.request().method() === "POST", { timeout: 15000 }),
-      page.click("button[type='submit']"),
-    ]);
-
-    const verifyBody = await verifyResp.text().catch(() => "(unreadable)");
-    const verifyStatus = verifyResp.status();
-
-    const postTotpWinner = await Promise.race([
-      page.waitForURL("**/admin/stores", { timeout: 15000 }).then(() => "stores" as const),
-      errorEl.waitFor({ state: "visible", timeout: 15000 }).then(() => "error" as const),
-    ]).catch(() => "timeout" as const);
-
-    if (postTotpWinner === "error") {
-      const errText = await errorEl.textContent();
-      throw new Error(`TOTP verification failed: "${errText}" | API ${verifyStatus}: ${verifyBody}`);
-    }
-
-    if (postTotpWinner === "timeout") {
-      throw new Error(`Post-TOTP redirect timed out | page URL: ${page.url()} | API ${verifyStatus}: ${verifyBody}`);
-    }
+  try {
+    await page.waitForURL("**/admin/stores", { timeout: 15000 });
+  } catch {
+    const url = page.url();
+    const errText = await page.locator(".bg-red-50").textContent().catch(() => "");
+    const bodySnippet = await page.locator("body").textContent().catch(() => "");
+    throw new Error(
+      `Post-TOTP redirect failed | url: ${url} | error: "${errText}" | body: ${bodySnippet?.slice(0, 300)}`,
+    );
   }
 }
 
