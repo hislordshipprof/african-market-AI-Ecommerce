@@ -210,7 +210,7 @@ export function StoreForm({
                 id="prepTimeMinutes"
                 name="prepTimeMinutes"
                 type="number"
-                min={1}
+                min={0}
                 max={480}
                 defaultValue={sv?.prepTimeMinutes ?? store?.prepTimeMinutes ?? 30}
                 className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
@@ -224,7 +224,7 @@ export function StoreForm({
                 id="deliveryRadiusMi"
                 name="deliveryRadiusMi"
                 type="number"
-                min={1}
+                min={0}
                 max={15}
                 step={0.5}
                 defaultValue={sv?.deliveryRadiusMi ?? (store ? Number(store.deliveryRadiusMi) : 8)}
