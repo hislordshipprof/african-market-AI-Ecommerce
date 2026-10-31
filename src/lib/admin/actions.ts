@@ -4,13 +4,12 @@ import { revalidateStore } from "../get-store";
 import { platformAdmin, platformAdminTransaction } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
-import { RESERVED_SLUGS } from "../slug";
+import { isSlugRoutable } from "../slug";
 import type { ThemePreset } from "../theme";
 import { Prisma } from "@prisma/client";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 
-const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 const MAX_CENTS = 2_147_483_647;
 
@@ -86,8 +85,7 @@ function validateStoreFields(data: FormData): {
   );
 
   if (!slug) errors.slug = "Slug is required";
-  else if (!SLUG_RE.test(slug)) errors.slug = "Slug must be lowercase alphanumeric with hyphens, 1-63 characters";
-  else if (RESERVED_SLUGS.has(slug)) errors.slug = "This slug is reserved and cannot be used";
+  else if (!isSlugRoutable(slug)) errors.slug = "This slug is not allowed (reserved, all-digit, or invalid format)";
 
   if (logoUrl) {
     if (logoUrl.startsWith("/") && !logoUrl.startsWith("//")) {
