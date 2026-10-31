@@ -45,14 +45,14 @@ export function CategoryMosaic({
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent group-hover:from-black/80" />
             <div className="relative flex h-full flex-col justify-end p-3">
-              {cat.localName && (
-                <span className="font-label text-[13px] uppercase tracking-wider text-white/80">
-                  {cat.localName}
-                </span>
-              )}
               <span className="font-display text-sm font-bold leading-tight text-white sm:text-base">
                 {cat.name}
               </span>
+              {cat.localName && (
+                <span className="font-label text-[13px] tracking-wider text-white/70">
+                  {cat.localName}
+                </span>
+              )}
             </div>
           </Link>
         ))}

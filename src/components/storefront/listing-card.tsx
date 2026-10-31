@@ -38,18 +38,17 @@ export function ListingCard({
       </div>
 
       <div className="flex flex-1 flex-col gap-0.5 p-3">
-        {listing.altName && (
-          <span className="font-label text-[13px] uppercase tracking-wider text-muted-foreground">
-            {listing.altName}
-          </span>
-        )}
-
         <Link
           href={`/listings/${listing.id}`}
           className="font-body text-sm font-medium leading-snug text-ink line-clamp-2 hover:text-primary"
         >
           {listing.displayName}
         </Link>
+        {listing.altName && (
+          <span className="font-label text-[13px] tracking-wider text-muted-foreground">
+            {listing.altName}
+          </span>
+        )}
 
         <div className="mt-auto flex items-end justify-between gap-2 pt-1">
           <PriceDisplay
