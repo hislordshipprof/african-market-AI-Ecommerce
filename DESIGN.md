@@ -220,7 +220,13 @@ Taken from the DoorDash, Instacart and Weee! teardowns (`research/ui/delivery-ap
 | 30ms | Stagger between list items |
 | 1.3s loop | Skeleton shimmer |
 
-**The Confirm, Don't Decorate Rule.** Motion only confirms an action (added, swapped, paid) or shows where something went. No ambient or looping animation besides loading skeletons.
+**The Confirm, Don't Decorate Rule.** On task surfaces (browse, cart, checkout, order inbox, admin forms), motion only confirms an action (added, swapped, paid) or shows where something went. No ambient or looping animation there besides loading skeletons.
+
+**The Story Surface Rule** (user direction, 2026-10-31). Sign-in, sign-up, invite-accept, onboarding and marketing pages are story surfaces. They tell the story: an independent African market, its shelves, produce, spices and the people who run it. Each one gets a rich background: a 3D scene (React Three Fiber, lazy-loaded on the client after the form is interactive, with a static poster image as first paint and fallback) plus high-quality photography or rendered imagery. Entrance and parallax motion use the `motion` library (Framer Motion's current package). Limits:
+- The form stays first, readable (AA contrast over the background via a solid or blurred panel) and usable before any 3D loads.
+- No layout shift, and LCP stays under 2.5s on mid-range mobile. Mobile and save-data get the poster image only.
+- Under reduced motion, the scene is frozen to its poster and nothing moves.
+- Images must be licensed for commercial use (record the source and license in `public/images/CREDITS.md`) or rendered by us. No AI-generated faces of real-looking people. Never stereotyped "Africa" clichés: real market textures, foods and colors from the research.
 
 **The Reduced Motion Rule.** Under `prefers-reduced-motion`, all transitions and animations are off. State changes still happen instantly.
 

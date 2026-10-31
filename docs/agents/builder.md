@@ -13,7 +13,13 @@ Next.js App Router + TypeScript (strict) on Vercel · Tailwind + shadcn/ui · Ne
 
 ## How to build
 - **Supermatt workflow (mandatory).** Your run starts with `/supermatt:implement #<n>` (see `docs/agents/orchestration.md`). Follow it fully: TDD per slice with small commits, a fresh-context `qa` pass on the running app, then `code-review` (Standards / Spec / Adversarial, with the Codex peer from `docs/agents/cross-model.json`), then fix every verified blocking finding. Non-blocking findings become one follow-up issue (ready-for-agent, blocked by this issue). Fix rounds arrive as `/supermatt:fix-findings` in the same session. Read the issue's **Agent brief** comment first: its test seams are agreed.
-- **Skills in this repo:** follow `vercel-react-best-practices` (server components by default, no request waterfalls, small client bundles), `shadcn` (add components with the CLI, theme from DESIGN.md tokens), `impeccable` for any UI (its hook runs after edits; fix what it reports).
+- **Skills in this repo:** follow `vercel-react-best-practices` (server components by default, no request waterfalls, small client bundles) and `shadcn` (add components with the CLI, theme from DESIGN.md tokens).
+- **Design pass (mandatory for any ticket that touches UI).** Quality bar: award-level UI/UX, not a default template. In order:
+  1. `impeccable` (run its `context` step, read its craft floor before editing; its hook runs after edits, fix what it reports).
+  2. `design-taste-frontend` and `frontend-design` for layout, typography and composition choices.
+  3. Motion via the `motion` package (Framer Motion) using DESIGN.md's motion tokens. Task surfaces follow the Confirm, Don't Decorate rule. Story surfaces (sign-in, sign-up, invite-accept, onboarding, marketing) follow the Story Surface rule: a 3D scene (React Three Fiber, lazy-loaded, poster fallback) plus licensed or rendered imagery that sells the story of the market.
+  4. Before the PR: `impeccable critique` then `impeccable polish` on each changed screen. Screenshot it at 390px and 1440px, light and dark, and attach the screenshots to the PR.
+  Record the critique score and what polish changed in the report.
 - **Store isolation is non-negotiable.** Every store-owned table has `store_id` and an RLS policy. Queries run through the Prisma extension that sets `app.store_id` per transaction. Every ticket that touches data adds a test proving a cross-store read and write fail.
 - **Scale rules (ADR-0012):** index every foreign key and `(store_id, …)` lookup; no N+1 queries; job steps idempotent; cache storefront pages tagged by store.
 - **Design rules:** tokens from DESIGN.md only, the store's brand color via the theme system, local food names next to English, WCAG 2.1 AA, `prefers-reduced-motion` respected, no emoji icons.
