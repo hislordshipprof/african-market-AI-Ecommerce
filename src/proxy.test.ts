@@ -59,7 +59,7 @@ function makeRequest(
   return req;
 }
 
-describe("proxy cookie persistence (override allowed)", () => {
+describe("proxy redirect on ?store= (override allowed)", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("VERCEL_ENV", "");
@@ -68,7 +68,18 @@ describe("proxy cookie persistence (override allowed)", () => {
     vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
   });
 
-  it("sets store_override cookie when ?store= is present", () => {
+  it("redirects 307 when ?store= is present and strips the param", () => {
+    const req = makeRequest("http://localhost:3000/?store=mama-ngozi");
+    const res = proxy(req);
+    expect(res.status).toBe(307);
+    const location = res.headers.get("location");
+    expect(location).toBeDefined();
+    const redirectUrl = new URL(location!);
+    expect(redirectUrl.searchParams.has("store")).toBe(false);
+    expect(redirectUrl.pathname).toBe("/");
+  });
+
+  it("sets store_override cookie on redirect response", () => {
     const req = makeRequest("http://localhost:3000/?store=mama-ngozi");
     const res = proxy(req);
     const cookie = res.cookies.get("store_override");
@@ -76,22 +87,16 @@ describe("proxy cookie persistence (override allowed)", () => {
     expect(cookie!.value).toBe("mama-ngozi");
   });
 
-  it("sets x-store-slug header from ?store= param", () => {
-    const req = makeRequest("http://localhost:3000/?store=mama-ngozi");
-    const res = proxy(req);
-    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe(
-      "mama-ngozi",
+  it("preserves other query params in redirect", () => {
+    const req = makeRequest(
+      "http://localhost:3000/search?store=mama-ngozi&q=rice",
     );
-  });
-
-  it("falls back to store_override cookie when no query param", () => {
-    const req = makeRequest("http://localhost:3000/categories/grains", {
-      store_override: "mama-ngozi",
-    });
     const res = proxy(req);
-    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe(
-      "mama-ngozi",
-    );
+    expect(res.status).toBe(307);
+    const location = new URL(res.headers.get("location")!);
+    expect(location.searchParams.has("store")).toBe(false);
+    expect(location.searchParams.get("q")).toBe("rice");
+    expect(location.pathname).toBe("/search");
   });
 
   it("replaces cookie when a new ?store= value is provided", () => {
@@ -99,24 +104,56 @@ describe("proxy cookie persistence (override allowed)", () => {
       store_override: "mama-ngozi",
     });
     const res = proxy(req);
+    expect(res.status).toBe(307);
     const cookie = res.cookies.get("store_override");
     expect(cookie!.value).toBe("tante-marie");
+  });
+
+  it("sets HttpOnly, SameSite=Lax, Path=/ on the cookie", () => {
+    const req = makeRequest("http://localhost:3000/?store=mama-ngozi");
+    const res = proxy(req);
+    const setCookie = res.headers.getSetCookie();
+    const cookieStr = setCookie.find((c) => c.startsWith("store_override="));
+    expect(cookieStr).toBeDefined();
+    expect(cookieStr).toContain("HttpOnly");
+    expect(cookieStr!.toLowerCase()).toContain("samesite=lax");
+    expect(cookieStr).toContain("Path=/");
+  });
+});
+
+describe("proxy cookie fallback (override allowed)", () => {
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
+  });
+
+  it("falls back to store_override cookie when no query param", () => {
+    const req = makeRequest("http://localhost:3000/categories/grains", {
+      store_override: "mama-ngozi",
+    });
+    const res = proxy(req);
+    expect(res.status).toBe(200);
     expect(res.headers.get("x-middleware-request-x-store-slug")).toBe(
-      "tante-marie",
+      "mama-ngozi",
     );
   });
 
-  it("rejects invalid slug in ?store= param", () => {
+  it("rejects invalid slug in ?store= param (no redirect)", () => {
     const req = makeRequest("http://localhost:3000/?store=../evil");
     const res = proxy(req);
+    expect(res.status).toBe(200);
     const cookie = res.cookies.get("store_override");
     expect(cookie).toBeUndefined();
     expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
   });
 
-  it("rejects reserved slug in ?store= param", () => {
+  it("rejects reserved slug in ?store= param (no redirect)", () => {
     const req = makeRequest("http://localhost:3000/?store=admin");
     const res = proxy(req);
+    expect(res.status).toBe(200);
     const cookie = res.cookies.get("store_override");
     expect(cookie).toBeUndefined();
   });
@@ -127,19 +164,6 @@ describe("proxy cookie persistence (override allowed)", () => {
     });
     const res = proxy(req);
     expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
-  });
-
-  it("sets HttpOnly, SameSite=Lax, Path=/ on the cookie", () => {
-    const req = makeRequest("http://localhost:3000/?store=mama-ngozi");
-    const res = proxy(req);
-    const cookie = res.cookies.get("store_override");
-    expect(cookie).toBeDefined();
-    const setCookie = res.headers.getSetCookie();
-    const cookieStr = setCookie.find((c) => c.startsWith("store_override="));
-    expect(cookieStr).toBeDefined();
-    expect(cookieStr).toContain("HttpOnly");
-    expect(cookieStr!.toLowerCase()).toContain("samesite=lax");
-    expect(cookieStr).toContain("Path=/");
   });
 });
 
@@ -152,9 +176,10 @@ describe("proxy in production (override not allowed)", () => {
     vi.stubEnv("PLATFORM_ROOT_DOMAIN", "");
   });
 
-  it("ignores ?store= param in production", () => {
+  it("ignores ?store= param in production (no redirect)", () => {
     const req = makeRequest("http://example.com/?store=mama-ngozi");
     const res = proxy(req);
+    expect(res.status).toBe(200);
     const cookie = res.cookies.get("store_override");
     expect(cookie).toBeUndefined();
   });

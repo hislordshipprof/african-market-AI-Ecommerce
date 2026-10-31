@@ -20,14 +20,24 @@ export function proxy(request: NextRequest) {
   const host = request.headers.get("host");
   const overrideAllowed = allowStoreOverride(process.env);
   let slug: string | null = null;
-  let setCookie = false;
 
   if (overrideAllowed) {
     const paramSlug = request.nextUrl.searchParams.get("store");
     if (paramSlug && isSlugRoutable(paramSlug)) {
-      slug = paramSlug;
-      setCookie = true;
-    } else if (!paramSlug) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.searchParams.delete("store");
+      const response = NextResponse.redirect(redirectUrl, 307);
+      response.cookies.set(COOKIE_NAME, paramSlug, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: COOKIE_MAX_AGE,
+        secure: request.nextUrl.protocol === "https:",
+      });
+      return response;
+    }
+
+    if (!paramSlug) {
       const cookieSlug = request.cookies.get(COOKIE_NAME)?.value;
       if (cookieSlug && isSlugRoutable(cookieSlug)) {
         slug = cookieSlug;
@@ -43,19 +53,7 @@ export function proxy(request: NextRequest) {
     headers.set("x-store-slug", slug);
   }
 
-  const response = NextResponse.next({ request: { headers } });
-
-  if (setCookie && slug) {
-    response.cookies.set(COOKIE_NAME, slug, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: COOKIE_MAX_AGE,
-      secure: request.nextUrl.protocol === "https:",
-    });
-  }
-
-  return response;
+  return NextResponse.next({ request: { headers } });
 }
 
 export const config = {
