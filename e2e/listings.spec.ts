@@ -112,7 +112,7 @@ test.describe("Listing management (authenticated)", () => {
     // Verify the price changed in the UI
     await page.waitForTimeout(500);
     await page.goto("/store-admin/listings?store=mama-ngozi");
-    await expect(page.locator(`text=$7.00`)).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(`text=$7.00`).first()).toBeVisible({ timeout: 5000 });
   });
 
   test("switch stock mode from counted to status", async ({ page }) => {

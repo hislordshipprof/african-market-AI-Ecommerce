@@ -60,6 +60,7 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
   });
 
   test("?store= override is blocked in production mode", async ({ page }) => {
+    test.skip(!!process.env.E2E_STORE_OVERRIDE, "E2E_STORE_OVERRIDE enables ?store= param");
     await page.goto("http://localhost:3000/?store=mama-ngozi");
     await expect(page.locator("h1")).toHaveText("Store not found");
   });
