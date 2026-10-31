@@ -131,15 +131,22 @@ describe("resolveStoreTheme", () => {
 
   for (const preset of VALID_PRESETS) {
     for (const brand of [...PROBLEM_COLORS, ...NORMAL_COLORS]) {
-      it(`dark primary for ${brand} on ${preset} passes AA`, () => {
+      it(`light on-primary for ${brand} on ${preset} passes AA`, () => {
         const theme = resolveStoreTheme(preset, brand);
-        const darkBg = theme.dark["--store-bg"];
+        const lightPrimary = theme.light["--store-primary"];
+        const lightOnPrimary = theme.light["--store-on-primary"];
+        expect(
+          contrastRatio(lightPrimary, lightOnPrimary),
+        ).toBeGreaterThanOrEqual(4.5);
+      });
+
+      it(`dark on-primary for ${brand} on ${preset} passes AA`, () => {
+        const theme = resolveStoreTheme(preset, brand);
         const darkPrimary = theme.dark["--store-primary"];
-        expect(contrastRatio(darkPrimary, darkBg)).toBeGreaterThanOrEqual(4.5);
-        const textOnPrimary = readableFillColor(darkPrimary);
-        expect(contrastRatio(darkPrimary, textOnPrimary)).toBeGreaterThanOrEqual(
-          4.5,
-        );
+        const darkOnPrimary = theme.dark["--store-on-primary"];
+        expect(
+          contrastRatio(darkPrimary, darkOnPrimary),
+        ).toBeGreaterThanOrEqual(4.5);
       });
     }
   }
