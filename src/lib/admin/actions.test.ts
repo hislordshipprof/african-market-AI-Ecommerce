@@ -407,6 +407,18 @@ describe("createStore", () => {
     expect(result.fieldErrors?.slug).toContain("reserved");
   });
 
+  it("rejects all-digit slug '123'", async () => {
+    const result = await createStore({}, formData({ ...VALID_STORE, slug: "123" }));
+    expect(result.fieldErrors?.slug).toBeDefined();
+    expect(result.fieldErrors?.slug).toContain("not allowed");
+  });
+
+  it("rejects 'localhost' slug", async () => {
+    const result = await createStore({}, formData({ ...VALID_STORE, slug: "localhost" }));
+    expect(result.fieldErrors?.slug).toBeDefined();
+    expect(result.fieldErrors?.slug).toContain("not allowed");
+  });
+
   it("rejects remote logo URL when LOGO_HOSTS is not set", async () => {
     const original = process.env.LOGO_HOSTS;
     delete process.env.LOGO_HOSTS;
