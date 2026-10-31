@@ -57,9 +57,9 @@ test.describe("LCP measurement (throttled 4G)", () => {
 
   test("product page LCP under 2.5s", async ({ page }) => {
     await page.goto(`${BASE}/`, { waitUntil: "load" });
-    const firstCard = page.locator("[data-testid='listing-card']").first();
-    await expect(firstCard).toBeVisible({ timeout: 10000 });
-    const href = await firstCard.getAttribute("href");
+    const firstCardLink = page.locator("[data-testid='listing-card'] a").first();
+    await expect(firstCardLink).toBeVisible({ timeout: 10000 });
+    const href = await firstCardLink.getAttribute("href");
     expect(href).toBeTruthy();
 
     const lcp = await measureLCP(page, `${BASE}${href}`);

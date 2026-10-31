@@ -48,9 +48,9 @@ test.describe("Storefront screenshots", () => {
         });
         const page = await context.newPage();
         await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-        const firstCard = page.locator("[data-testid='listing-card']").first();
-        await expect(firstCard).toBeVisible({ timeout: 10000 });
-        await firstCard.click();
+        const firstCardLink = page.locator("[data-testid='listing-card'] a").first();
+        await expect(firstCardLink).toBeVisible({ timeout: 10000 });
+        await firstCardLink.click();
         await page.waitForURL(/\/listings\//);
         await expect(page.locator("#variants-heading")).toBeVisible({
           timeout: 5000,

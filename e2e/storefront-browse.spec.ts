@@ -39,9 +39,9 @@ test.describe("Storefront browse and search (#8 acceptance criteria)", () => {
     await page.goto(`${BASE}/`);
     await expect(page.locator("h1")).toBeVisible({ timeout: 10000 });
 
-    const firstCard = page.locator("[data-testid='listing-card']").first();
-    await expect(firstCard).toBeVisible({ timeout: 10000 });
-    await firstCard.click();
+    const firstCardLink = page.locator("[data-testid='listing-card'] a").first();
+    await expect(firstCardLink).toBeVisible({ timeout: 10000 });
+    await firstCardLink.click();
 
     await page.waitForURL(/\/listings\//);
 
@@ -64,8 +64,8 @@ test.describe("Storefront browse and search (#8 acceptance criteria)", () => {
     await page.goto(`${BASE}/`);
     await expect(page.locator("h1")).toBeVisible({ timeout: 10000 });
 
-    const listingsSection = page.locator("#listings-heading");
-    await expect(listingsSection).toBeVisible({ timeout: 10000 });
+    const rail = page.locator("[data-testid='product-rail']").first();
+    await expect(rail).toBeVisible({ timeout: 10000 });
 
     const cards = page.locator("[data-testid='listing-card']");
     await expect(cards.first()).toBeVisible({ timeout: 10000 });
