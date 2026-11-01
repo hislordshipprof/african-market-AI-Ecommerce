@@ -1,12 +1,25 @@
 "use client";
-import { useState } from "react";
-import { Pause, Play, Asterisk } from "lucide-react";
+import { useRef } from "react";
+import Link from "next/link";
+import Image from "next/image";
+import { m, useReducedMotion, useScroll, useTransform } from "motion/react";
+
 const names = ["Egusi", "Garri", "Ogbono", "Suya spice", "Ata rodo", "Fufu flour"];
+const photos = ["yam-white-puna", "cassava-root-fresh", "egusi-seeds-whole"];
+
 export function MarketMarquee() {
-  const [paused, setPaused] = useState(false);
-  return <section className="sf-marquee" data-testid="market-marquee" aria-label="Familiar names from home" data-paused={paused}>
-    <p className="sr-only">{names.join(" · ")}</p>
-    {[0, 1].map(row => <div key={row} className="sf-marquee-window" aria-hidden><div className="sf-marquee-track">{[0, 1].map(copy => <span key={copy}>{names.map(name => <span key={name}>{name}<i><Asterisk size={22} /></i></span>)}</span>)}</div></div>)}
-    <button className="sf-round-button sf-marquee-pause" aria-label={paused ? "Play product names" : "Pause product names"} aria-pressed={paused} onClick={() => setPaused(v => !v)}>{paused ? <Play size={15} /> : <Pause size={15} />}</button>
+  const ref = useRef<HTMLElement>(null);
+  const reduced = useReducedMotion();
+  const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
+  const x = useTransform(scrollYProgress, [0, 1], [64, 0]);
+  return <section ref={ref} className="sf-market-band" data-testid="market-band" aria-label="Familiar names from home">
+    <div className="sf-market-window">
+      <m.div className="sf-market-track" style={{ x: reduced ? 0 : x }}>
+        {names.map((name, i) => <span className="sf-market-item" key={name}>
+          <Link className="sf-market-chip" href={"/search?q=" + encodeURIComponent(name.toLowerCase())}>{name}</Link>
+          <Image src={"/images/products/" + photos[i % photos.length] + ".webp"} width={52} height={52} alt="" />
+        </span>)}
+      </m.div>
+    </div>
   </section>;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, type ReactNode } from "react";
+import { Children, type CSSProperties, type ReactNode } from "react";
 import { AnimatePresence, LazyMotion, m, useReducedMotion } from "motion/react";
 
 const loadLayout = () => import("./motion-layout-features").then(module => module.default);
@@ -35,12 +35,11 @@ export function ProductListMotion({
               : index
           }
           className={itemClassName}
+          data-sf-reveal
+          style={{ "--sf-reveal-delay": `${Math.min(index, 7) * 30}ms` } as CSSProperties}
           layout={reduced || contents ? false : "position"}
           exit={{ opacity: 0 }}
           initial={false}
-          animate={reduced ? { opacity: 1, y: 0 } : undefined}
-          whileInView={reduced ? undefined : { opacity: [0, 1], y: [24, 0] }}
-          viewport={{ once: true, amount: 0.2 }}
           transition={
             reduced
               ? { duration: 0 }

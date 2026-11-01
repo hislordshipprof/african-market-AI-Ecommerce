@@ -37,7 +37,7 @@ export function ListingCard({
           tabIndex={-1}
           onNavigate={choose}
         >
-          <ViewTransition name={selected === instance ? `product-${listing.id}` : "auto"} share="sf-product-morph" default="none"><ProductImage src={listing.imageUrl} name={listing.displayName} /></ViewTransition>
+          <ViewTransition name={selected === instance ? `product-${listing.id}` : "auto"} share="sf-product-morph" default="none"><ProductImage category={listing.categorySlug} src={listing.imageUrl} name={listing.displayName} /></ViewTransition>
         </Link>
         <button className="sf-quick-view-trigger" onClick={() => openQuickView(listing)} aria-label={`Quick view ${listing.displayName}`}>Quick view</button>
         {listing.frozen && <span className="sf-photo-tag">Frozen</span>}

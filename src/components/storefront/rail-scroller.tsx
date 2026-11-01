@@ -84,6 +84,10 @@ export function RailScroller({
         onClickCapture={e => { if (drag.current?.moved) { e.preventDefault(); e.stopPropagation(); } drag.current = null; }}
         onDragStart={e => e.preventDefault()}
         onKeyDown={(e) => {
+          if (e.key === "Home" || e.key === "End") {
+            e.preventDefault();
+            e.currentTarget.scrollTo({ left: e.key === "Home" ? 0 : e.currentTarget.scrollWidth, behavior: "instant" });
+          }
           if (e.key === "ArrowRight") {
             e.preventDefault();
             scroll(1);
