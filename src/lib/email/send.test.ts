@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   sendEmail,
   getTestSentEmails,
   clearTestSentEmails,
   ResendSender,
+  createSender,
 } from "./send";
 
 describe("sendEmail (test double)", () => {
@@ -36,6 +37,50 @@ describe("sendEmail (test double)", () => {
     await sendEmail({ to: "a@example.com", subject: "Test", html: "" });
     clearTestSentEmails();
     expect(getTestSentEmails()).toHaveLength(0);
+  });
+});
+
+describe("createSender", () => {
+  it("throws in production when RESEND_API_KEY is missing", () => {
+    expect(() => createSender({ NODE_ENV: "production" })).toThrow(
+      /RESEND_API_KEY/,
+    );
+  });
+
+  it("returns TestSender in NODE_ENV=test without RESEND_API_KEY", () => {
+    const sender = createSender({ NODE_ENV: "test" });
+    expect(sender).not.toBeInstanceOf(ResendSender);
+  });
+
+  it("returns TestSender when CI=true without RESEND_API_KEY", () => {
+    const sender = createSender({ CI: "true", NODE_ENV: "production" });
+    expect(sender).not.toBeInstanceOf(ResendSender);
+  });
+
+  it("returns TestSender in development without RESEND_API_KEY", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const sender = createSender({ NODE_ENV: "development" });
+    expect(sender).not.toBeInstanceOf(ResendSender);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("RESEND_API_KEY not set"),
+    );
+    warn.mockRestore();
+  });
+
+  it("returns TestSender during build phase even with NODE_ENV=production", () => {
+    const sender = createSender({
+      NODE_ENV: "production",
+      NEXT_PHASE: "phase-production-build",
+    });
+    expect(sender).not.toBeInstanceOf(ResendSender);
+  });
+
+  it("returns ResendSender in production when RESEND_API_KEY is set", () => {
+    const sender = createSender({
+      NODE_ENV: "production",
+      RESEND_API_KEY: "re_test_key",
+    });
+    expect(sender).toBeInstanceOf(ResendSender);
   });
 });
 

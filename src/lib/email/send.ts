@@ -59,15 +59,27 @@ export function clearTestSentEmails(): void {
   sent.length = 0;
 }
 
-function createSender(): EmailSender {
-  if (process.env.NODE_ENV === "test" || process.env.CI === "true") {
+export function createSender(
+  env: Record<string, string | undefined> = process.env,
+): EmailSender {
+  if (env.NEXT_PHASE === "phase-production-build") {
     return new TestSender();
   }
 
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
+  if (env.NODE_ENV === "test" || env.CI === "true") {
+    return new TestSender();
+  }
+
+  const apiKey = env.RESEND_API_KEY;
+  const from = env.EMAIL_FROM ?? "onboarding@resend.dev";
 
   if (!apiKey) {
+    if (env.NODE_ENV === "production") {
+      throw new Error(
+        "RESEND_API_KEY is required in production. " +
+          "All transactional emails (invites, order confirmations) will fail without it.",
+      );
+    }
     console.warn("RESEND_API_KEY not set — emails will be logged to console");
     return new TestSender();
   }
