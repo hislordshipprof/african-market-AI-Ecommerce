@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 
 function getR2Client() {
   const accountId = process.env.R2_ACCOUNT_ID;
@@ -12,6 +12,14 @@ function getR2Client() {
     endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
     credentials: { accessKeyId, secretAccessKey },
   });
+}
+
+export function catalogImageUrl(key: string): string {
+  const publicUrl = process.env.R2_PUBLIC_URL;
+  if (publicUrl) {
+    return `${publicUrl.replace(/\/+$/, "")}/${key}`;
+  }
+  return `/api/catalog-image/${key}`;
 }
 
 export async function uploadToR2(
@@ -32,7 +40,31 @@ export async function uploadToR2(
     }),
   );
 
-  const publicUrl = process.env.R2_PUBLIC_URL;
-  if (!publicUrl) throw new Error("R2_PUBLIC_URL is required for public image URLs");
-  return `${publicUrl.replace(/\/+$/, "")}/${key}`;
+  return catalogImageUrl(key);
+}
+
+const ALLOWED_KEY_RE = /^catalog\/[a-zA-Z0-9_-]+\.(jpg|png|svg|webp)$/;
+
+export async function streamFromR2(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
+  if (!ALLOWED_KEY_RE.test(key)) return null;
+
+  const bucket = process.env.R2_BUCKET;
+  if (!bucket) return null;
+
+  try {
+    const client = getR2Client();
+    const response = await client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    if (!response.Body) return null;
+    const webStream = response.Body.transformToWebStream();
+    return {
+      body: webStream as ReadableStream,
+      contentType: response.ContentType ?? "application/octet-stream",
+    };
+  } catch {
+    return null;
+  }
 }
