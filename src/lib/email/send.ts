@@ -62,6 +62,10 @@ export function clearTestSentEmails(): void {
 export function createSender(
   env: Record<string, string | undefined> = process.env,
 ): EmailSender {
+  if (env.NEXT_PHASE === "phase-production-build") {
+    return new TestSender();
+  }
+
   if (env.NODE_ENV === "test" || env.CI === "true") {
     return new TestSender();
   }

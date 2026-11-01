@@ -67,6 +67,14 @@ describe("createSender", () => {
     warn.mockRestore();
   });
 
+  it("returns TestSender during build phase even with NODE_ENV=production", () => {
+    const sender = createSender({
+      NODE_ENV: "production",
+      NEXT_PHASE: "phase-production-build",
+    });
+    expect(sender).not.toBeInstanceOf(ResendSender);
+  });
+
   it("returns ResendSender in production when RESEND_API_KEY is set", () => {
     const sender = createSender({
       NODE_ENV: "production",
