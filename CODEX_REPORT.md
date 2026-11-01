@@ -232,3 +232,88 @@ Questions skipped: the user's explicit brief already authorized the direction an
 Before acceptance on a machine allowing subprocesses: run external rembg and inspect all output; reseed with the revalidation URL/secret; run the five standard commands; run the capture runner and inspect long copy, text zoom, all widths/themes, focus, modal behavior, carousel/coverflow motion and shared transitions; record real LCP and tune until both routes are below 2.5s; repeat the rendered design critique to meet the target. Also resolve any desired bento/two-offer composition, multi-image gallery, real restock/promotion/review data, neighborhood count and contact-data requirements against real sources.
 
 Auth, admin UI, RLS, proxy, store resolution, payment implementation, phase 2 service interfaces/adapters and demo gates were preserved. Listing mutation edits are limited to the explicitly requested cache invalidation. The default 15% tip remains. No servers are left running.
+
+## Design round 4
+
+Implemented on 2026-11-01 for issue #73. **Source work is complete for the seven requested presentation items; browser acceptance and LCP remain unverified because Chromium cannot launch in this sandbox.** Read the issue body/comments, DESIGN.md, the three research/ui references, installed Next Image documentation, the owner reference and Motion's useScroll documentation. No commit, push or branch commands were run.
+
+### Requested items
+
+| Item | Status and implementation |
+|---|---|
+| 1. Wider grid and bleeding rails | Implemented in shared storefront tokens and RailScroller. Content caps at 1440px / 1536px on very large screens. Headers sit above rails, whose left edge follows the grid and right edge reaches the viewport with zero right padding. Shared card sizing gives 2.25 / 3.5 / 4.5 / 5.5 visible cards at 390 / 1024 / 1440 / 1920px. Products, deals, categories and collections use this geometry; collections now reuse RailScroller instead of maintaining a separate coverflow. Arrows, drag/touch, arrow keys and Home/End remain available. |
+| 2. Noticeable reveal | Implemented with a post-hydration html.sf-reveal-ready class, a shared IntersectionObserver at 18%, opacity 0 to 1, 24px rise, 500ms ease-out and 30ms child staggering capped at index seven. Already-visible content is marked revealed before the class is added to avoid a hydration flash. SSR without JS remains visible. Reduced-motion changes remove the class; focus exposes hidden content. |
+| 3. Scroll-linked band | Implemented as one slim row with useScroll/useTransform and six real search links: Egusi, Garri, Ogbono, Suya spice, Ata rodo and Fufu flour. Accepted local yam, cassava and egusi cut-outs separate chips. No timer, duplicate rows or pause control. Keyboard focus makes the complete row reachable; reduced motion wraps statically. |
+| 4. Larger/fuller imagery | Implemented in ProductImage and shared CSS: real photos cover square rounded tiles without inset; accepted cut-outs have 7.5% padding per side, contain sizing and contact shadow. Category photos cover the full circular clip with no inset or shadow. Responsive rail sizing enlarges desktop cards while meeting the requested mobile visible-card count. |
+| 5. Designed fallback | Implemented: absent/retired imagery renders a theme-tinted category glyph and product initial, without failure language. A real image request retries once with a distinct URL before Photo unavailable. Source changes reset retry state. |
+| 6. R2 master images | Implemented one server-side image resolver across browse, home rails, detail, collections, search and quick view. Priority is optional listing image, linked master image, accepted local cut-out, then no-image fallback. Stored keys, media-route URLs and old public catalog URLs resolve via current R2_PUBLIC_URL or the existing allowlisted route. Next Image permits the configured R2 host. Wikimedia originals are no longer requested by ProductImage or editorial fallback; source metadata remains for attribution. Listing currently has no image column: precedence is supported when supplied, but no schema/upload change was introduced. |
+| 7. Market hero | Implemented: first slide uses Tunde Buremo's licensed Bodija Market tomato/pepper scene. Downloaded, visually inspected and cropped to a local 1600 x 1000 WebP (193,180 bytes), avoiding an external first-hero fetch. Credits updated in public/images/CREDITS.md and /credits. |
+
+DESIGN.md records the new shared tokens and behavior. Existing palette and readable focus colors are reused. No auth, admin, RLS, proxy, store-resolution, payment or cart-state implementation was changed. Storefront service changes only enrich read projections with images/category glyph metadata; search ranking and tenant predicates are unchanged.
+
+### Verification
+
+| Command/check | Exact outcome |
+|---|---|
+| pnpm exec prisma generate | Passed. Required because the first typecheck found an ungenerated Prisma client. |
+| pnpm typecheck | Passed after generation and final source/test edits. An intermediate newly added test escaping error was fixed before the passing run. |
+| pnpm lint | Passed with zero errors and two existing unused-variable warnings: prisma/seed-master-catalog.ts:125 and src/lib/cart/service.test.ts:24. |
+| pnpm test | Blocked before tests: Vite/esbuild child-process spawn EPERM. |
+| Sandbox-compatible full Vitest run | In-process TypeScript transform, native config loader, worker threads and preserved symlinks; same source tests/setup/assertions. 1,009 tests passed across 39 files. One additional file, src/lib/email/send.test.ts, was blocked by vite:define invoking esbuild (spawn EPERM). Exit 1, not a full-suite pass. Existing Stripe webhook integration returned early because localhost:3000 was not running, despite Vitest counting that case as passed. |
+| Targeted follow-up with the same runner | 34 tests passed: storefront service 26, image resolver 6, ProductImage fallback 2. This includes the new database integration proving master-image priority in browse, home rails, detail, search and collections. The separate email suite remained blocked by spawn EPERM, so the combined command exited 1. |
+| pnpm build | Prisma generation passed; migration engine failed to spawn (EPERM), before Next build. Standard command did not pass. |
+| pnpm exec next build, default config | Application compiled, then TypeScript subprocess hit spawn EPERM. |
+| Production build with temporary worker settings | Passed with experimental.workerThreads=true, cpus=1 and useTypeScriptCli=false; TypeScript and static-generation checks remained enabled. Temporary settings were restored after the build and are not in the delivered config. |
+| Production HTTP smoke | 6/6 passed: home, category, product, search, credits and local hero asset. Asserted store identity, band links/markup, no retired image hotlinks and visible SSR defaults. Each temporary HTTP server was closed. |
+| pnpm test:e2e --workers=1 | Blocked before browser tests by spawn EPERM. Existing home/product throttled real-image LCP assertions remain <2500ms and were not weakened. |
+| node scripts/capture-storefront-redesign.mjs | Blocked at Chromium launch by spawn EPERM. No round4 screenshots or recording produced. Connected browser inventory was empty. |
+| git diff --check | Passed. |
+
+The sandbox Vitest commands use --config .validation-artifacts/vitest.config.mjs --configLoader native. Local evidence is in .validation-artifacts/round4-unit-tests.json, round4-targeted-tests.json and round4-http.json. These are ignored local validation artifacts, not application dependencies.
+
+Added 15 e2e cases for all four rail widths, category-circle fill, hydration/once-only reveal, no-JS visibility, scroll-linked movement without autoplay, all six chip search destinations, and the one-retry failure state. Updated the old marquee/collection tests to assert the replacement behavior rather than deleting the interaction gates.
+
+### Screenshots and remaining gaps
+
+The capture script now targets 40 requested screenshots (home top/middle/bottom, category and product, four widths, light/dark), plus 16 quick-view/404 captures. All use round4-* names, with a round4-motion recording and round4-checks.json manifest. It captures the normal motion design with hero autoplay paused for stills, then scrolls through reveals for video. screenshots/redesign/README.md explains rerunning it. Existing images were not relabeled.
+
+- Rendered geometry, final light/dark AA contrast, focus behavior, actual reveal/band motion, LCP <2.5s and absence of layout shift still require the browser run. Source inspection, successful type checking/build and HTTP responses do not establish these.
+- The demo mn_egusi listing is linked to mp_egusi, whose imageUrl is null in the available database. It correctly uses its accepted local cut-out; R2 precedence for populated master rows passed the database integration test. Missing linked-master image data was not fabricated or backfilled.
+- The original issue's broader request to source and visually reprocess replacements for all 56 rejected cut-outs was not performed in this presentation round. Rejected originals are no longer remote storefront fallbacks; populated master R2 photos take priority, then accepted cut-outs or the designed fallback. Further source-quality curation remains separate work.
+- Listing-owned image storage/upload is not available in the existing schema and remains outside the requested presentation scope.
+- Standard unit/build/e2e commands must be rerun in an environment that permits their subprocesses. The email suite and browser gates are not claimed as passed.
+
+All servers started for smoke verification were stopped. No git commit, push or branch operations were performed.
+
+### Changed files
+
+- CODEX_REPORT.md
+- DESIGN.md
+- e2e/storefront-motion.spec.ts
+- e2e/storefront-round4.spec.ts
+- next.config.ts
+- public/images/CREDITS.md
+- public/images/market-bodija.webp
+- screenshots/redesign/README.md
+- scripts/capture-storefront-redesign.mjs
+- src/app/credits/page.tsx
+- src/app/search/page.tsx
+- src/components/storefront/category-mosaic.tsx
+- src/components/storefront/collection-banner.tsx
+- src/components/storefront/hero-carousel.tsx
+- src/components/storefront/listing-card.tsx
+- src/components/storefront/marquee.tsx
+- src/components/storefront/motion-provider.tsx
+- src/components/storefront/motion.css
+- src/components/storefront/product-detail.tsx
+- src/components/storefront/product-image.test.ts
+- src/components/storefront/product-image.tsx
+- src/components/storefront/product-list-motion.tsx
+- src/components/storefront/quick-view.tsx
+- src/components/storefront/rail-scroller.tsx
+- src/components/storefront/scroll-motion.tsx
+- src/lib/storefront/editorial.ts
+- src/lib/storefront/images.test.ts
+- src/lib/storefront/images.ts
+- src/lib/storefront/service.test.ts
+- src/lib/storefront/service.ts

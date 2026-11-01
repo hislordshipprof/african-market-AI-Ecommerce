@@ -197,3 +197,7 @@ Matched by explicit English/local name to the catalog manifest. The missing sour
 | yam-flour-elubo | [Tesleemah](https://commons.wikimedia.org/wiki/File:Elubo_(Amala_flour).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
 | yam-water | [Obsidian Soul](https://commons.wikimedia.org/wiki/File:Dioscorea_alata_-_Purple_yam_tuber_-_Mindanao,_Philippines.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
 | yam-white-puna | [Akadeby](https://commons.wikimedia.org/wiki/File:Own_yam.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+
+## Design round 4
+
+The first storefront hero now uses the Bodija Market tomato-and-pepper scene by Tunde Buremo, replacing the plated jollof background. [Original photograph](https://unsplash.com/photos/a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00), [Unsplash License](https://unsplash.com/license). Local asset: public/images/market-bodija.webp, cropped to 1600 x 1000 and encoded as WebP. Cropped and resized for display; this is a market scene, not a photograph of the fictional demo store. Catalog originals resolve from master-product R2 media; remote Wikimedia URLs remain attribution records, not storefront image fallbacks. Accepted local cut-outs retain their existing credits above.
