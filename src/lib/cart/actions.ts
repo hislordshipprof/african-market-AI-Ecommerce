@@ -8,6 +8,7 @@ import {
   updateLineQty,
   updateLineSwapRule,
   removeLine,
+  clearAllLines,
   getCartWithLines,
   checkMinimumOrder,
   CartError,
@@ -94,6 +95,18 @@ export async function removeCartLine(
       return { ok: false, error: e.message, code: e.code };
     }
     throw e;
+  }
+}
+
+export async function clearCart(): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const store = await getStore();
+    const cartId = await getCartIdFromCookie();
+    if (!cartId) return { ok: true };
+    await clearAllLines(store.id, cartId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
   }
 }
 

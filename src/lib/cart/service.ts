@@ -1,6 +1,8 @@
 import { storeScoped, storeScopedTransaction } from "../db";
+import { catalogFor } from "../storefront/catalog";
+import type { SwapRuleValue } from "../storefront/cart-store";
 
-export type SwapRuleValue = "exact_only" | "store_suggests" | "named_substitute";
+export type { SwapRuleValue };
 const VALID_SWAP_RULES: readonly SwapRuleValue[] = [
   "exact_only",
   "store_suggests",
@@ -20,6 +22,7 @@ export interface CartLineView {
   qty: number;
   swapRule: SwapRuleValue;
   substituteVariantId: string | null;
+  imageUrl: string | undefined;
   variant: {
     id: string;
     label: string;
@@ -211,6 +214,14 @@ export async function removeLine(
   await scoped.cartLine.delete({ where: { id: lineId } });
 }
 
+export async function clearAllLines(
+  storeId: string,
+  cartId: string,
+): Promise<void> {
+  const scoped = storeScoped(storeId);
+  await scoped.cartLine.deleteMany({ where: { cartId } });
+}
+
 export async function getCartWithLines(
   storeId: string,
   cartId: string,
@@ -236,30 +247,37 @@ export async function getCartWithLines(
 
   if (!cart) return null;
 
-  const lines: CartLineView[] = cart.lines.map((line) => ({
-    id: line.id,
-    variantId: line.variantId,
-    qty: line.qty,
-    swapRule: line.swapRule as SwapRuleValue,
-    substituteVariantId: line.substituteVariantId,
-    variant: {
-      id: line.variant.id,
-      label: line.variant.label,
-      price: line.variant.price,
-      weightG: line.variant.weightG,
-      listing: {
-        id: line.variant.listing.id,
-        customName: line.variant.listing.customName,
-        maxPerOrder: line.variant.listing.maxPerOrder,
-        masterProduct: line.variant.listing.masterProduct
-          ? {
-              name: line.variant.listing.masterProduct.name,
-              categoryId: line.variant.listing.masterProduct.categoryId,
-            }
-          : null,
+  const lines: CartLineView[] = cart.lines.map((line) => {
+    const photo = catalogFor(
+      line.variant.listing.customName,
+      line.variant.listing.masterProduct?.name,
+    );
+    return {
+      id: line.id,
+      variantId: line.variantId,
+      qty: line.qty,
+      swapRule: line.swapRule as SwapRuleValue,
+      substituteVariantId: line.substituteVariantId,
+      imageUrl: photo?.imageUrl || undefined,
+      variant: {
+        id: line.variant.id,
+        label: line.variant.label,
+        price: line.variant.price,
+        weightG: line.variant.weightG,
+        listing: {
+          id: line.variant.listing.id,
+          customName: line.variant.listing.customName,
+          maxPerOrder: line.variant.listing.maxPerOrder,
+          masterProduct: line.variant.listing.masterProduct
+            ? {
+                name: line.variant.listing.masterProduct.name,
+                categoryId: line.variant.listing.masterProduct.categoryId,
+              }
+            : null,
+        },
       },
-    },
-  }));
+    };
+  });
 
   const subtotalCents = lines.reduce(
     (sum, l) => sum + l.variant.price * l.qty,

@@ -1,3 +1,5 @@
+export type SwapRuleValue = "exact_only" | "store_suggests" | "named_substitute";
+
 export interface CartItem {
   listingId: string;
   variantId?: string;
@@ -9,6 +11,9 @@ export interface CartItem {
 }
 export interface CartLine extends CartItem {
   quantity: number;
+  serverLineId?: string;
+  swapRule?: SwapRuleValue;
+  substituteVariantId?: string | null;
 }
 export interface CartStore {
   snapshot: () => readonly CartLine[];

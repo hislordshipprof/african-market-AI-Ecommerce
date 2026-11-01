@@ -8,6 +8,7 @@ import { useCart } from "../cart-provider";
 import { Button, Chip, EmptyState } from "../primitives";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import { cartItemKey } from "@/lib/storefront/cart-store";
+import { clearCart } from "@/lib/cart/actions";
 import type {
   CheckoutInput,
   CheckoutQuote,
@@ -238,6 +239,7 @@ export function CheckoutPage({
         authorization,
       );
       setPayState("success");
+      await clearCart();
       lines.forEach((line) => store.remove(cartItemKey(line)));
       if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
         await new Promise((resolve) => setTimeout(resolve, 650));
