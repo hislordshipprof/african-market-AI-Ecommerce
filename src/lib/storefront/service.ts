@@ -2,6 +2,7 @@ import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { stockBadge, type StockBadge } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
+import { listingImage, storefrontPhoto } from "./images";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
 
 /** Read-only, tenant-scoped catalog projection for the demo journey adapters. */
@@ -42,9 +43,14 @@ async function readGetFlowCatalog(
 }
 
 export async function listCategories() {
-  return platform.category.findMany({
+  const categories = await platform.category.findMany({
     orderBy: { sortOrder: "asc" },
+    include: { masterProducts: { where: { imageUrl: { not: null }, status: "active" }, orderBy: { id: "asc" }, take: 1, select: { imageUrl: true } } },
   });
+  return categories.map(({ masterProducts, ...category }) => ({
+    ...category,
+    imageUrl: storefrontPhoto(category.imageUrl) ?? storefrontPhoto(masterProducts[0]?.imageUrl) ?? null,
+  }));
 }
 
 export interface StorefrontListing {
@@ -56,6 +62,7 @@ export interface StorefrontListing {
   frozen: boolean;
   perishable: boolean;
   imageUrl?: string;
+  categorySlug?: string;
   variantId?: string;
   packLabel?: string;
   weightG?: number;
@@ -90,7 +97,8 @@ function toStorefrontListing(listing: {
   status: string | null;
   frozen: boolean;
   perishable: boolean;
-  masterProduct: { name: string } | null;
+  imageUrl?: string | null;
+  masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string } | null } | null;
   variants: { id?: string; label?: string; price: number; weightG?: number }[];
 }): StorefrontListing {
   const startingPrice =
@@ -105,13 +113,12 @@ function toStorefrontListing(listing: {
   const pack = [...listing.variants].sort(
     (a, b) => a.price - b.price || (a.id ?? "").localeCompare(b.id ?? ""),
   )[0];
-  const photo = catalogFor(listing.customName, listing.masterProduct?.name);
-
   return {
     id: listing.id,
     ...names,
     altName: names.altName ?? localNameFor(names.displayName),
-    imageUrl: photo?.imageUrl || undefined,
+    imageUrl: listingImage(listing),
+    categorySlug: listing.masterProduct?.category?.slug,
     variantId: pack?.id,
     packLabel: pack?.label ?? "Each",
     weightG: pack?.weightG,
@@ -157,7 +164,7 @@ async function readListingsByCategory(
       active: true,
       masterProduct: { categoryId: category.id },
     },
-    include: { masterProduct: true, variants: true },
+    include: { masterProduct: { include: { category: true } }, variants: true },
     orderBy: { createdAt: "desc" },
   });
 
@@ -175,8 +182,8 @@ export interface StorefrontListingDetail {
   frozen: boolean;
   perishable: boolean;
   imageUrl?: string;
-  description?: string;
   categorySlug?: string;
+  description?: string;
   price: number;
   variants: {
     id: string;
@@ -211,7 +218,7 @@ async function readGetListingDetail(
     id: listing.id,
     ...names,
     altName: names.altName ?? localNameFor(names.displayName),
-    imageUrl: photo?.imageUrl || undefined,
+    imageUrl: listingImage(listing),
     description: photo?.description,
     categorySlug: listing.masterProduct?.category?.slug,
     price: listing.price,
@@ -241,6 +248,7 @@ export interface SearchResult {
   frozen: boolean;
   perishable: boolean;
   imageUrl?: string;
+  categorySlug?: string;
   variantId?: string;
   packLabel?: string;
   weightG?: number;
@@ -250,6 +258,8 @@ interface RawSearchRow {
   id: string;
   custom_name: string | null;
   master_product_name: string | null;
+  master_product_image: string | null;
+  category_slug: string | null;
   price: number;
   confidence: number;
   stock_mode: string;
@@ -273,12 +283,13 @@ async function readSearchListings(
   const results = await storeScopedRawQuery<RawSearchRow>(
     storeId,
     Prisma.sql`
-    SELECT l.id, l.custom_name, mp.name AS master_product_name,
+    SELECT l.id, l.custom_name, mp.name AS master_product_name, mp.image_url AS master_product_image, c.slug AS category_slug,
       l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable,
       pack.price AS min_variant_price, pack.id AS variant_id,
       pack.label AS pack_label, pack.weight_g
     FROM listings l
     LEFT JOIN master_products mp ON l.master_product_id = mp.id
+    LEFT JOIN categories c ON mp.category_id = c.id
     LEFT JOIN LATERAL (
       SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
       WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id LIMIT 1
@@ -309,9 +320,8 @@ async function readSearchListings(
       id: row.id,
       name: names.displayName,
       altName: names.altName ?? localNameFor(names.displayName),
-      imageUrl:
-        catalogFor(row.custom_name, row.master_product_name)?.imageUrl ||
-        undefined,
+      imageUrl: listingImage({ customName: row.custom_name, masterProduct: row.master_product_name ? { name: row.master_product_name, imageUrl: row.master_product_image } : null }),
+      categorySlug: row.category_slug ?? undefined,
       variantId: row.variant_id ?? undefined,
       packLabel: row.pack_label ?? "Each",
       weightG: row.weight_g ?? undefined,
@@ -334,7 +344,7 @@ async function readGetActiveListings(
   const scoped = storeScoped(storeId);
   const listings = await scoped.listing.findMany({
     where: { active: true },
-    include: { masterProduct: true, variants: true },
+    include: { masterProduct: { include: { category: true } }, variants: true },
     orderBy: { createdAt: "desc" },
   });
 
@@ -410,7 +420,7 @@ async function readGetCollectionListings(
         orderBy: { sortOrder: "asc" },
         include: {
           listing: {
-            include: { masterProduct: true, variants: true },
+            include: { masterProduct: { include: { category: true } }, variants: true },
           },
         },
       },
