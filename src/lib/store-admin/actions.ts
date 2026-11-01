@@ -24,6 +24,7 @@ export async function inviteMemberAction(formData: FormData) {
       email,
       role,
       invitedById: session.user.id,
+      actorEmail: session.user.email,
       baseUrl: resolveAuthBaseUrl(),
       storeSlug: session.store.slug,
       storeName: session.store.name,

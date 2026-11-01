@@ -22,6 +22,7 @@ export interface CreateInviteInput {
   email: string;
   role: StoreRole;
   invitedById: string;
+  actorEmail: string;
   baseUrl: string;
   storeSlug: string;
   storeName: string;
@@ -50,7 +51,7 @@ export async function createInvite(input: CreateInviteInput): Promise<{ id: stri
       });
     }
 
-    return tx.storeInvite.create({
+    const created = await tx.storeInvite.create({
       data: {
         storeId: input.storeId,
         email,
@@ -60,6 +61,20 @@ export async function createInvite(input: CreateInviteInput): Promise<{ id: stri
         invitedById: input.invitedById,
       },
     });
+
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.invitedById,
+        actorEmail: input.actorEmail,
+        action: "invite.create",
+        entityType: "store_invite",
+        entityId: created.id,
+        after: { email, role: input.role },
+      },
+    });
+
+    return created;
   });
 
   const inviteUrl = `${input.baseUrl}/invite/${raw}?store=${input.storeSlug}`;

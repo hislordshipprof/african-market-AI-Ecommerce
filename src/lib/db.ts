@@ -147,7 +147,7 @@ export async function storeScopedTransaction<T>(
 }
 
 export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
-  await tx.$queryRaw`SELECT 1 FROM "Store" WHERE id = ${storeId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
 }
 
 export async function lockCartLineByVariant(
