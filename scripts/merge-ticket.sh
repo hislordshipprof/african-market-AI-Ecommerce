@@ -10,7 +10,8 @@ PR=$(gh pr list -R "$REPO" --state open --json number,headRefName --jq ".[] | se
 [ -n "$PR" ] || { echo "No open PR for ticket #$N"; exit 1; }
 HEAD_REF=$(gh api "repos/$REPO/pulls/$PR" --jq .head.ref)
 CMP=$(gh api "repos/$REPO/compare/main...$HEAD_REF" --jq .behind_by)
-PENDING_OR_FAILED=$(gh pr checks "$PR" -R "$REPO" --json bucket --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping")] | length')
+# Vercel previews are optional on ticket branches (they build only on "[preview]" commits); a canceled or skipped preview never blocks a merge.
+PENDING_OR_FAILED=$(gh pr checks "$PR" -R "$REPO" --json name,bucket,description --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping") | select((.name | startswith("Vercel")) and ((.description // "") | test("[Cc]ancel|[Ii]gnored|[Ss]kipp")) | not)] | length')
 if [ "$CMP" = "0" ] && [ "$PENDING_OR_FAILED" = "0" ]; then
   gh pr comment "$PR" -R "$REPO" --body "Coordinator QA verdict: $VERDICT" >/dev/null
   gh pr merge "$PR" -R "$REPO" --squash --delete-branch
