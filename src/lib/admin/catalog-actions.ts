@@ -191,7 +191,13 @@ export async function updateReviewProduct(
   });
   if (!product) return { error: "Product not found" };
 
-  const updateData: Record<string, unknown> = {};
+  const updateData: {
+    name?: string;
+    description?: string | null;
+    unit?: string | null;
+    storage?: string | null;
+    originCountries?: string | null;
+  } = {};
   if (data.name !== undefined) updateData.name = data.name;
   if (data.description !== undefined) updateData.description = data.description || null;
   if (data.unit !== undefined) updateData.unit = data.unit || null;
@@ -219,7 +225,7 @@ export async function updateReviewProduct(
           storage: product.storage,
           originCountries: product.originCountries,
         },
-        after: updateData,
+        after: updateData as Record<string, string | null>,
       },
     });
   });
