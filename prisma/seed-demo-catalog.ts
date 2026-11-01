@@ -294,12 +294,6 @@ const PRODUCTS: CatalogProduct[] = [
     synonyms: [{ term: "malta" }, { term: "amstel malta" }, { term: "maltina" }],
   },
   {
-    id: "mp_palm_wine",
-    name: "Palm Wine",
-    categoryId: "cat_drinks",
-    synonyms: [{ term: "nkwu elu", language: "igbo" }, { term: "emu", language: "yoruba" }],
-  },
-  {
     id: "mp_hibiscus_dried",
     name: "Dried Hibiscus Flowers",
     categoryId: "cat_drinks",
@@ -1028,21 +1022,6 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
       ],
     },
     {
-      id: `${prefix}_palm_wine`,
-      masterProductId: "mp_palm_wine",
-      customName: null,
-      price: 899,
-      stockMode: "counted",
-      qty: 6,
-      status: null,
-      frozen: false,
-      perishable: true,
-      active: true,
-      variants: [
-        { id: `${prefix}_pwine_v1`, label: "1 litre bottle", price: 899, weightG: 1000 },
-      ],
-    },
-    {
       id: `${prefix}_hibiscus_dried`,
       masterProductId: "mp_hibiscus_dried",
       customName: "Dried Zobo Leaves",
@@ -1169,6 +1148,16 @@ export async function seedDemoCatalog(prisma: PrismaClient) {
     { store: storeA, prefix: "mn" },
     { store: storeB, prefix: "tm" },
   ]) {
+    // Retire the old demo alcohol listing on existing installations as well.
+    // Preserve any historical references; it must never be offered for sale.
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      await tx.listing.updateMany({
+        where: { id: `${prefix}_palm_wine`, storeId: store.id },
+        data: { active: false },
+      });
+    });
     const listings = storeListings(store.id, prefix);
     for (const l of listings) {
       await prisma.$transaction(async (tx) => {

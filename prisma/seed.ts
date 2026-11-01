@@ -1,3 +1,5 @@
+import { editorial } from "../src/lib/storefront/editorial";
+import { categoryPhotos } from "../src/lib/storefront/catalog";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
@@ -16,7 +18,7 @@ async function seedDemoStores() {
       ownerName: "Ngozi Okafor",
       ownerStory:
         "Mama Ngozi has been bringing the flavors of home to the community since 2009. What started as a small shop in a strip mall is now the neighborhood’s go-to for authentic Nigerian and West African groceries, spices, and fresh produce.",
-      ownerPhotoUrl: "/images/stores/mama-ngozi-owner.svg",
+      ownerPhotoUrl: null,
       neighborhood: "Parkside, Houston TX",
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
       hours: {
@@ -44,7 +46,7 @@ async function seedDemoStores() {
       ownerName: "Ngozi Okafor",
       ownerStory:
         "Mama Ngozi has been bringing the flavors of home to the community since 2009. What started as a small shop in a strip mall is now the neighborhood’s go-to for authentic Nigerian and West African groceries, spices, and fresh produce.",
-      ownerPhotoUrl: "/images/stores/mama-ngozi-owner.svg",
+      ownerPhotoUrl: null,
       neighborhood: "Parkside, Houston TX",
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
       hours: {
@@ -65,7 +67,7 @@ async function seedDemoStores() {
       ownerName: "Marie Desrosiers",
       ownerStory:
         "Tante Marie left Port-au-Prince in 1995 with three recipes and a dream. Today her shop is where Atlanta’s Caribbean community finds scotch bonnet peppers, fresh plantains, and the taste of the islands.",
-      ownerPhotoUrl: "/images/stores/tante-marie-owner.svg",
+      ownerPhotoUrl: null,
       neighborhood: "Little Caribbean, Atlanta GA",
       deliveryInfo: "Next-day delivery within 6 miles · No pickup",
       hours: {
@@ -93,7 +95,7 @@ async function seedDemoStores() {
       ownerName: "Marie Desrosiers",
       ownerStory:
         "Tante Marie left Port-au-Prince in 1995 with three recipes and a dream. Today her shop is where Atlanta’s Caribbean community finds scotch bonnet peppers, fresh plantains, and the taste of the islands.",
-      ownerPhotoUrl: "/images/stores/tante-marie-owner.svg",
+      ownerPhotoUrl: null,
       neighborhood: "Little Caribbean, Atlanta GA",
       deliveryInfo: "Next-day delivery within 6 miles · No pickup",
       hours: {
@@ -148,17 +150,17 @@ async function seedCategoryMetadata() {
     imageUrl: string;
     sortOrder: number;
   }[] = [
-    { id: "cat_tubers", name: "Tubers & Roots", slug: "tubers-and-roots", localName: "ISU · BAYERE", imageUrl: "/images/categories/tubers-and-roots.svg", sortOrder: 1 },
-    { id: "cat_grains", name: "Grains & Flours", slug: "grains-and-flours", localName: "OKA · AGBADO", imageUrl: "/images/categories/grains-and-flours.svg", sortOrder: 2 },
-    { id: "cat_spices", name: "Spices & Seasonings", slug: "spices-and-seasonings", localName: "OSE · YAJI", imageUrl: "/images/categories/spices-and-seasonings.svg", sortOrder: 3 },
-    { id: "cat_oils", name: "Oils & Butters", slug: "oils-and-butters", localName: "NKWU · ORI", imageUrl: "/images/categories/oils-and-butters.svg", sortOrder: 4 },
-    { id: "cat_vegetables", name: "Vegetables", slug: "vegetables", localName: "EFO · AHIHARA", imageUrl: "/images/categories/vegetables.svg", sortOrder: 5 },
-    { id: "cat_fish_meat", name: "Fish & Meat", slug: "fish-and-meat", localName: "EJA · ERAN", imageUrl: "/images/categories/fish-and-meat.svg", sortOrder: 6 },
-    { id: "cat_frozen", name: "Frozen", slug: "frozen", localName: "", imageUrl: "", sortOrder: 7 },
-    { id: "cat_snacks", name: "Snacks", slug: "snacks", localName: "IPANU", imageUrl: "/images/categories/snacks.svg", sortOrder: 8 },
-    { id: "cat_drinks", name: "Drinks", slug: "drinks", localName: "OMU · ZOBO", imageUrl: "/images/categories/drinks.svg", sortOrder: 9 },
-    { id: "cat_beauty", name: "Beauty", slug: "beauty", localName: "", imageUrl: "", sortOrder: 10 },
-    { id: "cat_pantry", name: "Pantry Staples", slug: "pantry-staples", localName: "ILE IDANA", imageUrl: "/images/categories/pantry-staples.svg", sortOrder: 11 },
+    { id: "cat_tubers", name: "Tubers & Roots", slug: "tubers-and-roots", localName: "ISU · BAYERE", imageUrl: categoryPhotos["tubers-and-roots"], sortOrder: 1 },
+    { id: "cat_grains", name: "Grains & Flours", slug: "grains-and-flours", localName: "OKA · AGBADO", imageUrl: categoryPhotos["grains-and-flours"], sortOrder: 2 },
+    { id: "cat_spices", name: "Spices & Seasonings", slug: "spices-and-seasonings", localName: "OSE · YAJI", imageUrl: categoryPhotos["spices-and-seasonings"], sortOrder: 3 },
+    { id: "cat_oils", name: "Oils & Butters", slug: "oils-and-butters", localName: "NKWU · ORI", imageUrl: categoryPhotos["oils-and-butters"], sortOrder: 4 },
+    { id: "cat_vegetables", name: "Vegetables", slug: "vegetables", localName: "EFO · AHIHARA", imageUrl: categoryPhotos["vegetables"], sortOrder: 5 },
+    { id: "cat_fish_meat", name: "Fish & Meat", slug: "fish-and-meat", localName: "EJA · ERAN", imageUrl: categoryPhotos["fish-and-meat"], sortOrder: 6 },
+    { id: "cat_frozen", name: "Frozen", slug: "frozen", localName: "", imageUrl: categoryPhotos.frozen, sortOrder: 7 },
+    { id: "cat_snacks", name: "Snacks", slug: "snacks", localName: "IPANU", imageUrl: categoryPhotos["snacks"], sortOrder: 8 },
+    { id: "cat_drinks", name: "Drinks", slug: "drinks", localName: "OMU · ZOBO", imageUrl: categoryPhotos["drinks"], sortOrder: 9 },
+    { id: "cat_beauty", name: "Beauty", slug: "beauty", localName: "", imageUrl: categoryPhotos.beauty, sortOrder: 10 },
+    { id: "cat_pantry", name: "Pantry Staples", slug: "pantry-staples", localName: "ILE IDANA", imageUrl: categoryPhotos["pantry-staples"], sortOrder: 11 },
   ];
 
   for (const cat of categories) {
@@ -207,11 +209,11 @@ async function seedStoreBanners() {
     {
       id: "banner_mn_1",
       storeId: storeA.id,
-      title: "Fresh yams just landed",
-      subtitle: "Direct from Enugu · While stocks last",
-      ctaText: "Shop tubers",
-      ctaHref: "/categories/tubers-and-roots",
-      imageUrl: "/images/banners/mama-ngozi-yams.svg",
+      title: "A little closer to home.",
+      subtitle: "The ingredients you grew up with. From your neighborhood store to your kitchen.",
+      ctaText: "Shop your favorites",
+      ctaHref: "/collections/jollof-night",
+      imageUrl: editorial.jollof,
       sortOrder: 0,
     },
     {
@@ -221,7 +223,7 @@ async function seedStoreBanners() {
       subtitle: "Everything for egusi, ogbono and ewedu",
       ctaText: "Build your pot",
       ctaHref: "/collections/soup-essentials",
-      imageUrl: "/images/banners/mama-ngozi-soup.svg",
+      imageUrl: editorial.spices,
       sortOrder: 1,
     },
     {
@@ -231,7 +233,7 @@ async function seedStoreBanners() {
       subtitle: "Same-day to your door in Houston",
       ctaText: "Start shopping",
       ctaHref: "/",
-      imageUrl: "/images/banners/mama-ngozi-delivery.svg",
+      imageUrl: editorial.market,
       sortOrder: 2,
     },
     // tante-marie banners
@@ -242,7 +244,7 @@ async function seedStoreBanners() {
       subtitle: "Scotch bonnet · Plantain · Callaloo",
       ctaText: "Browse all",
       ctaHref: "/",
-      imageUrl: "/images/banners/tante-marie-island.svg",
+      imageUrl: editorial.market,
       sortOrder: 0,
     },
     {
@@ -252,7 +254,7 @@ async function seedStoreBanners() {
       subtitle: "$12.99/lb this Saturday only",
       ctaText: "See deal",
       ctaHref: "/categories/fish-and-meat",
-      imageUrl: "/images/banners/tante-marie-oxtail.svg",
+      imageUrl: editorial.fish,
       sortOrder: 1,
     },
     {
@@ -262,7 +264,7 @@ async function seedStoreBanners() {
       subtitle: "Ackee, saltfish, plantain, bammy — feeds 4",
       ctaText: "Order now",
       ctaHref: "/collections/caribbean-breakfast",
-      imageUrl: "/images/banners/tante-marie-breakfast.svg",
+      imageUrl: editorial.jollof,
       sortOrder: 2,
     },
   ];
@@ -321,7 +323,7 @@ async function seedStoreCollections() {
       title: "Jollof night",
       subtitle: "Everything for the perfect pot",
       slug: "jollof-night",
-      imageUrl: "/images/collections/jollof-night.svg",
+      imageUrl: editorial.jollof,
       sortOrder: 0,
       listingIds: ["mn_ofada_rice", "mn_tomato_paste", "mn_scotch_bonnet", "mn_palm_oil", "mn_maggi", "mn_curry"],
     },
@@ -331,7 +333,7 @@ async function seedStoreCollections() {
       title: "Soup essentials",
       subtitle: "Egusi, ogbono, ewedu and all the fixings",
       slug: "soup-essentials",
-      imageUrl: "/images/collections/soup-essentials.svg",
+      imageUrl: editorial.spices,
       sortOrder: 1,
       listingIds: ["mn_egusi", "mn_ogbono", "mn_ugu", "mn_bitter_leaf", "mn_stockfish", "mn_crayfish", "mn_palm_oil", "mn_iru"],
     },
@@ -341,7 +343,7 @@ async function seedStoreCollections() {
       title: "Sunday stew",
       subtitle: "Build the perfect Nigerian stew from scratch",
       slug: "sunday-stew",
-      imageUrl: "/images/collections/sunday-stew.svg",
+      imageUrl: editorial.spices,
       sortOrder: 2,
       listingIds: ["mn_tomato_paste", "mn_scotch_bonnet", "mn_palm_oil", "mn_curry", "mn_thyme", "mn_maggi", "mn_goat_meat"],
     },
@@ -351,7 +353,7 @@ async function seedStoreCollections() {
       title: "Snack run",
       subtitle: "Chin chin, kulikuli and more",
       slug: "snack-run",
-      imageUrl: "/images/collections/snack-run.svg",
+      imageUrl: categoryPhotos.snacks,
       sortOrder: 3,
       listingIds: ["mn_chin_chin", "mn_plantain_chips", "mn_kulikuli", "mn_puff_puff_mix", "mn_zobo", "mn_malt"],
     },
@@ -362,7 +364,7 @@ async function seedStoreCollections() {
       title: "Caribbean breakfast",
       subtitle: "Start the morning island-style",
       slug: "caribbean-breakfast",
-      imageUrl: "/images/collections/caribbean-breakfast.svg",
+      imageUrl: editorial.jollof,
       sortOrder: 0,
       listingIds: ["tm_plantain", "tm_yam", "tm_palm_oil"],
     },
@@ -372,7 +374,7 @@ async function seedStoreCollections() {
       title: "Pepper pot",
       subtitle: "The hottest picks",
       slug: "pepper-pot",
-      imageUrl: "/images/collections/pepper-pot.svg",
+      imageUrl: editorial.spices,
       sortOrder: 1,
       listingIds: ["tm_scotch_bonnet", "tm_cameroon_pepper", "tm_suya"],
     },
@@ -382,7 +384,7 @@ async function seedStoreCollections() {
       title: "Stock up staples",
       subtitle: "Pantry essentials that last",
       slug: "stock-up-staples",
-      imageUrl: "/images/collections/stock-up-staples.svg",
+      imageUrl: editorial.grains,
       sortOrder: 2,
       listingIds: ["tm_garri_white", "tm_ofada_rice", "tm_palm_oil", "tm_maggi", "tm_peak_milk", "tm_tomato_paste"],
     },
