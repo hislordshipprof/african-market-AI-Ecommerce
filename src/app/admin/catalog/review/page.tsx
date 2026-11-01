@@ -1,0 +1,76 @@
+import Link from "next/link";
+import { listReviewProducts, getReviewStats } from "@/lib/admin/catalog-actions";
+import { ReviewTable } from "./review-table";
+
+export const metadata = { title: "Catalog Review — Platform Admin" };
+
+export default async function CatalogReviewPage(props: {
+  searchParams: Promise<{ page?: string; status?: string }>;
+}) {
+  const searchParams = await props.searchParams;
+  const page = Math.max(1, parseInt(searchParams.page ?? "1", 10) || 1);
+  const status = searchParams.status ?? "needs_review";
+
+  const [data, stats] = await Promise.all([
+    listReviewProducts({ status, page, pageSize: 25 }),
+    getReviewStats(),
+  ]);
+
+  const tabs = [
+    { key: "needs_review", label: "Needs review", count: stats.needsReview },
+    { key: "active", label: "Active", count: stats.active },
+    { key: "rejected", label: "Rejected", count: stats.rejected },
+  ];
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <Link
+            href="/admin"
+            className="mb-1 inline-block text-xs font-medium text-[#55625A] hover:text-[#1F5A43] dark:text-[#a0a8a3]"
+          >
+            &larr; Admin
+          </Link>
+          <h1 className="text-2xl font-bold text-[#15201A] dark:text-white">
+            Catalog review
+          </h1>
+          <p className="mt-1 text-sm text-[#55625A] dark:text-[#a0a8a3]">
+            {stats.total} products total &middot; {stats.needsReview} awaiting review
+          </p>
+        </div>
+      </div>
+
+      {/* Status tabs */}
+      <div className="mb-6 flex gap-1 rounded-xl border border-[#e2e4e9] bg-[#f8f9fa] p-1 dark:border-[#333] dark:bg-[#111]">
+        {tabs.map((tab) => (
+          <Link
+            key={tab.key}
+            href={`/admin/catalog/review?status=${tab.key}`}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              status === tab.key
+                ? "bg-white text-[#15201A] shadow-sm dark:bg-[#1a1a1a] dark:text-white"
+                : "text-[#55625A] hover:text-[#15201A] dark:text-[#a0a8a3] dark:hover:text-white"
+            }`}
+          >
+            {tab.label}
+            <span className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-xs font-semibold ${
+              status === tab.key
+                ? "bg-[#1F5A43] text-white"
+                : "bg-[#e2e4e9] text-[#55625A] dark:bg-[#333] dark:text-[#a0a8a3]"
+            }`}>
+              {tab.count}
+            </span>
+          </Link>
+        ))}
+      </div>
+
+      <ReviewTable
+        products={data.products}
+        total={data.total}
+        page={data.page}
+        pageSize={data.pageSize}
+      />
+    </div>
+  );
+}
