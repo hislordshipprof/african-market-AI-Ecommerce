@@ -7,7 +7,8 @@ test.describe("Design round 4", () => {
     test("rails bleed to the viewport with whole cards at " + width, async ({ page }) => {
       await page.emulateMedia({ reducedMotion: "reduce" });
       await page.setViewportSize({ width, height: 1000 });
-      await page.goto(BASE);
+      await page.goto(BASE, { waitUntil: "networkidle" });
+      await page.waitForSelector(".sf-rail-scroll", { timeout: 10000 });
       const rails = page.locator(".sf-rail-scroll");
       expect(await rails.count()).toBeGreaterThan(4);
       for (const rail of await rails.all()) {
@@ -28,7 +29,7 @@ test.describe("Design round 4", () => {
         expect(geometry.right).toBeCloseTo(geometry.viewport, 0);
         expect(geometry.padding).toBe("0px");
         expect(geometry.clippedBy).toEqual([]);
-        if (!geometry.cardCount) continue; // Reviews use their own non-product cards.
+        if (!geometry.cardCount) continue;
         expect(geometry.first).toBeCloseTo(geometry.left, 0);
         expect(geometry.visibleCount).toBeCloseTo(count, 1);
         expect(geometry.whole).toBe(Math.min(Math.floor(count), geometry.cardCount));
@@ -38,7 +39,7 @@ test.describe("Design round 4", () => {
   }
 
   test("category photos fill their clipped circles", async ({ page }) => {
-    await page.goto(BASE);
+    await page.goto(BASE, { waitUntil: "networkidle" });
     const images = page.locator(".sf-category-tile .sf-product-image img");
     expect(await images.count()).toBeGreaterThan(0);
     for (const image of await images.all()) {
@@ -60,7 +61,7 @@ test.describe("Design round 4", () => {
 
   test("hydration enables once-only off-screen reveals and responds to reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await page.goto(BASE);
+    await page.goto(BASE, { waitUntil: "networkidle" });
     await expect(page.locator("html")).toHaveClass(/sf-reveal-ready/);
     const section = page.locator("[data-sf-reveal]").filter({ has: page.getByTestId("collection-banners") }).first();
     await expect(section).toHaveCSS("opacity", "0");
@@ -79,7 +80,7 @@ test.describe("Design round 4", () => {
     const context = await browser.newContext({ javaScriptEnabled: false });
     try {
       const page = await context.newPage();
-      await page.goto(BASE);
+      await page.goto(BASE, { waitUntil: "networkidle" });
       await expect(page.locator("html")).not.toHaveClass(/sf-reveal-ready/);
       const reveals = page.locator("[data-sf-reveal]");
       expect(await reveals.count()).toBeGreaterThan(0);
@@ -89,11 +90,12 @@ test.describe("Design round 4", () => {
 
   test("band follows scrolling but never autoplays", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await page.goto(BASE);
+    await page.goto(BASE, { waitUntil: "networkidle" });
     const band = page.locator(".sf-market-track");
     await page.getByTestId("market-band").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
     const before = await band.evaluate(element => getComputedStyle(element).transform);
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(600);
     await expect(band).toHaveCSS("transform", before);
     await page.evaluate(() => scrollBy(0, 160));
     await expect.poll(() => band.evaluate(element => getComputedStyle(element).transform)).not.toBe(before);
@@ -102,7 +104,7 @@ test.describe("Design round 4", () => {
 
   for (const name of ["Egusi", "Garri", "Ogbono", "Suya spice", "Ata rodo", "Fufu flour"]) {
     test("band chip searches for " + name, async ({ page }) => {
-      await page.goto(BASE);
+      await page.goto(BASE, { waitUntil: "networkidle" });
       const chip = page.getByTestId("market-band").getByRole("link", { name, exact: true });
       await chip.focus();
       await expect(chip).toBeFocused();

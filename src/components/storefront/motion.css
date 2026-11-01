@@ -198,15 +198,15 @@
 
 /* Round 4: one grid and one bleed geometry for every storefront rail. */
 .sf-storefront {
+  container-type:inline-size;
   --sf-content-max:1440px;
   --sf-page-padding:32px;
-  --sf-gutter:max(var(--sf-page-padding),calc((100cqw - var(--sf-content-max)) / 2));
   --sf-rail-gap:16px;
   --sf-rail-count:4.5;
   --sf-reveal-duration:500ms;
   --sf-reveal-rise:24px;
 }
-.sf-storefront > main { container-type:inline-size; }
+.sf-storefront > main { --sf-gutter:max(var(--sf-page-padding),calc((100cqw - var(--sf-content-max)) / 2)); }
 .sf-container { width:min(calc(100% - 2 * var(--sf-page-padding)),var(--sf-content-max)); }
 .sf-rail { display:block; }
 .sf-rail .sf-rail-label { flex-direction:row; align-items:center; justify-content:space-between; gap:24px; padding:0 0 20px; }
