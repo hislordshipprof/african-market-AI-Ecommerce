@@ -7,6 +7,7 @@ const mockUpdateListing = vi.fn();
 const mockDeactivateListing = vi.fn();
 const mockReactivateListing = vi.fn();
 const mockUpdateVariants = vi.fn();
+const mockListMasterProducts = vi.fn();
 
 vi.mock("./service", () => ({
   createListing: (...args: unknown[]) => mockCreateListing(...args),
@@ -14,6 +15,7 @@ vi.mock("./service", () => ({
   deactivateListing: (...args: unknown[]) => mockDeactivateListing(...args),
   reactivateListing: (...args: unknown[]) => mockReactivateListing(...args),
   updateVariants: (...args: unknown[]) => mockUpdateVariants(...args),
+  listMasterProducts: (...args: unknown[]) => mockListMasterProducts(...args),
 }));
 
 vi.mock("../store-admin/session", () => ({
@@ -30,6 +32,7 @@ import {
   updateListingAction,
   deactivateListingAction,
   reactivateListingAction,
+  listMasterProductsAction,
 } from "./actions";
 
 function formData(entries: Record<string, string>): FormData {
@@ -108,6 +111,17 @@ describe("createListingAction", () => {
     expect(mockCreateListing).not.toHaveBeenCalled();
   });
 
+  it.each([0, -5])("rejects variant weight %s", async (weightG) => {
+    const result = await createListingAction(
+      formData({
+        ...VALID_LISTING,
+        variants: JSON.stringify([{ label: "1kg", price: 800, weightG }]),
+      }),
+    );
+    expect(result.error).toMatch(/weight/i);
+    expect(mockCreateListing).not.toHaveBeenCalled();
+  });
+
   it("rejects empty variants", async () => {
     const result = await createListingAction(formData({ ...VALID_LISTING, variants: "[]" }));
     expect(result.error).toMatch(/variant/i);
@@ -124,8 +138,7 @@ describe("createListingAction", () => {
         price: 800,
         stockMode: "counted",
         qty: 25,
-        actorId: "owner-1",
-        actorEmail: "owner@test.com",
+        actor: { id: "owner-1", email: "owner@test.com" },
       }),
     );
   });
@@ -183,6 +196,33 @@ describe("updateListingAction", () => {
     expect(mockUpdateVariants).not.toHaveBeenCalled();
   });
 
+  it("rejects update when all variants resolve to empty, without calling the service", async () => {
+    const result = await updateListingAction(
+      formData({ listingId: "listing-1", price: "600", variants: "[]" }),
+    );
+    expect(result.error).toMatch(/variant/i);
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+  });
+
+  it("rejects update with variant weight 0", async () => {
+    const result = await updateListingAction(
+      formData({
+        listingId: "listing-1",
+        variants: JSON.stringify([{ label: "1kg", price: 800, weightG: 0 }]),
+      }),
+    );
+    expect(result.error).toMatch(/weight/i);
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+  });
+
+  it("passes masterProductId through on update", async () => {
+    mockUpdateListing.mockResolvedValueOnce({ id: "listing-1" });
+    await updateListingAction(formData({ listingId: "listing-1", masterProductId: "mp-1" }));
+    expect(mockUpdateListing).toHaveBeenCalledWith(
+      expect.objectContaining({ masterProductId: "mp-1" }),
+    );
+  });
+
   it("clears maxPerOrder when sent as empty string", async () => {
     mockUpdateListing.mockResolvedValueOnce({ id: "listing-1" });
     const result = await updateListingAction(
@@ -233,7 +273,7 @@ describe("deactivateListingAction", () => {
     const result = await deactivateListingAction("listing-1");
     expect(result).toEqual({ success: true });
     expect(mockDeactivateListing).toHaveBeenCalledWith(
-      "store-1", "listing-1", "owner-1", "owner@test.com",
+      "store-1", "listing-1", { id: "owner-1", email: "owner@test.com" },
     );
   });
 
@@ -252,7 +292,17 @@ describe("reactivateListingAction", () => {
     const result = await reactivateListingAction("listing-1");
     expect(result).toEqual({ success: true });
     expect(mockReactivateListing).toHaveBeenCalledWith(
-      "store-1", "listing-1", "owner-1", "owner@test.com",
+      "store-1", "listing-1", { id: "owner-1", email: "owner@test.com" },
     );
+  });
+});
+
+describe("listMasterProductsAction", () => {
+  it("returns only id and name for each master product", async () => {
+    mockListMasterProducts.mockResolvedValueOnce([
+      { id: "mp-1", name: "Garri", description: "internal", weightG: 1000 },
+    ]);
+    const result = await listMasterProductsAction();
+    expect(result).toEqual([{ id: "mp-1", name: "Garri" }]);
   });
 });
