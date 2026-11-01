@@ -164,14 +164,14 @@ async function downloadAndOptimize(
   url: string,
   productId: string,
 ): Promise<{ buffer: Buffer; contentType: string } | null> {
-  const thumbUrl = toThumbnailUrl(url, 800);
+  const thumbUrl = toThumbnailUrl(url, 960);
   const urls = thumbUrl !== url ? [thumbUrl, url] : [url];
   for (const fetchUrl of urls) {
     const raw = await fetchWithRetry(fetchUrl, productId);
     if (raw) {
       try {
         const webpBuf = await sharp(raw)
-          .resize(800, 800, { fit: "inside", withoutEnlargement: true })
+          .resize(960, 960, { fit: "inside", withoutEnlargement: true })
           .webp({ quality: 80 })
           .toBuffer();
         return { buffer: webpBuf, contentType: "image/webp" };
@@ -253,6 +253,9 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
   const existingR2Keys = hasR2 ? new Set(await listR2Objects("catalog/")) : new Set<string>();
   const oldKeysToDelete = [...existingR2Keys].filter((k) => !k.endsWith(".webp"));
 
+  const withImages = highRows.filter((r) => r.image_url?.trim());
+  let processed = 0;
+
   for (const row of highRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
     const weightG = row.typical_weight_g ? parseInt(row.typical_weight_g, 10) : null;
@@ -280,7 +283,11 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
           imageSkips++;
           failures.push({ id: row.id, reason: "download/convert failed" });
         }
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      processed++;
+      if (processed % 10 === 0) {
+        console.log(`  images: ${processed}/${withImages.length} (${imageUploads} new, ${imageExisting} cached, ${imageSkips} failed)`);
       }
     }
 
