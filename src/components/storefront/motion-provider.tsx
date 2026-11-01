@@ -19,12 +19,12 @@ export function StorefrontMotion({ children }: { children: ReactNode }) {
       const seen = new WeakSet<Element>();
       observer = new IntersectionObserver(entries => {
         for (const entry of entries) {
-          if (entry.isIntersecting && entry.intersectionRatio >= 0.18) {
+          if (entry.isIntersecting) {
             entry.target.setAttribute("data-revealed", "true");
             observer?.unobserve(entry.target);
           }
         }
-      }, { threshold: 0.18 });
+      }, { threshold: 0.05 });
       const scan = () => document.querySelectorAll<HTMLElement>("[data-sf-reveal]").forEach(element => {
         if (seen.has(element)) return;
         seen.add(element);

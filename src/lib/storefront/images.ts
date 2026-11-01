@@ -1,12 +1,13 @@
 import { catalogImageUrl } from "../r2";
 import { catalogFor } from "./catalog";
+import { isRetiredRemote } from "./editorial";
 
 /** Resolve stored R2 keys against today's public host, including legacy route URLs. */
 export function storefrontPhoto(url: string | null | undefined): string | undefined {
   if (!url || url.endsWith(".svg")) return undefined;
-  if (/^https?:\/\/(?:upload\.)?wikimedia\.org\//i.test(url)) return undefined;
-  const key = url.match(/^(?:\/api\/catalog-image\/)?(catalog\/[a-zA-Z0-9_-]+\.(?:jpg|png|webp))$/)?.[1]
-    ?? url.match(/^https:\/\/[^/]+\/(catalog\/[a-zA-Z0-9_-]+\.(?:jpg|png|webp))$/)?.[1];
+  if (isRetiredRemote(url)) return undefined;
+  const key = url.match(/^(?:\/api\/catalog-image\/)?(catalog\/[a-zA-Z0-9._-]+\.(?:jpg|png|webp))$/)?.[1]
+    ?? url.match(/^https:\/\/[^/]+\/(catalog\/[a-zA-Z0-9._-]+\.(?:jpg|png|webp))$/)?.[1];
   return key ? catalogImageUrl(key) : url;
 }
 

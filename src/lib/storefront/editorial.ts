@@ -11,10 +11,11 @@ export const editorial = {
   fish: "https://images.unsplash.com/photo-1689187015184-a9bc081f3de6?auto=format&fit=crop&w=1000&q=80",
 };
 
+export const isRetiredRemote = (url: string) => /wikimedia\.org\//i.test(url);
+
 export function photoOrFallback(
   url: string | null | undefined,
   fallback = editorial.market,
 ) {
-  // Old demo vector assets are deliberately retired. Store-uploaded photos still win.
-  return url && !url.endsWith(".svg") && !url.includes("wikimedia.org/") ? url : fallback;
+  return url && !url.endsWith(".svg") && !isRetiredRemote(url) ? url : fallback;
 }

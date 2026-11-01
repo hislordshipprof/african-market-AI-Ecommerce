@@ -12,10 +12,12 @@ describe("designed image fallback", () => {
     expect(html).not.toContain("Photo unavailable");
     expect(html).not.toContain("Photo coming soon");
   });
-  it("does not request a retired Wikimedia original", () => {
-    const html = renderToStaticMarkup(createElement(ProductImage, { name: "Plantain", src: "https://upload.wikimedia.org/old.jpg" }));
-    expect(html).toContain('data-testid="designed-image-fallback"');
-    expect(html).not.toContain("<img");
-    expect(html).not.toContain("Photo unavailable");
+  it("does not request a retired Wikimedia original regardless of case", () => {
+    for (const src of ["https://upload.wikimedia.org/old.jpg", "https://upload.Wikimedia.org/old.jpg"]) {
+      const html = renderToStaticMarkup(createElement(ProductImage, { name: "Plantain", src }));
+      expect(html).toContain('data-testid="designed-image-fallback"');
+      expect(html).not.toContain("<img");
+      expect(html).not.toContain("Photo unavailable");
+    }
   });
 });

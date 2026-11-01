@@ -2,6 +2,7 @@
 import Image from "next/image";
 import { useState } from "react";
 import { ImageOff, Carrot, Wheat, Leaf, Fish, CupSoda, CookingPot, Package, Droplets, Cookie, Sparkles } from "lucide-react";
+import { isRetiredRemote } from "@/lib/storefront/editorial";
 
 const glyphs = {
   "tubers-and-roots": Carrot, "grains-and-flours": Wheat, vegetables: Leaf,
@@ -13,8 +14,7 @@ const glyphs = {
 export function ProductImage({
   src, name, category, sizes = "(max-width: 767px) 44vw, 320px", priority = false,
 }: { src?: string; name: string; category?: string; sizes?: string; priority?: boolean }) {
-  // Retired remote originals are missing imagery, not failed network requests.
-  const accepted = src && !src.includes("wikimedia.org/") ? src : undefined;
+  const accepted = src && !isRetiredRemote(src) ? src : undefined;
   return <ProductPhoto key={accepted || "missing"} src={accepted} name={name} category={category} sizes={sizes} priority={priority} />;
 }
 

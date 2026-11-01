@@ -68,7 +68,7 @@ export function HeroCarousel({ banners, products = [], pickupMinutes = 30, picku
           <m.div key={banner.id} className="sf-hero-slide" role="group" aria-roledescription="slide" aria-label={`${safeIndex + 1} of ${banners.length}`}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.65 }}>
             <div className="sf-hero-background" style={{ animationPlayState: running ? "running" : "paused" }}>
-              <Image src={safeIndex === 0 ? editorial.market : photoOrFallback(banner.imageUrl, [editorial.market, editorial.spices, editorial.grains][safeIndex % 3])} alt="" fill sizes="100vw" preload={safeIndex === 0} draggable={false} />
+              <Image src={photoOrFallback(banner.imageUrl, [editorial.market, editorial.spices, editorial.grains][safeIndex % 3])} alt="" fill sizes="100vw" preload={safeIndex === 0} draggable={false} />
             </div>
             <div className="sf-hero-shade" />
             <span className="sf-hero-word" aria-hidden>{["HOME", "FRESH", "GATHER"][safeIndex % 3]}</span>
