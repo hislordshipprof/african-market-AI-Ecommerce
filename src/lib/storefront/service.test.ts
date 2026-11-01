@@ -237,9 +237,9 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   // Seam 7: category seed migration
-  it("has exactly 11 categories after seed", async () => {
+  it("has exactly 17 categories after seed", async () => {
     const categories = await listCategories();
-    expect(categories.length).toBe(11);
+    expect(categories.length).toBe(17);
     const slugs = categories.map((c) => c.slug);
     expect(slugs).toContain("tubers-and-roots");
     expect(slugs).toContain("vegetables");
@@ -252,6 +252,12 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     expect(slugs).toContain("beauty");
     expect(slugs).toContain("oils-and-butters");
     expect(slugs).toContain("pantry-staples");
+    expect(slugs).toContain("beans-and-legumes");
+    expect(slugs).toContain("breakfast-and-dairy");
+    expect(slugs).toContain("canned-and-packaged");
+    expect(slugs).toContain("fruits");
+    expect(slugs).toContain("household");
+    expect(slugs).toContain("seasonings-and-sauces");
   });
 
   // Seam 1: category browse store isolation

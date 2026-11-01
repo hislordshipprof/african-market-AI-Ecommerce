@@ -34,6 +34,9 @@ test.describe("Customer journey demo", () => {
       .getByRole("dialog")
       .getByRole("button", { name: "Let the store suggest a swap" })
       .click();
+    await expect(
+      page.getByRole("button", { name: /Replace with Store suggests/ }),
+    ).toBeVisible({ timeout: 10000 });
     await page.reload();
     await expect(
       page.getByRole("button", { name: /Replace with Store suggests/ }),

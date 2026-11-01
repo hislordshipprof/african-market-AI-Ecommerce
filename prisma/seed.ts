@@ -7,6 +7,7 @@ import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
 import { assertNotProduction } from "../src/lib/seed-guard";
 import { seedDemoCatalog } from "./seed-demo-catalog";
+import { seedMasterCatalog } from "./seed-master-catalog";
 import { revalidateSeededStores } from "../scripts/revalidate-storefront";
 
 const adapter = new PrismaPg(resolveDirectUrl());
@@ -162,6 +163,12 @@ async function seedCategoryMetadata() {
     { id: "cat_drinks", name: "Drinks", slug: "drinks", localName: "OMU · ZOBO", imageUrl: categoryPhotos["drinks"], sortOrder: 9 },
     { id: "cat_beauty", name: "Beauty", slug: "beauty", localName: "", imageUrl: categoryPhotos.beauty, sortOrder: 10 },
     { id: "cat_pantry", name: "Pantry Staples", slug: "pantry-staples", localName: "ILE IDANA", imageUrl: categoryPhotos["pantry-staples"], sortOrder: 11 },
+    { id: "cat_beans_legumes", name: "Beans & Legumes", slug: "beans-and-legumes", localName: "EWA · WAKE", imageUrl: categoryPhotos["grains-and-flours"], sortOrder: 12 },
+    { id: "cat_breakfast_dairy", name: "Breakfast & Dairy", slug: "breakfast-and-dairy", localName: "", imageUrl: categoryPhotos["pantry-staples"], sortOrder: 13 },
+    { id: "cat_canned_packaged", name: "Canned & Packaged", slug: "canned-and-packaged", localName: "", imageUrl: categoryPhotos["pantry-staples"], sortOrder: 14 },
+    { id: "cat_fruits", name: "Fruits", slug: "fruits", localName: "ESO · MANGO", imageUrl: categoryPhotos.vegetables, sortOrder: 15 },
+    { id: "cat_household", name: "Household", slug: "household", localName: "", imageUrl: categoryPhotos.beauty, sortOrder: 16 },
+    { id: "cat_seasonings_sauces", name: "Seasonings & Sauces", slug: "seasonings-and-sauces", localName: "OBE · DINDIN", imageUrl: categoryPhotos["spices-and-seasonings"], sortOrder: 17 },
   ];
 
   for (const cat of categories) {
@@ -700,6 +707,8 @@ async function main() {
   await seedDemoCatalog(prisma);
   await seedStoreBanners();
   await seedStoreCollections();
+
+  await seedMasterCatalog(prisma);
 
   if (process.env.SEED_TEST_ADMIN === "1") {
     await seedTestAdmin();

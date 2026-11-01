@@ -228,17 +228,32 @@ model Category {
 }
 
 model MasterProduct {
-  id         String    @id @default(cuid())
-  name       String
-  categoryId String?   @map("category_id")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  id              String    @id @default(cuid())
+  name            String
+  categoryId      String?   @map("category_id")
+  description     String?
+  imageUrl        String?   @map("image_url")
+  imageSourceUrl  String?   @map("image_source_url")
+  imageAuthor     String?   @map("image_author")
+  imageLicense    String?   @map("image_license")
+  unit            String?
+  weightG         Int?      @map("weight_g")
+  frozen          Boolean   @default(false)
+  perishable      Boolean   @default(false)
+  storage         String?
+  subcategory     String?
+  originCountries String?   @map("origin_countries")
+  status          String    @default("active")
+  confidence      String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   category Category?  @relation(fields: [categoryId], references: [id])
   listings Listing[]
   synonyms ProductSynonym[]
 
   @@index([categoryId])
+  @@index([status])
   @@map("master_products")
 }
 
