@@ -186,6 +186,7 @@ export interface TransactionalClient {
       $executeRaw(strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
       $queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
     }) => Promise<T>,
+    options?: { timeout?: number; maxWait?: number },
   ): Promise<T>;
 }
 
@@ -215,7 +216,7 @@ export async function rateLimitUpsert(
 
 /**
  * Wraps each query in a transaction that first sets a 5 s server-side statement
- * timeout (health.ts STATEMENT_TIMEOUT_SQL), so a slow database cancels the query
+ * timeout, so a slow database cancels the query
  * instead of hanging until the function timeout.
  */
 export function withStatementTimeout(client: TransactionalClient): QueryRawFn {
@@ -223,7 +224,7 @@ export function withStatementTimeout(client: TransactionalClient): QueryRawFn {
     client.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL statement_timeout = '5000'`;
       return (await tx.$queryRaw(strings, ...values)) as unknown[];
-    });
+    }, { timeout: 7000, maxWait: 2000 });
 }
 
 // No RLS wrapper: health checks read only system catalogs, not store-scoped tables.

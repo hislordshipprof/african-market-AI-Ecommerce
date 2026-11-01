@@ -5,8 +5,6 @@ export type QueryRawFn = (
 
 export const HEALTH_QUERY_TIMEOUT_MS = 5000;
 
-export const STATEMENT_TIMEOUT_SQL = `SET LOCAL statement_timeout = '${HEALTH_QUERY_TIMEOUT_MS}'`;
-
 // Client-side backstop: the server-side timeout can't fire if the connection itself hangs.
 function withDeadline<T>(promise: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -72,17 +70,22 @@ export async function checkMigrations(
   queryRaw: QueryRawFn,
 ): Promise<{ upToDate: boolean }> {
   try {
-    // A missing table means migrations don't apply (e.g. `prisma db push`), not that they're pending.
-    const present = (await withDeadline(
-      queryRaw`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = '_prisma_migrations') AS present`,
-    )) as { present?: boolean }[];
-    if (present[0]?.present === false) return { upToDate: true };
+    // One shared 5 s budget for both queries. A missing table means migrations don't
+    // apply (e.g. `prisma db push`), not that they're pending. to_regclass resolves via
+    // search_path like the count query below and ignores table privileges.
+    return await withDeadline(
+      (async () => {
+        const present = (await queryRaw`SELECT to_regclass('"_prisma_migrations"') IS NOT NULL AS present`) as {
+          present?: boolean;
+        }[];
+        if (present[0]?.present === false) return { upToDate: true };
 
-    const rows = (await withDeadline(
-      queryRaw`SELECT COUNT(*)::int AS count FROM "_prisma_migrations" WHERE "finished_at" IS NULL OR "rolled_back_at" IS NOT NULL`,
-    )) as { count: number | bigint }[];
-    const count = Number(rows[0]?.count ?? 0);
-    return { upToDate: count === 0 };
+        const rows = (await queryRaw`SELECT COUNT(*)::int AS count FROM "_prisma_migrations" WHERE "finished_at" IS NULL OR "rolled_back_at" IS NOT NULL`) as {
+          count: number | bigint;
+        }[];
+        return { upToDate: Number(rows[0]?.count ?? 0) === 0 };
+      })(),
+    );
   } catch (err) {
     if (isMissingRelation(err)) return { upToDate: true };
     console.error("Health check: migration status query failed", err);

@@ -8,7 +8,6 @@ import {
   runHealthChecks,
   requiredEnvVars,
   toMinimalResult,
-  STATEMENT_TIMEOUT_SQL,
   HEALTH_QUERY_TIMEOUT_MS,
 } from "./health";
 import type { HealthResult } from "./health";
@@ -152,8 +151,7 @@ describe("query timeouts", () => {
     const client = { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) };
     const rows = await withStatementTimeout(client as never)`SELECT current_user`;
     expect(rows).toEqual([{ current_user: "app_runtime" }]);
-    expect(calls[0]).toBe(STATEMENT_TIMEOUT_SQL);
-    expect(STATEMENT_TIMEOUT_SQL).toMatch(/SET LOCAL statement_timeout = '5000'/);
+    expect(calls[0]).toBe("SET LOCAL statement_timeout = '5000'");
     expect(calls[1]).toBe("SELECT current_user");
   });
 });
@@ -207,6 +205,18 @@ describe("checkMigrations", () => {
       .mockResolvedValueOnce([{ present: true }])
       .mockRejectedValueOnce(new Error("permission denied"));
     expect(await checkMigrations(queryRaw)).toEqual({ upToDate: false });
+  });
+
+  it("shares one 5 s budget across both queries", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const queryRaw = vi.fn().mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve([{ present: true }]), 3000)),
+    );
+    const pending = checkMigrations(queryRaw);
+    await vi.advanceTimersByTimeAsync(HEALTH_QUERY_TIMEOUT_MS + 1);
+    await expect(pending).resolves.toEqual({ upToDate: false });
+    vi.useRealTimers();
   });
 
   it("returns upToDate false when the table exists and migrations are pending", async () => {
