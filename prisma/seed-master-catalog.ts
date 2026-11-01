@@ -3,7 +3,9 @@ import { parse } from "csv-parse/sync";
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { uploadToR2 } from "../src/lib/r2";
+import sharp from "sharp";
+import { S3Client, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { uploadToR2, catalogImageUrl } from "../src/lib/r2";
 
 interface CsvRow {
   id: string;
@@ -50,6 +52,137 @@ const CATEGORY_SLUG_TO_ID: Record<string, string> = {
 };
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_RETRIES = 5;
+
+function getS3Client() {
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    },
+  });
+}
+
+async function listR2Objects(prefix: string): Promise<string[]> {
+  const client = getS3Client();
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const resp = await client.send(
+      new ListObjectsV2Command({
+        Bucket: process.env.R2_BUCKET!,
+        Prefix: prefix,
+        ContinuationToken: token,
+      }),
+    );
+    for (const obj of resp.Contents ?? []) {
+      if (obj.Key) keys.push(obj.Key);
+    }
+    token = resp.NextContinuationToken;
+  } while (token);
+  return keys;
+}
+
+async function deleteR2Objects(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  const client = getS3Client();
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000);
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: process.env.R2_BUCKET!,
+        Delete: { Objects: batch.map((Key) => ({ Key })) },
+      }),
+    );
+  }
+}
+
+function toThumbnailUrl(originalUrl: string, width: number): string {
+  try {
+    const url = new URL(originalUrl);
+    if (!url.hostname.endsWith("wikimedia.org")) return originalUrl;
+    const parts = url.pathname.split("/");
+    const commonsIdx = parts.indexOf("commons");
+    if (commonsIdx === -1) return originalUrl;
+    if (parts[commonsIdx + 1] === "thumb") return originalUrl;
+    const filename = parts[parts.length - 1];
+    const thumbSuffix = filename.toLowerCase().endsWith(".svg")
+      ? `${width}px-${filename}.png`
+      : `${width}px-${filename}`;
+    const newParts = [...parts];
+    newParts.splice(commonsIdx + 1, 0, "thumb");
+    newParts.push(thumbSuffix);
+    return `${url.origin}${newParts.join("/")}`;
+  } catch {
+    return originalUrl;
+  }
+}
+
+async function fetchWithRetry(
+  url: string,
+  productId: string,
+): Promise<Buffer | null> {
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "AfricanMarketsPlatform/1.0 (catalog-seed)",
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(30000),
+      });
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("Retry-After");
+        const baseMs = retryAfter
+          ? parseInt(retryAfter, 10) * 1000
+          : 1000 * Math.pow(2, attempt);
+        const jitter = Math.random() * 1000;
+        await new Promise((r) => setTimeout(r, Math.min(baseMs + jitter, 60000)));
+        continue;
+      }
+      if (response.status === 404) return null;
+      if (!response.ok) return null;
+      const buf = Buffer.from(await response.arrayBuffer());
+      if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) return null;
+      return buf;
+    } catch {
+      if (attempt < MAX_RETRIES - 1) {
+        const baseMs = 1000 * Math.pow(2, attempt);
+        const jitter = Math.random() * 1000;
+        await new Promise((r) => setTimeout(r, baseMs + jitter));
+        continue;
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+async function downloadAndOptimize(
+  url: string,
+  productId: string,
+): Promise<{ buffer: Buffer; contentType: string } | null> {
+  const thumbUrl = toThumbnailUrl(url, 800);
+  const urls = thumbUrl !== url ? [thumbUrl, url] : [url];
+  for (const fetchUrl of urls) {
+    const raw = await fetchWithRetry(fetchUrl, productId);
+    if (raw) {
+      try {
+        const webpBuf = await sharp(raw)
+          .resize(800, 800, { fit: "inside", withoutEnlargement: true })
+          .webp({ quality: 80 })
+          .toBuffer();
+        return { buffer: webpBuf, contentType: "image/webp" };
+      } catch {
+        console.warn(`sharp conversion failed for ${productId}`);
+        continue;
+      }
+    }
+  }
+  return null;
+}
 
 function synonymId(productId: string, prefix: string, ...parts: (string | null | undefined)[]): string {
   const hash = createHash("sha256")
@@ -84,30 +217,6 @@ function parseSearchSynonyms(raw: string): { term: string }[] {
     .map((term) => ({ term }));
 }
 
-async function downloadImage(
-  url: string,
-  productId: string,
-): Promise<{ buffer: Buffer; contentType: string; ext: string } | null> {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "AfricanMarketsPlatform/1.0 (catalog seed)",
-      },
-      redirect: "error",
-    });
-    if (!response.ok) return null;
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_BYTES) return null;
-    const contentType = response.headers.get("content-type") || "image/jpeg";
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength > MAX_IMAGE_BYTES) return null;
-    const ext = contentType.includes("png") ? "png" : contentType.includes("svg") ? "svg" : "jpg";
-    return { buffer, contentType, ext };
-  } catch {
-    console.warn(`Failed to download image for ${productId}: ${url}`);
-    return null;
-  }
-}
 
 export async function seedMasterCatalog(prisma: PrismaClient) {
   if (process.env.VERCEL_ENV === "production") {
@@ -138,6 +247,11 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
   let imageUploads = 0;
   let imageSkips = 0;
   let imageExisting = 0;
+  let totalUploadBytes = 0;
+  const failures: { id: string; reason: string }[] = [];
+
+  const existingR2Keys = hasR2 ? new Set(await listR2Objects("catalog/")) : new Set<string>();
+  const oldKeysToDelete = [...existingR2Keys].filter((k) => !k.endsWith(".webp"));
 
   for (const row of highRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
@@ -147,28 +261,26 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
     let imageUrl: string | null = null;
 
     if (hasR2 && imageSourceUrl) {
-      const existing = await prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-        return tx.masterProduct.findUnique({ where: { id: row.id }, select: { imageUrl: true } });
-      });
-      if (existing?.imageUrl) {
-        imageUrl = existing.imageUrl;
+      const webpKey = `catalog/${row.id}.webp`;
+      if (existingR2Keys.has(webpKey)) {
+        imageUrl = catalogImageUrl(webpKey);
         imageExisting++;
       } else {
-        const img = await downloadImage(imageSourceUrl, row.id);
+        const img = await downloadAndOptimize(imageSourceUrl, row.id);
         if (img) {
           try {
-            const key = `catalog/${row.id}.${img.ext}`;
-            imageUrl = await uploadToR2(key, img.buffer, img.contentType);
+            imageUrl = await uploadToR2(webpKey, img.buffer, img.contentType);
             imageUploads++;
+            totalUploadBytes += img.buffer.byteLength;
           } catch (e) {
             console.warn(`R2 upload failed for ${row.id}:`, e);
+            failures.push({ id: row.id, reason: "R2 upload failed" });
           }
         } else {
           imageSkips++;
+          failures.push({ id: row.id, reason: "download/convert failed" });
         }
-        await new Promise((r) => setTimeout(r, 120));
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
 
@@ -228,7 +340,26 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
     });
   }
 
-  console.log(`Seeded ${highRows.length} high-confidence products (${imageUploads} images uploaded, ${imageExisting} existing, ${imageSkips} skipped)`);
+  if (hasR2 && oldKeysToDelete.length > 0) {
+    await deleteR2Objects(oldKeysToDelete);
+    console.log(`Deleted ${oldKeysToDelete.length} old non-webp R2 objects`);
+  }
+
+  const coveragePct = highRows.length > 0
+    ? (((imageUploads + imageExisting) / highRows.filter((r) => r.image_url?.trim()).length) * 100).toFixed(1)
+    : "N/A";
+  console.log(
+    `Seeded ${highRows.length} high-confidence products ` +
+    `(${imageUploads} webp uploaded [${(totalUploadBytes / 1024 / 1024).toFixed(2)} MB], ` +
+    `${imageExisting} existing, ${imageSkips} skipped, ` +
+    `coverage: ${coveragePct}%)`,
+  );
+  if (failures.length > 0) {
+    console.log(`Image failures (${failures.length}):`);
+    for (const f of failures) {
+      console.log(`  ${f.id}: ${f.reason}`);
+    }
+  }
 
   for (const row of reviewRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;

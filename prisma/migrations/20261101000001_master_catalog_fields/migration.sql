@@ -18,12 +18,7 @@ ALTER TABLE "master_products" ADD COLUMN "confidence" TEXT;
 -- Index on status for the review queue query
 CREATE INDEX "master_products_status_idx" ON "master_products"("status");
 
--- 6 new categories (sort_order 12-17, after existing beauty at 10 and pantry at 11)
-INSERT INTO "categories" ("id", "name", "slug", "sort_order", "created_at", "updated_at") VALUES
-  ('cat_beans_legumes',       'Beans & Legumes',        'beans-and-legumes',       12, NOW(), NOW()),
-  ('cat_breakfast_dairy',     'Breakfast & Dairy',       'breakfast-and-dairy',     13, NOW(), NOW()),
-  ('cat_canned_packaged',     'Canned & Packaged',      'canned-and-packaged',     14, NOW(), NOW()),
-  ('cat_fruits',              'Fruits',                  'fruits',                  15, NOW(), NOW()),
-  ('cat_household',           'Household',               'household',               16, NOW(), NOW()),
-  ('cat_seasonings_sauces',   'Seasonings & Sauces',     'seasonings-and-sauces',   17, NOW(), NOW())
-ON CONFLICT ("id") DO NOTHING;
+-- 6 new categories (beans-and-legumes, breakfast-and-dairy, canned-and-packaged,
+-- fruits, household, seasonings-and-sauces) are seeded by seedCategoryMetadata()
+-- in prisma/seed.ts with RLS-safe platform-admin context, not here, because
+-- categories has FORCE ROW LEVEL SECURITY and the migration role lacks a policy.
