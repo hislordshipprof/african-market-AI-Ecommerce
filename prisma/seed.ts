@@ -466,44 +466,57 @@ async function seedStoreCollections() {
   console.log(`Seeded ${collections.length} store collections with listing associations`);
 }
 
-async function seedTestAdmin() {
+interface SeedUserOptions {
+  name: string;
+  email: string;
+  role: string;
+  /** Used only when the user is created; an existing user keeps its own id. */
+  id: string;
+  password: string;
+  authSecret: string;
+  totpSecret: string;
+  backupCodes: string[];
+  /** Ids used only when the account/twoFactor rows are created. */
+  accountId: string;
+  twoFactorId: string;
+}
+
+function requireSeedAuthEnv() {
   assertNotProduction(process.env);
 
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
-  if (!adminPassword) {
-    throw new Error("SEED_ADMIN_PASSWORD is required when SEED_TEST_ADMIN=1");
-  }
-
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!password) throw new Error("SEED_ADMIN_PASSWORD is required when SEED_TEST_ADMIN=1");
   const authSecret = process.env.BETTER_AUTH_SECRET;
-  if (!authSecret) {
-    throw new Error("BETTER_AUTH_SECRET is required when SEED_TEST_ADMIN=1");
-  }
-
+  if (!authSecret) throw new Error("BETTER_AUTH_SECRET is required when SEED_TEST_ADMIN=1");
   const totpSecret = process.env.SEED_ADMIN_TOTP_SECRET;
-  if (!totpSecret) {
-    throw new Error("SEED_ADMIN_TOTP_SECRET is required when SEED_TEST_ADMIN=1");
-  }
+  if (!totpSecret) throw new Error("SEED_ADMIN_TOTP_SECRET is required when SEED_TEST_ADMIN=1");
+  return { password, authSecret, totpSecret };
+}
 
-  const adminId = "seed-platform-admin";
-  const adminEmail = "admin@platform.test";
-  const hashedPassword = await hashPassword(adminPassword);
+/**
+ * Upserts a user with a credential account and enrolled 2FA. Every dependent
+ * write uses the id of the user the upsert returned, so a user that already
+ * exists under a different id never causes a foreign-key failure.
+ */
+async function seedUserWith2FA(opts: SeedUserOptions) {
+  const hashedPassword = await hashPassword(opts.password);
 
-  await prisma.user.upsert({
-    where: { email: adminEmail },
+  const user = await prisma.user.upsert({
+    where: { email: opts.email },
     update: { twoFactorEnabled: true },
     create: {
-      id: adminId,
-      name: "Platform Admin",
-      email: adminEmail,
+      id: opts.id,
+      name: opts.name,
+      email: opts.email,
       emailVerified: true,
-      role: "platform_admin",
+      role: opts.role,
       twoFactorEnabled: true,
       updatedAt: new Date(),
     },
   });
 
   const existingAccount = await prisma.account.findFirst({
-    where: { userId: adminId, providerId: "credential" },
+    where: { userId: user.id, providerId: "credential" },
   });
   if (existingAccount) {
     await prisma.account.update({
@@ -513,10 +526,10 @@ async function seedTestAdmin() {
   } else {
     await prisma.account.create({
       data: {
-        id: "seed-admin-account",
-        accountId: adminId,
+        id: opts.accountId,
+        accountId: user.id,
         providerId: "credential",
-        userId: adminId,
+        userId: user.id,
         password: hashedPassword,
         updatedAt: new Date(),
       },
@@ -524,16 +537,16 @@ async function seedTestAdmin() {
   }
 
   const encryptedSecret = await symmetricEncrypt({
-    key: authSecret,
-    data: `base32:${totpSecret}`,
+    key: opts.authSecret,
+    data: `base32:${opts.totpSecret}`,
   });
   const encryptedBackupCodes = await symmetricEncrypt({
-    key: authSecret,
-    data: JSON.stringify(["BACKUP1234", "BACKUP5678"]),
+    key: opts.authSecret,
+    data: JSON.stringify(opts.backupCodes),
   });
 
   const existingTwoFactor = await prisma.twoFactor.findFirst({
-    where: { userId: adminId },
+    where: { userId: user.id },
   });
   if (existingTwoFactor) {
     await prisma.twoFactor.update({
@@ -543,29 +556,47 @@ async function seedTestAdmin() {
   } else {
     await prisma.twoFactor.create({
       data: {
-        id: "seed-admin-totp",
+        id: opts.twoFactorId,
         secret: encryptedSecret,
         backupCodes: encryptedBackupCodes,
-        userId: adminId,
+        userId: user.id,
         verified: true,
       },
     });
   }
 
+  return user;
+}
+
+async function seedTestAdmin() {
+  const { password, authSecret, totpSecret } = requireSeedAuthEnv();
+
+  await seedUserWith2FA({
+    id: "seed-platform-admin",
+    name: "Platform Admin",
+    email: "admin@platform.test",
+    role: "platform_admin",
+    password,
+    authSecret,
+    totpSecret,
+    backupCodes: ["BACKUP1234", "BACKUP5678"],
+    accountId: "seed-admin-account",
+    twoFactorId: "seed-admin-totp",
+  });
+
   console.log("Seeded test admin: admin@platform.test (2FA enrolled)");
 
-  // Unenrolled admin for 2FA enrollment e2e test
-  const unenrolledId = "seed-unenrolled-admin";
+  // Unenrolled admin for 2FA enrollment e2e test. It has a credential account
+  // but no 2FA, so it does not share the helper's enrolled-user flow.
   const unenrolledEmail = "unenrolled-admin@platform.test";
+  const hashedPassword = await hashPassword(password);
 
   await prisma.$transaction(async (tx) => {
-    await tx.twoFactor.deleteMany({ where: { userId: unenrolledId } });
-
-    await tx.user.upsert({
+    const unenrolled = await tx.user.upsert({
       where: { email: unenrolledEmail },
       update: { twoFactorEnabled: false, updatedAt: new Date() },
       create: {
-        id: unenrolledId,
+        id: "seed-unenrolled-admin",
         name: "Unenrolled Admin",
         email: unenrolledEmail,
         emailVerified: true,
@@ -575,8 +606,10 @@ async function seedTestAdmin() {
       },
     });
 
+    await tx.twoFactor.deleteMany({ where: { userId: unenrolled.id } });
+
     const existingUnenrolledAccount = await tx.account.findFirst({
-      where: { userId: unenrolledId, providerId: "credential" },
+      where: { userId: unenrolled.id, providerId: "credential" },
     });
     if (existingUnenrolledAccount) {
       await tx.account.update({
@@ -587,9 +620,9 @@ async function seedTestAdmin() {
       await tx.account.create({
         data: {
           id: "seed-unenrolled-account",
-          accountId: unenrolledId,
+          accountId: unenrolled.id,
           providerId: "credential",
-          userId: unenrolledId,
+          userId: unenrolled.id,
           password: hashedPassword,
           updatedAt: new Date(),
         },
@@ -601,88 +634,20 @@ async function seedTestAdmin() {
 }
 
 async function seedStoreOwner() {
-  assertNotProduction(process.env);
+  const { password, authSecret, totpSecret } = requireSeedAuthEnv();
 
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
-  if (!adminPassword) {
-    throw new Error("SEED_ADMIN_PASSWORD is required when SEED_TEST_ADMIN=1");
-  }
-  const authSecret = process.env.BETTER_AUTH_SECRET;
-  if (!authSecret) {
-    throw new Error("BETTER_AUTH_SECRET is required when SEED_TEST_ADMIN=1");
-  }
-  const totpSecret = process.env.SEED_ADMIN_TOTP_SECRET;
-  if (!totpSecret) {
-    throw new Error("SEED_ADMIN_TOTP_SECRET is required when SEED_TEST_ADMIN=1");
-  }
-
-  const ownerId = "seed-store-owner";
-  const ownerEmail = "owner@mama-ngozi.test";
-  const hashedPassword = await hashPassword(adminPassword);
-
-  await prisma.user.upsert({
-    where: { email: ownerEmail },
-    update: { twoFactorEnabled: true },
-    create: {
-      id: ownerId,
-      name: "Mama Ngozi Owner",
-      email: ownerEmail,
-      emailVerified: true,
-      role: "user",
-      twoFactorEnabled: true,
-      updatedAt: new Date(),
-    },
+  const owner = await seedUserWith2FA({
+    id: "seed-store-owner",
+    name: "Mama Ngozi Owner",
+    email: "owner@mama-ngozi.test",
+    role: "user",
+    password,
+    authSecret,
+    totpSecret,
+    backupCodes: ["OWNERBACKUP1", "OWNERBACKUP2"],
+    accountId: "seed-store-owner-account",
+    twoFactorId: "seed-store-owner-totp",
   });
-
-  const existingAccount = await prisma.account.findFirst({
-    where: { userId: ownerId, providerId: "credential" },
-  });
-  if (existingAccount) {
-    await prisma.account.update({
-      where: { id: existingAccount.id },
-      data: { password: hashedPassword, updatedAt: new Date() },
-    });
-  } else {
-    await prisma.account.create({
-      data: {
-        id: "seed-store-owner-account",
-        accountId: ownerId,
-        providerId: "credential",
-        userId: ownerId,
-        password: hashedPassword,
-        updatedAt: new Date(),
-      },
-    });
-  }
-
-  const encryptedSecret = await symmetricEncrypt({
-    key: authSecret,
-    data: `base32:${totpSecret}`,
-  });
-  const encryptedBackupCodes = await symmetricEncrypt({
-    key: authSecret,
-    data: JSON.stringify(["OWNERBACKUP1", "OWNERBACKUP2"]),
-  });
-
-  const existingTwoFactor = await prisma.twoFactor.findFirst({
-    where: { userId: ownerId },
-  });
-  if (existingTwoFactor) {
-    await prisma.twoFactor.update({
-      where: { id: existingTwoFactor.id },
-      data: { secret: encryptedSecret, backupCodes: encryptedBackupCodes },
-    });
-  } else {
-    await prisma.twoFactor.create({
-      data: {
-        id: "seed-store-owner-totp",
-        secret: encryptedSecret,
-        backupCodes: encryptedBackupCodes,
-        userId: ownerId,
-        verified: true,
-      },
-    });
-  }
 
   const mamaNgozi = await prisma.store.findUnique({ where: { slug: "mama-ngozi" } });
   if (!mamaNgozi) throw new Error("mama-ngozi store not found; run seedDemoStores first");
@@ -692,9 +657,9 @@ async function seedStoreOwner() {
     prisma.$executeRaw`SELECT set_config('app.store_id', ${mamaNgozi.id}, true)`,
     prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
     prisma.storeMembership.upsert({
-      where: { storeId_userId: { storeId: mamaNgozi.id, userId: ownerId } },
+      where: { storeId_userId: { storeId: mamaNgozi.id, userId: owner.id } },
       update: { role: "owner" },
-      create: { storeId: mamaNgozi.id, userId: ownerId, role: "owner" },
+      create: { storeId: mamaNgozi.id, userId: owner.id, role: "owner" },
     }),
   ]);
 
