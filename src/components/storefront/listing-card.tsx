@@ -1,69 +1,52 @@
-import Image from "next/image";
-import Link from "next/link";
+﻿import Link from "next/link";
 import type { StorefrontListing } from "@/lib/storefront/service";
 import { PriceDisplay } from "./price-display";
 import { StockBadgeChip } from "./stock-badge";
 import { QuickAddStepper } from "./quick-add-stepper";
+import { ProductImage } from "./product-image";
 
 export function ListingCard({
   listing,
-  categorySlug,
 }: {
   listing: StorefrontListing;
   categorySlug?: string;
 }) {
-  const placeholderSrc = categorySlug
-    ? `/images/categories/${categorySlug}.svg`
-    : "/images/product-placeholder.svg";
-
   return (
-    <div
-      className="group flex flex-col overflow-hidden rounded-md bg-surface transition-all duration-200 hover:-translate-y-0.5 hover:bg-raised"
-      style={{ transitionTimingFunction: "var(--ease-std)" }}
-      data-testid="listing-card"
-    >
-      <div className="relative flex aspect-square w-full items-center justify-center bg-raised">
-        <Image
-          src={placeholderSrc}
-          alt=""
-          width={120}
-          height={120}
-          className="h-16 w-16 object-contain opacity-30"
-          aria-hidden="true"
-        />
-
-        <div className="absolute bottom-2 right-2">
-          <QuickAddStepper productName={listing.displayName} />
-        </div>
-      </div>
-
-      <div className="flex flex-1 flex-col gap-0.5 p-3">
+    <article className="sf-product-card" data-testid="listing-card">
+      <div className="sf-product-photo">
         <Link
           href={`/listings/${listing.id}`}
-          className="font-body text-sm font-medium leading-snug text-ink line-clamp-2 hover:text-primary focus-visible:text-primary focus-visible:outline-none"
+          aria-label={`View ${listing.displayName}`}
+          tabIndex={-1}
         >
+          <ProductImage src={listing.imageUrl} name={listing.displayName} />
+        </Link>
+        {listing.frozen && <span className="sf-photo-tag">Frozen</span>}
+        <div className="sf-quick-add">
+          <QuickAddStepper
+            item={{
+              listingId: listing.id,
+              variantId: listing.variantId,
+              name: listing.displayName,
+              price: listing.startingPrice,
+              imageUrl: listing.imageUrl,
+              packLabel: listing.packLabel,
+            }}
+            disabled={listing.badge === "ask-store"}
+          />
+        </div>
+      </div>
+      <div className="sf-product-copy">
+        <PriceDisplay cents={listing.startingPrice} weightG={listing.weightG} />
+        <Link href={`/listings/${listing.id}`} className="sf-product-name">
           {listing.displayName}
         </Link>
-        {listing.altName && (
-          <span className="font-label text-[13px] tracking-wider text-muted-foreground line-clamp-1">
-            {listing.altName}
-          </span>
-        )}
-
-        <div className="mt-auto flex items-end justify-between gap-2 pt-1">
-          <PriceDisplay
-            cents={listing.startingPrice}
-            className="font-body text-base font-semibold text-ink"
-          />
+        {listing.altName && <p className="sf-local-name">{listing.altName}</p>}
+        <div className="sf-product-meta">
+          <span>{listing.packLabel ?? "Each"}</span>
           <StockBadgeChip badge={listing.badge} />
         </div>
-
-        {listing.frozen && (
-          <span className="font-label text-[13px] text-muted-foreground">
-            Frozen
-          </span>
-        )}
       </div>
-    </div>
+    </article>
   );
 }

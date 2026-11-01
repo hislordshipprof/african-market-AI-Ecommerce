@@ -1,0 +1,452 @@
+{
+  "yam": {
+    "localNames": "isu (Yoruba, Nigeria)|ji (Igbo, Nigeria)|doya (Hausa, Nigeria)|udia (Efik, Nigeria)|pona (Twi, Ghana)|bayerɛ (Twi, Ghana)|te (Ewe, Ghana)|puna (Twi, Ghana)|igname (French, Côte d'Ivoire)",
+    "description": "Large starchy white-fleshed tuber (Dioscorea rotundata) boiled, fried, roasted or pounded into pounded yam.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/14/Own_yam.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Own_yam.jpg",
+    "author": "Akadeby",
+    "catalogId": "yam-white-puna",
+    "license": "CC BY-SA 3.0"
+  },
+  "plantain": {
+    "localNames": "ogede agbagba (Yoruba, Nigeria)|ogede (Igbo, Nigeria)|borode (Twi, Ghana)|brodeɛ (Twi, Ghana)|apem (Twi, Ghana)|apantu (Twi, Ghana)|banane plantain (French, Cameroon)|makemba (Lingala, DR Congo)|ndizi (Swahili, Kenya)|gonja (Luganda, Uganda)|banana-pão (Portuguese, Angola)",
+    "description": "Sweet ripe plantain fried as dodo, kelewele or alloco.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/84/Ripe_Plantain_for_sale.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Ripe_Plantain_for_sale.jpg",
+    "author": "Iwai-Dialax",
+    "catalogId": "plantain-ripe",
+    "license": "CC BY 4.0"
+  },
+  "cassava": {
+    "localNames": "ege (Yoruba, Nigeria)|gbaguda (Yoruba, Nigeria)|akpu (Igbo, Nigeria)|rogo (Hausa, Nigeria)|iwa (Efik, Nigeria)|bankye (Twi, Ghana)|manioc (French, Cameroon)|agbeli (Ewe, Ghana)|manioc (French, Côte d'Ivoire)|nyambi (Wolof, Senegal)|kasada (Krio, Sierra Leone)|manioc (French, DR Congo)|muhogo (Swahili, Kenya)|mihogo (Swahili, Tanzania)|muwogo (Luganda, Uganda)|imyumbati (Kinyarwanda, Rwanda)|mandioca (Portuguese, Angola)|mandioca (Portuguese, Mozambique)|chinangwa (Chichewa, Malawi)|mufarinya (Shona, Zimbabwe)",
+    "description": "Starchy root boiled, fried or processed into garri, fufu, lafun and abacha.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9b/Harvested_cassava_roots_03.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Harvested_cassava_roots_03.jpg",
+    "author": "Denis kasozi",
+    "catalogId": "cassava-root-fresh",
+    "license": "CC BY-SA 4.0"
+  },
+  "cocoyam": {
+    "localNames": "ede (Igbo, Nigeria)|koko (Yoruba, Nigeria)|gwaza (Hausa, Nigeria)|kooko (Twi, Ghana)|taro (French, Cameroon)|taro (Cameroonian English, Cameroon)|nduma (Kikuyu, Kenya)|madumbe (Zulu, South Africa)|magimbi (Swahili, Tanzania)|amateke (Kinyarwanda, Rwanda)|dasheen (English, Trinidad and Tobago)|eddoes (English, Jamaica)",
+    "description": "Small hairy corm (Colocasia esculenta) boiled and pounded to thicken Igbo soups like ofe onugbu and oha, or eaten boiled.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c2/Colocasia_esculenta_dsc07801.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Colocasia_esculenta_dsc07801.jpg",
+    "author": "David Monniaux",
+    "catalogId": "cocoyam-taro",
+    "license": "CC BY-SA 3.0"
+  },
+  "sweet potato": {
+    "localNames": "odunkun (Yoruba, Nigeria)|dankali (Hausa, Nigeria)",
+    "description": "Pale-fleshed sweet potato boiled, fried or cooked in porridge, less sweet than orange US yams.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/49/White_and_Red_Sweet_potato.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:White_and_Red_Sweet_potato.jpg",
+    "author": "Abdsomod",
+    "catalogId": "sweet-potato-african",
+    "license": "CC BY-SA 4.0"
+  },
+  "garri": {
+    "localNames": "gaari (Yoruba, Nigeria)|garri (Igbo, Nigeria)|gari (Hausa, Nigeria)|gari (Fon, Benin)|gari (Twi, Ghana)|gari (Ga, Ghana)|gali (Ewe, Ghana)|garri (Cameroonian English, Cameroon)|gari (Krio, Sierra Leone)",
+    "description": "Roasted granulated fermented cassava, made into eba with hot water or soaked in cold water as a snack.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/13/Cassava_Flakes_%28garri%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Cassava_Flakes_(garri).jpg",
+    "author": "Zeerun",
+    "catalogId": "garri-white",
+    "license": "CC BY-SA 4.0"
+  },
+  "white garri": {
+    "localNames": "gaari (Yoruba, Nigeria)|garri (Igbo, Nigeria)|gari (Hausa, Nigeria)|gari (Fon, Benin)|gari (Twi, Ghana)|gari (Ga, Ghana)|gali (Ewe, Ghana)|garri (Cameroonian English, Cameroon)|gari (Krio, Sierra Leone)",
+    "description": "Roasted granulated fermented cassava, made into eba with hot water or soaked in cold water as a snack.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/13/Cassava_Flakes_%28garri%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Cassava_Flakes_(garri).jpg",
+    "author": "Zeerun",
+    "catalogId": "garri-white",
+    "license": "CC BY-SA 4.0"
+  },
+  "yellow garri (ijebu)": {
+    "localNames": "garri (Igbo, Nigeria)",
+    "description": "Garri roasted with a little palm oil for a yellow color, mostly made into eba.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/bf/Yellow_Garri.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Yellow_Garri.jpg",
+    "author": "Betterfoto",
+    "catalogId": "garri-yellow",
+    "license": "CC BY-SA 4.0"
+  },
+  "egusi (melon seeds)": {
+    "localNames": "egusi (Yoruba, Nigeria)|egwusi (Igbo, Nigeria)|agushi (Hausa, Nigeria)|agushi (Twi, Ghana)|egusi (Krio, Sierra Leone)|pistache (French, Cameroon)|egusi (Cameroonian English, Cameroon)|mbika (Lingala, DR Congo)|mbika (Lingala, Republic of the Congo)",
+    "description": "Shelled seeds of egusi melon ground at home to thicken egusi soup.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/2/22/Egusi_seeds.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Egusi_seeds.jpg",
+    "author": "Judethedeus",
+    "catalogId": "egusi-seeds-whole",
+    "license": "CC0"
+  },
+  "ogbono (wild mango seed)": {
+    "localNames": "ogbono (Igbo, Nigeria)|apon (Yoruba, Nigeria)|ugiri (Igbo, Nigeria)|andok (Ewondo, Cameroon)|mangue sauvage (French, Cameroon)|dika (French, Gabon)|odika (Fang, Gabon)|dika (Fang, Gabon)|chocolat indigène (French, Gabon)",
+    "description": "Dried kernels of African bush mango ground to make draw ogbono soup.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/46/Ogbono_%28Irvingia_gabonensis%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Ogbono_(Irvingia_gabonensis).jpg",
+    "author": "Zz411 at English Wikipedia",
+    "catalogId": "ogbono-whole",
+    "license": "CC BY-SA 3.0"
+  },
+  "semovita": {
+    "localNames": "",
+    "description": "Fortified wheat semolina from Flour Mills of Nigeria, cooked in water as a smooth swallow.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/0f/Semovita_Swallow_with_assorted_okra_soup.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Semovita_Swallow_with_assorted_okra_soup.jpg",
+    "author": "Halima Waziri",
+    "catalogId": "semovita-golden-penny",
+    "license": "CC BY-SA 4.0"
+  },
+  "pounded yam flour": {
+    "localNames": "iyan (Yoruba, Nigeria)|sakwara (Hausa, Nigeria)|poundo (Nigerian English, Nigeria)|foutou igname (French, Côte d'Ivoire)|bayerɛ fufu (Twi, Ghana)",
+    "description": "Instant flour stirred into boiling water to make pounded yam, eaten with egusi, ogbono and other soups.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/db/%C3%8Dy%C3%A1n_%28Pounded_yam%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:%C3%8Dy%C3%A1n_(Pounded_yam).jpg",
+    "author": "Tesleemah",
+    "catalogId": "poundo-yam-flour",
+    "license": "CC BY-SA 4.0"
+  },
+  "poundo yam": {
+    "localNames": "iyan (Yoruba, Nigeria)|sakwara (Hausa, Nigeria)|poundo (Nigerian English, Nigeria)|foutou igname (French, Côte d'Ivoire)|bayerɛ fufu (Twi, Ghana)",
+    "description": "Instant flour stirred into boiling water to make pounded yam, eaten with egusi, ogbono and other soups.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/db/%C3%8Dy%C3%A1n_%28Pounded_yam%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:%C3%8Dy%C3%A1n_(Pounded_yam).jpg",
+    "author": "Tesleemah",
+    "catalogId": "poundo-yam-flour",
+    "license": "CC BY-SA 4.0"
+  },
+  "ofada rice": {
+    "localNames": "iresi ofada (Yoruba, Nigeria)",
+    "description": "Short, aromatic unpolished local rice from Ogun State, served with ayamase (ofada stew).",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/85/Ofada_Rice.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Ofada_Rice.jpg",
+    "author": "Ijeoma",
+    "catalogId": "rice-ofada",
+    "license": "CC BY-SA 4.0"
+  },
+  "suya spice": {
+    "localNames": "yaji (Hausa, Nigeria)|suya pepper (Nigerian English, Nigeria)",
+    "description": "Peanut-based chili spice blend rubbed on suya and sprinkled on grilled meat.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b4/Suya_with_pepper_sauce.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Suya_with_pepper_sauce.jpg",
+    "author": "Bukky658",
+    "catalogId": "suya-spice-yaji",
+    "license": "CC BY-SA 4.0"
+  },
+  "locust bean (dawadawa)": {
+    "localNames": "daddawa (Hausa, Nigeria)|dawadawa (Hausa, Nigeria)|soumbala (Bambara, Mali)|dawadawa (Hausa, Ghana)|kpalgu (Dagbani, Ghana)|sumbala (Dioula, Burkina Faso)|soumbara (Malinke, Guinea)|nététou (Wolof, Senegal)|afitin (Fon, Benin)|iru (Yoruba, Nigeria)|soumbala en poudre (French, Mali)|nététou en poudre (French, Senegal)",
+    "description": "Sun-dried fermented locust bean balls or powder for northern soups and Sahelian sauces.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9e/Sumbala_balls_and_the_African_locust_bean_seeds_they_are_prepared_from_%28Kera_%28D%C3%A9dougou_District%29%2C_Burkina_Faso%2C_June_2014%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sumbala_balls_and_the_African_locust_bean_seeds_they_are_prepared_from_(Kera_(D%C3%A9dougou_District),_Burkina_Faso,_June_2014).jpg",
+    "author": "Rik Schuiling / TropCrop - Tropical Crops Services",
+    "catalogId": "dawadawa-dried",
+    "license": "CC BY-SA 3.0"
+  },
+  "iru (locust bean)": {
+    "localNames": "iru (Yoruba, Nigeria)|daddawa (Hausa, Nigeria)|dawadawa (Hausa, Nigeria)|dawadawa (Dagbani, Ghana)|soumbala (Bambara, Mali)|nététou (Wolof, Senegal)",
+    "description": "Pungent fermented seeds of Parkia biglobosa that flavor ayamase, efo riro, ogbono and Sahelian sauces.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b8/Afitin_04.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Afitin_04.jpg",
+    "author": "Aimeabibis",
+    "catalogId": "iru-fermented-locust-beans",
+    "license": "CC BY-SA 4.0"
+  },
+  "cameroon pepper": {
+    "localNames": "Cameroon pepper (Cameroonian English, Cameroon)|piment noir (French, Cameroon)",
+    "description": "Very hot, dark, smoke-dried ground chilli used in pepper soup, ndolé and jollof.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9e/Cameroon_Pepper_Seller_with_Wheelbarrow.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Cameroon_Pepper_Seller_with_Wheelbarrow.jpg",
+    "author": "Johnnybam",
+    "catalogId": "cameroon-pepper",
+    "license": "CC BY-SA 4.0"
+  },
+  "ground crayfish": {
+    "localNames": "ede (Yoruba, Nigeria)|oporo (Igbo, Nigeria)|njanga (Cameroonian Pidgin, Cameroon)|crevettes séchées (French, Cameroon)|shrimps (Ghanaian English, Ghana)",
+    "description": "Pre-ground dried crayfish for soups, stews and jollof.",
+    "imageUrl": "",
+    "source": "",
+    "author": "",
+    "catalogId": "crayfish-ground",
+    "license": ""
+  },
+  "curry powder": {
+    "localNames": "",
+    "description": "Mild yellow curry powder used in Nigerian jollof, fried rice, stews and meat marinades.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/7/70/Curry_powder.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Curry_powder.jpg",
+    "author": "Edithobayaa1",
+    "catalogId": "curry-powder-nigerian",
+    "license": "CC BY-SA 4.0"
+  },
+  "thyme": {
+    "localNames": "",
+    "description": "Dried thyme, paired with curry in nearly every Nigerian stew, jollof and fried rice.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/3/33/Thyme-spice.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Thyme-spice.jpg",
+    "author": "Henna",
+    "catalogId": "thyme-dried",
+    "license": "CC BY-SA 1.0"
+  },
+  "ehuru (calabash nutmeg)": {
+    "localNames": "ehuru (Igbo, Nigeria)|ariwo (Yoruba, Nigeria)|abolabo (Yoruba, Nigeria)|wedeaba (Twi, Ghana)|pèbè (French, Cameroon)",
+    "description": "Aromatic seeds of Monodora myristica, toasted and ground for pepper soup and ofe akwu.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9c/Monodora-myristica-SF26020-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Monodora-myristica-SF26020-01.jpg",
+    "author": "Steve Fitzgerald",
+    "catalogId": "calabash-nutmeg",
+    "license": "CC BY-SA 4.0"
+  },
+  "palm oil": {
+    "localNames": "epo pupa (Yoruba, Nigeria)|manja (Hausa, Nigeria)|zomi (Ewe, Ghana)|abɛ ngo (Twi, Ghana)|ngo (Twi, Ghana)|huile rouge (French, Cameroon)|huile de palme (French, Côte d'Ivoire)|red oil (Krio, Sierra Leone)|palm oil (Liberian English, Liberia)|mafuta ya mbila (Lingala, DR Congo)|mafuta ya mawese (Swahili, Tanzania)|óleo de palma (Portuguese, Angola)|dendém (Portuguese, Angola)",
+    "description": "Unrefined red oil from palm fruit, the base of egusi, ofe akwu, banga, red-red and many West African soups.",
+    "imageUrl": "",
+    "source": "",
+    "author": "",
+    "catalogId": "palm-oil-red",
+    "license": ""
+  },
+  "shea butter": {
+    "localNames": "nkuto (Twi, Ghana)|karité (French, Burkina Faso)|kpangnan (Dioula, Côte d'Ivoire)|sì tulu (Bambara, Mali)|man kadanya (Hausa, Ghana)|ori (Yoruba, Nigeria)|okwuma (Igbo, Nigeria)|man kade (Hausa, Nigeria)",
+    "description": "Ivory butter from shea nuts used on skin and hair, and in northern Ghana for cooking.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c5/Shea_butter.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Shea_butter.jpg",
+    "author": "Amuzujoe",
+    "catalogId": "shea-butter-raw",
+    "license": "CC BY-SA 4.0"
+  },
+  "groundnut oil": {
+    "localNames": "epo epa (Yoruba, Nigeria)|man gyada (Hausa, Nigeria)|diw gerte (Wolof, Senegal)|huile d'arachide (French, Senegal)|nkate ngo (Twi, Ghana)",
+    "description": "Peanut oil used for frying and stews, especially in northern Nigeria.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/2/27/Groundnut_oil.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Groundnut_oil.jpg",
+    "author": "KISUMAR123",
+    "catalogId": "groundnut-oil",
+    "license": "CC0"
+  },
+  "fluted pumpkin leaves (ugu)": {
+    "localNames": "ugu (Igbo, Nigeria)|ugwu (Igbo, Nigeria)|ikong ubong (Efik, Nigeria)",
+    "description": "Dark green leaves of Telfairia occidentalis, the main green in edikang ikong, egusi and vegetable soup.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a3/Fluted_pumpkin_%28Telfairia_occidentalis%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Fluted_pumpkin_(Telfairia_occidentalis).jpg",
+    "author": "Danjuma Anthony",
+    "catalogId": "ugu-leaves-fresh",
+    "license": "CC0"
+  },
+  "ugu leaves": {
+    "localNames": "ugu (Igbo, Nigeria)|ugwu (Igbo, Nigeria)|ikong ubong (Efik, Nigeria)",
+    "description": "Dark green leaves of Telfairia occidentalis, the main green in edikang ikong, egusi and vegetable soup.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a3/Fluted_pumpkin_%28Telfairia_occidentalis%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Fluted_pumpkin_(Telfairia_occidentalis).jpg",
+    "author": "Danjuma Anthony",
+    "catalogId": "ugu-leaves-fresh",
+    "license": "CC0"
+  },
+  "bitter leaf": {
+    "localNames": "onugbu (Igbo, Nigeria)|ewuro (Yoruba, Nigeria)|shuwaka (Hausa, Nigeria)|etidot (Efik, Nigeria)|oriwo (Edo, Nigeria)|awonwono (Twi, Ghana)|ndolé (Duala, Cameroon)",
+    "description": "Pre-washed (de-bittered) bitter leaf, frozen, ready for ofe onugbu and ndolé.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b0/Boules_de_ndole.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Boules_de_ndole.jpg",
+    "author": "Le Zeno",
+    "catalogId": "bitter-leaf-frozen",
+    "license": "CC BY-SA 4.0"
+  },
+  "ewedu (jute leaves)": {
+    "localNames": "ayoyo (Hausa, Ghana)|adémè (Ewe, Togo)|adémè (Ewe, Ghana)|krain krain (Krio, Sierra Leone)|ewedu (Yoruba, Nigeria)|ayoyo (Hausa, Nigeria)|ayoyo (Dagbani, Ghana)|ademe (Ewe, Ghana)|mrenda (Luhya, Kenya)|apoth (Dholuo, Kenya)|murere (Luhya, Kenya)|mulukhiyah (Arabic, Sudan)",
+    "description": "Slimy leaves of Corchorus olitorius cooked into ayoyo soup, adémè sauce or krain krain plasas.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e9/Corchorus_olitorius_%281459401640%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Corchorus_olitorius_(1459401640).jpg",
+    "author": "Dinesh Valke from Thane, India",
+    "catalogId": "jute-leaves",
+    "license": "CC BY-SA 2.0"
+  },
+  "waterleaf": {
+    "localNames": "gbure (Yoruba, Nigeria)|mgbolodi (Igbo, Nigeria)|mmong mmong ikong (Efik, Nigeria)|bologi (Krio, Sierra Leone)|waterleaf (Cameroonian English, Cameroon)",
+    "description": "Succulent leaves of Talinum fruticosum cooked with ugu in edikang ikong and efo riro.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/14/Talinum_fruticosum%2CNativeplants_Botanical_Garden.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Talinum_fruticosum,Nativeplants_Botanical_Garden.jpg",
+    "author": "Nativeplants garden",
+    "catalogId": "waterleaf-fresh",
+    "license": "CC BY-SA 4.0"
+  },
+  "okra": {
+    "localNames": "ila (Yoruba, Nigeria)|okwuru (Igbo, Nigeria)|kubewa (Hausa, Nigeria)|nkruma (Twi, Ghana)|gombo (French, Côte d'Ivoire)|kanja (Wolof, Senegal)|fetri (Ewe, Ghana)|gombo (French, Cameroon)|kandia (Wolof, Senegal)|derere (Shona, Zimbabwe)|therere (Chichewa, Malawi)|bamia (Swahili, Kenya)|bamia (Arabic, Sudan)|bamya (Somali, Somalia)|bamia (Amharic, Ethiopia)|quiabo (Portuguese, Angola)|dongo-dongo (Lingala, DR Congo)",
+    "description": "Green pods chopped or grated for okra soup, ila alasepo and to add body to stews.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/3/32/Bucket_of_raw_okra_pods.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Bucket_of_raw_okra_pods.jpg",
+    "author": "Bill Tarpenning",
+    "catalogId": "okra-fresh",
+    "license": "Public domain"
+  },
+  "scotch bonnet pepper": {
+    "localNames": "ata rodo (Yoruba, Nigeria)|ose (Igbo, Nigeria)|atarugu (Hausa, Nigeria)|mako (Twi, Ghana)|atadi (Ewe, Ghana)|kaani (Wolof, Senegal)|piment (French, Cameroon)|pepe (Krio, Sierra Leone)|scotch bonnet (English, Jamaica)|piment bouc (Haitian Creole, Haiti)",
+    "description": "Very hot, fruity round chili blended with tomatoes and tatashe for stew and jollof.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/97/Scotch_bonnet_chili_pepper.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Scotch_bonnet_chili_pepper.jpg",
+    "author": "Temaciejewski",
+    "catalogId": "pepper-scotch-bonnet",
+    "license": "CC BY-SA 4.0"
+  },
+  "garden eggs": {
+    "localNames": "igba (Yoruba, Nigeria)|anara (Igbo, Nigeria)|gauta (Hausa, Nigeria)|nyaadewa (Twi, Ghana)|ntrowa (Twi, Ghana)|garden egg (Ghanaian English, Ghana)|entula (Luganda, Uganda)|impwa (Bemba, Zambia)|biringanya (Swahili, Kenya)",
+    "description": "Small white, green or yellow eggplant (Solanum aethiopicum) eaten raw with peanut butter or cooked in stews.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/98/Solanum_aethiopicum.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Solanum_aethiopicum.jpg",
+    "author": "Hans B.",
+    "catalogId": "garden-egg",
+    "license": "Public domain"
+  },
+  "stockfish": {
+    "localNames": "okporoko (Igbo, Nigeria)|panla (Yoruba, Nigeria)",
+    "description": "Stockfish sawn into pieces so it soaks and cooks faster.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/3/3d/Stockfish_%28_Okporoko%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Stockfish_(_Okporoko).jpg",
+    "author": "Victorpeter001",
+    "catalogId": "stockfish-cut",
+    "license": "CC BY-SA 4.0"
+  },
+  "dried crayfish": {
+    "localNames": "ede (Yoruba, Nigeria)|oporo (Igbo, Nigeria)|njanga (Cameroonian Pidgin, Cameroon)|crevettes séchées (French, Cameroon)|shrimps (Ghanaian English, Ghana)",
+    "description": "Small smoke-dried estuarine shrimp (sold as crayfish) that flavor almost every Nigerian soup and stew.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/0a/Dried_Crayfish.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Dried_Crayfish.jpg",
+    "author": "Senator BNB",
+    "catalogId": "crayfish-whole-dried",
+    "license": "CC BY-SA 4.0"
+  },
+  "dried fish (eja kika)": {
+    "localNames": "eja aro (Yoruba, Nigeria)|tarwada (Hausa, Nigeria)|smoked catfish (Ghanaian English, Ghana)|silure fumé (French, Côte d'Ivoire)|ngolo (Lingala, DR Congo)|kambale (Swahili, Kenya)|kambale (Luganda, Uganda)|mlamba (Chichewa, Malawi)",
+    "description": "Whole catfish smoked until hard, broken into soups and stews.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/be/Smoked_Fish_%28_Eja_Sisun%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Smoked_Fish_(_Eja_Sisun).jpg",
+    "author": "Similitude01",
+    "catalogId": "smoked-catfish",
+    "license": "CC BY-SA 4.0"
+  },
+  "goat meat": {
+    "localNames": "eran ewure (Yoruba, Nigeria)|anu ewu (Igbo, Nigeria)|naman akuya (Hausa, Nigeria)|aponkye nam (Twi, Ghana)|ntaba (Lingala, DR Congo)|nyama ya mbuzi (Swahili, Kenya)|hilib ari (Somali, Somalia)|ye fiyel siga (Amharic, Ethiopia)|nyama yembudzi (Shona, Zimbabwe)",
+    "description": "Bone-in goat cut with the skin on, for pepper soup, asun and stews.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4c/Frozen_goat_meat_for_sale_at_Lucky.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Frozen_goat_meat_for_sale_at_Lucky.jpg",
+    "author": "Grendelkhan",
+    "catalogId": "goat-meat-frozen",
+    "license": "CC BY-SA 3.0"
+  },
+  "cow foot": {
+    "localNames": "bokoto (Yoruba, Nigeria)",
+    "description": "Cut cow feet slow-cooked for nkwobi, pepper soup and stews.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/07/Nkwobi_delicacy.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Nkwobi_delicacy.jpg",
+    "author": "Bukky658",
+    "catalogId": "cow-foot",
+    "license": "CC BY-SA 4.0"
+  },
+  "ponmo (cow skin)": {
+    "localNames": "ponmo (Yoruba, Nigeria)|kpomo (Igbo, Nigeria)|ganda (Hausa, Nigeria)|wele (Twi, Ghana)",
+    "description": "Pre-soaked soft cow skin pieces ready for stew and pepper soup.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e3/Display_of_cow_skin_02.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Display_of_cow_skin_02.jpg",
+    "author": "Umshushima",
+    "catalogId": "ponmo-frozen",
+    "license": "CC BY-SA 4.0"
+  },
+  "chin chin": {
+    "localNames": "chin chin (Nigerian English, Nigeria)",
+    "description": "Crunchy fried sweet dough cubes, the classic Nigerian party snack.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/01/A_fried_chin_chin.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:A_fried_chin_chin.jpg",
+    "author": "Linason Blessing",
+    "catalogId": "chin-chin",
+    "license": "CC BY-SA 4.0"
+  },
+  "puff puff mix": {
+    "localNames": "puff puff (Nigerian English, Nigeria)|beignets (French, Cameroon)|bofrot (Twi, Ghana)|toogbei (Ga, Ghana)|yovo doko (Ewe, Togo)",
+    "description": "Flour, yeast and sugar mix for deep-fried puff puff dough balls.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a3/Nigerian-puff-puff-recipe_cropped.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Nigerian-puff-puff-recipe_cropped.jpg",
+    "author": "Afrolems ; cropped by Off-shell",
+    "catalogId": "puff-puff-mix",
+    "license": "CC BY-SA 4.0"
+  },
+  "plantain chips": {
+    "localNames": "ipekere (Yoruba, Nigeria)",
+    "description": "Thin crisp chips of unripe plantain fried in oil, salted or spiced.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b7/Chips_made_from_plantain.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Chips_made_from_plantain.jpg",
+    "author": "Daniel Paullll",
+    "catalogId": "plantain-chips-unripe",
+    "license": "CC BY-SA 4.0"
+  },
+  "kulikuli (groundnut cake)": {
+    "localNames": "kuli kuli (Hausa, Nigeria)|kulikuli (Yoruba, Nigeria)|kluiklui (Fon, Benin)|kulikuli (Hausa, Ghana)",
+    "description": "Crunchy fried sticks or rings of pressed peanut paste, eaten with garri or ground for suya spice.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/3/3e/Kuli-Kuli.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Kuli-Kuli.jpg",
+    "author": "AgnesAbah",
+    "catalogId": "kuli-kuli",
+    "license": "CC0"
+  },
+  "zobo (hibiscus) drink": {
+    "localNames": "bissap (Wolof, Senegal)|sobolo (Ghanaian English, Ghana)|wonjo (Mandinka, Gambia)|zobo (Hausa, Nigeria)",
+    "description": "Ready-to-drink sweetened hibiscus drink, usually spiced with ginger, mint or pineapple.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/07/Sobolo.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sobolo.jpg",
+    "author": "Noahalorwu",
+    "catalogId": "hibiscus-drink-bottled",
+    "license": "CC BY-SA 4.0"
+  },
+  "malt drink": {
+    "localNames": "",
+    "description": "Nigerian Breweries' non-alcoholic malt drink, Nigeria's oldest malt brand.",
+    "imageUrl": "",
+    "source": "",
+    "author": "",
+    "catalogId": "maltina",
+    "license": ""
+  },
+  "dried hibiscus flowers": {
+    "localNames": "bissap (Wolof, Senegal)|sobolo (Ghanaian English, Ghana)|wonjo (Mandinka, Gambia)|foléré (Fulfulde, Cameroon)|dah (Bambara, Mali)|zobo (Hausa, Nigeria)|isapa (Yoruba, Nigeria)|karkade (Arabic, Sudan)|كركديه (Arabic, Sudan)|sorrel (English, Jamaica)|sorrel (English, Trinidad and Tobago)",
+    "description": "Dried red calyces of Hibiscus sabdariffa steeped with ginger and sugar into bissap or sobolo.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/84/Zobo_leaf_seller.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Zobo_leaf_seller.jpg",
+    "author": "Major Lyte",
+    "catalogId": "hibiscus-dried",
+    "license": "CC BY-SA 4.0"
+  },
+  "dried zobo leaves": {
+    "localNames": "bissap (Wolof, Senegal)|sobolo (Ghanaian English, Ghana)|wonjo (Mandinka, Gambia)|foléré (Fulfulde, Cameroon)|dah (Bambara, Mali)|zobo (Hausa, Nigeria)|isapa (Yoruba, Nigeria)|karkade (Arabic, Sudan)|كركديه (Arabic, Sudan)|sorrel (English, Jamaica)|sorrel (English, Trinidad and Tobago)",
+    "description": "Dried red calyces of Hibiscus sabdariffa steeped with ginger and sugar into bissap or sobolo.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/84/Zobo_leaf_seller.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Zobo_leaf_seller.jpg",
+    "author": "Major Lyte",
+    "catalogId": "hibiscus-dried",
+    "license": "CC BY-SA 4.0"
+  },
+  "tomato paste": {
+    "localNames": "",
+    "description": "Double-concentrated tomato paste for stew and jollof.",
+    "imageUrl": "",
+    "source": "",
+    "author": "",
+    "catalogId": "tomato-paste-gino",
+    "license": ""
+  },
+  "maggi cubes": {
+    "localNames": "",
+    "description": "Nestlé's West African bouillon cube used in nearly every Nigerian soup, stew and jollof.",
+    "imageUrl": "",
+    "source": "",
+    "author": "",
+    "catalogId": "maggi-star-cubes",
+    "license": ""
+  },
+  "peak milk": {
+    "localNames": "",
+    "description": "Full-cream evaporated milk from FrieslandCampina WAMCO, added to tea, cereal, ogi and custard.",
+    "imageUrl": "",
+    "source": "",
+    "author": "",
+    "catalogId": "peak-evaporated-milk",
+    "license": ""
+  }
+}

@@ -1,74 +1,107 @@
-import Image from "next/image";
-import { User, MapPin, Truck, ShieldCheck, RefreshCw } from "lucide-react";
+﻿import Image from "next/image";
 import type { StoreProfile } from "@/lib/storefront/service";
-
-export function TrustStoryStrip({ profile }: { profile: StoreProfile }) {
+import { editorial } from "@/lib/storefront/editorial";
+const DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+export function TrustStoryStrip({
+  profile,
+  demo = false,
+}: {
+  profile: StoreProfile;
+  demo?: boolean;
+}) {
   if (!profile.ownerName && !profile.ownerStory) return null;
-
-  const excerpt =
-    profile.ownerStory && profile.ownerStory.length > 120
-      ? profile.ownerStory.slice(0, 120).trimEnd() + "…"
-      : profile.ownerStory;
-
+  const actualPhoto =
+    profile.ownerPhotoUrl && !profile.ownerPhotoUrl.endsWith(".svg")
+      ? profile.ownerPhotoUrl
+      : null;
+  const year = profile.ownerStory?.match(/since (\d{4})/)?.[1];
+  const hours =
+    profile.hours &&
+    typeof profile.hours === "object" &&
+    !Array.isArray(profile.hours)
+      ? (profile.hours as Record<string, unknown>)
+      : {};
   return (
     <section
+      className="sf-story sf-container"
       data-testid="trust-strip"
-      className="border-t border-line bg-surface px-4 py-6 sm:px-6"
+      id="our-story"
     >
-      <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 sm:flex-row sm:gap-6">
-        <div className="shrink-0">
-          {profile.ownerPhotoUrl ? (
-            <Image
-              src={profile.ownerPhotoUrl}
-              alt={profile.ownerName || "Store owner"}
-              width={64}
-              height={64}
-              className="h-16 w-16 rounded-full object-cover"
-            />
-          ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-soft">
-              <User className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
+      <figure className="sf-story-photo">
+        <Image
+          src={actualPhoto || editorial.market}
+          alt={
+            actualPhoto
+              ? profile.ownerName || "Store owner"
+              : "Bodija Market in Ibadan, Nigeria"
+          }
+          fill
+          sizes="(max-width:767px) 100vw, 360px"
+        />
+        {!actualPhoto && (
+          <figcaption>
+            Market inspiration · Bodija, Ibadan · Tunde Buremo
+          </figcaption>
+        )}
+      </figure>
+      <div>
+        <h2>
+          A familiar face.
+          <br />A taste of home.
+        </h2>
+        <p>
+          {profile.ownerName}
+          {profile.neighborhood && ` · ${profile.neighborhood}`}
+        </p>
+        {demo && <span className="sf-badge">Demo store story</span>}
+        <p>{profile.ownerStory?.split(". ")[0]}.</p>
+        <details>
+          <summary>Read more about our store</summary>
+          <p>{profile.ownerStory}</p>
+          <p>
+            Nothing is swapped without your approval. If an item is short, you
+            choose a swap or a refund.
+          </p>
+        </details>
+        <div className="sf-story-facts">
+          {year && (
+            <div>
+              <strong>{new Date().getFullYear() - Number(year)} years</strong>
+              <span>Part of the neighborhood</span>
             </div>
           )}
+          <div>
+            <strong>{profile.deliveryRadiusMi} miles</strong>
+            <span>Local delivery radius</span>
+          </div>
         </div>
-
-        <div className="min-w-0 flex-1 text-center sm:text-left">
-          {profile.ownerName && (
-            <p className="font-display text-base font-bold text-ink">
-              {profile.ownerName}
-            </p>
+      </div>
+      <div className="sf-hours">
+        <h3>Come on in</h3>
+        <dl>
+          {DAYS.map((day) =>
+            typeof hours[day] === "string" ? (
+              <div key={day}>
+                <dt>{day}</dt>
+                <dd>{String(hours[day])}</dd>
+              </div>
+            ) : null,
           )}
-          {excerpt && (
-            <p className="mt-0.5 font-body text-sm leading-relaxed text-muted-foreground">
-              {excerpt}
-            </p>
-          )}
-        </div>
-
-        <div className="flex shrink-0 flex-col gap-2 text-center sm:text-right">
-          {profile.neighborhood && (
-            <span className="inline-flex items-center justify-center gap-1.5 font-label text-[13px] text-muted-foreground sm:justify-end">
-              <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-              {profile.neighborhood}
-            </span>
-          )}
-          {profile.deliveryInfo && (
-            <span className="inline-flex items-center justify-center gap-1.5 font-label text-[13px] text-muted-foreground sm:justify-end">
-              <Truck className="h-3.5 w-3.5" aria-hidden="true" />
-              {profile.deliveryInfo}
-            </span>
-          )}
-          {profile.pickupEnabled && (
-            <span className="inline-flex items-center justify-center gap-1.5 font-label text-[13px] text-muted-foreground sm:justify-end">
-              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-              Pickup available
-            </span>
-          )}
-          <span className="inline-flex items-center justify-center gap-1.5 font-label text-[13px] text-muted-foreground sm:justify-end">
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-            Wrong item? We swap it free
-          </span>
-        </div>
+        </dl>
+        <p>
+          {profile.pickupEnabled
+            ? `Pickup ready in about ${profile.prepTimeMinutes} minutes.`
+            : "Delivery available. Pickup is not offered."}
+        </p>
+        <p>No swaps without your approval.</p>
       </div>
     </section>
   );

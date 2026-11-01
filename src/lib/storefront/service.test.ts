@@ -11,6 +11,7 @@ import {
   getActiveCollections,
   getCollectionListings,
   getListingsByCategory,
+  getFlowCatalog,
 } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -25,6 +26,19 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let listingBId: string;
   let inactiveListingId: string;
   let collectionId: string;
+
+  it("projects checkout catalog variants without crossing stores or including inactive listings", async () => {
+    const [a, b] = await Promise.all([getFlowCatalog(storeAId), getFlowCatalog(storeBId)]);
+    expect(a.some(item => item.listingId === listingAId)).toBe(true);
+    expect(a.some(item => item.listingId === listingBId || item.listingId === inactiveListingId)).toBe(false);
+    expect(b.some(item => item.listingId === listingBId)).toBe(true);
+    expect(b.some(item => item.listingId === listingAId)).toBe(false);
+    for (const item of a) {
+      expect(item.weightG).toBeGreaterThan(0);
+      expect(item.maxPerOrder).toBeGreaterThan(0);
+      expect(Number.isInteger(item.price)).toBe(true);
+    }
+  });
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -317,6 +331,10 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     const listing = result.listings.find((l) => l.id === listingAId);
     expect(listing).toBeDefined();
     expect(listing!.startingPrice).toBe(500);
+    expect(listing!.packLabels).toEqual(expect.arrayContaining(["1 bunch", "3 bunches"]));
+    expect(listing!.packOptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "3 bunches", price: 1400, weightG: 600 }),
+    ]));
   });
 
   it("inactive listing excluded from category browse", async () => {

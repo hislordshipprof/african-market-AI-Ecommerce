@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "../components/storefront/storefront.css";
+@import "../components/storefront/flow/flow.css";
 
 @custom-variant dark (&:is(.dark *));
 

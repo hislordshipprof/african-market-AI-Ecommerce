@@ -1,63 +1,31 @@
-import Link from "next/link";
-import { MapPin } from "lucide-react";
+﻿import Link from "next/link";
 import type { ValidatedStore } from "@/lib/get-store";
-
 export function StorefrontFooter({ store }: { store: ValidatedStore }) {
   return (
-    <footer
-      data-testid="storefront-footer"
-      className="bg-primary-deep text-on-primary"
-    >
-      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-        <div className="grid gap-8 sm:grid-cols-3">
+    <footer className="sf-footer" data-testid="storefront-footer">
+      <div className="sf-container">
+        <div className="sf-footer-top">
           <div>
-            <h3 className="font-display text-base font-bold">{store.name}</h3>
-            {store.neighborhood && (
-              <p className="mt-1 flex items-center gap-1.5 font-body text-sm text-on-primary/70">
-                <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-                {store.neighborhood}
-              </p>
-            )}
-            {store.deliveryInfo && (
-              <p className="mt-1 font-body text-sm text-on-primary/70">
-                {store.deliveryInfo}
-              </p>
-            )}
-          </div>
-
-          <div>
-            <h3 className="font-label text-[13px] uppercase tracking-wider text-on-primary/70">
-              Quick links
-            </h3>
-            <ul className="mt-2 space-y-1.5 font-body text-sm text-on-primary/80">
-              <li>
-                <Link href="/" className="hover:text-on-primary focus-visible:text-on-primary focus-visible:outline-none focus-visible:underline">
-                  Home
-                </Link>
-              </li>
-              <li>
-                <Link href="/search" className="hover:text-on-primary focus-visible:text-on-primary focus-visible:outline-none focus-visible:underline">
-                  Search
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <h3 className="font-label text-[13px] uppercase tracking-wider text-on-primary/70">
-              About
-            </h3>
-            <p className="mt-2 font-body text-sm text-on-primary/70">
-              Powered by the Platform
+            <h2 className="sf-footer-brand">{store.name}</h2>
+            <p>
+              {store.neighborhood ||
+                "Your independent neighborhood grocery store."}
             </p>
           </div>
+          <nav aria-label="Footer">
+            <Link href="/">Home</Link>
+            <Link href="/categories">All aisles</Link>
+            <Link href="/search">Search</Link>
+            <Link href="/#our-story">Our story</Link>
+            <a href="/images/CREDITS.md">Photo credits</a>
+          </nav>
         </div>
-      </div>
-
-      <div className="border-t border-on-primary/10 px-4 py-4 text-center">
-        <p className="font-body text-[13px] text-on-primary/60">
-          &copy; {new Date().getFullYear()} {store.name}. All rights reserved.
-        </p>
+        <div className="sf-footer-bottom">
+          <span>
+            © {new Date().getFullYear()} {store.name}
+          </span>
+          <span>Powered by the Platform</span>
+        </div>
       </div>
     </footer>
   );

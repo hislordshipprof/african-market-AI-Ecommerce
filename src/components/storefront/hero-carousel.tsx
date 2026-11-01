@@ -1,185 +1,181 @@
-"use client";
-
-import { useState, useCallback } from "react";
+﻿"use client";
+import { useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
+import {
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  ShieldCheck,
+  Store,
+  Truck,
+} from "lucide-react";
 import type { StorefrontBanner } from "@/lib/storefront/service";
-
-const variants = {
-  enter: (dir: number) => ({ x: dir > 0 ? "100%" : "-100%", opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit: (dir: number) => ({ x: dir > 0 ? "-100%" : "100%", opacity: 0 }),
-};
-
-function BannerContent({ banner }: { banner: StorefrontBanner }) {
-  return (
-    <>
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${banner.imageUrl})` }}
-      />
-      <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-transparent" />
-      <div className="relative flex h-full items-center px-6 sm:px-8">
-        <div className="max-w-md">
-          <h2
-            className="font-display text-white"
-            style={{
-              fontSize: "clamp(20px, 3.5vw, 36px)",
-              fontWeight: 700,
-              lineHeight: 1.1,
-            }}
-          >
-            {banner.title}
-          </h2>
-          {banner.subtitle && (
-            <p className="mt-2 font-body text-sm text-white/80 sm:text-base">
-              {banner.subtitle}
-            </p>
-          )}
-          {banner.ctaText && banner.ctaHref && (
-            <Link
-              href={banner.ctaHref}
-              className="mt-3 inline-flex h-11 items-center rounded-pill bg-white px-6 font-label text-sm font-semibold text-primary-deep transition-opacity hover:opacity-90"
-            >
-              {banner.ctaText}
-            </Link>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
+import { editorial, photoOrFallback } from "@/lib/storefront/editorial";
 
 export function HeroCarousel({ banners }: { banners: StorefrontBanner[] }) {
-  const reduced = useReducedMotion();
   const [index, setIndex] = useState(0);
-  const [dir, setDir] = useState(1);
-
-  const go = useCallback(
-    (next: number, direction: number) => {
-      setDir(direction);
-      setIndex(((next % banners.length) + banners.length) % banners.length);
-    },
-    [banners.length],
-  );
-
-  if (banners.length === 0) return null;
-
-  const safeIndex = index >= banners.length ? 0 : index;
+  const reduced = useReducedMotion();
+  if (!banners.length) return null;
+  const safeIndex = index % banners.length;
   const banner = banners[safeIndex];
-  const nextBanner = banners[(safeIndex + 1) % banners.length];
-  const hasMultiple = banners.length > 1;
-
+  const go = (next: number) =>
+    setIndex((next + banners.length) % banners.length);
+  const fallback = [editorial.jollof, editorial.spices, editorial.market][
+    safeIndex % 3
+  ];
   return (
     <section
+      className="sf-hero-wrap sf-container"
       data-testid="hero-carousel"
-      className="relative w-full bg-raised"
+      aria-roledescription="carousel"
+      aria-label="Store offers"
     >
-      <div className="mx-auto flex max-w-6xl gap-3 px-4 py-3 sm:px-6">
-        {/* Main carousel panel */}
+      <div className="sf-hero-grid">
         <div
-          className="relative w-full overflow-hidden rounded-lg lg:w-2/3"
-          style={{ aspectRatio: "16/9", maxHeight: 380 }}
+          className="sf-hero"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight") {
+              e.preventDefault();
+              go(safeIndex + 1);
+            }
+            if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              go(safeIndex - 1);
+            }
+            if (e.key === "Home") {
+              e.preventDefault();
+              go(0);
+            }
+            if (e.key === "End") {
+              e.preventDefault();
+              go(banners.length - 1);
+            }
+          }}
         >
-          <AnimatePresence initial={false} custom={dir} mode="popLayout">
+          <AnimatePresence initial={false} mode="wait">
             <motion.div
               key={banner.id}
-              custom={dir}
-              variants={variants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              drag={hasMultiple ? "x" : false}
-              dragConstraints={{ left: 0, right: 0 }}
-              dragElastic={0.12}
-              onDragEnd={(_e, info) => {
-                const swipe = info.offset.x;
-                if (swipe < -50) go(safeIndex + 1, 1);
-                else if (swipe > 50) go(safeIndex - 1, -1);
+              className="sf-hero-slide"
+              role="group"
+              aria-roledescription="slide"
+              aria-label={`${safeIndex + 1} of ${banners.length}`}
+              initial={reduced ? false : { opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={reduced ? { opacity: 1 } : { opacity: 0, x: -24 }}
+              transition={{
+                duration: reduced ? 0 : 0.4,
+                ease: [0.45, 0, 0.05, 1],
               }}
-              transition={
-                reduced
-                  ? { duration: 0 }
-                  : { duration: 0.4, ease: [0.4, 0.4, 0, 1] }
-              }
-              className="absolute inset-0"
+              drag={banners.length > 1 ? "x" : false}
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={reduced ? 0 : 0.1}
+              onDragEnd={(_, info) => {
+                if (info.offset.x < -45) go(safeIndex + 1);
+                if (info.offset.x > 45) go(safeIndex - 1);
+              }}
             >
-              <BannerContent banner={banner} />
+              <div className="sf-hero-copy">
+                <h2 data-testid="banner-title">{banner.title}</h2>
+                {banner.subtitle && <p>{banner.subtitle}</p>}
+                {banner.ctaText && banner.ctaHref && (
+                  <Link href={banner.ctaHref} className="sf-button">
+                    {banner.ctaText}
+                    <ArrowRight size={16} aria-hidden />
+                  </Link>
+                )}
+              </div>
+              <div className="sf-hero-photo">
+                <Image
+                  src={photoOrFallback(banner.imageUrl, fallback)}
+                  alt=""
+                  fill
+                  sizes="(max-width:767px) 45vw, (max-width:1280px) 32vw, 440px"
+                  priority={safeIndex === 0}
+                  draggable={false}
+                />
+              </div>
             </motion.div>
           </AnimatePresence>
-
-          {hasMultiple && (
-            <>
-              <button
-                type="button"
-                onClick={() => go(safeIndex - 1, -1)}
-                className="absolute left-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface text-ink shadow-md transition-colors hover:bg-raised focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 md:flex"
-                aria-label="Previous slide"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => go(safeIndex + 1, 1)}
-                className="absolute right-3 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface text-ink shadow-md transition-colors hover:bg-raised focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 md:flex"
-                aria-label="Next slide"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            </>
+          {banners.length > 1 && (
+            <div className="sf-hero-controls">
+              <div className="sf-hero-dots">
+                {banners.map((b, i) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    className="sf-hero-dot"
+                    data-testid="carousel-dot"
+                    aria-current={i === safeIndex ? "true" : undefined}
+                    aria-label={`Go to slide ${i + 1}`}
+                    onClick={() => go(i)}
+                  >
+                    <span />
+                  </button>
+                ))}
+              </div>
+              <span className="sr-only" aria-live="polite">
+                Slide {safeIndex + 1} of {banners.length}: {banner.title}
+              </span>
+              <div className="sf-hero-arrows">
+                <button
+                  type="button"
+                  className="sf-round-button"
+                  aria-label="Previous slide"
+                  onClick={() => go(safeIndex - 1)}
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="sf-round-button"
+                  aria-label="Next slide"
+                  onClick={() => go(safeIndex + 1)}
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
           )}
         </div>
-
-        {/* Side tile — desktop only */}
-        {hasMultiple && (
-          <button
-            type="button"
-            onClick={() => go(safeIndex + 1, 1)}
-            className="relative hidden w-1/3 overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 lg:block"
-            aria-label={`Next: ${nextBanner.title}`}
-          >
-            <div
-              className="absolute inset-0 bg-cover bg-center transition-all duration-300 hover:scale-[1.03]"
-              style={{
-                backgroundImage: `url(${nextBanner.imageUrl})`,
-                transitionTimingFunction: "var(--ease-std)",
-              }}
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
-            <div className="relative flex h-full flex-col justify-end p-5">
-              <span className="font-display text-lg font-bold leading-tight text-white">
-                {nextBanner.title}
-              </span>
-            </div>
-          </button>
-        )}
+        <Link href="/categories/spices-and-seasonings" className="sf-offer">
+          <Image
+            src={editorial.spices}
+            alt="Bowls of spices and peppers"
+            fill
+            sizes="(max-width:767px) 1px, 400px"
+            priority
+          />
+          <div className="sf-photo-scrim" />
+          <div className="sf-offer-copy">
+            <h3>
+              Big flavor.
+              <br />
+              Small essentials.
+            </h3>
+            <p>Build your spice cupboard, one familiar favorite at a time.</p>
+            <span className="sf-offer-link">
+              Explore the pantry <ArrowRight size={18} />
+            </span>
+          </div>
+        </Link>
       </div>
-
-      {/* Dots — below the panels */}
-      {hasMultiple && (
-        <div className="flex justify-center gap-2 pb-3">
-          {banners.map((b, i) => (
-            <button
-              key={b.id}
-              type="button"
-              data-testid="carousel-dot"
-              onClick={() => go(i, i > safeIndex ? 1 : -1)}
-              aria-current={i === safeIndex ? "true" : undefined}
-              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
-              aria-label={`Go to slide ${i + 1}`}
-            >
-              <span
-                className={`block h-2 rounded-pill transition-all ${
-                  i === safeIndex
-                    ? "w-6 bg-primary"
-                    : "w-2 bg-muted/40 hover:bg-muted/60"
-                }`}
-              />
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="sf-reassurance">
+        <span>
+          <Store size={16} />
+          Your neighborhood store, online
+        </span>
+        <span>
+          <ShieldCheck size={16} />
+          No swaps without your say
+        </span>
+        <span>
+          <Truck size={16} />
+          Local delivery & easy pickup
+        </span>
+      </div>
     </section>
   );
 }

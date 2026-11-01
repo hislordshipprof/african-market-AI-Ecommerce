@@ -1,51 +1,48 @@
+﻿import Image from "next/image";
 import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
 import type { StorefrontCollection } from "@/lib/storefront/service";
-
+import { editorial, photoOrFallback } from "@/lib/storefront/editorial";
+import { SectionHeader } from "./primitives";
 export function CollectionBanners({
   collections,
 }: {
   collections: StorefrontCollection[];
 }) {
-  if (collections.length === 0) return null;
-
+  if (!collections.length) return null;
   return (
     <section
       data-testid="collection-banners"
       aria-labelledby="collections-heading"
     >
-      <h2
+      <SectionHeader
         id="collections-heading"
-        className="mb-4 font-display text-[22px] font-bold leading-[1.2] text-ink"
-      >
-        Curated collections
-      </h2>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {collections.map((col) => (
+        title="Good meals start here"
+        description="A little inspiration for your next gathering."
+      />
+      <div className="sf-collections">
+        {collections.map((col, i) => (
           <Link
             key={col.id}
             href={`/collections/${col.slug}`}
-            className="group relative overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
-            style={{ aspectRatio: "21/9" }}
+            className="sf-collection-card"
           >
-            <div
-              className="absolute inset-0 bg-primary-deep bg-cover bg-center transition-all duration-300 group-hover:brightness-110"
-              style={{
-                backgroundImage: col.imageUrl
-                  ? `url(${col.imageUrl})`
-                  : undefined,
-                transitionTimingFunction: "var(--ease-std)",
-              }}
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-            <div className="relative flex h-full flex-col justify-end p-4 sm:p-5">
-              <h3 className="font-display text-lg font-bold text-white sm:text-xl">
-                {col.title}
-              </h3>
-              {col.subtitle && (
-                <p className="mt-0.5 font-body text-sm text-white/80">
-                  {col.subtitle}
-                </p>
+            <Image
+              src={photoOrFallback(
+                col.imageUrl,
+                i % 2 ? editorial.spices : editorial.jollof,
               )}
+              alt=""
+              fill
+              sizes="(max-width:767px) 100vw, 600px"
+            />
+            <div className="sf-photo-scrim" />
+            <div>
+              <h3>{col.title}</h3>
+              {col.subtitle && <p>{col.subtitle}</p>}
+              <span className="sf-round-button">
+                <ArrowUpRight size={20} aria-hidden />
+              </span>
             </div>
           </Link>
         ))}

@@ -1,5 +1,44 @@
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { stockBadge, type StockBadge } from "./stock-badge";
+import { catalogFor, localNameFor } from "./catalog";
+import type { FlowCatalogItem } from "../customer-flow/contracts";
+
+/** Read-only, tenant-scoped catalog projection for the demo journey adapters. */
+export async function getFlowCatalog(
+  storeId: string,
+): Promise<FlowCatalogItem[]> {
+  const listings = await storeScoped(storeId).listing.findMany({
+    where: { active: true },
+    include: {
+      masterProduct: true,
+      variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  return listings.flatMap((listing) => {
+    const item = toStorefrontListing(listing);
+    const base = {
+      listingId: listing.id,
+      name: item.displayName,
+      imageUrl: item.imageUrl,
+      categoryId: listing.masterProduct?.categoryId ?? "uncategorized",
+      frozen: listing.frozen,
+      maxPerOrder: listing.maxPerOrder ?? 99,
+      available:
+        !(listing.stockMode === "counted" && (listing.qty ?? 0) <= 0) &&
+        !(listing.stockMode === "status" && listing.status === "out_of_stock"),
+    };
+    return listing.variants.length
+      ? listing.variants.map((variant) => ({
+          ...base,
+          variantId: variant.id,
+          price: variant.price,
+          packLabel: variant.label,
+          weightG: variant.weightG,
+        }))
+      : [{ ...base, price: listing.price, packLabel: "Each", weightG: 500 }];
+  });
+}
 
 export async function listCategories() {
   return platform.category.findMany({
@@ -15,6 +54,17 @@ export interface StorefrontListing {
   badge: StockBadge;
   frozen: boolean;
   perishable: boolean;
+  imageUrl?: string;
+  variantId?: string;
+  packLabel?: string;
+  weightG?: number;
+  packLabels?: string[];
+  packOptions?: {
+    id: string;
+    label: string;
+    price: number;
+    weightG?: number;
+  }[];
 }
 
 function deriveNames(
@@ -40,18 +90,42 @@ function toStorefrontListing(listing: {
   frozen: boolean;
   perishable: boolean;
   masterProduct: { name: string } | null;
-  variants: { price: number }[];
+  variants: { id?: string; label?: string; price: number; weightG?: number }[];
 }): StorefrontListing {
   const startingPrice =
     listing.variants.length > 0
       ? Math.min(...listing.variants.map((v) => v.price))
       : listing.price;
 
-  const names = deriveNames(listing.customName, listing.masterProduct?.name ?? null);
+  const names = deriveNames(
+    listing.customName,
+    listing.masterProduct?.name ?? null,
+  );
+  const pack = [...listing.variants].sort(
+    (a, b) => a.price - b.price || (a.id ?? "").localeCompare(b.id ?? ""),
+  )[0];
+  const photo = catalogFor(listing.customName, listing.masterProduct?.name);
 
   return {
     id: listing.id,
     ...names,
+    altName: names.altName ?? localNameFor(names.displayName),
+    imageUrl: photo?.imageUrl || undefined,
+    variantId: pack?.id,
+    packLabel: pack?.label ?? "Each",
+    weightG: pack?.weightG,
+    packOptions: listing.variants.flatMap((v) =>
+      v.id && v.label
+        ? [{ id: v.id, label: v.label, price: v.price, weightG: v.weightG }]
+        : [],
+    ),
+    packLabels: [
+      ...new Set(
+        listing.variants
+          .map((v) => v.label)
+          .filter((label): label is string => !!label),
+      ),
+    ],
     startingPrice,
     badge: stockBadge({
       confidence: listing.confidence,
@@ -67,7 +141,10 @@ function toStorefrontListing(listing: {
 export async function listingsByCategory(
   storeId: string,
   categorySlug: string,
-): Promise<{ category: { name: string; slug: string } | null; listings: StorefrontListing[] }> {
+): Promise<{
+  category: { name: string; slug: string } | null;
+  listings: StorefrontListing[];
+}> {
   const category = await platform.category.findUnique({
     where: { slug: categorySlug },
   });
@@ -79,7 +156,7 @@ export async function listingsByCategory(
       active: true,
       masterProduct: { categoryId: category.id },
     },
-    include: { masterProduct: true, variants: { select: { price: true } } },
+    include: { masterProduct: true, variants: true },
     orderBy: { createdAt: "desc" },
   });
 
@@ -96,6 +173,10 @@ export interface StorefrontListingDetail {
   badge: StockBadge;
   frozen: boolean;
   perishable: boolean;
+  imageUrl?: string;
+  description?: string;
+  categorySlug?: string;
+  price: number;
   variants: {
     id: string;
     label: string;
@@ -111,16 +192,28 @@ export async function getListingDetail(
   const scoped = storeScoped(storeId);
   const listing = await scoped.listing.findUnique({
     where: { id: listingId },
-    include: { masterProduct: true, variants: true },
+    include: {
+      masterProduct: { include: { category: true } },
+      variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
+    },
   });
 
   if (!listing || !listing.active) return null;
 
-  const names = deriveNames(listing.customName, listing.masterProduct?.name ?? null);
+  const names = deriveNames(
+    listing.customName,
+    listing.masterProduct?.name ?? null,
+  );
+  const photo = catalogFor(listing.customName, listing.masterProduct?.name);
 
   return {
     id: listing.id,
     ...names,
+    altName: names.altName ?? localNameFor(names.displayName),
+    imageUrl: photo?.imageUrl || undefined,
+    description: photo?.description,
+    categorySlug: listing.masterProduct?.category?.slug,
+    price: listing.price,
     badge: stockBadge({
       confidence: listing.confidence,
       stockMode: listing.stockMode,
@@ -144,6 +237,12 @@ export interface SearchResult {
   altName?: string;
   price: number;
   badge: StockBadge;
+  frozen: boolean;
+  perishable: boolean;
+  imageUrl?: string;
+  variantId?: string;
+  packLabel?: string;
+  weightG?: number;
 }
 
 interface RawSearchRow {
@@ -156,6 +255,11 @@ interface RawSearchRow {
   qty: number | null;
   status: string | null;
   min_variant_price: number | null;
+  variant_id: string | null;
+  pack_label: string | null;
+  weight_g: number | null;
+  frozen: boolean;
+  perishable: boolean;
 }
 
 export async function searchListings(
@@ -177,10 +281,20 @@ export async function searchListings(
       l.stock_mode,
       l.qty,
       l.status,
-      (SELECT MIN(lv.price) FROM listing_variants lv WHERE lv.listing_id = l.id) AS min_variant_price
+      l.frozen,
+      l.perishable,
+      pack.price AS min_variant_price,
+      pack.id AS variant_id,
+      pack.label AS pack_label,
+      pack.weight_g
     FROM listings l
     LEFT JOIN master_products mp ON l.master_product_id = mp.id
     LEFT JOIN product_synonyms ps ON ps.product_id = mp.id
+    LEFT JOIN LATERAL (
+      SELECT lv.id, lv.label, lv.price, lv.weight_g
+      FROM listing_variants lv WHERE lv.listing_id = l.id
+      ORDER BY lv.price, lv.id LIMIT 1
+    ) pack ON true
     WHERE l.active = true
       AND (
         l.search_vector @@ plainto_tsquery('english', ${trimmed})
@@ -200,8 +314,16 @@ export async function searchListings(
     return {
       id: row.id,
       name: names.displayName,
-      altName: names.altName,
+      altName: names.altName ?? localNameFor(names.displayName),
+      imageUrl:
+        catalogFor(row.custom_name, row.master_product_name)?.imageUrl ||
+        undefined,
+      variantId: row.variant_id ?? undefined,
+      packLabel: row.pack_label ?? "Each",
+      weightG: row.weight_g ?? undefined,
       price: row.min_variant_price ?? row.price,
+      frozen: row.frozen,
+      perishable: row.perishable,
       badge: stockBadge({
         confidence: row.confidence,
         stockMode: row.stock_mode,
@@ -212,11 +334,13 @@ export async function searchListings(
   });
 }
 
-export async function getActiveListings(storeId: string): Promise<StorefrontListing[]> {
+export async function getActiveListings(
+  storeId: string,
+): Promise<StorefrontListing[]> {
   const scoped = storeScoped(storeId);
   const listings = await scoped.listing.findMany({
     where: { active: true },
-    include: { masterProduct: true, variants: { select: { price: true } } },
+    include: { masterProduct: true, variants: true },
     orderBy: { createdAt: "desc" },
   });
 
@@ -232,7 +356,9 @@ export interface StorefrontBanner {
   imageUrl: string;
 }
 
-export async function getActiveBanners(storeId: string): Promise<StorefrontBanner[]> {
+export async function getActiveBanners(
+  storeId: string,
+): Promise<StorefrontBanner[]> {
   const scoped = storeScoped(storeId);
   const banners = await scoped.storeBanner.findMany({
     where: { active: true },
@@ -257,7 +383,9 @@ export interface StorefrontCollection {
   slug: string;
 }
 
-export async function getActiveCollections(storeId: string): Promise<StorefrontCollection[]> {
+export async function getActiveCollections(
+  storeId: string,
+): Promise<StorefrontCollection[]> {
   const scoped = storeScoped(storeId);
   const collections = await scoped.storeCollection.findMany({
     where: { active: true },
@@ -276,7 +404,10 @@ export async function getActiveCollections(storeId: string): Promise<StorefrontC
 export async function getCollectionListings(
   storeId: string,
   collectionSlug: string,
-): Promise<{ collection: StorefrontCollection | null; listings: StorefrontListing[] }> {
+): Promise<{
+  collection: StorefrontCollection | null;
+  listings: StorefrontListing[];
+}> {
   const scoped = storeScoped(storeId);
   const collection = await scoped.storeCollection.findFirst({
     where: { slug: collectionSlug, active: true },
@@ -285,7 +416,7 @@ export async function getCollectionListings(
         orderBy: { sortOrder: "asc" },
         include: {
           listing: {
-            include: { masterProduct: true, variants: { select: { price: true } } },
+            include: { masterProduct: true, variants: true },
           },
         },
       },
@@ -360,13 +491,16 @@ export async function getListingsByCategory(
     where: { active: true },
     include: {
       masterProduct: { include: { category: true } },
-      variants: { select: { price: true } },
+      variants: true,
     },
     orderBy: { createdAt: "desc" },
     take: MAX_HOMEPAGE_LISTINGS,
   });
 
-  const byCategory = new Map<string, { slug: string; listings: StorefrontListing[] }>();
+  const byCategory = new Map<
+    string,
+    { slug: string; listings: StorefrontListing[] }
+  >();
   for (const listing of listings) {
     const catName = listing.masterProduct?.category?.name ?? "Other";
     const catSlug = listing.masterProduct?.category?.slug ?? "other";

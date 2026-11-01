@@ -51,7 +51,10 @@ export function DetailSkeleton() {
           <div className="h-5 w-28 skeleton" />
           <div className="divide-y divide-line rounded-md border border-line">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center justify-between gap-3 px-4 py-3">
+              <div
+                key={i}
+                className="flex items-center justify-between gap-3 px-4 py-3"
+              >
                 <div className="space-y-1">
                   <div className="h-4 w-24 skeleton" />
                   <div className="h-3 w-12 skeleton" />
@@ -96,7 +99,11 @@ export function MosaicSkeleton() {
       <div className="h-6 w-40 skeleton" />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {Array.from({ length: 8 }, (_, i) => (
-          <div key={i} className="skeleton rounded-md" style={{ aspectRatio: "4/3" }} />
+          <div
+            key={i}
+            className="skeleton rounded-md"
+            style={{ aspectRatio: "4/3" }}
+          />
         ))}
       </div>
     </div>
@@ -109,7 +116,11 @@ export function BannerSkeleton() {
       <div className="h-6 w-48 skeleton" />
       <div className="grid gap-4 sm:grid-cols-2">
         {Array.from({ length: 2 }, (_, i) => (
-          <div key={i} className="skeleton rounded-lg" style={{ aspectRatio: "21/9" }} />
+          <div
+            key={i}
+            className="skeleton rounded-lg"
+            style={{ aspectRatio: "21/9" }}
+          />
         ))}
       </div>
     </div>

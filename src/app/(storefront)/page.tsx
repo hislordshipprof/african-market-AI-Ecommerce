@@ -1,4 +1,4 @@
-import { getStoreWithStatus } from "@/lib/get-store";
+﻿import { getStoreWithStatus } from "@/lib/get-store";
 import {
   listCategories,
   getActiveBanners,
@@ -6,104 +6,80 @@ import {
   getListingsByCategory,
   extractStoreProfile,
 } from "@/lib/storefront/service";
-import { StorefrontHeader } from "@/components/storefront/storefront-header";
+import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { HeroCarousel } from "@/components/storefront/hero-carousel";
 import { CategoryMosaic } from "@/components/storefront/category-mosaic";
 import { ProductRail } from "@/components/storefront/product-rail";
 import { CollectionBanners } from "@/components/storefront/collection-banner";
 import { PromoBand } from "@/components/storefront/promo-band";
 import { TrustStoryStrip } from "@/components/storefront/trust-story-strip";
-import { StorefrontFooter } from "@/components/storefront/storefront-footer";
-import Link from "next/link";
+import { EmptyState } from "@/components/storefront/primitives";
 
 export default async function StorefrontPage() {
   const { store, suspended } = await getStoreWithStatus();
-
-  if (suspended) {
+  if (suspended)
     return (
-      <main className="flex min-h-screen items-center justify-center bg-bg">
-        <div className="text-center">
-          <h1
-            className="font-display text-ink mb-2"
-            style={{ fontSize: "clamp(28px, 4vw, 40px)", fontWeight: 700 }}
-          >
-            {store.name}
-          </h1>
-          <p className="text-muted-foreground">
-            This store is temporarily offline. Please check back later.
-          </p>
-        </div>
+      <main className="sf-storefront sf-section sf-container">
+        <h1 className="sf-page-title">{store.name}</h1>
+        <EmptyState
+          title="We'll be back soon"
+          description="This store is temporarily offline. Please check back later."
+        />
       </main>
     );
-  }
-
-  const [categories, banners, collections, listingsByCategory] =
-    await Promise.all([
-      listCategories(),
-      getActiveBanners(store.id),
-      getActiveCollections(store.id),
-      getListingsByCategory(store.id),
-    ]);
-
-  const profile = extractStoreProfile(store);
-
-  const CURATED_LABELS: Record<string, string> = {
-    "Tubers & Roots": "Fresh Tubers & Roots",
-    "Spices & Seasonings": "Spice Cabinet",
-    "Fish & Meat": "Fresh Catch & Meats",
-    "Vegetables": "Market Vegetables",
-    "Snacks": "Snack Run",
-    "Pantry Staples": "Stock Up — Pantry Staples",
-  };
-
-  const MAX_HOME_RAILS = 4;
-  const visibleRails = listingsByCategory.slice(0, MAX_HOME_RAILS);
-  const hasMoreRails = listingsByCategory.length > MAX_HOME_RAILS;
-
+  const [categories, banners, collections, rails] = await Promise.all([
+    listCategories(),
+    getActiveBanners(store.id),
+    getActiveCollections(store.id),
+    getListingsByCategory(store.id),
+  ]);
+  const all = rails.flatMap((r) => r.listings);
+  const favorites = all
+    .filter((l) => l.imageUrl && l.badge !== "ask-store" && !l.frozen)
+    .slice(0, 10);
+  const fresh = all.filter((l) => l.perishable && !l.frozen).slice(0, 10);
+  const pantry = rails.find((r) => r.categorySlug === "grains-and-flours");
   return (
-    <main className="min-h-screen bg-bg">
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-on-primary focus:shadow-lg"
-      >
-        Skip to content
-      </a>
-      <StorefrontHeader store={store} />
-
+    <StorefrontShell store={store}>
       <HeroCarousel banners={banners} />
-
-      <div id="main-content" className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-6">
+      <div className="sf-container sf-stack">
         <CategoryMosaic categories={categories} />
-
-        <TrustStoryStrip profile={profile} />
-
-        {visibleRails.map((rail) => (
-          <ProductRail
-            key={rail.categorySlug}
-            title={CURATED_LABELS[rail.categoryName] ?? rail.categoryName}
-            categorySlug={rail.categorySlug}
-            listings={rail.listings}
-            seeAllHref={`/categories/${rail.categorySlug}`}
+        {!all.length && (
+          <EmptyState
+            title="The shelves are getting ready"
+            description="Your store is adding its first listings. Come back soon to see what's in season."
           />
-        ))}
-
-        {hasMoreRails && (
-          <div className="flex justify-center">
-            <Link
-              href="/categories"
-              className="inline-flex h-12 items-center rounded-pill bg-soft px-8 font-label text-sm font-semibold text-primary transition-colors hover:bg-raised"
-            >
-              Browse all categories &rarr;
-            </Link>
-          </div>
         )}
-
-        <CollectionBanners collections={collections} />
+        <ProductRail
+          title="Popular picks"
+          description="Familiar favorites for a well-stocked kitchen."
+          listings={favorites}
+          seeAllHref="/categories"
+        />
+        <CollectionBanners collections={collections.slice(0, 2)} />
+        <ProductRail
+          title="Fresh in"
+          description="Something good for tonight's pot."
+          listings={fresh}
+          seeAllHref="/categories/vegetables"
+        />
+        {pantry && (
+          <ProductRail
+            title="Pantry, sorted."
+            description="Everyday staples worth keeping close."
+            listings={pantry.listings}
+            seeAllHref="/categories/grains-and-flours"
+          />
+        )}
       </div>
-
-      <PromoBand store={store} />
-
-      <StorefrontFooter store={store} />
-    </main>
+      <PromoBand
+        store={store}
+        offer={banners.find((b) => /free delivery/i.test(b.title))?.title}
+      />
+      <TrustStoryStrip
+        profile={extractStoreProfile(store)}
+        demo={["mama-ngozi", "tante-marie"].includes(store.slug)}
+      />
+    </StorefrontShell>
   );
 }
