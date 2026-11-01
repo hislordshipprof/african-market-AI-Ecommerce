@@ -93,6 +93,7 @@ async function downloadImage(
       headers: {
         "User-Agent": "AfricanMarketsPlatform/1.0 (catalog seed)",
       },
+      redirect: "error",
     });
     if (!response.ok) return null;
     const contentLength = response.headers.get("content-length");

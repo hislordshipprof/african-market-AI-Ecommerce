@@ -102,6 +102,7 @@ async function downloadAndUploadImage(
   try {
     const response = await fetch(sourceUrl, {
       headers: { "User-Agent": "AfricanMarketsPlatform/1.0 (catalog review)" },
+      redirect: "error",
     });
     if (!response.ok) return null;
     const contentLength = response.headers.get("content-length");
