@@ -88,6 +88,70 @@ p{margin:0}
 a{color:var(--primary);font-weight:600}
 .lbl{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .foot{font-size:13px;color:var(--muted)}
+/* views */
+.tabs{display:flex;gap:4px;padding:4px;background:var(--raised);border-radius:12px;width:fit-content;max-width:100%}
+.tab{font:600 14px/1.2 var(--f-body);color:var(--muted);background:none;border:0;padding:9px 16px;border-radius:9px;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.tab:focus-visible,.tchip:focus-visible,.flow .chip:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.view{display:grid;gap:36px}
+.sec{display:grid;gap:12px}
+.sec .lede{font-size:14.5px}
+figure{margin:0;display:grid;gap:10px}
+figcaption{font-size:13.5px;color:var(--muted);max-width:80ch}
+.scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.scroll svg{display:block;width:100%;height:auto}
+svg.flow{min-width:960px}
+svg.sys{min-width:720px}
+.hint{display:none;font-size:12.5px;color:var(--muted)}
+@media (max-width:760px){.hint{display:block}}
+svg text{font-family:var(--f-body);font-size:12px;fill:var(--ink)}
+svg .lane-h{font-weight:600;font-size:13px}
+svg .muted,svg .via{fill:var(--muted)}
+svg .band{fill:var(--raised);opacity:.5}
+svg .box{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+svg .app{fill:var(--soft);stroke:var(--primary);stroke-width:1.4}
+svg .ttl{font-family:var(--f-display);font-weight:700;font-size:14px}
+svg .wire{stroke:currentColor;stroke-width:1.4;fill:none}
+.flow,.sys{color:var(--muted)}
+.flow .row.built .box{fill:var(--soft);stroke:var(--ok)}
+.flow .row.partial .box{stroke:var(--review)}
+.flow .row.todo .box{stroke-dasharray:5 4}
+.flow .row.todo .bt{fill:var(--muted)}
+.flow .chip{cursor:pointer}
+.flow .chip rect{stroke:none}
+.st-merged rect{fill:var(--ok-bg)}.st-merged text{fill:var(--ok)}
+.st-building rect{fill:var(--run-bg)}.st-building text{fill:var(--run)}
+.st-review rect{fill:var(--review-bg)}.st-review text{fill:var(--review)}
+.st-blocked rect{fill:var(--stop-bg)}.st-blocked text{fill:var(--stop)}
+.st-ready rect{fill:var(--soft)}.st-ready text{fill:var(--primary)}
+.st-waiting rect,.st-human rect{fill:var(--idle-bg)}.st-waiting text,.st-human text{fill:var(--idle)}
+.flow .chip text{font-family:var(--f-mono);font-size:11px;font-weight:500}
+.keyline{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted)}
+.keyline span{display:inline-flex;align-items:center;gap:6px}
+.kb{width:22px;height:12px;border-radius:3px;border:1.5px solid var(--ok);background:var(--soft)}
+.kb.p{border-color:var(--review);background:var(--surface)}
+.kb.t{border:1.5px dashed var(--line);background:var(--surface)}
+/* services */
+.svc{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.svc-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:6px;align-content:start}
+.svc-card .row1 b{font-weight:600}
+.svc-card p{font-size:13.5px;color:var(--muted)}
+.svc-card .used{font-family:var(--f-mono);font-size:11.5px;color:var(--muted)}
+/* phases */
+.path{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px}
+.pstep{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;gap:6px;align-content:start;flex:1 1 150px;min-width:0}
+.pstep .warn{font-size:12.5px;color:var(--stop)}
+.arrow{align-self:center;color:var(--muted);font-size:18px}
+@media (max-width:640px){.arrow{display:none}}
+.phases{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.phase{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:10px;align-content:start}
+.phase.now{border-color:var(--primary)}
+.phase h3{font-family:var(--f-display);font-size:16px;margin:0}
+.phase .when{font-size:12.5px;color:var(--muted)}
+.grp{display:grid;gap:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.tchip{border:0;cursor:pointer;font-family:var(--f-body)}
+.phase ul{margin:0;padding-left:18px;display:grid;gap:4px;font-size:13.5px;color:var(--muted)}
 @media (max-width:640px){.wave{grid-template-columns:1fr;gap:8px}.whead{position:static;display:flex;gap:10px;align-items:baseline}}
 @media (prefers-reduced-motion:no-preference){.bar i,.prog i{transition:width .4s cubic-bezier(.4,.4,0,1)}}
 </style>
@@ -99,6 +163,63 @@ a{color:var(--primary);font-weight:600}
     <span class="live" id="live"><span class="dot"></span><span id="liveText">Connecting to live status…</span></span>
   </header>
 
+  <div class="tabs" role="tablist" aria-label="Board views">
+    <button class="tab" role="tab" id="tabBuild" aria-controls="viewBuild" aria-selected="true">Build order</button>
+    <button class="tab" role="tab" id="tabArch" aria-controls="viewArch" aria-selected="false">How it works</button>
+  </div>
+
+  <div class="view" id="viewArch" role="tabpanel" aria-labelledby="tabArch" hidden>
+    <section class="sec" aria-labelledby="flowH">
+      <h2 id="flowH">One order, end to end</h2>
+      <p class="lede">What happens from the moment a shopper opens a store's site to the moment the order is done. Each row is one step: who acts, who it reaches, and the tickets that build it. <span id="flowCount"></span></p>
+      <div class="keyline"><span><i class="kb"></i>Built (all its tickets merged)</span><span><i class="kb p"></i>Partly built</span><span><i class="kb t"></i>Not built yet</span><span>Ticket colours match the board. Click one to open it.</span></div>
+      <figure>
+        <div class="scroll"><svg class="flow" id="flow" role="img" aria-label="Swimlane diagram of one order moving between the customer, storefront, platform, store admin and outside services, from opening the site to refunds"></svg></div>
+        <figcaption>The card is only held at checkout. The store is charged the final amount when it taps Ready, which is never more than the hold, so swaps and refunds settle before money moves.</figcaption>
+        <p class="hint">Scroll the diagram sideways to see every lane.</p>
+      </figure>
+    </section>
+
+    <section class="sec" aria-labelledby="sysH">
+      <h2 id="sysH">What runs where</h2>
+      <figure>
+        <div class="scroll"><svg class="sys" viewBox="0 0 960 290" role="img" aria-label="System map: shoppers, store staff and platform admins reach one Next.js app on Vercel, which talks to Neon Postgres, Cloudflare R2 and Inngest">
+          <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+          <rect class="box" x="0" y="36" width="190" height="52" rx="10"/><text x="95" y="58" text-anchor="middle" font-weight="600">Shopper</text><text class="muted" x="95" y="75" text-anchor="middle">phone or laptop</text>
+          <rect class="box" x="0" y="119" width="190" height="52" rx="10"/><text x="95" y="141" text-anchor="middle" font-weight="600">Store owner and staff</text><text class="muted" x="95" y="158" text-anchor="middle">phone-first admin, 2FA</text>
+          <rect class="box" x="0" y="202" width="190" height="52" rx="10"/><text x="95" y="224" text-anchor="middle" font-weight="600">Platform admin</text><text class="muted" x="95" y="241" text-anchor="middle">password + 2FA</text>
+          <line class="wire" x1="190" y1="62" x2="286" y2="62" marker-end="url(#ah)"/><text class="muted" x="238" y="55" text-anchor="middle" font-size="11">store's domain</text>
+          <line class="wire" x1="190" y1="145" x2="286" y2="145" marker-end="url(#ah)"/><text class="muted" x="238" y="138" text-anchor="middle" font-size="11">admin</text>
+          <line class="wire" x1="190" y1="228" x2="286" y2="228" marker-end="url(#ah)"/><text class="muted" x="238" y="221" text-anchor="middle" font-size="11">platform</text>
+          <rect class="app" x="290" y="10" width="360" height="270" rx="14"/>
+          <text class="ttl" x="470" y="36" text-anchor="middle">One Next.js app on Vercel</text>
+          <rect class="box" x="310" y="50" width="320" height="44" rx="8"/><text x="470" y="69" text-anchor="middle">Finds the store from the web address</text><text class="muted" x="470" y="85" text-anchor="middle" font-size="11">proxy.ts, before any page renders</text>
+          <rect class="box" x="310" y="104" width="320" height="44" rx="8"/><text x="470" y="123" text-anchor="middle">Storefront · Store admin · Platform admin</text><text class="muted" x="470" y="139" text-anchor="middle" font-size="11">server-rendered pages, cached per store</text>
+          <rect class="box" x="310" y="158" width="320" height="44" rx="8"/><text x="470" y="177" text-anchor="middle">Webhooks from Stripe and couriers</text><text class="muted" x="470" y="193" text-anchor="middle" font-size="11">signature-checked, safe to retry</text>
+          <rect class="box" x="310" y="212" width="320" height="44" rx="8"/><text x="470" y="231" text-anchor="middle">Background jobs and timers</text><text class="muted" x="470" y="247" text-anchor="middle" font-size="11">Inngest functions run as app routes</text>
+          <line class="wire" x1="650" y1="72" x2="756" y2="72" marker-end="url(#ah)"/><text class="muted" x="703" y="65" text-anchor="middle" font-size="11">SQL, one store</text>
+          <line class="wire" x1="650" y1="148" x2="756" y2="148" marker-end="url(#ah)"/><text class="muted" x="703" y="141" text-anchor="middle" font-size="11">photos</text>
+          <line class="wire" x1="654" y1="234" x2="756" y2="234" marker-start="url(#ah)" marker-end="url(#ah)"/><text class="muted" x="705" y="227" text-anchor="middle" font-size="11">events, calls</text>
+          <rect class="box" x="760" y="44" width="200" height="56" rx="10"/><text x="860" y="67" text-anchor="middle" font-weight="600">Neon Postgres</text><text class="muted" x="860" y="85" text-anchor="middle" font-size="11">row-level security per store</text>
+          <rect class="box" x="760" y="120" width="200" height="56" rx="10"/><text x="860" y="143" text-anchor="middle" font-weight="600">Cloudflare R2</text><text class="muted" x="860" y="161" text-anchor="middle" font-size="11">product and proof photos</text>
+          <rect class="box" x="760" y="206" width="200" height="56" rx="10"/><text x="860" y="229" text-anchor="middle" font-weight="600">Inngest Cloud</text><text class="muted" x="860" y="247" text-anchor="middle" font-size="11">durable timers and retries</text>
+        </svg></div>
+        <figcaption>Every store shares one app and one database. The app connects as a limited database role, and every query first sets the current store, so Postgres itself refuses rows from other stores. Outside services below plug into this app.</figcaption>
+        <p class="hint">Scroll the diagram sideways to see the whole map.</p>
+      </figure>
+      <h3 class="lbl" style="margin:6px 0 0">Outside services and their keys</h3>
+      <div class="svc" id="svc"></div>
+    </section>
+
+    <section class="sec" aria-labelledby="phH">
+      <h2 id="phH">Phases and the path ahead</h2>
+      <p class="lede">The main path to a working order. Each ticket needs the one before it.</p>
+      <div class="path" id="path"></div>
+      <div class="phases" id="phases"></div>
+    </section>
+  </div>
+
+  <div class="view" id="viewBuild" role="tabpanel" aria-labelledby="tabBuild">
   <section class="summary" id="summary" aria-label="Progress"></section>
   <div class="bar" id="bar" aria-hidden="true"></div>
   <div class="legend" id="legend"></div>
@@ -109,6 +230,7 @@ a{color:var(--primary);font-weight:600}
   </section>
 
   <section class="waves" id="waves" aria-label="Build waves"></section>
+  </div>
   <p class="foot" id="foot">Status is written by the coordinator session after each builder run. The coordinator merges after verifying CI, the live preview and every acceptance criterion. Tickets that need keys wait for the owner to test them.</p>
 </div>
 
@@ -172,7 +294,7 @@ function render(){
     const cards = el("div","cards");
     ts.forEach(x=>{
       const t=x.t, checked=new Set(x.r.checked||[]);
-      const d = el("details","card"); d.dataset.s = x.s;
+      const d = el("details","card"); d.dataset.s = x.s; d.id = "t-"+t.n;
       try { if (localStorage.getItem("open-"+t.n)==="1") d.open = true; } catch(e){}
       d.addEventListener("toggle",()=>{ try{ localStorage.setItem("open-"+t.n, d.open?"1":"0") }catch(e){} });
       const s = el("summary");
@@ -196,9 +318,153 @@ function render(){
     });
     sec.append(h,cards); waves.append(sec);
   }
+  renderArch();
 }
 
+/* ---------- How it works ---------- */
+const SHORT = {1:"Walking skeleton",2:"Platform admin",3:"Store sign-in",4:"Stripe payouts",5:"Custom domains",6:"Listings",7:"Master catalog",8:"Browse and search",55:"Storefront redesign",9:"Cart",10:"Checkout",11:"Order inbox and pickup",12:"Notifications and tracking",13:"Substitutions",14:"Customer accounts",15:"Store delivery",16:"DoorDash courier",17:"Uber and failover",18:"Issues and refunds",19:"Chat",20:"Copilot: stock",21:"Copilot: voice and photo",22:"Copilot: alerts and digest",23:"Copilot on WhatsApp",24:"Shopper: builds carts",25:"Shopper: recipes",26:"Shopper: questions"};
+const LANES = [["c","Customer"],["s","Storefront"],["p","Platform"],["a","Store admin"],["x","Outside services"]];
+const FLOW = [
+  {a:"c",at:"Opens the store's site",b:"s",bt:"Finds the store from|its web address",via:"Store's own domain|or subdomain",t:[1,5]},
+  {a:"c",at:"Browses and searches",b:"s",bt:"Aisles, search by|local name",via:"“egusi” finds|melon seed",t:[8,55]},
+  {a:"c",at:"Adds items, picks a|swap rule per line",b:"s",bt:"Cart keeps lines|and swap rules",via:"Default: exact|item only",t:[9]},
+  {a:"s",at:"Checkout: phone,|pickup or delivery",b:"x",bt:"Stripe holds the card|(total + buffer)",via:"Hold now,|charge later",t:[4,10]},
+  {a:"s",at:"Saves the order|with tax lines",b:"p",bt:"Order AUTHORIZED,|scoped to the store",via:"Postgres with|row-level security",t:[10]},
+  {a:"p",at:"Order event",b:"a",bt:"New-order alert|with sound",via:"Web push",t:[11,12]},
+  {a:"p",at:"Order event",b:"c",bt:"Email and text with|a tracking link",via:"Resend, Telnyx",t:[12]},
+  {a:"a",at:"Accepts, sets|prep time",b:"p",bt:"Alert at 15 min,|cancel at 30",via:"Durable timer|voids the hold",t:[11]},
+  {a:"a",at:"Picks, marks|a line short",b:"c",bt:"Swap or refund?|link in a text",via:"Timeout applies|the swap rule",t:[13]},
+  {a:"c",at:"Approves the swap",b:"a",bt:"Pick list|updates",via:"Polling every|10 seconds",t:[13]},
+  {a:"a",at:"Taps Ready",b:"x",bt:"Stripe charges the|final amount",via:"Never more|than the hold",t:[11]},
+  {a:"p",at:"Books a courier",b:"x",bt:"DoorDash or Uber,|cheaper wins",via:"Fails over|after 10 min",t:[16,17]},
+  {a:"a",at:"Hands over, or|delivers with photo",b:"c",bt:"Order completed",via:"Proof photo on|the tracking page",t:[11,15]},
+  {a:"p",at:"Sale writes|stock events",b:"a",bt:"Copilot: low stock,|daily digest",via:"Owner confirms|with one tap",t:[20,22]},
+  {a:"c",at:"Reports a problem",b:"a",bt:"Auto-refund under limit,|or store reviews",via:"Refund back|to the card",t:[18,19]}
+];
+const SERVICES = [
+  {n:"Neon Postgres",st:"on",what:"All store data in one database, isolated per store by row-level security.",used:"every ticket"},
+  {n:"Better Auth",st:"on",what:"Admin sign-in with 2FA now. Customer phone codes come with accounts.",used:"#2 #3 #14"},
+  {n:"Vercel",st:"on",what:"Hosting, previews and store domains. You're on Hobby; the hosting decision assumed Pro for unlimited store domains, so check limits before onboarding many stores.",used:"#5"},
+  {n:"Cloudflare R2",st:"on",what:"Product photos and delivery proof photos. Upload, read and delete tested.",used:"#7 #15"},
+  {n:"Resend",st:"on",what:"Staff invites and order emails.",used:"#3 #12"},
+  {n:"Telnyx",st:"part",what:"Order texts and sign-in codes. API key is set; a sending number and 10DLC approval (1–2 weeks) are still to do.",used:"#12 #13 #14"},
+  {n:"Stripe Connect",st:"soon",what:"Card holds, final charge, refunds and payouts to each store. Deferred for now, but checkout needs it to work for real.",used:"#4 #10 #11 #18"},
+  {n:"Inngest",st:"need",what:"Timers and retries: the 30-minute auto-cancel, substitution timeout, courier failover, daily digests.",used:"#12 #13 #17 #22"},
+  {n:"Google Maps",st:"need",what:"Address autocomplete and the delivery-radius check.",used:"#10 #15"},
+  {n:"DoorDash Drive",st:"need",what:"Courier delivery.",used:"#16"},
+  {n:"Uber Direct",st:"need",what:"Second courier, so the cheaper one wins and failover works.",used:"#17"},
+  {n:"Anthropic (Claude)",st:"need",what:"Store copilot and the shopper assistant.",used:"#20–#26"},
+  {n:"WhatsApp Cloud API",st:"need",what:"Copilot on the platform's WhatsApp number.",used:"#23"},
+  {n:"Sentry",st:"need",what:"Error monitoring. Decided in the stack choices, no ticket yet.",used:"no ticket yet"}
+];
+const SVC_ST = {on:["Connected","s-merged"],part:["Partly set up","s-review"],soon:["Needed at #10","s-blocked"],need:["Keys needed later","s-waiting"]};
+const CRIT = [[9,""],[10,"Needs Stripe sandbox keys to test for real"],[11,""],[12,"Needs a Telnyx number and 10DLC approval"],[13,""]];
+const PHASES = [
+  {h:"Phase 0 · Foundations",when:"Spec weeks 1–2",groups:[["Platform",[1,2,3,5]],["Still open from this phase",[4,7]]]},
+  {h:"Phase 1 · One store, end to end",when:"Spec weeks 3–8 · you are here",now:true,groups:[["Storefront",[8,55,9,10,14]],["Store admin",[6,11,13]],["Delivery",[15,16,17]],["After the order",[12,18,19]],["Store copilot",[20,21,22,23]],["Shopper assistant, built last",[24,25,26]]]},
+  {h:"Phase 2 · Multi-store launch",when:"Spec weeks 9–14",list:["Onboard four more markets, AI photo-to-listing","Copilot reports, trends and reorder suggestions","Customer ordering on the store's own WhatsApp","Store directory: find stores by state or near me","Store coupons, payouts dashboard, platform console"]},
+  {h:"Phase 3 · Scale",when:"After launch",list:["Second metro and native apps","Batch picking and scheduled van slots","Nationwide shipping for dry goods","Hot food and catering","Agentic commerce and wholesaler reorders"]}
+];
+const SVGNS = "http://www.w3.org/2000/svg";
+const sv = (tag, attrs, parent) => { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.append(e); return e; };
+const statusByN = n => { const t = PLAN.find(p => p.n === n); return t ? statusOf(t) : "waiting"; };
+const openTicket = n => { location.hash = "t-" + n; };
+
+let flowBuilt = false;
+function buildFlow(){
+  const svg = document.getElementById("flow");
+  const L = 108, LW = 182, BW = 158, BH = 44, TOP = 52, RH = 58, VW = 190;
+  const W = L + LANES.length*LW + VW, H = TOP + FLOW.length*RH + 6;
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  const defs = sv("defs", {}, svg);
+  const m = sv("marker", {id:"fa", viewBox:"0 0 10 10", refX:"9", refY:"5", markerWidth:"7", markerHeight:"7", orient:"auto"}, defs);
+  sv("path", {d:"M0 0L10 5L0 10z", fill:"currentColor"}, m);
+  LANES.forEach(([k,label],i) => {
+    if (i % 2 === 1) sv("rect", {class:"band", x:L+i*LW, y:0, width:LW, height:H}, svg);
+    sv("text", {class:"lane-h", x:L+i*LW+LW/2, y:28, "text-anchor":"middle"}, svg).textContent = label;
+  });
+  sv("text", {class:"lane-h muted", x:8, y:28}, svg).textContent = "Tickets";
+  sv("text", {class:"lane-h muted", x:L+LANES.length*LW+14, y:28}, svg).textContent = "How";
+  const laneX = k => L + LANES.findIndex(l => l[0] === k)*LW + (LW-BW)/2;
+  const lines = (g, str, cx, cy, cls) => { const parts = str.split("|"); parts.forEach((p,j) => { sv("text", {class:cls||"", x:cx, y:cy + (j-(parts.length-1)/2)*15 + 4, "text-anchor": cls==="via" ? "start" : "middle"}, g).textContent = p; }); };
+  FLOW.forEach((f,i) => {
+    const y = TOP + i*RH, g = sv("g", {class:"row", "data-row":i}, svg);
+    const ax = laneX(f.a), bx = laneX(f.b), cy = y + BH/2;
+    sv("rect", {class:"box", x:ax, y:y, width:BW, height:BH, rx:8}, g);
+    sv("rect", {class:"box", x:bx, y:y, width:BW, height:BH, rx:8}, g);
+    lines(g, f.at, ax+BW/2, cy, "at");
+    lines(g, f.bt, bx+BW/2, cy, "bt");
+    const right = bx > ax;
+    sv("line", {class:"wire", x1: right ? ax+BW : ax, y1:cy, x2: right ? bx-3 : bx+BW+3, y2:cy, "marker-end":"url(#fa)"}, g);
+    lines(g, f.via, L+LANES.length*LW+14, cy, "via");
+    f.t.forEach((n,j) => {
+      const c = sv("g", {class:"chip", "data-t":n, tabindex:"0", role:"link", "aria-label":"Ticket "+n+", "+SHORT[n]}, g);
+      sv("rect", {x:8+j*48, y:cy-11, width:44, height:22, rx:6}, c);
+      sv("text", {x:8+j*48+22, y:cy+4, "text-anchor":"middle"}, c).textContent = "#"+n;
+      const tip = sv("title", {}, c); tip.textContent = "#"+n+" "+SHORT[n];
+      c.addEventListener("click", () => openTicket(n));
+      c.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); openTicket(n); } });
+    });
+  });
+  flowBuilt = true;
+}
+
+function chipBtn(n){
+  const s = statusByN(n), b = el("button", "pill tchip s-"+s, "#"+n+" "+SHORT[n]);
+  b.type = "button"; b.title = S[s].label; b.addEventListener("click", () => openTicket(n));
+  return b;
+}
+
+function renderArch(){
+  if (!flowBuilt) buildFlow();
+  let built = 0;
+  document.querySelectorAll("#flow .row").forEach(g => {
+    const f = FLOW[+g.dataset.row], m = f.t.filter(n => statusByN(n) === "merged").length;
+    const state = m === f.t.length ? "built" : m ? "partial" : "todo";
+    if (state === "built") built++;
+    g.setAttribute("class", "row " + state);
+  });
+  document.querySelectorAll("#flow .chip").forEach(c => c.setAttribute("class", "chip st-" + statusByN(+c.dataset.t)));
+  document.getElementById("flowCount").textContent = built + " of " + FLOW.length + " steps are fully built.";
+
+  const svc = document.getElementById("svc"); svc.replaceChildren();
+  SERVICES.forEach(x => {
+    const d = el("div","svc-card"), r = el("div","row1");
+    r.append(el("b",null,x.n), el("span","pill "+SVC_ST[x.st][1], SVC_ST[x.st][0]));
+    d.append(r, el("p",null,x.what), el("span","used","Used by "+x.used)); svc.append(d);
+  });
+
+  const path = document.getElementById("path"); path.replaceChildren();
+  CRIT.forEach(([n,warn],i) => {
+    if (i) path.append(el("span","arrow","→"));
+    const p = el("div","pstep"); p.append(chipBtn(n));
+    if (warn) p.append(el("span","warn",warn));
+    path.append(p);
+  });
+
+  const ph = document.getElementById("phases"); ph.replaceChildren();
+  PHASES.forEach(x => {
+    const d = el("div","phase"+(x.now?" now":"")); d.append(el("h3",null,x.h), el("span","when",x.when));
+    (x.groups||[]).forEach(([label,ns]) => { const g = el("div","grp"), c = el("div","chips"); ns.forEach(n => c.append(chipBtn(n))); g.append(el("span","lbl",label), c); d.append(g); });
+    if (x.list){ const ul = el("ul"); x.list.forEach(t => ul.append(el("li",null,t))); d.append(ul); }
+    ph.append(d);
+  });
+}
+
+function route(){
+  const h = location.hash.slice(1), arch = h === "how-it-works";
+  document.getElementById("viewArch").hidden = !arch;
+  document.getElementById("viewBuild").hidden = arch;
+  document.getElementById("tabArch").setAttribute("aria-selected", String(arch));
+  document.getElementById("tabBuild").setAttribute("aria-selected", String(!arch));
+  if (h.startsWith("t-")){ const c = document.getElementById(h); if (c){ c.open = true; c.scrollIntoView({block:"center"}); } }
+}
+document.getElementById("tabArch").addEventListener("click", () => { location.hash = "how-it-works"; });
+document.getElementById("tabBuild").addEventListener("click", () => { history.replaceState(null, "", location.pathname + location.search); route(); });
+window.addEventListener("hashchange", route);
+
 render();
+route();
 
 (async()=>{
   const liveEl = document.getElementById("live"), txt = document.getElementById("liveText");
