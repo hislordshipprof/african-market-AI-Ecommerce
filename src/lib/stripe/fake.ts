@@ -18,7 +18,7 @@ function getAccounts(): Map<string, ConnectAccount> {
 }
 
 const fakeStripeProvider: StripeProvider = {
-  async createConnectAccount({ email, storeId }) {
+  async createConnectAccount({ storeId }) {
     const accountId = `acct_fake_${storeId}`;
     const account: ConnectAccount = {
       accountId,
