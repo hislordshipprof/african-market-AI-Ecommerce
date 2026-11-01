@@ -32,6 +32,7 @@ export async function uploadToR2(
     }),
   );
 
-  const accountId = process.env.R2_ACCOUNT_ID!;
-  return `https://${bucket}.${accountId}.r2.dev/${key}`;
+  const publicUrl = process.env.R2_PUBLIC_URL;
+  if (!publicUrl) throw new Error("R2_PUBLIC_URL is required for public image URLs");
+  return `${publicUrl.replace(/\/+$/, "")}/${key}`;
 }

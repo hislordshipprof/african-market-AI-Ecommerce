@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { parse } from "csv-parse/sync";
+import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { uploadToR2 } from "../src/lib/r2";
@@ -48,6 +49,16 @@ const CATEGORY_SLUG_TO_ID: Record<string, string> = {
   "seasonings-and-sauces": "cat_seasonings_sauces",
 };
 
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+function synonymId(productId: string, prefix: string, ...parts: (string | null | undefined)[]): string {
+  const hash = createHash("sha256")
+    .update(parts.filter(Boolean).join("|"))
+    .digest("hex")
+    .substring(0, 12);
+  return `${productId}_${prefix}_${hash}`;
+}
+
 function parseLocalNames(raw: string): { term: string; language: string | null; region: string | null }[] {
   if (!raw) return [];
   return raw.split("|").map((entry) => {
@@ -84,8 +95,11 @@ async function downloadImage(
       },
     });
     if (!response.ok) return null;
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_BYTES) return null;
     const contentType = response.headers.get("content-type") || "image/jpeg";
     const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > MAX_IMAGE_BYTES) return null;
     const ext = contentType.includes("png") ? "png" : contentType.includes("svg") ? "svg" : "jpg";
     return { buffer, contentType, ext };
   } catch {
@@ -112,7 +126,8 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
     process.env.R2_ACCOUNT_ID &&
     process.env.R2_ACCESS_KEY_ID &&
     process.env.R2_SECRET_ACCESS_KEY &&
-    process.env.R2_BUCKET
+    process.env.R2_BUCKET &&
+    process.env.R2_PUBLIC_URL
   );
 
   const highRows = rows.filter((r) => r.confidence.trim() === "high");
@@ -126,11 +141,12 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
   for (const row of highRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
     const weightG = row.typical_weight_g ? parseInt(row.typical_weight_g, 10) : null;
+    const imageSourceUrl = row.image_url?.trim() || null;
 
     let imageUrl: string | null = null;
 
-    if (hasR2 && row.image_url?.trim()) {
-      const img = await downloadImage(row.image_url.trim(), row.id);
+    if (hasR2 && imageSourceUrl) {
+      const img = await downloadImage(imageSourceUrl, row.id);
       if (img) {
         try {
           const key = `catalog/${row.id}.${img.ext}`;
@@ -145,51 +161,43 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
       await new Promise((r) => setTimeout(r, 120));
     }
 
+    const productData = {
+      name: row.english_name,
+      categoryId,
+      description: row.description || null,
+      imageSourceUrl,
+      imageAuthor: row.image_author || null,
+      imageLicense: row.image_license || null,
+      unit: row.unit || null,
+      weightG: isNaN(weightG as number) ? null : weightG,
+      frozen: row.storage?.trim().toLowerCase() === "frozen",
+      perishable: row.perishable?.trim().toLowerCase() === "yes",
+      storage: row.storage || null,
+      subcategory: row.subcategory || null,
+      originCountries: row.origin_countries || null,
+      status: "active",
+      confidence: "high",
+    };
+
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.masterProduct.upsert({
         where: { id: row.id },
         update: {
-          name: row.english_name,
-          categoryId,
-          description: row.description || null,
-          imageUrl,
-          imageAuthor: row.image_author || null,
-          imageLicense: row.image_license || null,
-          unit: row.unit || null,
-          weightG: isNaN(weightG as number) ? null : weightG,
-          frozen: row.storage?.trim().toLowerCase() === "frozen",
-          perishable: row.perishable?.trim().toLowerCase() === "yes",
-          storage: row.storage || null,
-          subcategory: row.subcategory || null,
-          originCountries: row.origin_countries || null,
-          status: "active",
-          confidence: "high",
+          ...productData,
+          ...(imageUrl !== null ? { imageUrl } : {}),
         },
         create: {
           id: row.id,
-          name: row.english_name,
-          categoryId,
-          description: row.description || null,
+          ...productData,
           imageUrl,
-          imageAuthor: row.image_author || null,
-          imageLicense: row.image_license || null,
-          unit: row.unit || null,
-          weightG: isNaN(weightG as number) ? null : weightG,
-          frozen: row.storage?.trim().toLowerCase() === "frozen",
-          perishable: row.perishable?.trim().toLowerCase() === "yes",
-          storage: row.storage || null,
-          subcategory: row.subcategory || null,
-          originCountries: row.origin_countries || null,
-          status: "active",
-          confidence: "high",
         },
       });
 
       const localNames = parseLocalNames(row.local_names);
       for (const syn of localNames) {
-        const synId = `${row.id}_ln_${syn.term.replace(/[^a-z0-9]/gi, "_").substring(0, 40)}`;
+        const synId = synonymId(row.id, "ln", syn.term, syn.language, syn.region);
         await tx.productSynonym.upsert({
           where: { id: synId },
           update: { term: syn.term, language: syn.language, region: syn.region },
@@ -199,7 +207,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
 
       const searchSyns = parseSearchSynonyms(row.search_synonyms);
       for (const syn of searchSyns) {
-        const synId = `${row.id}_ss_${syn.term.replace(/[^a-z0-9]/gi, "_").substring(0, 40)}`;
+        const synId = synonymId(row.id, "ss", syn.term);
         await tx.productSynonym.upsert({
           where: { id: synId },
           update: { term: syn.term },
@@ -214,6 +222,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
   for (const row of reviewRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
     const weightG = row.typical_weight_g ? parseInt(row.typical_weight_g, 10) : null;
+    const imageSourceUrl = row.image_url?.trim() || null;
 
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -224,7 +233,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
           name: row.english_name,
           categoryId,
           description: row.description || null,
-          imageUrl: null,
+          imageSourceUrl,
           imageAuthor: row.image_author || null,
           imageLicense: row.image_license || null,
           unit: row.unit || null,
@@ -234,7 +243,6 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
           storage: row.storage || null,
           subcategory: row.subcategory || null,
           originCountries: row.origin_countries || null,
-          status: "needs_review",
           confidence: row.confidence.trim(),
         },
         create: {
@@ -243,6 +251,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
           categoryId,
           description: row.description || null,
           imageUrl: null,
+          imageSourceUrl,
           imageAuthor: row.image_author || null,
           imageLicense: row.image_license || null,
           unit: row.unit || null,
@@ -259,7 +268,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
 
       const localNames = parseLocalNames(row.local_names);
       for (const syn of localNames) {
-        const synId = `${row.id}_ln_${syn.term.replace(/[^a-z0-9]/gi, "_").substring(0, 40)}`;
+        const synId = synonymId(row.id, "ln", syn.term, syn.language, syn.region);
         await tx.productSynonym.upsert({
           where: { id: synId },
           update: { term: syn.term, language: syn.language, region: syn.region },
@@ -269,7 +278,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
 
       const searchSyns = parseSearchSynonyms(row.search_synonyms);
       for (const syn of searchSyns) {
-        const synId = `${row.id}_ss_${syn.term.replace(/[^a-z0-9]/gi, "_").substring(0, 40)}`;
+        const synId = synonymId(row.id, "ss", syn.term);
         await tx.productSynonym.upsert({
           where: { id: synId },
           update: { term: syn.term },

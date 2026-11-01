@@ -4,6 +4,8 @@ import { platformAdmin, platformAdminTransaction } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { uploadToR2 } from "../r2";
 
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
 export type ReviewProduct = {
   id: string;
   name: string;
@@ -85,17 +87,28 @@ async function downloadAndUploadImage(
     process.env.R2_ACCOUNT_ID &&
     process.env.R2_ACCESS_KEY_ID &&
     process.env.R2_SECRET_ACCESS_KEY &&
-    process.env.R2_BUCKET
+    process.env.R2_BUCKET &&
+    process.env.R2_PUBLIC_URL
   );
   if (!hasR2 || !sourceUrl) return null;
+
+  try {
+    const parsed = new URL(sourceUrl);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  } catch {
+    return null;
+  }
 
   try {
     const response = await fetch(sourceUrl, {
       headers: { "User-Agent": "AfricanMarketsPlatform/1.0 (catalog review)" },
     });
     if (!response.ok) return null;
-    const contentType = response.headers.get("content-type") || "image/jpeg";
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_BYTES) return null;
     const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > MAX_IMAGE_BYTES) return null;
+    const contentType = response.headers.get("content-type") || "image/jpeg";
     const ext = contentType.includes("png") ? "png" : contentType.includes("svg") ? "svg" : "jpg";
     const key = `catalog/${productId}.${ext}`;
     return await uploadToR2(key, buffer, contentType);
@@ -106,7 +119,6 @@ async function downloadAndUploadImage(
 
 export async function approveProduct(
   productId: string,
-  imageSourceUrl?: string,
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
 
@@ -117,8 +129,8 @@ export async function approveProduct(
   if (product.status === "active") return { success: true };
 
   let imageUrl = product.imageUrl;
-  if (imageSourceUrl && !imageUrl) {
-    imageUrl = await downloadAndUploadImage(imageSourceUrl, productId);
+  if (!imageUrl && product.imageSourceUrl) {
+    imageUrl = await downloadAndUploadImage(product.imageSourceUrl, productId);
   }
 
   await platformAdminTransaction(async (tx) => {
