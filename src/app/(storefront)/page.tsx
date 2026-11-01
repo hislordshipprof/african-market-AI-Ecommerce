@@ -1,4 +1,5 @@
 import { getStoreWithStatus } from "@/lib/get-store";
+import { checkCheckoutReady } from "@/lib/stripe/checkout-gate";
 import {
   listCategories,
   getActiveBanners,
@@ -22,6 +23,7 @@ import { demoFlowsEnabled } from "@/lib/customer-flow/demo-gate";
 
 export default async function StorefrontPage() {
   const { store, suspended } = await getStoreWithStatus();
+  const checkout = checkCheckoutReady(store.stripeOnboardingStatus);
   if (suspended)
     return (
       <main className="sf-storefront sf-section sf-container">
@@ -48,6 +50,13 @@ export default async function StorefrontPage() {
   const subjects = ["Plantain", "Scotch Bonnet Pepper", "Yam"].flatMap(name => all.filter(p => p.displayName === name)).slice(0, 3);
   return (
     <StorefrontShell store={store}>
+      {!checkout.enabled && (
+        <div className="sf-container" style={{ paddingBlock: "var(--sf-space-sm)" }}>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+            {checkout.message}
+          </div>
+        </div>
+      )}
       <HeroCarousel banners={banners} products={subjects.length ? subjects : favorites.slice(0, 3)} pickupMinutes={store.prepTimeMinutes} pickupEnabled={store.pickupEnabled} />
       <MarketMarquee />
       <div className="sf-container sf-stack">
