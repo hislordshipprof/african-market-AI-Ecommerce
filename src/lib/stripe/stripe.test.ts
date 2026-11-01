@@ -103,16 +103,7 @@ describe("fakeStripeProvider", () => {
   it("verifies webhook signature with valid signature", () => {
     const event: WebhookEvent = {
       type: "account.updated",
-      account: "acct_fake_store_123",
-      data: {
-        object: {
-          id: "acct_fake_store_123",
-          charges_enabled: true,
-          payouts_enabled: true,
-          details_submitted: true,
-          requirements: { currently_due: [] },
-        },
-      },
+      accountId: "acct_fake_store_123",
     };
 
     const result = fakeStripeProvider.verifyWebhookSignature({
@@ -121,6 +112,7 @@ describe("fakeStripeProvider", () => {
     });
 
     expect(result.type).toBe("account.updated");
+    expect(result.accountId).toBe("acct_fake_store_123");
   });
 
   it("rejects webhook with invalid signature", () => {

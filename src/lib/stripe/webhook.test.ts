@@ -62,16 +62,7 @@ describe("Stripe webhook handler", () => {
   it("returns 200 and updates store for valid account.updated event", async () => {
     const event: WebhookEvent = {
       type: "account.updated",
-      account: "acct_fake_store_123",
-      data: {
-        object: {
-          id: "acct_fake_store_123",
-          charges_enabled: true,
-          payouts_enabled: true,
-          details_submitted: true,
-          requirements: { currently_due: [] },
-        },
-      },
+      accountId: "acct_fake_store_123",
     };
 
     const res = await callWebhook(
@@ -87,8 +78,7 @@ describe("Stripe webhook handler", () => {
   it("returns 200 but does not update store for unrelated event types", async () => {
     const event = {
       type: "payment_intent.succeeded",
-      account: "acct_fake_store_123",
-      data: { object: { id: "pi_123" } },
+      accountId: "pi_123",
     };
 
     const res = await callWebhook(

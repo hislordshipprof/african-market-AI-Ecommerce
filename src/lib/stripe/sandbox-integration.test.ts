@@ -12,7 +12,7 @@ afterAll(async () => {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   for (const id of accountsToCleanup) {
     try {
-      await stripe.accounts.del(id);
+      await stripe.v2.core.accounts.close(id);
     } catch {
       // best-effort cleanup
     }

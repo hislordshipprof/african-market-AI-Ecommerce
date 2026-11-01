@@ -18,18 +18,7 @@ export interface AccountLinkResult {
 
 export interface WebhookEvent {
   type: string;
-  account: string;
-  data: {
-    object: {
-      id: string;
-      charges_enabled: boolean;
-      payouts_enabled: boolean;
-      details_submitted: boolean;
-      requirements?: {
-        currently_due: string[];
-      };
-    };
-  };
+  accountId: string;
 }
 
 export interface StripeProvider {

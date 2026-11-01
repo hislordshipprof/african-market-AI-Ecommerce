@@ -29,8 +29,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (event.type === "account.updated") {
-    await updateStoreOnboardingStatus(event.data.object.id);
+  const accountEventTypes = [
+    "account.updated",
+    "v1.account.updated",
+    "v2.core.account.updated",
+    "v2.core.account[configuration.merchant].capability_status_updated",
+    "v2.core.account.including.requirements.updated",
+  ];
+  if (accountEventTypes.includes(event.type) && event.accountId) {
+    await updateStoreOnboardingStatus(event.accountId);
   }
 
   return NextResponse.json({ received: true }, { status: 200 });

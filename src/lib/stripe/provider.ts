@@ -30,24 +30,47 @@ function getWebhookSecret(): string {
   return secret;
 }
 
-function toConnectAccount(account: Stripe.Account): ConnectAccount {
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function toConnectAccount(account: any): ConnectAccount {
+  const merchantCaps = account.configuration?.merchant?.capabilities;
+  const chargesEnabled = merchantCaps?.card_payments?.status === "active";
+  const payoutsEnabled =
+    merchantCaps?.stripe_balance?.payouts?.status === "active";
+
+  const requirementEntries: Array<{
+    awaiting_action_from: string;
+    description: string;
+  }> = account.requirements?.entries ?? [];
+  const userRequirements = requirementEntries
+    .filter((e) => e.awaiting_action_from === "user")
+    .map((e) => e.description);
+
+  const detailsSubmitted =
+    userRequirements.length === 0 &&
+    account.configuration?.merchant?.applied === true;
+
   return {
     accountId: account.id,
-    chargesEnabled: account.charges_enabled ?? false,
-    payoutsEnabled: account.payouts_enabled ?? false,
-    detailsSubmitted: account.details_submitted ?? false,
-    requirementsCurrentlyDue:
-      account.requirements?.currently_due ?? [],
+    chargesEnabled,
+    payoutsEnabled,
+    detailsSubmitted,
+    requirementsCurrentlyDue: userRequirements,
   };
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export const stripeProvider: StripeProvider = {
   async createConnectAccount({ email, businessName, storeId }) {
     const stripe = getStripeClient();
-    const v2Account = await stripe.v2.core.accounts.create({
+    const account = await stripe.v2.core.accounts.create({
       contact_email: email,
       display_name: businessName,
       dashboard: "express",
+      metadata: { platform_store_id: storeId },
+      identity: {
+        country: "US",
+        entity_type: "company",
+      },
       configuration: {
         merchant: {
           capabilities: {
@@ -61,14 +84,8 @@ export const stripeProvider: StripeProvider = {
           losses_collector: "application",
         },
       },
-      identity: {
-        country: "US",
-        entity_type: "company",
-      },
-      metadata: { platform_store_id: storeId },
       include: ["configuration.merchant", "requirements"],
     });
-    const account = await stripe.accounts.retrieve(v2Account.id);
     return toConnectAccount(account);
   },
 
@@ -89,14 +106,40 @@ export const stripeProvider: StripeProvider = {
 
   async getAccount(accountId) {
     const stripe = getStripeClient();
-    const account = await stripe.accounts.retrieve(accountId);
+    const account = await stripe.v2.core.accounts.retrieve(accountId, {
+      include: ["configuration.merchant", "requirements"],
+    });
     return toConnectAccount(account);
   },
 
   verifyWebhookSignature({ payload, signature }) {
     const stripe = getStripeClient();
     const secret = getWebhookSecret();
-    const event = stripe.webhooks.constructEvent(payload, signature, secret);
-    return event as unknown as WebhookEvent;
+    try {
+      const event = stripe.webhooks.constructEvent(
+        payload,
+        signature,
+        secret,
+      );
+      const obj = event.data?.object as { id?: string } | undefined;
+      return {
+        type: event.type,
+        accountId: obj?.id ?? event.account ?? "",
+      } satisfies WebhookEvent;
+    } catch {
+      // v1 parse failed — try v2 thin event
+    }
+    const notification = stripe.parseEventNotification(
+      payload,
+      signature,
+      secret,
+    );
+    return {
+      type: notification.type,
+      accountId:
+        ("related_object" in notification
+          ? (notification.related_object as { id?: string } | null)?.id
+          : undefined) ?? "",
+    } satisfies WebhookEvent;
   },
 };

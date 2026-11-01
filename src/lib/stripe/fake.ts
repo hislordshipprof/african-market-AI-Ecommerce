@@ -54,7 +54,11 @@ const fakeStripeProvider: StripeProvider = {
         "No signatures found matching the expected signature for payload.",
       );
     }
-    return JSON.parse(payload) as WebhookEvent;
+    const parsed = JSON.parse(payload);
+    return {
+      type: parsed.type as string,
+      accountId: (parsed.accountId ?? parsed.data?.object?.id ?? "") as string,
+    } satisfies WebhookEvent;
   },
 };
 
