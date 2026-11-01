@@ -91,7 +91,7 @@ Fix test-first, re-run affected QA, review only the fix diff, commit, push to th
 esac
 
 # Keep the session id for --resume / --continue.
-node -e 'const fs=require("fs");try{const t=fs.readFileSync(process.argv[1],"utf8");const j=JSON.parse(t.slice(t.indexOf("{")));if(j.session_id)fs.writeFileSync(process.argv[2],j.session_id)}catch(e){}' "$LOG" "$SESSION_FILE"
+node -e 'const fs=require("fs");try{const t=fs.readFileSync(process.argv[1],"utf8");const m=[...t.matchAll(/"session_id"\s*:\s*"([0-9a-f-]{36})"/g)].pop();if(m)fs.writeFileSync(process.argv[2],m[1])}catch(e){}' "$LOG" "$SESSION_FILE"
 
 echo "Run finished (exit ${status:-0}). Log: $LOG"
 [ -f "$REPORT" ] && head -40 "$REPORT" || echo "No report written; check the log."
