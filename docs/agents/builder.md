@@ -49,6 +49,15 @@ Run and pass all of these, in the worktree:
 4. `pnpm build`
 5. `pnpm test:e2e`: Playwright opens the running app and checks each acceptance criterion that has a visible result.
 
+While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts --workers=1`), and the affected unit tests (`pnpm test <path>`). Run the full e2e suite once, at the end, before you push the final commit. CI runs everything on the PR.
+
+### Definition of done (the coordinator rejects the PR if any is missing)
+- The branch is rebased on the latest `origin/main` (`git merge-base --is-ancestor origin/main HEAD` passes).
+- Every real integration the ticket touches was actually exercised with the keys in `.env.local`: seeds run, uploads made, sandbox API calls made. Report counts and evidence. "Blocked: no creds" is only acceptable after you've checked `.env.local` for the key names.
+- For UI: you opened and looked at every screenshot and image you produced (the Read tool shows images). Automated metrics alone don't count as visual review.
+- No "pre-existing failure" claim without proof: name the test and show it failing on `origin/main`.
+- Migrations work on an empty database (`prisma migrate reset`, or a fresh branch), the same way CI and new previews run them.
+
 If something fails and you cannot fix it, report it as failing with the output. Never report a check you did not run.
 
 ## Finish
