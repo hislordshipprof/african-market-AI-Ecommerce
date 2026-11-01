@@ -243,6 +243,7 @@ function buildCssVars(tokens: ThemeTokens): Record<string, string> {
     cssVars[`--store-${key}`] = value;
   }
   cssVars["--store-on-primary"] = readableFillColor(tokens.primary);
+  cssVars["--store-on-primary-deep"] = readableFillColor(tokens["primary-deep"]);
   cssVars["--store-on-accent"] = readableFillColor(tokens.accent);
   return cssVars;
 }

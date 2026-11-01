@@ -1,0 +1,579 @@
+{
+  "processed": 111,
+  "accepted": 55,
+  "rejected": 56,
+  "results": [
+    {
+      "slug": "abacha-dried",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "achi-thickener",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows two bowls of cooked dish, not raw thickener"
+    },
+    {
+      "slug": "afang-leaves-frozen",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "african-black-soap",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "african-net-sponge",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (43%)"
+    },
+    {
+      "slug": "agbalumo-star-apple",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "aidan-fruit",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "messy cut-out with market debris, bags, heavy ghosting"
+    },
+    {
+      "slug": "akpu-wet-frozen",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "alligator-pepper",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (27%)"
+    },
+    {
+      "slug": "amaranth-leaves",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (27%)"
+    },
+    {
+      "slug": "ashanti-pepper",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "bambara-nut",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "baobab-fruit-powder",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "baobab-leaf-powder",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "beans-black-eyed-peas",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
+    },
+    {
+      "slug": "beans-brown",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "beans-honey-oloyin",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "beans-peeled-brown",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "bitter-kola",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "bitter-leaf-dried",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
+    },
+    {
+      "slug": "bitter-leaf-frozen",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "calabash-nutmeg",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "cameroon-pepper",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (25%)"
+    },
+    {
+      "slug": "cassava-flour-lafun",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "cassava-fufu-flour",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "unrecognizable white blob"
+    },
+    {
+      "slug": "cassava-root-fresh",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "chewing-stick",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "WRONG CONTENT: shows a persons face, not a chewing stick"
+    },
+    {
+      "slug": "chikwangue-kwanga",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "chin-chin",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "cocoyam-tannia",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "cocoyam-taro",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (61%)"
+    },
+    {
+      "slug": "corn-dried-whole",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "cow-foot",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked dish with garnishes, not raw cow foot"
+    },
+    {
+      "slug": "crayfish-ground",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "crayfish-whole-dried",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "curry-powder-nigerian",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "dates",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "tiny object, mostly packaging, unrecognizable at tile size"
+    },
+    {
+      "slug": "dawadawa-dried",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "efo-shoko-celosia",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (50%)"
+    },
+    {
+      "slug": "egusi-ground",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked egusi soup with spoon, not ground egusi seeds"
+    },
+    {
+      "slug": "egusi-seeds-whole",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "ewedu-leaves-fresh",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "fonio",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "fumbwa-dried-gnetum-leaves",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "garden-egg",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "garri-ijebu",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows prepared garri drink with peanuts, not raw garri granules"
+    },
+    {
+      "slug": "garri-white",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (22%)"
+    },
+    {
+      "slug": "garri-yellow",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "goat-meat-frozen",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "grains-of-selim",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "ground-hot-pepper",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (35%)"
+    },
+    {
+      "slug": "groundnut-oil",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "groundnuts-raw",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "hibiscus-dried",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
+    },
+    {
+      "slug": "hibiscus-drink-bottled",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "horse-mackerel-frozen",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "iru-fermented-locust-beans",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (74%)"
+    },
+    {
+      "slug": "jute-leaves",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (75%)"
+    },
+    {
+      "slug": "kola-nut",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
+    },
+    {
+      "slug": "kuli-kuli",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "maltina",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "millet-flour",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "millet-pearl",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "moringa-powder",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "mortar-pestle-wood",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (27%)"
+    },
+    {
+      "slug": "ofor-thickener",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (74%)"
+    },
+    {
+      "slug": "ogbono-ground",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked ogbono soup with meat, not ground ogbono seeds"
+    },
+    {
+      "slug": "ogbono-whole",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "oha-leaves-dried",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked oha soup with meat, not dried oha leaves"
+    },
+    {
+      "slug": "oha-leaves-frozen",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "okra-dried",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "okra-fresh",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "okra-frozen",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
+    },
+    {
+      "slug": "oxtail",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "palm-nut-cream",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "palm-oil-red",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "pepper-scotch-bonnet",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "pigeon-peas-dried",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (22%)"
+    },
+    {
+      "slug": "plantain-chips-unripe",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "plantain-ripe",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (37%)"
+    },
+    {
+      "slug": "ponmo-frozen",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "potato-greens",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "poundo-yam-flour",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked pounded yam blob in plastic, not flour product"
+    },
+    {
+      "slug": "puff-puff-mix",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked puff-puff balls, not the dry mix"
+    },
+    {
+      "slug": "rice-flour-tuwo",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (26%)"
+    },
+    {
+      "slug": "rice-ofada",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows plated stew and chicken dish, not raw Ofada rice"
+    },
+    {
+      "slug": "rice-parboiled-long-grain",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "roselle-leaves",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "scent-leaf-fresh",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "semovita-golden-penny",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked semovita dough lump, not flour product"
+    },
+    {
+      "slug": "shea-butter-raw",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "scattered dark grains with heavy ghosting, not recognizable as raw shea butter"
+    },
+    {
+      "slug": "smoked-catfish",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (61%)"
+    },
+    {
+      "slug": "sorghum-guinea-corn",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "stockfish-cut",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (20%)"
+    },
+    {
+      "slug": "suya-spice-yaji",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (47%)"
+    },
+    {
+      "slug": "sweet-potato-african",
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "messy market scene with multiple products and debris"
+    },
+    {
+      "slug": "tamarind",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (64%)"
+    },
+    {
+      "slug": "thyme-dried",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "tiger-nut",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (77%)"
+    },
+    {
+      "slug": "ube-african-pear",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (40%)"
+    },
+    {
+      "slug": "ugu-leaves-fresh",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (48%)"
+    },
+    {
+      "slug": "ugu-leaves-frozen",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
+    },
+    {
+      "slug": "ukwa-breadfruit",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "uziza-leaves-dried",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "velvet-tamarind",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (41%)"
+    },
+    {
+      "slug": "waterleaf-fresh",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "wheat-meal-swallow",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "white-maize-meal",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (39%)"
+    },
+    {
+      "slug": "yam-flour-elubo",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "yam-water",
+      "status": "accepted",
+      "visual_review": "accepted"
+    },
+    {
+      "slug": "yam-white-puna",
+      "status": "accepted",
+      "visual_review": "accepted"
+    }
+  ],
+  "original_pipeline_failed": 0
+}

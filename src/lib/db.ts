@@ -75,6 +75,9 @@ export function storeScoped(storeId: string) {
     listingVariant: wrapDelegate(storeId, prisma.listingVariant),
     stockEvent: wrapDelegate(storeId, prisma.stockEvent),
     auditLog: wrapDelegate(storeId, prisma.auditLog),
+    storeBanner: wrapDelegate(storeId, prisma.storeBanner),
+    storeCollection: wrapDelegate(storeId, prisma.storeCollection),
+    storeCollectionListing: wrapDelegate(storeId, prisma.storeCollectionListing),
   };
 }
 

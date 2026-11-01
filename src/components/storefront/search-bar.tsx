@@ -1,78 +1,205 @@
-"use client";
+﻿"use client";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Search, ArrowUpRight } from "lucide-react";
+import type { SearchResult } from "@/lib/storefront/service";
+import { ProductImage } from "./product-image";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useTransition } from "react";
-
-export function SearchBar() {
-  const router = useRouter();
-  const formRef = useRef<HTMLFormElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [isPending, startTransition] = useTransition();
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key !== "/") return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if ((e.target as HTMLElement)?.isContentEditable) return;
-      e.preventDefault();
-      inputRef.current?.focus();
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, []);
-
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const q = (formData.get("q") as string).trim();
-    if (!q) return;
-    startTransition(() => {
-      router.push(`/search?q=${encodeURIComponent(q)}`);
-    });
+export function Highlight({ text, query }: { text: string; query: string }) {
+  const index = text.toLowerCase().indexOf(query.toLowerCase());
+  return index < 0 || !query ? (
+    <>{text}</>
+  ) : (
+    <>
+      {text.slice(0, index)}
+      <mark>{text.slice(index, index + query.length)}</mark>
+      {text.slice(index + query.length)}
+    </>
+  );
+}
+export function rememberSearch(storeId: string, q: string) {
+  try {
+    const raw: unknown = JSON.parse(
+      localStorage.getItem(`storefront-searches:${storeId}`) || "[]",
+    );
+    const previous = Array.isArray(raw)
+      ? raw.filter((v): v is string => typeof v === "string")
+      : [];
+    localStorage.setItem(
+      `storefront-searches:${storeId}`,
+      JSON.stringify([q, ...previous.filter((s) => s !== q)].slice(0, 6)),
+    );
+  } catch {
+    /* Search stays usable without browser storage. */
   }
-
+}
+export function SearchBar({ storeId }: { storeId: string }) {
+  const params = useSearchParams();
+  return <SearchInput key={params.get("q") || ""} storeId={storeId} />;
+}
+function SearchInput({ storeId }: { storeId: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const container = useRef<HTMLFormElement>(null);
+  const [query, setQuery] = useState(params.get("q") || "");
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    function key(e: KeyboardEvent) {
+      const el = e.target as HTMLElement;
+      if (
+        e.key === "/" &&
+        !["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) &&
+        !el.isContentEditable
+      ) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
+  useEffect(() => {
+    if (!query.trim() || !open) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      setLoading(true);
+      setError(false);
+      fetch(`/api/storefront/search?q=${encodeURIComponent(query)}`, {
+        signal: abort.signal,
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error("Search failed");
+          return r.json();
+        })
+        .then((data) => {
+          setResults(data.results);
+          setLoading(false);
+        })
+        .catch((e) => {
+          if (e.name !== "AbortError") {
+            setError(true);
+            setLoading(false);
+          }
+        });
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [query, open]);
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const q = query.trim();
+    if (!q) return;
+    rememberSearch(storeId, q);
+    setOpen(false);
+    router.push(`/search?q=${encodeURIComponent(q)}`);
+  }
   return (
     <form
-      ref={formRef}
-      onSubmit={handleSubmit}
-      className="relative w-full"
+      ref={container}
+      onSubmit={submit}
       role="search"
+      className="sf-search-form"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
+      }}
     >
       <label htmlFor="storefront-search" className="sr-only">
         Search listings — press / to focus
       </label>
+      <Search className="sf-search-icon" size={18} aria-hidden />
       <input
         ref={inputRef}
         id="storefront-search"
         name="q"
         type="search"
-        placeholder="Search by name, e.g. ugu, garri, egusi..."
         autoComplete="off"
-        className="w-full min-h-[44px] rounded-pill border border-line bg-surface px-4 py-3 pl-10 pr-12 font-body text-sm text-ink placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+        className="sf-search-input"
+        placeholder="Search egusi, plantain, your favorites…"
+        value={query}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setResults([]);
+          setLoading(Boolean(e.target.value.trim()));
+          setError(false);
+          setOpen(true);
+        }}
+        aria-controls={open && query.trim() ? "instant-results" : undefined}
       />
-      <svg
-        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-        strokeWidth={2}
-        stroke="currentColor"
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-        />
-      </svg>
-      {isPending ? (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+      <kbd className="sf-search-key">/</kbd>
+      {open && query.trim() && (
+        <div
+          id="instant-results"
+          data-testid="instant-results"
+          className="sf-search-dropdown"
+        >
+          <div role="status" aria-live="polite">
+            {loading ? (
+              <p>Searching the shelves…</p>
+            ) : error ? (
+              <p>
+                Search couldn’t connect. Press Enter to try the results page.
+              </p>
+            ) : !results.length ? (
+              <p>No matches yet. Try egusi, garri or ugu.</p>
+            ) : (
+              <span className="sr-only">{results.length} listings found</span>
+            )}
+          </div>
+          {results.slice(0, 5).map((result) => (
+            <Link
+              key={result.id}
+              href={`/listings/${result.id}`}
+              onClick={() => {
+                rememberSearch(storeId, query.trim());
+                setOpen(false);
+              }}
+            >
+              <ProductImage
+                src={result.imageUrl}
+                name={result.name}
+                sizes="48px"
+              />
+              <span>
+                <strong>
+                  <Highlight text={result.name} query={query} />
+                </strong>
+                {result.altName && (
+                  <small>
+                    <Highlight text={result.altName} query={query} />
+                  </small>
+                )}
+                <small>
+                  ${(result.price / 100).toFixed(2)} · {result.packLabel}
+                </small>
+              </span>
+            </Link>
+          ))}
+          {results.length > 0 && (
+            <Link
+              href={`/search?q=${encodeURIComponent(query.trim())}`}
+              onClick={() => {
+                rememberSearch(storeId, query.trim());
+                setOpen(false);
+              }}
+            >
+              See all results <ArrowUpRight size={16} />
+            </Link>
+          )}
         </div>
-      ) : (
-        <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 hidden rounded-sm border border-line bg-raised px-1.5 py-0.5 font-body text-[10px] font-medium text-muted-foreground sm:inline-block">/</kbd>
       )}
+      <span className="sr-only">
+        {pathname === "/search" ? "Search results page" : "Search this store"}
+      </span>
     </form>
   );
 }

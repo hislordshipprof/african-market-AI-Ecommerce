@@ -1,0 +1,194 @@
+[
+  {
+    "screen": "home",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "home-390px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "category",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "category-390px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "search",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "search-390px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "product",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "product-390px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "collection",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "collection-390px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "cart",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "cart-390px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "home",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "home-390px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "category",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "category-390px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "search",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "search-390px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "product",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "product-390px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "collection",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "collection-390px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "cart",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "cart-390px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "home",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "home-1440px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "category",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "category-1440px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "search",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "search-1440px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "product",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "product-1440px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "collection",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "collection-1440px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "cart",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "cart-1440px-light.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "home",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "home-1440px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "category",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "category-1440px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "search",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "search-1440px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "product",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "product-1440px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "collection",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "collection-1440px-dark.png",
+    "overflow": false,
+    "errors": []
+  },
+  {
+    "screen": "cart",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "cart-1440px-dark.png",
+    "overflow": false,
+    "errors": []
+  }
+]

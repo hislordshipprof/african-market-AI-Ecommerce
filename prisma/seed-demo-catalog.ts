@@ -27,6 +27,7 @@ interface CatalogListing {
 }
 
 const PRODUCTS: CatalogProduct[] = [
+  // --- Tubers ---
   {
     id: "mp_yam",
     name: "Yam",
@@ -39,6 +40,25 @@ const PRODUCTS: CatalogProduct[] = [
     categoryId: "cat_tubers",
     synonyms: [{ term: "dodo", language: "yoruba" }, { term: "boli", language: "yoruba" }],
   },
+  {
+    id: "mp_cassava",
+    name: "Cassava",
+    categoryId: "cat_tubers",
+    synonyms: [{ term: "akpu", language: "igbo" }, { term: "ege", language: "yoruba" }],
+  },
+  {
+    id: "mp_cocoyam",
+    name: "Cocoyam",
+    categoryId: "cat_tubers",
+    synonyms: [{ term: "ede", language: "igbo" }, { term: "koko", language: "yoruba" }],
+  },
+  {
+    id: "mp_sweet_potato",
+    name: "Sweet Potato",
+    categoryId: "cat_tubers",
+    synonyms: [{ term: "anamo", language: "igbo" }, { term: "odunkun", language: "yoruba" }],
+  },
+  // --- Grains & Flours ---
   {
     id: "mp_garri",
     name: "Garri",
@@ -58,6 +78,31 @@ const PRODUCTS: CatalogProduct[] = [
     synonyms: [{ term: "ogbono", language: "igbo" }, { term: "apon", language: "yoruba" }],
   },
   {
+    id: "mp_semovita",
+    name: "Semovita",
+    categoryId: "cat_grains",
+    synonyms: [{ term: "semo", language: "yoruba" }, { term: "semolina" }],
+  },
+  {
+    id: "mp_pounded_yam_flour",
+    name: "Pounded Yam Flour",
+    categoryId: "cat_grains",
+    synonyms: [{ term: "poundo yam" }, { term: "iyan" }],
+  },
+  {
+    id: "mp_ofada_rice",
+    name: "Ofada Rice",
+    categoryId: "cat_grains",
+    synonyms: [{ term: "ofada", language: "yoruba" }, { term: "unpolished rice" }],
+  },
+  {
+    id: "mp_jollof_seasoning",
+    name: "Jollof Rice Seasoning",
+    categoryId: "cat_spices",
+    synonyms: [{ term: "jollof mix" }, { term: "party rice seasoning" }],
+  },
+  // --- Spices & Seasonings ---
+  {
     id: "mp_suya_spice",
     name: "Suya Spice",
     categoryId: "cat_spices",
@@ -69,6 +114,37 @@ const PRODUCTS: CatalogProduct[] = [
     categoryId: "cat_spices",
     synonyms: [{ term: "iru", language: "yoruba" }, { term: "dawadawa", language: "hausa" }, { term: "ogiri", language: "igbo" }],
   },
+  {
+    id: "mp_cameroon_pepper",
+    name: "Cameroon Pepper",
+    categoryId: "cat_spices",
+    synonyms: [{ term: "ata rodo" }, { term: "dried pepper" }],
+  },
+  {
+    id: "mp_ground_crayfish",
+    name: "Ground Crayfish",
+    categoryId: "cat_spices",
+    synonyms: [{ term: "ground crayfish powder" }],
+  },
+  {
+    id: "mp_curry_powder",
+    name: "Curry Powder",
+    categoryId: "cat_spices",
+    synonyms: [{ term: "curry" }],
+  },
+  {
+    id: "mp_thyme",
+    name: "Thyme",
+    categoryId: "cat_spices",
+    synonyms: [{ term: "dried thyme" }],
+  },
+  {
+    id: "mp_ehuru",
+    name: "Ehuru (Calabash Nutmeg)",
+    categoryId: "cat_spices",
+    synonyms: [{ term: "ehuru", language: "igbo" }, { term: "ariwo", language: "yoruba" }],
+  },
+  // --- Oils & Butters ---
   {
     id: "mp_palm_oil",
     name: "Palm Oil",
@@ -82,6 +158,19 @@ const PRODUCTS: CatalogProduct[] = [
     synonyms: [{ term: "ori", language: "yoruba" }],
   },
   {
+    id: "mp_groundnut_oil",
+    name: "Groundnut Oil",
+    categoryId: "cat_oils",
+    synonyms: [{ term: "peanut oil" }, { term: "man gyada", language: "hausa" }],
+  },
+  {
+    id: "mp_coconut_oil",
+    name: "Coconut Oil",
+    categoryId: "cat_oils",
+    synonyms: [{ term: "adi agbon", language: "yoruba" }],
+  },
+  // --- Vegetables ---
+  {
     id: "mp_ugu",
     name: "Fluted Pumpkin Leaves (Ugu)",
     categoryId: "cat_vegetables",
@@ -93,6 +182,37 @@ const PRODUCTS: CatalogProduct[] = [
     categoryId: "cat_vegetables",
     synonyms: [{ term: "onugbu", language: "igbo" }, { term: "ewuro", language: "yoruba" }],
   },
+  {
+    id: "mp_ewedu",
+    name: "Ewedu (Jute Leaves)",
+    categoryId: "cat_vegetables",
+    synonyms: [{ term: "ewedu", language: "yoruba" }, { term: "ahingbara", language: "igbo" }],
+  },
+  {
+    id: "mp_waterleaf",
+    name: "Waterleaf",
+    categoryId: "cat_vegetables",
+    synonyms: [{ term: "gbure", language: "yoruba" }, { term: "mmong ikong", language: "efik" }],
+  },
+  {
+    id: "mp_okra",
+    name: "Okra",
+    categoryId: "cat_vegetables",
+    synonyms: [{ term: "okro" }, { term: "ila", language: "yoruba" }, { term: "kubewa", language: "hausa" }],
+  },
+  {
+    id: "mp_scotch_bonnet",
+    name: "Scotch Bonnet Pepper",
+    categoryId: "cat_vegetables",
+    synonyms: [{ term: "ata rodo", language: "yoruba" }, { term: "ose oyibo", language: "igbo" }],
+  },
+  {
+    id: "mp_garden_eggs",
+    name: "Garden Eggs",
+    categoryId: "cat_vegetables",
+    synonyms: [{ term: "african eggplant" }, { term: "igba", language: "yoruba" }, { term: "anara", language: "igbo" }],
+  },
+  // --- Fish & Meat ---
   {
     id: "mp_stockfish",
     name: "Stockfish",
@@ -106,22 +226,103 @@ const PRODUCTS: CatalogProduct[] = [
     synonyms: [{ term: "crayfish" }],
   },
   {
+    id: "mp_dried_fish",
+    name: "Dried Fish (Eja Kika)",
+    categoryId: "cat_fish_meat",
+    synonyms: [{ term: "eja kika", language: "yoruba" }, { term: "azu oku", language: "igbo" }],
+  },
+  {
+    id: "mp_goat_meat",
+    name: "Goat Meat",
+    categoryId: "cat_fish_meat",
+    synonyms: [{ term: "eran ewure", language: "yoruba" }, { term: "anu ewu", language: "igbo" }],
+  },
+  {
+    id: "mp_oxtail",
+    name: "Oxtail",
+    categoryId: "cat_fish_meat",
+    synonyms: [{ term: "iru eran" }],
+  },
+  {
+    id: "mp_cow_foot",
+    name: "Cow Foot",
+    categoryId: "cat_fish_meat",
+    synonyms: [{ term: "ese eran", language: "yoruba" }, { term: "nkwobi" }],
+  },
+  {
+    id: "mp_ponmo",
+    name: "Ponmo (Cow Skin)",
+    categoryId: "cat_fish_meat",
+    synonyms: [{ term: "ponmo", language: "yoruba" }, { term: "kpomo" }, { term: "kanda" }],
+  },
+  // --- Snacks ---
+  {
     id: "mp_chin_chin",
     name: "Chin Chin",
     categoryId: "cat_snacks",
     synonyms: [{ term: "chinchilla" }],
   },
   {
+    id: "mp_puff_puff_mix",
+    name: "Puff Puff Mix",
+    categoryId: "cat_snacks",
+    synonyms: [{ term: "puff puff" }, { term: "bofrot", language: "ghanaian" }],
+  },
+  {
+    id: "mp_plantain_chips",
+    name: "Plantain Chips",
+    categoryId: "cat_snacks",
+    synonyms: [{ term: "dodo chips" }, { term: "banana chips" }],
+  },
+  {
+    id: "mp_kulikuli",
+    name: "Kulikuli (Groundnut Cake)",
+    categoryId: "cat_snacks",
+    synonyms: [{ term: "kulikuli", language: "yoruba" }, { term: "kuli kuli" }],
+  },
+  // --- Drinks ---
+  {
     id: "mp_zobo",
     name: "Zobo (Hibiscus) Drink",
     categoryId: "cat_drinks",
     synonyms: [{ term: "zobo", language: "hausa" }, { term: "sobolo", language: "ghanaian" }],
   },
+  {
+    id: "mp_malt_drink",
+    name: "Malt Drink",
+    categoryId: "cat_drinks",
+    synonyms: [{ term: "malta" }, { term: "amstel malta" }, { term: "maltina" }],
+  },
+  {
+    id: "mp_hibiscus_dried",
+    name: "Dried Hibiscus Flowers",
+    categoryId: "cat_drinks",
+    synonyms: [{ term: "zobo leaves" }, { term: "bissap", language: "wolof" }],
+  },
+  // --- Pantry Staples ---
+  {
+    id: "mp_tomato_paste",
+    name: "Tomato Paste",
+    categoryId: "cat_pantry",
+    synonyms: [{ term: "tin tomato" }, { term: "tomato puree" }],
+  },
+  {
+    id: "mp_maggi_cubes",
+    name: "Maggi Cubes",
+    categoryId: "cat_pantry",
+    synonyms: [{ term: "seasoning cubes" }, { term: "knorr" }, { term: "star maggi" }],
+  },
+  {
+    id: "mp_peak_milk",
+    name: "Peak Milk",
+    categoryId: "cat_pantry",
+    synonyms: [{ term: "evaporated milk" }, { term: "peak" }, { term: "carnation" }],
+  },
 ];
 
 function storeListings(storeId: string, prefix: string): CatalogListing[] {
   return [
-    // Tubers
+    // --- Tubers ---
     {
       id: `${prefix}_yam`,
       masterProductId: "mp_yam",
@@ -154,7 +355,54 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_plantain_v2`, label: "Single", price: 199, weightG: 200 },
       ],
     },
-    // Grains & Flours
+    {
+      id: `${prefix}_cassava`,
+      masterProductId: "mp_cassava",
+      customName: null,
+      price: 599,
+      stockMode: "counted",
+      qty: 15,
+      status: null,
+      frozen: false,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_cassava_v1`, label: "1 piece (~1.5 lb)", price: 599, weightG: 680 },
+        { id: `${prefix}_cassava_v2`, label: "3 pieces (~4.5 lb)", price: 1499, weightG: 2040 },
+      ],
+    },
+    {
+      id: `${prefix}_cocoyam`,
+      masterProductId: "mp_cocoyam",
+      customName: null,
+      price: 449,
+      stockMode: "counted",
+      qty: 20,
+      status: null,
+      frozen: false,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_cocoyam_v1`, label: "1 lb", price: 449, weightG: 454 },
+      ],
+    },
+    {
+      id: `${prefix}_sweet_potato`,
+      masterProductId: "mp_sweet_potato",
+      customName: null,
+      price: 349,
+      stockMode: "counted",
+      qty: 30,
+      status: null,
+      frozen: false,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_sweet_potato_v1`, label: "1 lb", price: 349, weightG: 454 },
+        { id: `${prefix}_sweet_potato_v2`, label: "3 lb bag", price: 899, weightG: 1362 },
+      ],
+    },
+    // --- Grains & Flours ---
     {
       id: `${prefix}_garri_white`,
       masterProductId: "mp_garri",
@@ -220,7 +468,55 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_ogbono_v2`, label: "1 lb", price: 2199, weightG: 454 },
       ],
     },
-    // Spices
+    {
+      id: `${prefix}_semovita`,
+      masterProductId: "mp_semovita",
+      customName: null,
+      price: 499,
+      stockMode: "counted",
+      qty: 25,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_semo_v1`, label: "2 lb bag", price: 499, weightG: 907 },
+        { id: `${prefix}_semo_v2`, label: "10 lb bag", price: 1999, weightG: 4536 },
+      ],
+    },
+    {
+      id: `${prefix}_pounded_yam`,
+      masterProductId: "mp_pounded_yam_flour",
+      customName: "Poundo Yam",
+      price: 699,
+      stockMode: "counted",
+      qty: 20,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_poundo_v1`, label: "2 lb bag", price: 699, weightG: 907 },
+        { id: `${prefix}_poundo_v2`, label: "5 lb bag", price: 1499, weightG: 2268 },
+      ],
+    },
+    {
+      id: `${prefix}_ofada_rice`,
+      masterProductId: "mp_ofada_rice",
+      customName: null,
+      price: 899,
+      stockMode: "counted",
+      qty: 15,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_ofada_v1`, label: "2 lb", price: 899, weightG: 907 },
+        { id: `${prefix}_ofada_v2`, label: "10 lb bag", price: 3599, weightG: 4536 },
+      ],
+    },
+    // --- Spices & Seasonings ---
     {
       id: `${prefix}_suya`,
       masterProductId: "mp_suya_spice",
@@ -252,7 +548,99 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_iru_v1`, label: "4 oz", price: 399, weightG: 113 },
       ],
     },
-    // Oils
+    {
+      id: `${prefix}_cameroon_pepper`,
+      masterProductId: "mp_cameroon_pepper",
+      customName: null,
+      price: 599,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_cameroon_v1`, label: "4 oz", price: 599, weightG: 113 },
+        { id: `${prefix}_cameroon_v2`, label: "8 oz", price: 999, weightG: 227 },
+      ],
+    },
+    {
+      id: `${prefix}_ground_crayfish`,
+      masterProductId: "mp_ground_crayfish",
+      customName: null,
+      price: 799,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_gcray_v1`, label: "4 oz", price: 799, weightG: 113 },
+        { id: `${prefix}_gcray_v2`, label: "8 oz", price: 1399, weightG: 227 },
+      ],
+    },
+    {
+      id: `${prefix}_curry`,
+      masterProductId: "mp_curry_powder",
+      customName: null,
+      price: 299,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_curry_v1`, label: "3 oz", price: 299, weightG: 85 },
+      ],
+    },
+    {
+      id: `${prefix}_thyme`,
+      masterProductId: "mp_thyme",
+      customName: null,
+      price: 249,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_thyme_v1`, label: "2 oz", price: 249, weightG: 57 },
+      ],
+    },
+    {
+      id: `${prefix}_ehuru`,
+      masterProductId: "mp_ehuru",
+      customName: null,
+      price: 699,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_ehuru_v1`, label: "4 oz", price: 699, weightG: 113 },
+      ],
+    },
+    {
+      id: `${prefix}_jollof_seasoning`,
+      masterProductId: "mp_jollof_seasoning",
+      customName: null,
+      price: 399,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_jollof_s_v1`, label: "4 oz packet", price: 399, weightG: 113 },
+      ],
+    },
+    // --- Oils & Butters ---
     {
       id: `${prefix}_palm_oil`,
       masterProductId: "mp_palm_oil",
@@ -286,7 +674,38 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_shea_v2`, label: "16 oz jar", price: 1699, weightG: 454 },
       ],
     },
-    // Vegetables
+    {
+      id: `${prefix}_groundnut_oil`,
+      masterProductId: "mp_groundnut_oil",
+      customName: null,
+      price: 899,
+      stockMode: "counted",
+      qty: 12,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_gnut_v1`, label: "500 ml", price: 899, weightG: 460 },
+        { id: `${prefix}_gnut_v2`, label: "1 litre", price: 1599, weightG: 920 },
+      ],
+    },
+    {
+      id: `${prefix}_coconut_oil`,
+      masterProductId: "mp_coconut_oil",
+      customName: null,
+      price: 1099,
+      stockMode: "counted",
+      qty: 10,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_coco_v1`, label: "500 ml", price: 1099, weightG: 460 },
+      ],
+    },
+    // --- Vegetables ---
     {
       id: `${prefix}_ugu`,
       masterProductId: "mp_ugu",
@@ -318,7 +737,84 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_bitter_v1`, label: "8 oz bag (frozen)", price: 599, weightG: 227 },
       ],
     },
-    // Fish & Meat
+    {
+      id: `${prefix}_ewedu`,
+      masterProductId: "mp_ewedu",
+      customName: null,
+      price: 449,
+      stockMode: "counted",
+      qty: 12,
+      status: null,
+      frozen: true,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_ewedu_v1`, label: "8 oz bag (frozen)", price: 449, weightG: 227 },
+      ],
+    },
+    {
+      id: `${prefix}_waterleaf`,
+      masterProductId: "mp_waterleaf",
+      customName: null,
+      price: 499,
+      stockMode: "counted",
+      qty: 8,
+      status: null,
+      frozen: true,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_wleaf_v1`, label: "8 oz bag (frozen)", price: 499, weightG: 227 },
+      ],
+    },
+    {
+      id: `${prefix}_okra`,
+      masterProductId: "mp_okra",
+      customName: null,
+      price: 399,
+      stockMode: "counted",
+      qty: 20,
+      status: null,
+      frozen: false,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_okra_v1`, label: "1 lb", price: 399, weightG: 454 },
+        { id: `${prefix}_okra_v2`, label: "3 lb bag", price: 999, weightG: 1362 },
+      ],
+    },
+    {
+      id: `${prefix}_scotch_bonnet`,
+      masterProductId: "mp_scotch_bonnet",
+      customName: null,
+      price: 299,
+      stockMode: "counted",
+      qty: 35,
+      status: null,
+      frozen: false,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_scotch_v1`, label: "4 oz (~6 peppers)", price: 299, weightG: 113 },
+        { id: `${prefix}_scotch_v2`, label: "1 lb bag", price: 699, weightG: 454 },
+      ],
+    },
+    {
+      id: `${prefix}_garden_eggs`,
+      masterProductId: "mp_garden_eggs",
+      customName: null,
+      price: 499,
+      stockMode: "counted",
+      qty: 10,
+      status: null,
+      frozen: false,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_gegg_v1`, label: "4 pieces", price: 499, weightG: 300 },
+      ],
+    },
+    // --- Fish & Meat ---
     {
       id: `${prefix}_stockfish`,
       masterProductId: "mp_stockfish",
@@ -351,7 +847,85 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_cray_v2`, label: "8 oz", price: 1199, weightG: 227 },
       ],
     },
-    // Snacks
+    {
+      id: `${prefix}_dried_fish`,
+      masterProductId: "mp_dried_fish",
+      customName: null,
+      price: 1499,
+      stockMode: "counted",
+      qty: 10,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_dfish_v1`, label: "8 oz", price: 1499, weightG: 227 },
+        { id: `${prefix}_dfish_v2`, label: "1 lb", price: 2599, weightG: 454 },
+      ],
+    },
+    {
+      id: `${prefix}_goat_meat`,
+      masterProductId: "mp_goat_meat",
+      customName: null,
+      price: 1299,
+      stockMode: "counted",
+      qty: 8,
+      status: null,
+      frozen: true,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_goat_v1`, label: "1 lb", price: 1299, weightG: 454 },
+        { id: `${prefix}_goat_v2`, label: "3 lb pack", price: 3499, weightG: 1362 },
+      ],
+    },
+    {
+      id: `${prefix}_oxtail`,
+      masterProductId: "mp_oxtail",
+      customName: null,
+      price: 1499,
+      stockMode: "counted",
+      qty: 6,
+      status: null,
+      frozen: true,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_oxtail_v1`, label: "1 lb", price: 1499, weightG: 454 },
+        { id: `${prefix}_oxtail_v2`, label: "3 lb pack", price: 3999, weightG: 1362 },
+      ],
+    },
+    {
+      id: `${prefix}_cow_foot`,
+      masterProductId: "mp_cow_foot",
+      customName: null,
+      price: 899,
+      stockMode: "counted",
+      qty: 5,
+      status: null,
+      frozen: true,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_cfoot_v1`, label: "2 lb pack", price: 899, weightG: 907 },
+      ],
+    },
+    {
+      id: `${prefix}_ponmo`,
+      masterProductId: "mp_ponmo",
+      customName: null,
+      price: 699,
+      stockMode: "counted",
+      qty: 12,
+      status: null,
+      frozen: true,
+      perishable: true,
+      active: true,
+      variants: [
+        { id: `${prefix}_ponmo_v1`, label: "1 lb", price: 699, weightG: 454 },
+      ],
+    },
+    // --- Snacks ---
     {
       id: `${prefix}_chin_chin`,
       masterProductId: "mp_chin_chin",
@@ -368,7 +942,53 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_chin_v2`, label: "1 lb bag", price: 999, weightG: 454 },
       ],
     },
-    // Drinks
+    {
+      id: `${prefix}_puff_puff_mix`,
+      masterProductId: "mp_puff_puff_mix",
+      customName: null,
+      price: 499,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_puff_v1`, label: "1 lb bag", price: 499, weightG: 454 },
+      ],
+    },
+    {
+      id: `${prefix}_plantain_chips`,
+      masterProductId: "mp_plantain_chips",
+      customName: null,
+      price: 399,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_pchips_v1`, label: "5 oz bag", price: 399, weightG: 142 },
+        { id: `${prefix}_pchips_v2`, label: "10 oz bag", price: 699, weightG: 283 },
+      ],
+    },
+    {
+      id: `${prefix}_kulikuli`,
+      masterProductId: "mp_kulikuli",
+      customName: null,
+      price: 349,
+      stockMode: "status",
+      qty: null,
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_kuli_v1`, label: "6 oz bag", price: 349, weightG: 170 },
+      ],
+    },
+    // --- Drinks ---
     {
       id: `${prefix}_zobo`,
       masterProductId: "mp_zobo",
@@ -385,7 +1005,89 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
         { id: `${prefix}_zobo_v2`, label: "1 litre bottle", price: 699, weightG: 1000 },
       ],
     },
-    // Inactive listing (for e2e test: category excludes inactive)
+    {
+      id: `${prefix}_malt`,
+      masterProductId: "mp_malt_drink",
+      customName: null,
+      price: 299,
+      stockMode: "counted",
+      qty: 48,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_malt_v1`, label: "330 ml can", price: 299, weightG: 330 },
+        { id: `${prefix}_malt_v2`, label: "6-pack", price: 1499, weightG: 1980 },
+      ],
+    },
+    {
+      id: `${prefix}_hibiscus_dried`,
+      masterProductId: "mp_hibiscus_dried",
+      customName: "Dried Zobo Leaves",
+      price: 499,
+      stockMode: "counted",
+      qty: 20,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_hibiscus_v1`, label: "8 oz bag", price: 499, weightG: 227 },
+        { id: `${prefix}_hibiscus_v2`, label: "1 lb bag", price: 899, weightG: 454 },
+      ],
+    },
+    // --- Pantry Staples ---
+    {
+      id: `${prefix}_tomato_paste`,
+      masterProductId: "mp_tomato_paste",
+      customName: null,
+      price: 199,
+      stockMode: "counted",
+      qty: 50,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_tpaste_v1`, label: "70 g tin", price: 199, weightG: 70 },
+        { id: `${prefix}_tpaste_v2`, label: "400 g tin", price: 499, weightG: 400 },
+        { id: `${prefix}_tpaste_v3`, label: "800 g tin", price: 799, weightG: 800 },
+      ],
+    },
+    {
+      id: `${prefix}_maggi`,
+      masterProductId: "mp_maggi_cubes",
+      customName: null,
+      price: 199,
+      stockMode: "counted",
+      qty: 100,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_maggi_v1`, label: "10-pack", price: 199, weightG: 40 },
+        { id: `${prefix}_maggi_v2`, label: "100-cube box", price: 1299, weightG: 400 },
+      ],
+    },
+    {
+      id: `${prefix}_peak_milk`,
+      masterProductId: "mp_peak_milk",
+      customName: null,
+      price: 349,
+      stockMode: "counted",
+      qty: 30,
+      status: null,
+      frozen: false,
+      perishable: false,
+      active: true,
+      variants: [
+        { id: `${prefix}_peak_v1`, label: "160 ml tin", price: 349, weightG: 175 },
+        { id: `${prefix}_peak_v2`, label: "400 ml tin", price: 599, weightG: 425 },
+      ],
+    },
+    // --- Inactive listing (for e2e test: category excludes inactive) ---
     {
       id: `${prefix}_inactive_item`,
       masterProductId: "mp_garri",
@@ -446,47 +1148,47 @@ export async function seedDemoCatalog(prisma: PrismaClient) {
     { store: storeA, prefix: "mn" },
     { store: storeB, prefix: "tm" },
   ]) {
+    // Retire the old demo alcohol listing on existing installations as well.
+    // Preserve any historical references; it must never be offered for sale.
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      await tx.listing.updateMany({
+        where: { id: `${prefix}_palm_wine`, storeId: store.id },
+        data: { active: false },
+      });
+    });
     const listings = storeListings(store.id, prefix);
     for (const l of listings) {
       await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
         await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+        const listingData = {
+          price: l.price,
+          stockMode: l.stockMode,
+          qty: l.qty,
+          status: l.status,
+          frozen: l.frozen,
+          perishable: l.perishable,
+          active: l.active,
+        };
         await tx.listing.upsert({
           where: { id: l.id },
-          update: {
-            price: l.price,
-            stockMode: l.stockMode,
-            qty: l.qty,
-            status: l.status,
-            frozen: l.frozen,
-            perishable: l.perishable,
-            active: l.active,
-          },
+          update: listingData,
           create: {
             id: l.id,
             storeId: store.id,
             masterProductId: l.masterProductId,
             customName: l.customName,
-            price: l.price,
-            stockMode: l.stockMode,
-            qty: l.qty,
-            status: l.status,
-            frozen: l.frozen,
-            perishable: l.perishable,
-            active: l.active,
+            ...listingData,
           },
         });
         for (const v of l.variants) {
+          const variantData = { label: v.label, price: v.price, weightG: v.weightG };
           await tx.listingVariant.upsert({
             where: { id: v.id },
-            update: { label: v.label, price: v.price, weightG: v.weightG },
-            create: {
-              id: v.id,
-              listingId: l.id,
-              label: v.label,
-              price: v.price,
-              weightG: v.weightG,
-            },
+            update: variantData,
+            create: { id: v.id, listingId: l.id, ...variantData },
           });
         }
       });

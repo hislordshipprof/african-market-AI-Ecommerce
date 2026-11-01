@@ -1,13 +1,18 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { storeScoped, platformAdmin } from "../db";
+
 import {
   listCategories,
   listingsByCategory,
   getListingDetail,
   searchListings,
   getActiveListings,
+  getActiveCollections,
+  getCollectionListings,
+  getListingsByCategory,
+  getFlowCatalog,
 } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -16,12 +21,25 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let rawPrisma: PrismaClient;
   let storeAId: string;
   let storeBId: string;
-  let userId: string;
   let masterProductId: string;
   let synonymId: string;
   let listingAId: string;
   let listingBId: string;
   let inactiveListingId: string;
+  let collectionId: string;
+
+  it("projects checkout catalog variants without crossing stores or including inactive listings", async () => {
+    const [a, b] = await Promise.all([getFlowCatalog(storeAId), getFlowCatalog(storeBId)]);
+    expect(a.some(item => item.listingId === listingAId)).toBe(true);
+    expect(a.some(item => item.listingId === listingBId || item.listingId === inactiveListingId)).toBe(false);
+    expect(b.some(item => item.listingId === listingBId)).toBe(true);
+    expect(b.some(item => item.listingId === listingAId)).toBe(false);
+    for (const item of a) {
+      expect(item.weightG).toBeGreaterThan(0);
+      expect(item.maxPerOrder).toBeGreaterThan(0);
+      expect(Number.isInteger(item.price)).toBe(true);
+    }
+  });
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -42,12 +60,11 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     });
     storeBId = storeB.id;
 
-    const user = await rawPrisma.user.upsert({
+    await rawPrisma.user.upsert({
       where: { email: "sf-test-user@example.com" },
       update: {},
       create: { id: "sf-test-user", email: "sf-test-user@example.com", name: "SF Test User", emailVerified: true },
     });
-    userId = user.id;
 
     // Get the vegetables category (seeded by migration)
     const vegCat = await rawPrisma.category.findUnique({ where: { slug: "vegetables" } });
@@ -156,10 +173,44 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       }),
     ]);
     inactiveListingId = (inactiveListing[2] as { id: string }).id;
+
+    // Create a collection in store A with an item
+    const collection = await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.storeCollection.create({
+        data: {
+          storeId: storeAId,
+          title: "Test Soup Kit",
+          slug: "test-soup-kit",
+          active: true,
+          sortOrder: 0,
+        },
+      }),
+    ]);
+    collectionId = (collection[2] as { id: string }).id;
+
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.storeCollectionListing.create({
+        data: { collectionId, listingId: listingAId, sortOrder: 0 },
+      }),
+    ]);
   });
 
   afterAll(async () => {
     // Clean up in reverse order of dependencies
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeCollectionListing.deleteMany({ where: { collectionId } }),
+    ]);
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeCollection.deleteMany({ where: { id: collectionId } }),
+    ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
@@ -186,20 +237,21 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   // Seam 7: category seed migration
-  it("has exactly 10 categories after migration", async () => {
+  it("has exactly 11 categories after seed", async () => {
     const categories = await listCategories();
-    expect(categories.length).toBe(10);
+    expect(categories.length).toBe(11);
     const slugs = categories.map((c) => c.slug);
-    expect(slugs).toContain("tubers");
+    expect(slugs).toContain("tubers-and-roots");
     expect(slugs).toContain("vegetables");
-    expect(slugs).toContain("spices");
+    expect(slugs).toContain("spices-and-seasonings");
     expect(slugs).toContain("grains-and-flours");
     expect(slugs).toContain("fish-and-meat");
     expect(slugs).toContain("frozen");
     expect(slugs).toContain("snacks");
     expect(slugs).toContain("drinks");
     expect(slugs).toContain("beauty");
-    expect(slugs).toContain("oils");
+    expect(slugs).toContain("oils-and-butters");
+    expect(slugs).toContain("pantry-staples");
   });
 
   // Seam 1: category browse store isolation
@@ -269,6 +321,19 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   // Seam 6: pg_trgm fuzzy search (word_similarity)
+  it("ranks the exact local egusi match first without cassava or garden eggs", async () => {
+    const store = await rawPrisma.store.findUniqueOrThrow({ where: { slug: "mama-ngozi" } });
+    const results = await searchListings(store.id, "egusi");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].name.toLowerCase()).toContain("egusi");
+    expect(results.some(r => /cassava|garden eggs/i.test(r.name))).toBe(false);
+  });
+
+  it("ranks English and local prefixes before unrelated fuzzy candidates", async () => {
+    const results = await searchListings(storeAId, "ug");
+    expect(results[0]?.id).toBe(listingAId);
+    expect(await searchListings(storeAId, "x")).toEqual([]);
+  });
   it("fuzzy search 'pumkin' finds 'Fluted Pumpkin Leaves' via trigram", async () => {
     const results = await searchListings(storeAId, "pumkin");
     expect(results.length).toBeGreaterThanOrEqual(1);
@@ -280,6 +345,10 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     const listing = result.listings.find((l) => l.id === listingAId);
     expect(listing).toBeDefined();
     expect(listing!.startingPrice).toBe(500);
+    expect(listing!.packLabels).toEqual(expect.arrayContaining(["1 bunch", "3 bunches"]));
+    expect(listing!.packOptions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "3 bunches", price: 1400, weightG: 600 }),
+    ]));
   });
 
   it("inactive listing excluded from category browse", async () => {
@@ -302,5 +371,45 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     const listings = await getActiveListings(storeAId);
     expect(listings.length).toBeGreaterThanOrEqual(1);
     expect(listings.every((l) => l.id !== listingBId)).toBe(true);
+  });
+
+  // Collection service tests (S9)
+  it("getActiveCollections returns store A collections", async () => {
+    const collections = await getActiveCollections(storeAId);
+    expect(collections.length).toBeGreaterThanOrEqual(1);
+    expect(collections.some((c) => c.slug === "test-soup-kit")).toBe(true);
+  });
+
+  it("getActiveCollections isolates by store", async () => {
+    const collections = await getActiveCollections(storeBId);
+    expect(collections.every((c) => c.slug !== "test-soup-kit")).toBe(true);
+  });
+
+  it("getCollectionListings returns listings for a collection", async () => {
+    const result = await getCollectionListings(storeAId, "test-soup-kit");
+    expect(result.collection).not.toBeNull();
+    expect(result.collection!.title).toBe("Test Soup Kit");
+    expect(result.listings.length).toBeGreaterThanOrEqual(1);
+    expect(result.listings.some((l) => l.id === listingAId)).toBe(true);
+  });
+
+  it("getCollectionListings returns null for nonexistent slug", async () => {
+    const result = await getCollectionListings(storeAId, "nonexistent-collection");
+    expect(result.collection).toBeNull();
+    expect(result.listings).toHaveLength(0);
+  });
+
+  it("getCollectionListings excludes inactive listings", async () => {
+    const result = await getCollectionListings(storeAId, "test-soup-kit");
+    expect(result.listings.every((l) => l.id !== inactiveListingId)).toBe(true);
+  });
+
+  // getListingsByCategory (new return type)
+  it("getListingsByCategory returns category rails with slugs", async () => {
+    const rails = await getListingsByCategory(storeAId);
+    expect(rails.length).toBeGreaterThanOrEqual(1);
+    const vegRail = rails.find((r) => r.categorySlug === "vegetables");
+    expect(vegRail).toBeDefined();
+    expect(vegRail!.listings.length).toBeGreaterThanOrEqual(1);
   });
 });

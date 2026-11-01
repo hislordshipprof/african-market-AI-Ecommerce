@@ -1,104 +1,99 @@
-import Link from "next/link";
 import { getStoreWithStatus } from "@/lib/get-store";
-import { listCategories, getActiveListings } from "@/lib/storefront/service";
-import { StorefrontHeader } from "@/components/storefront/storefront-header";
-import { ListingCard } from "@/components/storefront/listing-card";
+import {
+  listCategories,
+  getActiveBanners,
+  getActiveCollections,
+  getListingsByCategory,
+  extractStoreProfile,
+} from "@/lib/storefront/service";
+import { StorefrontShell } from "@/components/storefront/storefront-shell";
+import { HeroCarousel } from "@/components/storefront/hero-carousel";
+import { CategoryMosaic } from "@/components/storefront/category-mosaic";
+import { ProductRail } from "@/components/storefront/product-rail";
+import { CollectionBanners } from "@/components/storefront/collection-banner";
+import { PromoBand } from "@/components/storefront/promo-band";
+import { TrustStoryStrip } from "@/components/storefront/trust-story-strip";
+import { EmptyState } from "@/components/storefront/primitives";
+import { SectionReveal } from "@/components/storefront/scroll-motion";
+import { MarketMarquee } from "@/components/storefront/marquee";
+import { DealsCarousel } from "@/components/storefront/deals-carousel";
+import { ReviewsCarousel } from "@/components/storefront/reviews-carousel";
+import { demoFlowsEnabled } from "@/lib/customer-flow/demo-gate";
 
 export default async function StorefrontPage() {
   const { store, suspended } = await getStoreWithStatus();
-
-  if (suspended) {
+  if (suspended)
     return (
-      <main className="flex min-h-screen items-center justify-center bg-bg">
-        <div className="text-center">
-          <h1
-            className="font-display text-ink mb-2"
-            style={{ fontSize: "clamp(28px, 4vw, 40px)", fontWeight: 700 }}
-          >
-            {store.name}
-          </h1>
-          <p className="text-muted-foreground">
-            This store is temporarily offline. Please check back later.
-          </p>
-        </div>
+      <main className="sf-storefront sf-section sf-container">
+        <h1 className="sf-page-title">{store.name}</h1>
+        <EmptyState
+          title="We'll be back soon"
+          description="This store is temporarily offline. Please check back later."
+        />
       </main>
     );
-  }
-
-  const [categories, listings] = await Promise.all([
+  const [categories, banners, collections, rails] = await Promise.all([
     listCategories(),
-    getActiveListings(store.id),
+    getActiveBanners(store.id),
+    getActiveCollections(store.id),
+    getListingsByCategory(store.id),
   ]);
-
+  const all = rails.flatMap((r) => r.listings);
+  const favorites = all
+    .filter((l) => l.imageUrl && l.badge !== "ask-store" && !l.frozen)
+    .slice(0, 10);
+  const fresh = all.filter((l) => l.perishable && !l.frozen).slice(0, 10);
+  const pantry = rails.find((r) => r.categorySlug === "grains-and-flours");
+  const demo = demoFlowsEnabled(process.env) && ["mama-ngozi", "tante-marie"].includes(store.slug);
+  const subjects = ["Plantain", "Scotch Bonnet Pepper", "Yam"].flatMap(name => all.filter(p => p.displayName === name)).slice(0, 3);
   return (
-    <main className="min-h-screen bg-bg">
-      <StorefrontHeader store={store} />
-
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-        {/* Category grid */}
-        <section aria-labelledby="categories-heading">
-          <h2
-            id="categories-heading"
-            className="font-display text-ink mb-4"
-            style={{ fontSize: "22px", fontWeight: 700, lineHeight: 1.2 }}
-          >
-            Shop by category
-          </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-            {categories.map((cat) => (
-              <Link
-                key={cat.id}
-                href={`/categories/${cat.slug}`}
-                className="flex items-center gap-2.5 rounded-md bg-surface px-4 py-3 transition-colors hover:bg-soft"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-soft font-display text-sm font-bold text-primary">
-                  {cat.name.charAt(0)}
-                </span>
-                <span className="font-label text-xs font-semibold text-ink">
-                  {cat.name}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        {/* Active listings */}
-        {listings.length > 0 && (
-          <section aria-labelledby="listings-heading" className="mt-8">
-            <h2
-              id="listings-heading"
-              className="font-display text-ink mb-4"
-              style={{ fontSize: "22px", fontWeight: 700, lineHeight: 1.2 }}
-            >
-              Recently added
-            </h2>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {listings.map((listing) => (
-                <ListingCard key={listing.id} listing={listing} />
-              ))}
-            </div>
-          </section>
+    <StorefrontShell store={store}>
+      <HeroCarousel banners={banners} products={subjects.length ? subjects : favorites.slice(0, 3)} pickupMinutes={store.prepTimeMinutes} pickupEnabled={store.pickupEnabled} />
+      <MarketMarquee />
+      <div className="sf-container sf-stack">
+        <SectionReveal><CategoryMosaic categories={categories} /></SectionReveal>
+        {!all.length && (
+          <EmptyState
+            title="The shelves are getting ready"
+            description="Your store is adding its first listings. Come back soon to see what's in season."
+          />
         )}
-
-        {listings.length === 0 && (
-          <section className="mt-8">
-            <div className="rounded-md bg-surface p-8 text-center">
-              <p className="font-body font-medium text-ink">
-                No listings yet
-              </p>
-              <p className="mt-1 font-body text-sm text-muted-foreground">
-                This store is setting up. Check back soon for fresh products.
-              </p>
-            </div>
-          </section>
-        )}
+        <ProductRail
+          title={demo ? "Popular picks" : "Shelf favorites"}
+          description="Familiar favorites for a well-stocked kitchen."
+          listings={favorites}
+          seeAllHref="/categories"
+        />
       </div>
-
-      <footer className="border-t border-line px-4 py-6 text-center">
-        <p className="font-body text-sm text-muted-foreground">
-          Powered by the Platform
-        </p>
-      </footer>
-    </main>
+      <DealsCarousel listings={favorites} demo={demo} />
+      <div className="sf-container sf-stack">
+        <SectionReveal><CollectionBanners collections={collections} /></SectionReveal>
+        <ProductRail
+          title={demo ? "Fresh in" : "Fresh ingredients"}
+          description="Something good for tonight's pot."
+          listings={fresh}
+          seeAllHref="/categories/vegetables"
+        />
+        {pantry && (
+          <ProductRail
+            title="Pantry, sorted."
+            description="Everyday staples worth keeping close."
+            listings={pantry.listings}
+            seeAllHref="/categories/grains-and-flours"
+          />
+        )}
+        <ProductRail title={demo ? "Back in stock" : "Available today"} description={demo ? "Sample restocked picks from the demo shelves." : "Available on the shelves today."} listings={all.filter(l => l.badge === "in-stock").slice(-8)} seeAllHref="/categories" />
+      </div>
+      <PromoBand
+        store={store}
+        offer={banners.find((b) => /free delivery/i.test(b.title))?.title}
+      />
+      <TrustStoryStrip
+        profile={extractStoreProfile(store)}
+        demo={demo}
+        productCount={all.length}
+      />
+      <ReviewsCarousel demo={demo} />
+    </StorefrontShell>
   );
 }

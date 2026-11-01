@@ -27,9 +27,9 @@ test.describe("Store override navigation (#56)", () => {
       timeout: 10000,
     });
 
-    const productCard = page.locator("[data-testid='listing-card']").first();
-    await expect(productCard).toBeVisible({ timeout: 10000 });
-    await productCard.click();
+    const productCardLink = page.locator("[data-testid='listing-card'] a").first();
+    await expect(productCardLink).toBeVisible({ timeout: 10000 });
+    await productCardLink.click();
     await page.waitForURL(/\/listings\//);
     await expect(storeHeader(page)).toHaveText("Mama Ngozi African Market", {
       timeout: 10000,

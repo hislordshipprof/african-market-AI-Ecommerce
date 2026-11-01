@@ -46,9 +46,14 @@ export default defineConfig({
   webServer: process.env.CI
     ? undefined
     : {
-        command: "npx next start",
+        command: "pnpm exec next start",
         url: "http://localhost:3000/api/health",
         reuseExistingServer: true,
         timeout: 120_000,
+        env: {
+          NEXT_PUBLIC_DEMO_FLOWS: "1",
+          E2E_STORE_OVERRIDE: "1",
+          VERCEL_ENV: "preview",
+        },
       },
 });

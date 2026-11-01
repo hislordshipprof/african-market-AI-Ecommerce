@@ -38,3 +38,6 @@ blob-report/
 
 # Builder run logs and reports
 .builder/
+
+# Local browser profile directories (left by screenshot/validation tools)
+.validation-*/

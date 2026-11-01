@@ -1,0 +1,722 @@
+[
+  {
+    "screen": "cart",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-cart-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/cart",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "checkout",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-checkout-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/checkout",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "payment-declined",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-payment-declined-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/checkout",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "confirmation",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-confirmation-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/8cfaa9de-7565-42ba-b25e-28b05a4889b4?placed=1",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "tracking",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-tracking-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/8cfaa9de-7565-42ba-b25e-28b05a4889b4",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "substitutions",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-substitutions-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/8cfaa9de-7565-42ba-b25e-28b05a4889b4/substitutions",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "chat",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-chat-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/8cfaa9de-7565-42ba-b25e-28b05a4889b4",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "report",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-report-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/8cfaa9de-7565-42ba-b25e-28b05a4889b4/report",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "sign-in",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-sign-in-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/account/sign-in",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "sign-in-code",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-sign-in-code-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/account/sign-in",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "account",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-account-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/account",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "account-order",
+    "width": 390,
+    "colorScheme": "light",
+    "file": "phase2-account-order-390px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/account/orders/7a813c88-7da2-4fa4-b8e7-3858f2664e42",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "cart",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-cart-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/cart",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "checkout",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-checkout-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/checkout",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "payment-declined",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-payment-declined-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/checkout",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "confirmation",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-confirmation-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/c134a38a-c3ed-4e85-ba32-b671630d6164?placed=1",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "tracking",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-tracking-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/c134a38a-c3ed-4e85-ba32-b671630d6164",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "substitutions",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-substitutions-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/c134a38a-c3ed-4e85-ba32-b671630d6164/substitutions",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "chat",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-chat-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/c134a38a-c3ed-4e85-ba32-b671630d6164",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "report",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-report-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/c134a38a-c3ed-4e85-ba32-b671630d6164/report",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "sign-in",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-sign-in-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/account/sign-in",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "sign-in-code",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-sign-in-code-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/account/sign-in",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "account",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-account-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/account",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "account-order",
+    "width": 390,
+    "colorScheme": "dark",
+    "file": "phase2-account-order-390px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/account/orders/e884d942-2cd1-40eb-b4bd-d25665b8d247",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errors": []
+  },
+  {
+    "screen": "cart",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-cart-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/cart",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "checkout",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-checkout-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/checkout",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "payment-declined",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-payment-declined-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/checkout",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "confirmation",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-confirmation-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/b4344d9b-ad5c-4152-82d0-4a82f5e3a116?placed=1",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "tracking",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-tracking-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/b4344d9b-ad5c-4152-82d0-4a82f5e3a116",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "substitutions",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-substitutions-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/b4344d9b-ad5c-4152-82d0-4a82f5e3a116/substitutions",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 3,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "chat",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-chat-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/b4344d9b-ad5c-4152-82d0-4a82f5e3a116",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "report",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-report-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/order/b4344d9b-ad5c-4152-82d0-4a82f5e3a116/report",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "sign-in",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-sign-in-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/account/sign-in",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "sign-in-code",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-sign-in-code-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/account/sign-in",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "account",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-account-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/account",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "account-order",
+    "width": 1440,
+    "colorScheme": "light",
+    "file": "phase2-account-order-1440px-light.png",
+    "url": "http://mama-ngozi.localhost:3000/account/orders/a0b83193-682a-488a-b156-799668af0366",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "cart",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-cart-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/cart",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "checkout",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-checkout-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/checkout",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "payment-declined",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-payment-declined-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/checkout",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "confirmation",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-confirmation-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/82425728-fbf7-4507-b63f-eba4e6f5fc32?placed=1",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "tracking",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-tracking-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/82425728-fbf7-4507-b63f-eba4e6f5fc32",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "substitutions",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-substitutions-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/82425728-fbf7-4507-b63f-eba4e6f5fc32/substitutions",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 3,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "chat",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-chat-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/82425728-fbf7-4507-b63f-eba4e6f5fc32",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "report",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-report-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/order/82425728-fbf7-4507-b63f-eba4e6f5fc32/report",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "sign-in",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-sign-in-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/account/sign-in",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "sign-in-code",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-sign-in-code-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/account/sign-in",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 2,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "account",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-account-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/account",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  },
+  {
+    "screen": "account-order",
+    "width": 1440,
+    "colorScheme": "dark",
+    "file": "phase2-account-order-1440px-dark.png",
+    "url": "http://mama-ngozi.localhost:3000/account/orders/2b55b423-b533-4bcc-9fe2-043c75c1c053",
+    "overflow": false,
+    "fontsReady": true,
+    "imageCount": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errors": []
+  }
+]

@@ -1,4 +1,5 @@
 "use server";
+import { revalidateStorefront } from "../storefront/cache";
 
 import { requireStoreOwner } from "../store-admin/session";
 import {
@@ -82,6 +83,7 @@ export async function createListingAction(formData: FormData) {
       actorId: session.user.id,
       actorEmail: session.user.email,
     });
+    revalidateStorefront(session.store.id);
     return { success: true, id: result.id };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create listing";
@@ -148,6 +150,7 @@ export async function updateListingAction(formData: FormData) {
       variants: parsedVariants,
     });
 
+    revalidateStorefront(session.store.id);
     return { success: true, id: updated.id };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update listing";
@@ -165,6 +168,7 @@ export async function deactivateListingAction(listingId: string) {
       session.user.id,
       session.user.email,
     );
+    revalidateStorefront(session.store.id);
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to deactivate listing";
@@ -182,6 +186,7 @@ export async function reactivateListingAction(listingId: string) {
       session.user.id,
       session.user.email,
     );
+    revalidateStorefront(session.store.id);
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to reactivate listing";

@@ -23,12 +23,20 @@ model Store {
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
+  ownerName            String?  @map("owner_name")
+  ownerStory           String?  @map("owner_story")
+  ownerPhotoUrl        String?  @map("owner_photo_url")
+  neighborhood         String?
+  deliveryInfo         String?  @map("delivery_info")
+
   rlsFixtures  RlsTestFixture[]
   auditLogs    AuditLog[]
   memberships  StoreMembership[]
   invites      StoreInvite[]
   listings     Listing[]
   stockEvents  StockEvent[]
+  banners      StoreBanner[]
+  collections  StoreCollection[]
 
   @@map("stores")
 }
@@ -205,6 +213,8 @@ model Category {
   id        String   @id @default(cuid())
   name      String   @unique
   slug      String   @unique
+  localName String?  @map("local_name")
+  imageUrl  String?  @map("image_url")
   sortOrder Int      @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -266,6 +276,7 @@ model Listing {
   masterProduct  MasterProduct? @relation(fields: [masterProductId], references: [id])
   variants       ListingVariant[]
   stockEvents    StockEvent[]
+  collectionItems StoreCollectionListing[]
 
   @@index([storeId])
   @@index([storeId, active])
@@ -307,4 +318,61 @@ model StockEvent {
   @@index([listingId])
   @@index([actorId])
   @@map("stock_events")
+}
+
+model StoreBanner {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  title     String
+  subtitle  String?
+  ctaText   String?  @map("cta_text")
+  ctaHref   String?  @map("cta_href")
+  imageUrl  String   @map("image_url")
+  sortOrder Int      @default(0) @map("sort_order")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+  @@index([storeId, active, sortOrder])
+  @@map("store_banners")
+}
+
+model StoreCollection {
+  id          String   @id @default(cuid())
+  storeId     String   @map("store_id")
+  title       String
+  subtitle    String?
+  imageUrl    String?  @map("image_url")
+  slug        String
+  sortOrder   Int      @default(0) @map("sort_order")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  store    Store                    @relation(fields: [storeId], references: [id])
+  items    StoreCollectionListing[]
+
+  @@unique([storeId, slug])
+  @@index([storeId])
+  @@index([storeId, active, sortOrder])
+  @@map("store_collections")
+}
+
+model StoreCollectionListing {
+  id           String   @id @default(cuid())
+  collectionId String   @map("collection_id")
+  listingId    String   @map("listing_id")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  collection StoreCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  listing    Listing         @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, listingId])
+  @@index([collectionId])
+  @@index([listingId])
+  @@map("store_collection_listings")
 }

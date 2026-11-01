@@ -1,3 +1,5 @@
+import { editorial } from "../src/lib/storefront/editorial";
+import { categoryPhotos } from "../src/lib/storefront/catalog";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
@@ -5,6 +7,7 @@ import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
 import { assertNotProduction } from "../src/lib/seed-guard";
 import { seedDemoCatalog } from "./seed-demo-catalog";
+import { revalidateSeededStores } from "../scripts/revalidate-storefront";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
@@ -12,7 +15,23 @@ const prisma = new PrismaClient({ adapter });
 async function seedDemoStores() {
   const storeA = await prisma.store.upsert({
     where: { slug: "mama-ngozi" },
-    update: {},
+    update: {
+      ownerName: "Ngozi Okafor",
+      ownerStory:
+        "Mama Ngozi has been bringing the flavors of home to the community since 2009. What started as a small shop in a strip mall is now the neighborhood’s go-to for authentic Nigerian and West African groceries, spices, and fresh produce.",
+      ownerPhotoUrl: null,
+      neighborhood: "Parkside, Houston TX",
+      deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
+      hours: {
+        monday: "9:00 AM - 8:00 PM",
+        tuesday: "9:00 AM - 8:00 PM",
+        wednesday: "9:00 AM - 8:00 PM",
+        thursday: "9:00 AM - 8:00 PM",
+        friday: "9:00 AM - 9:00 PM",
+        saturday: "8:00 AM - 9:00 PM",
+        sunday: "10:00 AM - 6:00 PM",
+      },
+    },
     create: {
       slug: "mama-ngozi",
       name: "Mama Ngozi African Market",
@@ -25,12 +44,43 @@ async function seedDemoStores() {
       minimumOrderCents: 3500,
       pickupEnabled: true,
       autoRefundLimitCents: 2500,
+      ownerName: "Ngozi Okafor",
+      ownerStory:
+        "Mama Ngozi has been bringing the flavors of home to the community since 2009. What started as a small shop in a strip mall is now the neighborhood’s go-to for authentic Nigerian and West African groceries, spices, and fresh produce.",
+      ownerPhotoUrl: null,
+      neighborhood: "Parkside, Houston TX",
+      deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
+      hours: {
+        monday: "9:00 AM - 8:00 PM",
+        tuesday: "9:00 AM - 8:00 PM",
+        wednesday: "9:00 AM - 8:00 PM",
+        thursday: "9:00 AM - 8:00 PM",
+        friday: "9:00 AM - 9:00 PM",
+        saturday: "8:00 AM - 9:00 PM",
+        sunday: "10:00 AM - 6:00 PM",
+      },
     },
   });
 
   const storeB = await prisma.store.upsert({
     where: { slug: "tante-marie" },
-    update: {},
+    update: {
+      ownerName: "Marie Desrosiers",
+      ownerStory:
+        "Tante Marie left Port-au-Prince in 1995 with three recipes and a dream. Today her shop is where Atlanta’s Caribbean community finds scotch bonnet peppers, fresh plantains, and the taste of the islands.",
+      ownerPhotoUrl: null,
+      neighborhood: "Little Caribbean, Atlanta GA",
+      deliveryInfo: "Next-day delivery within 6 miles · No pickup",
+      hours: {
+        monday: "10:00 AM - 7:00 PM",
+        tuesday: "10:00 AM - 7:00 PM",
+        wednesday: "10:00 AM - 7:00 PM",
+        thursday: "10:00 AM - 7:00 PM",
+        friday: "10:00 AM - 8:00 PM",
+        saturday: "9:00 AM - 8:00 PM",
+        sunday: "Closed",
+      },
+    },
     create: {
       slug: "tante-marie",
       name: "Tante Marie Caribbean Grocer",
@@ -43,6 +93,21 @@ async function seedDemoStores() {
       minimumOrderCents: 3000,
       pickupEnabled: false,
       autoRefundLimitCents: 2000,
+      ownerName: "Marie Desrosiers",
+      ownerStory:
+        "Tante Marie left Port-au-Prince in 1995 with three recipes and a dream. Today her shop is where Atlanta’s Caribbean community finds scotch bonnet peppers, fresh plantains, and the taste of the islands.",
+      ownerPhotoUrl: null,
+      neighborhood: "Little Caribbean, Atlanta GA",
+      deliveryInfo: "Next-day delivery within 6 miles · No pickup",
+      hours: {
+        monday: "10:00 AM - 7:00 PM",
+        tuesday: "10:00 AM - 7:00 PM",
+        wednesday: "10:00 AM - 7:00 PM",
+        thursday: "10:00 AM - 7:00 PM",
+        friday: "10:00 AM - 8:00 PM",
+        saturday: "9:00 AM - 8:00 PM",
+        sunday: "Closed",
+      },
     },
   });
 
@@ -75,6 +140,323 @@ async function seedDemoStores() {
   ]);
 
   console.log("Seeded 2 demo stores: mama-ngozi, tante-marie");
+}
+
+async function seedCategoryMetadata() {
+  const categories: {
+    id: string;
+    name: string;
+    slug: string;
+    localName: string;
+    imageUrl: string;
+    sortOrder: number;
+  }[] = [
+    { id: "cat_tubers", name: "Tubers & Roots", slug: "tubers-and-roots", localName: "ISU · BAYERE", imageUrl: categoryPhotos["tubers-and-roots"], sortOrder: 1 },
+    { id: "cat_grains", name: "Grains & Flours", slug: "grains-and-flours", localName: "OKA · AGBADO", imageUrl: categoryPhotos["grains-and-flours"], sortOrder: 2 },
+    { id: "cat_spices", name: "Spices & Seasonings", slug: "spices-and-seasonings", localName: "OSE · YAJI", imageUrl: categoryPhotos["spices-and-seasonings"], sortOrder: 3 },
+    { id: "cat_oils", name: "Oils & Butters", slug: "oils-and-butters", localName: "NKWU · ORI", imageUrl: categoryPhotos["oils-and-butters"], sortOrder: 4 },
+    { id: "cat_vegetables", name: "Vegetables", slug: "vegetables", localName: "EFO · AHIHARA", imageUrl: categoryPhotos["vegetables"], sortOrder: 5 },
+    { id: "cat_fish_meat", name: "Fish & Meat", slug: "fish-and-meat", localName: "EJA · ERAN", imageUrl: categoryPhotos["fish-and-meat"], sortOrder: 6 },
+    { id: "cat_frozen", name: "Frozen", slug: "frozen", localName: "", imageUrl: categoryPhotos.frozen, sortOrder: 7 },
+    { id: "cat_snacks", name: "Snacks", slug: "snacks", localName: "IPANU", imageUrl: categoryPhotos["snacks"], sortOrder: 8 },
+    { id: "cat_drinks", name: "Drinks", slug: "drinks", localName: "OMU · ZOBO", imageUrl: categoryPhotos["drinks"], sortOrder: 9 },
+    { id: "cat_beauty", name: "Beauty", slug: "beauty", localName: "", imageUrl: categoryPhotos.beauty, sortOrder: 10 },
+    { id: "cat_pantry", name: "Pantry Staples", slug: "pantry-staples", localName: "ILE IDANA", imageUrl: categoryPhotos["pantry-staples"], sortOrder: 11 },
+  ];
+
+  for (const cat of categories) {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.category.upsert({
+        where: { id: cat.id },
+        update: {
+          name: cat.name,
+          slug: cat.slug,
+          localName: cat.localName || null,
+          imageUrl: cat.imageUrl,
+          sortOrder: cat.sortOrder,
+        },
+        create: {
+          id: cat.id,
+          name: cat.name,
+          slug: cat.slug,
+          localName: cat.localName || null,
+          imageUrl: cat.imageUrl,
+          sortOrder: cat.sortOrder,
+        },
+      });
+    });
+  }
+  console.log(`Seeded ${categories.length} categories with localName and imageUrl`);
+}
+
+async function seedStoreBanners() {
+  const storeA = await prisma.store.findUnique({ where: { slug: "mama-ngozi" } });
+  const storeB = await prisma.store.findUnique({ where: { slug: "tante-marie" } });
+  if (!storeA || !storeB) throw new Error("Demo stores must exist before seeding banners");
+
+  const banners: {
+    id: string;
+    storeId: string;
+    title: string;
+    subtitle: string;
+    ctaText: string;
+    ctaHref: string;
+    imageUrl: string;
+    sortOrder: number;
+  }[] = [
+    // mama-ngozi banners
+    {
+      id: "banner_mn_1",
+      storeId: storeA.id,
+      title: "A little closer to home.",
+      subtitle: "The ingredients you grew up with. From your neighborhood store to your kitchen.",
+      ctaText: "Shop your favorites",
+      ctaHref: "/collections/jollof-night",
+      imageUrl: editorial.jollof,
+      sortOrder: 0,
+    },
+    {
+      id: "banner_mn_2",
+      storeId: storeA.id,
+      title: "Soup season is here",
+      subtitle: "Everything for egusi, ogbono and ewedu",
+      ctaText: "Build your pot",
+      ctaHref: "/collections/soup-essentials",
+      imageUrl: editorial.spices,
+      sortOrder: 1,
+    },
+    {
+      id: "banner_mn_3",
+      storeId: storeA.id,
+      title: "Free delivery over $75",
+      subtitle: "Same-day to your door in Houston",
+      ctaText: "Start shopping",
+      ctaHref: "/",
+      imageUrl: editorial.market,
+      sortOrder: 2,
+    },
+    // tante-marie banners
+    {
+      id: "banner_tm_1",
+      storeId: storeB.id,
+      title: "Island flavors, Atlanta prices",
+      subtitle: "Scotch bonnet · Plantain · Callaloo",
+      ctaText: "Browse all",
+      ctaHref: "/",
+      imageUrl: editorial.market,
+      sortOrder: 0,
+    },
+    {
+      id: "banner_tm_2",
+      storeId: storeB.id,
+      title: "Weekend special: oxtail",
+      subtitle: "$12.99/lb this Saturday only",
+      ctaText: "See deal",
+      ctaHref: "/categories/fish-and-meat",
+      imageUrl: editorial.fish,
+      sortOrder: 1,
+    },
+    {
+      id: "banner_tm_3",
+      storeId: storeB.id,
+      title: "New: Caribbean breakfast box",
+      subtitle: "Ackee, saltfish, plantain, bammy — feeds 4",
+      ctaText: "Order now",
+      ctaHref: "/collections/caribbean-breakfast",
+      imageUrl: editorial.jollof,
+      sortOrder: 2,
+    },
+  ];
+
+  for (const b of banners) {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${b.storeId}, true)`;
+      await tx.storeBanner.upsert({
+        where: { id: b.id },
+        update: {
+          title: b.title,
+          subtitle: b.subtitle,
+          ctaText: b.ctaText,
+          ctaHref: b.ctaHref,
+          imageUrl: b.imageUrl,
+          sortOrder: b.sortOrder,
+          active: true,
+        },
+        create: {
+          id: b.id,
+          storeId: b.storeId,
+          title: b.title,
+          subtitle: b.subtitle,
+          ctaText: b.ctaText,
+          ctaHref: b.ctaHref,
+          imageUrl: b.imageUrl,
+          sortOrder: b.sortOrder,
+          active: true,
+        },
+      });
+    });
+  }
+  console.log(`Seeded ${banners.length} store banners`);
+}
+
+async function seedStoreCollections() {
+  const storeA = await prisma.store.findUnique({ where: { slug: "mama-ngozi" } });
+  const storeB = await prisma.store.findUnique({ where: { slug: "tante-marie" } });
+  if (!storeA || !storeB) throw new Error("Demo stores must exist before seeding collections");
+
+  const collections: {
+    id: string;
+    storeId: string;
+    title: string;
+    subtitle: string;
+    slug: string;
+    imageUrl: string;
+    sortOrder: number;
+    listingIds: string[];
+  }[] = [
+    // mama-ngozi collections
+    {
+      id: "coll_mn_jollof",
+      storeId: storeA.id,
+      title: "Jollof night",
+      subtitle: "Everything for the perfect pot",
+      slug: "jollof-night",
+      imageUrl: editorial.jollof,
+      sortOrder: 0,
+      listingIds: ["mn_ofada_rice", "mn_tomato_paste", "mn_scotch_bonnet", "mn_palm_oil", "mn_maggi", "mn_curry"],
+    },
+    {
+      id: "coll_mn_soup",
+      storeId: storeA.id,
+      title: "Soup essentials",
+      subtitle: "Egusi, ogbono, ewedu and all the fixings",
+      slug: "soup-essentials",
+      imageUrl: editorial.spices,
+      sortOrder: 1,
+      listingIds: ["mn_egusi", "mn_ogbono", "mn_ugu", "mn_bitter_leaf", "mn_stockfish", "mn_crayfish", "mn_palm_oil", "mn_iru"],
+    },
+    {
+      id: "coll_mn_stew",
+      storeId: storeA.id,
+      title: "Sunday stew",
+      subtitle: "Build the perfect Nigerian stew from scratch",
+      slug: "sunday-stew",
+      imageUrl: editorial.spices,
+      sortOrder: 2,
+      listingIds: ["mn_tomato_paste", "mn_scotch_bonnet", "mn_palm_oil", "mn_curry", "mn_thyme", "mn_maggi", "mn_goat_meat"],
+    },
+    {
+      id: "coll_mn_snack",
+      storeId: storeA.id,
+      title: "Snack run",
+      subtitle: "Chin chin, kulikuli and more",
+      slug: "snack-run",
+      imageUrl: categoryPhotos.snacks,
+      sortOrder: 3,
+      listingIds: ["mn_chin_chin", "mn_plantain_chips", "mn_kulikuli", "mn_puff_puff_mix", "mn_zobo", "mn_malt"],
+    },
+    // tante-marie collections
+    {
+      id: "coll_tm_breakfast",
+      storeId: storeB.id,
+      title: "Caribbean breakfast",
+      subtitle: "Start the morning island-style",
+      slug: "caribbean-breakfast",
+      imageUrl: editorial.jollof,
+      sortOrder: 0,
+      listingIds: ["tm_plantain", "tm_yam", "tm_palm_oil"],
+    },
+    {
+      id: "coll_tm_pepper",
+      storeId: storeB.id,
+      title: "Pepper pot",
+      subtitle: "The hottest picks",
+      slug: "pepper-pot",
+      imageUrl: editorial.spices,
+      sortOrder: 1,
+      listingIds: ["tm_scotch_bonnet", "tm_cameroon_pepper", "tm_suya"],
+    },
+    {
+      id: "coll_tm_staples",
+      storeId: storeB.id,
+      title: "Stock up staples",
+      subtitle: "Pantry essentials that last",
+      slug: "stock-up-staples",
+      imageUrl: editorial.grains,
+      sortOrder: 2,
+      listingIds: ["tm_garri_white", "tm_ofada_rice", "tm_palm_oil", "tm_maggi", "tm_peak_milk", "tm_tomato_paste"],
+    },
+  ];
+
+  for (const c of collections) {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${c.storeId}, true)`;
+      await tx.storeCollection.upsert({
+        where: { storeId_slug: { storeId: c.storeId, slug: c.slug } },
+        update: {
+          title: c.title,
+          subtitle: c.subtitle,
+          imageUrl: c.imageUrl,
+          sortOrder: c.sortOrder,
+          active: true,
+        },
+        create: {
+          id: c.id,
+          storeId: c.storeId,
+          title: c.title,
+          subtitle: c.subtitle,
+          imageUrl: c.imageUrl,
+          slug: c.slug,
+          sortOrder: c.sortOrder,
+          active: true,
+        },
+      });
+    });
+
+    // Seed collection-listing associations
+    const collection = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${c.storeId}, true)`;
+      return tx.storeCollection.findFirst({
+        where: { storeId: c.storeId, slug: c.slug },
+        select: { id: true },
+      });
+    });
+    if (!collection) continue;
+
+    for (let i = 0; i < c.listingIds.length; i++) {
+      const listingId = c.listingIds[i];
+      const itemId = `${c.id}_item_${i}`;
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.store_id', ${c.storeId}, true)`;
+
+        const existing = await tx.storeCollectionListing.findUnique({
+          where: {
+            collectionId_listingId: {
+              collectionId: collection.id,
+              listingId,
+            },
+          },
+        });
+        if (!existing) {
+          await tx.storeCollectionListing.create({
+            data: {
+              id: itemId,
+              collectionId: collection.id,
+              listingId,
+              sortOrder: i,
+            },
+          });
+        }
+      });
+    }
+  }
+  console.log(`Seeded ${collections.length} store collections with listing associations`);
 }
 
 async function seedTestAdmin() {
@@ -314,12 +696,16 @@ async function seedStoreOwner() {
 
 async function main() {
   await seedDemoStores();
+  await seedCategoryMetadata();
   await seedDemoCatalog(prisma);
+  await seedStoreBanners();
+  await seedStoreCollections();
 
   if (process.env.SEED_TEST_ADMIN === "1") {
     await seedTestAdmin();
     await seedStoreOwner();
   }
+  await revalidateSeededStores(await prisma.store.findMany({ where: { slug: { in: ["mama-ngozi", "tante-marie"] } }, select: { id: true, slug: true } }));
 }
 
 main()

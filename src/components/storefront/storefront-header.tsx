@@ -1,36 +1,51 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { ValidatedStore } from "@/lib/get-store";
+import { listCategories } from "@/lib/storefront/service";
 import { SearchBar } from "./search-bar";
+import { CartTrigger } from "./cart-provider";
+import { FulfillmentChip } from "./fulfillment-chip";
+import { ShrinkingHeader } from "./scroll-motion";
 
-export function StorefrontHeader({ store }: { store: ValidatedStore }) {
+export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
+  const categories = await listCategories();
   return (
-    <header className="bg-primary">
-      <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6">
-        <div className="flex items-center gap-3">
+    <ShrinkingHeader>
+      <div className="sf-header-main sf-container">
+        <Link href="/" className="sf-brand">
           {store.logoUrl && (
             <Image
               src={store.logoUrl}
               alt={`${store.name} logo`}
-              width={48}
-              height={48}
-              className="h-12 w-12 rounded-md object-contain"
+              width={44}
+              height={44}
+              className="sf-logo"
             />
           )}
-          <Link href="/" className="min-w-0">
-            <h1
-              className="truncate font-display text-on-primary"
-              style={{ fontSize: "clamp(20px, 3vw, 28px)", fontWeight: 700, lineHeight: 1.2 }}
-            >
-              {store.name}
-            </h1>
-          </Link>
+          <h1 data-testid="store-name">{store.name}</h1>
+        </Link>
+        <div className="sf-header-window">
+          <FulfillmentChip
+            minutes={store.prepTimeMinutes}
+            pickup={store.pickupEnabled}
+            radius={Number(store.deliveryRadiusMi)}
+          />
         </div>
-
-        <div className="mt-4">
-          <SearchBar />
+        <div className="sf-header-search">
+          <SearchBar storeId={store.id} />
         </div>
+        <CartTrigger className="sf-header-cart" />
       </div>
-    </header>
+      <nav aria-label="Store categories" className="sf-category-nav">
+        <div className="sf-container">
+          <Link href="/categories">All aisles</Link>
+          {categories.slice(0, 8).map((cat) => (
+            <Link key={cat.id} href={`/categories/${cat.slug}`}>
+              {cat.name}
+            </Link>
+          ))}
+        </div>
+      </nav>
+    </ShrinkingHeader>
   );
 }
