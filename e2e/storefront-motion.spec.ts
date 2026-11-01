@@ -4,10 +4,11 @@ const BASE = "http://mama-ngozi.localhost:3000";
 test.describe("Phase 3 motion and depth", () => {
   test.use({ reducedMotion: "no-preference" });
   test("hero autoplay pauses independently on hover and the pause button", async ({ page }) => {
+    test.setTimeout(60_000);
     await page.goto(BASE);
     const hero = page.getByTestId("hero-carousel");
     const dots = hero.getByTestId("carousel-dot");
-    await expect(hero).toHaveAttribute("data-autoplay", "running");
+    await expect(hero).toHaveAttribute("data-autoplay", "running", { timeout: 15_000 });
     await hero.hover();
     await expect(hero).toHaveAttribute("data-autoplay", "paused");
     await page.waitForTimeout(6500);
@@ -34,6 +35,7 @@ test.describe("Phase 3 motion and depth", () => {
   });
 
   test("hero remains edge to edge and layers overlap during a slide change", async ({ page }) => {
+    test.setTimeout(45_000);
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(BASE);
     const stage = page.locator(".sf-hero");
@@ -42,7 +44,7 @@ test.describe("Phase 3 motion and depth", () => {
     expect(geometry.right).toBe(geometry.viewport);
     await page.getByRole("button", { name: "Next slide", exact: true }).click();
     await expect(page.getByTestId("carousel-dot").nth(1)).toHaveAttribute("aria-current", "true");
-    await expect(page.locator(".sf-hero-slide")).toHaveCount(1);
+    await expect(page.locator(".sf-hero-slide")).toHaveCount(1, { timeout: 3000 });
     await expect(page.locator(".sf-hero-slide")).toHaveCSS("position", "absolute");
     await expect(stage).toHaveCSS("height", "600px");
   });

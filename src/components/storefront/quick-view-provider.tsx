@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import type { StorefrontListing } from "@/lib/storefront/service";
 const QuickView = dynamic(() => import("./quick-view").then(m => m.QuickView));
@@ -10,5 +10,16 @@ export const useQuickView = () => useContext(Context);
 export function QuickViewProvider({ children }: { children: ReactNode }) {
   const [listing, setListing] = useState<StorefrontListing | null>(null);
   const [selected, select] = useState("");
-  return <ImageTransitionContext.Provider value={{ selected, select }}><Context.Provider value={setListing}>{children}{listing && <QuickView key={listing.id} listing={listing} onClose={() => setListing(null)} />}</Context.Provider></ImageTransitionContext.Provider>;
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const open = (l: StorefrontListing) => {
+    triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setListing(l);
+  };
+  const close = () => {
+    const el = triggerRef.current;
+    triggerRef.current = null;
+    setListing(null);
+    requestAnimationFrame(() => el?.focus());
+  };
+  return <ImageTransitionContext.Provider value={{ selected, select }}><Context.Provider value={open}>{children}{listing && <QuickView key={listing.id} listing={listing} onClose={close} />}</Context.Provider></ImageTransitionContext.Provider>;
 }

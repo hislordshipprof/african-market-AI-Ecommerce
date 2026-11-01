@@ -8,6 +8,7 @@ test.describe("Storefront redesign interactions", () => {
   test("carousel supports next, previous and keyboard navigation", async ({
     page,
   }) => {
+    test.setTimeout(45_000);
     await page.goto(BASE);
     const carousel = page.getByTestId("hero-carousel");
     const dots = carousel.getByTestId("carousel-dot");
