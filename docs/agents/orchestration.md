@@ -11,7 +11,7 @@ How tickets get built. Adapted from SuperMatt's `orchestrate` (which needs Herdr
 | **A: Build** | headless Claude, worktree | `scripts/build-ticket.sh <n>` runs `/supermatt:implement #n` | Small TDD commits; fresh-context `qa` on the local app; `code-review` (Standards / Spec / Adversarial + Codex peer, `docs/agents/cross-model.json`); every verified finding fixed or deferred to a follow-up; pushed branch + PR; `.builder/report-<n>.md` |
 | **Fix** (at most 2 rounds) | same builder session, resumed | `scripts/build-ticket.sh <n> --resume "<findings>"` runs `/supermatt:fix-findings` | Fix commits, re-QA and re-review of the fix diff only |
 | **V: Verify** | coordinator | CI green + live Vercel preview check in Chrome (`/api/health`, the ticket's acceptance scenarios) + coordinator spot-check of the review report | Pass, or blocking findings back to Fix |
-| **B: Ship** | headless Claude, worktree | `scripts/ship-ticket.sh <n>` runs `/supermatt:ship-pr` | Rebase on `main`, QA the resolved diff if it changed, bounded CI repair, squash merge, issue closed |
+| **B: Ship** | coordinator script, then headless Claude only if needed | `scripts/merge-ticket.sh <n> "<verdict>"` squash-merges directly when the PR is up to date with `main` and all checks are green; otherwise it falls back to `scripts/ship-ticket.sh` (`/supermatt:ship-pr`: rebase, re-QA, bounded CI repair) | Squash merge, issue closed |
 | **C: Retro** | weekly, not per ticket | `/supermatt:retro` over the week's sessions | Lessons for the brief and scripts |
 
 `scripts/codex-review.sh` (standalone Codex, high effort, exhaustive) is now a fallback for when `implement`'s own review can't run, not a default stage: running it on top duplicates review and causes drip.
@@ -38,9 +38,9 @@ Anti-drip: one full review inside `implement`; follow-up reviews cover only the 
 
 ## Concurrency (this PC)
 
-- At most **two** Claude processes: one builder lane, plus one light planner or verifier.
-- Never two builders: RAM and the 5-hour usage limit are shared, and Phase 1 waves overlap on schema and auth.
-- One ship at a time (rebase + merge), so each PR merges on top of the last.
+- Up to **two builder lanes** (a Codex run counts as one lane), plus one light planner, only when free RAM is above about 6 GB and the two tickets touch disjoint areas. For example, a storefront UI round alongside a backend follow-up that adds no migrations. Tickets that both change the Prisma schema, auth or the same feature folder never run in parallel.
+- Otherwise one builder lane. RAM and the 5-hour usage limit are shared.
+- One ship at a time, so each PR merges on top of the last. CI runs once per PR (pull_request) and on `main` after merges (push), with superseded runs cancelled.
 - Close idle Claude Code sessions before long runs; the OS memory guard kills builders below about 1 GB free.
 - If a run is killed, resume the same session (`--resume`) instead of starting from zero.
 
