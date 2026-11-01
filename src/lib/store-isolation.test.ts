@@ -306,6 +306,16 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.storeMembership.upsert({
+        where: { storeId_userId: { storeId: storeBId, userId: testUserId } },
+        update: {},
+        create: { storeId: storeBId, userId: testUserId, role: "staff" },
+      }),
+    ]);
+
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.storeInvite.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
     ]);
     await rawPrisma.$transaction([
@@ -404,6 +414,7 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
       where: { storeId: { in: [storeAId, storeBId] } },
     });
     expect(memberships.some((m) => m.storeId === storeAId)).toBe(true);
+    expect(memberships.some((m) => m.storeId === storeBId)).toBe(true);
   });
 
   it("platformAdmin can read invites across stores", async () => {
@@ -577,6 +588,104 @@ describe.skipIf(!hasRuntime)(
       expect(rows.every((r) => r.storeId === store.id)).toBe(true);
 
       await ownerPrisma.$disconnect();
+    });
+  },
+);
+
+describe.skipIf(!hasRuntime)(
+  "FORCE RLS on store_memberships and store_invites via app_runtime",
+  () => {
+    let runtimePrisma: PrismaClient;
+    let ownerPrisma: PrismaClient;
+    let storeId: string;
+    let userId: string;
+
+    beforeAll(async () => {
+      const runtimeUrl = runtimeDatabaseUrl(process.env);
+      const runtimeAdapter = new PrismaPg(runtimeUrl);
+      runtimePrisma = new PrismaClient({ adapter: runtimeAdapter });
+      await runtimePrisma.$connect();
+
+      const ownerAdapter = new PrismaPg(process.env.DATABASE_URL!);
+      ownerPrisma = new PrismaClient({ adapter: ownerAdapter });
+      await ownerPrisma.$connect();
+
+      const store = await ownerPrisma.store.upsert({
+        where: { slug: "rls-force-runtime" },
+        update: {},
+        create: {
+          slug: "rls-force-runtime",
+          name: "FORCE RLS Runtime Test",
+          themePreset: "palm-and-shea",
+        },
+      });
+      storeId = store.id;
+
+      const user = await ownerPrisma.user.upsert({
+        where: { email: "rls-force-runtime@example.com" },
+        update: {},
+        create: {
+          id: "rls-force-runtime-user",
+          email: "rls-force-runtime@example.com",
+          name: "FORCE RLS User",
+          emailVerified: true,
+        },
+      });
+      userId = user.id;
+
+      await ownerPrisma.$transaction([
+        ownerPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        ownerPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        ownerPrisma.storeMembership.upsert({
+          where: { storeId_userId: { storeId, userId } },
+          update: {},
+          create: { storeId, userId, role: "owner" },
+        }),
+      ]);
+
+      await ownerPrisma.$transaction([
+        ownerPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        ownerPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        ownerPrisma.storeInvite.create({
+          data: {
+            storeId,
+            email: "force-rls-invite@example.com",
+            role: "staff",
+            tokenHash: `force_rls_${Date.now()}`,
+            expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+            invitedById: userId,
+          },
+        }),
+      ]);
+    });
+
+    afterAll(async () => {
+      await ownerPrisma.$transaction([
+        ownerPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        ownerPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        ownerPrisma.storeInvite.deleteMany({ where: { storeId } }),
+      ]);
+      await ownerPrisma.$transaction([
+        ownerPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        ownerPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        ownerPrisma.storeMembership.deleteMany({ where: { storeId } }),
+      ]);
+      await ownerPrisma.user.deleteMany({ where: { email: "rls-force-runtime@example.com" } });
+      await ownerPrisma.store.deleteMany({ where: { slug: "rls-force-runtime" } });
+      await ownerPrisma.$disconnect();
+      await runtimePrisma.$disconnect();
+    });
+
+    it("app_runtime without SET LOCAL ROLE reads 0 rows from store_memberships", async () => {
+      const rows =
+        await runtimePrisma.$queryRaw`SELECT * FROM store_memberships`;
+      expect(rows).toHaveLength(0);
+    });
+
+    it("app_runtime without SET LOCAL ROLE reads 0 rows from store_invites", async () => {
+      const rows =
+        await runtimePrisma.$queryRaw`SELECT * FROM store_invites`;
+      expect(rows).toHaveLength(0);
     });
   },
 );

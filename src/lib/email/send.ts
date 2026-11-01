@@ -8,7 +8,7 @@ export interface EmailSender {
   send(message: EmailMessage): Promise<{ id: string }>;
 }
 
-class ResendSender implements EmailSender {
+export class ResendSender implements EmailSender {
   private apiKey: string;
   private from: string;
 
