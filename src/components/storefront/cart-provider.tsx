@@ -59,6 +59,7 @@ interface CartContextValue {
   store: CartStore;
   openCart: () => void;
   loading: boolean;
+  syncing: boolean;
   refreshCart: () => Promise<void>;
 }
 const Context = createContext<CartContextValue | null>(null);
@@ -86,10 +87,14 @@ export function CartProvider({
   const [lines, setLines] = useState<readonly CartLine[]>(EMPTY_CART);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [, startTransition] = useTransition();
+  const [syncing, startTransition] = useTransition();
   const linesRef = useRef(lines);
-  useEffect(() => { linesRef.current = lines; }, [lines]);
+  useEffect(() => {
+    linesRef.current = lines;
+  }, [lines]);
   const migratedRef = useRef(false);
+  const inflightAdds = useRef(new Set<string>());
+  const pendingQty = useRef(new Map<string, number>());
 
   const refreshCart = useCallback(async () => {
     const cart = await getServerCart();
@@ -144,7 +149,7 @@ export function CartProvider({
               }
             }
           } catch {
-            // localStorage unavailable or migration failed — continue with empty cart
+            // localStorage unavailable or migration failed
           }
         }
       } finally {
@@ -174,6 +179,8 @@ export function CartProvider({
               toast.error(result.error);
             }
           });
+        } else if (inflightAdds.current.has(key)) {
+          pendingQty.current.set(key, 0);
         }
         return;
       }
@@ -195,6 +202,8 @@ export function CartProvider({
               toast.error(result.error);
             }
           });
+        } else {
+          pendingQty.current.set(key, quantity);
         }
       } else {
         setLines([
@@ -202,13 +211,63 @@ export function CartProvider({
           { ...item, quantity, serverLineId: undefined },
         ]);
         if (item.variantId) {
+          inflightAdds.current.add(key);
           startTransition(async () => {
             const result = await addToCart(item.variantId!, quantity);
             if (!result.ok) {
+              inflightAdds.current.delete(key);
+              pendingQty.current.delete(key);
               setLines(prev);
               toast.error(result.error);
+              return;
+            }
+
+            const cart = await getServerCart();
+            inflightAdds.current.delete(key);
+
+            if (!cart) {
+              pendingQty.current.delete(key);
+              return;
+            }
+
+            const serverLines = cart.lines.map(serverLineToClient);
+            const desired = pendingQty.current.get(key);
+            pendingQty.current.delete(key);
+
+            if (desired !== undefined) {
+              const serverLine = serverLines.find(
+                (l) => cartItemKey(l) === key,
+              );
+              if (serverLine?.serverLineId) {
+                if (desired <= 0) {
+                  setLines(
+                    serverLines.filter(
+                      (l) => cartItemKey(l) !== key,
+                    ),
+                  );
+                  await removeCartLine(serverLine.serverLineId);
+                } else {
+                  setLines(
+                    serverLines.map((l) =>
+                      cartItemKey(l) === key
+                        ? { ...l, quantity: desired }
+                        : l,
+                    ),
+                  );
+                  const qtyResult = await serverSetLineQty(
+                    serverLine.serverLineId,
+                    desired,
+                  );
+                  if (!qtyResult.ok) {
+                    toast.error(qtyResult.error);
+                    await refreshCart();
+                  }
+                }
+              } else {
+                setLines(serverLines);
+              }
             } else {
-              await refreshCart();
+              setLines(serverLines);
             }
           });
         }
@@ -226,6 +285,8 @@ export function CartProvider({
             toast.error(result.error);
           }
         });
+      } else if (inflightAdds.current.has(key)) {
+        pendingQty.current.set(key, 0);
       }
     },
   };
@@ -246,6 +307,7 @@ export function CartProvider({
         subtotal,
         openCart: () => setOpen(true),
         loading,
+        syncing,
         refreshCart,
       }}
     >
@@ -360,7 +422,7 @@ export function CartTrigger({
   className?: string;
   children?: ReactNode;
 }) {
-  const { count, openCart } = useCart();
+  const { count, openCart, syncing } = useCart();
   const reduced = useReducedMotion();
   return (
     <button
@@ -368,6 +430,7 @@ export function CartTrigger({
       className={`${styles.cartTrigger} ${className ?? ""}`}
       onClick={openCart}
       aria-label="Shopping cart"
+      data-cart-pending={syncing || undefined}
     >
       <ShoppingBag size={21} />
       {children}

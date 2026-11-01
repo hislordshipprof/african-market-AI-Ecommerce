@@ -211,7 +211,7 @@ export async function removeLine(
   lineId: string,
 ): Promise<void> {
   const scoped = storeScoped(storeId);
-  await scoped.cartLine.delete({ where: { id: lineId } });
+  await scoped.cartLine.deleteMany({ where: { id: lineId } });
 }
 
 export async function clearAllLines(
