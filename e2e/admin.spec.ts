@@ -240,50 +240,55 @@ test.describe("Catalog review (authenticated)", () => {
   });
 
   test("approve moves product to active tab", async ({ page }) => {
+    const reviewCountBefore = await page.locator("a[href*='status=needs_review'] span").last().textContent();
+    const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
+
     const firstRow = page.locator("table tbody tr").first();
-    const productName = await firstRow.locator("td").first().locator("p.font-medium").textContent();
-    expect(productName).toBeTruthy();
-
     await firstRow.getByRole("button", { name: "Approve" }).click();
-    await page.waitForTimeout(2000);
 
-    await page.goto("/admin/catalog/review?status=active");
-    await expect(page.locator(`text=${productName}`)).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("a[href*='status=needs_review'] span").last()).not.toHaveText(reviewCountBefore!, { timeout: 10000 });
+
+    const reviewCountAfter = await page.locator("a[href*='status=needs_review'] span").last().textContent();
+    const activeCountAfter = await page.locator("a[href*='status=active'] span").last().textContent();
+    expect(Number(reviewCountAfter)).toBe(Number(reviewCountBefore) - 1);
+    expect(Number(activeCountAfter)).toBe(Number(activeCountBefore) + 1);
   });
 
   test("edit-then-approve updates name and moves to active", async ({ page }) => {
+    const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
+
     const firstRow = page.locator("table tbody tr").first();
-    const originalName = await firstRow.locator("td").first().locator("p.font-medium").textContent();
-    expect(originalName).toBeTruthy();
-
     await firstRow.getByRole("button", { name: "Edit" }).click();
-    await expect(page.locator("h3")).toHaveText("Edit product", { timeout: 5000 });
 
-    const editedName = `E2E-Edited ${originalName}`;
-    await page.locator("input").first().fill(editedName);
+    const modal = page.getByRole("heading", { name: "Edit product" });
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    const nameInput = page.locator(".fixed input").first();
+    const editedName = `AAA-E2E-${Date.now()}`;
+    await nameInput.fill(editedName);
     await page.getByRole("button", { name: "Save" }).click();
-    await page.waitForTimeout(2000);
+    await expect(modal).not.toBeVisible({ timeout: 5000 });
 
-    await page.goto("/admin/catalog/review");
+    await page.reload();
     await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
-    const editedRow = page.locator("table tbody tr").filter({ hasText: editedName });
-    await editedRow.getByRole("button", { name: "Approve" }).click();
-    await page.waitForTimeout(2000);
 
-    await page.goto("/admin/catalog/review?status=active");
-    await expect(page.locator(`text=${editedName}`)).toBeVisible({ timeout: 10000 });
+    const editedRow = page.locator("table tbody tr").filter({ hasText: editedName });
+    await expect(editedRow).toBeVisible({ timeout: 10000 });
+    await editedRow.getByRole("button", { name: "Approve" }).click();
+
+    await expect(page.locator("a[href*='status=active'] span").last()).not.toHaveText(activeCountBefore!, { timeout: 10000 });
   });
 
   test("reject moves product to rejected tab", async ({ page }) => {
+    const rejectedCountBefore = await page.locator("a[href*='status=rejected'] span").last().textContent();
+
     const firstRow = page.locator("table tbody tr").first();
-    const productName = await firstRow.locator("td").first().locator("p.font-medium").textContent();
-    expect(productName).toBeTruthy();
-
     await firstRow.getByRole("button", { name: "Reject" }).click();
-    await page.waitForTimeout(2000);
 
-    await page.goto("/admin/catalog/review?status=rejected");
-    await expect(page.locator(`text=${productName}`)).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("a[href*='status=rejected'] span").last()).not.toHaveText(rejectedCountBefore!, { timeout: 10000 });
+
+    const rejectedCountAfter = await page.locator("a[href*='status=rejected'] span").last().textContent();
+    expect(Number(rejectedCountAfter)).toBe(Number(rejectedCountBefore) + 1);
   });
 
   test("non-admin access to catalog review redirects to sign-in", async ({ browser }) => {
