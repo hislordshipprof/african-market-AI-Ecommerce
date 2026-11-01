@@ -1,3 +1,7 @@
+// In-memory sliding-window limiter. State lives in a module-level Map, so on Vercel it is
+// per-isolate: each serverless instance counts separately, and the effective limit is
+// best-effort rather than global. That is deliberate: ADR-0017 defers distributed rate
+// limiting ("no Redis for now ... add Upstash only when Postgres-based limits show load").
 const hits = new Map<string, number[]>();
 
 const MAX_REQUESTS = 10;
@@ -34,4 +38,10 @@ export function isRateLimited(ip: string): boolean {
   recent.push(now);
   hits.set(ip, recent);
   return false;
+}
+
+/** Clears all limiter state. For tests. */
+export function resetRateLimiter(): void {
+  hits.clear();
+  lastEvict = Date.now();
 }

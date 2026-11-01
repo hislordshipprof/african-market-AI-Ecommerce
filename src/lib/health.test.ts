@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import {
@@ -8,9 +8,12 @@ import {
   runHealthChecks,
   requiredEnvVars,
   toMinimalResult,
+  STATEMENT_TIMEOUT_SQL,
+  HEALTH_QUERY_TIMEOUT_MS,
 } from "./health";
 import type { HealthResult } from "./health";
 import { runtimeDatabaseUrl } from "./env";
+import { withStatementTimeout } from "./db";
 
 describe("requiredEnvVars", () => {
   it("returns only core vars when VERCEL_ENV is absent", () => {
@@ -112,6 +115,49 @@ describe("checkDatabase", () => {
   });
 });
 
+describe("query timeouts", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const hang = () => new Promise<unknown[]>(() => {});
+
+  it("checkDatabase fails with the failure shape when the query exceeds 5 s", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending = checkDatabase(hang);
+    await vi.advanceTimersByTimeAsync(HEALTH_QUERY_TIMEOUT_MS + 1);
+    await expect(pending).resolves.toEqual({ reachable: false, user: null });
+  });
+
+  it("checkMigrations fails with the failure shape when the query exceeds 5 s", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending = checkMigrations(hang);
+    await vi.advanceTimersByTimeAsync(HEALTH_QUERY_TIMEOUT_MS + 1);
+    await expect(pending).resolves.toEqual({ upToDate: false });
+  });
+
+  it("withStatementTimeout sets statement_timeout in the same transaction, before the query", async () => {
+    const calls: string[] = [];
+    const tx = {
+      $executeRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        calls.push(strings.join(""));
+      }),
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        calls.push(strings.join(""));
+        return [{ current_user: "app_runtime" }];
+      }),
+    };
+    const client = { $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) };
+    const rows = await withStatementTimeout(client as never)`SELECT current_user`;
+    expect(rows).toEqual([{ current_user: "app_runtime" }]);
+    expect(calls[0]).toBe(STATEMENT_TIMEOUT_SQL);
+    expect(STATEMENT_TIMEOUT_SQL).toMatch(/SET LOCAL statement_timeout = '5000'/);
+    expect(calls[1]).toBe("SELECT current_user");
+  });
+});
+
 describe("checkMigrations", () => {
   it("returns upToDate true when no pending migrations", async () => {
     const queryRaw = vi.fn().mockResolvedValue([{ count: BigInt(0) }]);
@@ -126,9 +172,49 @@ describe("checkMigrations", () => {
   });
 
   it("returns upToDate false on query failure", async () => {
-    const queryRaw = vi.fn().mockRejectedValue(new Error("table not found"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const queryRaw = vi.fn().mockRejectedValue(new Error("connection refused"));
     const result = await checkMigrations(queryRaw);
     expect(result).toEqual({ upToDate: false });
+  });
+
+  it("returns upToDate true when _prisma_migrations does not exist (existence check)", async () => {
+    const queryRaw = vi.fn().mockResolvedValueOnce([{ present: false }]);
+    const result = await checkMigrations(queryRaw);
+    expect(result).toEqual({ upToDate: true });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns upToDate true when the count query throws 'relation does not exist'", async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ present: true }])
+      .mockRejectedValueOnce(new Error('relation "_prisma_migrations" does not exist'));
+    expect(await checkMigrations(queryRaw)).toEqual({ upToDate: true });
+  });
+
+  it("returns upToDate true when the existence check throws 'relation does not exist'", async () => {
+    const queryRaw = vi
+      .fn()
+      .mockRejectedValue(new Error('relation "_prisma_migrations" does not exist'));
+    expect(await checkMigrations(queryRaw)).toEqual({ upToDate: true });
+  });
+
+  it("returns upToDate false when the count query fails for another reason", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ present: true }])
+      .mockRejectedValueOnce(new Error("permission denied"));
+    expect(await checkMigrations(queryRaw)).toEqual({ upToDate: false });
+  });
+
+  it("returns upToDate false when the table exists and migrations are pending", async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ present: true }])
+      .mockResolvedValueOnce([{ count: 1 }]);
+    expect(await checkMigrations(queryRaw)).toEqual({ upToDate: false });
   });
 });
 
@@ -301,6 +387,19 @@ describe.skipIf(!hasRuntime)("Health check proves app_runtime connection", () =>
   afterAll(async () => {
     await runtimePrisma?.$disconnect();
   });
+
+  it("withStatementTimeout runs the real health queries well inside the timeout", async () => {
+    const timed = withStatementTimeout(runtimePrisma as never);
+    const started = Date.now();
+    expect(await checkDatabase(timed)).toMatchObject({ reachable: true });
+    expect((await checkMigrations(timed)).upToDate).toBe(true);
+    expect(Date.now() - started).toBeLessThan(HEALTH_QUERY_TIMEOUT_MS);
+  });
+
+  it("the server cancels a query that exceeds the statement timeout", async () => {
+    const timed = withStatementTimeout(runtimePrisma as never);
+    await expect(timed`SELECT pg_sleep(6)`).rejects.toThrow(/statement timeout/i);
+  }, 10_000);
 
   it("SELECT current_user returns app_runtime", async () => {
     const queryRaw = runtimePrisma.$queryRaw.bind(runtimePrisma) as (

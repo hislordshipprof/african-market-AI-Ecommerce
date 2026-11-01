@@ -1,7 +1,23 @@
-type QueryRawFn = (
+export type QueryRawFn = (
   strings: TemplateStringsArray,
   ...values: unknown[]
 ) => Promise<unknown[]>;
+
+export const HEALTH_QUERY_TIMEOUT_MS = 5000;
+
+export const STATEMENT_TIMEOUT_SQL = `SET LOCAL statement_timeout = '${HEALTH_QUERY_TIMEOUT_MS}'`;
+
+// Client-side backstop: the server-side timeout can't fire if the connection itself hangs.
+function withDeadline<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("Health query timed out")),
+      HEALTH_QUERY_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
 
 const CORE_ENV_VARS = ["DATABASE_URL", "DATABASE_URL_UNPOOLED"] as const;
 const DEPLOY_ENV_VARS = [
@@ -38,9 +54,9 @@ export async function checkDatabase(
   queryRaw: QueryRawFn,
 ): Promise<{ reachable: boolean; user: string | null }> {
   try {
-    const rows = (await queryRaw`SELECT current_user`) as {
-      current_user: string;
-    }[];
+    const rows = (await withDeadline(
+      queryRaw`SELECT current_user`,
+    )) as { current_user: string }[];
     return { reachable: true, user: rows[0]?.current_user ?? null };
   } catch (err) {
     console.error("Health check: database unreachable", err);
@@ -48,16 +64,27 @@ export async function checkDatabase(
   }
 }
 
+function isMissingRelation(err: unknown): boolean {
+  return err instanceof Error && /relation .* does not exist/i.test(err.message);
+}
+
 export async function checkMigrations(
   queryRaw: QueryRawFn,
 ): Promise<{ upToDate: boolean }> {
   try {
-    const rows = (await queryRaw`SELECT COUNT(*)::int AS count FROM "_prisma_migrations" WHERE "finished_at" IS NULL OR "rolled_back_at" IS NOT NULL`) as {
-      count: number | bigint;
-    }[];
+    // A missing table means migrations don't apply (e.g. `prisma db push`), not that they're pending.
+    const present = (await withDeadline(
+      queryRaw`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = '_prisma_migrations') AS present`,
+    )) as { present?: boolean }[];
+    if (present[0]?.present === false) return { upToDate: true };
+
+    const rows = (await withDeadline(
+      queryRaw`SELECT COUNT(*)::int AS count FROM "_prisma_migrations" WHERE "finished_at" IS NULL OR "rolled_back_at" IS NOT NULL`,
+    )) as { count: number | bigint }[];
     const count = Number(rows[0]?.count ?? 0);
     return { upToDate: count === 0 };
   } catch (err) {
+    if (isMissingRelation(err)) return { upToDate: true };
     console.error("Health check: migration status query failed", err);
     return { upToDate: false };
   }
