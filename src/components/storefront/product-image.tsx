@@ -46,7 +46,7 @@ function ProductPhoto({
           fill
           sizes={sizes}
           preload={priority}
-          className="object-contain"
+          className={src.startsWith("/images/products/") ? "object-contain" : "object-cover"}
           onError={() => setFailed(true)}
         />
       ) : src ? (

@@ -11,7 +11,7 @@
   "plantain": {
     "localNames": "ogede agbagba (Yoruba, Nigeria)|ogede (Igbo, Nigeria)|borode (Twi, Ghana)|brodeɛ (Twi, Ghana)|apem (Twi, Ghana)|apantu (Twi, Ghana)|banane plantain (French, Cameroon)|makemba (Lingala, DR Congo)|ndizi (Swahili, Kenya)|gonja (Luganda, Uganda)|banana-pão (Portuguese, Angola)",
     "description": "Sweet ripe plantain fried as dodo, kelewele or alloco.",
-    "imageUrl": "/images/products/plantain-ripe.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/84/Ripe_Plantain_for_sale.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Ripe_Plantain_for_sale.jpg",
     "author": "Iwai-Dialax",
     "catalogId": "plantain-ripe",
@@ -29,7 +29,7 @@
   "cocoyam": {
     "localNames": "ede (Igbo, Nigeria)|koko (Yoruba, Nigeria)|gwaza (Hausa, Nigeria)|kooko (Twi, Ghana)|taro (French, Cameroon)|taro (Cameroonian English, Cameroon)|nduma (Kikuyu, Kenya)|madumbe (Zulu, South Africa)|magimbi (Swahili, Tanzania)|amateke (Kinyarwanda, Rwanda)|dasheen (English, Trinidad and Tobago)|eddoes (English, Jamaica)",
     "description": "Small hairy corm (Colocasia esculenta) boiled and pounded to thicken Igbo soups like ofe onugbu and oha, or eaten boiled.",
-    "imageUrl": "/images/products/cocoyam-taro.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c2/Colocasia_esculenta_dsc07801.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Colocasia_esculenta_dsc07801.jpg",
     "author": "David Monniaux",
     "catalogId": "cocoyam-taro",
@@ -47,7 +47,7 @@
   "garri": {
     "localNames": "gaari (Yoruba, Nigeria)|garri (Igbo, Nigeria)|gari (Hausa, Nigeria)|gari (Fon, Benin)|gari (Twi, Ghana)|gari (Ga, Ghana)|gali (Ewe, Ghana)|garri (Cameroonian English, Cameroon)|gari (Krio, Sierra Leone)",
     "description": "Roasted granulated fermented cassava, made into eba with hot water or soaked in cold water as a snack.",
-    "imageUrl": "/images/products/garri-white.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/13/Cassava_Flakes_%28garri%29.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Cassava_Flakes_(garri).jpg",
     "author": "Zeerun",
     "catalogId": "garri-white",
@@ -56,7 +56,7 @@
   "white garri": {
     "localNames": "gaari (Yoruba, Nigeria)|garri (Igbo, Nigeria)|gari (Hausa, Nigeria)|gari (Fon, Benin)|gari (Twi, Ghana)|gari (Ga, Ghana)|gali (Ewe, Ghana)|garri (Cameroonian English, Cameroon)|gari (Krio, Sierra Leone)",
     "description": "Roasted granulated fermented cassava, made into eba with hot water or soaked in cold water as a snack.",
-    "imageUrl": "/images/products/garri-white.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/13/Cassava_Flakes_%28garri%29.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Cassava_Flakes_(garri).jpg",
     "author": "Zeerun",
     "catalogId": "garri-white",
@@ -128,7 +128,7 @@
   "suya spice": {
     "localNames": "yaji (Hausa, Nigeria)|suya pepper (Nigerian English, Nigeria)",
     "description": "Peanut-based chili spice blend rubbed on suya and sprinkled on grilled meat.",
-    "imageUrl": "/images/products/suya-spice-yaji.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/ac/Yaji_pepper.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Yaji_pepper.jpg",
     "author": "Sman099",
     "catalogId": "suya-spice-yaji",
@@ -146,7 +146,7 @@
   "iru (locust bean)": {
     "localNames": "iru (Yoruba, Nigeria)|daddawa (Hausa, Nigeria)|dawadawa (Hausa, Nigeria)|dawadawa (Dagbani, Ghana)|soumbala (Bambara, Mali)|nététou (Wolof, Senegal)",
     "description": "Pungent fermented seeds of Parkia biglobosa that flavor ayamase, efo riro, ogbono and Sahelian sauces.",
-    "imageUrl": "/images/products/iru-fermented-locust-beans.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b8/Afitin_04.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Afitin_04.jpg",
     "author": "Aimeabibis",
     "catalogId": "iru-fermented-locust-beans",
@@ -155,7 +155,7 @@
   "cameroon pepper": {
     "localNames": "Cameroon pepper (Cameroonian English, Cameroon)|piment noir (French, Cameroon)",
     "description": "Very hot, dark, smoke-dried ground chilli used in pepper soup, ndolé and jollof.",
-    "imageUrl": "/images/products/cameroon-pepper.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e3/Dried_bush_pepper.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Dried_bush_pepper.jpg",
     "author": "Senator BNB",
     "catalogId": "cameroon-pepper",
@@ -191,7 +191,7 @@
   "ehuru (calabash nutmeg)": {
     "localNames": "ehuru (Igbo, Nigeria)|ariwo (Yoruba, Nigeria)|abolabo (Yoruba, Nigeria)|wedeaba (Twi, Ghana)|pèbè (French, Cameroon)",
     "description": "Aromatic seeds of Monodora myristica, toasted and ground for pepper soup and ofe akwu.",
-    "imageUrl": "/images/products/calabash-nutmeg.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9c/Monodora-myristica-SF26020-01.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Monodora-myristica-SF26020-01.jpg",
     "author": "Steve Fitzgerald",
     "catalogId": "calabash-nutmeg",
@@ -227,7 +227,7 @@
   "fluted pumpkin leaves (ugu)": {
     "localNames": "ugu (Igbo, Nigeria)|ugwu (Igbo, Nigeria)|ikong ubong (Efik, Nigeria)",
     "description": "Dark green leaves of Telfairia occidentalis, the main green in edikang ikong, egusi and vegetable soup.",
-    "imageUrl": "/images/products/ugu-leaves-fresh.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a3/Fluted_pumpkin_%28Telfairia_occidentalis%29.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Fluted_pumpkin_(Telfairia_occidentalis).jpg",
     "author": "Danjuma Anthony",
     "catalogId": "ugu-leaves-fresh",
@@ -236,7 +236,7 @@
   "ugu leaves": {
     "localNames": "ugu (Igbo, Nigeria)|ugwu (Igbo, Nigeria)|ikong ubong (Efik, Nigeria)",
     "description": "Dark green leaves of Telfairia occidentalis, the main green in edikang ikong, egusi and vegetable soup.",
-    "imageUrl": "/images/products/ugu-leaves-fresh.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a3/Fluted_pumpkin_%28Telfairia_occidentalis%29.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Fluted_pumpkin_(Telfairia_occidentalis).jpg",
     "author": "Danjuma Anthony",
     "catalogId": "ugu-leaves-fresh",
@@ -254,7 +254,7 @@
   "ewedu (jute leaves)": {
     "localNames": "ayoyo (Hausa, Ghana)|adémè (Ewe, Togo)|adémè (Ewe, Ghana)|krain krain (Krio, Sierra Leone)|ewedu (Yoruba, Nigeria)|ayoyo (Hausa, Nigeria)|ayoyo (Dagbani, Ghana)|ademe (Ewe, Ghana)|mrenda (Luhya, Kenya)|apoth (Dholuo, Kenya)|murere (Luhya, Kenya)|mulukhiyah (Arabic, Sudan)",
     "description": "Slimy leaves of Corchorus olitorius cooked into ayoyo soup, adémè sauce or krain krain plasas.",
-    "imageUrl": "/images/products/jute-leaves.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e9/Corchorus_olitorius_%281459401640%29.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Corchorus_olitorius_(1459401640).jpg",
     "author": "Dinesh Valke from Thane, India",
     "catalogId": "jute-leaves",
@@ -263,7 +263,7 @@
   "waterleaf": {
     "localNames": "gbure (Yoruba, Nigeria)|mgbolodi (Igbo, Nigeria)|mmong mmong ikong (Efik, Nigeria)|bologi (Krio, Sierra Leone)|waterleaf (Cameroonian English, Cameroon)",
     "description": "Succulent leaves of Talinum fruticosum cooked with ugu in edikang ikong and efo riro.",
-    "imageUrl": "/images/products/waterleaf-fresh.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/14/Talinum_fruticosum%2CNativeplants_Botanical_Garden.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Talinum_fruticosum,Nativeplants_Botanical_Garden.jpg",
     "author": "Nativeplants garden",
     "catalogId": "waterleaf-fresh",
@@ -272,7 +272,7 @@
   "okra": {
     "localNames": "ila (Yoruba, Nigeria)|okwuru (Igbo, Nigeria)|kubewa (Hausa, Nigeria)|nkruma (Twi, Ghana)|gombo (French, Côte d'Ivoire)|kanja (Wolof, Senegal)|fetri (Ewe, Ghana)|gombo (French, Cameroon)|kandia (Wolof, Senegal)|derere (Shona, Zimbabwe)|therere (Chichewa, Malawi)|bamia (Swahili, Kenya)|bamia (Arabic, Sudan)|bamya (Somali, Somalia)|bamia (Amharic, Ethiopia)|quiabo (Portuguese, Angola)|dongo-dongo (Lingala, DR Congo)",
     "description": "Green pods chopped or grated for okra soup, ila alasepo and to add body to stews.",
-    "imageUrl": "/images/products/okra-fresh.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/3/32/Bucket_of_raw_okra_pods.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Bucket_of_raw_okra_pods.jpg",
     "author": "Bill Tarpenning",
     "catalogId": "okra-fresh",
@@ -299,7 +299,7 @@
   "stockfish": {
     "localNames": "okporoko (Igbo, Nigeria)|panla (Yoruba, Nigeria)",
     "description": "Stockfish sawn into pieces so it soaks and cooks faster.",
-    "imageUrl": "/images/products/stockfish-cut.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/3/3d/Stockfish_%28_Okporoko%29.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Stockfish_(_Okporoko).jpg",
     "author": "Victorpeter001",
     "catalogId": "stockfish-cut",
@@ -317,7 +317,7 @@
   "dried fish (eja kika)": {
     "localNames": "eja aro (Yoruba, Nigeria)|tarwada (Hausa, Nigeria)|smoked catfish (Ghanaian English, Ghana)|silure fumé (French, Côte d'Ivoire)|ngolo (Lingala, DR Congo)|kambale (Swahili, Kenya)|kambale (Luganda, Uganda)|mlamba (Chichewa, Malawi)",
     "description": "Whole catfish smoked until hard, broken into soups and stews.",
-    "imageUrl": "/images/products/smoked-catfish.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/be/Smoked_Fish_%28_Eja_Sisun%29.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Smoked_Fish_(_Eja_Sisun).jpg",
     "author": "Similitude01",
     "catalogId": "smoked-catfish",
@@ -407,7 +407,7 @@
   "dried hibiscus flowers": {
     "localNames": "bissap (Wolof, Senegal)|sobolo (Ghanaian English, Ghana)|wonjo (Mandinka, Gambia)|foléré (Fulfulde, Cameroon)|dah (Bambara, Mali)|zobo (Hausa, Nigeria)|isapa (Yoruba, Nigeria)|karkade (Arabic, Sudan)|كركديه (Arabic, Sudan)|sorrel (English, Jamaica)|sorrel (English, Trinidad and Tobago)",
     "description": "Dried red calyces of Hibiscus sabdariffa steeped with ginger and sugar into bissap or sobolo.",
-    "imageUrl": "/images/products/hibiscus-dried.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d6/Dried_hibiscus_flowers.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Dried_hibiscus_flowers.jpg",
     "author": "Jugemu",
     "catalogId": "hibiscus-dried",
@@ -416,7 +416,7 @@
   "dried zobo leaves": {
     "localNames": "bissap (Wolof, Senegal)|sobolo (Ghanaian English, Ghana)|wonjo (Mandinka, Gambia)|foléré (Fulfulde, Cameroon)|dah (Bambara, Mali)|zobo (Hausa, Nigeria)|isapa (Yoruba, Nigeria)|karkade (Arabic, Sudan)|كركديه (Arabic, Sudan)|sorrel (English, Jamaica)|sorrel (English, Trinidad and Tobago)",
     "description": "Dried red calyces of Hibiscus sabdariffa steeped with ginger and sugar into bissap or sobolo.",
-    "imageUrl": "/images/products/hibiscus-dried.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d6/Dried_hibiscus_flowers.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Dried_hibiscus_flowers.jpg",
     "author": "Jugemu",
     "catalogId": "hibiscus-dried",

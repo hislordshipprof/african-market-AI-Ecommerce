@@ -36,7 +36,7 @@ export function CollectionBanners({ collections }: { collections: StorefrontColl
   };
   return <section className="sf-collection-section" data-testid="collection-banners" aria-label="Meal inspiration" aria-roledescription="carousel">
     <SectionHeader id="collections-heading" title="Good meals start here" description="A little inspiration for your next gathering." />
-    <div className="sf-coverflow" ref={ref} tabIndex={0} onKeyDown={e => { if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); go(active + (e.key === "ArrowRight" ? 1 : -1)); } if (e.key === "Home") { e.preventDefault(); go(0); } if (e.key === "End") { e.preventDefault(); go(collections.length - 1); } }}>
+    <div className="sf-coverflow" ref={ref} data-edge={active === 0 ? "start" : active === collections.length - 1 ? "end" : undefined} tabIndex={0} onKeyDown={e => { if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); go(active + (e.key === "ArrowRight" ? 1 : -1)); } if (e.key === "Home") { e.preventDefault(); go(0); } if (e.key === "End") { e.preventDefault(); go(collections.length - 1); } }}>
       {collections.map((col, i) => <Link key={col.id} href={`/collections/${col.slug}`} className="sf-collection-card" data-active={i === active}
         style={{ "--offset": i - active, "--recede": Math.min(Math.abs(i - active), 3), "--direction": Math.sign(i - active) } as React.CSSProperties}
         onPointerDown={() => { pointerSelection.current = active; }} onFocus={() => { if (pointerSelection.current === null) setActive(i); }}

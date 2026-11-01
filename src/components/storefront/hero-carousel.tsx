@@ -78,7 +78,7 @@ export function HeroCarousel({ banners, products = [], pickupMinutes = 30, picku
                 {banner.subtitle && <m.p initial={enter} variants={{ show: { opacity: 1, y: 0 } }}>{banner.subtitle}</m.p>}
                 {banner.ctaText && banner.ctaHref && <m.div initial={enter} variants={{ show: { opacity: 1, y: 0 } }}><Link href={banner.ctaHref} className="sf-button">{banner.ctaText}<ArrowRight size={18} aria-hidden /></Link></m.div>}
               </m.div>
-              {subject?.imageUrl && <m.div className="sf-hero-subject" initial={reduced ? false : { opacity: 0, x: 70, rotate: -7 }} animate={{ opacity: 1, x: 0, rotate: -4 }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 90, damping: 18 }}>
+              {subject?.imageUrl?.startsWith("/images/products/") && <m.div className="sf-hero-subject" initial={reduced ? false : { opacity: 0, x: 70, rotate: -7 }} animate={{ opacity: 1, x: 0, rotate: -4 }} transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 90, damping: 18 }}>
                 <ProductImage src={subject.imageUrl} name={subject.displayName} sizes="(max-width:767px) 210px, 470px" />
                 <span className="sf-hero-subject-label">{subject.altName || subject.displayName}</span>
               </m.div>}

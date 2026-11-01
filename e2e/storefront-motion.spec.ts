@@ -49,6 +49,30 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(stage).toHaveCSS("height", "600px");
   });
 
+  for (const vw of [1024, 1280, 1440, 1920]) {
+    test(`hero offer tile does not overlap pills or subject label at ${vw}px`, async ({ page }) => {
+      await page.setViewportSize({ width: vw, height: 1000 });
+      await page.goto(BASE);
+      const hero = page.locator(".sf-hero");
+      await expect(hero).toBeVisible();
+      const offerBox = await page.locator(".sf-hero-offer").boundingBox();
+      if (!offerBox) return;
+      const overlaps: string[] = [];
+      for (const sel of [".sf-glass-one", ".sf-glass-two", ".sf-hero-subject-label"]) {
+        const el = page.locator(sel);
+        if (await el.count() === 0) continue;
+        const vis = await el.isVisible().catch(() => false);
+        if (!vis) continue;
+        const box = await el.boundingBox();
+        if (!box) continue;
+        const xOverlap = offerBox.x < box.x + box.width && offerBox.x + offerBox.width > box.x;
+        const yOverlap = offerBox.y < box.y + box.height && offerBox.y + offerBox.height > box.y;
+        if (xOverlap && yOverlap) overlaps.push(sel);
+      }
+      expect(overlaps, `Offer tile overlaps at ${vw}px`).toEqual([]);
+    });
+  }
+
   test("mobile collection controls and snap scrolling agree", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(BASE);

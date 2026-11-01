@@ -1,2511 +1,492 @@
 {
-  "processed": 0,
-  "failed": 501,
+  "processed": 111,
+  "accepted": 71,
+  "rejected": 40,
   "results": [
     {
-      "slug": "yam-white-puna",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "cocoyam-taro",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "cocoyam-tannia",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "cocoyam-flour",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "akpu-wet-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "millet-flour",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "millet-pearl",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "fonio",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "white-maize-meal",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "baobab-fruit-powder",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "baobab-leaf-powder",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "moringa-powder",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "tamarind",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "dates",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "bambara-nut",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "pigeon-peas-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "fumbwa-dried-gnetum-leaves",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "jute-leaves",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "potato-greens",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "roselle-leaves",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "garden-egg",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "okra-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ground-hot-pepper",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "cameroon-pepper",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "amaranth-leaves",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "bitter-leaf-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ashanti-pepper",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "grains-of-selim",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "calabash-nutmeg",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "aidan-fruit",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "dawadawa-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "palm-kernel-oil",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "groundnut-oil",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "palm-nut-cream",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "onga-seasoning",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "shea-butter-raw",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "african-black-soap",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "chewing-stick",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "african-net-sponge",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "mortar-pestle-wood",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "hibiscus-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "hibiscus-drink-bottled",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "velvet-tamarind",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "bitter-kola",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "kola-nut",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "geisha-mackerel",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "horse-mackerel-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "chikwangue-kwanga",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ube-african-pear",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "yam-water",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "cassava-root-fresh",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "sweet-potato-african",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "poundo-yam-flour",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "yam-flour-elubo",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "plantain-flour-unripe",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "cassava-flour-lafun",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "garri-white",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "garri-yellow",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "garri-ijebu",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "cassava-fufu-flour",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
       "slug": "abacha-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "cassava-starch-usi",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "oat-fufu-flour",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "okpa-flour",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "bean-flour-peeled",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "semovita-golden-penny",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "semolina-honeywell",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "wheat-meal-swallow",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "rice-ofada",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "rice-parboiled-long-grain",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "rice-flour-tuwo",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "sorghum-guinea-corn",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "corn-dried-whole",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ukwa-breadfruit",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "beans-honey-oloyin",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "beans-brown",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "beans-black-eyed-peas",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "beans-peeled-brown",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "beans-akidi-black",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "groundnuts-raw",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ugba-oil-bean",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ugu-leaves-fresh",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ugu-leaves-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "bitter-leaf-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "waterleaf-fresh",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "uziza-leaves-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "utazi-leaves-dried",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "oha-leaves-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "oha-leaves-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "afang-leaves-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "scent-leaf-fresh",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "scent-leaf-dried",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ewedu-leaves-fresh",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "efo-shoko-celosia",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "okra-fresh",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "okra-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "pepper-scotch-bonnet",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "pepper-tatashe",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "pepper-nsukka-yellow-dried",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "plantain-green",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "plantain-ripe",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "agbalumo-star-apple",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "tiger-nut",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "egusi-seeds-whole",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "egusi-ground",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ogbono-whole",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ogbono-ground",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
       "slug": "achi-thickener",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "status": "accepted"
     },
     {
-      "slug": "ofor-thickener",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "afang-leaves-frozen",
+      "status": "accepted"
     },
     {
-      "slug": "ukpo-thickener",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "african-black-soap",
+      "status": "accepted"
+    },
+    {
+      "slug": "african-net-sponge",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (43%)"
+    },
+    {
+      "slug": "agbalumo-star-apple",
+      "status": "accepted"
+    },
+    {
+      "slug": "aidan-fruit",
+      "status": "accepted"
+    },
+    {
+      "slug": "akpu-wet-frozen",
+      "status": "accepted"
     },
     {
       "slug": "alligator-pepper",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (27%)"
     },
     {
-      "slug": "ataiko-seeds",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "amaranth-leaves",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (27%)"
     },
     {
-      "slug": "suya-spice-yaji",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "ashanti-pepper",
+      "status": "accepted"
     },
     {
-      "slug": "pepper-soup-spice",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "bambara-nut",
+      "status": "accepted"
     },
     {
-      "slug": "nsala-soup-spice",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "baobab-fruit-powder",
+      "status": "accepted"
     },
     {
-      "slug": "banga-spice",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "baobab-leaf-powder",
+      "status": "accepted"
     },
     {
-      "slug": "curry-powder-nigerian",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "beans-black-eyed-peas",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
     },
     {
-      "slug": "thyme-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "beans-brown",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
-      "slug": "iru-fermented-locust-beans",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "beans-honey-oloyin",
+      "status": "accepted"
     },
     {
-      "slug": "ogiri",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "beans-peeled-brown",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
-      "slug": "potash-kaun",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "bitter-kola",
+      "status": "accepted"
     },
     {
-      "slug": "crayfish-whole-dried",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "bitter-leaf-dried",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
     },
     {
-      "slug": "crayfish-ground",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "bitter-leaf-frozen",
+      "status": "accepted"
     },
     {
-      "slug": "smoked-shrimp-dried",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "calabash-nutmeg",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
-      "slug": "stockfish-whole",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "cameroon-pepper",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (25%)"
     },
     {
-      "slug": "stockfish-cut",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "cassava-flour-lafun",
+      "status": "accepted"
     },
     {
-      "slug": "stockfish-head",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "cassava-fufu-flour",
+      "status": "accepted"
     },
     {
-      "slug": "stockfish-flakes",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "cassava-root-fresh",
+      "status": "accepted"
     },
     {
-      "slug": "smoked-catfish",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "chewing-stick",
+      "status": "accepted"
     },
     {
-      "slug": "smoked-bonga",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "mangala-fish",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ponmo-dried",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ponmo-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "shaki-tripe",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "cow-foot",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "goat-meat-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "hard-chicken",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "mackerel-titus-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "croaker-frozen",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tilapia-frozen",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "catfish-frozen",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "palm-oil-red",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "palm-oil-bleached-ofada",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "maggi-star-cubes",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "maggi-crayfish-cubes",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "knorr-chicken-cubes",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tomato-paste-gino",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "gino-pepper-onion-paste",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tomato-paste-de-rica",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tomato-paste-tasty-tom",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "heinz-salad-cream",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "indomie-chicken",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "indomie-onion-chicken",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "golden-penny-spaghetti",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "titus-sardines",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "titus-sardines-hot",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tinapa-mackerel",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "exeter-corned-beef",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "zwan-luncheon-meat",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "heinz-baked-beans",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ugu-leaves-dried",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "atama-leaves-dried",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "pepper-shombo",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ginger-dried-ground",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "coconut-dry",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "sugarcane",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "chikwangue-kwanga",
+      "status": "accepted"
     },
     {
       "slug": "chin-chin",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "status": "accepted"
     },
     {
-      "slug": "plantain-chips-unripe",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "cocoyam-tannia",
+      "status": "accepted"
     },
     {
-      "slug": "plantain-chips-ripe",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "cocoyam-taro",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (61%)"
+    },
+    {
+      "slug": "corn-dried-whole",
+      "status": "accepted"
+    },
+    {
+      "slug": "cow-foot",
+      "status": "accepted"
+    },
+    {
+      "slug": "crayfish-ground",
+      "status": "accepted"
+    },
+    {
+      "slug": "crayfish-whole-dried",
+      "status": "accepted"
+    },
+    {
+      "slug": "curry-powder-nigerian",
+      "status": "accepted"
+    },
+    {
+      "slug": "dates",
+      "status": "accepted"
+    },
+    {
+      "slug": "dawadawa-dried",
+      "status": "accepted"
+    },
+    {
+      "slug": "efo-shoko-celosia",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (50%)"
+    },
+    {
+      "slug": "egusi-ground",
+      "status": "accepted"
+    },
+    {
+      "slug": "egusi-seeds-whole",
+      "status": "accepted"
+    },
+    {
+      "slug": "ewedu-leaves-fresh",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
+    },
+    {
+      "slug": "fonio",
+      "status": "accepted"
+    },
+    {
+      "slug": "fumbwa-dried-gnetum-leaves",
+      "status": "accepted"
+    },
+    {
+      "slug": "garden-egg",
+      "status": "accepted"
+    },
+    {
+      "slug": "garri-ijebu",
+      "status": "accepted"
+    },
+    {
+      "slug": "garri-white",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (22%)"
+    },
+    {
+      "slug": "garri-yellow",
+      "status": "accepted"
+    },
+    {
+      "slug": "goat-meat-frozen",
+      "status": "accepted"
+    },
+    {
+      "slug": "grains-of-selim",
+      "status": "accepted"
+    },
+    {
+      "slug": "ground-hot-pepper",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (35%)"
+    },
+    {
+      "slug": "groundnut-oil",
+      "status": "accepted"
+    },
+    {
+      "slug": "groundnuts-raw",
+      "status": "accepted"
+    },
+    {
+      "slug": "hibiscus-dried",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
+    },
+    {
+      "slug": "hibiscus-drink-bottled",
+      "status": "accepted"
+    },
+    {
+      "slug": "horse-mackerel-frozen",
+      "status": "accepted"
+    },
+    {
+      "slug": "iru-fermented-locust-beans",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (74%)"
+    },
+    {
+      "slug": "jute-leaves",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (75%)"
+    },
+    {
+      "slug": "kola-nut",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
     },
     {
       "slug": "kuli-kuli",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "kokoro",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "puff-puff-mix",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "cabin-biscuit-oxford",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "cream-crackers-jacobs",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tom-tom-candy",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "coated-peanuts",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "roasted-peanuts",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kilishi",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "milo-energy-cubes",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "malta-guinness",
-      "status": "failed",
-      "error": "No licensed source image"
+      "status": "accepted"
     },
     {
       "slug": "maltina",
-      "status": "failed",
-      "error": "No licensed source image"
+      "status": "accepted"
     },
     {
-      "slug": "supermalt",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "millet-flour",
+      "status": "accepted"
     },
     {
-      "slug": "kunu-drink",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "millet-pearl",
+      "status": "accepted"
     },
     {
-      "slug": "kunu-aya",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "moringa-powder",
+      "status": "accepted"
     },
     {
-      "slug": "lucozade",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "mortar-pestle-wood",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (27%)"
     },
     {
-      "slug": "ribena",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "ofor-thickener",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (74%)"
     },
     {
-      "slug": "peak-evaporated-milk",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "ogbono-ground",
+      "status": "accepted"
     },
     {
-      "slug": "peak-powdered-milk",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "ogbono-whole",
+      "status": "accepted"
     },
     {
-      "slug": "three-crowns-evaporated",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "oha-leaves-dried",
+      "status": "accepted"
     },
     {
-      "slug": "three-crowns-powder",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "oha-leaves-frozen",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
-      "slug": "nido-powdered-milk",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "okra-dried",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
-      "slug": "cowbell-milk",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "okra-fresh",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
-      "slug": "loya-milk",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "okra-frozen",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
     },
     {
-      "slug": "milo",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "oxtail",
+      "status": "accepted"
     },
     {
-      "slug": "bournvita",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "palm-nut-cream",
+      "status": "accepted"
     },
     {
-      "slug": "ovaltine",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "palm-oil-red",
+      "status": "accepted"
     },
     {
-      "slug": "golden-morn",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "pepper-scotch-bonnet",
+      "status": "accepted"
     },
     {
-      "slug": "cornflakes-nasco",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "pigeon-peas-dried",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (22%)"
     },
     {
-      "slug": "custard-powder",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "plantain-chips-unripe",
+      "status": "accepted"
     },
     {
-      "slug": "ogi-white",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "plantain-ripe",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (37%)"
     },
     {
-      "slug": "ogi-yellow",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "ponmo-frozen",
+      "status": "accepted"
     },
     {
-      "slug": "ogi-baba",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "potato-greens",
+      "status": "accepted"
     },
     {
-      "slug": "tapioca-nigerian",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "poundo-yam-flour",
+      "status": "accepted"
     },
     {
-      "slug": "agege-bread",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "puff-puff-mix",
+      "status": "accepted"
     },
     {
-      "slug": "blue-band-margarine",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "rice-flour-tuwo",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (26%)"
     },
     {
-      "slug": "st-louis-sugar",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "rice-ofada",
+      "status": "accepted"
     },
     {
-      "slug": "dudu-osun",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "rice-parboiled-long-grain",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
-      "slug": "camwood-osun",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "roselle-leaves",
+      "status": "accepted"
     },
     {
-      "slug": "aboniki-balm",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "scent-leaf-fresh",
+      "status": "accepted"
     },
     {
-      "slug": "alum-stone",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "semovita-golden-penny",
+      "status": "accepted"
     },
     {
-      "slug": "yam-frozen-pieces",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "shea-butter-raw",
+      "status": "accepted"
     },
     {
-      "slug": "ayamase-sauce",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "smoked-catfish",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (61%)"
     },
     {
-      "slug": "moi-moi-leaves",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "sorghum-guinea-corn",
+      "status": "accepted"
     },
     {
-      "slug": "goat-head-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "stockfish-cut",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (20%)"
     },
     {
-      "slug": "pepper-mix-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "suya-spice-yaji",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (47%)"
     },
     {
-      "slug": "meat-pie",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "sweet-potato-african",
+      "status": "accepted"
     },
     {
-      "slug": "assorted-meat-frozen",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "tamarind",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (64%)"
     },
     {
-      "slug": "turning-stick-omorogun",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "thyme-dried",
+      "status": "accepted"
     },
     {
-      "slug": "chili-dried-whole",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "tiger-nut",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (77%)"
     },
     {
-      "slug": "kenkey-ga",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "ube-african-pear",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (40%)"
     },
     {
-      "slug": "kenkey-fante",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "ugu-leaves-fresh",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (48%)"
     },
     {
-      "slug": "kenkey-corn-meal",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "ugu-leaves-frozen",
+      "status": "rejected",
+      "reason": "too few opaque pixels after cleanup"
     },
     {
-      "slug": "banku-mix",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "ukwa-breadfruit",
+      "status": "accepted"
     },
     {
-      "slug": "banku-dough-fermented-frozen",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "uziza-leaves-dried",
+      "status": "accepted"
     },
     {
-      "slug": "corn-dough-fermented",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "velvet-tamarind",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (41%)"
     },
     {
-      "slug": "cassava-dough-agbelima",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "waterleaf-fresh",
+      "status": "rejected",
+      "reason": "object too small or low coverage after cleanup"
     },
     {
-      "slug": "fufu-flour-plantain",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
+      "slug": "wheat-meal-swallow",
+      "status": "accepted"
     },
     {
-      "slug": "fufu-flour-cassava-plantain",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "white-maize-meal",
+      "status": "rejected",
+      "reason": "excessive ghosting/haze (39%)"
     },
     {
-      "slug": "fufu-flour-instant-potato",
-      "status": "failed",
-      "error": "No licensed source image"
+      "slug": "yam-flour-elubo",
+      "status": "accepted"
     },
     {
-      "slug": "gari-ghana",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "yam-water",
+      "status": "accepted"
     },
     {
-      "slug": "kokonte-flour",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "apapransa-flour-mix",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "couscous-de-mil",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "araw-millet-pellets",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "sankal-millet-grits",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "monikourou-millet",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "rice-broken",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "rice-country-liberia",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tom-brown",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "hausa-koko-mix",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "akassa",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "attieke-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "attieke-dried",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "placali",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "miondo",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "kontomire",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "garden-eggs-canned",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "bitter-garden-egg",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "turkey-berry",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kpakpo-shito-pepper",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "cassava-leaves",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "gboma-leaves",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "njama-njama",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "baobab-fruit-pulp",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "country-peanuts-cameroon",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "shito",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "palm-nuts-fresh",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "groundnut-paste",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "njansang",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "country-onion",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "mbongo-spice",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "achu-spice",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "nkui-spice",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "penja-pepper",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "fennel-nketenkete",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "datou",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "adja-seasoning",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "jumbo-seasoning",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "remie-seasoning",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ohene-yere-seasoning",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "waakye-leaves",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "zomi-palm-oil",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "guedj",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "yeet",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kethiakh",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "tambadiang",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "momoni",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "koobi",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "kako",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "keta-schoolboys",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "anchovies-dried-white",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "smoked-herring-sardinella",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "smoked-tilapia",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "guinea-fowl-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "cafe-touba",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kinkeliba",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ataya-gunpowder-tea",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "asaana",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "golden-tree-cocoa",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "golden-tree-kingsbite",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "nkatie-cake",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kube-cake",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "kanya",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "kola-nut-white",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "asanka",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "apotoyiwa-tapoli",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "thiouraye",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "shea-butter-yellow",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "turkey-berry-dried",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "torborgee-oil",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ekwang-grated-cocoyam",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "ghana-tea-bread",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ghana-butter-bread",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ginger-drink",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "sesame-benne",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "toasted-corn-peanuts",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "donkwa",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "aklui-corn-pellets",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "oblayo-hominy-grits",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "cassava-flour-congolese-fufu",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "salt-cod-makayabu-saltfish",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ndakala-kapenta-dried-sardines",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "mbinzo-dried-caterpillars",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "pili-pili-dried-bird-eye-chili",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "whole-maize-meal-roller-meal",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "jogoo-maize-meal",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "pembe-maize-flour",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "finger-millet-flour",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "sorghum-flour",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "uji-porridge-flour",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "chapati-flour-kenyan",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "mandazi-mix",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "pilau-masala",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "royco-mchuzi-mix",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "royco-cubes",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "chai-masala",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "east-african-curry-powder",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "kenyan-black-tea-loose",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ketepa-pride-tea",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "kericho-gold-tea",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "chai-bora-tea",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "africafe-instant-coffee",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "dormans-coffee",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "stoney-tangawizi",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "mabuyu-baobab-candy",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ndengu-green-grams",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "njahi-lablab-beans",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "rosecoco-beans",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "githeri-maize-bean-mix",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kimbo-cooking-fat",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "sambusa-pastry-sheets",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "sambusa-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "akabanga-chili-oil",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "nile-perch-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "omena-dagaa",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "managu-african-nightshade",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "sukuma-wiki-collard-greens",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kunde-cowpea-leaves",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "pumpkin-leaves",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "matoke-green-cooking-bananas",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "matoke-frozen-peeled",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "nakati-solanum-leaves",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "spider-plant-leaves",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "cardamom",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "cloves",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "cinnamon",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "teff-flour-ivory",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "teff-flour-brown",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "teff-grain-whole",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "injera",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kocho-enset",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "berbere",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "mitmita",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "shiro-powder",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "nech-shiro-powder",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "niter-kibbeh",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "kibe-qimem-butter-spice",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "korerima",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "koseret",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "besobela",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tena-adam-rue",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "fenugreek",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "black-cumin-nigella",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ajwain-nech-azmud",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "timiz-long-pepper",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "mekelesha",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "awaze-paste",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "black-pepper",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "turmeric",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "cumin",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "gesho",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ethiopian-green-coffee-beans",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ethiopian-roasted-coffee",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kolo-roasted-barley",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "dabo-kolo",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "besso-roasted-barley-flour",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "kinche-cracked-wheat",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "misir-red-lentils",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kik-yellow-split-peas",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "fava-beans-dried",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "shimbra-chickpeas",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "telba-flaxseed",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "nug-niger-seed",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ambo-mineral-water",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ayib-cottage-cheese",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "xawaash-spice",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "basmati-rice-somali",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "xalwo-somali-halwa",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "laxoox-canjeero-mix",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ghee-subag",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "camel-milk",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "muqmad-preserved-meat",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "adzuki-beans-cambuulo",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "basbaas-somali-hot-sauce",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "vimto-cordial",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ful-medames-canned",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "shata-sudanese-chili",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "kawal-fermented-leaves",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "hulu-mur-abreh",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "iwisa-maize-meal",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "white-star-maize-meal",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "maltabella-sorghum-porridge",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "jungle-oats",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "pronutro-cereal",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "samp-crushed-maize",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "samp-and-beans-mix",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "biltong",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "droewors",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "boerewors-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "chakalaka-canned",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "mrs-balls-chutney",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "rooibos-tea",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "five-roses-tea",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tastic-rice",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "aromat-seasoning",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "robertsons-spices",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "rajah-curry-powder",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "peri-peri-sauce",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "mazoe-orange-crush",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ouma-rusks",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "bakers-tennis-biscuits",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "simba-chips",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "niknaks",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "peppermint-crisp",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "koo-baked-beans",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "all-gold-tomato-sauce",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "lucky-star-pilchards",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "oros-squash",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "appletiser",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "mopane-worms",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "chambo-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "henna-powder",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "uunsi-bakhoor-incense",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "frankincense-resin",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "myrrh-resin",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "dukhan-talih-smoke-wood",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "dilka-body-scrub",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "khumra-perfume-oil",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "qasil-powder",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "black-seed-oil",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "miswak-caday",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "arimis-milking-jelly",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "bio-oil",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ingrams-camphor-cream",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "jebena-coffee-pot",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "sini-coffee-cups",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "rekebot-coffee-tray",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "menkeshkesh-roasting-pan",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "mitad-injera-griddle",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "mesob-basket",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "dabqaad-incense-burner",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "mwiko-cooking-stick",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ackee-canned",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "callaloo-canned",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "scotch-bonnet-pepper-sauce",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "jerk-seasoning-paste",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "jerk-seasoning-dry",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "grace-cock-soup-mix",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "coconut-milk-canned",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "grace-kola-champagne",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "ting-grapefruit-soda",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "jamaican-ginger-beer",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "malta-goya",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "goya-sazon",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "goya-adobo",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "pickapeppa-sauce",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "supligen-drink",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "sea-moss-dried",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "jamaican-curry-powder",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "green-seasoning-trinidad",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "pimento-allspice-whole",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "browning-sauce",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "bammy",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "jamaican-beef-patties-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "hard-dough-bread",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "jamaican-spice-bun",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "grace-mackerel-tomato-sauce",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "pigeon-peas-canned",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "breadfruit-frozen",
-      "status": "failed",
-      "error": "Offline model missing: download u2netp once before using --offline"
-    },
-    {
-      "slug": "grace-tropical-rhythms",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "excelsior-water-crackers",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "tastee-cheese",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "hilbet-powder",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "senafich-mustard-seed",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "banana-leaves-frozen",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "chapati-frozen",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "pishori-rice",
-      "status": "failed",
-      "error": "No licensed source image"
-    },
-    {
-      "slug": "honey-malab",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "pikliz",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "ginger-root",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
-    },
-    {
-      "slug": "rice-jasmine-thai",
-      "status": "failed",
-      "error": "Original not downloaded; rerun with --download-only online first"
+      "slug": "yam-white-puna",
+      "status": "accepted"
     }
-  ]
+  ],
+  "original_pipeline_failed": 0
 }
