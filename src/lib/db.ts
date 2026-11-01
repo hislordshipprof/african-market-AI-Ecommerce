@@ -200,7 +200,11 @@ export async function rateLimitUpsert(
         THEN 1
         ELSE rate_limits.count + 1
       END,
-      last_request = ${now}
+      last_request = CASE
+        WHEN rate_limits.last_request < ${windowStart}
+        THEN ${now}
+        ELSE rate_limits.last_request
+      END
     RETURNING count
   `;
   return { count: Number(rows[0].count) };

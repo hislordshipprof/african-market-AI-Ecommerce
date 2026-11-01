@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import {
   checkInviteRateLimit,
   INVITE_RATE_LIMIT_MAX,
+  INVITE_RATE_LIMIT_WINDOW_MS,
 } from "./rate-limit";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -102,5 +103,29 @@ describe.skipIf(!hasDb)("checkInviteRateLimit", () => {
     const afterExpiry = await checkInviteRateLimit(storeAId);
     expect(afterExpiry.allowed).toBe(true);
     expect(afterExpiry.count).toBe(1);
+  });
+
+  it("fixed window: steady use does not prevent reset after window from first invite elapses", async () => {
+    const windowMs = INVITE_RATE_LIMIT_WINDOW_MS;
+    const t0 = Date.now();
+    const spread = Math.floor((windowMs * 0.98) / INVITE_RATE_LIMIT_MAX);
+
+    // 20 invites spread across ~59 minutes (each ~2.94 min apart)
+    for (let i = 0; i < INVITE_RATE_LIMIT_MAX; i++) {
+      const nowMs = t0 + i * spread;
+      const result = await checkInviteRateLimit(storeAId, nowMs);
+      expect(result.allowed).toBe(true);
+    }
+
+    // 21st at t0 + 59min — still within window, should be blocked
+    const t59 = t0 + Math.floor(windowMs * 0.98);
+    const blocked = await checkInviteRateLimit(storeAId, t59);
+    expect(blocked.allowed).toBe(false);
+
+    // After the window from the FIRST invite elapses (t0 + windowMs + 1ms)
+    const tAfterWindow = t0 + windowMs + 1;
+    const allowed = await checkInviteRateLimit(storeAId, tAfterWindow);
+    expect(allowed.allowed).toBe(true);
+    expect(allowed.count).toBe(1);
   });
 });
