@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useSyncExternalStore } from "react";
+import { useState, useTransition, useSyncExternalStore } from "react";
 import { Trash2, ArrowRight } from "lucide-react";
 import { QuickAddStepper } from "../quick-add-stepper";
 import { useCart } from "../cart-provider";
@@ -16,7 +16,9 @@ import type {
   FlowStore,
   SwapRule,
 } from "@/lib/customer-flow/contracts";
-import { getSwapRule, setSwapRule } from "@/lib/customer-flow/rules";
+import { setSwapRule as serverSetSwapRule } from "@/lib/cart/actions";
+import type { SwapRuleValue } from "@/lib/cart/service";
+import { toast } from "sonner";
 import {
   DemoNotice,
   FeeLine,
@@ -44,11 +46,37 @@ export interface ShoppingFlowProps {
   enabled: boolean;
 }
 
+function swapRuleLabel(line: CartLine, catalog: FlowCatalogItem[]): string {
+  const rule = line.swapRule ?? "exact_only";
+  if (rule === "named_substitute" && line.substituteVariantId) {
+    const sub = catalog.find((c) => c.variantId === line.substituteVariantId);
+    return sub ? sub.name : "Named substitute chosen";
+  }
+  if (rule === "store_suggests") return "Store suggests";
+  return "Exact item only";
+}
+
+function clientRuleToServer(rule: SwapRule): {
+  swapRule: SwapRuleValue;
+  substituteVariantId: string | null;
+} {
+  if (rule.kind === "chosen" && rule.item.variantId) {
+    return {
+      swapRule: "named_substitute",
+      substituteVariantId: rule.item.variantId,
+    };
+  }
+  if (rule.kind === "suggest") {
+    return { swapRule: "store_suggests", substituteVariantId: null };
+  }
+  return { swapRule: "exact_only", substituteVariantId: null };
+}
+
 export function CartPage({ settings, catalog }: ShoppingFlowProps) {
-  const { lines, subtotal, count, store } = useCart();
+  const { lines, subtotal, count, store, refreshCart } = useCart();
   const ready = useCartReady();
   const [selected, select] = useState<CartLine | null>(null);
-  const [revision, refresh] = useState(0);
+  const [, startTransition] = useTransition();
   const remaining = Math.max(0, settings.minimumOrderCents - subtotal);
   const invalid = lines.some((line) => {
     const item = catalog.find(
@@ -57,10 +85,22 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
     return !item?.available || line.quantity > item.maxPerOrder;
   });
   function choose(rule: SwapRule) {
-    if (!selected) return;
-    setSwapRule(settings.id, cartItemKey(selected), rule);
-    refresh(revision + 1);
+    if (!selected || !selected.serverLineId) return;
+    const { swapRule, substituteVariantId } = clientRuleToServer(rule);
+    const lineId = selected.serverLineId;
     select(null);
+    startTransition(async () => {
+      const result = await serverSetSwapRule(
+        lineId,
+        swapRule,
+        substituteVariantId,
+      );
+      if (!result.ok) {
+        toast.error(result.error);
+      } else {
+        await refreshCart();
+      }
+    });
   }
   if (!ready) return <FlowLoading />;
   const selectedItem =
@@ -98,8 +138,7 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
               <ul className={styles.lines}>
                 {lines.map((line) => {
                   const key = cartItemKey(line),
-                    item = catalog.find((item) => cartItemKey(item) === key),
-                    rule = getSwapRule(settings.id, key);
+                    item = catalog.find((item) => cartItemKey(item) === key);
                   return (
                     <li className={styles.line} key={key}>
                       <div className={styles.photo}>
@@ -131,17 +170,16 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
                           onClick={() => select(line)}
                         >
                           Replace with{" "}
-                          <span>
-                            {rule.kind === "chosen"
-                              ? rule.item.name
-                              : rule.kind === "suggest"
-                                ? "Store suggests"
-                                : "Exact item only"}
-                          </span>
+                          <span>{swapRuleLabel(line, catalog)}</span>
                           <ArrowRight size={15} />
                         </button>
                         <div className={styles.lineActions}>
-                          <QuickAddStepper item={line} maxQuantity={item?.available ? item.maxPerOrder : 0} />
+                          <QuickAddStepper
+                            item={line}
+                            maxQuantity={
+                              item?.available ? item.maxPerOrder : 0
+                            }
+                          />
                           <button
                             className={styles.iconButton}
                             aria-label={`Remove ${line.name}`}
@@ -223,7 +261,7 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
                   <p className={styles.muted}>
                     {remaining
                       ? `${money(remaining)} more to reach the ${money(settings.minimumOrderCents)} minimum.`
-                      : "You’ve reached the minimum order."}
+                      : "You've reached the minimum order."}
                   </p>
                 </>
               )}

@@ -78,6 +78,8 @@ export function storeScoped(storeId: string) {
     storeBanner: wrapDelegate(storeId, prisma.storeBanner),
     storeCollection: wrapDelegate(storeId, prisma.storeCollection),
     storeCollectionListing: wrapDelegate(storeId, prisma.storeCollectionListing),
+    cart: wrapDelegate(storeId, prisma.cart),
+    cartLine: wrapDelegate(storeId, prisma.cartLine),
   };
 }
 
@@ -127,7 +129,7 @@ export async function platformAdminTransaction<T>(
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "stockEvent" | "auditLog" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "$queryRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -137,6 +139,8 @@ export async function storeScopedTransaction<T>(
       listingVariant: tx.listingVariant,
       stockEvent: tx.stockEvent,
       auditLog: tx.auditLog,
+      cart: tx.cart,
+      cartLine: tx.cartLine,
       $queryRaw: tx.$queryRaw.bind(tx),
     });
   });
@@ -144,6 +148,19 @@ export async function storeScopedTransaction<T>(
 
 export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
   await tx.$queryRaw`SELECT 1 FROM "Store" WHERE id = ${storeId} FOR UPDATE`;
+}
+
+export async function lockCartLineByVariant(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  cartId: string,
+  variantId: string,
+): Promise<{ id: string; qty: number } | null> {
+  const rows = await tx.$queryRaw<Array<{ id: string; qty: number }>>`
+    SELECT id, qty FROM cart_lines
+    WHERE cart_id = ${cartId} AND variant_id = ${variantId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
 }
 
 export async function storeScopedRawQuery<T>(

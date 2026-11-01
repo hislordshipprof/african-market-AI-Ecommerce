@@ -8,6 +8,7 @@ import { useCart } from "../cart-provider";
 import { Button, Chip, EmptyState } from "../primitives";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import { cartItemKey } from "@/lib/storefront/cart-store";
+import { clearCart } from "@/lib/cart/actions";
 import type {
   CheckoutInput,
   CheckoutQuote,
@@ -38,7 +39,7 @@ export function CheckoutPage({
   catalog,
   enabled,
 }: ShoppingFlowProps) {
-  const { lines, subtotal, store } = useCart();
+  const { lines, subtotal, refreshCart } = useCart();
   const ready = useCartReady();
   const router = useRouter();
   const services = useMemo(
@@ -238,7 +239,8 @@ export function CheckoutPage({
         authorization,
       );
       setPayState("success");
-      lines.forEach((line) => store.remove(cartItemKey(line)));
+      await clearCart();
+      await refreshCart();
       if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
         await new Promise((resolve) => setTimeout(resolve, 650));
       router.push(`/order/${order.token}?placed=1`);

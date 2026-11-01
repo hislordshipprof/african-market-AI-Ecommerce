@@ -13,6 +13,9 @@ async function fillBasket(page: Page) {
   await expect(
     page.getByTestId("storefront-header").getByTestId("cart-count"),
   ).toHaveText("10");
+  await expect(
+    page.getByTestId("storefront-header").locator("[data-cart-pending]"),
+  ).toBeHidden({ timeout: 10000 });
   await page.goto(`${base}/cart`);
 }
 
