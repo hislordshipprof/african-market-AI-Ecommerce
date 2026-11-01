@@ -6,7 +6,9 @@ const OUT = resolve(__dirname, "..", "screenshots");
 
 const VIEWPORTS = [
   { name: "390px", width: 390, height: 844 },
+  { name: "1024px", width: 1024, height: 768 },
   { name: "1440px", width: 1440, height: 900 },
+  { name: "1920px", width: 1920, height: 1080 },
 ];
 
 const THEMES = ["light", "dark"] as const;
