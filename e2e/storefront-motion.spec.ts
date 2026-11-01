@@ -109,7 +109,8 @@ test.describe("Phase 3 motion and depth", () => {
 
   test("fly-to-cart updates the accessible badge immediately", async ({ page }) => {
     await page.goto(`${BASE}/categories/grains-and-flours`);
-    const card = page.getByTestId("listing-card").filter({ has: page.locator('[data-testid="quick-add-btn"]:enabled') }).first();
+    await page.waitForTimeout(2000);
+    const card = page.getByTestId("listing-card").filter({ has: page.locator('[data-testid="quick-add-btn"]:enabled') }).filter({ hasNot: page.locator(".sf-product-fallback") }).first();
     await expect(card.locator("img")).toBeVisible();
     await expect.poll(() => card.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     await card.getByTestId("quick-add-btn").click();

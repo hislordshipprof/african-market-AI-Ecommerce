@@ -1,7 +1,7 @@
 {
   "processed": 111,
-  "accepted": 71,
-  "rejected": 40,
+  "accepted": 55,
+  "rejected": 56,
   "results": [
     {
       "slug": "abacha-dried",
@@ -10,15 +10,19 @@
     },
     {
       "slug": "achi-thickener",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows two bowls of cooked dish, not raw thickener"
     },
     {
       "slug": "afang-leaves-frozen",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "african-black-soap",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "african-net-sponge",
@@ -27,15 +31,19 @@
     },
     {
       "slug": "agbalumo-star-apple",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "aidan-fruit",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "messy cut-out with market debris, bags, heavy ghosting"
     },
     {
       "slug": "akpu-wet-frozen",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "alligator-pepper",
@@ -49,19 +57,23 @@
     },
     {
       "slug": "ashanti-pepper",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "bambara-nut",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "baobab-fruit-powder",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "baobab-leaf-powder",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "beans-black-eyed-peas",
@@ -75,7 +87,8 @@
     },
     {
       "slug": "beans-honey-oloyin",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "beans-peeled-brown",
@@ -84,7 +97,8 @@
     },
     {
       "slug": "bitter-kola",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "bitter-leaf-dried",
@@ -93,7 +107,8 @@
     },
     {
       "slug": "bitter-leaf-frozen",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "calabash-nutmeg",
@@ -107,31 +122,40 @@
     },
     {
       "slug": "cassava-flour-lafun",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "cassava-fufu-flour",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "unrecognizable white blob"
     },
     {
       "slug": "cassava-root-fresh",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "chewing-stick",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "WRONG CONTENT: shows a persons face, not a chewing stick"
     },
     {
       "slug": "chikwangue-kwanga",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "chin-chin",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "cocoyam-tannia",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "cocoyam-taro",
@@ -140,31 +164,40 @@
     },
     {
       "slug": "corn-dried-whole",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "cow-foot",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked dish with garnishes, not raw cow foot"
     },
     {
       "slug": "crayfish-ground",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "crayfish-whole-dried",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "curry-powder-nigerian",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "dates",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "tiny object, mostly packaging, unrecognizable at tile size"
     },
     {
       "slug": "dawadawa-dried",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "efo-shoko-celosia",
@@ -173,11 +206,14 @@
     },
     {
       "slug": "egusi-ground",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked egusi soup with spoon, not ground egusi seeds"
     },
     {
       "slug": "egusi-seeds-whole",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "ewedu-leaves-fresh",
@@ -186,19 +222,24 @@
     },
     {
       "slug": "fonio",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "fumbwa-dried-gnetum-leaves",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "garden-egg",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "garri-ijebu",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows prepared garri drink with peanuts, not raw garri granules"
     },
     {
       "slug": "garri-white",
@@ -207,15 +248,18 @@
     },
     {
       "slug": "garri-yellow",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "goat-meat-frozen",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "grains-of-selim",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "ground-hot-pepper",
@@ -224,11 +268,13 @@
     },
     {
       "slug": "groundnut-oil",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "groundnuts-raw",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "hibiscus-dried",
@@ -237,11 +283,13 @@
     },
     {
       "slug": "hibiscus-drink-bottled",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "horse-mackerel-frozen",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "iru-fermented-locust-beans",
@@ -260,23 +308,28 @@
     },
     {
       "slug": "kuli-kuli",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "maltina",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "millet-flour",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "millet-pearl",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "moringa-powder",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "mortar-pestle-wood",
@@ -290,15 +343,20 @@
     },
     {
       "slug": "ogbono-ground",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked ogbono soup with meat, not ground ogbono seeds"
     },
     {
       "slug": "ogbono-whole",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "oha-leaves-dried",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked oha soup with meat, not dried oha leaves"
     },
     {
       "slug": "oha-leaves-frozen",
@@ -322,19 +380,23 @@
     },
     {
       "slug": "oxtail",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "palm-nut-cream",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "palm-oil-red",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "pepper-scotch-bonnet",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "pigeon-peas-dried",
@@ -343,7 +405,8 @@
     },
     {
       "slug": "plantain-chips-unripe",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "plantain-ripe",
@@ -352,19 +415,25 @@
     },
     {
       "slug": "ponmo-frozen",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "potato-greens",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "poundo-yam-flour",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked pounded yam blob in plastic, not flour product"
     },
     {
       "slug": "puff-puff-mix",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked puff-puff balls, not the dry mix"
     },
     {
       "slug": "rice-flour-tuwo",
@@ -373,7 +442,9 @@
     },
     {
       "slug": "rice-ofada",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows plated stew and chicken dish, not raw Ofada rice"
     },
     {
       "slug": "rice-parboiled-long-grain",
@@ -382,19 +453,25 @@
     },
     {
       "slug": "roselle-leaves",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "scent-leaf-fresh",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "semovita-golden-penny",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "shows cooked semovita dough lump, not flour product"
     },
     {
       "slug": "shea-butter-raw",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "scattered dark grains with heavy ghosting, not recognizable as raw shea butter"
     },
     {
       "slug": "smoked-catfish",
@@ -403,7 +480,8 @@
     },
     {
       "slug": "sorghum-guinea-corn",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "stockfish-cut",
@@ -417,7 +495,9 @@
     },
     {
       "slug": "sweet-potato-african",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "rejected",
+      "visual_review_reason": "messy market scene with multiple products and debris"
     },
     {
       "slug": "tamarind",
@@ -426,7 +506,8 @@
     },
     {
       "slug": "thyme-dried",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "tiger-nut",
@@ -450,11 +531,13 @@
     },
     {
       "slug": "ukwa-breadfruit",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "uziza-leaves-dried",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "velvet-tamarind",
@@ -468,7 +551,8 @@
     },
     {
       "slug": "wheat-meal-swallow",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "white-maize-meal",
@@ -477,15 +561,18 @@
     },
     {
       "slug": "yam-flour-elubo",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "yam-water",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     },
     {
       "slug": "yam-white-puna",
-      "status": "accepted"
+      "status": "accepted",
+      "visual_review": "accepted"
     }
   ],
   "original_pipeline_failed": 0

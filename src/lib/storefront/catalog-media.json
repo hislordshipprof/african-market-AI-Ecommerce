@@ -38,7 +38,7 @@
   "sweet potato": {
     "localNames": "odunkun (Yoruba, Nigeria)|dankali (Hausa, Nigeria)",
     "description": "Pale-fleshed sweet potato boiled, fried or cooked in porridge, less sweet than orange US yams.",
-    "imageUrl": "/images/products/sweet-potato-african.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/49/White_and_Red_Sweet_potato.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:White_and_Red_Sweet_potato.jpg",
     "author": "Abdsomod",
     "catalogId": "sweet-potato-african",
@@ -92,7 +92,7 @@
   "semovita": {
     "localNames": "",
     "description": "Fortified wheat semolina from Flour Mills of Nigeria, cooked in water as a smooth swallow.",
-    "imageUrl": "/images/products/semovita-golden-penny.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a9/Durum_wheat_flour_(2).jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Durum_wheat_flour_(2).jpg",
     "author": "Horcrux",
     "catalogId": "semovita-golden-penny",
@@ -101,7 +101,7 @@
   "pounded yam flour": {
     "localNames": "iyan (Yoruba, Nigeria)|sakwara (Hausa, Nigeria)|poundo (Nigerian English, Nigeria)|foutou igname (French, Côte d'Ivoire)|bayerɛ fufu (Twi, Ghana)",
     "description": "Instant flour stirred into boiling water to make pounded yam, eaten with egusi, ogbono and other soups.",
-    "imageUrl": "/images/products/poundo-yam-flour.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Sun_dried_yam_flour.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Sun_dried_yam_flour.jpg",
     "author": "Oluwaseyi Ale",
     "catalogId": "poundo-yam-flour",
@@ -110,7 +110,7 @@
   "poundo yam": {
     "localNames": "iyan (Yoruba, Nigeria)|sakwara (Hausa, Nigeria)|poundo (Nigerian English, Nigeria)|foutou igname (French, Côte d'Ivoire)|bayerɛ fufu (Twi, Ghana)",
     "description": "Instant flour stirred into boiling water to make pounded yam, eaten with egusi, ogbono and other soups.",
-    "imageUrl": "/images/products/poundo-yam-flour.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Sun_dried_yam_flour.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Sun_dried_yam_flour.jpg",
     "author": "Oluwaseyi Ale",
     "catalogId": "poundo-yam-flour",
@@ -119,7 +119,7 @@
   "ofada rice": {
     "localNames": "iresi ofada (Yoruba, Nigeria)",
     "description": "Short, aromatic unpolished local rice from Ogun State, served with ayamase (ofada stew).",
-    "imageUrl": "/images/products/rice-ofada.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/5/5c/Brown_Rice.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Brown_Rice.jpg",
     "author": "Gaurav Dhwaj Khadka",
     "catalogId": "rice-ofada",
@@ -209,7 +209,7 @@
   "shea butter": {
     "localNames": "nkuto (Twi, Ghana)|karité (French, Burkina Faso)|kpangnan (Dioula, Côte d'Ivoire)|sì tulu (Bambara, Mali)|man kadanya (Hausa, Ghana)|ori (Yoruba, Nigeria)|okwuma (Igbo, Nigeria)|man kade (Hausa, Nigeria)",
     "description": "Ivory butter from shea nuts used on skin and hair, and in northern Ghana for cooking.",
-    "imageUrl": "/images/products/shea-butter-raw.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c5/Shea_butter.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Shea_butter.jpg",
     "author": "Amuzujoe",
     "catalogId": "shea-butter-raw",
@@ -335,7 +335,7 @@
   "cow foot": {
     "localNames": "bokoto (Yoruba, Nigeria)",
     "description": "Cut cow feet slow-cooked for nkwobi, pepper soup and stews.",
-    "imageUrl": "/images/products/cow-foot.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e2/A_prepared_cow_feet.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:A_prepared_cow_feet.jpg",
     "author": "Isaac Gyamfi Assumeng",
     "catalogId": "cow-foot",
@@ -362,7 +362,7 @@
   "puff puff mix": {
     "localNames": "puff puff (Nigerian English, Nigeria)|beignets (French, Cameroon)|bofrot (Twi, Ghana)|toogbei (Ga, Ghana)|yovo doko (Ewe, Togo)",
     "description": "Flour, yeast and sugar mix for deep-fried puff puff dough balls.",
-    "imageUrl": "/images/products/puff-puff-mix.webp",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/df/Wheat_flour.jpg",
     "source": "https://commons.wikimedia.org/wiki/File:Wheat_flour.jpg",
     "author": "Oliwier Brzezinski",
     "catalogId": "puff-puff-mix",
