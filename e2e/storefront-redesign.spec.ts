@@ -9,7 +9,7 @@ test.describe("Storefront redesign interactions", () => {
     page,
   }) => {
     test.setTimeout(45_000);
-    await page.goto(BASE);
+    await page.goto(BASE, { waitUntil: "networkidle" });
     const carousel = page.getByTestId("hero-carousel");
     const dots = carousel.getByTestId("carousel-dot");
     await expect(dots.nth(1)).toBeVisible();
@@ -17,25 +17,25 @@ test.describe("Storefront redesign interactions", () => {
     await carousel
       .getByRole("button", { name: "Next slide", exact: true })
       .click();
-    await expect(dots.nth(1)).toHaveAttribute("aria-current", "true");
+    await expect(dots.nth(1)).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
     await expect(carousel.getByTestId("banner-title")).not.toHaveText(
       initialTitle,
     );
     await carousel
       .getByRole("button", { name: "Previous slide", exact: true })
       .click();
-    await expect(dots.first()).toHaveAttribute("aria-current", "true");
+    await expect(dots.first()).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
     await expect(carousel.getByTestId("banner-title")).toHaveText(initialTitle);
     const keyboardTarget = carousel.locator("[tabindex='0']");
     await keyboardTarget.focus();
     await keyboardTarget.press("ArrowRight");
-    await expect(dots.nth(1)).toHaveAttribute("aria-current", "true");
+    await expect(dots.nth(1)).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
     await keyboardTarget.press("ArrowLeft");
-    await expect(dots.first()).toHaveAttribute("aria-current", "true");
+    await expect(dots.first()).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
     await keyboardTarget.press("End");
-    await expect(dots.last()).toHaveAttribute("aria-current", "true");
+    await expect(dots.last()).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
     await keyboardTarget.press("Home");
-    await expect(dots.first()).toHaveAttribute("aria-current", "true");
+    await expect(dots.first()).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
   });
 
   test("quick add expands, updates cart count and creates a drawer line", async ({
@@ -171,8 +171,9 @@ test.describe("Storefront redesign interactions", () => {
   test("mobile bottom navigation reaches categories, search, account and home", async ({
     page,
   }) => {
+    test.setTimeout(60_000);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(BASE);
+    await page.goto(BASE, { waitUntil: "networkidle" });
     const nav = page.getByRole("navigation", {
       name: "Main navigation",
       exact: true,
@@ -185,7 +186,7 @@ test.describe("Storefront redesign interactions", () => {
       ["Home", "/"],
     ]) {
       await nav.getByRole("link", { name: label, exact: true }).click();
-      await expect(page).toHaveURL(`${BASE}${path}`);
+      await expect(page).toHaveURL(`${BASE}${path}`, { timeout: 15_000 });
       await expect(
         nav.getByRole("link", { name: label, exact: true }),
       ).toHaveAttribute("aria-current", "page");

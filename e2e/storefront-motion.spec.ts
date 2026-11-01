@@ -37,8 +37,10 @@ test.describe("Phase 3 motion and depth", () => {
   test("hero remains edge to edge and layers overlap during a slide change", async ({ page }) => {
     test.setTimeout(45_000);
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto(BASE);
+    await page.goto(BASE, { waitUntil: "networkidle" });
     const stage = page.locator(".sf-hero");
+    await expect(stage).toBeVisible();
+    await expect(stage).not.toHaveCSS("width", "0px");
     const geometry = await stage.evaluate(element => ({ left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right, viewport: document.documentElement.clientWidth }));
     expect(geometry.left).toBe(0);
     expect(geometry.right).toBe(geometry.viewport);
