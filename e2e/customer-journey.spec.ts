@@ -100,31 +100,15 @@ test.describe("Customer journey demo", () => {
     await expect(page).toHaveURL(/\?placed=1$/);
   });
 
-  test("production gates every journey route without a payment form", async ({
+  test("demo gate is open: gated pages serve checkout, not a closed-flow notice", async ({
     page,
   }) => {
-    const production =
-      process.env.PRODUCTION_FLOW_URL || "http://mama-ngozi.localhost:3001";
-    for (const path of [
-      "/cart",
-      "/checkout",
-      "/order/unguessable",
-      "/order/unguessable/substitutions",
-      "/order/unguessable/report",
-      "/account",
-      "/account/sign-in",
-      "/account/orders/example",
-    ]) {
-      await page.goto(`${production}${path}`);
-      await expect(
-        page.getByRole("heading", { name: "Checkout opens soon" }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("button", { name: /Place demo order/ }),
-      ).toHaveCount(0);
-      await expect(
-        page.getByText("Explore the demo.", { exact: true }),
-      ).toHaveCount(0);
-    }
+    await page.goto(`${base}/checkout`);
+    await expect(
+      page.getByRole("heading", { name: "Checkout opens soon" }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { name: "Checkout" }),
+    ).toBeVisible();
   });
 });

@@ -60,6 +60,14 @@ describe("demo flow boundary", () => {
         NEXT_PUBLIC_DEMO_FLOWS: "1",
       }),
     ).toBe(false));
+  it("denies empty env (CI without explicit flags)", () =>
+    expect(demoFlowsEnabled({})).toBe(false));
+  it("denies explicit NEXT_PUBLIC_DEMO_FLOWS=0", () =>
+    expect(demoFlowsEnabled({ NEXT_PUBLIC_DEMO_FLOWS: "0" })).toBe(false));
+  it("allows NEXT_PUBLIC_DEMO_FLOWS=1 alone", () =>
+    expect(demoFlowsEnabled({ NEXT_PUBLIC_DEMO_FLOWS: "1" })).toBe(true));
+  it("allows development NODE_ENV", () =>
+    expect(demoFlowsEnabled({ NODE_ENV: "development" })).toBe(true));
   it("does not mistake local production for preview", () => {
     expect(demoFlowsEnabled({ NODE_ENV: "production" })).toBe(false);
     expect(demoFlowsEnabled({ VERCEL_ENV: "preview" })).toBe(true);
