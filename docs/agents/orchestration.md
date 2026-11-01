@@ -38,7 +38,7 @@ Anti-drip: one full review inside `implement`; follow-up reviews cover only the 
 
 ## Concurrency (this PC)
 
-- Up to **two builder lanes** (a Codex run counts as one lane), plus one light planner, only when free RAM is above about 6 GB and the two tickets touch disjoint areas. For example, a storefront UI round alongside a backend follow-up that adds no migrations. Tickets that both change the Prisma schema, auth or the same feature folder never run in parallel.
+- Up to **three builder lanes** (a Codex run counts as one lane), plus one light planner, only when free RAM is above about 8 GB and the tickets touch disjoint areas. Each lane gets its own e2e port (`E2E_PORT=3000`, `3100`, `3200`; Playwright reads it). For example, a storefront UI round alongside a backend follow-up that adds no migrations. Tickets that both change the Prisma schema, auth or the same feature folder never run in parallel.
 - Otherwise one builder lane. RAM and the 5-hour usage limit are shared.
 - One ship at a time, so each PR merges on top of the last. CI runs once per PR (pull_request) and on `main` after merges (push), with superseded runs cancelled.
 - Close idle Claude Code sessions before long runs; the OS memory guard kills builders below about 1 GB free.
@@ -49,3 +49,11 @@ Anti-drip: one full review inside `implement`; follow-up reviews cover only the 
 - Every report names the commit SHA it checked. A report for an older SHA doesn't count.
 - Scripts propagate failures; no `|| true` on the build or review step.
 - The coordinator never builds; it plans the queue, checks evidence and previews, and merges via `ship-pr`.
+
+## Rigor tiers (owner-approved 2026-11-01)
+
+- **full** (default; `scripts/build-ticket.sh <n>`): most capable model at high effort, with a three-axis review. Required for money (Stripe, checkout, refunds), auth, RLS/data isolation, migrations and order-state work.
+- **light** (`TIER=light scripts/build-ticket.sh <n>`): Sonnet at medium effort, with one combined review. For test coverage, docs, small fixes and review follow-ups.
+- **Batches:** small follow-ups in one area are grouped under one batch issue ("Batch: …", listing `Closes #a, #b, …`) and built in a single light run.
+- **Codex:** no external peer on every build (`cross-model.json` mode `host-only`). The coordinator runs `scripts/codex-review.sh` (gpt-6-astra, medium effort) at milestones: before merging a money or auth ticket, and on the main-path PR that completes a phase slice. Codex UI builds also run at Astra medium.
+

@@ -50,7 +50,21 @@ git fetch -q origin main
 cp .env.local "$WT/.env.local"
 cd "$WT"
 
-RULES="Run headless: never ask the user. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). While iterating, run only the affected e2e specs and unit tests; run the full e2e suite once at the end. Keep $REPORT updated with: the commit SHA you checked, QA and code-review verdict lines, every finding code with how it ended, and the PR URL."
+# Tier: full (default) = most capable model at high effort, three-axis review.
+# light = faster model at medium effort, one combined review, for tests, docs and small fixes.
+# Never use light for money, auth, RLS/data isolation, migrations or order-state work.
+TIER="${TIER:-full}"
+LANE_PORT="${E2E_PORT:-3000}"
+if [ "$TIER" = "light" ]; then
+  MODEL_FLAGS=(--model claude-sonnet-5-5 --effort medium)
+  TIER_RULE="Tier: light. Run one combined code-review pass (standards, spec and adversarial together) instead of three parallel axes. No external peer review."
+else
+  MODEL_FLAGS=(--effort high)
+  TIER_RULE="Tier: full. Run the full three-axis code review. External peer review follows docs/agents/cross-model.json (Claude-only by default; the coordinator runs Codex at milestones)."
+fi
+PORT_RULE="This lane's e2e port is $LANE_PORT: run Playwright with E2E_PORT=$LANE_PORT and never use another lane's port."
+
+RULES="Run headless: never ask the user. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). While iterating, run only the affected e2e specs and unit tests; run the full e2e suite once at the end. $TIER_RULE $PORT_RULE Keep $REPORT updated with: the commit SHA you checked, QA and code-review verdict lines, every finding code with how it ended, and the PR URL."
 
 case "$MODE" in
   build)
@@ -60,18 +74,18 @@ If this ticket touches UI, the design pass in docs/agents/builder.md is part of 
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
 ${KEYLESS:-}
 $RULES"
-    claude -p "$PROMPT" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    claude -p "$PROMPT" "${MODEL_FLAGS[@]}" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   --resume)
     [ -n "$FINDINGS" ] || { echo "--resume needs the finding text"; exit 1; }
     SID=$(cat "$SESSION_FILE")
     PROMPT="/supermatt:fix-findings $FINDINGS
 Fix test-first, re-run affected QA, review only the fix diff, commit, push to the same PR. $RULES"
-    claude -p --resume "$SID" "$PROMPT" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    claude -p --resume "$SID" "$PROMPT" "${MODEL_FLAGS[@]}" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   --continue)
     SID=$(cat "$SESSION_FILE")
-    claude -p --resume "$SID" "Continue where you stopped. $RULES" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    claude -p --resume "$SID" "Continue where you stopped. $RULES" "${MODEL_FLAGS[@]}" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
     ;;
   *) echo "unknown mode $MODE"; exit 1 ;;
 esac
