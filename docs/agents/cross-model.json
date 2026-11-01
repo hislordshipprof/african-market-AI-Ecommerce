@@ -1,12 +1,12 @@
 {
-  "mode": "codex",
+  "mode": "host-only",
   "claude": {
     "model": null,
     "effort": "high"
   },
   "codex": {
     "model": "gpt-6-astra",
-    "effort": "high"
+    "effort": "medium"
   },
   "cursor": {
     "model": null

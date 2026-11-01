@@ -25,6 +25,8 @@ function loadEnvFile(filePath: string) {
 loadEnvFile(resolve(__dirname, ".env.e2e"));
 loadEnvFile(resolve(__dirname, ".env.local"));
 
+const E2E_PORT = process.env.E2E_PORT || "3000";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -34,7 +36,7 @@ export default defineConfig({
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: `http://localhost:${E2E_PORT}`,
     trace: "on-first-retry",
   },
   projects: [
@@ -46,8 +48,8 @@ export default defineConfig({
   webServer: process.env.CI
     ? undefined
     : {
-        command: "pnpm exec next start",
-        url: "http://localhost:3000/api/health",
+        command: `pnpm exec next start -p ${E2E_PORT}`,
+        url: `http://localhost:${E2E_PORT}/api/health`,
         reuseExistingServer: true,
         timeout: 120_000,
         env: {

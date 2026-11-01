@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent PR review by Codex (gpt-6-astra, high effort, one exhaustive pass) on a builder worktree.
+# Independent PR review by Codex (gpt-6-astra, medium effort, one exhaustive pass) on a builder worktree.
 # Usage: scripts/codex-review.sh <issue-number>
 # Writes: .builder/codex-review-<n>.md. The coordinator reproduces every finding before acting on it.
 set -euo pipefail
@@ -24,6 +24,6 @@ Focus on: correctness bugs, per-store data isolation (Postgres RLS, the storeSco
 Report ALL findings in this single pass: do not hold any back for a later round, and check every acceptance criterion explicitly (met / not met, with evidence). For EVERY finding give: severity (blocking = security, data isolation, data loss, a failed acceptance criterion, or broken build/CI; everything else non-blocking), file:line, the concrete failure scenario, and exact steps or a command to reproduce it. Do not report style preferences. If nothing blocking remains, say exactly: NO BLOCKING FINDINGS."
 
 codex exec --sandbox read-only --skip-git-repo-check \
-  -c model="gpt-6-astra" -c model_reasoning_effort="high" \
+  -c model="gpt-6-astra" -c model_reasoning_effort="medium" \
   -o "$OUT" "$PROMPT" > "$OUT.log" 2>&1 || true
 echo "Codex review written to $OUT"
