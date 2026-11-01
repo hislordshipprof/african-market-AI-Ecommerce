@@ -7,6 +7,7 @@ import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
 import { assertNotProduction } from "../src/lib/seed-guard";
 import { seedDemoCatalog } from "./seed-demo-catalog";
+import { revalidateSeededStores } from "../scripts/revalidate-storefront";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
@@ -704,6 +705,7 @@ async function main() {
     await seedTestAdmin();
     await seedStoreOwner();
   }
+  await revalidateSeededStores(await prisma.store.findMany({ where: { slug: { in: ["mama-ngozi", "tante-marie"] } }, select: { id: true, slug: true } }));
 }
 
 main()

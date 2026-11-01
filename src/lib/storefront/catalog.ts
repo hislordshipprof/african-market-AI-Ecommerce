@@ -4,11 +4,13 @@ type CatalogEntry = (typeof catalog)[keyof typeof catalog];
 const entries: Record<string, CatalogEntry> = catalog;
 
 export function catalogFor(...names: (string | null | undefined)[]) {
+  let fallback: CatalogEntry | undefined;
   for (const name of names) {
-    const entry = name && entries[name.trim().toLowerCase()];
-    if (entry) return entry;
+    const entry = name ? entries[name.normalize("NFKC").trim().toLowerCase()] : undefined;
+    if (entry?.imageUrl) return entry;
+    if (entry) fallback ??= entry;
   }
-  return undefined;
+  return fallback;
 }
 
 export function localNameFor(name: string) {

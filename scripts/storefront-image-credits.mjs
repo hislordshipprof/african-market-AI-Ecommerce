@@ -5,9 +5,11 @@ const catalog = JSON.parse(
   fs.readFileSync(path, "utf8").replace(/^\uFEFF/, ""),
 );
 fs.writeFileSync(path, JSON.stringify(catalog, null, 2) + "\n");
-const oldCredits = fs
-  .readFileSync("public/images/CREDITS.md", "utf8")
-  .split("## Storefront redesign photography")[0];
+const existingCredits = fs.readFileSync("public/images/CREDITS.md", "utf8");
+const oldCredits = existingCredits.split("## Storefront redesign photography")[0];
+const derivativeCredits = existingCredits.includes("## Phase 3 product cut-outs")
+  ? "## Phase 3 product cut-outs" + existingCredits.split("## Phase 3 product cut-outs")[1]
+  : "";
 const unique = [
   ...new Map(
     Object.values(catalog)
@@ -56,7 +58,7 @@ const editorial = [
   ],
 ];
 let credit =
-  "## Storefront redesign photography\n\nPhotos are cropped/resized by next/image. Commons images are representative ingredients, not verified store packshots. Prepared dishes are labeled serving suggestions. The demo story photo depicts Bodija Market, not the fictional store or owner. Legacy SVG illustrations above are retired from the customer storefront.\n\n| Placement | Image URL | Source page | Author | License |\n|---|---|---|---|---|\n";
+  "## Storefront redesign photography\n\nPhotos are resized by next/image. Commons product images represent ingredients or packaged goods, not verified store packshots. Prepared dishes appear only as editorial meal inspiration. The demo story photo depicts Bodija Market, not the fictional store or owner. Legacy SVG illustrations above are retired from the customer storefront.\n\n| Placement | Image URL | Source page | Author | License |\n|---|---|---|---|---|\n";
 credit += editorial
   .map(
     ([use, id, page, author]) =>
@@ -64,16 +66,16 @@ credit += editorial
   )
   .join("\n");
 credit +=
-  "\n| Dark promo band: cut-out photograph | https://upload.wikimedia.org/wikipedia/commons/2/26/Yellow_chili.png | https://commons.wikimedia.org/wiki/File:Yellow_chili.png | Tiia Monto | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |\n";
+  "\n| Retired phase 1 promo photograph | https://upload.wikimedia.org/wikipedia/commons/2/26/Yellow_chili.png | https://commons.wikimedia.org/wiki/File:Yellow_chili.png | Tiia Monto | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |\n";
 credit +=
-  "\n\n### Catalog photographs\n\nMatched by explicit English/local name to the supplied verified master catalog. CC BY / BY-SA originals retain their authorship; cropping only, no claim of original ownership.\n\n| Catalog reference | Image URL | Source page | Author | License |\n|---|---|---|---|---|\n";
+  "\n\n### Catalog photographs\n\nMatched by explicit English/local name to the catalog manifest. The missing source CSV was reconstructed in Phase 3; replacements have Commons metadata evidence in scripts/images. CC BY / BY-SA originals retain their authorship. Product sources use contain sizing; completed background-removal derivatives are listed separately below.\n\n| Catalog reference | Image URL | Source page | Author | License |\n|---|---|---|---|---|\n";
 credit += unique
   .map(
     (x) =>
       `| ${x.catalogId} | ${x.imageUrl} | ${x.source} | ${x.author.replaceAll("|", "/")} | ${licenseLink(x.license)} |`,
   )
   .join("\n");
-fs.writeFileSync("public/images/CREDITS.md", oldCredits + credit + "\n");
+fs.writeFileSync("public/images/CREDITS.md", oldCredits + credit + "\n\n" + derivativeCredits);
 console.log(
   `Credited ${unique.length} Commons and ${editorial.length} Unsplash images.`,
 );

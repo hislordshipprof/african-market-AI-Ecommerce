@@ -43,7 +43,7 @@ export function FulfillmentChip({
           <label htmlFor="delivery-zip">Your ZIP code</label>
           <p>
             Store delivery within {radius} miles. Availability confirmed at
-            checkout.
+            checkout. This temporary note lasts until you leave this page; it does not check delivery coverage.
           </p>
           <input
             id="delivery-zip"
@@ -56,7 +56,7 @@ export function FulfillmentChip({
             autoComplete="postal-code"
           />
           <button className="sf-button" type="submit">
-            Save ZIP
+            Note ZIP for now
           </button>
           <button
             type="button"

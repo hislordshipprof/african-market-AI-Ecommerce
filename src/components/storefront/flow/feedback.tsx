@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 import {
   AnimatePresence,
-  motion,
+  m,
   useReducedMotion,
   type HTMLMotionProps,
 } from "motion/react";
@@ -24,7 +24,7 @@ export function FlowToast({
   return (
     <AnimatePresence>
       {message && (
-        <motion.div
+        <m.div
           className="flow-toast"
           role="status"
           initial={reduced ? false : { opacity: 0, y: 16 }}
@@ -37,7 +37,7 @@ export function FlowToast({
           <button aria-label="Dismiss notification" onClick={onClose}>
             <X size={18} />
           </button>
-        </motion.div>
+        </m.div>
       )}
     </AnimatePresence>
   );
@@ -53,14 +53,14 @@ export function PayButton({
 } & HTMLMotionProps<"button">) {
   const reduced = useReducedMotion();
   return (
-    <motion.button
+    <m.button
       {...props}
       className="sf-button flow-pay"
       disabled={disabled || state !== "idle"}
       aria-busy={state === "pending"}
       whileTap={reduced ? undefined : { scale: 0.97 }}
     >
-      <motion.span
+      <m.span
         className="flow-pay-fill"
         initial={false}
         animate={{ scaleX: state === "success" ? 1 : 0 }}
@@ -78,14 +78,14 @@ export function PayButton({
             ? "Demo order placed"
             : label}
       </span>
-    </motion.button>
+    </m.button>
   );
 }
 
 export function SuccessMark() {
   const reduced = useReducedMotion();
   return (
-    <motion.span
+    <m.span
       className="flow-success-mark"
       initial={reduced ? false : { scale: 0.6 }}
       animate={{ scale: 1 }}
@@ -96,6 +96,6 @@ export function SuccessMark() {
       }
     >
       <Check size={30} aria-hidden />
-    </motion.span>
+    </m.span>
   );
 }

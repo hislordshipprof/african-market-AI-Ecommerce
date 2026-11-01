@@ -1,0 +1,246 @@
+{
+  "processed": 0,
+  "failed": 48,
+  "results": [
+    {
+      "slug": "yam-white-puna",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "plantain-ripe",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "cassava-root-fresh",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "cocoyam-taro",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "sweet-potato-african",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "garri-white",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "garri-yellow",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "egusi-seeds-whole",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "ogbono-whole",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "semovita-golden-penny",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "poundo-yam-flour",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "rice-ofada",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "suya-spice-yaji",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "dawadawa-dried",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "iru-fermented-locust-beans",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "cameroon-pepper",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "crayfish-ground",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "curry-powder-nigerian",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "thyme-dried",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "calabash-nutmeg",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "palm-oil-red",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "shea-butter-raw",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "groundnut-oil",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "ugu-leaves-fresh",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "bitter-leaf-frozen",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "jute-leaves",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "waterleaf-fresh",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "okra-fresh",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "pepper-scotch-bonnet",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "garden-egg",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "stockfish-cut",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "crayfish-whole-dried",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "smoked-catfish",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "goat-meat-frozen",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "cow-foot",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "ponmo-frozen",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "chin-chin",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "puff-puff-mix",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "plantain-chips-unripe",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "kuli-kuli",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "hibiscus-drink-bottled",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "maltina",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "hibiscus-dried",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "tomato-paste-gino",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "maggi-star-cubes",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "peak-evaporated-milk",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "coconut-oil",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    },
+    {
+      "slug": "oxtail",
+      "status": "failed",
+      "error": "Original not downloaded; rerun with --download-only online first"
+    }
+  ]
+}

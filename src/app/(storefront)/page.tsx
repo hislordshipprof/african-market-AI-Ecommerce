@@ -1,4 +1,4 @@
-﻿import { getStoreWithStatus } from "@/lib/get-store";
+import { getStoreWithStatus } from "@/lib/get-store";
 import {
   listCategories,
   getActiveBanners,
@@ -14,6 +14,11 @@ import { CollectionBanners } from "@/components/storefront/collection-banner";
 import { PromoBand } from "@/components/storefront/promo-band";
 import { TrustStoryStrip } from "@/components/storefront/trust-story-strip";
 import { EmptyState } from "@/components/storefront/primitives";
+import { SectionReveal } from "@/components/storefront/scroll-motion";
+import { MarketMarquee } from "@/components/storefront/marquee";
+import { DealsCarousel } from "@/components/storefront/deals-carousel";
+import { ReviewsCarousel } from "@/components/storefront/reviews-carousel";
+import { demoFlowsEnabled } from "@/lib/customer-flow/demo-gate";
 
 export default async function StorefrontPage() {
   const { store, suspended } = await getStoreWithStatus();
@@ -39,11 +44,14 @@ export default async function StorefrontPage() {
     .slice(0, 10);
   const fresh = all.filter((l) => l.perishable && !l.frozen).slice(0, 10);
   const pantry = rails.find((r) => r.categorySlug === "grains-and-flours");
+  const demo = demoFlowsEnabled(process.env) && ["mama-ngozi", "tante-marie"].includes(store.slug);
+  const subjects = ["Plantain", "Scotch Bonnet Pepper", "Yam"].flatMap(name => all.filter(p => p.displayName === name)).slice(0, 3);
   return (
     <StorefrontShell store={store}>
-      <HeroCarousel banners={banners} />
+      <HeroCarousel banners={banners} products={subjects.length ? subjects : favorites.slice(0, 3)} pickupMinutes={store.prepTimeMinutes} pickupEnabled={store.pickupEnabled} />
+      <MarketMarquee />
       <div className="sf-container sf-stack">
-        <CategoryMosaic categories={categories} />
+        <SectionReveal><CategoryMosaic categories={categories} /></SectionReveal>
         {!all.length && (
           <EmptyState
             title="The shelves are getting ready"
@@ -51,14 +59,17 @@ export default async function StorefrontPage() {
           />
         )}
         <ProductRail
-          title="Popular picks"
+          title={demo ? "Popular picks" : "Shelf favorites"}
           description="Familiar favorites for a well-stocked kitchen."
           listings={favorites}
           seeAllHref="/categories"
         />
-        <CollectionBanners collections={collections.slice(0, 2)} />
+      </div>
+      <DealsCarousel listings={favorites} demo={demo} />
+      <div className="sf-container sf-stack">
+        <SectionReveal><CollectionBanners collections={collections} /></SectionReveal>
         <ProductRail
-          title="Fresh in"
+          title={demo ? "Fresh in" : "Fresh ingredients"}
           description="Something good for tonight's pot."
           listings={fresh}
           seeAllHref="/categories/vegetables"
@@ -71,6 +82,7 @@ export default async function StorefrontPage() {
             seeAllHref="/categories/grains-and-flours"
           />
         )}
+        <ProductRail title={demo ? "Back in stock" : "Available today"} description={demo ? "Sample restocked picks from the demo shelves." : "Available on the shelves today."} listings={all.filter(l => l.badge === "in-stock").slice(-8)} seeAllHref="/categories" />
       </div>
       <PromoBand
         store={store}
@@ -78,8 +90,10 @@ export default async function StorefrontPage() {
       />
       <TrustStoryStrip
         profile={extractStoreProfile(store)}
-        demo={["mama-ngozi", "tante-marie"].includes(store.slug)}
+        demo={demo}
+        productCount={all.length}
       />
+      <ReviewsCarousel demo={demo} />
     </StorefrontShell>
   );
 }

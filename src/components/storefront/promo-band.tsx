@@ -1,8 +1,9 @@
-﻿import Image from "next/image";
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import type { ValidatedStore } from "@/lib/get-store";
 import { editorial } from "@/lib/storefront/editorial";
+import { ParallaxImage } from "./scroll-motion";
 export function PromoBand({
   store,
   offer,
@@ -25,12 +26,12 @@ export function PromoBand({
           </Link>
         </div>
         <div className="sf-promo-photo">
-          <Image
-            src={editorial.pepper}
-            alt="Yellow chili pepper"
+          <ParallaxImage><Image
+            src={editorial.spices}
+            alt="Spices and herbs for the pantry"
             fill
             sizes="(max-width:767px) 40vw, 520px"
-          />
+          /></ParallaxImage>
         </div>
       </div>
     </section>

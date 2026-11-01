@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "../components/storefront/storefront.css";
 @import "../components/storefront/flow/flow.css";
+@import "../components/storefront/motion.css";
 
 @custom-variant dark (&:is(.dark *));
 

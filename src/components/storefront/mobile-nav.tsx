@@ -29,7 +29,7 @@ export function MobileNav() {
               className={active ? styles.activeNav : styles.navLink}
             >
               <Icon size={21} />
-              {active && <span>{label}</span>}
+              <span>{label}</span>
             </Link>
           </div>
         );

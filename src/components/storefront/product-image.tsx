@@ -1,6 +1,7 @@
 "use client";
 import Image from "next/image";
 import { useState } from "react";
+import { ImageOff } from "lucide-react";
 
 export function ProductImage({
   src,
@@ -44,10 +45,12 @@ function ProductPhoto({
           alt={name}
           fill
           sizes={sizes}
-          priority={priority}
-          className="object-cover"
+          preload={priority}
+          className="object-contain"
           onError={() => setFailed(true)}
         />
+      ) : src ? (
+        <div className="sf-product-fallback" role="img" aria-label={`Photo temporarily unavailable for ${name}`}><ImageOff size={28} aria-hidden /><small>Photo unavailable</small></div>
       ) : (
         <div
           className="sf-product-fallback"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { m, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
 import styles from "./cart.module.css";
 
@@ -72,7 +72,7 @@ export function Sheet({
     };
   }, []);
   return (
-    <motion.dialog
+    <m.dialog
       ref={ref}
       className={styles.sheet}
       initial={false}
@@ -111,6 +111,6 @@ export function Sheet({
         </header>
         {children}
       </div>
-    </motion.dialog>
+    </m.dialog>
   );
 }

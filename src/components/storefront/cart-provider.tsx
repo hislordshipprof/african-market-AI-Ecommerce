@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { ShoppingBag, Trash2 } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { m, useReducedMotion } from "motion/react";
 import {
   cartItemKey,
   createCartStore,
@@ -189,7 +189,7 @@ export function CartTrigger({
     >
       <ShoppingBag size={21} />
       {children}
-      <motion.span
+      <m.span
         key={count}
         data-testid="cart-count"
         aria-hidden="true"
@@ -202,7 +202,7 @@ export function CartTrigger({
         }
       >
         {count}
-      </motion.span>
+      </m.span>
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {count} {count === 1 ? "item" : "items"} in cart
       </span>

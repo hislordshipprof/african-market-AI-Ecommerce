@@ -4,6 +4,8 @@ import { CartProvider } from "./cart-provider";
 import { MobileNav } from "./mobile-nav";
 import { StorefrontHeader } from "./storefront-header";
 import { StorefrontFooter } from "./storefront-footer";
+import { StorefrontMotion } from "./motion-provider";
+import { QuickViewProvider } from "./quick-view-provider";
 
 export function StorefrontShell({
   store,
@@ -14,19 +16,19 @@ export function StorefrontShell({
 }) {
   return (
     <div className="sf-storefront">
-      <CartProvider
+      <StorefrontMotion><CartProvider
         storeId={store.id}
         storeName={store.name}
         minimumOrderCents={store.minimumOrderCents}
       >
-        <a href="#main-content" className="sf-skip-link">
+        <QuickViewProvider><a href="#main-content" className="sf-skip-link">
           Skip to content
         </a>
         <StorefrontHeader store={store} />
         <main id="main-content">{children}</main>
         <StorefrontFooter store={store} />
-        <MobileNav />
-      </CartProvider>
+        <MobileNav /></QuickViewProvider>
+      </CartProvider></StorefrontMotion>
     </div>
   );
 }

@@ -18,6 +18,7 @@ async function measureLCP(
   const cdp = await page.context().newCDPSession(page);
 
   await cdp.send("Network.enable");
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
   await cdp.send("Network.emulateNetworkConditions", THROTTLE_4G);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
 
@@ -66,59 +67,16 @@ async function measureLCP(
   return lcp;
 }
 
-const TRANSPARENT_GIF = Buffer.from(
-  "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
-  "base64",
-);
-
-test.describe("LCP measurement (throttled 4G)", () => {
+test.describe("LCP measurement (real images, throttled 4G)", () => {
   test.describe.configure({ retries: 1 });
-  test("home page LCP under 2.5s", async ({ page }) => {
-    // Stub Wikipedia images that 429 and stall the optimizer during throttled tests;
-    // the hero (Unsplash) and layout are measured normally.
-    await page.route(
-      (url) =>
-        url.pathname.startsWith("/_next/image") &&
-        url.search.includes("wikimedia"),
-      (route) =>
-        route.fulfill({
-          status: 200,
-          contentType: "image/gif",
-          body: TRANSPARENT_GIF,
-        }),
-    );
-
-    // Warm server-side optimizer cache before throttled measurement
-    await page.goto(`${BASE}/`, { waitUntil: "load" });
-
-    const lcp = await measureLCP(page, `${BASE}/`);
-    console.log(`HOME PAGE LCP (4G throttled): ${lcp.toFixed(0)}ms`);
-    expect(lcp).toBeGreaterThan(0);
-    expect(lcp).toBeLessThan(2500);
-  });
-
-  test("product page LCP under 2.5s", async ({ page }) => {
-    await page.route(
-      (url) =>
-        url.pathname.startsWith("/_next/image") &&
-        url.search.includes("wikimedia"),
-      (route) =>
-        route.fulfill({
-          status: 200,
-          contentType: "image/gif",
-          body: TRANSPARENT_GIF,
-        }),
-    );
-
-    await page.goto(`${BASE}/`, { waitUntil: "load" });
-    const firstCardLink = page.locator("[data-testid='listing-card'] a").first();
-    await expect(firstCardLink).toBeVisible({ timeout: 10000 });
-    const href = await firstCardLink.getAttribute("href");
-    expect(href).toBeTruthy();
-
-    const lcp = await measureLCP(page, `${BASE}${href}`);
-    console.log(`PRODUCT PAGE LCP (4G throttled): ${lcp.toFixed(0)}ms`);
-    expect(lcp).toBeGreaterThan(0);
-    expect(lcp).toBeLessThan(2500);
-  });
+  for (const [name, path] of [["home", "/"], ["product", "/listings/mn_egusi"]]) {
+    test(`${name} page LCP under 2.5s`, async ({ page }, testInfo) => {
+      const lcp = await measureLCP(page, `${BASE}${path}`);
+      const result = { page: name, lcpMs: lcp, network: "1.6Mbps down / 750Kbps up / 150ms RTT", cpuSlowdown: CPU_SLOWDOWN, browserCache: "disabled", imageStubs: false };
+      console.log(JSON.stringify(result));
+      await testInfo.attach(`${name}-lcp.json`, { body: JSON.stringify(result, null, 2), contentType: "application/json" });
+      expect(lcp).toBeGreaterThan(0);
+      expect(lcp).toBeLessThan(2500);
+    });
+  }
 });

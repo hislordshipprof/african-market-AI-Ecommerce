@@ -1,4 +1,6 @@
+vi.mock("../storefront/cache", () => ({ revalidateStorefront: vi.fn() }));
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { revalidateStorefront } from "../storefront/cache";
 
 const mockCreateListing = vi.fn();
 const mockUpdateListing = vi.fn();
@@ -50,6 +52,18 @@ const VALID_LISTING = {
 
 describe("createListingAction", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("expires storefront reads after a committed listing mutation", async () => {
+    mockCreateListing.mockResolvedValueOnce({ id: "created" });
+    expect(await createListingAction(formData(VALID_LISTING))).toEqual({ success: true, id: "created" });
+    expect(revalidateStorefront).toHaveBeenCalledWith("store-1");
+  });
+
+  it("does not invalidate a failed listing mutation", async () => {
+    mockCreateListing.mockRejectedValueOnce(new Error("Not saved"));
+    expect(await createListingAction(formData(VALID_LISTING))).toEqual({ error: "Not saved" });
+    expect(revalidateStorefront).not.toHaveBeenCalled();
+  });
 
   it("rejects when no name or master product", async () => {
     const result = await createListingAction(formData({ ...VALID_LISTING, customName: "" }));

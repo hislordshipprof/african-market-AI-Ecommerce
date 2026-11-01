@@ -92,47 +92,47 @@
   "semovita": {
     "localNames": "",
     "description": "Fortified wheat semolina from Flour Mills of Nigeria, cooked in water as a smooth swallow.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/0f/Semovita_Swallow_with_assorted_okra_soup.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:Semovita_Swallow_with_assorted_okra_soup.jpg",
-    "author": "Halima Waziri",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a9/Durum_wheat_flour_%282%29.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Durum_wheat_flour_(2).jpg",
+    "author": "Horcrux",
     "catalogId": "semovita-golden-penny",
-    "license": "CC BY-SA 4.0"
+    "license": "CC BY 4.0"
   },
   "pounded yam flour": {
     "localNames": "iyan (Yoruba, Nigeria)|sakwara (Hausa, Nigeria)|poundo (Nigerian English, Nigeria)|foutou igname (French, Côte d'Ivoire)|bayerɛ fufu (Twi, Ghana)",
     "description": "Instant flour stirred into boiling water to make pounded yam, eaten with egusi, ogbono and other soups.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/db/%C3%8Dy%C3%A1n_%28Pounded_yam%29.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:%C3%8Dy%C3%A1n_(Pounded_yam).jpg",
-    "author": "Tesleemah",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Sun_dried_yam_flour.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sun_dried_yam_flour.jpg",
+    "author": "Oluwaseyi Ale",
     "catalogId": "poundo-yam-flour",
     "license": "CC BY-SA 4.0"
   },
   "poundo yam": {
     "localNames": "iyan (Yoruba, Nigeria)|sakwara (Hausa, Nigeria)|poundo (Nigerian English, Nigeria)|foutou igname (French, Côte d'Ivoire)|bayerɛ fufu (Twi, Ghana)",
     "description": "Instant flour stirred into boiling water to make pounded yam, eaten with egusi, ogbono and other soups.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/db/%C3%8Dy%C3%A1n_%28Pounded_yam%29.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:%C3%8Dy%C3%A1n_(Pounded_yam).jpg",
-    "author": "Tesleemah",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Sun_dried_yam_flour.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Sun_dried_yam_flour.jpg",
+    "author": "Oluwaseyi Ale",
     "catalogId": "poundo-yam-flour",
     "license": "CC BY-SA 4.0"
   },
   "ofada rice": {
     "localNames": "iresi ofada (Yoruba, Nigeria)",
     "description": "Short, aromatic unpolished local rice from Ogun State, served with ayamase (ofada stew).",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/85/Ofada_Rice.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:Ofada_Rice.jpg",
-    "author": "Ijeoma",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/5/5c/Brown_Rice.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Brown_Rice.jpg",
+    "author": "Gaurav Dhwaj Khadka",
     "catalogId": "rice-ofada",
     "license": "CC BY-SA 4.0"
   },
   "suya spice": {
     "localNames": "yaji (Hausa, Nigeria)|suya pepper (Nigerian English, Nigeria)",
     "description": "Peanut-based chili spice blend rubbed on suya and sprinkled on grilled meat.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b4/Suya_with_pepper_sauce.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:Suya_with_pepper_sauce.jpg",
-    "author": "Bukky658",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/ac/Yaji_pepper.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Yaji_pepper.jpg",
+    "author": "Sman099",
     "catalogId": "suya-spice-yaji",
-    "license": "CC BY-SA 4.0"
+    "license": "CC0"
   },
   "locust bean (dawadawa)": {
     "localNames": "daddawa (Hausa, Nigeria)|dawadawa (Hausa, Nigeria)|soumbala (Bambara, Mali)|dawadawa (Hausa, Ghana)|kpalgu (Dagbani, Ghana)|sumbala (Dioula, Burkina Faso)|soumbara (Malinke, Guinea)|nététou (Wolof, Senegal)|afitin (Fon, Benin)|iru (Yoruba, Nigeria)|soumbala en poudre (French, Mali)|nététou en poudre (French, Senegal)",
@@ -155,20 +155,20 @@
   "cameroon pepper": {
     "localNames": "Cameroon pepper (Cameroonian English, Cameroon)|piment noir (French, Cameroon)",
     "description": "Very hot, dark, smoke-dried ground chilli used in pepper soup, ndolé and jollof.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/9e/Cameroon_Pepper_Seller_with_Wheelbarrow.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:Cameroon_Pepper_Seller_with_Wheelbarrow.jpg",
-    "author": "Johnnybam",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e3/Dried_bush_pepper.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Dried_bush_pepper.jpg",
+    "author": "Senator BNB",
     "catalogId": "cameroon-pepper",
     "license": "CC BY-SA 4.0"
   },
   "ground crayfish": {
     "localNames": "ede (Yoruba, Nigeria)|oporo (Igbo, Nigeria)|njanga (Cameroonian Pidgin, Cameroon)|crevettes séchées (French, Cameroon)|shrimps (Ghanaian English, Ghana)",
     "description": "Pre-ground dried crayfish for soups, stews and jollof.",
-    "imageUrl": "",
-    "source": "",
-    "author": "",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/0a/Dried_Crayfish.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Dried_Crayfish.jpg",
+    "author": "Senator BNB",
     "catalogId": "crayfish-ground",
-    "license": ""
+    "license": "CC BY-SA 4.0"
   },
   "curry powder": {
     "localNames": "",
@@ -200,11 +200,11 @@
   "palm oil": {
     "localNames": "epo pupa (Yoruba, Nigeria)|manja (Hausa, Nigeria)|zomi (Ewe, Ghana)|abɛ ngo (Twi, Ghana)|ngo (Twi, Ghana)|huile rouge (French, Cameroon)|huile de palme (French, Côte d'Ivoire)|red oil (Krio, Sierra Leone)|palm oil (Liberian English, Liberia)|mafuta ya mbila (Lingala, DR Congo)|mafuta ya mawese (Swahili, Tanzania)|óleo de palma (Portuguese, Angola)|dendém (Portuguese, Angola)",
     "description": "Unrefined red oil from palm fruit, the base of egusi, ofe akwu, banga, red-red and many West African soups.",
-    "imageUrl": "",
-    "source": "",
-    "author": "",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/1/1f/PALM_OIL_BOTTLES.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:PALM_OIL_BOTTLES.jpg",
+    "author": "Yahuzaishat",
     "catalogId": "palm-oil-red",
-    "license": ""
+    "license": "CC BY-SA 4.0"
   },
   "shea butter": {
     "localNames": "nkuto (Twi, Ghana)|karité (French, Burkina Faso)|kpangnan (Dioula, Côte d'Ivoire)|sì tulu (Bambara, Mali)|man kadanya (Hausa, Ghana)|ori (Yoruba, Nigeria)|okwuma (Igbo, Nigeria)|man kade (Hausa, Nigeria)",
@@ -335,9 +335,9 @@
   "cow foot": {
     "localNames": "bokoto (Yoruba, Nigeria)",
     "description": "Cut cow feet slow-cooked for nkwobi, pepper soup and stews.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/0/07/Nkwobi_delicacy.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:Nkwobi_delicacy.jpg",
-    "author": "Bukky658",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e2/A_prepared_cow_feet.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:A_prepared_cow_feet.jpg",
+    "author": "Isaac Gyamfi Assumeng",
     "catalogId": "cow-foot",
     "license": "CC BY-SA 4.0"
   },
@@ -362,9 +362,9 @@
   "puff puff mix": {
     "localNames": "puff puff (Nigerian English, Nigeria)|beignets (French, Cameroon)|bofrot (Twi, Ghana)|toogbei (Ga, Ghana)|yovo doko (Ewe, Togo)",
     "description": "Flour, yeast and sugar mix for deep-fried puff puff dough balls.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a3/Nigerian-puff-puff-recipe_cropped.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:Nigerian-puff-puff-recipe_cropped.jpg",
-    "author": "Afrolems ; cropped by Off-shell",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/df/Wheat_flour.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Wheat_flour.jpg",
+    "author": "Oliwier Brzezinski",
     "catalogId": "puff-puff-mix",
     "license": "CC BY-SA 4.0"
   },
@@ -398,55 +398,73 @@
   "malt drink": {
     "localNames": "",
     "description": "Nigerian Breweries' non-alcoholic malt drink, Nigeria's oldest malt brand.",
-    "imageUrl": "",
-    "source": "",
-    "author": "",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/3/3c/Maltina_Soft_Drink.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Maltina_Soft_Drink.jpg",
+    "author": "Marwan Bello",
     "catalogId": "maltina",
-    "license": ""
+    "license": "CC BY-SA 4.0"
   },
   "dried hibiscus flowers": {
     "localNames": "bissap (Wolof, Senegal)|sobolo (Ghanaian English, Ghana)|wonjo (Mandinka, Gambia)|foléré (Fulfulde, Cameroon)|dah (Bambara, Mali)|zobo (Hausa, Nigeria)|isapa (Yoruba, Nigeria)|karkade (Arabic, Sudan)|كركديه (Arabic, Sudan)|sorrel (English, Jamaica)|sorrel (English, Trinidad and Tobago)",
     "description": "Dried red calyces of Hibiscus sabdariffa steeped with ginger and sugar into bissap or sobolo.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/84/Zobo_leaf_seller.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:Zobo_leaf_seller.jpg",
-    "author": "Major Lyte",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d6/Dried_hibiscus_flowers.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Dried_hibiscus_flowers.jpg",
+    "author": "Jugemu",
     "catalogId": "hibiscus-dried",
-    "license": "CC BY-SA 4.0"
+    "license": "CC0"
   },
   "dried zobo leaves": {
     "localNames": "bissap (Wolof, Senegal)|sobolo (Ghanaian English, Ghana)|wonjo (Mandinka, Gambia)|foléré (Fulfulde, Cameroon)|dah (Bambara, Mali)|zobo (Hausa, Nigeria)|isapa (Yoruba, Nigeria)|karkade (Arabic, Sudan)|كركديه (Arabic, Sudan)|sorrel (English, Jamaica)|sorrel (English, Trinidad and Tobago)",
     "description": "Dried red calyces of Hibiscus sabdariffa steeped with ginger and sugar into bissap or sobolo.",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/84/Zobo_leaf_seller.jpg",
-    "source": "https://commons.wikimedia.org/wiki/File:Zobo_leaf_seller.jpg",
-    "author": "Major Lyte",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d6/Dried_hibiscus_flowers.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Dried_hibiscus_flowers.jpg",
+    "author": "Jugemu",
     "catalogId": "hibiscus-dried",
-    "license": "CC BY-SA 4.0"
+    "license": "CC0"
   },
   "tomato paste": {
     "localNames": "",
     "description": "Double-concentrated tomato paste for stew and jollof.",
-    "imageUrl": "",
-    "source": "",
-    "author": "",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/4/49/Tomato_paste_can.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Tomato_paste_can.jpg",
+    "author": "Jon Sullivan",
     "catalogId": "tomato-paste-gino",
-    "license": ""
+    "license": "Public domain"
   },
   "maggi cubes": {
     "localNames": "",
     "description": "Nestlé's West African bouillon cube used in nearly every Nigerian soup, stew and jollof.",
-    "imageUrl": "",
-    "source": "",
-    "author": "",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b0/Maggi_Seasoning_Cube.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Maggi_Seasoning_Cube.jpg",
+    "author": "Marwan Bello",
     "catalogId": "maggi-star-cubes",
-    "license": ""
+    "license": "CC BY-SA 4.0"
   },
   "peak milk": {
     "localNames": "",
     "description": "Full-cream evaporated milk from FrieslandCampina WAMCO, added to tea, cereal, ogi and custard.",
-    "imageUrl": "",
-    "source": "",
-    "author": "",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/8/8d/Peak_Milk_01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Peak_Milk_01.jpg",
+    "author": "Anasskoko",
     "catalogId": "peak-evaporated-milk",
-    "license": ""
+    "license": "CC BY-SA 4.0"
+  },
+  "coconut oil": {
+    "catalogId": "coconut-oil",
+    "localNames": "",
+    "description": "A familiar ingredient for your next meal. Check the pack for origin, ingredients and storage.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/da/Coconut_oil_bottle_in_the_background_of_coconuts_from_Kaleeswari_Farm.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Coconut_oil_bottle_in_the_background_of_coconuts_from_Kaleeswari_Farm.jpg",
+    "author": "deadrat",
+    "license": "CC BY-SA 4.0"
+  },
+  "oxtail": {
+    "catalogId": "oxtail",
+    "localNames": "",
+    "description": "A familiar ingredient for your next meal. Check the pack for origin, ingredients and storage.",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/9/94/Raw_oxtail-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Raw_oxtail-01.jpg",
+    "author": "FotoosVanRobin",
+    "license": "CC BY-SA 2.0"
   }
 }

@@ -1,8 +1,8 @@
-﻿import Link from "next/link";
-import Image from "next/image";
+import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { categoryPhotos } from "@/lib/storefront/catalog";
-import { editorial, photoOrFallback } from "@/lib/storefront/editorial";
+import { ProductImage } from "./product-image";
+import { RailScroller } from "./rail-scroller";
 import { SectionHeader } from "./primitives";
 interface MosaicCategory {
   id: string;
@@ -32,30 +32,21 @@ export function CategoryMosaic({
         ].includes(c.slug),
       );
   return (
-    <section data-testid="category-mosaic" aria-labelledby="mosaic-heading">
-      <SectionHeader
+    <section data-testid="category-mosaic" aria-label="Store aisles">
+      {all && <SectionHeader
         id="mosaic-heading"
         title="Aisles full of home"
         description="The staples you know. A few new favorites."
         href={all ? undefined : "/categories"}
-      />
-      <div className="sf-mosaic">
+      />}
+      <RailScroller className={all ? "sf-category-rail sf-all-categories" : "sf-category-rail"} label="Categories" title={all ? "Find your favorites" : "Aisles full of home"} description="The staples you know. A few new favorites." href={all ? undefined : "/categories"}>
         {visible.map((cat) => (
           <Link
             key={cat.id}
             href={`/categories/${cat.slug}`}
             className="sf-category-tile"
           >
-            <Image
-              src={photoOrFallback(
-                cat.imageUrl,
-                categoryPhotos[cat.slug] || editorial.market,
-              )}
-              alt=""
-              fill
-              sizes="(max-width:767px) 45vw, 300px"
-            />
-            <div className="sf-photo-scrim" />
+            <ProductImage src={categoryPhotos[cat.slug] || (cat.imageUrl?.endsWith(".svg") ? undefined : cat.imageUrl ?? undefined)} name={cat.name} sizes="180px" />
             <div>
               <span>
                 {cat.localName && <small>{cat.localName}</small>}
@@ -65,7 +56,7 @@ export function CategoryMosaic({
             </div>
           </Link>
         ))}
-      </div>
+      </RailScroller>
     </section>
   );
 }

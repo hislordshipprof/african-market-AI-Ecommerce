@@ -251,10 +251,11 @@
   }
   .navLink,
   .activeNav {
-    gap: 6px;
+    flex-direction: column;
+    gap: 3px;
     border-radius: 999px;
     color: var(--muted-foreground);
-    padding: 0 10px;
+    padding: 6px 7px;
     font-size: 12px;
     font-weight: 600;
   }

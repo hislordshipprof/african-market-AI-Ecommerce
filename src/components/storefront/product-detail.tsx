@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, ViewTransition } from "react";
 import type { StorefrontListingDetail } from "@/lib/storefront/service";
 import { formatPrice, formatWeight } from "@/lib/format";
 import { ProductImage } from "./product-image";
@@ -27,12 +27,12 @@ export function ProductDetail({
   return (
     <div className="sf-detail" data-testid="product-detail">
       <div className="sf-detail-photo">
-        <ProductImage
+        <ViewTransition name={`product-${listing.id}`} share="sf-product-morph" default="none"><ProductImage
           src={listing.imageUrl}
           name={listing.displayName}
           sizes="(max-width:767px) 92vw, 45vw"
           priority
-        />
+        /></ViewTransition>
         <p className="sf-photo-note">
           {servingSuggestion
             ? "Serving suggestion. "

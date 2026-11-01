@@ -1,5 +1,17 @@
 # Redesign screenshots
 
+## Phase 3 — capture blocked
+
+The final Phase 3 runner was attempted on 2026-10-31. Chromium exited at launch with `spawn EPERM`. No Phase 3 screenshots, video, or transition frames were produced. Existing images are not evidence of the current implementation; they have not been relabeled as new captures.
+
+After a normal `pnpm build`, start one preview server with `E2E_STORE_OVERRIDE=1`, `NEXT_PUBLIC_DEMO_FLOWS=1` and `VERCEL_ENV=preview`. Run `node scripts/capture-storefront-redesign.mjs` in another terminal, then stop the server with Ctrl+C.
+
+The current runner replaces 28 images: home top/mid/bottom, category, product, quick view and branded 404, each at 390px and 1440px in light and dark. It checks visible image loading, horizontal overflow and browser errors; writes `phase3-checks.json`; and captures a short WebM plus four hero transition frames and three hover-tilt frames. Reduced motion freezes the still-image captures; the motion capture explicitly enables motion.
+
+Run `pnpm test:e2e --workers=1` for interaction gates and real-image LCP tests. The LCP test disables browser cache, uses 1.6 Mbps down / 750 Kbps up / 150ms RTT and 2× CPU throttling, and retains the `<2500ms` assertions. No LCP numbers are available from this sandbox.
+
+The older instructions below describe historical Phase 1/2 attempts, not the current Phase 3 screenshot set.
+
 The 24-image capture was attempted against the production server on 2026-10-31. Chromium failed to launch with `spawn EPERM`; manually launched CDP browsers also could not render. **No screenshots in this directory are claimed as captured or visually reviewed.** Older PNGs in the parent directory predate this rebuild.
 
 On a machine where Playwright Chromium can run, use PowerShell:

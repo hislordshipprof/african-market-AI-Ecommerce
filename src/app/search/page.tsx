@@ -29,7 +29,7 @@ export default async function SearchPage({
           {q ? `Results for "${q}"` : "What's cooking?"}
         </h2>
         <p className="sf-page-intro">
-          Search the names you know. Ugu, egusi, garri � you�re in the right
+          Search the names you know. Ugu, egusi, garri — you’re in the right
           place.
         </p>
         {q ? (
@@ -61,7 +61,7 @@ export default async function SearchPage({
               </ProductListMotion>
             ) : (
               <EmptyState
-                title={`No results for �${q}�`}
+                title={`No results for "${q}"`}
                 description="Try a local or English name, check the spelling, or explore a whole aisle."
               >
                 <div className="sf-search-suggestions">

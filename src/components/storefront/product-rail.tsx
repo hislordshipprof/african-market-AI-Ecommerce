@@ -2,6 +2,7 @@ import type { StorefrontListing } from "@/lib/storefront/service";
 import { ProductListMotion } from "./product-list-motion";
 import { ListingCard } from "./listing-card";
 import { RailScroller } from "./rail-scroller";
+import { SectionReveal } from "./scroll-motion";
 export function ProductRail({
   title,
   listings,
@@ -16,7 +17,7 @@ export function ProductRail({
 }) {
   if (!listings.length) return null;
   return (
-    <section data-testid="product-rail" aria-label={title}>
+    <SectionReveal><section data-testid="product-rail" aria-label={title}>
       <RailScroller
         label={title}
         title={title}
@@ -29,6 +30,6 @@ export function ProductRail({
           ))}
         </ProductListMotion>
       </RailScroller>
-    </section>
+    </section></SectionReveal>
   );
 }

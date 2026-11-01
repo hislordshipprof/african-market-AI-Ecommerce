@@ -1,7 +1,9 @@
 "use client";
 
 import { Children, type ReactNode } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, LazyMotion, m, useReducedMotion } from "motion/react";
+
+const loadLayout = () => import("./motion-layout-features").then(module => module.default);
 
 /** Receives server-rendered cards; catalog data and card rendering stay on the server. */
 export function ProductListMotion({
@@ -19,13 +21,13 @@ export function ProductListMotion({
 }) {
   const reduced = useReducedMotion();
   const Container = as;
-  const Item = as === "ul" ? motion.li : motion.div;
-  return (
+  const Item = as === "ul" ? m.li : m.div;
+  const content = (
     <Container
       className={className}
       style={contents ? { display: "contents" } : undefined}
     >
-      {Children.toArray(children).map((child, index) => (
+      <AnimatePresence initial={false}>{Children.toArray(children).map((child, index) => (
         <Item
           key={
             typeof child === "object" && child !== null && "key" in child
@@ -33,10 +35,12 @@ export function ProductListMotion({
               : index
           }
           className={itemClassName}
+          layout={reduced || contents ? false : "position"}
+          exit={{ opacity: 0 }}
           initial={false}
           animate={reduced ? { opacity: 1, y: 0 } : undefined}
-          whileInView={reduced ? undefined : { opacity: [0, 1], y: [8, 0] }}
-          viewport={{ once: true, amount: 0.1 }}
+          whileInView={reduced ? undefined : { opacity: [0, 1], y: [24, 0] }}
+          viewport={{ once: true, amount: 0.2 }}
           transition={
             reduced
               ? { duration: 0 }
@@ -49,7 +53,8 @@ export function ProductListMotion({
         >
           {child}
         </Item>
-      ))}
+      ))}</AnimatePresence>
     </Container>
   );
+  return contents ? content : <LazyMotion features={loadLayout}>{content}</LazyMotion>;
 }

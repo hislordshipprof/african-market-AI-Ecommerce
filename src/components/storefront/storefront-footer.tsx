@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import type { ValidatedStore } from "@/lib/get-store";
 export function StorefrontFooter({ store }: { store: ValidatedStore }) {
   return (
@@ -16,8 +16,8 @@ export function StorefrontFooter({ store }: { store: ValidatedStore }) {
             <Link href="/">Home</Link>
             <Link href="/categories">All aisles</Link>
             <Link href="/search">Search</Link>
-            <Link href="/#our-story">Our story</Link>
-            <a href="/images/CREDITS.md">Photo credits</a>
+            {(store.ownerName || store.ownerStory) && <Link href="/#our-story">Our story</Link>}
+            <Link href="/credits">Photo credits</Link>
           </nav>
         </div>
         <div className="sf-footer-bottom">

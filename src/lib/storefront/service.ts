@@ -1,10 +1,11 @@
+import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { stockBadge, type StockBadge } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
 
 /** Read-only, tenant-scoped catalog projection for the demo journey adapters. */
-export async function getFlowCatalog(
+async function readGetFlowCatalog(
   storeId: string,
 ): Promise<FlowCatalogItem[]> {
   const listings = await storeScoped(storeId).listing.findMany({
@@ -138,7 +139,7 @@ function toStorefrontListing(listing: {
   };
 }
 
-export async function listingsByCategory(
+async function readListingsByCategory(
   storeId: string,
   categorySlug: string,
 ): Promise<{
@@ -185,7 +186,7 @@ export interface StorefrontListingDetail {
   }[];
 }
 
-export async function getListingDetail(
+async function readGetListingDetail(
   storeId: string,
   listingId: string,
 ): Promise<StorefrontListingDetail | null> {
@@ -262,7 +263,7 @@ interface RawSearchRow {
   perishable: boolean;
 }
 
-export async function searchListings(
+async function readSearchListings(
   storeId: string,
   query: string,
 ): Promise<SearchResult[]> {
@@ -272,39 +273,32 @@ export async function searchListings(
   const results = await storeScopedRawQuery<RawSearchRow>(
     storeId,
     Prisma.sql`
-    SELECT DISTINCT ON (l.id)
-      l.id,
-      l.custom_name,
-      mp.name AS master_product_name,
-      l.price,
-      l.confidence,
-      l.stock_mode,
-      l.qty,
-      l.status,
-      l.frozen,
-      l.perishable,
-      pack.price AS min_variant_price,
-      pack.id AS variant_id,
-      pack.label AS pack_label,
-      pack.weight_g
+    SELECT l.id, l.custom_name, mp.name AS master_product_name,
+      l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable,
+      pack.price AS min_variant_price, pack.id AS variant_id,
+      pack.label AS pack_label, pack.weight_g
     FROM listings l
     LEFT JOIN master_products mp ON l.master_product_id = mp.id
-    LEFT JOIN product_synonyms ps ON ps.product_id = mp.id
     LEFT JOIN LATERAL (
-      SELECT lv.id, lv.label, lv.price, lv.weight_g
-      FROM listing_variants lv WHERE lv.listing_id = l.id
-      ORDER BY lv.price, lv.id LIMIT 1
+      SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
+      WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id LIMIT 1
     ) pack ON true
-    WHERE l.active = true
-      AND (
-        l.search_vector @@ plainto_tsquery('english', ${trimmed})
-        OR mp.search_vector @@ plainto_tsquery('english', ${trimmed})
-        OR word_similarity(${trimmed}, ps.term) > 0.3
-        OR word_similarity(${trimmed}, mp.name) > 0.3
-        OR word_similarity(${trimmed}, COALESCE(l.custom_name, '')) > 0.3
-        OR LOWER(ps.term) = LOWER(${trimmed})
-      )
-    ORDER BY l.id
+    CROSS JOIN LATERAL (
+      SELECT MIN(CASE
+        WHEN LOWER(term) = LOWER(${trimmed}) THEN 0
+        WHEN STARTS_WITH(LOWER(term), LOWER(${trimmed})) THEN 1
+        WHEN to_tsvector('english', term) @@ plainto_tsquery('english', ${trimmed}) THEN 2
+        ELSE 3 END) AS rank,
+        MAX(similarity(LOWER(${trimmed}), LOWER(term))) AS fuzzy
+      FROM (
+        SELECT l.custom_name AS term UNION ALL SELECT mp.name
+        UNION ALL SELECT ps.term FROM product_synonyms ps WHERE ps.product_id = mp.id
+        UNION ALL SELECT word FROM regexp_split_to_table(COALESCE(mp.name, '') || ' ' || COALESCE(l.custom_name, ''), '[^[:alnum:]]+') word
+        WHERE length(word) >= GREATEST(3, length(${trimmed}) - 1)
+      ) terms WHERE term IS NOT NULL
+    ) relevance
+    WHERE l.active = true AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND relevance.fuzzy > 0.3))
+    ORDER BY relevance.rank, relevance.fuzzy DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
     LIMIT 50
     `,
   );
@@ -334,7 +328,7 @@ export async function searchListings(
   });
 }
 
-export async function getActiveListings(
+async function readGetActiveListings(
   storeId: string,
 ): Promise<StorefrontListing[]> {
   const scoped = storeScoped(storeId);
@@ -356,7 +350,7 @@ export interface StorefrontBanner {
   imageUrl: string;
 }
 
-export async function getActiveBanners(
+async function readGetActiveBanners(
   storeId: string,
 ): Promise<StorefrontBanner[]> {
   const scoped = storeScoped(storeId);
@@ -383,7 +377,7 @@ export interface StorefrontCollection {
   slug: string;
 }
 
-export async function getActiveCollections(
+async function readGetActiveCollections(
   storeId: string,
 ): Promise<StorefrontCollection[]> {
   const scoped = storeScoped(storeId);
@@ -401,7 +395,7 @@ export async function getActiveCollections(
   }));
 }
 
-export async function getCollectionListings(
+async function readGetCollectionListings(
   storeId: string,
   collectionSlug: string,
 ): Promise<{
@@ -482,7 +476,7 @@ export interface CategoryRail {
   listings: StorefrontListing[];
 }
 
-export async function getListingsByCategory(
+async function readGetListingsByCategory(
   storeId: string,
 ): Promise<CategoryRail[]> {
   const scoped = storeScoped(storeId);
@@ -516,4 +510,40 @@ export async function getListingsByCategory(
       listings: data.listings,
     }))
     .sort((a, b) => a.categoryName.localeCompare(b.categoryName));
+}
+
+export function getFlowCatalog(storeId: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["getFlowCatalog"]), () => readGetFlowCatalog(storeId));
+}
+
+export function listingsByCategory(storeId: string, categorySlug: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["listingsByCategory", categorySlug]), () => readListingsByCategory(storeId, categorySlug));
+}
+
+export function getListingDetail(storeId: string, listingId: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["getListingDetail", listingId]), () => readGetListingDetail(storeId, listingId));
+}
+
+export function searchListings(storeId: string, query: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["searchListings", query]), () => readSearchListings(storeId, query));
+}
+
+export function getActiveListings(storeId: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["getActiveListings"]), () => readGetActiveListings(storeId));
+}
+
+export function getActiveBanners(storeId: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["getActiveBanners"]), () => readGetActiveBanners(storeId));
+}
+
+export function getActiveCollections(storeId: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["getActiveCollections"]), () => readGetActiveCollections(storeId));
+}
+
+export function getCollectionListings(storeId: string, collectionSlug: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["getCollectionListings", collectionSlug]), () => readGetCollectionListings(storeId, collectionSlug));
+}
+
+export function getListingsByCategory(storeId: string) {
+  return cachedStorefrontRead(storeId, JSON.stringify(["getListingsByCategory"]), () => readGetListingsByCategory(storeId));
 }

@@ -1,6 +1,7 @@
-﻿import Image from "next/image";
+import Image from "next/image";
 import type { StoreProfile } from "@/lib/storefront/service";
 import { editorial } from "@/lib/storefront/editorial";
+import { CountUp, SectionReveal } from "./scroll-motion";
 const DAYS = [
   "monday",
   "tuesday",
@@ -13,9 +14,11 @@ const DAYS = [
 export function TrustStoryStrip({
   profile,
   demo = false,
+  productCount,
 }: {
   profile: StoreProfile;
   demo?: boolean;
+  productCount?: number;
 }) {
   if (!profile.ownerName && !profile.ownerStory) return null;
   const actualPhoto =
@@ -52,7 +55,8 @@ export function TrustStoryStrip({
           </figcaption>
         )}
       </figure>
-      <div>
+      <div className="sf-story-steps">
+        <SectionReveal>
         <h2>
           A familiar face.
           <br />A taste of home.
@@ -63,25 +67,26 @@ export function TrustStoryStrip({
         </p>
         {demo && <span className="sf-badge">Demo store story</span>}
         <p>{profile.ownerStory?.split(". ")[0]}.</p>
-        <details>
-          <summary>Read more about our store</summary>
+        </SectionReveal><SectionReveal className="sf-story-step">
+          <h3>Good food. Familiar people.</h3>
           <p>{profile.ownerStory}</p>
           <p>
             Nothing is swapped without your approval. If an item is short, you
             choose a swap or a refund.
           </p>
-        </details>
+        </SectionReveal>
         <div className="sf-story-facts">
           {year && (
             <div>
-              <strong>{new Date().getFullYear() - Number(year)} years</strong>
+              <strong><CountUp value={new Date().getFullYear() - Number(year)} suffix=" years" /></strong>
               <span>Part of the neighborhood</span>
             </div>
           )}
           <div>
-            <strong>{profile.deliveryRadiusMi} miles</strong>
+            <strong><CountUp value={profile.deliveryRadiusMi} suffix=" miles" /></strong>
             <span>Local delivery radius</span>
           </div>
+          {productCount !== undefined && <div><strong><CountUp value={productCount} /></strong><span>Products on our shelves</span></div>}
         </div>
       </div>
       <div className="sf-hours">

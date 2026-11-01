@@ -1,15 +1,16 @@
-﻿import Image from "next/image";
+import Image from "next/image";
 import Link from "next/link";
 import type { ValidatedStore } from "@/lib/get-store";
 import { listCategories } from "@/lib/storefront/service";
 import { SearchBar } from "./search-bar";
 import { CartTrigger } from "./cart-provider";
 import { FulfillmentChip } from "./fulfillment-chip";
+import { ShrinkingHeader } from "./scroll-motion";
 
 export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
   const categories = await listCategories();
   return (
-    <header className="sf-header" data-testid="storefront-header">
+    <ShrinkingHeader>
       <div className="sf-header-main sf-container">
         <Link href="/" className="sf-brand">
           {store.logoUrl && (
@@ -45,6 +46,6 @@ export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
           ))}
         </div>
       </nav>
-    </header>
+    </ShrinkingHeader>
   );
 }

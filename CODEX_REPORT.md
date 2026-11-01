@@ -140,3 +140,95 @@ No uncredited images were added. Sign-in reuses the credited Bodija market photo
 - Pickup scheduling supplies demo 10 AM slots within six days; real capacity and Store-hour validation await checkout integration. The Store-closed view is implemented against FlowStore.closed, which defaults to an open demo fixture.
 - Issue submission stores a simulated outcome, not an uploaded photo or real refund. The proof surface intentionally does not misrepresent a product photograph as an actual delivery photograph.
 - Sign-in uses the licensed static market-photo fallback. No new 3D scene was introduced; the repository's existing StorySurface has ENABLE_3D_SCENE=false pending its separate fidelity work.
+
+## Phase 3 — motion, depth and imagery
+
+Implemented on 2026-10-31. **Source implementation and non-browser verification are substantially complete; Phase 3 is not fully accepted.** Actual background removal, browser interaction verification, replacement screenshots, motion recordings, measured LCP and the requested visual-quality score remain blocked or unverified. No commit, push or branch commands were run. Every server started for this phase was stopped.
+
+### Deliverable status and reference patterns
+
+| Request | Status and implementation | Reference pattern |
+|---|---|---|
+| Clean product imagery | **Partial.** Shared ProductImage now uses contain sizing, theme-tinted tiles and a contact shadow. Replaced meal/poor product mappings, repaired related-product name lookup, and added the offline rembg pipeline. No transparent WebPs were generated in this sandbox. | Shopery / Shopify Grocery cut-outs on quiet tiles |
+| Hero and banner photography | Atmospheric, full-bleed backgrounds remain distinct from product photography. Foreground product is layered above the photo; it still retains its source background until processing succeeds. | Danlex / FreshMart layered editorial depth |
+| Full-width hero | Removed the enclosing content-width box. Stage spans its parent edge to edge, 600px desktop / 460px mobile; content keeps the shared grid. Background crossfade/Ken Burns, oversized Bricolage word, spring product entrance, staggered text, glass reassurance pills and circular text badge. Long copy can scroll within reserved copy space. | Danlex full bleed; FreshMart display behind subject; Shopify Grocery pills/badge |
+| Hero controls | Six-second autoplay, per-slide transform progress, swipe, arrows, Home/End and arrow keys; independent hover, focus, off-screen, hidden-tab, explicit pause and reduced-motion gates. Badge and background motion pause with the slideshow. | Accessible interpretation of reference motion |
+| Offer beside hero | One desktop offer tile overlaps the lower hero area. Mobile omits this secondary tile. **No separate bento promo grid or two-stacked-offer composition was added.** | Shopery adjacent offer treatment, partial |
+| Marquee | Two opposing infinite ingredient-name rows on desktop, one on mobile; hover/focus pause and explicit pause/play. Static wrapping names under reduced motion. | Danlex local-name band |
+| Deals carousel | Accent-tinted cards with imagery breaking above the card edge, percent circles and shared quick-add. Explicit sample offers are limited to demo stores in demo mode; actual displayed demo prices remain authoritative. Production has no invented discounts. | Dribbble Food Website / Shopify Grocery |
+| Category carousel | Rounded ingredient-photo tiles, local-name eyebrows, snap scrolling, arrows, keys and desktop pointer drag. | Shopery soft category tiles |
+| Product rails | Popular picks, Fresh in, pantry and Back in stock demo rails reuse the shared card. Production uses Shelf favorites, Fresh ingredients and Available today because no popularity/arrival/restock event data exists. | Shopery card hover and Shopify Grocery ingredient rails |
+| Collections / recipes | Desktop perspective coverflow with large selected card and receding sides; mobile snap rail. Buttons, keyboard navigation and scroll-selected state agree. Collection photos use small parallax offsets. | Food Website editorial collections with requested coverflow |
+| Reviews | Sample review carousel is visibly labeled fictional and disappears in production even with the public demo flag enabled. No production review source was invented. | Shopify Grocery testimonials |
+| Scroll reveals | Shared section reveal: opacity + 24px rise, once at 20% visibility. Product children stagger at 30ms, capped at eight. Visible server-rendered defaults preserve content before JS. | Danlex fade/rise sections |
+| Parallax and header | Banner/collection image offsets are -20px to +20px. Header compact state starts after 40px and uses transforms plus a blur backdrop without changing document layout. | Requested scroll depth |
+| Owner story | Sticky desktop photo with successive text sections; one-shot counters with reserved text width. Years derive from the existing story, product count from listings, delivery miles from the store. **No neighborhood count exists; delivery radius is shown instead.** Mobile uses normal flow. | Editorial sticky split |
+| Cart motion | A loaded product thumbnail flies toward the existing cart trigger; the trigger bumps. Cart state updates synchronously and a polite live region announces count. No decorative flight under reduced motion. | Requested shopping feedback |
+| Page / filter transitions | React 19.3 ViewTransition shares the selected card image with product detail; selection is unique across repeated cards and excludes modified/new-tab clicks. CSS opacity fallback remains. Results use AnimatePresence and position layout animation. | Requested shared-element continuity |
+| Motion bundle | Shared LazyMotion uses domAnimation and `m` components. Result grids asynchronously load the separate layout feature/renderer because domAnimation alone does not implement `layout`; home rails do not request that extra feature. Quick view is dynamically loaded once per shell. | Small shared feature bundle |
+| Product hover / touch | Fine-pointer image zoom to 1.08, lifted shadow, pointer-following tilt clamped to +/-6 degrees with 800px perspective, focus/hover quick-view button. Touch press-scale 0.98; no tilt. | Shopery hover / Food Website depth |
+| Quick view | Shared accessible Sheet with zoomable product image, loaded pack choices/prices and shared add-to-cart; focus trapping/restoration and loading/error recovery. **The catalog has one image per product, so this is a one-image gallery, not an invented multi-image gallery.** | Instacart-style click expansion |
+| Backgrounds | Existing store palette extended with a tile and lift token, alternating base/tinted/deep bands and low-opacity SVG woven line texture. Hero overlays derive from store colors. | Reference section rhythm without flags/maps/kente |
+| Reduced motion / accessibility | Autoplay unit-tested; CSS motion disabled, parallax/flight/tilt/counters reduced, keyboard controls and visible focus retained. Mobile purchasing text enlarged and all navigation labels shown. **Rendered AA contrast and browser accessibility are not certified.** | Existing accessible design system |
+
+### Coordinator fixes
+
+1. **Empty storefront cache:** tenant-keyed `unstable_cache` wrappers tag listing, banner, collection and related storefront reads with `storefront:<id>` and a 60-second fallback. Successful listing create/update/deactivate/reactivate calls expire that tag after the write. Banner and collection writes in this checkout occur in the seed; its final step calls `revalidateSeededStores`. An authenticated route expires storefront and existing store tags. Regression tests cover cached-empty reads, invalidation, tenant/query isolation, successful versus failed mutations, and unauthorized/malformed flush requests.
+   - Immediate invalidation from an offline seed needs `STOREFRONT_REVALIDATION_URL` pointing to the running server's `/api/storefront/revalidate`, plus matching `STOREFRONT_REVALIDATION_SECRET` in seed and server environments. Without them the seed logs setup instructions; the 60-second cache freshness fallback remains. Next's request-scoped revalidation cannot be called directly from standalone Prisma seed code. No banner/collection admin mutation APIs existed to wire separately.
+2. **Encoding:** repaired the search subtitle and empty-result copy as UTF-8. Repository text scan found no replacement character or its previously double-encoded form, excluding generated dependencies/build/Git data.
+3. **Search:** exact English/local names rank first, prefixes second, then full-text and bounded fuzzy matches. Trigram similarity must exceed 0.3; minimum query/token lengths reject incidental matches. DB tests and HTTP checks put egusi first and exclude cassava/garden eggs; existing typo/prefix behavior remains covered.
+4. **404:** unknown pages inside a known store show branded Page not found, store search and aisles. Unknown stores retain Store not found. No proxy/store-resolution changes. HTTP verified `/c/grains-flours` returns 404; unknown-store streaming behavior retains its existing noindex response.
+5. **Credits:** footer now opens a designed `/credits` page with source links, authors, licenses and truthful processing notes. `public/images/CREDITS.md` remains the attribution record.
+6. **Tip:** existing 15% default remains unchanged.
+
+### Image processing and attribution
+
+The requested `research/catalog/master-catalog.csv` did not exist in this checkout. Reconstructed it from the current manifest and reviewed Commons imageinfo metadata, preserving that provenance in `scripts/images/README.md` and `source-verification.json`.
+
+- **52 image-bearing catalog keys; 48 processing rows using 47 distinct Commons photographs.** Five existing Unsplash editorial images are credited separately.
+- Replaced 17 mappings, including flour for semovita/poundo, raw rice for Ofada, seasoning for suya, flour for puff-puff mix, raw cow foot, dried pepper/hibiscus and packaged palm oil/Maggi/Peak/Maltina/tomato paste. Added the missing coconut oil, oxtail and ground-crayfish lookup coverage. These remain representative ingredients/packages, not verified store packshots; the rice photograph is not verified as the Ofada variety.
+- **Processed: 0.** Creating the throwaway external venv failed in ensurepip with `PermissionError`. No rembg dependency was added to the app. The offline bookkeeping attempt recorded **48 failures due to uncached originals**; these are not segmentation-quality failures. See `scripts/images/processing-report.json`.
+- `process-products.py` is ready to install/run with upstream `pip install "rembg[cpu]"` in an external venv. It reuses a small CPU model session, writes centered 800px alpha WebP under `public/images/products/<listing-slug>.webp`, updates the same seed/catalog manifest only on success, and records author/license plus “background removed.” Partial reruns retain credits for previously generated assets; BY-SA licenses remain BY-SA.
+- Existing photos use contain sizing while processing is blocked. A failed network photo gets a Photo unavailable state; letter artwork is reserved for a genuinely unmapped item (for example Jollof Rice Seasoning). Related products now try the master product name when a listing-specific alias has no mapping.
+- Actual segmentation edges, source suitability and final cut-out composition still need visual review after processing. `CREDITS.md` explicitly states that no alpha output exists yet.
+
+### Verification and performance
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | **Passed**, including final motion and polish code |
+| `pnpm lint` | **Passed**, final run with no warnings |
+| `pnpm test` | Attempted; standard Vite/esbuild startup blocked by `spawn EPERM` |
+| Full sandbox-compatible suite | **920/920 tests in 28 files passed**, zero failed/skipped. Same source tests/setup/assertions, in-process TypeScript transform and worker threads. JSON: `.validation-artifacts/phase3-unit-tests.json` |
+| `pnpm build` | Attempted; Prisma generation passed, migrate-deploy schema-engine spawn blocked by `EPERM` |
+| Next production build | **Passed** with `CODEX_IN_PROCESS_BUILD=1 pnpm exec next build`. Opt-in config uses worker threads, one worker and in-worker TypeScript checking; no type/build checks skipped. Final compilation 3.3s, TypeScript 11.6s, 22 static-generation work items. These are build times, not LCP |
+| HTTP smoke against final build | **15/15 passed**: 12 preview checks plus 3 production checks. Home, category, product, credits, branded unknown page, unknown-store message/noindex, exact search, quick-view packs/image, unauthorized cache-flush denial and sample-content gates. Reports: `.validation-artifacts/phase3-http-*.json` |
+| `pnpm test:e2e --workers=1` | Attempted again after updates; exits before browser tests with `spawn EPERM`. **Not passed** |
+| Capture runner | Attempted; Chromium launch blocked by `spawn EPERM`. CUA had no browser; IAB unavailable. **Zero new screenshots or recordings** |
+| Home LCP, throttled 4G | **Not measured**; no numeric result available. Target remains <2500ms |
+| Product LCP, throttled 4G | **Not measured**; no numeric result available. Target remains <2500ms |
+| Python scripts | Syntax compilation passed; external venv/rembg execution blocked as above |
+
+Added nine browser regressions covering hero pause/resume, full-width stage geometry, marquee/pause, mobile coverflow control/snap agreement, quick-view pack/add/focus, fly-to-cart/live count, branded 404, exact search ranking and reduced motion. Existing assertions were retained. The LCP tests now use real images, disabled browser cache, 1.6 Mbps down / 750 Kbps up / 150ms RTT and 2x CPU throttling; prior transparent-image stubs and warming were removed. Their <2500ms assertions remain intact.
+
+Only the first hero background is preloaded on home; product-detail hero is preloaded on its route. Foreground/below-fold images use default lazy loading. New movement uses transforms/opacity, contact shadows are static, counters reserve width, and no broad will-change was added. Actual LCP/CLS/interaction smoothness and remote-image latency remain unverified; successful compilation does not establish the performance target.
+
+### Impeccable critique, polish and review
+
+Used the repository's `.claude/skills/impeccable/SKILL.md`, context command, craft floor, critique and polish references. Assessment A (`design_a`) independently reviewed design; Assessment B (`design_b`) ran one detector scan and held findings until A finished. Browser inspection was unavailable, so no overlays or rendered-quality claims were made.
+
+Provisional pre-polish Nielsen scores, in order: visibility **3/4**, real-world match **3/4**, control **3/4**, consistency **3/4**, prevention **2/4**, recognition **2/4**, efficiency **3/4**, minimalist design **2/4**, recovery **3/4**, help **1/4**: **25/40**. Archived trend: 24/40 -> 25/40. **The requested >=8/10 for each heuristic is not achieved/verified.** Snapshot: `.impeccable/critique/2026-11-01T05-47-27Z__src-app-storefront-page-tsx.md`; backlog left open because browser and help/imagery gaps remain.
+
+Strengths were local food vocabulary, shared shopping controls and independent motion pause gates. Priorities were tiny mobile purchase text, misleading ZIP-save language, hidden navigation labels, unsupported merchandising claims and hero content resilience. The detector returned 179 advisory differences (146 type size, 24 color, 9 radius), including legacy/overridden CSS; no critical/error finding. Decorative display sizing, neutral scrims and progress-strip corners were treated as intentional, not automatic defects. JSON: `.validation-artifacts/phase3-impeccable-detector.json`.
+
+Polish enlarged mobile names/metadata/quick-view/category labels, kept all navigation destinations labeled, described ZIP entry as a temporary note rather than saved eligibility, qualified production rail headings, removed redundant hero/collection/credits labels, replaced fixed hero greens with store-derived colors, restored shared product corner sizing, reserved counter width and removed a false circular mask around unprocessed hero photography. Category accessible naming and optional story footer anchor were corrected. An independent code review also found and led to fixes for conflicting old hero CSS, mobile coverflow state, duplicate transition names after modified clicks, quick-view entry/exit and badge pause behavior. A real store contact path and end-of-rail disabled controls remain smaller usability gaps; no new contact backend was fabricated.
+
+Questions skipped: the user's explicit brief already authorized the direction and polish; no redundant approval was requested.
+
+### Screenshots, recording and remaining work
+
+`scripts/capture-storefront-redesign.mjs` is prepared to replace **28 screenshots**: home top/mid/bottom, category, product, quick view and 404 at 390/1440px, light/dark. It checks visible images, overflow and page errors, writes `phase3-checks.json`, then records a WebM plus hero-transition and hover-tilt frame series. **The requested replacement was not possible here.** Existing screenshots are historical, not current visual evidence. Updated `screenshots/redesign/README.md` explains how to capture and stop the server.
+
+Before acceptance on a machine allowing subprocesses: run external rembg and inspect all output; reseed with the revalidation URL/secret; run the five standard commands; run the capture runner and inspect long copy, text zoom, all widths/themes, focus, modal behavior, carousel/coverflow motion and shared transitions; record real LCP and tune until both routes are below 2.5s; repeat the rendered design critique to meet the target. Also resolve any desired bento/two-offer composition, multi-image gallery, real restock/promotion/review data, neighborhood count and contact-data requirements against real sources.
+
+Auth, admin UI, RLS, proxy, store resolution, payment implementation, phase 2 service interfaces/adapters and demo gates were preserved. Listing mutation edits are limited to the explicitly requested cache invalidation. The default 15% tip remains. No servers are left running.

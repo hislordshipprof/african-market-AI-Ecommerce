@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
@@ -320,6 +321,19 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   // Seam 6: pg_trgm fuzzy search (word_similarity)
+  it("ranks the exact local egusi match first without cassava or garden eggs", async () => {
+    const store = await rawPrisma.store.findUniqueOrThrow({ where: { slug: "mama-ngozi" } });
+    const results = await searchListings(store.id, "egusi");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].name.toLowerCase()).toContain("egusi");
+    expect(results.some(r => /cassava|garden eggs/i.test(r.name))).toBe(false);
+  });
+
+  it("ranks English and local prefixes before unrelated fuzzy candidates", async () => {
+    const results = await searchListings(storeAId, "ug");
+    expect(results[0]?.id).toBe(listingAId);
+    expect(await searchListings(storeAId, "x")).toEqual([]);
+  });
   it("fuzzy search 'pumkin' finds 'Fluted Pumpkin Leaves' via trigram", async () => {
     const results = await searchListings(storeAId, "pumkin");
     expect(results.length).toBeGreaterThanOrEqual(1);
