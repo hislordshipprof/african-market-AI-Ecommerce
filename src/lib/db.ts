@@ -185,3 +185,27 @@ export function healthQueryRaw(
 ): Promise<unknown[]> {
   return prisma.$queryRaw(strings, ...values) as Promise<unknown[]>;
 }
+
+export async function rateLimitUpsert(
+  key: string,
+  now: bigint,
+  windowStart: bigint,
+): Promise<{ count: number }> {
+  const rows = await prisma.$queryRaw<Array<{ count: number }>>`
+    INSERT INTO rate_limits (id, key, count, last_request)
+    VALUES (gen_random_uuid()::text, ${key}, 1, ${now})
+    ON CONFLICT (key) DO UPDATE SET
+      count = CASE
+        WHEN rate_limits.last_request < ${windowStart}
+        THEN 1
+        ELSE rate_limits.count + 1
+      END,
+      last_request = CASE
+        WHEN rate_limits.last_request < ${windowStart}
+        THEN ${now}
+        ELSE rate_limits.last_request
+      END
+    RETURNING count
+  `;
+  return { count: Number(rows[0].count) };
+}

@@ -6,6 +6,7 @@ import {
   removeStoreMember,
   type StoreRole,
 } from "../invite/service";
+import { checkInviteRateLimit } from "../invite/rate-limit";
 import { resolveAuthBaseUrl } from "../auth";
 
 export async function inviteMemberAction(formData: FormData) {
@@ -17,6 +18,11 @@ export async function inviteMemberAction(formData: FormData) {
   }
 
   const role: StoreRole = "staff";
+
+  const rateCheck = await checkInviteRateLimit(session.store.id);
+  if (!rateCheck.allowed) {
+    return { error: "rate_limit_exceeded" };
+  }
 
   try {
     const result = await createInvite({
