@@ -99,9 +99,7 @@
 .sf-parallax-frame { position:absolute; inset:0; overflow:hidden; }
 .sf-parallax-image { position:absolute; inset:-24px 0; }
 .sf-coverflow { position:relative; height:390px; perspective:1200px; overflow:hidden; padding:24px 0; }
-.sf-coverflow .sf-collection-card { position:absolute; top:24px; left:calc(50% - 260px); width:520px; height:330px; transform:translateX(calc(var(--offset) * 65%)) translateZ(calc(var(--recede) * -100px)) rotateY(calc(var(--direction) * -20deg)); z-index:calc(10 - var(--recede)); transition:transform .55s var(--sf-motion-ease), left .55s var(--sf-motion-ease); }
-.sf-coverflow[data-edge="start"] .sf-collection-card { left:max(32px, calc((100% - 1280px) / 2)); }
-.sf-coverflow[data-edge="end"] .sf-collection-card { left:calc(100% - 520px - max(32px, (100% - 1280px) / 2)); }
+.sf-coverflow .sf-collection-card { position:absolute; top:24px; left:calc(50% - 260px); width:520px; height:330px; transform:translateX(calc(var(--offset) * 65%)) translateZ(calc(var(--recede) * -100px)) rotateY(calc(var(--direction) * -20deg)); z-index:calc(10 - var(--recede)); transition:transform .55s var(--sf-motion-ease); }
 .sf-coverflow .sf-collection-card:not([data-active="true"])::after { content:""; position:absolute; inset:0; background:#071b1540; pointer-events:none; }
 .sf-collection-card p { padding-right:50px; color:#fff; }
 .sf-collection-card h3 { margin-top:10px; }
@@ -158,6 +156,11 @@
 }
 @media (hover:none) { .sf-product-card:active,.sf-category-tile:active { transform:scale(.98); } }
 @media (max-width:1000px) and (min-width:768px) { .sf-hero-offer { width:235px; } .sf-glass-one { right:16%; } .sf-hero-subject { right:0; top:120px; } .sf-glass-two { display:none; } }
+@media (min-width:768px) {
+  .sf-coverflow .sf-collection-card { transition:transform .55s var(--sf-motion-ease), left .55s var(--sf-motion-ease); }
+  .sf-coverflow[data-edge="start"] .sf-collection-card { left:max(32px, calc((100% - 1280px) / 2)); }
+  .sf-coverflow[data-edge="end"] .sf-collection-card { left:calc(100% - 520px - max(32px, (100% - 1280px) / 2)); }
+}
 @media (max-width:767px) {
   .sf-header[data-compact="true"] { transform:translateY(-6px); }
   .sf-hero { height:460px; }
