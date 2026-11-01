@@ -1,4 +1,4 @@
-import { storeScoped, storeScopedTransaction } from "../db";
+import { storeScoped, storeScopedTransaction, lockCartLineByVariant } from "../db";
 import { catalogFor } from "../storefront/catalog";
 import type { SwapRuleValue } from "../storefront/cart-store";
 
@@ -99,9 +99,8 @@ export async function addLine(
     }
 
     const maxPerOrder = variant.listing.maxPerOrder ?? 99;
-    const existing = await tx.cartLine.findUnique({
-      where: { cartId_variantId: { cartId, variantId } },
-    });
+
+    const existing = await lockCartLineByVariant(tx, cartId, variantId);
     const totalQty = (existing?.qty ?? 0) + qty;
 
     if (totalQty > maxPerOrder) {
@@ -132,11 +131,12 @@ export async function addLine(
 
 export async function updateLineQty(
   storeId: string,
+  cartId: string,
   lineId: string,
   qty: number,
 ): Promise<void> {
   if (qty <= 0) {
-    await removeLine(storeId, lineId);
+    await removeLine(storeId, cartId, lineId);
     return;
   }
 
@@ -145,7 +145,7 @@ export async function updateLineQty(
       where: { id: lineId },
       include: { variant: { include: { listing: true } } },
     });
-    if (!line) {
+    if (!line || line.cartId !== cartId) {
       throw new CartError("Cart line not found", "CART_NOT_FOUND");
     }
 
@@ -166,6 +166,7 @@ export async function updateLineQty(
 
 export async function updateLineSwapRule(
   storeId: string,
+  cartId: string,
   lineId: string,
   swapRule: SwapRuleValue,
   substituteVariantId: string | null,
@@ -182,6 +183,10 @@ export async function updateLineSwapRule(
       );
     }
     await storeScopedTransaction(storeId, async (tx) => {
+      const line = await tx.cartLine.findUnique({ where: { id: lineId } });
+      if (!line || line.cartId !== cartId) {
+        throw new CartError("Cart line not found", "CART_NOT_FOUND");
+      }
       const substitute = await tx.listingVariant.findUnique({
         where: { id: substituteVariantId },
         include: { listing: true },
@@ -199,6 +204,10 @@ export async function updateLineSwapRule(
     });
   } else {
     const scoped = storeScoped(storeId);
+    const line = await scoped.cartLine.findUnique({ where: { id: lineId } });
+    if (!line || line.cartId !== cartId) {
+      throw new CartError("Cart line not found", "CART_NOT_FOUND");
+    }
     await scoped.cartLine.update({
       where: { id: lineId },
       data: { swapRule, substituteVariantId: null },
@@ -208,10 +217,11 @@ export async function updateLineSwapRule(
 
 export async function removeLine(
   storeId: string,
+  cartId: string,
   lineId: string,
 ): Promise<void> {
   const scoped = storeScoped(storeId);
-  await scoped.cartLine.deleteMany({ where: { id: lineId } });
+  await scoped.cartLine.deleteMany({ where: { id: lineId, cartId } });
 }
 
 export async function clearAllLines(

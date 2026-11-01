@@ -150,6 +150,19 @@ export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId:
   await tx.$queryRaw`SELECT 1 FROM "Store" WHERE id = ${storeId} FOR UPDATE`;
 }
 
+export async function lockCartLineByVariant(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  cartId: string,
+  variantId: string,
+): Promise<{ id: string; qty: number } | null> {
+  const rows = await tx.$queryRaw<Array<{ id: string; qty: number }>>`
+    SELECT id, qty FROM cart_lines
+    WHERE cart_id = ${cartId} AND variant_id = ${variantId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
+}
+
 export async function storeScopedRawQuery<T>(
   storeId: string,
   sql: Prisma.Sql,

@@ -39,7 +39,7 @@ export function CheckoutPage({
   catalog,
   enabled,
 }: ShoppingFlowProps) {
-  const { lines, subtotal, store } = useCart();
+  const { lines, subtotal, refreshCart } = useCart();
   const ready = useCartReady();
   const router = useRouter();
   const services = useMemo(
@@ -240,7 +240,7 @@ export function CheckoutPage({
       );
       setPayState("success");
       await clearCart();
-      lines.forEach((line) => store.remove(cartItemKey(line)));
+      await refreshCart();
       if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
         await new Promise((resolve) => setTimeout(resolve, 650));
       router.push(`/order/${order.token}?placed=1`);

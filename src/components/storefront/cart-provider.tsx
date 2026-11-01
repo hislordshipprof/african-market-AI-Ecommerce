@@ -211,6 +211,10 @@ export function CartProvider({
           { ...item, quantity, serverLineId: undefined },
         ]);
         if (item.variantId) {
+          if (inflightAdds.current.has(key)) {
+            pendingQty.current.set(key, quantity);
+            return;
+          }
           inflightAdds.current.add(key);
           startTransition(async () => {
             const result = await addToCart(item.variantId!, quantity);

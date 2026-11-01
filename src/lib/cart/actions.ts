@@ -55,8 +55,8 @@ export async function setLineQty(
   qty: number,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
   try {
-    const store = await getStore();
-    await updateLineQty(store.id, lineId, qty);
+    const { storeId, cartId } = await ensureCartId();
+    await updateLineQty(storeId, cartId, lineId, qty);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -72,8 +72,8 @@ export async function setSwapRule(
   substituteVariantId: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
   try {
-    const store = await getStore();
-    await updateLineSwapRule(store.id, lineId, swapRule, substituteVariantId);
+    const { storeId, cartId } = await ensureCartId();
+    await updateLineSwapRule(storeId, cartId, lineId, swapRule, substituteVariantId);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -87,8 +87,8 @@ export async function removeCartLine(
   lineId: string,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
   try {
-    const store = await getStore();
-    await removeLine(store.id, lineId);
+    const { storeId, cartId } = await ensureCartId();
+    await removeLine(storeId, cartId, lineId);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -149,6 +149,7 @@ export async function migrateLocalCart(
           if (serverLine) {
             await updateLineSwapRule(
               storeId,
+              cartId,
               serverLine.id,
               line.swapRule,
               line.substituteVariantId ?? null,

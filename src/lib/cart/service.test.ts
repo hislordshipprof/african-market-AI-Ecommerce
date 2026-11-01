@@ -204,7 +204,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
       const cartId = await getOrCreateCart(storeId, null, null);
       await addLine(storeId, cartId, variantId, 1);
       const cart = await getCartWithLines(storeId, cartId);
-      await updateLineQty(storeId, cart!.lines[0].id, 3);
+      await updateLineQty(storeId, cartId, cart!.lines[0].id, 3);
       const updated = await getCartWithLines(storeId, cartId);
       expect(updated!.lines[0].qty).toBe(3);
     });
@@ -213,7 +213,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
       const cartId = await getOrCreateCart(storeId, null, null);
       await addLine(storeId, cartId, variantId, 2);
       const cart = await getCartWithLines(storeId, cartId);
-      await updateLineQty(storeId, cart!.lines[0].id, 0);
+      await updateLineQty(storeId, cartId, cart!.lines[0].id, 0);
       const updated = await getCartWithLines(storeId, cartId);
       expect(updated!.lines).toHaveLength(0);
     });
@@ -223,7 +223,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
       await addLine(storeId, cartId, variantId, 1);
       const cart = await getCartWithLines(storeId, cartId);
       await expect(
-        updateLineQty(storeId, cart!.lines[0].id, 10),
+        updateLineQty(storeId, cartId, cart!.lines[0].id, 10),
       ).rejects.toThrow(CartError);
     });
   });
@@ -235,6 +235,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
       const cart = await getCartWithLines(storeId, cartId);
       await updateLineSwapRule(
         storeId,
+        cartId,
         cart!.lines[0].id,
         "store_suggests",
         null,
@@ -249,6 +250,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
       const cart = await getCartWithLines(storeId, cartId);
       await updateLineSwapRule(
         storeId,
+        cartId,
         cart!.lines[0].id,
         "named_substitute",
         variant2Id,
@@ -263,7 +265,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
       await addLine(storeId, cartId, variantId, 1);
       const cart = await getCartWithLines(storeId, cartId);
       await expect(
-        updateLineSwapRule(storeId, cart!.lines[0].id, "named_substitute", null),
+        updateLineSwapRule(storeId, cartId, cart!.lines[0].id, "named_substitute", null),
       ).rejects.toThrow(CartError);
     });
 
@@ -273,12 +275,14 @@ describe.skipIf(!hasDb)("Cart service", () => {
       const cart = await getCartWithLines(storeId, cartId);
       await updateLineSwapRule(
         storeId,
+        cartId,
         cart!.lines[0].id,
         "named_substitute",
         variant2Id,
       );
       await updateLineSwapRule(
         storeId,
+        cartId,
         cart!.lines[0].id,
         "exact_only",
         null,
@@ -294,7 +298,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
       const cartId = await getOrCreateCart(storeId, null, null);
       await addLine(storeId, cartId, variantId, 1);
       const cart = await getCartWithLines(storeId, cartId);
-      await removeLine(storeId, cart!.lines[0].id);
+      await removeLine(storeId, cartId, cart!.lines[0].id);
       const updated = await getCartWithLines(storeId, cartId);
       expect(updated!.lines).toHaveLength(0);
     });
