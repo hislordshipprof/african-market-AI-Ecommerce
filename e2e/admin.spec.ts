@@ -232,6 +232,101 @@ test.describe("Layout regression", () => {
   });
 });
 
+test.describe("Catalog review (authenticated)", () => {
+  test.beforeEach(async ({ page }) => {
+    await adminSignIn(page);
+    await page.goto("/admin/catalog/review");
+    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+  });
+
+  test("approve moves product to active tab", async ({ page }) => {
+    const firstRow = page.locator("table tbody tr").first();
+    const productName = await firstRow.locator("td").first().locator("p.font-medium").textContent();
+    expect(productName).toBeTruthy();
+
+    await firstRow.getByRole("button", { name: "Approve" }).click();
+    await page.waitForTimeout(2000);
+
+    await page.goto("/admin/catalog/review?status=active");
+    await expect(page.locator(`text=${productName}`)).toBeVisible({ timeout: 10000 });
+  });
+
+  test("edit-then-approve updates name and moves to active", async ({ page }) => {
+    const firstRow = page.locator("table tbody tr").first();
+    const originalName = await firstRow.locator("td").first().locator("p.font-medium").textContent();
+    expect(originalName).toBeTruthy();
+
+    await firstRow.getByRole("button", { name: "Edit" }).click();
+    await expect(page.locator("h3")).toHaveText("Edit product", { timeout: 5000 });
+
+    const editedName = `E2E-Edited ${originalName}`;
+    await page.locator("input").first().fill(editedName);
+    await page.getByRole("button", { name: "Save" }).click();
+    await page.waitForTimeout(2000);
+
+    await page.goto("/admin/catalog/review");
+    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+    const editedRow = page.locator("table tbody tr").filter({ hasText: editedName });
+    await editedRow.getByRole("button", { name: "Approve" }).click();
+    await page.waitForTimeout(2000);
+
+    await page.goto("/admin/catalog/review?status=active");
+    await expect(page.locator(`text=${editedName}`)).toBeVisible({ timeout: 10000 });
+  });
+
+  test("reject moves product to rejected tab", async ({ page }) => {
+    const firstRow = page.locator("table tbody tr").first();
+    const productName = await firstRow.locator("td").first().locator("p.font-medium").textContent();
+    expect(productName).toBeTruthy();
+
+    await firstRow.getByRole("button", { name: "Reject" }).click();
+    await page.waitForTimeout(2000);
+
+    await page.goto("/admin/catalog/review?status=rejected");
+    await expect(page.locator(`text=${productName}`)).toBeVisible({ timeout: 10000 });
+  });
+
+  test("non-admin access to catalog review redirects to sign-in", async ({ browser }) => {
+    const context = await browser.newContext();
+    const freshPage = await context.newPage();
+    await freshPage.goto("http://localhost:3000/admin/catalog/review");
+    await expect(freshPage).toHaveURL(/\/admin\/sign-in/, { timeout: 10000 });
+    await context.close();
+  });
+});
+
+test.describe("Catalog review screenshots", () => {
+  test("desktop 1440px light and dark", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    await adminSignIn(page);
+    await page.goto("/admin/catalog/review");
+    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: "screenshots/review-1440px-light.png", fullPage: true });
+
+    await page.evaluate(() => document.documentElement.classList.add("dark"));
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: "screenshots/review-1440px-dark.png", fullPage: true });
+    await context.close();
+  });
+
+  test("mobile 390px light and dark", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await adminSignIn(page);
+    await page.goto("/admin/catalog/review");
+    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: "screenshots/review-390px-light.png", fullPage: true });
+
+    await page.evaluate(() => document.documentElement.classList.add("dark"));
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: "screenshots/review-390px-dark.png", fullPage: true });
+    await context.close();
+  });
+});
+
 test.describe("2FA enrollment (unenrolled admin)", () => {
   const UNENROLLED_EMAIL = "unenrolled-admin@platform.test";
 
