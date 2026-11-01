@@ -32,10 +32,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
+import {
   createListingAction,
   updateListingAction,
   deactivateListingAction,
   reactivateListingAction,
+  listMasterProductsAction,
 } from "@/lib/listing/actions";
 import {
   ArrowLeft,
@@ -56,8 +65,14 @@ interface Variant {
   barcode: string | null;
 }
 
+interface MasterProductOption {
+  id: string;
+  name: string;
+}
+
 interface Listing {
   id: string;
+  masterProductId: string | null;
   customName: string | null;
   masterProductName: string | null;
   price: number;
@@ -107,10 +122,62 @@ interface VariantFormRow {
   label: string;
   price: string;
   weightG: string;
+  /** Carried through edits so saving never erases existing values; no input UI. */
+  sku?: string | null;
+  barcode?: string | null;
 }
 
 function emptyVariantRow(): VariantFormRow {
   return { key: crypto.randomUUID(), label: "", price: "", weightG: "" };
+}
+
+interface ListingFormFields {
+  name: string;
+  price: string;
+  stockMode: string;
+  qty: string;
+  status: string;
+  frozen: boolean;
+  perishable: boolean;
+  maxPerOrder: string;
+  masterProductId: string | null;
+}
+
+function buildVariantsJson(variants: VariantFormRow[]) {
+  return JSON.stringify(
+    variants
+      .filter((v) => v.label.trim())
+      .map((v) => ({
+        label: v.label.trim(),
+        price: Math.round(parseFloat(v.price || "0") * 100),
+        weightG: parseInt(v.weightG || "0", 10),
+        sku: v.sku ?? null,
+        barcode: v.barcode ?? null,
+      })),
+  );
+}
+
+/** Serialises the listing form for create and update; update passes `listingId`. */
+function buildListingFormData(
+  fields: ListingFormFields,
+  variants: VariantFormRow[],
+  listingId?: string,
+) {
+  const fd = new FormData();
+  if (listingId) fd.set("listingId", listingId);
+  fd.set("customName", fields.name);
+  fd.set("price", String(Math.round(parseFloat(fields.price || "0") * 100)));
+  fd.set("stockMode", fields.stockMode);
+  if (fields.stockMode === "counted") fd.set("qty", fields.qty);
+  if (fields.stockMode === "status") fd.set("status", fields.status);
+  fd.set("frozen", String(fields.frozen));
+  fd.set("perishable", String(fields.perishable));
+  // Update always sends maxPerOrder so clearing it works; create omits it when blank.
+  if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
+  if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
+  else if (listingId) fd.set("masterProductId", "");
+  fd.set("variants", buildVariantsJson(variants));
+  return fd;
 }
 
 export function ListingManagement({ storeName, storeSlug, listings }: Props) {
@@ -129,6 +196,8 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [frozen, setFrozen] = useState(false);
   const [perishable, setPerishable] = useState(false);
   const [maxPerOrder, setMaxPerOrder] = useState("");
+  const [masterProductId, setMasterProductId] = useState<string | null>(null);
+  const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
   const [variants, setVariants] = useState<VariantFormRow[]>([emptyVariantRow()]);
 
   function resetForm() {
@@ -140,11 +209,20 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setFrozen(false);
     setPerishable(false);
     setMaxPerOrder("");
+    setMasterProductId(null);
     setVariants([emptyVariantRow()]);
+  }
+
+  function loadMasterProducts() {
+    if (masterProducts) return;
+    listMasterProductsAction()
+      .then(setMasterProducts)
+      .catch(() => toast.error("Could not load the master product list"));
   }
 
   function openCreate() {
     resetForm();
+    loadMasterProducts();
     setCreateOpen(true);
   }
 
@@ -157,14 +235,18 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setFrozen(listing.frozen);
     setPerishable(listing.perishable);
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
+    setMasterProductId(listing.masterProductId);
     setVariants(
       listing.variants.map((v) => ({
         key: v.id,
         label: v.label,
         price: (v.price / 100).toFixed(2),
         weightG: String(v.weightG),
+        sku: v.sku,
+        barcode: v.barcode,
       })),
     );
+    loadMasterProducts();
     setEditListing(listing);
   }
 
@@ -176,35 +258,26 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setVariants((prev) => prev.filter((v) => v.key !== key));
   }
 
-  function updateVariantField(key: string, field: keyof VariantFormRow, value: string) {
+  function updateVariantField(key: string, field: "label" | "price" | "weightG", value: string) {
     setVariants((prev) =>
       prev.map((v) => (v.key === key ? { ...v, [field]: value } : v)),
     );
   }
 
-  function buildVariantsJson() {
-    return JSON.stringify(
-      variants
-        .filter((v) => v.label.trim())
-        .map((v) => ({
-          label: v.label.trim(),
-          price: Math.round(parseFloat(v.price || "0") * 100),
-          weightG: parseInt(v.weightG || "0", 10),
-        })),
-    );
-  }
+  const formFields: ListingFormFields = {
+    name,
+    price,
+    stockMode,
+    qty,
+    status,
+    frozen,
+    perishable,
+    maxPerOrder,
+    masterProductId,
+  };
 
   function handleCreate() {
-    const fd = new FormData();
-    fd.set("customName", name);
-    fd.set("price", String(Math.round(parseFloat(price || "0") * 100)));
-    fd.set("stockMode", stockMode);
-    if (stockMode === "counted") fd.set("qty", qty);
-    if (stockMode === "status") fd.set("status", status);
-    fd.set("frozen", String(frozen));
-    fd.set("perishable", String(perishable));
-    if (maxPerOrder) fd.set("maxPerOrder", maxPerOrder);
-    fd.set("variants", buildVariantsJson());
+    const fd = buildListingFormData(formFields, variants);
 
     startTransition(async () => {
       const result = await createListingAction(fd);
@@ -221,17 +294,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
 
   function handleUpdate() {
     if (!editListing) return;
-    const fd = new FormData();
-    fd.set("listingId", editListing.id);
-    fd.set("customName", name);
-    fd.set("price", String(Math.round(parseFloat(price || "0") * 100)));
-    fd.set("stockMode", stockMode);
-    if (stockMode === "counted") fd.set("qty", qty);
-    if (stockMode === "status") fd.set("status", status);
-    fd.set("frozen", String(frozen));
-    fd.set("perishable", String(perishable));
-    fd.set("maxPerOrder", maxPerOrder);
-    fd.set("variants", buildVariantsJson());
+    const fd = buildListingFormData(formFields, variants, editListing.id);
 
     startTransition(async () => {
       const result = await updateListingAction(fd);
@@ -264,8 +327,41 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const activeListings = listings.filter((l) => l.active);
   const inactiveListings = listings.filter((l) => !l.active);
 
+  const selectedMaster = masterProducts?.find((m) => m.id === masterProductId) ?? null;
+
   const formContent = (
     <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="listing-master">Master product (optional)</Label>
+        <Combobox
+          items={masterProducts ?? []}
+          value={selectedMaster}
+          onValueChange={(item: MasterProductOption | null) => {
+            setMasterProductId(item?.id ?? null);
+            if (item && !name.trim()) setName(item.name);
+          }}
+          itemToStringLabel={(item: MasterProductOption) => item.name}
+          isItemEqualToValue={(a: MasterProductOption, b: MasterProductOption) => a.id === b.id}
+        >
+          <ComboboxInput
+            id="listing-master"
+            placeholder={masterProducts ? "Search the catalog" : "Loading catalog..."}
+            showClear
+          />
+          <ComboboxContent>
+            <ComboboxEmpty>No catalog product matches</ComboboxEmpty>
+            <ComboboxList>
+              {(item: MasterProductOption) => (
+                <ComboboxItem key={item.id} value={item}>
+                  {item.name}
+                </ComboboxItem>
+              )}
+            </ComboboxList>
+          </ComboboxContent>
+        </Combobox>
+        <p className="text-xs text-muted-foreground">Leave empty for a custom product.</p>
+      </div>
+
       <div className="flex flex-col gap-2">
         <Label htmlFor="listing-name">Product name</Label>
         <Input
@@ -389,7 +485,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
               <Input
                 placeholder="Weight (g)"
                 type="number"
-                min="0"
+                min="1"
                 value={v.weightG}
                 onChange={(e) => updateVariantField(v.key, "weightG", e.target.value)}
                 className="w-24"

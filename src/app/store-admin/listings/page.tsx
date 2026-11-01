@@ -12,6 +12,7 @@ export default async function ListingsPage() {
       storeSlug={session.store.slug}
       listings={listings.map((l) => ({
         id: l.id,
+        masterProductId: l.masterProductId,
         customName: l.customName,
         masterProductName: l.masterProduct?.name ?? null,
         price: l.price,
