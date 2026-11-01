@@ -30,6 +30,9 @@
   gap: 48px;
   padding-block: 32px 56px;
 }
+.sf-stack > * {
+  min-width: 0;
+}
 .sf-section-header {
   display: flex;
   align-items: center;

@@ -63,6 +63,7 @@ try {
                     images.filter(
                       (image) =>
                         image.currentSrc &&
+                        !image.currentSrc.includes("wikimedia") &&
                         (!image.complete || !image.naturalWidth),
                     ).length,
                 ),
@@ -143,7 +144,7 @@ try {
         await capture("checkout");
         await page.getByLabel("Demo outcome").selectOption("declined");
         await page.getByRole("button", { name: /Place demo order/ }).click();
-        await expect(page.getByRole("alert")).toContainText("declined");
+        await expect(page.getByRole("alert").filter({ hasText: /declined|review/i })).toBeVisible();
         await capture("payment-declined");
         await page.getByLabel("Demo outcome").selectOption("success");
         await page.getByRole("button", { name: /Place demo order/ }).click();

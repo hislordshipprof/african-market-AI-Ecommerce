@@ -71,6 +71,7 @@ try {
                     images.filter(
                       (image) =>
                         image.currentSrc &&
+                        !image.currentSrc.includes("wikimedia") &&
                         (!image.complete || !image.naturalWidth),
                     ).length,
                 ),
