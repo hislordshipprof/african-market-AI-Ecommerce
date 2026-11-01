@@ -441,7 +441,7 @@ export async function getStoreById(id: string) {
 }
 
 export async function inviteStoreOwnerAction(formData: FormData) {
-  await requirePlatformAdmin();
+  const session = await requirePlatformAdmin();
   const storeId = formData.get("storeId") as string | null;
   const email = formData.get("email") as string | null;
 
@@ -461,7 +461,8 @@ export async function inviteStoreOwnerAction(formData: FormData) {
       storeId: store.id,
       email,
       role: "owner",
-      invitedById: "platform",
+      invitedById: session.user.id,
+      actorEmail: session.user.email,
       baseUrl: resolveAuthBaseUrl(),
       storeSlug: store.slug,
       storeName: store.name,
