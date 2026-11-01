@@ -137,6 +137,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
 
   let imageUploads = 0;
   let imageSkips = 0;
+  let imageExisting = 0;
 
   for (const row of highRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
@@ -146,19 +147,29 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
     let imageUrl: string | null = null;
 
     if (hasR2 && imageSourceUrl) {
-      const img = await downloadImage(imageSourceUrl, row.id);
-      if (img) {
-        try {
-          const key = `catalog/${row.id}.${img.ext}`;
-          imageUrl = await uploadToR2(key, img.buffer, img.contentType);
-          imageUploads++;
-        } catch (e) {
-          console.warn(`R2 upload failed for ${row.id}:`, e);
-        }
+      const existing = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        return tx.masterProduct.findUnique({ where: { id: row.id }, select: { imageUrl: true } });
+      });
+      if (existing?.imageUrl) {
+        imageUrl = existing.imageUrl;
+        imageExisting++;
       } else {
-        imageSkips++;
+        const img = await downloadImage(imageSourceUrl, row.id);
+        if (img) {
+          try {
+            const key = `catalog/${row.id}.${img.ext}`;
+            imageUrl = await uploadToR2(key, img.buffer, img.contentType);
+            imageUploads++;
+          } catch (e) {
+            console.warn(`R2 upload failed for ${row.id}:`, e);
+          }
+        } else {
+          imageSkips++;
+        }
+        await new Promise((r) => setTimeout(r, 120));
       }
-      await new Promise((r) => setTimeout(r, 120));
     }
 
     const productData = {
@@ -217,7 +228,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
     });
   }
 
-  console.log(`Seeded ${highRows.length} high-confidence products (${imageUploads} images uploaded, ${imageSkips} skipped)`);
+  console.log(`Seeded ${highRows.length} high-confidence products (${imageUploads} images uploaded, ${imageExisting} existing, ${imageSkips} skipped)`);
 
   for (const row of reviewRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
