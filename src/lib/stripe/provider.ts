@@ -44,22 +44,41 @@ function toConnectAccount(account: Stripe.Account): ConnectAccount {
 export const stripeProvider: StripeProvider = {
   async createConnectAccount({ email, businessName, storeId }) {
     const stripe = getStripeClient();
-    const account = await stripe.accounts.create({
-      type: "express",
-      email,
-      business_profile: { name: businessName },
+    const v2Account = await stripe.v2.core.accounts.create({
+      contact_email: email,
+      display_name: businessName,
+      dashboard: "express",
+      configuration: {
+        merchant: {
+          capabilities: {
+            card_payments: { requested: true },
+          },
+        },
+      },
+      defaults: {
+        responsibilities: {
+          fees_collector: "application",
+          losses_collector: "application",
+        },
+      },
       metadata: { platform_store_id: storeId },
+      include: ["configuration.merchant", "requirements"],
     });
+    const account = await stripe.accounts.retrieve(v2Account.id);
     return toConnectAccount(account);
   },
 
   async createAccountLink({ accountId, returnUrl, refreshUrl }) {
     const stripe = getStripeClient();
-    const link = await stripe.accountLinks.create({
+    const link = await stripe.v2.core.accountLinks.create({
       account: accountId,
-      return_url: returnUrl,
-      refresh_url: refreshUrl,
-      type: "account_onboarding",
+      use_case: {
+        type: "account_onboarding",
+        account_onboarding: {
+          refresh_url: refreshUrl,
+          return_url: returnUrl,
+        },
+      },
     });
     return { url: link.url } satisfies AccountLinkResult;
   },
