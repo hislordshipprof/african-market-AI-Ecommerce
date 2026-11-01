@@ -61,6 +61,10 @@ export const stripeProvider: StripeProvider = {
           losses_collector: "application",
         },
       },
+      identity: {
+        country: "US",
+        entity_type: "company",
+      },
       metadata: { platform_store_id: storeId },
       include: ["configuration.merchant", "requirements"],
     });
