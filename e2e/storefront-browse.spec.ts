@@ -56,7 +56,7 @@ test.describe("Storefront browse and search (#8 acceptance criteria)", () => {
     const firstVariantText = await variantRows.first().textContent();
     expect(firstVariantText).toMatch(pricePattern);
 
-    const badge = page.locator("[data-testid='stock-badge']");
+    const badge = page.getByTestId("product-detail").getByTestId("stock-badge");
     await expect(badge).toBeVisible();
   });
 

@@ -39,13 +39,13 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
 
   test("stores render different theme colors", async ({ page }) => {
     await page.goto("http://mama-ngozi.localhost:3000/");
-    const headerA = page.locator("header");
+    const headerA = page.getByTestId("storefront-header");
     const bgA = await headerA.evaluate(
       (el) => getComputedStyle(el).backgroundColor,
     );
 
     await page.goto("http://tante-marie.localhost:3000/");
-    const headerB = page.locator("header");
+    const headerB = page.getByTestId("storefront-header");
     const bgB = await headerB.evaluate(
       (el) => getComputedStyle(el).backgroundColor,
     );
