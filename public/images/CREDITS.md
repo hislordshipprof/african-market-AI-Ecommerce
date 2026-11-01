@@ -86,7 +86,114 @@ Matched by explicit English/local name to the catalog manifest. The missing sour
 
 ## Phase 3 product cut-outs
 
-No alpha WebP outputs have been produced yet. Original backgrounds remain; source attribution above still applies.
+800px WebP with alpha. Background removed; resized. ShareAlike derivatives retain the source license. Review segmentation before publication.
 
 | Product | Source / author | License | Changes |
 |---|---|---|---|
+| abacha-dried | [Zeerun](https://commons.wikimedia.org/wiki/File:Dried_African_Salad_(Abacha).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| achi-thickener | [Onwuka Glory](https://commons.wikimedia.org/wiki/File:Brachystegia_Eurycoma_(_Ach%E1%BB%8B)_Marchant_at_Lagwa,_Abo_Mbaise,_Imo_state.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| afang-leaves-frozen | [T.K. Naliaka](https://commons.wikimedia.org/wiki/File:Mfumbwa_-_Gnetum_africanum,_leaves_bundle_and_chopped.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| african-black-soap | [Darkemperror](https://commons.wikimedia.org/wiki/File:Alata_samina.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| african-net-sponge | [Fquasie](https://commons.wikimedia.org/wiki/File:Sponge_seller.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| agbalumo-star-apple | [Quami43](https://commons.wikimedia.org/wiki/File:African_Star_Apple_Fruit_in_Ghana.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| aidan-fruit | [Flixtey](https://commons.wikimedia.org/wiki/File:Tetrapleura_tetraptera_(Prekese).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| akpu-wet-frozen | [Sunday Glory](https://commons.wikimedia.org/wiki/File:Fufu,_one_of_the_final_produce_from_cassava.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| alligator-pepper | [Shaddiii](https://commons.wikimedia.org/wiki/File:Grains_of_paradise_(Aframomum_melegueta).jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| amaranth-leaves | [KWOJNG ekwiuel AWAN](https://commons.wikimedia.org/wiki/File:HK_food_Amaranthus_mangostanus_%E8%8E%A7%E8%8F%9C_vegetable_April_2021_SS2.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| ashanti-pepper | [Samsule2](https://commons.wikimedia.org/wiki/File:Uziza_Seeds_at_Bakin_Dogo_Market,_Kaduna_North.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| bambara-nut | [Roger Culos](https://commons.wikimedia.org/wiki/File:Vigna_subterranea_MHNT.BOT.2009.13.10.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| baobab-fruit-powder | [T.K. Naliaka](https://commons.wikimedia.org/wiki/File:Baobab_fruit_pulp_-_dry_detail.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| baobab-leaf-powder | [T.K. Naliaka](https://commons.wikimedia.org/wiki/File:Cymbium_marmoratum_shell_scoop_for_lalo_-_baobab_green_leaf_powder.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| beans-black-eyed-peas | [Toby Hudson](https://commons.wikimedia.org/wiki/File:BlackEyedPeas.JPG) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| beans-brown | [JoabJacob](https://commons.wikimedia.org/wiki/File:Brown_Beans_at_Bakin_Dogo_Market_Kaduna_North.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| beans-honey-oloyin | [Iwai-Dialax](https://commons.wikimedia.org/wiki/File:A_bowl_of_Honey_Beans.jpg) | CC BY 4.0 | Background removed; resized to 800px |
+| beans-peeled-brown | [JoabJacob](https://commons.wikimedia.org/wiki/File:Brown_Beans_at_Bakin_Dogo_Market_Kaduna_North.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| bitter-kola | [Roger Culos](https://commons.wikimedia.org/wiki/File:Garcinia_kola_MHNT.BOT.2009.13.6.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| bitter-leaf-dried | [Forestowlet](https://commons.wikimedia.org/wiki/File:Vernonia_amygdalina_06.jpg) | CC0 | Background removed; resized to 800px |
+| bitter-leaf-frozen | [Le Zeno](https://commons.wikimedia.org/wiki/File:Boules_de_ndole.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| calabash-nutmeg | [Steve Fitzgerald](https://commons.wikimedia.org/wiki/File:Monodora-myristica-SF26020-01.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| cameroon-pepper | [Johnnybam](https://commons.wikimedia.org/wiki/File:Cameroon_Pepper_Seller_with_Wheelbarrow.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| cassava-flour-lafun | [Yesua Aliki Uriah](https://commons.wikimedia.org/wiki/File:Cassava_Flour_Display_for_sale.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| cassava-fufu-flour | [HarunaSylvester](https://commons.wikimedia.org/wiki/File:Fufu_1.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| cassava-root-fresh | [Denis kasozi](https://commons.wikimedia.org/wiki/File:Harvested_cassava_roots_03.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| chewing-stick | [Shamsurabiu](https://commons.wikimedia.org/wiki/File:Man_brushing_his_teeth_using_chewing_stick.jpeg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| chikwangue-kwanga | [T.K. Naliaka](https://commons.wikimedia.org/wiki/File:Cassava_Bread_-_cassava_cooked_in_leaf_wrap_(Kwanga,_Chikwangue).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| chin-chin | [Linason Blessing](https://commons.wikimedia.org/wiki/File:A_fried_chin_chin.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| cocoyam-tannia | [Obuezie](https://commons.wikimedia.org/wiki/File:Cocoyam_for_food.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| cocoyam-taro | [David Monniaux](https://commons.wikimedia.org/wiki/File:Colocasia_esculenta_dsc07801.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| corn-dried-whole | [Rajani Gairshail](https://commons.wikimedia.org/wiki/File:Drying_maize_corns_(Himachal_Pradesh),2.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| cow-foot | [Bukky658](https://commons.wikimedia.org/wiki/File:Nkwobi_delicacy.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| crayfish-whole-dried | [Senator BNB](https://commons.wikimedia.org/wiki/File:Dried_Crayfish.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| curry-powder-nigerian | [Edithobayaa1](https://commons.wikimedia.org/wiki/File:Curry_powder.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| dates | [Hajia Hijjah](https://commons.wikimedia.org/wiki/File:Dates_fruit.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| dawadawa-dried | [Rik Schuiling / TropCrop - Tropical Crops Services](https://commons.wikimedia.org/wiki/File:Sumbala_balls_and_the_African_locust_bean_seeds_they_are_prepared_from_(Kera_(D%C3%A9dougou_District),_Burkina_Faso,_June_2014).jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| efo-shoko-celosia | [TheNuggeteer](https://commons.wikimedia.org/wiki/File:Celosia_argentea_in_Philippines.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| egusi-ground | [Bukky658](https://commons.wikimedia.org/wiki/File:Pot_of_Egusi_soup.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| egusi-seeds-whole | [Judethedeus](https://commons.wikimedia.org/wiki/File:Egusi_seeds.jpg) | CC0 | Background removed; resized to 800px |
+| ewedu-leaves-fresh | [Forest and Kim Starr](https://commons.wikimedia.org/wiki/File:Starr-130221-1611-Corchorus_olitorius-leaves-Waihee-Maui_(25112637261).jpg) | CC BY 3.0 us | Background removed; resized to 800px |
+| fonio | [Gabbri.gabbri](https://commons.wikimedia.org/wiki/File:Fonio_Grains_(Digitaria_Exilis).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| fumbwa-dried-gnetum-leaves | [Minette Lontsie](https://commons.wikimedia.org/wiki/File:Gnetum_africanum_Leaves_(Eru,_Okok).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| garden-egg | [Hans B.](https://commons.wikimedia.org/wiki/File:Solanum_aethiopicum.jpg) | Public domain | Background removed; resized to 800px |
+| garri-ijebu | [Bukky658](https://commons.wikimedia.org/wiki/File:A_bowl_of_Garri_Ijebu_Sugar_milk_ice_and_groundnut.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| garri-white | [Zeerun](https://commons.wikimedia.org/wiki/File:Cassava_Flakes_(garri).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| garri-yellow | [Betterfoto](https://commons.wikimedia.org/wiki/File:Yellow_Garri.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| goat-meat-frozen | [Grendelkhan](https://commons.wikimedia.org/wiki/File:Frozen_goat_meat_for_sale_at_Lucky.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| grains-of-selim | [NanaYawBotar](https://commons.wikimedia.org/wiki/File:Grains_of_Selim.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| ground-hot-pepper | [Kambai Akau](https://commons.wikimedia.org/wiki/File:Dried_pepper_on_sale_at_the_Monday_Market_in_Kakuri,_Kaduna_03.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| groundnut-oil | [KISUMAR123](https://commons.wikimedia.org/wiki/File:Groundnut_oil.jpg) | CC0 | Background removed; resized to 800px |
+| groundnuts-raw | [Ibn Dagara](https://commons.wikimedia.org/wiki/File:Groundnuts_in_container.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| hibiscus-dried | [Major Lyte](https://commons.wikimedia.org/wiki/File:Zobo_leaf_seller.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| hibiscus-drink-bottled | [Noahalorwu](https://commons.wikimedia.org/wiki/File:Sobolo.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| horse-mackerel-frozen | [jujurenoult](https://commons.wikimedia.org/wiki/File:Trachurus_trachurus_France.jpg) | CC BY 4.0 | Background removed; resized to 800px |
+| iru-fermented-locust-beans | [Aimeabibis](https://commons.wikimedia.org/wiki/File:Afitin_04.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| jute-leaves | [Dinesh Valke from Thane, India](https://commons.wikimedia.org/wiki/File:Corchorus_olitorius_(1459401640).jpg) | CC BY-SA 2.0 | Background removed; resized to 800px |
+| kola-nut | [Achiri Bitamsimli](https://commons.wikimedia.org/wiki/File:Kola_nut_1.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| kuli-kuli | [AgnesAbah](https://commons.wikimedia.org/wiki/File:Kuli-Kuli.jpg) | CC0 | Background removed; resized to 800px |
+| millet-flour | [T.K. Naliaka](https://commons.wikimedia.org/wiki/File:Calabash_bowls_-_6_hand_processing_millet_flour,_millet_pellets_vs_millet_flour.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| millet-pearl | [Sznu](https://commons.wikimedia.org/wiki/File:Pearl_millet_grain.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| moringa-powder | [CNEcija12345](https://commons.wikimedia.org/wiki/File:Moringa_oleifera_powder.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| mortar-pestle-wood | [T.K. Naliaka](https://commons.wikimedia.org/wiki/File:Mortar_and_Pestle_Wood_West_Africa.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| ofor-thickener | [Marco Schmidt](https://commons.wikimedia.org/wiki/File:Detarium_microcarpum_MS_1336.JPG) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| ogbono-ground | [Xtacywura](https://commons.wikimedia.org/wiki/File:Ogbono_soup.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| ogbono-whole | [Zz411 at English Wikipedia](https://commons.wikimedia.org/wiki/File:Ogbono_(Irvingia_gabonensis).jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| oha-leaves-dried | [Chichiunigeria](https://commons.wikimedia.org/wiki/File:Oha_soup.jpg) | CC BY 4.0 | Background removed; resized to 800px |
+| oha-leaves-frozen | [Akwugo](https://commons.wikimedia.org/wiki/File:%E1%BB%8Cha_soup.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| okra-dried | [Samsule2](https://commons.wikimedia.org/wiki/File:Dried_Okra_at_Bakin_Dogo_Market,_Kaduna_North.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| okra-fresh | [Bill Tarpenning](https://commons.wikimedia.org/wiki/File:Bucket_of_raw_okra_pods.jpg) | Public domain | Background removed; resized to 800px |
+| okra-frozen | [ArionStar](https://commons.wikimedia.org/wiki/File:Quiabo.jpg) | CC0 | Background removed; resized to 800px |
+| palm-nut-cream | [Foundation Digital Schools Liberia](https://commons.wikimedia.org/wiki/File:Palm_butter_fruits.jpg) | CC0 | Background removed; resized to 800px |
+| pepper-scotch-bonnet | [Temaciejewski](https://commons.wikimedia.org/wiki/File:Scotch_bonnet_chili_pepper.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| pigeon-peas-dried | [Roger Culos](https://commons.wikimedia.org/wiki/File:Cajanus_cajan_MHNT.BOT.2015.2.47.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| plantain-chips-unripe | [Daniel Paullll](https://commons.wikimedia.org/wiki/File:Chips_made_from_plantain.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| plantain-ripe | [Iwai-Dialax](https://commons.wikimedia.org/wiki/File:Ripe_Plantain_for_sale.jpg) | CC BY 4.0 | Background removed; resized to 800px |
+| ponmo-frozen | [Umshushima](https://commons.wikimedia.org/wiki/File:Display_of_cow_skin_02.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| potato-greens | [NeoBatfreak](https://commons.wikimedia.org/wiki/File:SWEET_POTATO_LEAVES.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| poundo-yam-flour | [Tesleemah](https://commons.wikimedia.org/wiki/File:%C3%8Dy%C3%A1n_(Pounded_yam).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| puff-puff-mix | [Afrolems ; cropped by Off-shell](https://commons.wikimedia.org/wiki/File:Nigerian-puff-puff-recipe_cropped.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| rice-flour-tuwo | [Bukky658](https://commons.wikimedia.org/wiki/File:Tuwo_shinkafa_made_with_rice.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| rice-ofada | [Ijeoma](https://commons.wikimedia.org/wiki/File:Ofada_Rice.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| rice-parboiled-long-grain | [Luigi Chiesa](https://commons.wikimedia.org/wiki/File:Riso_parboiled.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| roselle-leaves | [AjayDas](https://commons.wikimedia.org/wiki/File:Deep_maroon_palmate_leaves_of_Hibiscus_sabdariffa_cultivar,_locally_known_as_Tengamora_in_Assam,_growing_in_a_garden._02.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| scent-leaf-fresh | [Onjacktallcuca](https://commons.wikimedia.org/wiki/File:Manjericao_Ocimum_gratissimum.JPG) | Public domain | Background removed; resized to 800px |
+| semovita-golden-penny | [Halima Waziri](https://commons.wikimedia.org/wiki/File:Semovita_Swallow_with_assorted_okra_soup.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| shea-butter-raw | [Amuzujoe](https://commons.wikimedia.org/wiki/File:Shea_butter.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| smoked-catfish | [Similitude01](https://commons.wikimedia.org/wiki/File:Smoked_Fish_(_Eja_Sisun).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| sorghum-guinea-corn | [Salil Kumar Mukherjee](https://commons.wikimedia.org/wiki/File:A_plate_of_sorghum_grain.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| stockfish-cut | [Victorpeter001](https://commons.wikimedia.org/wiki/File:Stockfish_(_Okporoko).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| suya-spice-yaji | [Bukky658](https://commons.wikimedia.org/wiki/File:Suya_with_pepper_sauce.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| sweet-potato-african | [Abdsomod](https://commons.wikimedia.org/wiki/File:White_and_Red_Sweet_potato.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| tamarind | [B.navez](https://commons.wikimedia.org/wiki/File:Tamarindus_indica_pods.JPG) | CC BY 2.5 | Background removed; resized to 800px |
+| thyme-dried | [Henna](https://commons.wikimedia.org/wiki/File:Thyme-spice.jpg) | CC BY-SA 1.0 | Background removed; resized to 800px |
+| tiger-nut | [Museu Valencià d'Etnologia from València, España](https://commons.wikimedia.org/wiki/File:Cyperus_esculentus_(Museu_Valenci%C3%A0_d%27Etnologia).jpg) | CC BY-SA 2.0 | Background removed; resized to 800px |
+| ube-african-pear | [Victorpeter001](https://commons.wikimedia.org/wiki/File:An_African_pear_(Dacryodes_edulis).jpg) | CC BY 4.0 | Background removed; resized to 800px |
+| ugu-leaves-fresh | [Danjuma Anthony](https://commons.wikimedia.org/wiki/File:Fluted_pumpkin_(Telfairia_occidentalis).jpg) | CC0 | Background removed; resized to 800px |
+| ugu-leaves-frozen | [Samsule2](https://commons.wikimedia.org/wiki/File:Ugu_leafs_at_Bakin_Dogo_Market,_Kaduna_North_01.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| ukwa-breadfruit | [Aderiqueza](https://commons.wikimedia.org/wiki/File:Ukwa_(African_breadfruit).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| uziza-leaves-dried | [Jos. Fleischmann](https://commons.wikimedia.org/wiki/File:Piper_guineense01.JPG) | Public domain | Background removed; resized to 800px |
+| velvet-tamarind | [Timzy D'Great](https://commons.wikimedia.org/wiki/File:African_Velvet_tamarind.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| waterleaf-fresh | [Nativeplants garden](https://commons.wikimedia.org/wiki/File:Talinum_fruticosum,Nativeplants_Botanical_Garden.jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| wheat-meal-swallow | [Margaret Hoogstrate](https://commons.wikimedia.org/wiki/File:Whole_wheat_grain_flour_being_scooped.jpg) | CC BY 3.0 | Background removed; resized to 800px |
+| white-maize-meal | [Fumikas Sagisavas](https://commons.wikimedia.org/wiki/File:Corn_flour_(20240709).jpg) | CC0 | Background removed; resized to 800px |
+| yam-flour-elubo | [Tesleemah](https://commons.wikimedia.org/wiki/File:Elubo_(Amala_flour).jpg) | CC BY-SA 4.0 | Background removed; resized to 800px |
+| yam-water | [Obsidian Soul](https://commons.wikimedia.org/wiki/File:Dioscorea_alata_-_Purple_yam_tuber_-_Mindanao,_Philippines.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
+| yam-white-puna | [Akadeby](https://commons.wikimedia.org/wiki/File:Own_yam.jpg) | CC BY-SA 3.0 | Background removed; resized to 800px |
