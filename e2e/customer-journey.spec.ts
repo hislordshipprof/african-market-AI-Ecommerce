@@ -52,7 +52,7 @@ test.describe("Customer journey demo", () => {
     await page.getByRole("button", { name: /Pickup.*Free/ }).click();
     await page.getByLabel("Full name").fill("Ada Demo");
     await page.getByLabel("Phone number (required)").fill("2025550100");
-    await page.getByLabel("Email (optional)").fill("ada@example.test");
+    await page.getByLabel("Email (required)").fill("ada@example.test");
     await page.getByRole("button", { name: /Place demo order/ }).click();
     await expect(page).toHaveURL(/\/order\/[a-f0-9-]{36}\?placed=1/);
     await expect(

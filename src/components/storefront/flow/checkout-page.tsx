@@ -335,7 +335,7 @@ export function CheckoutPage({
       </div>
     );
 
-  if (stripeConfig?.publishableKey) {
+  if (stripeConfig?.publishableKey && !enabled) {
     return (
       <StripeWrapper config={stripeConfig}>
         <RealCheckoutForm settings={settings} catalog={catalog} stripeConfig={stripeConfig} />
