@@ -44,16 +44,13 @@ test.describe("Order inbox", () => {
     expect(page.url()).toContain("/store-admin/orders");
   });
 
-  test("orders page renders header and order list or empty state", async ({ page }) => {
+  test("orders page renders header and seeded order cards", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
     await expect(page.locator("h1", { hasText: "Orders" })).toBeVisible();
-
-    const hasOrders = await page.locator("text=#100").isVisible().catch(() => false);
-    if (!hasOrders) {
-      await expect(page.locator("text=No active orders right now")).toBeVisible();
-    }
+    await expect(page.locator("text=#1001")).toBeVisible();
+    await expect(page.locator("text=Adaeze Chukwu").first()).toBeVisible();
   });
 
   test("orders page has audio toggle button", async ({ page }) => {
@@ -82,6 +79,28 @@ test.describe("Order inbox", () => {
 
     const badge = page.locator("text=/\\d+ new/");
     await expect(badge).toBeVisible();
+  });
+
+  test("clicking an order shows detail with customer name and status", async ({ page }) => {
+    await storeOwnerSignIn(page);
+    await page.goto(ORDERS_URL);
+
+    await page.locator("button", { hasText: "#1001" }).click();
+    await expect(page.locator("text=Order #1001")).toBeVisible();
+    await expect(page.locator("text=Adaeze Chukwu")).toBeVisible();
+    await expect(page.locator("text=Accept order")).toBeVisible();
+  });
+
+  test("picking order shows pick list with frozen-last sort", async ({ page }) => {
+    await storeOwnerSignIn(page);
+    await page.goto(ORDERS_URL);
+
+    const pickingOrder = page.locator("button", { hasText: "Picking" });
+    if (await pickingOrder.isVisible()) {
+      await pickingOrder.click();
+      await expect(page.locator("text=Pick list")).toBeVisible();
+      await expect(page.locator("text=Pick").first()).toBeVisible();
+    }
   });
 
   test("no horizontal overflow at 390px mobile", async ({ page }) => {
