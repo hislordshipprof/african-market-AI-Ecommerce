@@ -7,7 +7,8 @@ const logoHosts = (process.env.LOGO_HOSTS ?? "")
 
 const nextConfig: NextConfig = {
   images: {
-    dangerouslyAllowSVG: true,
+    // SVG logos are rendered with a plain <img> (StoreLogo), never via the optimizer (#60).
+    dangerouslyAllowSVG: false,
     contentDispositionType: "attachment",
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     remotePatterns: [
