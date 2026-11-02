@@ -12,10 +12,22 @@ HEAD_REF=$(gh api "repos/$REPO/pulls/$PR" --jq .head.ref)
 CMP=$(gh api "repos/$REPO/compare/main...$HEAD_REF" --jq .behind_by)
 # Vercel previews are optional on ticket branches (they build only on "[preview]" commits); a canceled or skipped preview never blocks a merge.
 PENDING_OR_FAILED=$(gh pr checks "$PR" -R "$REPO" --json name,bucket,description --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping") | select((.name | startswith("Vercel")) and ((.description // "") | test("[Cc]ancel|[Ii]gnored|[Ss]kipp|[Rr]ate limit")) | not)] | length')
-if [ "$CMP" = "0" ] && [ "$PENDING_OR_FAILED" = "0" ]; then
+# Behind main but disjoint: if no file changed on main since the PR's merge base is also changed by the PR,
+# merge without re-running CI (main's post-merge CI is the safety net). Owner-approved 2026-11-02.
+DISJOINT=no
+if [ "$CMP" != "0" ] && [ "$PENDING_OR_FAILED" = "0" ]; then
+  git fetch -q origin main "$HEAD_REF" 2>/dev/null || true
+  BASE=$(git merge-base origin/main "origin/$HEAD_REF" 2>/dev/null || true)
+  if [ -n "$BASE" ]; then
+    OVERLAP=$(comm -12 <(git diff --name-only "$BASE" origin/main | sort) <(git diff --name-only "$BASE" "origin/$HEAD_REF" | sort) | grep -vE '^scripts/ticket-env\.txt$' || true)
+    [ -z "$OVERLAP" ] && DISJOINT=yes || echo "Files changed on both sides: $(echo "$OVERLAP" | tr '
+' ' ')"
+  fi
+fi
+if { [ "$CMP" = "0" ] || [ "$DISJOINT" = "yes" ]; } && [ "$PENDING_OR_FAILED" = "0" ]; then
   gh pr comment "$PR" -R "$REPO" --body "Coordinator QA verdict: $VERDICT" >/dev/null
   gh pr merge "$PR" -R "$REPO" --squash --delete-branch
-  echo "Merged PR #$PR (fast path: up to date with main, all checks green)."
+  echo "Merged PR #$PR (fast path: $([ "$CMP" = "0" ] && echo "up to date with main" || echo "behind main by $CMP commit(s), no overlapping files"), all checks green)."
 else
   echo "PR #$PR is $CMP commit(s) behind main or has $PENDING_OR_FAILED non-green check(s); using ship-ticket.sh."
   exec "$(dirname "$0")/ship-ticket.sh" "$N" "$VERDICT"
