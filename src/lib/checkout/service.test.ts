@@ -98,6 +98,19 @@ describe("quoteCheckout", () => {
     );
   });
 
+  it("flags invalid email format (no @ sign)", async () => {
+    const q = await quoteCheckout(
+      "store-1",
+      0,
+      baseInput({ contact: { name: "Jane", phone: "+15551234567", email: "notanemail" } }),
+    );
+    expect(q.problems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "invalid-contact" }),
+      ]),
+    );
+  });
+
   it("flags invalid phone (too short)", async () => {
     const q = await quoteCheckout(
       "store-1",

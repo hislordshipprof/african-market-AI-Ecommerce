@@ -56,14 +56,17 @@ export interface CheckoutPageProps extends ShoppingFlowProps {
   stripeConfig?: StripeConfig;
 }
 
-let stripePromiseCache: Promise<StripeJs | null> | null = null;
+const stripePromiseMap = new Map<string, Promise<StripeJs | null>>();
 function getStripePromise(config: StripeConfig): Promise<StripeJs | null> {
-  if (!stripePromiseCache) {
-    stripePromiseCache = loadStripe(config.publishableKey, {
+  const key = `${config.publishableKey}:${config.accountId}`;
+  let cached = stripePromiseMap.get(key);
+  if (!cached) {
+    cached = loadStripe(config.publishableKey, {
       stripeAccount: config.accountId,
     });
+    stripePromiseMap.set(key, cached);
   }
-  return stripePromiseCache;
+  return cached;
 }
 
 function StripeCardInput() {
@@ -219,13 +222,13 @@ function RealCheckoutForm({
       if (latest.problems.length) {
         throw new Error(
           latest.problems
-            .map((p) => p.message)
-            .filter((v, i, a) => a.indexOf(v) === i)
+            .map((p: { message: string }) => p.message)
+            .filter((v: string, i: number, a: string[]) => a.indexOf(v) === i)
             .join(" "),
         );
       }
 
-      const piResult = await createPaymentIntentAction(latest.holdCents);
+      const piResult = await createPaymentIntentAction(input);
       if (!piResult.ok) throw new Error(piResult.error);
 
       const { error: submitError } = await elements.submit();
@@ -242,7 +245,6 @@ function RealCheckoutForm({
       const orderResult = await placeOrderAction(
         piResult.paymentIntentId,
         input,
-        latest,
       );
       if (!orderResult.ok) throw new Error(orderResult.error);
 
@@ -663,8 +665,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   onChange={(e) => setContact({ ...contact, email: e.target.value })}
                 />
               </label>
-              {submitted && !contact.email.trim() && (
-                <p className={styles.error}>Enter an email address.</p>
+              {submitted && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim()) && (
+                <p className={styles.error}>Enter a valid email address.</p>
               )}
             </FlowCard>
           </div>

@@ -17,6 +17,11 @@ function validPhone(phone: string): boolean {
   return PHONE_RE.test(phone) && phone.replace(/\D/g, "").length >= 10;
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function validEmail(email: string): boolean {
+  return EMAIL_RE.test(email.trim());
+}
+
 export async function quoteCheckout(
   storeId: string,
   minimumOrderCents: number,
@@ -50,7 +55,7 @@ export async function quoteCheckout(
 
   if (
     !input.contact.name.trim() ||
-    !input.contact.email.trim() ||
+    !validEmail(input.contact.email) ||
     !validPhone(input.contact.phone)
   ) {
     problems.push({
@@ -110,15 +115,27 @@ export async function createPaymentIntent(
 
 export async function placeOrder(
   storeId: string,
+  minimumOrderCents: number,
   input: CheckoutInput,
-  quote: CheckoutQuote,
   paymentIntentId: string,
-): Promise<{ token: string }> {
+): Promise<{ token: string; quote: CheckoutQuote }> {
+  const quote = await quoteCheckout(storeId, minimumOrderCents, input);
+  if (quote.problems.length) {
+    throw new Error(
+      quote.problems.map((p) => p.message).join(" "),
+    );
+  }
+
   const stripe = getStripe();
   const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
   if (pi.status !== "requires_capture") {
     throw new Error(
       `PaymentIntent is in status "${pi.status}", expected "requires_capture"`,
+    );
+  }
+  if (pi.amount !== quote.holdCents) {
+    throw new Error(
+      `PaymentIntent amount (${pi.amount}) does not match quote hold (${quote.holdCents})`,
     );
   }
 
@@ -171,5 +188,5 @@ export async function placeOrder(
     return order.id;
   });
 
-  return { token: orderId };
+  return { token: orderId, quote };
 }

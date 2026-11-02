@@ -22,22 +22,26 @@ export async function quoteCheckoutAction(
 }
 
 export async function createPaymentIntentAction(
-  holdCents: number,
+  input: CheckoutInput,
 ): Promise<
-  | { ok: true; clientSecret: string; paymentIntentId: string }
+  | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number }
   | { ok: false; error: string }
 > {
   try {
-    if (!Number.isSafeInteger(holdCents) || holdCents < 50) {
-      return { ok: false, error: "Invalid amount" };
-    }
     const store = await getStore();
     const gate = checkCheckoutReady(store.stripeOnboardingStatus);
     if (!gate.enabled) {
       return { ok: false, error: gate.message ?? "Checkout is not available" };
     }
-    const result = await createPaymentIntent(store.id, holdCents);
-    return { ok: true, ...result };
+    const quote = await quoteCheckout(store.id, store.minimumOrderCents, input);
+    if (quote.problems.length) {
+      return { ok: false, error: quote.problems.map((p) => p.message).join(" ") };
+    }
+    if (quote.holdCents < 50) {
+      return { ok: false, error: "Order total is too low" };
+    }
+    const result = await createPaymentIntent(store.id, quote.holdCents);
+    return { ok: true, ...result, holdCents: quote.holdCents };
   } catch (e) {
     return {
       ok: false,
@@ -49,14 +53,13 @@ export async function createPaymentIntentAction(
 export async function placeOrderAction(
   paymentIntentId: string,
   input: CheckoutInput,
-  quote: CheckoutQuote,
 ): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   try {
     const store = await getStore();
     const result = await placeOrder(
       store.id,
+      store.minimumOrderCents,
       input,
-      quote,
       paymentIntentId,
     );
     return { ok: true, token: result.token };
