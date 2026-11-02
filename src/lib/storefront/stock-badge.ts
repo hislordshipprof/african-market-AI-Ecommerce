@@ -1,6 +1,6 @@
 export type StockBadge = "in-stock" | "limited" | "ask-store";
 
-interface StockBadgeInput {
+export interface StockBadgeInput {
   confidence: number;
   stockMode: string;
   qty: number | null;

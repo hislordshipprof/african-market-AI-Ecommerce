@@ -1,6 +1,6 @@
 import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
-import { stockBadge, type StockBadge } from "./stock-badge";
+import { stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
 import { listingImage, storefrontPhoto } from "./images";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
@@ -140,7 +140,7 @@ function toStorefrontListing(listing: {
       stockMode: listing.stockMode,
       qty: listing.qty,
       status: listing.status,
-    }),
+    } satisfies StockBadgeInput),
     frozen: listing.frozen,
     perishable: listing.perishable,
   };
@@ -227,7 +227,7 @@ async function readGetListingDetail(
       stockMode: listing.stockMode,
       qty: listing.qty,
       status: listing.status,
-    }),
+    } satisfies StockBadgeInput),
     frozen: listing.frozen,
     perishable: listing.perishable,
     variants: listing.variants.map((v) => ({
@@ -333,7 +333,7 @@ async function readSearchListings(
         stockMode: row.stock_mode,
         qty: row.qty,
         status: row.status,
-      }),
+      } satisfies StockBadgeInput),
     };
   });
 }
