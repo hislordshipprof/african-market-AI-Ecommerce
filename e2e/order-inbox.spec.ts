@@ -44,13 +44,19 @@ test.describe("Order inbox", () => {
     expect(page.url()).toContain("/store-admin/orders");
   });
 
-  test("orders page renders header and seeded order cards", async ({ page }) => {
+  test("orders page renders header and seeded order cards with item counts", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
     await expect(page.locator("h1", { hasText: "Orders" })).toBeVisible();
     await expect(page.locator("text=#1001")).toBeVisible();
     await expect(page.locator("text=Adaeze Chukwu").first()).toBeVisible();
+
+    const firstCard = page.locator("button", { hasText: "#1001" });
+    await expect(firstCard.locator("text=/\\d+ items?/")).toBeVisible();
+    const itemText = await firstCard.locator("text=/\\d+ items?/").textContent();
+    const count = parseInt(itemText?.match(/(\d+)/)?.[1] ?? "0", 10);
+    expect(count).toBeGreaterThan(0);
   });
 
   test("orders page has audio toggle button", async ({ page }) => {

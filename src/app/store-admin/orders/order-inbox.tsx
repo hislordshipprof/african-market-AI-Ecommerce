@@ -417,11 +417,13 @@ export function OrderInbox({
                                 {config?.label ?? order.status}
                               </Badge>
                             </div>
-                            <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                              {order.customer.name} &middot;{" "}
-                              {order.lines.length} item
-                              {order.lines.length !== 1 ? "s" : ""} &middot;{" "}
-                              {money(order.totalCents ?? order.subtotalCents)}
+                            <div className="mt-0.5 flex items-baseline gap-1 text-xs text-muted-foreground">
+                              <span className="truncate">
+                                {order.customer.name}
+                              </span>
+                              <span className="shrink-0 tabular-nums">
+                                &middot; {order.lines.length} item{order.lines.length !== 1 ? "s" : ""} &middot; {money(order.totalCents ?? order.subtotalCents)}
+                              </span>
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground">
