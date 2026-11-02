@@ -105,6 +105,21 @@ test.describe("Listing management (authenticated)", () => {
     await storeOwnerSignIn(page);
   });
 
+  test("master product picker searches server-side and stays bounded", async ({ page }) => {
+    await page.goto(LISTINGS_URL);
+    await page.click("text=Add listing");
+    const picker = page.getByLabel("Master product (optional)");
+    await picker.click();
+    await expect(page.getByRole("option").first()).toBeVisible({ timeout: 10000 });
+    expect(await page.getByRole("option").count()).toBeLessThanOrEqual(50);
+
+    await picker.fill("zzzznotfound");
+    await expect(page.getByText("No catalog product matches")).toBeVisible({ timeout: 10000 });
+
+    await picker.fill("");
+    await expect(page.getByRole("option").first()).toBeVisible({ timeout: 10000 });
+  });
+
   test("create a listing with a variant", async ({ page }) => {
     await createListingViaUI(page, {
       name: `E2E Garri ${Date.now()}`,

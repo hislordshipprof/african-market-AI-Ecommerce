@@ -332,10 +332,15 @@ export async function getListing(storeId: string, listingId: string) {
   });
 }
 
-export async function listMasterProducts() {
+export const MASTER_PRODUCT_PAGE_SIZE = 50;
+
+export async function listMasterProducts(query?: string, take = MASTER_PRODUCT_PAGE_SIZE) {
   const { masterProduct } = await import("../db").then((m) => m.platformAdmin);
+  const term = query?.trim();
   return masterProduct.findMany({
+    where: term ? { name: { contains: term, mode: "insensitive" } } : undefined,
     orderBy: { name: "asc" },
+    take: Math.min(Math.max(1, Math.floor(take)), MASTER_PRODUCT_PAGE_SIZE),
   });
 }
 
