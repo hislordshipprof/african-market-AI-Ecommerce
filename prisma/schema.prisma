@@ -40,6 +40,8 @@ model Store {
   banners      StoreBanner[]
   collections  StoreCollection[]
   carts        Cart[]
+  customers    Customer[]
+  orders       Order[]
 
   @@map("stores")
 }
@@ -316,6 +318,7 @@ model ListingVariant {
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
   cartLines           CartLine[]
   substituteCartLines CartLine[] @relation("substituteVariant")
+  orderLines          OrderLine[]
 
   @@index([listingId])
   @@map("listing_variants")
@@ -398,18 +401,21 @@ model StoreCollectionListing {
 }
 
 model Cart {
-  id        String   @id @default(cuid())
-  storeId   String   @map("store_id")
-  userId    String?  @map("user_id")
-  source    String   @default("manual")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id         String   @id @default(cuid())
+  storeId    String   @map("store_id")
+  userId     String?  @map("user_id")
+  customerId String?  @map("customer_id")
+  source     String   @default("manual")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
-  store Store     @relation(fields: [storeId], references: [id])
-  lines CartLine[]
+  store    Store     @relation(fields: [storeId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
+  lines    CartLine[]
 
   @@index([storeId])
   @@index([storeId, userId])
+  @@index([customerId])
   @@map("carts")
 }
 
@@ -433,4 +439,70 @@ model CartLine {
   @@index([cartId])
   @@index([variantId])
   @@map("cart_lines")
+}
+
+model Customer {
+  id               String   @id @default(cuid())
+  storeId          String   @map("store_id")
+  userId           String?  @map("user_id")
+  name             String
+  email            String
+  phone            String
+  marketingConsent Boolean  @default(false) @map("marketing_consent")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  store  Store   @relation(fields: [storeId], references: [id])
+  orders Order[]
+  carts  Cart[]
+
+  @@index([storeId])
+  @@index([storeId, email])
+  @@map("customers")
+}
+
+model Order {
+  id                   String   @id @default(cuid())
+  storeId              String   @map("store_id")
+  number               Int
+  customerId           String   @map("customer_id")
+  status               String   @default("AUTHORIZED")
+  fulfillment          String   @default("pickup")
+  pickupSlot           String?  @map("pickup_slot")
+  subtotalCents        Int      @map("subtotal_cents")
+  bufferCents          Int      @map("buffer_cents")
+  totalAuthorizedCents Int      @map("total_authorized_cents")
+  paymentIntentId      String?  @unique @map("payment_intent_id")
+  capturedAmountCents  Int?     @map("captured_amount_cents")
+  platformFeeCents     Int?     @map("platform_fee_cents")
+  notes                String?
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  store    Store      @relation(fields: [storeId], references: [id])
+  customer Customer   @relation(fields: [customerId], references: [id])
+  lines    OrderLine[]
+
+  @@unique([storeId, number])
+  @@index([storeId])
+  @@index([customerId])
+  @@map("orders")
+}
+
+model OrderLine {
+  id               String @id @default(cuid())
+  storeId          String @map("store_id")
+  orderId          String @map("order_id")
+  listingVariantId String @map("listing_variant_id")
+  qtyOrdered       Int    @map("qty_ordered")
+  unitPriceCents   Int    @map("unit_price_cents")
+  swapRule         String @default("exact_only") @map("swap_rule")
+  status           String @default("pending")
+
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  listingVariant ListingVariant @relation(fields: [listingVariantId], references: [id])
+
+  @@index([storeId])
+  @@index([orderId])
+  @@index([listingVariantId])
+  @@map("order_lines")
 }

@@ -81,6 +81,9 @@ export function storeScoped(storeId: string) {
     storeCollectionListing: wrapDelegate(storeId, prisma.storeCollectionListing),
     cart: wrapDelegate(storeId, prisma.cart),
     cartLine: wrapDelegate(storeId, prisma.cartLine),
+    customer: wrapDelegate(storeId, prisma.customer),
+    order: wrapDelegate(storeId, prisma.order),
+    orderLine: wrapDelegate(storeId, prisma.orderLine),
   };
 }
 
@@ -130,7 +133,7 @@ export async function platformAdminTransaction<T>(
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "$queryRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -142,6 +145,9 @@ export async function storeScopedTransaction<T>(
       auditLog: tx.auditLog,
       cart: tx.cart,
       cartLine: tx.cartLine,
+      customer: tx.customer,
+      order: tx.order,
+      orderLine: tx.orderLine,
       $queryRaw: tx.$queryRaw.bind(tx),
     });
   });
