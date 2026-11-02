@@ -18,6 +18,8 @@ I am away: decide for me, for issue #$N only. Verify the issue's claims against 
 - the test seams (every store-owned table: cross-store read and write fail through storeScoped(); auth paths tested against the real database)
 - environment keys and external accounts needed (match scripts/ticket-env.txt; say which are missing)
 - dependencies on merged code to reuse, and risks
+- an 'Integration contracts' section: for every external provider or platform API the ticket touches (Stripe, Inngest, Resend, Telnyx, R2, Vercel and so on), how it actually behaves, checked against its official docs, with links. Example: destination charges live on the platform account, so capture and cancel run on the platform, not the connected account.
+- an 'Edge cases' table that the builder must turn into tests: retries and duplicate events, an external call that succeeds followed by a failed DB write, concurrency, cross-store access, timezones and overnight hours, empty and maximum inputs, money rounding and amounts above an authorization, keys missing at runtime
 If the ticket has more than about 5 acceptance criteria or more than one security-sensitive system, recommend a split in the brief and create the child issues.
 Label it ready-for-agent when it can be built without a human decision; otherwise needs-info or ready-for-human with the missing facts. Do not change any code or create branches."
 

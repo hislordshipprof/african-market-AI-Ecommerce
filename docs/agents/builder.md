@@ -58,7 +58,13 @@ While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts 
 - No "pre-existing failure" claim without proof: name the test and show it failing on `origin/main`.
 - Migrations work on an empty database (`prisma migrate reset`, or a fresh branch), the same way CI and new previews run them.
 
+- Every row of the agent brief's 'Edge cases' table has a test, and every 'Integration contracts' item is honoured in code.
+- Test doubles enforce the provider's real rules (wrong account, amount above the authorization, already captured or cancelled, signature checks). A fake that accepts anything hides bugs. Each external path also has at least one test against the real sandbox when the keys are in `.env.local`.
+
 If something fails and you cannot fix it, report it as failing with the output. Never report a check you did not run.
+
+### No agent reviews its own work
+Don't run the code review on your own code. After you push, `scripts/build-ticket.sh` runs `scripts/review-ticket.sh`: a fresh session that never saw your reasoning reviews the diff, plus Codex for money, auth and external-provider tickets. Its findings come back to you as a fix round. Reproduce each finding before changing code, and say so with evidence when one does not reproduce.
 
 ## Finish
 1. Commit in small, meaningful commits. End each message with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
