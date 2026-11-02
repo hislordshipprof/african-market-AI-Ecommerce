@@ -670,6 +670,96 @@ async function seedStoreOwner() {
   console.log("Seeded store owner: owner@mama-ngozi.test (2FA enrolled, mama-ngozi owner)");
 }
 
+async function seedDemoOrders() {
+  const store = await prisma.store.findUnique({ where: { slug: "mama-ngozi" } });
+  if (!store) throw new Error("mama-ngozi must exist before seeding orders");
+
+  const variants = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+    return tx.listingVariant.findMany({
+      where: { listing: { storeId: store.id } },
+      include: { listing: { select: { frozen: true, perishable: true, customName: true } } },
+      take: 6,
+    });
+  });
+  if (variants.length < 3) {
+    console.log("Skipping order seed: not enough listing variants");
+    return;
+  }
+
+  const customer = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+    return tx.customer.upsert({
+      where: { storeId_email: { storeId: store.id, email: "demo-customer@example.com" } },
+      update: {},
+      create: {
+        storeId: store.id,
+        name: "Adaeze Chukwu",
+        email: "demo-customer@example.com",
+        phone: "+17135551234",
+      },
+    });
+  });
+
+  const demoOrders = [
+    { id: "seed-order-1", number: 1001, status: "AUTHORIZED", lines: [0, 1, 2] },
+    { id: "seed-order-2", number: 1002, status: "ACCEPTED", lines: [1, 3] },
+    { id: "seed-order-3", number: 1003, status: "PICKING", lines: [0, 2, 4 % variants.length] },
+    { id: "seed-order-4", number: 1004, status: "AWAITING_PICKUP", lines: [3 % variants.length, 5 % variants.length] },
+  ];
+
+  for (const demo of demoOrders) {
+    const lineVariants = demo.lines.map((i) => variants[i % variants.length]);
+    const subtotal = lineVariants.reduce((s, v) => s + v.price * 2, 0);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+
+      const existing = await tx.order.findUnique({ where: { id: demo.id } });
+      if (existing) return;
+
+      await tx.order.create({
+        data: {
+          id: demo.id,
+          storeId: store.id,
+          number: demo.number,
+          customerId: customer.id,
+          status: demo.status,
+          fulfillment: "pickup",
+          subtotalCents: subtotal,
+          bufferCents: Math.round(subtotal * 0.1),
+          totalAuthorizedCents: subtotal + Math.round(subtotal * 0.1),
+          totalCents: subtotal,
+          paymentIntentId: `pi_seed_${demo.id}`,
+          acceptedAt: ["ACCEPTED", "PICKING", "AWAITING_PICKUP"].includes(demo.status) ? new Date() : null,
+          prepEstimateMinutes: ["ACCEPTED", "PICKING", "AWAITING_PICKUP"].includes(demo.status) ? 25 : null,
+          readyAt: demo.status === "AWAITING_PICKUP" ? new Date() : null,
+        },
+      });
+
+      for (const v of lineVariants) {
+        const isPicked = demo.status === "AWAITING_PICKUP" || (demo.status === "PICKING" && Math.random() > 0.5);
+        await tx.orderLine.create({
+          data: {
+            storeId: store.id,
+            orderId: demo.id,
+            listingVariantId: v.id,
+            qtyOrdered: 2,
+            unitPriceCents: v.price,
+            qtyPicked: isPicked ? 2 : 0,
+            status: isPicked ? "picked" : "pending",
+          },
+        });
+      }
+    });
+  }
+
+  console.log(`Seeded ${demoOrders.length} demo orders for mama-ngozi`);
+}
+
 async function main() {
   await seedDemoStores();
   await seedCategoryMetadata();
@@ -682,6 +772,7 @@ async function main() {
   if (process.env.SEED_TEST_ADMIN === "1") {
     await seedTestAdmin();
     await seedStoreOwner();
+    await seedDemoOrders();
   }
   await revalidateSeededStores(await prisma.store.findMany({ where: { slug: { in: ["mama-ngozi", "tante-marie"] } }, select: { id: true, slug: true } }));
 }
