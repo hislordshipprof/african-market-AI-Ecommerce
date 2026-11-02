@@ -50,10 +50,22 @@ Anti-drip: one full review inside `implement`; follow-up reviews cover only the 
 - Scripts propagate failures; no `|| true` on the build or review step.
 - The coordinator never builds; it plans the queue, checks evidence and previews, and merges via `ship-pr`.
 
+## No agent reviews its own work (owner-approved 2026-11-02)
+
+The owner wants as few bugs as possible, and no agent reviewing its own work in the same session.
+
+- The builder never runs the code review on its own code.
+- After every build and every fix round, `scripts/build-ticket.sh` runs `scripts/review-ticket.sh <n>`. That is a fresh `claude -p` session at high effort that sees only the diff, the issue and the brief, and writes `.builder/review-<n>.md` (first line `VERDICT: PASS` or `VERDICT: BLOCKING`).
+- RISK tickets also get the Codex review (gpt-6-astra, medium) in the same step. RISK means money, auth or external providers, detected from the keys in `ticket-env.txt`, or set with `RISK=1`. RISK tickets always build at full tier.
+- Blocking findings go back to the builder's session as a fix round. The builder reproduces each finding first, then fixes it test-first. The fix is re-reviewed by a new fresh session. After 2 fix rounds the coordinator decides.
+- Planner briefs include 'Integration contracts' (how each provider really behaves, with doc links) and an 'Edge cases' table. The builder turns each row into a test.
+- Test doubles must enforce the provider's real rules, and each external path needs a real sandbox test.
+- The coordinator still reads the risky code paths itself before merging.
+
 ## Rigor tiers (owner-approved 2026-11-01)
 
 - **full** (default; `scripts/build-ticket.sh <n>`): most capable model at high effort, with a three-axis review. Required for money (Stripe, checkout, refunds), auth, RLS/data isolation, migrations and order-state work.
-- **light** (`TIER=light scripts/build-ticket.sh <n>`): Sonnet at medium effort, with one combined review. For test coverage, docs, small fixes and review follow-ups.
+- **light** (`TIER=light scripts/build-ticket.sh <n>`): Sonnet at medium effort. Only for test coverage, docs, CSS, copy and small follow-ups; it is overridden to full for RISK tickets. Review is always the independent step above.
 - **Batches:** small follow-ups in one area are grouped under one batch issue ("Batch: …", listing `Closes #a, #b, …`) and built in a single light run.
 - **Codex:** no external peer on every build (`cross-model.json` mode `host-only`). The coordinator runs `scripts/codex-review.sh` (gpt-6-astra, medium effort) at milestones: before merging a money or auth ticket, and on the main-path PR that completes a phase slice. Codex UI builds also run at Astra medium, via `scripts/codex-ui-build.sh <worktree> <brief>`, without the Windows sandbox (owner-approved 2026-11-02) so Codex can run browsers, tests and builds itself. Its guard rules keep it inside the worktree and away from `.env` files.
 
