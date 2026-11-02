@@ -121,16 +121,17 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     expect(await audits(p.id, "catalog.approve")).toHaveLength(1);
   });
 
-  it("concurrent approve + reject: both serialize, final status matches the later audit row", async () => {
+  it("concurrent approve + reject: serialize, second audit row sees the first's result", async () => {
     const p = await seed("race2");
     await Promise.all([approveProduct(p.id), rejectProduct(p.id)]);
     const after = await raw.masterProduct.findUniqueOrThrow({ where: { id: p.id } });
-    const rows = await raw.auditLog.findMany({
-      where: { entityId: p.id },
-      orderBy: { createdAt: "asc" },
-    });
+    const rows = await raw.auditLog.findMany({ where: { entityId: p.id } });
     expect(rows).toHaveLength(2);
-    const last = rows[rows.length - 1].action;
-    expect(after.status).toBe(last === "catalog.approve" ? "active" : "rejected");
+    // Order by the audit chain (not createdAt): the first row saw needs_review,
+    // the second saw the first row's resulting status.
+    const first = rows.find((r) => (r.before as { status: string }).status === "needs_review")!;
+    const second = rows.find((r) => r !== first)!;
+    expect((second.before as { status: string }).status).toBe((first.after as { status: string }).status);
+    expect(after.status).toBe((second.after as { status: string }).status);
   });
 });
