@@ -200,6 +200,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
   const [selectedMasterOption, setSelectedMasterOption] = useState<MasterProductOption | null>(null);
   const searchSeq = useRef(0);
+  const selectedMasterNameRef = useRef<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [variants, setVariants] = useState<VariantFormRow[]>([emptyVariantRow()]);
 
@@ -214,10 +215,12 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setMaxPerOrder("");
     setMasterProductId(null);
     setSelectedMasterOption(null);
+    selectedMasterNameRef.current = null;
     setVariants([emptyVariantRow()]);
   }
 
   function searchMasterProducts(query: string) {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
     const seq = ++searchSeq.current;
     listMasterProductsAction(query)
       .then((rows) => {
@@ -229,6 +232,8 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   }
 
   function onMasterInputChange(value: string) {
+    // Choosing an item sets the input to its label: do not narrow the list to that label.
+    if (selectedMasterNameRef.current !== null && value === selectedMasterNameRef.current) return;
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => searchMasterProducts(value), 300);
   }
@@ -267,11 +272,12 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
       })),
     );
     searchMasterProducts("");
-    setSelectedMasterOption(
+    const currentMaster =
       listing.masterProductId && listing.masterProductName
         ? { id: listing.masterProductId, name: listing.masterProductName }
-        : null,
-    );
+        : null;
+    setSelectedMasterOption(currentMaster);
+    selectedMasterNameRef.current = currentMaster?.name ?? null;
     setEditListing(listing);
   }
 
@@ -370,6 +376,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
           onValueChange={(item: MasterProductOption | null) => {
             setMasterProductId(item?.id ?? null);
             setSelectedMasterOption(item);
+            selectedMasterNameRef.current = item?.name ?? null;
             if (item && !name.trim()) setName(item.name);
           }}
           itemToStringLabel={(item: MasterProductOption) => item.name}

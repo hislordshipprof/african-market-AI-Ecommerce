@@ -9,8 +9,10 @@ const SCHEMA = "tmp_backfill_110";
 
 // Applies every migration to a scratch schema (an empty database), seeds zero-weight
 // variants just before the backfill migration, then applies it.
-describe("zero-weight variant backfill migration", () => {
-  const client = new Client({ connectionString: process.env.DIRECT_URL ?? process.env.DATABASE_URL });
+const connectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+
+describe.skipIf(!connectionString)("zero-weight variant backfill migration", () => {
+  const client = new Client({ connectionString });
 
   beforeAll(async () => {
     await client.connect();
