@@ -108,6 +108,29 @@ test.describe("Order inbox", () => {
     await expect(page.getByRole("button", { name: "Pick" }).first()).toBeVisible({ timeout: 10000 });
   });
 
+  test("Mark ready button disabled until all lines picked, enabled after", async ({ page }) => {
+    await storeOwnerSignIn(page);
+    await page.goto(ORDERS_URL);
+
+    const orderCard = page.locator("button", { hasText: "#1003" });
+    await expect(orderCard).toBeVisible();
+    await orderCard.click();
+    await expect(page.locator("text=Pick list")).toBeVisible();
+
+    const markReadyBtn = page.getByRole("button", { name: "Mark ready" });
+    await expect(markReadyBtn).toBeVisible({ timeout: 10000 });
+    await expect(markReadyBtn).toBeDisabled();
+
+    const pickButtons = page.getByRole("button", { name: "Pick" });
+    const count = await pickButtons.count();
+    for (let i = 0; i < count; i++) {
+      await pickButtons.first().click();
+      await page.waitForTimeout(500);
+    }
+
+    await expect(markReadyBtn).toBeEnabled({ timeout: 10000 });
+  });
+
   test("no horizontal overflow at 390px mobile", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await storeOwnerSignIn(page);
