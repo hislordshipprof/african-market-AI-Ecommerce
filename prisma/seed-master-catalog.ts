@@ -155,8 +155,8 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await upsertMasterProduct(tx, row, categoryId, {
-        status: "active",
-        overwriteStatus: true,
+        statusOnCreate: "active",
+        statusOnUpdate: "active",
         confidence: "high",
         imageUrl,
       });
@@ -191,8 +191,7 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await upsertMasterProduct(tx, row, categoryId, {
-        status: "needs_review",
-        overwriteStatus: false,
+        statusOnCreate: "needs_review",
         confidence: row.confidence.trim(),
         imageUrl: null,
       });

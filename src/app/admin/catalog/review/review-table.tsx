@@ -39,7 +39,10 @@ const FOCUSABLE = "input, textarea, select, button, a[href], [tabindex]:not([tab
 function wrapTabFocus(e: React.KeyboardEvent<HTMLElement>) {
   if (e.key !== "Tab") return;
   const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-    (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true",
+    (el) =>
+      !el.hasAttribute("disabled") &&
+      el.getAttribute("aria-hidden") !== "true" &&
+      el.getAttribute("type") !== "hidden",
   );
   if (items.length === 0) return;
   const first = items[0];
@@ -155,10 +158,10 @@ function EditModal({
           </label>
         </div>
         <DialogFooter className="border-[#e2e4e9] bg-transparent dark:border-[#333]">
-          <Button type="button" variant="ghost" className="dark:text-white dark:hover:bg-[#222]" onClick={onClose} disabled={isPending}>
+          <Button type="button" variant="ghost" className="dark:text-white dark:hover:bg-[#222]" onClick={() => !isPending && onClose()} aria-disabled={isPending}>
             Cancel
           </Button>
-          <Button type="button" onClick={handleSave} disabled={isPending}>
+          <Button type="button" onClick={() => !isPending && handleSave()} aria-disabled={isPending}>
             {isPending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>

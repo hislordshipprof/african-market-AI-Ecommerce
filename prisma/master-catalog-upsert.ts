@@ -81,9 +81,9 @@ export async function upsertSynonyms(tx: Prisma.TransactionClient, row: CsvRow):
 
 export type MasterProductVariant = {
   /** Status a new row is created with. */
-  status: string;
-  /** Overwrite the status of an existing row (high-confidence path) or leave it alone (review path). */
-  overwriteStatus: boolean;
+  statusOnCreate: string;
+  /** Status written to an existing row. Omit to leave it alone (review path: never undo an approval). */
+  statusOnUpdate?: string;
   confidence: string;
   /** Set on create; on update it is written only when non-null, so a re-seed never wipes an image. */
   imageUrl: string | null;
@@ -122,10 +122,10 @@ export async function upsertMasterProduct(
     where: { id: row.id },
     update: {
       ...fields,
-      ...(variant.overwriteStatus ? { status: variant.status } : {}),
+      ...(variant.statusOnUpdate !== undefined ? { status: variant.statusOnUpdate } : {}),
       ...(variant.imageUrl !== null ? { imageUrl: variant.imageUrl } : {}),
     },
-    create: { id: row.id, ...fields, status: variant.status, imageUrl: variant.imageUrl },
+    create: { id: row.id, ...fields, status: variant.statusOnCreate, imageUrl: variant.imageUrl },
   });
 
   await upsertSynonyms(tx, row);

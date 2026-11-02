@@ -98,7 +98,7 @@ describe("downloadAndUploadImage", () => {
   it("reports an upload failure distinctly", async () => {
     fetchMock.mockResolvedValueOnce(okResponse());
     uploadToR2.mockRejectedValueOnce(new Error("boom"));
-    expect(await downloadAndUploadImage("https://x.test/a", "p1")).toEqual({ ok: false, reason: "upload" });
+    expect(await downloadAndUploadImage("https://x.test/a", "p1")).toMatchObject({ ok: false, reason: "upload" });
   });
 });
 
@@ -112,5 +112,20 @@ describe("toThumbnailUrl", () => {
     expect(toThumbnailUrl("https://upload.wikimedia.org/wikipedia/commons/a/ab/Y.svg", 960)).toBe(
       "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Y.svg/960px-Y.svg.png",
     );
+  });
+});
+
+describe("failure causes", () => {
+  it("surfaces the upload error and a sharp conversion error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse()));
+    const boom = new Error("denied");
+    uploadToR2.mockRejectedValueOnce(boom);
+    expect(await downloadAndUploadImage("https://x.test/a", "p1")).toEqual({ ok: false, reason: "upload", cause: boom });
+
+    const bad = new Error("bad image");
+    sharpPipeline.toBuffer.mockRejectedValueOnce(bad);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse()));
+    expect(await downloadAndUploadImage("https://x.test/a", "p1", { sharp: true })).toEqual({ ok: false, reason: "convert", cause: bad });
+    vi.unstubAllGlobals();
   });
 });

@@ -20,7 +20,7 @@ export type ImageDownloadOptions = {
 
 export type ImageDownloadResult =
   | { ok: true; key: string; url: string; bytes: number }
-  | { ok: false; reason: "download" | "upload" };
+  | { ok: false; reason: "download" | "upload" | "convert"; cause?: unknown };
 
 export function toThumbnailUrl(originalUrl: string, width: number): string {
   try {
@@ -81,15 +81,16 @@ async function fetchImage(
   return null;
 }
 
-async function toWebp(raw: Buffer): Promise<Buffer | null> {
+async function toWebp(raw: Buffer): Promise<{ webp: Buffer } | { error: unknown }> {
   try {
     const { default: sharp } = await import("sharp");
-    return await sharp(raw)
+    const webp = await sharp(raw)
       .resize(960, 960, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 80 })
       .toBuffer();
-  } catch {
-    return null;
+    return { webp };
+  } catch (error) {
+    return { error };
   }
 }
 
@@ -126,25 +127,31 @@ export async function downloadAndUploadImage(
   const candidates = thumb !== sourceUrl ? [thumb, sourceUrl] : [sourceUrl];
 
   let image: { buffer: Buffer; contentType: string } | null = null;
+  let convertError: unknown;
   for (const candidate of candidates) {
     const raw = await fetchImage(candidate, fetchOpts);
     if (!raw) continue;
     if (options.sharp) {
-      const webp = await toWebp(raw.buffer);
-      if (!webp) continue;
-      image = { buffer: webp, contentType: "image/webp" };
+      const converted = await toWebp(raw.buffer);
+      if ("error" in converted) {
+        convertError = converted.error;
+        continue;
+      }
+      image = { buffer: converted.webp, contentType: "image/webp" };
     } else {
       image = raw;
     }
     break;
   }
-  if (!image) return fail;
+  if (!image) {
+    return convertError === undefined ? fail : { ok: false, reason: "convert", cause: convertError };
+  }
 
   const key = `catalog/${id}.${options.format ?? extensionFor(image.contentType)}`;
   try {
     const url = await uploadToR2(key, image.buffer, image.contentType);
     return { ok: true, key, url, bytes: image.buffer.byteLength };
-  } catch {
-    return { ok: false, reason: "upload" };
+  } catch (cause) {
+    return { ok: false, reason: "upload", cause };
   }
 }
