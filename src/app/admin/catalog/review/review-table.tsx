@@ -8,6 +8,15 @@ import {
   updateReviewProduct,
 } from "@/lib/admin/catalog-actions";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 function ConfidenceBadge({ confidence }: { confidence: string | null }) {
   const color =
@@ -60,13 +69,21 @@ function EditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl dark:bg-[#1a1a1a]">
-        <h3 className="mb-4 text-lg font-bold text-[#15201A] dark:text-white">
-          Edit product
-        </h3>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !isPending) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-lg" showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle className="text-lg font-bold">Edit product</DialogTitle>
+          <DialogDescription>
+            Changes are saved to the master catalog and recorded in the audit log.
+          </DialogDescription>
+        </DialogHeader>
         {error && (
-          <p className="mb-3 text-sm text-red-600">{error}</p>
+          <p role="alert" className="text-sm text-red-600">{error}</p>
         )}
         <div className="space-y-3">
           <label className="block">
@@ -113,26 +130,16 @@ function EditModal({
             />
           </label>
         </div>
-        <div className="mt-5 flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isPending}
-            className="rounded-full px-4 py-2 text-sm font-medium text-[#55625A] hover:bg-[#f0f0f0] dark:text-[#a0a8a3] dark:hover:bg-[#222]"
-          >
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>
             Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isPending}
-            className="rounded-full bg-[#1F5A43] px-5 py-2 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
-          >
+          </Button>
+          <Button type="button" onClick={handleSave} disabled={isPending}>
             {isPending ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -184,17 +191,32 @@ export function ReviewTable({
     router.push(`/admin/catalog/review?${params.toString()}`);
   }
 
-  if (products.length === 0) {
+  if (products.length === 0 && total === 0) {
     return (
       <div className="rounded-xl border border-[#e2e4e9] bg-white p-12 text-center dark:border-[#333] dark:bg-[#1a1a1a]">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950">
-          <svg className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <svg aria-hidden="true" className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
           </svg>
         </div>
         <p className="text-sm font-medium text-[#55625A] dark:text-[#a0a8a3]">
           No products to review. All caught up!
         </p>
+      </div>
+    );
+  }
+
+  if (products.length === 0) {
+    const lastPage = Math.max(1, totalPages);
+    return (
+      <div className="rounded-xl border border-[#e2e4e9] bg-white p-12 text-center dark:border-[#333] dark:bg-[#1a1a1a]">
+        <p className="text-sm font-medium text-[#15201A] dark:text-white">No items on this page.</p>
+        <p className="mt-1 text-sm text-[#55625A] dark:text-[#a0a8a3]">
+          {total} {total === 1 ? "product remains" : "products remain"} on other pages.
+        </p>
+        <Button type="button" variant="outline" className="mt-4" onClick={() => goToPage(lastPage)}>
+          Back to page {lastPage}
+        </Button>
       </div>
     );
   }

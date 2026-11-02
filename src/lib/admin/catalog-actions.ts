@@ -2,9 +2,7 @@
 
 import { platformAdmin, platformAdminTransaction, lockMasterProductRow } from "../db";
 import { requirePlatformAdmin } from "./session";
-import { uploadToR2 } from "../r2";
-
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+import { downloadAndUploadImage } from "../catalog-image";
 
 export type ReviewProduct = {
   id: string;
@@ -79,7 +77,7 @@ export type CatalogActionResult = {
   error?: string;
 };
 
-async function downloadAndUploadImage(
+async function downloadCatalogImage(
   sourceUrl: string,
   productId: string,
 ): Promise<string | null> {
@@ -89,32 +87,11 @@ async function downloadAndUploadImage(
     process.env.R2_SECRET_ACCESS_KEY &&
     process.env.R2_BUCKET
   );
-  if (!hasR2 || !sourceUrl) return null;
-
-  try {
-    const parsed = new URL(sourceUrl);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-  } catch {
-    return null;
-  }
-
-  try {
-    const response = await fetch(sourceUrl, {
-      headers: { "User-Agent": "AfricanMarketsPlatform/1.0 (catalog review)" },
-      redirect: "error",
-    });
-    if (!response.ok) return null;
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_BYTES) return null;
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength > MAX_IMAGE_BYTES) return null;
-    const contentType = response.headers.get("content-type") || "image/jpeg";
-    const ext = contentType.includes("png") ? "png" : contentType.includes("svg") ? "svg" : "jpg";
-    const key = `catalog/${productId}.${ext}`;
-    return await uploadToR2(key, buffer, contentType);
-  } catch {
-    return null;
-  }
+  if (!hasR2) return null;
+  const result = await downloadAndUploadImage(sourceUrl, productId, {
+    userAgent: "AfricanMarketsPlatform/1.0 (catalog review)",
+  });
+  return result.ok ? result.url : null;
 }
 
 export async function approveProduct(
@@ -132,7 +109,7 @@ export async function approveProduct(
 
   let downloadedUrl: string | null = null;
   if (!preview.imageUrl && preview.imageSourceUrl) {
-    downloadedUrl = await downloadAndUploadImage(preview.imageSourceUrl, productId);
+    downloadedUrl = await downloadCatalogImage(preview.imageSourceUrl, productId);
   }
 
   return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
