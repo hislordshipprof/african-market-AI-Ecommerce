@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 import type { ValidatedStore } from "@/lib/get-store";
 import { listCategories } from "@/lib/storefront/service";
@@ -6,6 +5,7 @@ import { SearchBar } from "./search-bar";
 import { CartTrigger } from "./cart-provider";
 import { FulfillmentChip } from "./fulfillment-chip";
 import { ShrinkingHeader } from "./scroll-motion";
+import { StoreLogo } from "./store-logo";
 
 export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
   const categories = await listCategories();
@@ -13,15 +13,7 @@ export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
     <ShrinkingHeader>
       <div className="sf-header-main sf-container">
         <Link href="/" className="sf-brand">
-          {store.logoUrl && (
-            <Image
-              src={store.logoUrl}
-              alt={`${store.name} logo`}
-              width={44}
-              height={44}
-              className="sf-logo"
-            />
-          )}
+          {store.logoUrl && <StoreLogo src={store.logoUrl} name={store.name} />}
           <h1 data-testid="store-name">{store.name}</h1>
         </Link>
         <div className="sf-header-window">
