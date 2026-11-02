@@ -30,8 +30,21 @@ export async function deleteE2eListings(opts: { names?: string[] } = {}): Promis
     };
     const ids = (await prisma.listing.findMany({ where, select: { id: true } })).map((l) => l.id);
     if (ids.length > 0) {
-      // Variants and collection items cascade; stock events reference the listing without cascade.
+      // Variants and collection items cascade. Stock events, cart lines and order lines point at the
+      // listing or its variants without cascade, and other specs (customer journey) can add e2e
+      // listings to carts and orders, so those rows go first.
+      const variantIds = (
+        await prisma.listingVariant.findMany({ where: { listingId: { in: ids } }, select: { id: true } })
+      ).map((v) => v.id);
       await prisma.$transaction([
+        prisma.cartLine.deleteMany({
+          where: { OR: [{ variantId: { in: variantIds } }, { substituteVariantId: { in: variantIds } }] },
+        }),
+        prisma.orderLine.deleteMany({
+          where: {
+            OR: [{ listingVariantId: { in: variantIds } }, { substituteVariantId: { in: variantIds } }],
+          },
+        }),
         prisma.stockEvent.deleteMany({ where: { listingId: { in: ids } } }),
         prisma.listing.deleteMany({ where: { id: { in: ids } } }),
       ]);
