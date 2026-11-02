@@ -22,10 +22,15 @@ function loadEnvFile(filePath: string) {
   }
 }
 
+const E2E_PORT = process.env.E2E_PORT || "3000";
+
+// .env files cannot interpolate, so the auth origin follows E2E_PORT here.
+// Explicit values (CI job env, shell) still win.
+process.env.BETTER_AUTH_URL ??= `http://localhost:${E2E_PORT}`;
+process.env.BETTER_AUTH_TRUSTED_ORIGINS ??= `http://localhost:${E2E_PORT}`;
+
 loadEnvFile(resolve(__dirname, ".env.e2e"));
 loadEnvFile(resolve(__dirname, ".env.local"));
-
-const E2E_PORT = process.env.E2E_PORT || "3000";
 
 export default defineConfig({
   testDir: "./e2e",
