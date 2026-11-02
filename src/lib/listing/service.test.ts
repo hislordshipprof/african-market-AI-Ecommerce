@@ -11,6 +11,8 @@ import {
   getListing,
   updateVariants,
   listMasterProducts,
+  type Actor,
+  type CreateVariantInput,
 } from "./service";
 import { platformAdmin } from "../db";
 
@@ -20,6 +22,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
   let rawPrisma: PrismaClient;
   let storeId: string;
   let userId: string;
+  let actor: Actor;
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -39,6 +42,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       create: { id: "svc-listing-user", email: "svc-listing-user@example.com", name: "Svc Test User", emailVerified: true },
     });
     userId = user.id;
+    actor = { id: user.id, email: user.email };
   });
 
   afterAll(async () => {
@@ -69,8 +73,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
         { label: "1kg", price: 800, weightG: 1000 },
         { label: "2kg", price: 1500, weightG: 2000 },
       ],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     expect(result.customName).toBe("Garri White");
@@ -95,8 +98,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: true,
       variants: [{ label: "1L", price: 1500, weightG: 900 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const scoped = storeScoped(storeId);
@@ -117,8 +119,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "500g", price: 1200, weightG: 500 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const scoped = storeScoped(storeId);
@@ -140,16 +141,14 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "100g", price: 500, weightG: 100 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     await updateListing({
       storeId,
       listingId: listing.id,
       price: 600,
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const scoped = storeScoped(storeId);
@@ -171,16 +170,14 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "150g", price: 400, weightG: 150 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     await updateListing({
       storeId,
       listingId: listing.id,
       qty: 20,
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const scoped = storeScoped(storeId);
@@ -209,16 +206,14 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: true,
       variants: [{ label: "1 bunch", price: 300, weightG: 200 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     await updateListing({
       storeId,
       listingId: listing.id,
       status: "low",
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const scoped = storeScoped(storeId);
@@ -240,11 +235,10 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "200g", price: 1100, weightG: 200 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
-    const result = await deactivateListing(storeId, listing.id, userId, "svc-listing-user@example.com");
+    const result = await deactivateListing(storeId, listing.id, actor);
     expect(result.active).toBe(false);
 
     const activeListings = await listListings(storeId, false);
@@ -264,12 +258,11 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "100g", price: 900, weightG: 100 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
-    await deactivateListing(storeId, listing.id, userId, "svc-listing-user@example.com");
-    const result = await reactivateListing(storeId, listing.id, userId, "svc-listing-user@example.com");
+    await deactivateListing(storeId, listing.id, actor);
+    const result = await reactivateListing(storeId, listing.id, actor);
     expect(result.active).toBe(true);
   });
 
@@ -283,8 +276,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: true,
       perishable: false,
       variants: [{ label: "Whole", price: 2500, weightG: 500 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const found = await getListing(storeId, listing.id);
@@ -304,8 +296,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "1kg", price: 500, weightG: 1000 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     expect(listing.qty).toBe(20);
@@ -315,8 +306,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       listingId: listing.id,
       stockMode: "status",
       status: "in_stock",
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const found = await getListing(storeId, listing.id);
@@ -335,8 +325,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "1kg", price: 600, weightG: 1000 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     expect(listing.status).toBe("in_stock");
@@ -346,8 +335,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       listingId: listing.id,
       stockMode: "counted",
       qty: 10,
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const found = await getListing(storeId, listing.id);
@@ -369,8 +357,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
         { label: "250g", price: 500, weightG: 250 },
         { label: "1kg", price: 1800, weightG: 1000 },
       ],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     await updateListing({
@@ -380,8 +367,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
         { label: "250g", price: 600, weightG: 250 },
         { label: "1kg", price: 1800, weightG: 1000 },
       ],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const scoped = storeScoped(storeId);
@@ -409,16 +395,14 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "1kg", price: 700, weightG: 1000 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     await updateListing({
       storeId,
       listingId: listing.id,
       variants: [{ label: "1kg", price: 700, weightG: 1000 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const scoped = storeScoped(storeId);
@@ -441,8 +425,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
         { label: "250g", price: 500, weightG: 250 },
         { label: "1kg", price: 1800, weightG: 1000 },
       ],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     await updateListing({
@@ -452,8 +435,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
         { label: "1kg", price: 1800, weightG: 1000 },
         { label: "250g", price: 500, weightG: 250 },
       ],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     const scoped = storeScoped(storeId);
@@ -479,8 +461,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
         frozen: false,
         perishable: false,
         variants: [{ label: "500g", price: 1200, weightG: 500 }],
-        actorId: userId,
-        actorEmail: "svc-listing-user@example.com",
+        actor,
       });
 
       expect(listing.masterProductId).toBe(mp.id);
@@ -518,8 +499,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       frozen: false,
       perishable: false,
       variants: [{ label: "1kg", price: 700, weightG: 1000 }],
-      actorId: userId,
-      actorEmail: "svc-listing-user@example.com",
+      actor,
     });
 
     await updateVariants({
@@ -530,9 +510,157 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
         { label: "2kg", price: 1300, weightG: 2000 },
         { label: "5kg", price: 3000, weightG: 5000 },
       ],
+      actor,
     });
 
     const found = await getListing(storeId, listing.id);
     expect(found!.variants).toHaveLength(3);
+  });
+
+  async function newListing(
+    name: string,
+    variants: CreateVariantInput[] = [{ label: "1kg", price: 700, weightG: 1000 }],
+  ) {
+    return createListing({
+      storeId,
+      customName: name,
+      price: 700,
+      stockMode: "counted",
+      qty: 5,
+      frozen: false,
+      perishable: false,
+      variants,
+      actor,
+    });
+  }
+
+  async function auditFor(id: string, action: string) {
+    return storeScoped(storeId).auditLog.findMany({
+      where: { entityId: id, action },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  it("deactivate on an active listing audits before active:true, after active:false", async () => {
+    const listing = await newListing("Toggle Active");
+    await deactivateListing(storeId, listing.id, actor);
+    const logs = await auditFor(listing.id, "listing.deactivate");
+    expect(logs).toHaveLength(1);
+    expect(logs[0].before).toEqual({ active: true });
+    expect(logs[0].after).toEqual({ active: false });
+  });
+
+  it("deactivate on an already-inactive listing audits the true before-state", async () => {
+    const listing = await newListing("Toggle Twice");
+    await deactivateListing(storeId, listing.id, actor);
+    await deactivateListing(storeId, listing.id, actor);
+    const logs = await auditFor(listing.id, "listing.deactivate");
+    expect(logs).toHaveLength(2);
+    expect(logs[1].before).toEqual({ active: false });
+    expect(logs[1].after).toEqual({ active: false });
+  });
+
+  it("reactivate on an already-active listing audits before active:true", async () => {
+    const listing = await newListing("Reactivate Active");
+    await reactivateListing(storeId, listing.id, actor);
+    const logs = await auditFor(listing.id, "listing.reactivate");
+    expect(logs).toHaveLength(1);
+    expect(logs[0].before).toEqual({ active: true });
+    expect(logs[0].after).toEqual({ active: true });
+  });
+
+  it("updateVariants with changed prices writes a variant_price_change audit entry", async () => {
+    const listing = await newListing("UV Price Change");
+    await updateVariants({
+      storeId,
+      listingId: listing.id,
+      variants: [{ label: "1kg", price: 900, weightG: 1000 }],
+      actor,
+    });
+    const logs = await auditFor(listing.id, "listing.variant_price_change");
+    expect(logs).toHaveLength(1);
+    expect(logs[0].actorId).toBe(actor.id);
+    expect(logs[0].actorEmail).toBe(actor.email);
+    expect(logs[0].before).toEqual({ variants: [{ label: "1kg", price: 700 }] });
+    expect(logs[0].after).toEqual({ variants: [{ label: "1kg", price: 900 }] });
+  });
+
+  it("updateVariants with unchanged prices writes no audit entry", async () => {
+    const listing = await newListing("UV No Change");
+    await updateVariants({
+      storeId,
+      listingId: listing.id,
+      variants: [{ label: "1kg", price: 700, weightG: 1200 }],
+      actor,
+    });
+    expect(await auditFor(listing.id, "listing.variant_price_change")).toHaveLength(0);
+  });
+
+  it("round-trips sku and barcode through updateListing", async () => {
+    const listing = await newListing("Sku Roundtrip", [
+      { label: "1kg", price: 700, weightG: 1000, sku: "SKU-1", barcode: "123456" },
+    ]);
+    await updateListing({
+      storeId,
+      listingId: listing.id,
+      variants: [{ label: "1kg", price: 700, weightG: 1000, sku: "SKU-1", barcode: "123456" }],
+      actor,
+    });
+    const found = await getListing(storeId, listing.id);
+    expect(found!.variants[0].sku).toBe("SKU-1");
+    expect(found!.variants[0].barcode).toBe("123456");
+  });
+
+  it("rolls back the whole update when variant creation fails", async () => {
+    const listing = await newListing("Rollback Target");
+    await expect(
+      updateListing({
+        storeId,
+        listingId: listing.id,
+        price: 9999,
+        variants: [
+          { label: "ok", price: 1, weightG: 1 },
+          { label: "bad", price: 1, weightG: 1e12 }, // out of INT4 range: fails inside the transaction after the update and delete ran
+        ],
+        actor,
+      }),
+    ).rejects.toThrow();
+
+    const found = await getListing(storeId, listing.id);
+    expect(found!.price).toBe(700);
+    expect(found!.variants).toHaveLength(1);
+    expect(found!.variants[0].label).toBe("1kg");
+    expect(await auditFor(listing.id, "listing.price_change")).toHaveLength(0);
+  });
+
+  it("cross-store: another store cannot toggle a listing and sees none of its audit rows", async () => {
+    const other = await rawPrisma.store.upsert({
+      where: { slug: "svc-listing-test-b" },
+      update: {},
+      create: { slug: "svc-listing-test-b", name: "Listing Svc Test B", themePreset: "palm-and-shea" },
+    });
+    try {
+      const listing = await newListing("Cross Store Toggle");
+      await deactivateListing(storeId, listing.id, actor);
+
+      await expect(deactivateListing(other.id, listing.id, actor)).rejects.toThrow();
+      await expect(reactivateListing(other.id, listing.id, actor)).rejects.toThrow();
+      await expect(
+        updateVariants({
+          storeId: other.id,
+          listingId: listing.id,
+          variants: [{ label: "x", price: 1, weightG: 1 }],
+          actor,
+        }),
+      ).rejects.toThrow();
+
+      const seenByOther = await storeScoped(other.id).auditLog.findMany({
+        where: { entityId: listing.id },
+      });
+      expect(seenByOther).toHaveLength(0);
+      expect((await getListing(storeId, listing.id))!.active).toBe(false);
+    } finally {
+      await rawPrisma.store.deleteMany({ where: { slug: "svc-listing-test-b" } });
+    }
   });
 });

@@ -12,6 +12,51 @@ export interface CreateVariantInput {
   barcode?: string | null;
 }
 
+/** The signed-in user performing a listing mutation, recorded in audit rows. */
+export interface Actor {
+  id: string;
+  email: string;
+}
+
+type ListingTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
+
+/** Inserts variant rows for a listing. Shared by create, update and updateVariants. */
+async function createVariantRows(
+  tx: ListingTx,
+  listingId: string,
+  variants: CreateVariantInput[],
+) {
+  return Promise.all(
+    variants.map((v) =>
+      tx.listingVariant.create({
+        data: {
+          listingId,
+          label: v.label,
+          price: v.price,
+          weightG: v.weightG,
+          sku: v.sku ?? null,
+          barcode: v.barcode ?? null,
+        },
+      }),
+    ),
+  );
+}
+
+type VariantPriceRow = { label: string; price: number };
+
+function sortedPrices(rows: VariantPriceRow[]): VariantPriceRow[] {
+  return rows
+    .map((v) => ({ label: v.label, price: v.price }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function variantPricesDiffer(before: VariantPriceRow[], after: VariantPriceRow[]): boolean {
+  return (
+    before.length !== after.length ||
+    before.some((old, i) => old.label !== after[i]?.label || old.price !== after[i]?.price)
+  );
+}
+
 export interface CreateListingInput {
   storeId: string;
   masterProductId?: string | null;
@@ -24,8 +69,7 @@ export interface CreateListingInput {
   perishable: boolean;
   maxPerOrder?: number | null;
   variants: CreateVariantInput[];
-  actorId: string;
-  actorEmail: string;
+  actor: Actor;
 }
 
 export async function createListing(input: CreateListingInput) {
@@ -45,20 +89,7 @@ export async function createListing(input: CreateListingInput) {
       },
     });
 
-    const variants = await Promise.all(
-      input.variants.map((v) =>
-        tx.listingVariant.create({
-          data: {
-            listingId: listing.id,
-            label: v.label,
-            price: v.price,
-            weightG: v.weightG,
-            sku: v.sku ?? null,
-            barcode: v.barcode ?? null,
-          },
-        }),
-      ),
-    );
+    const variants = await createVariantRows(tx, listing.id, input.variants);
 
     if (input.stockMode === "counted" && (input.qty ?? 0) > 0) {
       await tx.stockEvent.create({
@@ -67,7 +98,7 @@ export async function createListing(input: CreateListingInput) {
           listingId: listing.id,
           type: "recount",
           delta: input.qty!,
-          actorId: input.actorId,
+          actorId: input.actor.id,
         },
       });
     }
@@ -75,8 +106,8 @@ export async function createListing(input: CreateListingInput) {
     await tx.auditLog.create({
       data: {
         storeId: input.storeId,
-        actorId: input.actorId,
-        actorEmail: input.actorEmail,
+        actorId: input.actor.id,
+        actorEmail: input.actor.email,
         action: "listing.create",
         entityType: "listing",
         entityId: listing.id,
@@ -109,8 +140,7 @@ export interface UpdateListingInput {
   frozen?: boolean;
   perishable?: boolean;
   maxPerOrder?: number | null;
-  actorId: string;
-  actorEmail: string;
+  actor: Actor;
   variants?: CreateVariantInput[];
 }
 
@@ -150,8 +180,8 @@ export async function updateListing(input: UpdateListingInput) {
       await tx.auditLog.create({
         data: {
           storeId: input.storeId,
-          actorId: input.actorId,
-          actorEmail: input.actorEmail,
+          actorId: input.actor.id,
+          actorEmail: input.actor.email,
           action: "listing.price_change",
           entityType: "listing",
           entityId: input.listingId,
@@ -176,8 +206,8 @@ export async function updateListing(input: UpdateListingInput) {
       await tx.auditLog.create({
         data: {
           storeId: input.storeId,
-          actorId: input.actorId,
-          actorEmail: input.actorEmail,
+          actorId: input.actor.id,
+          actorEmail: input.actor.email,
           action: "listing.stock_change",
           entityType: "listing",
           entityId: input.listingId,
@@ -194,7 +224,7 @@ export async function updateListing(input: UpdateListingInput) {
             listingId: input.listingId,
             type: "adjust",
             delta,
-            actorId: input.actorId,
+            actorId: input.actor.id,
           },
         });
       }
@@ -206,7 +236,7 @@ export async function updateListing(input: UpdateListingInput) {
             listingId: input.listingId,
             type: "adjust",
             delta: 0,
-            actorId: input.actorId,
+            actorId: input.actor.id,
           },
         });
       }
@@ -218,39 +248,18 @@ export async function updateListing(input: UpdateListingInput) {
       });
 
       await tx.listingVariant.deleteMany({ where: { listingId: input.listingId } });
-      await Promise.all(
-        input.variants.map((v) =>
-          tx.listingVariant.create({
-            data: {
-              listingId: input.listingId,
-              label: v.label,
-              price: v.price,
-              weightG: v.weightG,
-              sku: v.sku ?? null,
-              barcode: v.barcode ?? null,
-            },
-          }),
-        ),
-      );
+      await createVariantRows(tx, input.listingId, input.variants);
 
-      const sortByLabel = (a: { label: string }, b: { label: string }) =>
-        a.label.localeCompare(b.label);
-      const oldPrices = existingVariants
-        .map((v) => ({ label: v.label, price: v.price }))
-        .sort(sortByLabel);
-      const newPrices = input.variants
-        .map((v) => ({ label: v.label, price: v.price }))
-        .sort(sortByLabel);
-      const pricesChanged =
-        oldPrices.length !== newPrices.length ||
-        oldPrices.some((old, i) => old.label !== newPrices[i]?.label || old.price !== newPrices[i]?.price);
+      const oldPrices = sortedPrices(existingVariants);
+      const newPrices = sortedPrices(input.variants);
+      const pricesChanged = variantPricesDiffer(oldPrices, newPrices);
 
       if (pricesChanged) {
         await tx.auditLog.create({
           data: {
             storeId: input.storeId,
-            actorId: input.actorId,
-            actorEmail: input.actorEmail,
+            actorId: input.actor.id,
+            actorEmail: input.actor.email,
             action: "listing.variant_price_change",
             entityType: "listing",
             entityId: input.listingId,
@@ -265,28 +274,30 @@ export async function updateListing(input: UpdateListingInput) {
   });
 }
 
-export async function deactivateListing(
+async function setListingActive(
   storeId: string,
   listingId: string,
-  actorId: string,
-  actorEmail: string,
+  active: boolean,
+  actor: Actor,
 ) {
   return storeScopedTransaction(storeId, async (tx) => {
+    const existing = await tx.listing.findUniqueOrThrow({ where: { id: listingId } });
+
     const updated = await tx.listing.update({
       where: { id: listingId },
-      data: { active: false },
+      data: { active },
     });
 
     await tx.auditLog.create({
       data: {
         storeId,
-        actorId,
-        actorEmail,
-        action: "listing.deactivate",
+        actorId: actor.id,
+        actorEmail: actor.email,
+        action: active ? "listing.reactivate" : "listing.deactivate",
         entityType: "listing",
         entityId: listingId,
-        before: { active: true },
-        after: { active: false },
+        before: { active: existing.active },
+        after: { active },
       },
     });
 
@@ -294,33 +305,12 @@ export async function deactivateListing(
   });
 }
 
-export async function reactivateListing(
-  storeId: string,
-  listingId: string,
-  actorId: string,
-  actorEmail: string,
-) {
-  return storeScopedTransaction(storeId, async (tx) => {
-    const updated = await tx.listing.update({
-      where: { id: listingId },
-      data: { active: true },
-    });
+export async function deactivateListing(storeId: string, listingId: string, actor: Actor) {
+  return setListingActive(storeId, listingId, false, actor);
+}
 
-    await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId,
-        actorEmail,
-        action: "listing.reactivate",
-        entityType: "listing",
-        entityId: listingId,
-        before: { active: false },
-        after: { active: true },
-      },
-    });
-
-    return updated;
-  });
+export async function reactivateListing(storeId: string, listingId: string, actor: Actor) {
+  return setListingActive(storeId, listingId, true, actor);
 }
 
 export async function listListings(storeId: string, includeInactive = false) {
@@ -351,25 +341,35 @@ export interface UpdateVariantsInput {
   storeId: string;
   listingId: string;
   variants: (CreateVariantInput & { id?: string })[];
+  actor: Actor;
 }
 
 export async function updateVariants(input: UpdateVariantsInput) {
   return storeScopedTransaction(input.storeId, async (tx) => {
-    await tx.listingVariant.deleteMany({ where: { listingId: input.listingId } });
+    const existingVariants = await tx.listingVariant.findMany({
+      where: { listingId: input.listingId },
+    });
 
-    return Promise.all(
-      input.variants.map((v) =>
-        tx.listingVariant.create({
-          data: {
-            listingId: input.listingId,
-            label: v.label,
-            price: v.price,
-            weightG: v.weightG,
-            sku: v.sku ?? null,
-            barcode: v.barcode ?? null,
-          },
-        }),
-      ),
-    );
+    await tx.listingVariant.deleteMany({ where: { listingId: input.listingId } });
+    const created = await createVariantRows(tx, input.listingId, input.variants);
+
+    const oldPrices = sortedPrices(existingVariants);
+    const newPrices = sortedPrices(input.variants);
+    if (variantPricesDiffer(oldPrices, newPrices)) {
+      await tx.auditLog.create({
+        data: {
+          storeId: input.storeId,
+          actorId: input.actor.id,
+          actorEmail: input.actor.email,
+          action: "listing.variant_price_change",
+          entityType: "listing",
+          entityId: input.listingId,
+          before: { variants: oldPrices },
+          after: { variants: newPrices },
+        },
+      });
+    }
+
+    return created;
   });
 }

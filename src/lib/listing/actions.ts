@@ -7,12 +7,18 @@ import {
   updateListing,
   deactivateListing,
   reactivateListing,
+  listMasterProducts,
+  type Actor,
   type StockMode,
   type StockStatus,
   type CreateVariantInput,
 } from "./service";
 
 const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
+
+function toActor(user: { id: string; email: string }): Actor {
+  return { id: user.id, email: user.email };
+}
 
 function parseVariantsJson(raw: string | null): CreateVariantInput[] {
   if (!raw) return [];
@@ -22,7 +28,7 @@ function parseVariantsJson(raw: string | null): CreateVariantInput[] {
     const price = Number(v.price);
     const weightG = Number(v.weightG);
     if (!isFinite(price) || price < 0) throw new Error(`Variant ${i + 1}: valid non-negative price is required`);
-    if (!isFinite(weightG) || weightG < 0) throw new Error(`Variant ${i + 1}: valid non-negative weight is required`);
+    if (!isFinite(weightG) || weightG <= 0) throw new Error(`Variant ${i + 1}: weight must be greater than 0`);
     return {
       label: String(v.label ?? ""),
       price,
@@ -80,8 +86,7 @@ export async function createListingAction(formData: FormData) {
       perishable,
       maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null,
       variants,
-      actorId: session.user.id,
-      actorEmail: session.user.email,
+      actor: toActor(session.user),
     });
     revalidateStorefront(session.store.id);
     return { success: true, id: result.id };
@@ -127,6 +132,9 @@ export async function updateListingAction(formData: FormData) {
   if (variantsJson !== null) {
     try {
       parsedVariants = parseVariantsJson(variantsJson);
+      if (parsedVariants.length === 0) {
+        return { error: "At least one variant is required" };
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invalid variants";
       return { error: message };
@@ -137,7 +145,8 @@ export async function updateListingAction(formData: FormData) {
     const updated = await updateListing({
       storeId: session.store.id,
       listingId,
-      ...(customName !== null && { customName }),
+      ...(customName !== null && { customName: customName.trim() || null }),
+      ...(masterProductId !== null && { masterProductId: masterProductId || null }),
       ...(priceRaw !== null && { price: Number(priceRaw) }),
       ...(stockMode !== null && { stockMode: stockMode as StockMode }),
       ...(qtyRaw !== null && { qty: Number(qtyRaw) }),
@@ -145,8 +154,7 @@ export async function updateListingAction(formData: FormData) {
       ...(frozen !== null && { frozen: frozen === "true" }),
       ...(perishable !== null && { perishable: perishable === "true" }),
       ...(maxPerOrderRaw !== null && { maxPerOrder: maxPerOrderRaw ? Number(maxPerOrderRaw) : null }),
-      actorId: session.user.id,
-      actorEmail: session.user.email,
+      actor: toActor(session.user),
       variants: parsedVariants,
     });
 
@@ -165,8 +173,7 @@ export async function deactivateListingAction(listingId: string) {
     await deactivateListing(
       session.store.id,
       listingId,
-      session.user.id,
-      session.user.email,
+      toActor(session.user),
     );
     revalidateStorefront(session.store.id);
     return { success: true };
@@ -183,8 +190,7 @@ export async function reactivateListingAction(listingId: string) {
     await reactivateListing(
       session.store.id,
       listingId,
-      session.user.id,
-      session.user.email,
+      toActor(session.user),
     );
     revalidateStorefront(session.store.id);
     return { success: true };
@@ -192,4 +198,10 @@ export async function reactivateListingAction(listingId: string) {
     const message = err instanceof Error ? err.message : "Failed to reactivate listing";
     return { error: message };
   }
+}
+
+export async function listMasterProductsAction() {
+  await requireStoreOwner();
+  const products = await listMasterProducts();
+  return products.map((p) => ({ id: p.id, name: p.name }));
 }
