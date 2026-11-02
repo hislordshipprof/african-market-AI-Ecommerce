@@ -208,7 +208,7 @@ export function OrderInbox({
 
   return (
     <div className="min-h-dvh bg-background">
-      <header className="border-b border-border bg-card">
+      <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur-sm">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             <Link
@@ -249,7 +249,7 @@ export function OrderInbox({
           <div>
             <button
               onClick={() => setSelectedOrderId(null)}
-              className="mb-4 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              className="mb-4 flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="size-4" /> Back to orders
             </button>
@@ -257,7 +257,7 @@ export function OrderInbox({
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">
+                  <CardTitle className="text-lg font-bold tabular-nums">
                     Order #{selectedOrder.number}
                   </CardTitle>
                   <Badge
@@ -300,40 +300,40 @@ export function OrderInbox({
                       {sortedPickLines.map((line) => (
                         <div
                           key={line.id}
-                          className={`flex items-center justify-between rounded-lg border p-3 ${
+                          className={`flex items-center justify-between rounded-xl border p-3 transition-colors ${
                             line.status === "picked"
                               ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950"
                               : "border-border bg-card"
                           }`}
                         >
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <span className="text-sm font-medium text-foreground">
                                 {lineProductName(line)}
                               </span>
                               {line.frozen && (
-                                <Badge variant="secondary" className="text-xs">
+                                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
                                   Frozen
                                 </Badge>
                               )}
                               {line.perishable && (
-                                <Badge variant="secondary" className="text-xs">
+                                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
                                   Perishable
                                 </Badge>
                               )}
                             </div>
-                            <div className="text-xs text-muted-foreground">
+                            <div className="mt-0.5 text-xs text-muted-foreground">
                               {line.listingVariant.label} &middot; Qty:{" "}
                               {line.qtyOrdered}
                             </div>
                           </div>
                           {line.status === "picked" ? (
-                            <CheckCircle2 className="size-5 text-green-600 dark:text-green-400" />
+                            <CheckCircle2 className="size-5 shrink-0 text-green-600 dark:text-green-400" />
                           ) : (
                             <Button
                               variant="outline"
                               size="sm"
-                              className="rounded-full"
+                              className="shrink-0 rounded-full"
                               onClick={() => handleMarkPicked(line.id)}
                               disabled={isPending}
                             >
@@ -356,20 +356,20 @@ export function OrderInbox({
                   </Button>
                 )}
 
-                <div className="mt-4 space-y-1 border-t pt-4">
+                <div className="mt-6 space-y-1.5 border-t pt-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>{money(selectedOrder.subtotalCents)}</span>
+                    <span className="tabular-nums">{money(selectedOrder.subtotalCents)}</span>
                   </div>
                   {selectedOrder.tipCents > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Tip</span>
-                      <span>{money(selectedOrder.tipCents)}</span>
+                      <span className="tabular-nums">{money(selectedOrder.tipCents)}</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-sm font-medium">
+                  <div className="flex justify-between pt-1.5 text-base font-semibold">
                     <span>Total</span>
-                    <span>{money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}</span>
+                    <span className="tabular-nums">{money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}</span>
                   </div>
                 </div>
               </CardContent>
@@ -378,10 +378,13 @@ export function OrderInbox({
         ) : (
           <div>
             {orders.length === 0 ? (
-              <div className="py-12 text-center">
-                <ShoppingBag className="mx-auto mb-3 size-10 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
+              <div className="py-20 text-center">
+                <ShoppingBag className="mx-auto mb-4 size-12 text-muted-foreground/50" />
+                <p className="text-sm font-medium text-muted-foreground">
                   No active orders right now
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground/70">
+                  New orders will appear here automatically
                 </p>
               </div>
             ) : (
@@ -394,18 +397,18 @@ export function OrderInbox({
                       onClick={() => setSelectedOrderId(order.id)}
                       className="w-full text-left"
                     >
-                      <Card className="transition-shadow hover:shadow-md">
-                        <CardContent className="flex items-center gap-4 p-4">
-                          <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                      <Card className="transition-all duration-200 hover:shadow-md active:scale-[0.99]">
+                        <CardContent className="flex items-center gap-4 px-4 py-3.5">
+                          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10">
                             {config?.icon ? (
                               <config.icon className="size-5 text-primary" />
                             ) : (
                               <ShoppingBag className="size-5 text-primary" />
                             )}
                           </div>
-                          <div className="flex-1">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-foreground">
+                              <span className="text-sm font-bold tabular-nums text-foreground">
                                 #{order.number}
                               </span>
                               <Badge
@@ -414,14 +417,14 @@ export function OrderInbox({
                                 {config?.label ?? order.status}
                               </Badge>
                             </div>
-                            <div className="text-xs text-muted-foreground">
+                            <div className="mt-0.5 truncate text-xs text-muted-foreground">
                               {order.customer.name} &middot;{" "}
                               {order.lines.length} item
                               {order.lines.length !== 1 ? "s" : ""} &middot;{" "}
                               {money(order.totalCents ?? order.subtotalCents)}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <div className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground">
                             <Clock className="size-3" />
                             {new Date(order.createdAt).toLocaleTimeString([], {
                               hour: "2-digit",
