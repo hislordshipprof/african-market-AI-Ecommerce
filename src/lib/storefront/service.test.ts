@@ -28,6 +28,8 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let listingBId: string;
   let inactiveListingId: string;
   let e2eListingId: string;
+  let frozenListingId: string;
+  let customOnlyListingId: string;
   let collectionId: string;
 
   it("projects checkout catalog variants without crossing stores or including inactive listings", async () => {
@@ -212,6 +214,24 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     ]);
     e2eListingId = (e2eListing[2] as { id: string }).id;
 
+    // Frozen listing (AC4) and custom-name-only listing with no master product (AC5), both store A
+    const mkListing = async (data: Record<string, unknown>) => {
+      const r = await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+        rawPrisma.listing.create({
+          data: {
+            storeId: storeAId, price: 700, stockMode: "counted", qty: 5, perishable: false, confidence: 0.9,
+            variants: { create: [{ label: "1 pack", price: 700, weightG: 300 }] },
+            ...data,
+          } as never,
+        }),
+      ]);
+      return (r[2] as { id: string }).id;
+    };
+    frozenListingId = await mkListing({ masterProductId, customName: "Frozen Ugu Cubes", frozen: true });
+    customOnlyListingId = await mkListing({ masterProductId: null, customName: "Custom Item", frozen: false });
+
     // Create a collection in store A with an item
     const collection = await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -255,12 +275,12 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listingVariant.deleteMany({ where: { listingId: { in: [listingAId, listingBId, inactiveListingId, e2eListingId] } } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listingId: { in: [listingAId, listingBId, inactiveListingId, e2eListingId, frozenListingId, customOnlyListingId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listing.deleteMany({ where: { id: { in: [listingAId, listingBId, inactiveListingId, e2eListingId] } } }),
+      rawPrisma.listing.deleteMany({ where: { id: { in: [listingAId, listingBId, inactiveListingId, e2eListingId, frozenListingId, customOnlyListingId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -316,6 +336,22 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     expect(result.listings.length).toBeGreaterThanOrEqual(1);
     expect(result.listings.some((l) => l.id === listingBId)).toBe(true);
     expect(result.listings.some((l) => l.id === listingAId)).toBe(false);
+  });
+
+  // #72 AC4: frozen flag reaches search results
+  it("search results carry the frozen flag", async () => {
+    const results = await searchListings(storeAId, "Frozen Ugu Cubes");
+    expect(results.find((r) => r.id === frozenListingId)?.frozen).toBe(true);
+    const fresh = await searchListings(storeAId, "ugu");
+    expect(fresh.find((r) => r.id === listingAId)?.frozen).toBe(false);
+  });
+
+  // #72 AC5: custom-name-only listings are excluded from category browse but searchable
+  it("custom-only listing is absent from category browse but found by search", async () => {
+    const browse = await listingsByCategory(storeAId, "vegetables");
+    expect(browse.listings.some((l) => l.id === customOnlyListingId)).toBe(false);
+    const search = await searchListings(storeAId, "Custom Item");
+    expect(search.some((r) => r.id === customOnlyListingId)).toBe(true);
   });
 
   // Seam 3: listing detail store isolation
