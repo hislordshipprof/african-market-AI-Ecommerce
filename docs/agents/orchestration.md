@@ -8,13 +8,13 @@ How tickets get built. Adapted from SuperMatt's `orchestrate` (which needs Herdr
 |---|---|---|---|
 | **T: Plan** (ticket N+1, while N builds) | headless Claude, main checkout, read-only | `scripts/plan-ticket.sh <n>` runs `/supermatt:triage #n` in delegated mode | Agent brief comment on the issue (verified claims, test seams, env needs, exclusions), label `ready-for-agent`, or `needs-info` with the missing facts |
 | **Preflight** | script | inside `build-ticket.sh` | Refuses to start when the issue is blocked, has no brief, or `.env.local` lacks the keys in `scripts/ticket-env.txt` |
-| **A: Build** | headless Claude, worktree | `scripts/build-ticket.sh <n>` runs `/supermatt:implement #n` | Small TDD commits; fresh-context `qa` on the local app; `code-review` (Standards / Spec / Adversarial + Codex peer, `docs/agents/cross-model.json`); every verified finding fixed or deferred to a follow-up; pushed branch + PR; `.builder/report-<n>.md` |
+| **A: Build** | headless Claude, worktree | `scripts/build-ticket.sh <n>` runs `/supermatt:implement #n` | Small TDD commits; fresh-context `qa` on the local app; `code-review` (Standards / Spec / Adversarial, host-only per `docs/agents/cross-model.json`; no Codex peer per build); every verified finding fixed or deferred to a follow-up; pushed branch + PR; `.builder/report-<n>.md` |
 | **Fix** (at most 2 rounds) | same builder session, resumed | `scripts/build-ticket.sh <n> --resume "<findings>"` runs `/supermatt:fix-findings` | Fix commits, re-QA and re-review of the fix diff only |
 | **V: Verify** | coordinator | CI green + live Vercel preview check in Chrome (`/api/health`, the ticket's acceptance scenarios) + coordinator spot-check of the review report | Pass, or blocking findings back to Fix |
 | **B: Ship** | coordinator script, then headless Claude only if needed | `scripts/merge-ticket.sh <n> "<verdict>"` squash-merges directly when all checks are green and the PR is up to date with `main`, or is behind only by commits that touch none of its files (main's post-merge CI is the safety net); otherwise it falls back to `scripts/ship-ticket.sh` (`/supermatt:ship-pr`: rebase, re-QA, bounded CI repair) | Squash merge, issue closed |
 | **C: Retro** | weekly, not per ticket | `/supermatt:retro` over the week's sessions | Lessons for the brief and scripts |
 
-`scripts/codex-review.sh` (standalone Codex, high effort, exhaustive) is now a fallback for when `implement`'s own review can't run, not a default stage: running it on top duplicates review and causes drip.
+`scripts/codex-review.sh` (standalone Codex, medium effort per `cross-model.json`) is now a fallback for when `implement`'s own review can't run, not a default stage: running it on top duplicates review and causes drip.
 
 ## Vercel previews
 

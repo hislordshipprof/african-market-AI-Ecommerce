@@ -1,6 +1,7 @@
+import { storeUrl } from "./urls";
 import { test, expect } from "@playwright/test";
 
-const BASE = "http://mama-ngozi.localhost:3000";
+const BASE = storeUrl("mama-ngozi");
 
 test.describe("Hero carousel (#55)", () => {
   test("renders with at least one banner", async ({ page }) => {

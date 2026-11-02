@@ -1,6 +1,7 @@
+import { storeUrl } from "./urls";
 import { test, expect, type Page } from "@playwright/test";
 
-const base = "http://mama-ngozi.localhost:3000";
+const base = storeUrl("mama-ngozi");
 
 async function fillBasket(page: Page) {
   await page.goto(`${base}/categories/grains-and-flours`);

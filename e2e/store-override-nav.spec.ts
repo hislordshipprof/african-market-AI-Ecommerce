@@ -1,6 +1,7 @@
+import { storeUrl } from "./urls";
 import { test, expect } from "@playwright/test";
 
-const BASE = "http://localhost:3000";
+const BASE = storeUrl();
 const storeHeader = (page: import("@playwright/test").Page) =>
   page.locator("header h1, [data-testid='store-name']").first();
 

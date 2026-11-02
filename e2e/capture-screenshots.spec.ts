@@ -1,7 +1,8 @@
+import { storeUrl } from "./urls";
 import { test, expect } from "@playwright/test";
 import { resolve } from "path";
 
-const BASE = "http://mama-ngozi.localhost:3000";
+const BASE = storeUrl("mama-ngozi");
 const OUT = resolve(__dirname, "..", "screenshots");
 
 const VIEWPORTS = [

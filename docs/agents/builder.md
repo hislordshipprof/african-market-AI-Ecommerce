@@ -12,7 +12,7 @@ You are the **builder** for the African Markets Platform. You build exactly one 
 Next.js App Router + TypeScript (strict) on Vercel · Tailwind + shadcn/ui · Neon Postgres via `DATABASE_URL` (pooled) and `DIRECT_URL` (migrations only) · Prisma 7 · row-level security per store · Better Auth · Inngest · Cloudflare R2 · pnpm.
 
 ## How to build
-- **Supermatt workflow (mandatory).** Your run starts with `/supermatt:implement #<n>` (see `docs/agents/orchestration.md`). Follow it fully: TDD per slice with small commits, a fresh-context `qa` pass on the running app, then `code-review` (Standards / Spec / Adversarial, with the Codex peer from `docs/agents/cross-model.json`), then fix every verified blocking finding. Non-blocking findings become one follow-up issue (ready-for-agent, blocked by this issue). Fix rounds arrive as `/supermatt:fix-findings` in the same session. Read the issue's **Agent brief** comment first: its test seams are agreed.
+- **Supermatt workflow (mandatory).** Your run starts with `/supermatt:implement #<n>` (see `docs/agents/orchestration.md`). Follow it fully: TDD per slice with small commits, a fresh-context `qa` pass on the running app, then `code-review` (Standards / Spec / Adversarial; host-only per `docs/agents/cross-model.json`, no Codex peer per build), then fix every verified blocking finding. Non-blocking findings become one follow-up issue (ready-for-agent, blocked by this issue). Fix rounds arrive as `/supermatt:fix-findings` in the same session. Read the issue's **Agent brief** comment first: its test seams are agreed.
 - **Skills in this repo:** follow `vercel-react-best-practices` (server components by default, no request waterfalls, small client bundles) and `shadcn` (add components with the CLI, theme from DESIGN.md tokens).
 - **Design pass (mandatory for any ticket that touches UI).** Quality bar: award-level UI/UX, not a default template. In order:
   0. **Read the UI references before designing anything:** `research/ui/dribbble-references.md` (the user's picks, Part A, and "Patterns that recur"), `research/ui/delivery-apps-teardown.md` ("Shared conventions worth adopting" and "What to avoid"), `research/ui/market-sites-review.md` ("Gap" and "Cultural cues"), and DESIGN.md Components. In the report, list which reference patterns each screen uses. A screen that doesn't use them needs a written reason.
@@ -39,7 +39,7 @@ Write the question in your report and end the run. Do not invent product decisio
 1. `pnpm build`
 2. `pnpm test:e2e` (seeds, starts server, runs tests — no manual server start needed)
 
-Stop any other server on port 3000 before running `pnpm test:e2e`. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
+Stop any other server on your lane port (`E2E_PORT`, default 3000) before running `pnpm test:e2e`. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
 
 ## Verify before you claim done
 Run and pass all of these, in the worktree:

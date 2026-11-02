@@ -1,5 +1,6 @@
+import { storeUrl } from "./urls";
 import { test, expect } from "@playwright/test";
-const BASE = "http://mama-ngozi.localhost:3000";
+const BASE = storeUrl("mama-ngozi");
 
 test.describe("Phase 3 motion and depth", () => {
   test.use({ reducedMotion: "no-preference" });

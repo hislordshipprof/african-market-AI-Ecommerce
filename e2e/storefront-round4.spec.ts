@@ -1,6 +1,7 @@
+import { storeUrl } from "./urls";
 import { test, expect } from "@playwright/test";
 
-const BASE = "http://mama-ngozi.localhost:3000";
+const BASE = storeUrl("mama-ngozi");
 
 test.describe("Design round 4", () => {
   for (const [width, count] of [[390, 2.25], [1024, 3.5], [1440, 4.5], [1920, 5.5]]) {

@@ -1,3 +1,4 @@
+import { storeUrl } from "./urls";
 import { test, expect } from "@playwright/test";
 import { generateTOTP } from "./totp";
 
@@ -176,7 +177,7 @@ test.describe("Store management (authenticated)", () => {
     await page.click("button[type='submit']:has-text('Create store')");
     await page.waitForURL("**/admin/stores", { timeout: 10000 });
 
-    await page.goto(`http://${slug}.localhost:3000/`);
+    await page.goto(`${storeUrl(slug)}/`);
     await expect(page.locator("h1")).toHaveText("E2E Live Store");
   });
 
@@ -196,7 +197,7 @@ test.describe("Store management (authenticated)", () => {
       page.locator("tr", { hasText: slug }).getByText("suspended"),
     ).toBeVisible({ timeout: 5000 });
 
-    await page.goto(`http://${slug}.localhost:3000/`);
+    await page.goto(`${storeUrl(slug)}/`);
     await expect(page.locator("text=temporarily offline")).toBeVisible();
   });
 
@@ -227,7 +228,7 @@ test.describe("Layout regression", () => {
   });
 
   test("storefront page still renders", async ({ page }) => {
-    await page.goto("http://mama-ngozi.localhost:3000/");
+    await page.goto(`${storeUrl("mama-ngozi")}/`);
     await expect(page.locator("h1")).toHaveText("Mama Ngozi African Market");
   });
 });
@@ -294,7 +295,7 @@ test.describe("Catalog review (authenticated)", () => {
   test("non-admin access to catalog review redirects to sign-in", async ({ browser }) => {
     const context = await browser.newContext();
     const freshPage = await context.newPage();
-    await freshPage.goto("http://localhost:3000/admin/catalog/review");
+    await freshPage.goto(`${storeUrl()}/admin/catalog/review`);
     await expect(freshPage).toHaveURL(/\/admin\/sign-in/, { timeout: 10000 });
     await context.close();
   });
