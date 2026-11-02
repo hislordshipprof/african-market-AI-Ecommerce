@@ -473,12 +473,12 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     }
   });
 
-  it("listMasterProducts returns products ordered by name", async () => {
+  it("listMasterProducts returns matching products ordered by name", async () => {
     const mpA = await platformAdmin.masterProduct.create({ data: { name: "AAA Test Product" } });
     const mpZ = await platformAdmin.masterProduct.create({ data: { name: "ZZZ Test Product" } });
 
     try {
-      const products = await listMasterProducts();
+      const products = await listMasterProducts(" Test Product");
       expect(products.length).toBeGreaterThanOrEqual(2);
       const names = products.map((p) => p.name);
       const idxA = names.indexOf("AAA Test Product");
@@ -486,6 +486,24 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       expect(idxA).toBeLessThan(idxZ);
     } finally {
       await rawPrisma.masterProduct.deleteMany({ where: { id: { in: [mpA.id, mpZ.id] } } });
+    }
+  });
+
+  it("listMasterProducts filters by name case-insensitively and respects take", async () => {
+    const mps = await Promise.all(
+      ["Zq110 Egusi Seed", "Zq110 EGUSI Ground", "Zq110 Palm Oil"].map((name) =>
+        platformAdmin.masterProduct.create({ data: { name } }),
+      ),
+    );
+    try {
+      const hits = await listMasterProducts("zq110 egu");
+      expect(hits.map((p) => p.name)).toEqual(["Zq110 EGUSI Ground", "Zq110 Egusi Seed"]);
+      expect(await listMasterProducts("zq110", 2)).toHaveLength(2);
+      expect(await listMasterProducts("zzzznotfound110")).toEqual([]);
+      expect((await listMasterProducts()).length).toBeLessThanOrEqual(50);
+      expect((await listMasterProducts("")).length).toBeLessThanOrEqual(50);
+    } finally {
+      await rawPrisma.masterProduct.deleteMany({ where: { id: { in: mps.map((m) => m.id) } } });
     }
   });
 

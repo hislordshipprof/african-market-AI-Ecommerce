@@ -200,8 +200,9 @@ export async function reactivateListingAction(listingId: string) {
   }
 }
 
-export async function listMasterProductsAction() {
+export async function listMasterProductsAction(query?: string) {
   await requireStoreOwner();
-  const products = await listMasterProducts();
+  const safeQuery = typeof query === "string" ? query.slice(0, 100) : undefined;
+  const products = await listMasterProducts(safeQuery, 50);
   return products.map((p) => ({ id: p.id, name: p.name }));
 }

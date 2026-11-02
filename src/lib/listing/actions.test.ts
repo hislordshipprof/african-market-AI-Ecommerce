@@ -315,4 +315,10 @@ describe("listMasterProductsAction", () => {
     const result = await listMasterProductsAction();
     expect(result).toEqual([{ id: "mp-1", name: "Garri" }]);
   });
+
+  it("passes the query through with take 50", async () => {
+    mockListMasterProducts.mockResolvedValueOnce([]);
+    await listMasterProductsAction("egu");
+    expect(mockListMasterProducts).toHaveBeenLastCalledWith("egu", 50);
+  });
 });

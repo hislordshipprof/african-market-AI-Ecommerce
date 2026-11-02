@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -198,6 +198,9 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [maxPerOrder, setMaxPerOrder] = useState("");
   const [masterProductId, setMasterProductId] = useState<string | null>(null);
   const [masterProducts, setMasterProducts] = useState<MasterProductOption[] | null>(null);
+  const [selectedMasterOption, setSelectedMasterOption] = useState<MasterProductOption | null>(null);
+  const searchSeq = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [variants, setVariants] = useState<VariantFormRow[]>([emptyVariantRow()]);
 
   function resetForm() {
@@ -210,19 +213,36 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setPerishable(false);
     setMaxPerOrder("");
     setMasterProductId(null);
+    setSelectedMasterOption(null);
     setVariants([emptyVariantRow()]);
   }
 
-  function loadMasterProducts() {
-    if (masterProducts) return;
-    listMasterProductsAction()
-      .then(setMasterProducts)
-      .catch(() => toast.error("Could not load the master product list"));
+  function searchMasterProducts(query: string) {
+    const seq = ++searchSeq.current;
+    listMasterProductsAction(query)
+      .then((rows) => {
+        if (seq === searchSeq.current) setMasterProducts(rows);
+      })
+      .catch(() => {
+        if (seq === searchSeq.current) toast.error("Could not search the catalog");
+      });
   }
+
+  function onMasterInputChange(value: string) {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => searchMasterProducts(value), 300);
+  }
+
+  useEffect(
+    () => () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    },
+    [],
+  );
 
   function openCreate() {
     resetForm();
-    loadMasterProducts();
+    searchMasterProducts("");
     setCreateOpen(true);
   }
 
@@ -246,11 +266,12 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
         barcode: v.barcode,
       })),
     );
-    loadMasterProducts();
-    if (listing.masterProductId && listing.masterProductName) {
-      const current = { id: listing.masterProductId, name: listing.masterProductName };
-      setMasterProducts((prev) => prev ?? [current]);
-    }
+    searchMasterProducts("");
+    setSelectedMasterOption(
+      listing.masterProductId && listing.masterProductName
+        ? { id: listing.masterProductId, name: listing.masterProductName }
+        : null,
+    );
     setEditListing(listing);
   }
 
@@ -331,17 +352,24 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const activeListings = listings.filter((l) => l.active);
   const inactiveListings = listings.filter((l) => !l.active);
 
-  const selectedMaster = masterProducts?.find((m) => m.id === masterProductId) ?? null;
+  const selectedMaster = masterProductId ? selectedMasterOption : null;
+  const masterItems =
+    selectedMaster && !masterProducts?.some((m) => m.id === selectedMaster.id)
+      ? [selectedMaster, ...(masterProducts ?? [])]
+      : (masterProducts ?? []);
 
   const formContent = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label htmlFor="listing-master">Master product (optional)</Label>
         <Combobox
-          items={masterProducts ?? []}
+          items={masterItems}
+          filter={null}
+          onInputValueChange={onMasterInputChange}
           value={selectedMaster}
           onValueChange={(item: MasterProductOption | null) => {
             setMasterProductId(item?.id ?? null);
+            setSelectedMasterOption(item);
             if (item && !name.trim()) setName(item.name);
           }}
           itemToStringLabel={(item: MasterProductOption) => item.name}
