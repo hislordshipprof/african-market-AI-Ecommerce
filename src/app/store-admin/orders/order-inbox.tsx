@@ -418,10 +418,10 @@ export function OrderInbox({
                               </Badge>
                             </div>
                             <div className="mt-0.5 flex items-baseline gap-1 text-xs text-muted-foreground">
-                              <span className="truncate">
+                              <span className="min-w-0 truncate">
                                 {order.customer.name}
                               </span>
-                              <span className="shrink-0 tabular-nums">
+                              <span className="shrink-0 whitespace-nowrap tabular-nums">
                                 &middot; {order.lines.length} item{order.lines.length !== 1 ? "s" : ""} &middot; {money(order.totalCents ?? order.subtotalCents)}
                               </span>
                             </div>
