@@ -5,6 +5,7 @@ import {
   getStoreOrders,
   acceptOrder,
   markLinePicked,
+  markReady,
   completePickup,
 } from "./service";
 import { platform } from "../db";
@@ -35,6 +36,11 @@ export async function autoAcceptOrderAction(orderId: string) {
 export async function markLinePickedAction(lineId: string) {
   const session = await requireStoreMember();
   return markLinePicked(session.store.id, lineId);
+}
+
+export async function markReadyAction(orderId: string) {
+  const session = await requireStoreMember();
+  return markReady(session.store.id, orderId);
 }
 
 export async function completePickupAction(orderId: string) {

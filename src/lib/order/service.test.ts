@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
-import { acceptOrder, completePickup, markLinePicked, sortPickListLines } from "./service";
+import { acceptOrder, completePickup, markLinePicked, markReady, sortPickListLines } from "./service";
+import { setStripeProvider } from "../stripe";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments } from "../stripe/fake";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -53,14 +55,17 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     rawPrisma = new PrismaClient({ adapter });
     await rawPrisma.$connect();
 
+    setStripeProvider(fakeStripeProvider);
+
     const store = await rawPrisma.store.upsert({
       where: { slug: "order-svc-test" },
-      update: {},
+      update: { stripeAccountId: "acct_test_order_svc" },
       create: {
         slug: "order-svc-test",
         name: "Order Service Test Store",
         themePreset: "palm-and-shea",
         prepTimeMinutes: 25,
+        stripeAccountId: "acct_test_order_svc",
       },
     });
     storeId = store.id;
@@ -124,6 +129,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   afterAll(async () => {
+    setStripeProvider(null);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
@@ -212,7 +218,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("markLinePicked sets qtyPicked and transitions order to PICKING then AWAITING_PICKUP", async () => {
+  it("markLinePicked sets qtyPicked and stays at PICKING even when all lines resolved", async () => {
     const order = await createTestOrder();
     await acceptOrder(storeId, order.id, 15);
 
@@ -231,11 +237,11 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     const r3 = await markLinePicked(storeId, lines[2].id);
     expect(r3.ok).toBe(true);
-    if (r3.ok) expect(r3.orderStatus).toBe("AWAITING_PICKUP");
+    if (r3.ok) expect(r3.orderStatus).toBe("PICKING");
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("AWAITING_PICKUP");
-    expect(updated!.readyAt).toBeTruthy();
+    expect(updated!.status).toBe("PICKING");
+    expect(updated!.readyAt).toBeNull();
   });
 
   it("markLinePicked rejects line from wrong status order", async () => {
@@ -257,6 +263,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     for (const line of lines) {
       await markLinePicked(storeId, line.id);
     }
+    await markReady(storeId, order.id);
 
     const result = await completePickup(storeId, order.id);
     expect(result.ok).toBe(true);
@@ -271,5 +278,70 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const result = await completePickup(storeId, order.id);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Cannot complete");
+  });
+
+  it("markReady rejects when lines are unresolved", async () => {
+    resetFakeStripe();
+    const order = await createTestOrder();
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    await markLinePicked(storeId, lines[0].id);
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("unresolved");
+    }
+    expect(capturedPayments.size).toBe(0);
+  });
+
+  it("markReady succeeds and captures correct amount for pickup order", async () => {
+    resetFakeStripe();
+    const order = await createTestOrder();
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 2 x 1000 + 1 x 2000 + 3 x 500 = 5500
+      expect(result.capturedAmountCents).toBe(5500);
+    }
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("AWAITING_PICKUP");
+    expect(updated!.readyAt).toBeTruthy();
+    expect(updated!.capturedAmountCents).toBe(5500);
+
+    expect(capturedPayments.get(order.paymentIntentId!)).toBe(5500);
+  });
+
+  it("markReady rejects order not in PICKING status", async () => {
+    const order = await createTestOrder();
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("Cannot mark ready");
+    }
+  });
+
+  it("markReady rejects when called from wrong store", async () => {
+    const order = await createTestOrder();
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+    const result = await markReady("nonexistent-store-id", order.id);
+    expect(result.ok).toBe(false);
   });
 });

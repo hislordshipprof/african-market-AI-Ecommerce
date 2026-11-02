@@ -7,6 +7,8 @@ export type {
   ConnectAccount,
   AccountLinkResult,
   WebhookEvent,
+  CaptureResult,
+  CancelResult,
 } from "./types";
 export { deriveOnboardingStatus } from "./types";
 

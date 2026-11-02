@@ -3,14 +3,20 @@ import type {
   ConnectAccount,
   AccountLinkResult,
   WebhookEvent,
+  CaptureResult,
+  CancelResult,
 } from "./types";
 
 const VALID_WEBHOOK_SIGNATURE = "fake_valid_sig";
 
 const accounts = new Map<string, ConnectAccount>();
+const capturedPayments = new Map<string, number>();
+const cancelledPayments = new Set<string>();
 
 function reset() {
   accounts.clear();
+  capturedPayments.clear();
+  cancelledPayments.clear();
 }
 
 function getAccounts(): Map<string, ConnectAccount> {
@@ -60,6 +66,23 @@ const fakeStripeProvider: StripeProvider = {
       accountId: (parsed.accountId ?? parsed.data?.object?.id ?? "") as string,
     } satisfies WebhookEvent;
   },
+
+  async capturePaymentIntent(paymentIntentId, amountCents) {
+    capturedPayments.set(paymentIntentId, amountCents);
+    return {
+      paymentIntentId,
+      amountCaptured: amountCents,
+      status: "succeeded",
+    } satisfies CaptureResult;
+  },
+
+  async cancelPaymentIntent(paymentIntentId) {
+    cancelledPayments.add(paymentIntentId);
+    return {
+      paymentIntentId,
+      status: "canceled",
+    } satisfies CancelResult;
+  },
 };
 
-export { fakeStripeProvider, reset, getAccounts, VALID_WEBHOOK_SIGNATURE };
+export { fakeStripeProvider, reset, getAccounts, capturedPayments, cancelledPayments, VALID_WEBHOOK_SIGNATURE };

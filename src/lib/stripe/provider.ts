@@ -4,6 +4,8 @@ import type {
   ConnectAccount,
   AccountLinkResult,
   WebhookEvent,
+  CaptureResult,
+  CancelResult,
 } from "./types";
 
 let _stripeClient: Stripe | null = null;
@@ -141,5 +143,30 @@ export const stripeProvider: StripeProvider = {
           ? (notification.related_object as { id?: string } | null)?.id
           : undefined) ?? "",
     } satisfies WebhookEvent;
+  },
+
+  async capturePaymentIntent(paymentIntentId, amountCents, stripeAccountId) {
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.capture(paymentIntentId, {
+      amount_to_capture: amountCents,
+    }, {
+      stripeAccount: stripeAccountId,
+    });
+    return {
+      paymentIntentId: pi.id,
+      amountCaptured: pi.amount_received,
+      status: pi.status,
+    } satisfies CaptureResult;
+  },
+
+  async cancelPaymentIntent(paymentIntentId, stripeAccountId) {
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.cancel(paymentIntentId, {}, {
+      stripeAccount: stripeAccountId,
+    });
+    return {
+      paymentIntentId: pi.id,
+      status: pi.status,
+    } satisfies CancelResult;
   },
 };

@@ -21,6 +21,17 @@ export interface WebhookEvent {
   accountId: string;
 }
 
+export interface CaptureResult {
+  paymentIntentId: string;
+  amountCaptured: number;
+  status: string;
+}
+
+export interface CancelResult {
+  paymentIntentId: string;
+  status: string;
+}
+
 export interface StripeProvider {
   createConnectAccount(input: {
     email: string;
@@ -40,6 +51,17 @@ export interface StripeProvider {
     payload: string;
     signature: string;
   }): WebhookEvent;
+
+  capturePaymentIntent(
+    paymentIntentId: string,
+    amountCents: number,
+    stripeAccountId: string,
+  ): Promise<CaptureResult>;
+
+  cancelPaymentIntent(
+    paymentIntentId: string,
+    stripeAccountId: string,
+  ): Promise<CancelResult>;
 }
 
 export function deriveOnboardingStatus(account: {
