@@ -242,3 +242,14 @@ Taken from the DoorDash, Instacart and Weee! teardowns (`research/ui/delivery-ap
 - Put eyebrow labels above headings, colored side borders on cards, or emoji as icons.
 - Use stock "smiling woman in a headwrap" heroes, flag colors or patterns as wallpaper.
 - Show the platform's brand on a storefront beyond the "Powered by" footer.
+
+## Design round 4: storefront presentation
+
+This owner-approved direction supersedes the earlier rail, marquee and product-image treatments. It extends the existing store palette, typography, focus ring and shared components.
+
+- **Content grid:** `--sf-content-max` is 1440px, becoming 1536px at 1800px. `--sf-page-padding` is 16px on phones and 32px otherwise. Rail headings sit above their cards. The scroll viewport starts on the grid and ends at the right viewport edge, with no right padding. Products, deals, categories and collections use the same RailScroller, gap and card-width calculation: 2.25 cards on phones, 3.5 at 1024px, 4.5 at 1440px and 5.5 at 1920px. Short rails simply show all their cards. Arrow buttons, arrow keys, Home/End and touch scrolling remain available.
+- **Reveals:** 0 to 1 opacity and a 24px rise over 500ms ease-out, once at 18% intersection. Product children stagger by 30ms, capped at index seven. The JS-added `html.sf-reveal-ready` class enables hidden states only after hydration; content already in view is never hidden. Without JavaScript or with reduced motion, content stays visible. Focusing unrevealed content also exposes it.
+- **Local-name band:** one slim row of search chips and small accepted product cut-outs. Horizontal offset follows scroll progress through Motion's existing `useScroll` and `useTransform`; there is no timer or pause button. Keyboard focus exposes every chip. Reduced motion uses a static wrapping row.
+- **Images:** square, rounded photo tiles use edge-to-edge cover sizing. Accepted alpha cut-outs use contain sizing with 7.5% inset on each side and the existing contact shadow. Category images fill a circular clip with cover sizing and no inset or shadow. A missing image uses the theme tint, category glyph and product initial; a failed request retries once before showing Photo unavailable.
+- **Source order:** listing-owned image when provided, linked master-product R2 image, accepted local cut-out, designed fallback. Stored R2 paths resolve through `R2_PUBLIC_URL` or the existing allowlisted catalog-image route. Retired Wikimedia URLs are attribution metadata only. The current Listing schema has no owned-image field; no schema or upload work is introduced here.
+- **Hero:** the first slide uses the locally hosted, licensed Bodija Market produce photograph credited in `public/images/CREDITS.md` and `/credits`. It remains the only preloaded home hero background.

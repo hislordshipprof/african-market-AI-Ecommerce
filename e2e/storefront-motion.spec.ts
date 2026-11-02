@@ -26,12 +26,17 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(dots.nth(1)).toHaveAttribute("aria-current", "true", { timeout: 7500 });
   });
 
-  test("marquee is present and can be paused", async ({ page }) => {
+  test("scroll-linked band exposes searchable keyboard chips", async ({ page }) => {
     await page.goto(BASE);
-    const marquee = page.getByTestId("market-marquee");
-    await expect(marquee).toContainText("Egusi");
-    await marquee.getByRole("button", { name: "Pause product names" }).click();
-    await expect(marquee).toHaveAttribute("data-paused", "true");
+    const band = page.getByTestId("market-band");
+    await expect(band.getByRole("link")).toHaveCount(6);
+    await expect(band.getByRole("button")).toHaveCount(0);
+    const chip = band.getByRole("link", { name: "Egusi", exact: true });
+    await chip.focus();
+    await expect(chip).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/search\?q=egusi/);
+    await expect(page.getByTestId("listing-card").first()).toContainText(/egusi/i);
   });
 
   test("hero remains edge to edge and layers overlap during a slide change", async ({ page }) => {
@@ -75,19 +80,20 @@ test.describe("Phase 3 motion and depth", () => {
     });
   }
 
-  test("mobile collection controls and snap scrolling agree", async ({ page }) => {
+  test("mobile collection controls and keyboard scrolling agree", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(BASE);
     const collections = page.getByTestId("collection-banners");
+    const rail = collections.getByTestId("rail-scroll");
     await collections.scrollIntoViewIfNeeded();
-    await expect(collections.locator('[aria-live="polite"]')).toHaveText(/^1 \/ /);
-    await collections.getByRole("button", { name: "Next collection" }).click();
-    await expect(collections.locator('[aria-live="polite"]')).toHaveText(/^2 \/ /);
-    await expect.poll(() => collections.locator(".sf-coverflow").evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
-    await collections.locator(".sf-coverflow").focus();
+    await expect.poll(() => rail.evaluate(element => element.scrollLeft)).toBe(0);
+    await collections.getByRole("button", { name: "Scroll Collections right" }).click();
+    await expect.poll(() => rail.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+    await rail.focus();
     await page.keyboard.press("Home");
-    await expect(collections.locator('[aria-live="polite"]')).toHaveText(/^1 \/ /);
-    await expect.poll(() => collections.locator(".sf-coverflow").evaluate(element => element.scrollLeft)).toBe(0);
+    await expect.poll(() => rail.evaluate(element => element.scrollLeft)).toBe(0);
+    await page.keyboard.press("End");
+    await expect.poll(() => rail.evaluate(element => Math.abs(element.scrollLeft - (element.scrollWidth - element.clientWidth)))).toBeLessThan(2);
   });
 
   test("quick view opens, selects a pack, adds to cart and restores focus", async ({ page }) => {
@@ -140,11 +146,14 @@ test.describe("Phase 3 motion and depth", () => {
     expect(await names.allTextContents()).not.toEqual(expect.arrayContaining([expect.stringMatching(/cassava|garden eggs/i)]));
   });
 
-  test("reduced motion disables autoplay and keeps static marquee names", async ({ page }) => {
+  test("reduced motion disables autoplay and keeps static wrapping chips", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(BASE);
     await expect(page.getByTestId("hero-carousel")).toHaveAttribute("data-autoplay", "paused");
     await expect(page.getByRole("button", { name: "Play slideshow" })).toBeDisabled();
-    await expect(page.locator(".sf-marquee-track").first()).toHaveCSS("animation-name", "none");
+    await expect(page.locator("html")).not.toHaveClass(/sf-reveal-ready/);
+    await expect(page.locator(".sf-market-track")).toHaveCSS("transform", "none");
+    await expect(page.locator(".sf-market-track")).toHaveCSS("flex-wrap", "wrap");
+    await expect(page.getByTestId("market-band").getByRole("link")).toHaveCount(6);
   });
 });
