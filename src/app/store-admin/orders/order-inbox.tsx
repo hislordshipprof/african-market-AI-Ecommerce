@@ -42,7 +42,7 @@ import {
   completePickupAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
-import { RESOLVED_LINE_STATUSES } from "@/lib/order/service";
+import { RESOLVED_LINE_STATUSES } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
 

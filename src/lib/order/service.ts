@@ -1,6 +1,8 @@
 import { storeScopedTransaction, lockStoreRow } from "../db";
 import { getStripeProvider } from "../stripe";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
+import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
+export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
   | "AUTHORIZED"
@@ -10,13 +12,6 @@ export type OrderStatus =
   | "AWAITING_PICKUP"
   | "COMPLETED"
   | "CANCELLED";
-
-export type OrderLineStatus =
-  | "pending"
-  | "picked"
-  | "short"
-  | "refunded"
-  | "substituted";
 
 const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
@@ -121,8 +116,6 @@ export async function markLinePicked(
     return { ok: true, orderStatus: "PICKING" };
   });
 }
-
-const RESOLVED_LINE_STATUSES: OrderLineStatus[] = ["picked", "refunded", "substituted"];
 
 export async function markReady(
   storeId: string,
@@ -282,4 +275,4 @@ export async function autoCancelOrder(
 }
 
 export { sortPickListLines } from "./pick-sort";
-export { RESOLVED_LINE_STATUSES };
+export { RESOLVED_LINE_STATUSES } from "./constants";
