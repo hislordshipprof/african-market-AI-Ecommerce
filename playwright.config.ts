@@ -55,7 +55,9 @@ export default defineConfig({
     : {
         command: `pnpm exec next start -p ${E2E_PORT}`,
         url: `http://localhost:${E2E_PORT}/api/health`,
-        reuseExistingServer: true,
+        // Reusing whatever already listens on the lane port served stale builds from deleted
+        // worktrees (ChunkLoadError on #110). Fail fast instead; opt in with E2E_REUSE_SERVER=1.
+        reuseExistingServer: process.env.E2E_REUSE_SERVER === "1",
         timeout: 120_000,
         env: {
           NEXT_PUBLIC_DEMO_FLOWS: "1",
