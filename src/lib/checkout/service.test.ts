@@ -1,32 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { quoteCheckout } from "./service";
-import type { CheckoutInput } from "../customer-flow/contracts";
+import { computeQuote } from "./service";
+import type { Contact } from "../customer-flow/contracts";
 
-function baseInput(overrides?: Partial<CheckoutInput>): CheckoutInput {
-  return {
-    lines: [
-      {
-        listingId: "listing-1",
-        variantId: "variant-1",
-        name: "Egusi Seeds 500g",
-        price: 1200,
-        quantity: 2,
-      },
-    ],
-    fulfillment: "pickup",
-    contact: { name: "Jane Doe", phone: "+15551234567", email: "jane@test.com" },
-    notes: "",
-    leaveAtDoor: false,
-    slot: "asap",
-    promoCode: "",
-    tipCents: 0,
-    ...overrides,
-  };
+const validContact: Contact = {
+  name: "Jane Doe",
+  phone: "+15551234567",
+  email: "jane@test.com",
+};
+
+function baseLines(
+  overrides?: Array<{ price: number; qty: number; maxPerOrder: number | null }>,
+) {
+  return (
+    overrides ?? [{ price: 1200, qty: 2, maxPerOrder: null }]
+  );
 }
 
-describe("quoteCheckout", () => {
-  it("calculates subtotal and 10% buffer", async () => {
-    const q = await quoteCheckout("store-1", 0, baseInput());
+describe("computeQuote", () => {
+  it("calculates subtotal and 10% buffer", () => {
+    const q = computeQuote(0, baseLines(), validContact, "pickup");
     expect(q.subtotalCents).toBe(2400);
     expect(q.bufferCents).toBe(240);
     expect(q.holdCents).toBe(2640);
@@ -34,28 +26,28 @@ describe("quoteCheckout", () => {
     expect(q.problems).toHaveLength(0);
   });
 
-  it("caps buffer at $20 (2000 cents)", async () => {
-    const input = baseInput({
-      lines: [
-        { listingId: "l-1", variantId: "v-1", name: "Bulk item", price: 25000, quantity: 1 },
-      ],
-    });
-    const q = await quoteCheckout("store-1", 0, input);
+  it("caps buffer at $20 (2000 cents)", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 25000, qty: 1, maxPerOrder: null }],
+      validContact,
+      "pickup",
+    );
     expect(q.subtotalCents).toBe(25000);
     expect(q.bufferCents).toBe(2000);
     expect(q.holdCents).toBe(27000);
   });
 
-  it("includes tip in holdCents but not bufferCents", async () => {
-    const q = await quoteCheckout("store-1", 0, baseInput({ tipCents: 500 }));
-    expect(q.tipCents).toBe(500);
-    expect(q.totalCents).toBe(2900);
+  it("forces tip to 0 for pickup", () => {
+    const q = computeQuote(0, baseLines(), validContact, "pickup");
+    expect(q.tipCents).toBe(0);
+    expect(q.totalCents).toBe(2400);
     expect(q.bufferCents).toBe(240);
-    expect(q.holdCents).toBe(3140);
+    expect(q.holdCents).toBe(2640);
   });
 
-  it("flags minimum order violation", async () => {
-    const q = await quoteCheckout("store-1", 5000, baseInput());
+  it("flags minimum order violation", () => {
+    const q = computeQuote(5000, baseLines(), validContact, "pickup");
     expect(q.problems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "minimum-order" }),
@@ -63,8 +55,8 @@ describe("quoteCheckout", () => {
     );
   });
 
-  it("flags empty cart", async () => {
-    const q = await quoteCheckout("store-1", 0, baseInput({ lines: [] }));
+  it("flags empty cart", () => {
+    const q = computeQuote(0, [], validContact, "pickup");
     expect(q.problems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "minimum-order" }),
@@ -72,11 +64,12 @@ describe("quoteCheckout", () => {
     );
   });
 
-  it("flags missing contact name", async () => {
-    const q = await quoteCheckout(
-      "store-1",
+  it("flags missing contact name", () => {
+    const q = computeQuote(
       0,
-      baseInput({ contact: { name: "", phone: "+15551234567", email: "a@b.com" } }),
+      baseLines(),
+      { name: "", phone: "+15551234567", email: "a@b.com" },
+      "pickup",
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -85,11 +78,12 @@ describe("quoteCheckout", () => {
     );
   });
 
-  it("flags missing email", async () => {
-    const q = await quoteCheckout(
-      "store-1",
+  it("flags missing email", () => {
+    const q = computeQuote(
       0,
-      baseInput({ contact: { name: "Jane", phone: "+15551234567", email: "" } }),
+      baseLines(),
+      { name: "Jane", phone: "+15551234567", email: "" },
+      "pickup",
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -98,11 +92,12 @@ describe("quoteCheckout", () => {
     );
   });
 
-  it("flags invalid email format (no @ sign)", async () => {
-    const q = await quoteCheckout(
-      "store-1",
+  it("flags invalid email format (no @ sign)", () => {
+    const q = computeQuote(
       0,
-      baseInput({ contact: { name: "Jane", phone: "+15551234567", email: "notanemail" } }),
+      baseLines(),
+      { name: "Jane", phone: "+15551234567", email: "notanemail" },
+      "pickup",
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -111,11 +106,12 @@ describe("quoteCheckout", () => {
     );
   });
 
-  it("flags invalid phone (too short)", async () => {
-    const q = await quoteCheckout(
-      "store-1",
+  it("flags invalid phone (too short)", () => {
+    const q = computeQuote(
       0,
-      baseInput({ contact: { name: "Jane", phone: "123", email: "a@b.com" } }),
+      baseLines(),
+      { name: "Jane", phone: "123", email: "a@b.com" },
+      "pickup",
     );
     expect(q.problems).toEqual(
       expect.arrayContaining([
@@ -124,13 +120,13 @@ describe("quoteCheckout", () => {
     );
   });
 
-  it("flags bad quantity (zero)", async () => {
-    const input = baseInput({
-      lines: [
-        { listingId: "l-1", variantId: "v-1", name: "Item", price: 500, quantity: 0 },
-      ],
-    });
-    const q = await quoteCheckout("store-1", 0, input);
+  it("flags bad quantity (zero)", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 500, qty: 0, maxPerOrder: null }],
+      validContact,
+      "pickup",
+    );
     expect(q.problems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "max-quantity" }),
@@ -138,22 +134,47 @@ describe("quoteCheckout", () => {
     );
   });
 
-  it("sanitizes negative tipCents", async () => {
-    const q = await quoteCheckout("store-1", 0, baseInput({ tipCents: -100 }));
-    expect(q.tipCents).toBe(0);
+  it("flags non-pickup fulfillment", () => {
+    const q = computeQuote(0, baseLines(), validContact, "store-delivery");
+    expect(q.problems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "ineligible" }),
+      ]),
+    );
   });
 
-  it("returns a valid expiration ~15 minutes out", async () => {
+  it("returns a valid expiration ~15 minutes out", () => {
     const before = Date.now();
-    const q = await quoteCheckout("store-1", 0, baseInput());
+    const q = computeQuote(0, baseLines(), validContact, "pickup");
     const expires = new Date(q.expiresAt).getTime();
     expect(expires).toBeGreaterThan(before + 14 * 60_000);
     expect(expires).toBeLessThanOrEqual(before + 16 * 60_000);
   });
 
-  it("returns unique quote ids", async () => {
-    const q1 = await quoteCheckout("store-1", 0, baseInput());
-    const q2 = await quoteCheckout("store-1", 0, baseInput());
+  it("returns unique quote ids", () => {
+    const q1 = computeQuote(0, baseLines(), validContact, "pickup");
+    const q2 = computeQuote(0, baseLines(), validContact, "pickup");
     expect(q1.id).not.toBe(q2.id);
+  });
+
+  it("enforces maxPerOrder limit", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 1000, qty: 5, maxPerOrder: 3 }],
+      validContact,
+      "pickup",
+    );
+    expect(q.problems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "max-quantity" }),
+      ]),
+    );
+  });
+
+  it("client-supplied price has no effect on server-derived amount", () => {
+    const serverLines = [{ price: 1200, qty: 2, maxPerOrder: null }];
+    const q = computeQuote(0, serverLines, validContact, "pickup");
+    expect(q.subtotalCents).toBe(2400);
+    expect(q.holdCents).toBe(2640);
   });
 });

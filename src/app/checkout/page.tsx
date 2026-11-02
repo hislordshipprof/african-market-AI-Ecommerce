@@ -7,12 +7,10 @@ import { checkCheckoutReady } from "@/lib/stripe/checkout-gate";
 export default async function CheckoutRoute() {
   const { store, settings, catalog, enabled } = await getFlowContext();
   const gate = checkCheckoutReady(store.stripeOnboardingStatus);
-  const stripeConfig = gate.enabled
-    ? {
-        publishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? "",
-        accountId: store.stripeAccountId ?? "",
-      }
-    : undefined;
+  const stripeConfig =
+    gate.enabled && process.env.STRIPE_PUBLISHABLE_KEY
+      ? { publishableKey: process.env.STRIPE_PUBLISHABLE_KEY }
+      : undefined;
 
   return (
     <StorefrontShell store={store}>

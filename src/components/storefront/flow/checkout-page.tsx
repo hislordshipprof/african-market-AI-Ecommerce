@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, ShoppingBag, Truck } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
@@ -49,7 +49,6 @@ type Outcome =
 
 interface StripeConfig {
   publishableKey: string;
-  accountId: string;
 }
 
 export interface CheckoutPageProps extends ShoppingFlowProps {
@@ -58,13 +57,10 @@ export interface CheckoutPageProps extends ShoppingFlowProps {
 
 const stripePromiseMap = new Map<string, Promise<StripeJs | null>>();
 function getStripePromise(config: StripeConfig): Promise<StripeJs | null> {
-  const key = `${config.publishableKey}:${config.accountId}`;
-  let cached = stripePromiseMap.get(key);
+  let cached = stripePromiseMap.get(config.publishableKey);
   if (!cached) {
-    cached = loadStripe(config.publishableKey, {
-      stripeAccount: config.accountId,
-    });
-    stripePromiseMap.set(key, cached);
+    cached = loadStripe(config.publishableKey);
+    stripePromiseMap.set(config.publishableKey, cached);
   }
   return cached;
 }
@@ -72,12 +68,7 @@ function getStripePromise(config: StripeConfig): Promise<StripeJs | null> {
 function StripeCardInput() {
   return (
     <div className={styles.stripeCard}>
-      <PaymentElement
-        options={{
-          layout: "tabs",
-          fields: { billingDetails: { address: "never" } },
-        }}
-      />
+      <PaymentElement options={{ layout: "tabs" }} />
     </div>
   );
 }
@@ -85,37 +76,19 @@ function StripeCardInput() {
 function RealCheckoutForm({
   settings,
   catalog,
-  stripeConfig,
 }: {
   settings: ShoppingFlowProps["settings"];
   catalog: ShoppingFlowProps["catalog"];
-  stripeConfig: StripeConfig;
 }) {
   const { lines, subtotal, refreshCart } = useCart();
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
-  const [fulfillment, setFulfillment] = useState<Fulfillment>(
-    settings.pickupEnabled
-      ? "pickup"
-      : settings.storeDeliveryEnabled
-        ? "store-delivery"
-        : "courier",
-  );
+  const fulfillment: Fulfillment = "pickup";
   const [contact, setContact] = useState({ name: "", phone: "", email: "" });
-  const [address, setAddress] = useState<FlowAddress>();
-  const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<FlowAddress[]>([]);
-  const [searching, setSearching] = useState(false);
   const [notes, setNotes] = useState("");
-  const [leaveAtDoor, setLeaveAtDoor] = useState(false);
   const [schedule, setSchedule] = useState(false);
   const [slot, setSlot] = useState("asap");
-  const [promo, setPromo] = useState("");
-  const [appliedPromo, setAppliedPromo] = useState("");
-  const [promoMessage, setPromoMessage] = useState("");
-  const [tipPercent, setTipPercent] = useState<number | null>(15);
-  const [customTip, setCustomTip] = useState("");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   const [quoteKey, setQuoteKey] = useState("");
   const [error, setError] = useState("");
@@ -130,64 +103,22 @@ function RealCheckoutForm({
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
   );
-  const courierEligible =
-    weightG <= 22679.6 &&
-    metadata.every(({ item }) => !!item && item.weightG <= 22679.6) &&
-    (!frozen || settings.insulatedPackaging);
-  const tipCents =
-    tipPercent === null
-      ? Math.max(0, Math.round((Number(customTip) || 0) * 100))
-      : Math.round((subtotal * tipPercent) / 100);
-  const input = useMemo<CheckoutInput>(
-    () => ({
-      lines,
-      fulfillment,
-      contact,
-      address,
-      notes,
-      leaveAtDoor: frozen ? false : leaveAtDoor,
-      slot: schedule && fulfillment === "pickup" ? slot : "asap",
-      promoCode: appliedPromo,
-      tipCents,
-    }),
-    [lines, fulfillment, contact, address, notes, frozen, leaveAtDoor, schedule, slot, appliedPromo, tipCents],
-  );
-  const currentKey = JSON.stringify(input);
+  const currentKey = JSON.stringify(contact);
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
     let active = true;
-    quoteCheckoutAction(input).then((result) => {
+    quoteCheckoutAction(contact, "pickup").then((result) => {
       if (!active) return;
       if (result.ok) {
         setQuote(result.quote);
-        setQuoteKey(JSON.stringify(input));
+        setQuoteKey(JSON.stringify(contact));
       } else {
         setError(result.error);
       }
     });
     return () => { active = false; };
-  }, [input]);
-
-  // Address search with demo lookup
-  const demoServices = useMemo(
-    () => {
-      try { return createDemoServices(settings, catalog, true); } catch { return null; }
-    },
-    [settings, catalog],
-  );
-  useEffect(() => {
-    let active = true;
-    const timer = setTimeout(() => {
-      if (query.trim().length < 3 || !demoServices) { setSuggestions([]); return; }
-      setSearching(true);
-      demoServices.addresses.search(query)
-        .then((results) => { if (active) setSuggestions(results); })
-        .catch(() => { if (active) setError("Address lookup is unavailable."); })
-        .finally(() => { if (active) setSearching(false); });
-    }, 250);
-    return () => { active = false; clearTimeout(timer); };
-  }, [query, demoServices]);
+  }, [contact]);
 
   const [slots] = useState(() => {
     const first = new Date();
@@ -216,7 +147,7 @@ function RealCheckoutForm({
     if (payState !== "idle" || !stripe || !elements) return;
     setPayState("pending");
     try {
-      const quoteResult = await quoteCheckoutAction(input);
+      const quoteResult = await quoteCheckoutAction(contact, "pickup");
       if (!quoteResult.ok) throw new Error(quoteResult.error);
       const latest = quoteResult.quote;
       if (latest.problems.length) {
@@ -228,7 +159,7 @@ function RealCheckoutForm({
         );
       }
 
-      const piResult = await createPaymentIntentAction(input);
+      const piResult = await createPaymentIntentAction(contact, "pickup");
       if (!piResult.ok) throw new Error(piResult.error);
 
       const { error: submitError } = await elements.submit();
@@ -244,7 +175,10 @@ function RealCheckoutForm({
 
       const orderResult = await placeOrderAction(
         piResult.paymentIntentId,
-        input,
+        contact,
+        "pickup",
+        notes,
+        schedule ? slot : "asap",
       );
       if (!orderResult.ok) throw new Error(orderResult.error);
 
@@ -271,35 +205,35 @@ function RealCheckoutForm({
       lines={lines}
       subtotal={subtotal}
       fulfillment={fulfillment}
-      setFulfillment={setFulfillment}
+      setFulfillment={() => {}}
       contact={contact}
       setContact={setContact}
-      address={address}
-      setAddress={setAddress}
-      query={query}
-      setQuery={setQuery}
-      suggestions={suggestions}
-      setSuggestions={setSuggestions}
-      searching={searching}
+      address={undefined}
+      setAddress={() => {}}
+      query=""
+      setQuery={() => {}}
+      suggestions={[]}
+      setSuggestions={() => {}}
+      searching={false}
       notes={notes}
       setNotes={setNotes}
-      leaveAtDoor={leaveAtDoor}
-      setLeaveAtDoor={setLeaveAtDoor}
+      leaveAtDoor={false}
+      setLeaveAtDoor={() => {}}
       schedule={schedule}
       setSchedule={setSchedule}
       slot={slot}
       setSlot={setSlot}
       slots={slots}
-      promo={promo}
-      setPromo={setPromo}
-      appliedPromo={appliedPromo}
-      setAppliedPromo={setAppliedPromo}
-      promoMessage={promoMessage}
-      setPromoMessage={setPromoMessage}
-      tipPercent={tipPercent}
-      setTipPercent={setTipPercent}
-      customTip={customTip}
-      setCustomTip={setCustomTip}
+      promo=""
+      setPromo={() => {}}
+      appliedPromo=""
+      setAppliedPromo={() => {}}
+      promoMessage=""
+      setPromoMessage={() => {}}
+      tipPercent={0}
+      setTipPercent={() => {}}
+      customTip=""
+      setCustomTip={() => {}}
       quote={quote}
       quotePending={quotePending}
       error={error}
@@ -307,7 +241,7 @@ function RealCheckoutForm({
       payState={payState}
       frozen={frozen}
       weightG={weightG}
-      courierEligible={courierEligible}
+      courierEligible={false}
       onSubmit={pay}
       paymentSection={<StripeCardInput />}
       payLabel={quote ? `Pay · ${money(quote.holdCents)}` : "Pay"}
@@ -337,10 +271,10 @@ export function CheckoutPage({
       </div>
     );
 
-  if (stripeConfig?.publishableKey && !enabled) {
+  if (stripeConfig?.publishableKey) {
     return (
       <StripeWrapper config={stripeConfig}>
-        <RealCheckoutForm settings={settings} catalog={catalog} stripeConfig={stripeConfig} />
+        <RealCheckoutForm settings={settings} catalog={catalog} />
       </StripeWrapper>
     );
   }
@@ -430,11 +364,11 @@ interface CheckoutLayoutProps {
 
 function CheckoutLayout(props: CheckoutLayoutProps) {
   const {
-    settings, catalog, lines, fulfillment, setFulfillment,
+    settings, lines, fulfillment, setFulfillment,
     contact, setContact, address, setAddress, query, setQuery,
     suggestions, setSuggestions, searching, notes, setNotes,
     leaveAtDoor, setLeaveAtDoor, schedule, setSchedule,
-    slot, setSlot, slots, promo, setPromo, appliedPromo,
+    slot, setSlot, slots, promo, setPromo,
     setAppliedPromo, promoMessage, setPromoMessage,
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, submitted, payState,
@@ -472,7 +406,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   <ShoppingBag size={18} />
                   Pickup · Free
                 </Chip>
-                {settings.storeDeliveryEnabled && (
+                {!isRealPayment && settings.storeDeliveryEnabled && (
                   <Chip
                     type="button"
                     selected={fulfillment === "store-delivery"}
@@ -482,15 +416,17 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                     Store delivery · {money(settings.storeDeliveryFeeCents)}
                   </Chip>
                 )}
-                <Chip
-                  type="button"
-                  selected={fulfillment === "courier"}
-                  disabled={!courierEligible}
-                  onClick={() => setFulfillment("courier")}
-                >
-                  <Truck size={18} />
-                  Courier · {money(699)} {!isRealPayment && "demo quote"}
-                </Chip>
+                {!isRealPayment && (
+                  <Chip
+                    type="button"
+                    selected={fulfillment === "courier"}
+                    disabled={!courierEligible}
+                    onClick={() => setFulfillment("courier")}
+                  >
+                    <Truck size={18} />
+                    Courier · {money(699)} demo quote
+                  </Chip>
+                )}
               </div>
               <p className={styles.muted}>
                 Order weight: {(weightG / 453.592).toFixed(1)} lb. Delivery
@@ -670,43 +606,45 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               )}
             </FlowCard>
           </div>
-          <FlowCard title="A thank-you for your driver">
-            <p className={styles.muted}>
-              100% of your tip goes to the courier. Default is 15%; you can
-              change it.
-            </p>
-            <div className={styles.options}>
-              {[0, 10, 15, 20].map((value) => (
+          {fulfillment !== "pickup" && (
+            <FlowCard title="A thank-you for your driver">
+              <p className={styles.muted}>
+                100% of your tip goes to the courier. Default is 15%; you can
+                change it.
+              </p>
+              <div className={styles.options}>
+                {[0, 10, 15, 20].map((value) => (
+                  <Chip
+                    key={value}
+                    type="button"
+                    selected={tipPercent === value}
+                    onClick={() => setTipPercent(value)}
+                  >
+                    {value}%
+                  </Chip>
+                ))}
                 <Chip
-                  key={value}
                   type="button"
-                  selected={tipPercent === value}
-                  onClick={() => setTipPercent(value)}
+                  selected={tipPercent === null}
+                  onClick={() => setTipPercent(null)}
                 >
-                  {value}%
+                  Custom
                 </Chip>
-              ))}
-              <Chip
-                type="button"
-                selected={tipPercent === null}
-                onClick={() => setTipPercent(null)}
-              >
-                Custom
-              </Chip>
-            </div>
-            {tipPercent === null && (
-              <label className={styles.field}>
-                Custom tip ($)
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={customTip}
-                  onChange={(e) => setCustomTip(e.target.value)}
-                />
-              </label>
-            )}
-          </FlowCard>
+              </div>
+              {tipPercent === null && (
+                <label className={styles.field}>
+                  Custom tip ($)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={customTip}
+                    onChange={(e) => setCustomTip(e.target.value)}
+                  />
+                </label>
+              )}
+            </FlowCard>
+          )}
           <div id="payment" className={styles.anchor}>
             <FlowCard title={isRealPayment ? "Payment" : "Test payment"}>
               {paymentSection}
@@ -729,36 +667,40 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 </li>
               ))}
             </ul>
-            <label className={styles.field}>
-              Promo code
-              <div className={styles.inline}>
-                <input
-                  value={promo}
-                  disabled={payState !== "idle"}
-                  onChange={(e) => setPromo(e.target.value)}
-                  placeholder="Try WELCOME10"
-                />
-                <Button
-                  type="button"
-                  disabled={payState !== "idle"}
-                  onClick={() => {
-                    const code = promo.trim().toUpperCase();
-                    setAppliedPromo(code === "WELCOME10" ? code : "");
-                    setPromoMessage(
-                      code === "WELCOME10"
-                        ? "10% off applied, up to $10."
-                        : code
-                          ? "That code is not valid."
-                          : "Promo removed.",
-                    );
-                  }}
-                >
-                  Apply
-                </Button>
-              </div>
-            </label>
-            {promoMessage && (
-              <p className={styles.muted} role="status">{promoMessage}</p>
+            {!isRealPayment && (
+              <>
+                <label className={styles.field}>
+                  Promo code
+                  <div className={styles.inline}>
+                    <input
+                      value={promo}
+                      disabled={payState !== "idle"}
+                      onChange={(e) => setPromo(e.target.value)}
+                      placeholder="Try WELCOME10"
+                    />
+                    <Button
+                      type="button"
+                      disabled={payState !== "idle"}
+                      onClick={() => {
+                        const code = promo.trim().toUpperCase();
+                        setAppliedPromo(code === "WELCOME10" ? code : "");
+                        setPromoMessage(
+                          code === "WELCOME10"
+                            ? "10% off applied, up to $10."
+                            : code
+                              ? "That code is not valid."
+                              : "Promo removed.",
+                        );
+                      }}
+                    >
+                      Apply
+                    </Button>
+                  </div>
+                </label>
+                {promoMessage && (
+                  <p className={styles.muted} role="status">{promoMessage}</p>
+                )}
+              </>
             )}
             {quote ? (
               <>

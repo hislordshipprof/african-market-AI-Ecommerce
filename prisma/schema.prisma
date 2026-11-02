@@ -316,9 +316,10 @@ model ListingVariant {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  cartLines           CartLine[]
-  substituteCartLines CartLine[] @relation("substituteVariant")
-  orderLines          OrderLine[]
+  cartLines                CartLine[]
+  substituteCartLines      CartLine[]  @relation("substituteVariant")
+  orderLines               OrderLine[]
+  substituteOrderLines     OrderLine[] @relation("substituteOrderLine")
 
   @@index([listingId])
   @@map("listing_variants")
@@ -401,13 +402,14 @@ model StoreCollectionListing {
 }
 
 model Cart {
-  id         String   @id @default(cuid())
-  storeId    String   @map("store_id")
-  userId     String?  @map("user_id")
-  customerId String?  @map("customer_id")
-  source     String   @default("manual")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(cuid())
+  storeId         String   @map("store_id")
+  userId          String?  @map("user_id")
+  customerId      String?  @map("customer_id")
+  paymentIntentId String?  @unique @map("payment_intent_id")
+  source          String   @default("manual")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   store    Store     @relation(fields: [storeId], references: [id])
   customer Customer? @relation(fields: [customerId], references: [id])
@@ -456,6 +458,7 @@ model Customer {
   orders Order[]
   carts  Cart[]
 
+  @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, email])
   @@map("customers")
@@ -470,6 +473,7 @@ model Order {
   fulfillment          String   @default("pickup")
   pickupSlot           String?  @map("pickup_slot")
   subtotalCents        Int      @map("subtotal_cents")
+  tipCents             Int      @default(0) @map("tip_cents")
   bufferCents          Int      @map("buffer_cents")
   totalAuthorizedCents Int      @map("total_authorized_cents")
   paymentIntentId      String?  @unique @map("payment_intent_id")
@@ -479,9 +483,10 @@ model Order {
   createdAt            DateTime @default(now()) @map("created_at")
 
   store    Store      @relation(fields: [storeId], references: [id])
-  customer Customer   @relation(fields: [customerId], references: [id])
+  customer Customer   @relation(fields: [customerId, storeId], references: [id, storeId])
   lines    OrderLine[]
 
+  @@unique([id, storeId])
   @@unique([storeId, number])
   @@index([storeId])
   @@index([customerId])
@@ -489,20 +494,23 @@ model Order {
 }
 
 model OrderLine {
-  id               String @id @default(cuid())
-  storeId          String @map("store_id")
-  orderId          String @map("order_id")
-  listingVariantId String @map("listing_variant_id")
-  qtyOrdered       Int    @map("qty_ordered")
-  unitPriceCents   Int    @map("unit_price_cents")
-  swapRule         String @default("exact_only") @map("swap_rule")
-  status           String @default("pending")
+  id                  String  @id @default(cuid())
+  storeId             String  @map("store_id")
+  orderId             String  @map("order_id")
+  listingVariantId    String  @map("listing_variant_id")
+  substituteVariantId String? @map("substitute_variant_id")
+  qtyOrdered          Int     @map("qty_ordered")
+  unitPriceCents      Int     @map("unit_price_cents")
+  swapRule            String  @default("exact_only") @map("swap_rule")
+  status              String  @default("pending")
 
-  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  listingVariant ListingVariant @relation(fields: [listingVariantId], references: [id])
+  order              Order          @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  listingVariant     ListingVariant @relation(fields: [listingVariantId], references: [id])
+  substituteVariant  ListingVariant? @relation("substituteOrderLine", fields: [substituteVariantId], references: [id])
 
   @@index([storeId])
   @@index([orderId])
   @@index([listingVariantId])
+  @@index([substituteVariantId])
   @@map("order_lines")
 }

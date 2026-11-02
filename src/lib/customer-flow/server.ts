@@ -29,7 +29,7 @@ export const getFlowContext = cache(async () => {
   return {
     store,
     settings,
-    catalog: enabled ? await getFlowCatalog(store.id) : [],
+    catalog: await getFlowCatalog(store.id),
     enabled,
   };
 });
