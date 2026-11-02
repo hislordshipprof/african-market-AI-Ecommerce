@@ -2,9 +2,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
-import { acceptOrder, completePickup, markLinePicked, markReady, sortPickListLines } from "./service";
+import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, sortPickListLines } from "./service";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments } from "../stripe/fake";
+import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -133,6 +134,8 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.auditLog.deleteMany({ where: { storeId } }),
+      rawPrisma.stockEvent.deleteMany({ where: { storeId } }),
       rawPrisma.orderLine.deleteMany({ where: { storeId } }),
       rawPrisma.order.deleteMany({ where: { storeId } }),
       rawPrisma.customer.deleteMany({ where: { storeId } }),
@@ -342,6 +345,73 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       await markLinePicked(storeId, line.id);
     }
     const result = await markReady("nonexistent-store-id", order.id);
+    expect(result.ok).toBe(false);
+  });
+
+  it("autoCancelOrder cancels AUTHORIZED order and voids payment", async () => {
+    resetFakeStripe();
+    const order = await createTestOrder();
+
+    const result = await autoCancelOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.cancelledAt).toBeTruthy();
+
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
+  });
+
+  it("autoCancelOrder creates cancel_restore StockEvents with correct deltas", async () => {
+    resetFakeStripe();
+    const order = await createTestOrder();
+
+    await autoCancelOrder(storeId, order.id);
+
+    const events = await storeScoped(storeId).stockEvent.findMany({
+      where: { actorId: SYSTEM_ACTOR_ID, type: "cancel_restore" },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+    });
+    expect(events.length).toBe(3);
+    const deltas = events.map((e: { delta: number }) => e.delta).sort((a: number, b: number) => a - b);
+    // qtyOrdered: 1 (frozen), 2 (regular), 3 (perishable) -> deltas [1, 2, 3]
+    expect(deltas).toEqual([1, 2, 3]);
+    for (const e of events) {
+      expect((e as { actorId: string }).actorId).toBe(SYSTEM_ACTOR_ID);
+    }
+  });
+
+  it("autoCancelOrder creates auto_cancel AuditLog entry", async () => {
+    resetFakeStripe();
+    const order = await createTestOrder();
+
+    await autoCancelOrder(storeId, order.id);
+
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "auto_cancel" },
+    });
+    expect(logs.length).toBe(1);
+    expect(logs[0].actorId).toBe(SYSTEM_ACTOR_ID);
+    expect(logs[0].entityType).toBe("order");
+  });
+
+  it("autoCancelOrder rejects non-AUTHORIZED order", async () => {
+    resetFakeStripe();
+    const order = await createTestOrder();
+    await acceptOrder(storeId, order.id, 15);
+
+    const result = await autoCancelOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("not AUTHORIZED");
+    }
+    expect(cancelledPayments.size).toBe(0);
+  });
+
+  it("autoCancelOrder rejects wrong store", async () => {
+    const order = await createTestOrder();
+    const result = await autoCancelOrder("nonexistent-store-id", order.id);
     expect(result.ok).toBe(false);
   });
 });
