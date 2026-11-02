@@ -35,6 +35,7 @@ describe.skipIf(!hasDb)("GET /api/storefront/search (DB integration)", () => {
     const b = await prisma.store.upsert({ where: { slug: slugB }, update: {}, create: { slug: slugB, name: "SR B", themePreset: "palm-and-shea" } });
     storeAId = a.id;
     storeBId = b.id;
+    await cleanup(); // drop leftovers from an aborted earlier run
     const [, , listing] = await prisma.$transaction([
       ...scoped(storeAId),
       prisma.listing.create({ data: { storeId: storeAId, customName: "Routetest Egusi Seeds", price: 700, stockMode: "counted", qty: 5, frozen: false, perishable: false, confidence: 0.9 } }),
@@ -46,18 +47,24 @@ describe.skipIf(!hasDb)("GET /api/storefront/search (DB integration)", () => {
     ]);
   });
 
+  const cleanup = async () => {
+    const storeIds = [storeAId, storeBId].filter((id): id is string => !!id);
+    if (storeIds.length === 0) return;
+    await prisma.$transaction([
+      prisma.$executeRaw`SET LOCAL ROLE app_user`,
+      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      prisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: storeIds } } } }),
+    ]);
+    await prisma.$transaction([
+      prisma.$executeRaw`SET LOCAL ROLE app_user`,
+      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      prisma.listing.deleteMany({ where: { storeId: { in: storeIds } } }),
+    ]);
+  };
+
   afterAll(async () => {
-    await prisma.$transaction([
-      prisma.$executeRaw`SET LOCAL ROLE app_user`,
-      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      prisma.listingVariant.deleteMany({ where: { listingId: listingAId } }),
-    ]);
-    await prisma.$transaction([
-      prisma.$executeRaw`SET LOCAL ROLE app_user`,
-      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      prisma.listing.deleteMany({ where: { id: listingAId } }),
-    ]);
-    await prisma.store.deleteMany({ where: { id: { in: [storeAId, storeBId] } } });
+    await cleanup();
+    if (storeAId || storeBId) await prisma.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter((id): id is string => !!id) } } });
     await prisma.$disconnect();
   });
 
