@@ -1,22 +1,7 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { addItemToCart } from "./checkout-helpers";
 
 const base = "http://mama-ngozi.localhost:3000";
-
-async function addItemToCart(page: Page) {
-  await page.goto(`${base}/categories/grains-and-flours`);
-  const card = page
-    .getByTestId("listing-card")
-    .filter({ hasText: "Garri" })
-    .first();
-  await card.getByTestId("quick-add-btn").click();
-  for (let i = 0; i < 9; i++) await card.getByTestId("stepper-plus").click();
-  await expect(
-    page.getByTestId("storefront-header").getByTestId("cart-count"),
-  ).toHaveText("10");
-  await expect(
-    page.getByTestId("storefront-header").locator("[data-cart-pending]"),
-  ).toBeHidden({ timeout: 10000 });
-}
 
 test.describe("Guest checkout flow", () => {
   test.use({ reducedMotion: "reduce" });

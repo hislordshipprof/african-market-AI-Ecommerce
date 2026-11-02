@@ -324,6 +324,7 @@ describe.skipIf(!hasKey || !hasDb)(
     );
 
     it("buffer formula: 10% capped at $20 for various amounts", () => {
+      const validContact = { name: "A", email: "a@b.com", phone: "1234567890" };
       const cases = [
         { subtotal: 1000, expected: 100 },
         { subtotal: 5000, expected: 500 },
@@ -332,8 +333,8 @@ describe.skipIf(!hasKey || !hasDb)(
         { subtotal: 50000, expected: 2000 },
       ];
       for (const { subtotal, expected } of cases) {
-        const buffer = Math.min(Math.round(subtotal * 0.1), 2000);
-        expect(buffer).toBe(expected);
+        const q = computeQuote(0, [{ price: subtotal, qty: 1, maxPerOrder: null }], validContact, "pickup");
+        expect(q.bufferCents).toBe(expected);
       }
     });
   },

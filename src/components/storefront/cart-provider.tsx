@@ -31,6 +31,7 @@ import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { Sheet } from "./sheet";
 import { toast } from "sonner";
+import { money } from "@/lib/format";
 import styles from "./cart.module.css";
 
 function serverLineToClient(sl: CartLineView): CartLine {
@@ -68,10 +69,6 @@ export function useCart() {
   if (!value) throw new Error("Cart controls require CartProvider");
   return value;
 }
-const money = (value: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-    value / 100,
-  );
 
 export function CartProvider({
   storeId,

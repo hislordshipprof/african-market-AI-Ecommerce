@@ -108,16 +108,18 @@ function RealCheckoutForm({
 
   useEffect(() => {
     let active = true;
-    quoteCheckoutAction(contact, "pickup").then((result) => {
-      if (!active) return;
-      if (result.ok) {
-        setQuote(result.quote);
-        setQuoteKey(JSON.stringify(contact));
-      } else {
-        setError(result.error);
-      }
-    });
-    return () => { active = false; };
+    const timer = setTimeout(() => {
+      quoteCheckoutAction(contact, "pickup").then((result) => {
+        if (!active) return;
+        if (result.ok) {
+          setQuote(result.quote);
+          setQuoteKey(JSON.stringify(contact));
+        } else {
+          setError(result.error);
+        }
+      });
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
   }, [contact]);
 
   const [slots] = useState(() => {
@@ -257,7 +259,7 @@ export function CheckoutPage({
   stripeConfig,
 }: CheckoutPageProps) {
   const ready = useCartReady();
-  const { lines } = useCart();
+  const { lines, subtotal } = useCart();
 
   if (!ready) return <FlowLoading />;
   if (!lines.length)
@@ -272,8 +274,9 @@ export function CheckoutPage({
     );
 
   if (stripeConfig?.publishableKey) {
+    const estimatedHold = subtotal + Math.min(Math.round(subtotal * 0.10), 2000);
     return (
-      <StripeWrapper config={stripeConfig}>
+      <StripeWrapper config={stripeConfig} estimatedHoldCents={estimatedHold}>
         <RealCheckoutForm settings={settings} catalog={catalog} />
       </StripeWrapper>
     );
@@ -286,18 +289,21 @@ export function CheckoutPage({
 
 function StripeWrapper({
   config,
+  estimatedHoldCents,
   children,
 }: {
   config: StripeConfig;
+  estimatedHoldCents: number;
   children: React.ReactNode;
 }) {
   const stripePromise = useMemo(() => getStripePromise(config), [config]);
+  const amount = Math.max(estimatedHoldCents, 50);
   return (
     <Elements
       stripe={stripePromise}
       options={{
         mode: "payment",
-        amount: 100,
+        amount,
         currency: "usd",
         appearance: {
           theme: "stripe",

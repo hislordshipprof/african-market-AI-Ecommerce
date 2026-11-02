@@ -8,6 +8,14 @@ import type {
   Fulfillment,
 } from "../customer-flow/contracts";
 
+async function getStripeStore(storeId: string) {
+  const store = await (await import("../db")).platform.store.findUnique({ where: { id: storeId } });
+  if (!store?.stripeAccountId) {
+    throw new Error("Store is not connected to Stripe");
+  }
+  return store as typeof store & { stripeAccountId: string };
+}
+
 const PHONE_RE = /^\+?[\d\s().-]{10,20}$/;
 function validPhone(phone: string): boolean {
   return PHONE_RE.test(phone) && phone.replace(/\D/g, "").length >= 10;
@@ -115,10 +123,7 @@ export async function createPaymentIntent(
   holdCents: number,
 ): Promise<{ clientSecret: string; paymentIntentId: string }> {
   const scoped = storeScoped(storeId);
-  const store = await (await import("../db")).platform.store.findUnique({ where: { id: storeId } });
-  if (!store?.stripeAccountId) {
-    throw new Error("Store is not connected to Stripe");
-  }
+  const store = await getStripeStore(storeId);
 
   const stripe = getStripeClient();
 
@@ -127,6 +132,9 @@ export async function createPaymentIntent(
 
   if (cart.paymentIntentId) {
     const existing = await stripe.paymentIntents.retrieve(cart.paymentIntentId);
+    if (existing.status === "requires_capture") {
+      throw new Error("Payment already confirmed for this cart");
+    }
     if (
       existing.status === "requires_payment_method" ||
       existing.status === "requires_confirmation" ||
@@ -192,10 +200,7 @@ export async function placeOrder(
   pickupSlot: string | null,
   paymentIntentId: string,
 ): Promise<{ token: string; quote: CheckoutQuote }> {
-  const store = await (await import("../db")).platform.store.findUnique({ where: { id: storeId } });
-  if (!store?.stripeAccountId) {
-    throw new Error("Store is not connected to Stripe");
-  }
+  const store = await getStripeStore(storeId);
 
   if (fulfillment !== "pickup") {
     throw new Error("Only pickup fulfillment is supported");
@@ -316,6 +321,12 @@ export async function placeOrder(
         unitPriceCents: line.price,
         swapRule: line.swapRule,
       })),
+    });
+
+    await tx.cartLine.deleteMany({ where: { cartId } });
+    await tx.cart.update({
+      where: { id: cartId },
+      data: { paymentIntentId: null },
     });
 
     return order.id;

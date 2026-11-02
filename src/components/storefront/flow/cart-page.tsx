@@ -28,10 +28,8 @@ import {
 } from "./common";
 import styles from "./cart-checkout.module.css";
 
-export const money = (cents: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-    cents / 100,
-  );
+import { money } from "@/lib/format";
+export { money };
 const subscribe = () => () => {};
 export function useCartReady() {
   return useSyncExternalStore(

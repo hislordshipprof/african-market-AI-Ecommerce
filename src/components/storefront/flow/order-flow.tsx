@@ -34,10 +34,8 @@ export interface OrderFlowProps {
   enabled: boolean;
   confirmation?: boolean;
 }
-export const money = (cents: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-    cents / 100,
-  );
+import { money } from "@/lib/format";
+export { money };
 export const statusLabel = (status: OrderStatus) =>
   ({
     AUTHORIZED: "Order placed",
