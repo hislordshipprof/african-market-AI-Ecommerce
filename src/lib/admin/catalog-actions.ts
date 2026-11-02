@@ -1,6 +1,6 @@
 "use server";
 
-import { platformAdmin, platformAdminTransaction } from "../db";
+import { platformAdmin, platformAdminTransaction, lockMasterProductRow } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { uploadToR2 } from "../r2";
 
@@ -122,18 +122,26 @@ export async function approveProduct(
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
 
-  const product = await platformAdmin.masterProduct.findUnique({
+  // Optimistic read, outside the transaction, only so the image download (network I/O)
+  // never happens while the row lock is held. The locked re-read below is authoritative.
+  const preview = await platformAdmin.masterProduct.findUnique({
     where: { id: productId },
   });
-  if (!product) return { error: "Product not found" };
-  if (product.status === "active") return { success: true };
+  if (!preview) return { error: "Product not found" };
+  if (preview.status === "active") return { success: true };
 
-  let imageUrl = product.imageUrl;
-  if (!imageUrl && product.imageSourceUrl) {
-    imageUrl = await downloadAndUploadImage(product.imageSourceUrl, productId);
+  let downloadedUrl: string | null = null;
+  if (!preview.imageUrl && preview.imageSourceUrl) {
+    downloadedUrl = await downloadAndUploadImage(preview.imageSourceUrl, productId);
   }
 
-  await platformAdminTransaction(async (tx) => {
+  return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
+    await lockMasterProductRow(tx, productId);
+    const product = await tx.masterProduct.findUnique({ where: { id: productId } });
+    if (!product) return { error: "Product not found" };
+    if (product.status === "active") return { success: true };
+
+    const imageUrl = product.imageUrl ?? downloadedUrl;
     await tx.masterProduct.update({
       where: { id: productId },
       data: { status: "active", imageUrl },
@@ -149,9 +157,8 @@ export async function approveProduct(
         after: { status: "active", imageUrl },
       },
     });
+    return { success: true };
   });
-
-  return { success: true };
 }
 
 export async function rejectProduct(
@@ -159,13 +166,12 @@ export async function rejectProduct(
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
 
-  const product = await platformAdmin.masterProduct.findUnique({
-    where: { id: productId },
-  });
-  if (!product) return { error: "Product not found" };
-  if (product.status === "rejected") return { success: true };
+  return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
+    await lockMasterProductRow(tx, productId);
+    const product = await tx.masterProduct.findUnique({ where: { id: productId } });
+    if (!product) return { error: "Product not found" };
+    if (product.status === "rejected") return { success: true };
 
-  await platformAdminTransaction(async (tx) => {
     await tx.masterProduct.update({
       where: { id: productId },
       data: { status: "rejected" },
@@ -181,9 +187,8 @@ export async function rejectProduct(
         after: { status: "rejected" },
       },
     });
+    return { success: true };
   });
-
-  return { success: true };
 }
 
 export async function updateReviewProduct(
@@ -198,11 +203,6 @@ export async function updateReviewProduct(
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
 
-  const product = await platformAdmin.masterProduct.findUnique({
-    where: { id: productId },
-  });
-  if (!product) return { error: "Product not found" };
-
   const updateData: {
     name?: string;
     description?: string | null;
@@ -210,15 +210,22 @@ export async function updateReviewProduct(
     storage?: string | null;
     originCountries?: string | null;
   } = {};
-  if (data.name !== undefined) updateData.name = data.name;
+  if (data.name !== undefined) {
+    const name = data.name.trim();
+    if (!name) return { error: "Name is required" };
+    updateData.name = name;
+  }
   if (data.description !== undefined) updateData.description = data.description || null;
   if (data.unit !== undefined) updateData.unit = data.unit || null;
   if (data.storage !== undefined) updateData.storage = data.storage || null;
   if (data.originCountries !== undefined) updateData.originCountries = data.originCountries || null;
 
-  if (Object.keys(updateData).length === 0) return { success: true };
+  return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
+    await lockMasterProductRow(tx, productId);
+    const product = await tx.masterProduct.findUnique({ where: { id: productId } });
+    if (!product) return { error: "Product not found" };
+    if (Object.keys(updateData).length === 0) return { success: true };
 
-  await platformAdminTransaction(async (tx) => {
     await tx.masterProduct.update({
       where: { id: productId },
       data: updateData,
@@ -240,9 +247,8 @@ export async function updateReviewProduct(
         after: updateData as Record<string, string | null>,
       },
     });
+    return { success: true };
   });
-
-  return { success: true };
 }
 
 export async function getReviewStats() {

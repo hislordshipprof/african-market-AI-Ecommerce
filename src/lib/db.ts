@@ -168,6 +168,11 @@ export async function lockListingRow(tx: Pick<PrismaClient, "$queryRaw">, listin
   await tx.$queryRaw`SELECT 1 FROM listings WHERE id = ${listingId} FOR UPDATE`;
 }
 
+/** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
+export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
+  await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
+}
+
 export async function lockCartLineByVariant(
   tx: Pick<PrismaClient, "$queryRaw">,
   cartId: string,
