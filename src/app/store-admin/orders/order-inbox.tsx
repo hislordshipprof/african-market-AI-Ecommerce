@@ -36,11 +36,12 @@ import {
 import {
   fetchOrdersAction,
   acceptOrderAction,
+  autoAcceptOrderAction,
   markLinePickedAction,
   completePickupAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
-import { sortPickListLines } from "@/lib/order/service";
+import { sortPickListLines } from "@/lib/order/pick-sort";
 
 const STATUS_CONFIG: Record<
   string,
@@ -94,9 +95,16 @@ export function OrderInbox({
       try {
         const { orders: fresh } = await fetchOrdersAction();
         const prevIds = prevOrderIdsRef.current;
-        const hasNew = fresh.some((o) => !prevIds.has(o.id));
-        if (hasNew && audioEnabled && audioRef.current) {
+        const newOrders = fresh.filter((o) => !prevIds.has(o.id));
+        if (newOrders.length > 0 && audioEnabled && audioRef.current) {
           audioRef.current.play().catch(() => {});
+        }
+        if (autoAcceptOrders) {
+          for (const o of newOrders) {
+            if (o.status === "AUTHORIZED") {
+              await autoAcceptOrderAction(o.id);
+            }
+          }
         }
         prevOrderIdsRef.current = new Set(fresh.map((o) => o.id));
         setOrders(fresh);
@@ -104,7 +112,7 @@ export function OrderInbox({
         // polling failure is non-fatal
       }
     });
-  }, [audioEnabled]);
+  }, [audioEnabled, autoAcceptOrders]);
 
   useEffect(() => {
     const interval = setInterval(pollOrders, 10_000);

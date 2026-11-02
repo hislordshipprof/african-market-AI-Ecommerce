@@ -691,10 +691,12 @@ async function seedDemoOrders() {
   const customer = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
-    return tx.customer.upsert({
-      where: { storeId_email: { storeId: store.id, email: "demo-customer@example.com" } },
-      update: {},
-      create: {
+    const existing = await tx.customer.findFirst({
+      where: { storeId: store.id, email: "demo-customer@example.com" },
+    });
+    if (existing) return existing;
+    return tx.customer.create({
+      data: {
         storeId: store.id,
         name: "Adaeze Chukwu",
         email: "demo-customer@example.com",
