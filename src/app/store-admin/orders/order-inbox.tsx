@@ -139,6 +139,12 @@ export function OrderInbox({
   }, [pollOrders]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
+  const allLinesResolved =
+    selectedOrder?.status === "PICKING"
+      ? selectedOrder.lines.every((l) =>
+          RESOLVED_LINE_STATUSES.includes(l.status as "picked" | "refunded" | "substituted"),
+        )
+      : false;
 
   function handleAcceptClick(orderId: string) {
     setAcceptingOrderId(orderId);
@@ -361,20 +367,13 @@ export function OrderInbox({
                 )}
 
                 {selectedOrder.status === "PICKING" && (
-                  (() => {
-                    const allResolved = selectedOrder.lines.every(
-                      (l) => RESOLVED_LINE_STATUSES.includes(l.status as "picked" | "refunded" | "substituted"),
-                    );
-                    return (
-                      <Button
-                        className="mb-4 w-full rounded-full"
-                        onClick={() => handleMarkReady(selectedOrder.id)}
-                        disabled={isPending || !allResolved}
-                      >
-                        <CheckCircle2 className="mr-2 size-4" /> Mark ready
-                      </Button>
-                    );
-                  })()
+                  <Button
+                    className="mb-4 w-full rounded-full"
+                    onClick={() => handleMarkReady(selectedOrder.id)}
+                    disabled={isPending || !allLinesResolved}
+                  >
+                    <CheckCircle2 className="mr-2 size-4" /> Mark ready
+                  </Button>
                 )}
 
                 {selectedOrder.status === "AWAITING_PICKUP" && (

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, type Page } from "@playwright/test";
 import { generateTOTP } from "./totp";
 
 const OWNER_EMAIL = "owner@mama-ngozi.test";

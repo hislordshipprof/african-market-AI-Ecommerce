@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vites
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped } from "../db";
-import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, reset as resetFakeStripe } from "../stripe/fake";
 
 vi.mock("../inngest/send", () => ({
   sendOrderAuthorized: vi.fn().mockResolvedValue(undefined),
