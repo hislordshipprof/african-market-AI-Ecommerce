@@ -1,6 +1,7 @@
 import { storeScopedTransaction, lockStoreRow } from "../db";
 import { platform } from "../db";
 import { getStripeProvider } from "../stripe";
+import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
 export type OrderStatus =
   | "AUTHORIZED"
@@ -207,6 +208,74 @@ export async function completePickup(
       data: {
         status: "COMPLETED",
         completedAt: new Date(),
+      },
+    });
+
+    return { ok: true };
+  });
+}
+
+export async function autoCancelOrder(
+  storeId: string,
+  orderId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const store = await platform.store.findUnique({
+    where: { id: storeId },
+    select: { stripeAccountId: true },
+  });
+  if (!store?.stripeAccountId) {
+    return { ok: false, error: "Store is not connected to Stripe" };
+  }
+  const stripeAccountId = store.stripeAccountId;
+
+  return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    if (!order) return { ok: false, error: "Order not found" };
+    if (order.status !== "AUTHORIZED") {
+      return { ok: false, error: `Order is in status ${order.status}, not AUTHORIZED` };
+    }
+
+    if (order.paymentIntentId) {
+      const stripe = getStripeProvider();
+      await stripe.cancelPaymentIntent(order.paymentIntentId, stripeAccountId);
+    }
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+      },
+    });
+
+    const lines = await tx.orderLine.findMany({ where: { orderId } });
+    for (const line of lines) {
+      const variant = await tx.listingVariant.findUnique({
+        where: { id: line.listingVariantId },
+        select: { listingId: true },
+      });
+      if (variant) {
+        await tx.stockEvent.create({
+          data: {
+            storeId,
+            listingId: variant.listingId,
+            type: "cancel_restore",
+            delta: line.qtyOrdered,
+            actorId: SYSTEM_ACTOR_ID,
+          },
+        });
+      }
+    }
+
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action: "auto_cancel",
+        entityType: "order",
+        entityId: orderId,
       },
     });
 
