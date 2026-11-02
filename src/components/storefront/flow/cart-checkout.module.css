@@ -330,11 +330,15 @@
 }
 @media (max-width: 767px) {
   .page {
-    padding-bottom: 140px;
+    /* Fixed stack above the viewport bottom: nav (12px offset + 68px bar)
+       + 8px gap, then the 74px checkout bar, then a 12px scroll margin. */
+    --cart-bar-bottom: calc(88px + env(safe-area-inset-bottom));
+    --cart-bar-height: 74px;
+    padding-bottom: calc(var(--cart-bar-bottom) + var(--cart-bar-height) + 12px);
   }
   .mobileAction {
     position: fixed;
-    bottom: calc(88px + env(safe-area-inset-bottom));
+    bottom: var(--cart-bar-bottom);
     left: 12px;
     right: 12px;
     z-index: 39;
