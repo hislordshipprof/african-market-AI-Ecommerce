@@ -27,7 +27,7 @@ export function ProductDetail({
   return (
     <div className="sf-detail" data-testid="product-detail">
       <div className="sf-detail-photo">
-        <ViewTransition name={`product-${listing.id}`} share="sf-product-morph" default="none"><ProductImage
+        <ViewTransition name={`product-${listing.id}`} share="sf-product-morph" default="none"><ProductImage category={listing.categorySlug}
           src={listing.imageUrl}
           name={listing.displayName}
           sizes="(max-width:767px) 92vw, 45vw"

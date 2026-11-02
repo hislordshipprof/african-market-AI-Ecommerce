@@ -1,5 +1,15 @@
 # Redesign screenshots
 
+## Design round 4 - capture blocked
+
+On 2026-11-01, the updated capture runner reached Chromium launch and failed with spawn EPERM. No round 4 screenshots or recording were produced. The connected browser inventory was also empty. Historical screenshots are not evidence of round 4.
+
+The current scripts/capture-storefront-redesign.mjs writes round4-* files: home top/middle/bottom, category and product at 390, 1024, 1440 and 1920px in light and dark (40 requested images), plus quick view and 404 at each size/theme (16 additional images). Normal motion is enabled; the hero is explicitly paused for still captures. The video in round4-motion/ includes page scrolling to show reveals and the scroll-linked band. round4-checks.json records image loading, horizontal overflow and browser errors.
+
+After pnpm build, start the preview with E2E_STORE_OVERRIDE=1, NEXT_PUBLIC_DEMO_FLOWS=1 and VERCEL_ENV=preview. Run node scripts/capture-storefront-redesign.mjs, then stop the preview server with Ctrl+C. Run pnpm test:e2e --workers=1 for the geometry, keyboard, hydration, reduced-motion and existing throttled LCP gates. The <2500ms assertions are unchanged. No current LCP measurement is available.
+
+The sections below describe historical capture runners.
+
 ## Phase 3 — capture blocked
 
 The final Phase 3 runner was attempted on 2026-10-31. Chromium exited at launch with `spawn EPERM`. No Phase 3 screenshots, video, or transition frames were produced. Existing images are not evidence of the current implementation; they have not been relabeled as new captures.

@@ -33,7 +33,7 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
   return <Sheet open={open} onClose={close} title={`Quick view: ${listing.displayName}`}>
     <div className="sf-quick-view" data-testid="quick-view">
       <button className="sf-quick-gallery" aria-label={zoom ? "Reset product image zoom" : "Zoom product image"} aria-pressed={zoom} onClick={() => setZoom(v => !v)} data-zoom={zoom}>
-        <ProductImage src={detail?.imageUrl ?? listing.imageUrl} name={listing.displayName} sizes="(max-width:767px) 90vw, 430px" />
+        <ProductImage category={detail?.categorySlug ?? listing.categorySlug} src={detail?.imageUrl ?? listing.imageUrl} name={listing.displayName} sizes="(max-width:767px) 90vw, 430px" />
       </button>
       <p className="sf-local-name">{listing.altName}</p><p className="sf-photo-note">Representative ingredient. Packaging may vary.</p>
       <PriceDisplay cents={price} weightG={selected?.weightG} />

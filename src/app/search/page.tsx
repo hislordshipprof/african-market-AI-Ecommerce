@@ -52,6 +52,7 @@ export default async function SearchPage({
                       frozen: r.frozen,
                       perishable: r.perishable,
                       imageUrl: r.imageUrl,
+                      categorySlug: r.categorySlug,
                       variantId: r.variantId,
                       packLabel: r.packLabel,
                       weightG: r.weightG,

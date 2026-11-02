@@ -13,7 +13,7 @@ export default async function CreditsPage() {
     <div className="sf-credits-grid">{images.map(entry => <article className="sf-credit" key={entry.imageUrl}><h3>{entry.name}</h3><p>Photography by {entry.author || "See source attribution"}</p><a href={entry.source} target="_blank" rel="noreferrer">Original photograph ↗</a><p>{entry.license}</p><small>{entry.imageUrl.startsWith("/images/products/") ? "Background removed; resized to 800px WebP. Original license retained, including ShareAlike." : "Resized for display. Original background retained."}</small></article>)}</div>
     <h3 className="sf-page-title">Around the market</h3><div className="sf-credits-grid">
       {[
-        ["Market photography", "Tunde Buremo", "https://unsplash.com/photos/a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00"],
+        ["First hero slide - Bodija Market, Ibadan", "Tunde Buremo", "https://unsplash.com/photos/a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00"],
         ["Grain market", "Tunde Buremo", "https://unsplash.com/photos/a-man-standing-under-an-umbrella-in-a-market-NgH0WKgVR0A"],
         ["Spices and herbs", "Vincent Bélanger", "https://unsplash.com/photos/spices-and-herbs-in-wooden-bowls-on-a-table-3gmr5ez2otU"],
         ["Jollof inspiration", "Keesha’s Kitchen", "https://unsplash.com/photos/a-plate-of-food-gmQfS47FBOM"],

@@ -2,6 +2,7 @@ vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { catalogImageUrl } from "../r2";
 
 import {
   listCategories,
@@ -41,6 +42,21 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     }
   });
 
+  it("uses the linked master image in browse, home rails, detail, search and collections", async () => {
+    const expected = catalogImageUrl("catalog/storefront-test.jpg");
+    const [browse, active, detail, search, rails, collection] = await Promise.all([
+      listingsByCategory(storeAId, "vegetables"), getActiveListings(storeAId),
+      getListingDetail(storeAId, listingAId), searchListings(storeAId, "ugu"),
+      getListingsByCategory(storeAId), getCollectionListings(storeAId, "test-soup-kit"),
+    ]);
+    expect(browse.listings.find(item => item.id === listingAId)?.imageUrl).toBe(expected);
+    expect(active.find(item => item.id === listingAId)?.imageUrl).toBe(expected);
+    expect(detail?.imageUrl).toBe(expected);
+    expect(search.find(item => item.id === listingAId)?.imageUrl).toBe(expected);
+    expect(rails.flatMap(rail => rail.listings).find(item => item.id === listingAId)?.imageUrl).toBe(expected);
+    expect(collection.listings.find(item => item.id === listingAId)?.imageUrl).toBe(expected);
+  });
+
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
     rawPrisma = new PrismaClient({ adapter });
@@ -74,7 +90,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.masterProduct.create({
-        data: { name: "Fluted Pumpkin Leaves", categoryId: vegCat?.id ?? null },
+        data: { name: "Fluted Pumpkin Leaves", categoryId: vegCat?.id ?? null, imageUrl: "/api/catalog-image/catalog/storefront-test.jpg" },
       }),
     ]);
     masterProductId = (mp[2] as { id: string }).id;

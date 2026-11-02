@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { categoryPhotos } from "@/lib/storefront/catalog";
+import { storefrontPhoto } from "@/lib/storefront/images";
 import { ProductImage } from "./product-image";
 import { RailScroller } from "./rail-scroller";
 import { SectionHeader } from "./primitives";
@@ -46,7 +47,7 @@ export function CategoryMosaic({
             href={`/categories/${cat.slug}`}
             className="sf-category-tile"
           >
-            <ProductImage src={categoryPhotos[cat.slug] || (cat.imageUrl?.endsWith(".svg") ? undefined : cat.imageUrl ?? undefined)} name={cat.name} sizes="180px" />
+            <ProductImage src={storefrontPhoto(cat.imageUrl) || (categoryPhotos[cat.slug]?.startsWith("/images/products/") ? categoryPhotos[cat.slug] : undefined)} name={cat.name} category={cat.slug} sizes="(max-width:767px) 44vw, 320px" />
             <div>
               <span>
                 {cat.localName && <small>{cat.localName}</small>}
