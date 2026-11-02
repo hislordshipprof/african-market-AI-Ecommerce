@@ -612,37 +612,36 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
   });
 
   it("concurrent same-listing updates produce correct stock event delta sum", async () => {
-    const listing = await createListing({
-      storeId,
-      customName: "Concurrent Delta Test",
-      price: 500,
-      stockMode: "counted",
-      qty: 100,
-      frozen: false,
-      perishable: false,
-      variants: [{ label: "1kg", price: 500, weightG: 1000 }],
-      actor,
-    });
+    for (let round = 0; round < 5; round++) {
+      const listing = await createListing({
+        storeId,
+        customName: `Concurrent Delta R${round}`,
+        price: 500,
+        stockMode: "counted",
+        qty: 100,
+        frozen: false,
+        perishable: false,
+        variants: [{ label: "1kg", price: 500, weightG: 1000 }],
+        actor,
+      });
 
-    await Promise.all([
-      updateListing({ storeId, listingId: listing.id, qty: 90, actor }),
-      updateListing({ storeId, listingId: listing.id, qty: 80, actor }),
-    ]);
+      await Promise.all([
+        updateListing({ storeId, listingId: listing.id, qty: 90, actor }),
+        updateListing({ storeId, listingId: listing.id, qty: 80, actor }),
+      ]);
 
-    const finalQty = (await getListing(storeId, listing.id))!.qty!;
-    const scoped = storeScoped(storeId);
-    const events = await scoped.stockEvent.findMany({
-      where: { listingId: listing.id },
-    });
+      const finalQty = (await getListing(storeId, listing.id))!.qty!;
+      const scoped = storeScoped(storeId);
+      const events = await scoped.stockEvent.findMany({
+        where: { listingId: listing.id },
+      });
 
-    const adjustEvents = events.filter((e) => e.type === "adjust");
-    const deltaSum = adjustEvents.reduce((sum, e) => sum + e.delta, 0);
-    const initialEvent = events.find((e) => e.type === "recount");
-    const initialQty = initialEvent ? initialEvent.delta : 0;
+      const adjustEvents = events.filter((e) => e.type === "adjust");
+      const deltaSum = adjustEvents.reduce((sum, e) => sum + e.delta, 0);
 
-    expect(finalQty + initialQty + deltaSum).toBe(finalQty + initialQty + (finalQty - 100));
-    expect(deltaSum).toBe(finalQty - 100);
-  });
+      expect(deltaSum).toBe(finalQty - 100);
+    }
+  }, 30_000);
 
   it("concurrent updates to different listings do not block each other", async () => {
     const [l1, l2] = await Promise.all([
