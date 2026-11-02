@@ -173,6 +173,17 @@ export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, 
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
 }
 
+/**
+ * Row-lock the cart so concurrent mutations of its lines serialize. Needed
+ * because FOR UPDATE on cart_lines cannot lock a line that does not exist yet.
+ */
+export async function lockCart(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  cartId: string,
+): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM carts WHERE id = ${cartId} FOR UPDATE`;
+}
+
 export async function lockCartLineByVariant(
   tx: Pick<PrismaClient, "$queryRaw">,
   cartId: string,

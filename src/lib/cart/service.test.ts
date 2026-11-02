@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped } from "../db";
+import { catalogFor } from "../storefront/catalog";
 import {
   getOrCreateCart,
   addLine,
@@ -15,6 +16,9 @@ import {
 } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
+// Unique per run: lanes share one database and beforeEach wipes the store carts.
+const storeSlug = `cart-svc-test-${process.pid}-${Date.now()}`;
+// Orphans from a killed run are accepted: sweeping the prefix could delete a live lane's store.
 
 describe.skipIf(!hasDb)("Cart service", () => {
   let rawPrisma: PrismaClient;
@@ -22,6 +26,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
   let variantId: string;
   let variant2Id: string;
   let listingId: string;
+  let imageVariantId: string;
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -29,10 +34,10 @@ describe.skipIf(!hasDb)("Cart service", () => {
     await rawPrisma.$connect();
 
     const store = await rawPrisma.store.upsert({
-      where: { slug: "cart-svc-test" },
+      where: { slug: storeSlug },
       update: {},
       create: {
-        slug: "cart-svc-test",
+        slug: storeSlug,
         name: "Cart Service Test Store",
         themePreset: "palm-and-shea",
         minimumOrderCents: 2000,
@@ -73,6 +78,27 @@ describe.skipIf(!hasDb)("Cart service", () => {
       },
     });
     variant2Id = v2.id;
+
+    // "Yam" is a catalog entry with a known photo (see catalog-media.json)
+    const imageListing = await scoped.listing.create({
+      data: {
+        storeId,
+        customName: "Yam",
+        price: 1200,
+        stockMode: "unlimited",
+        frozen: false,
+        perishable: false,
+      },
+    });
+    const v3 = await scoped.listingVariant.create({
+      data: {
+        listingId: imageListing.id,
+        label: "Each",
+        price: 1200,
+        weightG: 900,
+      },
+    });
+    imageVariantId = v3.id;
   });
 
   afterAll(async () => {
@@ -86,7 +112,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
       }),
       rawPrisma.listing.deleteMany({ where: { storeId } }),
     ]);
-    await rawPrisma.store.deleteMany({ where: { slug: "cart-svc-test" } });
+    await rawPrisma.store.deleteMany({ where: { slug: storeSlug } });
     await rawPrisma.$disconnect();
   });
 
@@ -102,7 +128,18 @@ describe.skipIf(!hasDb)("Cart service", () => {
   describe("getOrCreateCart", () => {
     it("creates a new cart when no id given", async () => {
       const cartId = await getOrCreateCart(storeId, null, null);
-      expect(cartId).toBeTruthy();
+      expect(cartId).toMatch(/^c[a-z0-9]{24}$/);
+
+      const rows = await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.cart.findMany({ where: { id: cartId } }),
+      ]);
+      const carts = rows[2];
+      expect(carts).toHaveLength(1);
+      expect(carts[0].storeId).toBe(storeId);
+      expect(carts[0].source).toBe("manual");
+      expect(carts[0].userId).toBeNull();
     });
 
     it("returns existing cart when valid id given", async () => {
@@ -113,7 +150,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
 
     it("creates new cart when invalid id given", async () => {
       const id = await getOrCreateCart(storeId, "nonexistent-id", null);
-      expect(id).toBeTruthy();
+      expect(id).toMatch(/^c[a-z0-9]{24}$/);
       expect(id).not.toBe("nonexistent-id");
     });
   });
@@ -137,6 +174,50 @@ describe.skipIf(!hasDb)("Cart service", () => {
       expect(cart!.lines[0].qty).toBe(3);
     });
 
+    it("sums quantities across concurrent adds with no duplicate rows", async () => {
+      const cartId = await getOrCreateCart(storeId, null, null);
+      const results = await Promise.allSettled([
+        addLine(storeId, cartId, variantId, 1),
+        addLine(storeId, cartId, variantId, 1),
+        addLine(storeId, cartId, variantId, 1),
+        addLine(storeId, cartId, variantId, 1),
+      ]);
+      expect(results.map((r) => r.status)).toEqual([
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+        "fulfilled",
+      ]);
+
+      const rows = await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.cartLine.findMany({ where: { cartId, variantId } }),
+      ]);
+      const lines = rows[2];
+      expect(lines).toHaveLength(1);
+      expect(lines[0].qty).toBe(4);
+    });
+
+    it("never exceeds maxPerOrder under concurrent adds", async () => {
+      const cartId = await getOrCreateCart(storeId, null, null);
+      // maxPerOrder is 5: seven concurrent +1 adds -> exactly five succeed
+      const results = await Promise.allSettled(
+        Array.from({ length: 7 }, () => addLine(storeId, cartId, variantId, 1)),
+      );
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(5);
+      const rejected = results.filter(
+        (r): r is PromiseRejectedResult => r.status === "rejected",
+      );
+      expect(rejected).toHaveLength(2);
+      for (const r of rejected) {
+        expect((r.reason as CartError).code).toBe("MAX_PER_ORDER");
+      }
+      const cart = await getCartWithLines(storeId, cartId);
+      expect(cart!.lines).toHaveLength(1);
+      expect(cart!.lines[0].qty).toBe(5);
+    });
+
     it("enforces maxPerOrder limit", async () => {
       const cartId = await getOrCreateCart(storeId, null, null);
       await addLine(storeId, cartId, variantId, 4);
@@ -153,10 +234,10 @@ describe.skipIf(!hasDb)("Cart service", () => {
 
     it("rejects variant from another store", async () => {
       const otherStore = await rawPrisma.store.upsert({
-        where: { slug: "cart-svc-other" },
+        where: { slug: `${storeSlug}-other` },
         update: {},
         create: {
-          slug: "cart-svc-other",
+          slug: `${storeSlug}-other`,
           name: "Other Store",
           themePreset: "palm-and-shea",
         },
@@ -195,7 +276,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
         }),
         rawPrisma.listing.deleteMany({ where: { storeId: otherStore.id } }),
       ]);
-      await rawPrisma.store.deleteMany({ where: { slug: "cart-svc-other" } });
+      await rawPrisma.store.deleteMany({ where: { slug: `${storeSlug}-other` } });
     });
   });
 
@@ -335,9 +416,20 @@ describe.skipIf(!hasDb)("Cart service", () => {
 
     it("includes imageUrl from catalog", async () => {
       const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, imageVariantId, 1);
+      const cart = await getCartWithLines(storeId, cartId);
+      // Literal on purpose: the test must fail if the catalog mapping changes
+      expect(catalogFor("Yam")?.imageUrl).toBe(
+        "/images/products/yam-white-puna.webp",
+      );
+      expect(cart!.lines[0].imageUrl).toBe("/images/products/yam-white-puna.webp");
+    });
+
+    it("leaves imageUrl undefined when the catalog has no photo", async () => {
+      const cartId = await getOrCreateCart(storeId, null, null);
       await addLine(storeId, cartId, variantId, 1);
       const cart = await getCartWithLines(storeId, cartId);
-      expect(cart!.lines[0]).toHaveProperty("imageUrl");
+      expect(cart!.lines[0].imageUrl).toBeUndefined();
     });
   });
 
