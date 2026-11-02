@@ -18,7 +18,7 @@ How tickets get built. Adapted from SuperMatt's `orchestrate` (which needs Herdr
 
 ## Vercel previews
 
-Previews are built only on request, to save the Hobby plan's daily build limit and Neon branches. `vercel.json` runs `scripts/vercel-ignore.sh`: `main` (production) always builds, and a PR branch builds only when the pushed commit message contains `[preview]`. Builders never add it. The coordinator pushes `git commit --allow-empty -m "chore: preview for verification [preview]"` to the PR branch at a milestone it wants to check, or when the user asks to see one. CI (ci and e2e on GitHub Actions) still runs on every push.
+Previews are built only on request, to save the Hobby plan's daily deployment limit (100 a day) and Neon branches. An ignored build still creates a canceled deployment that counts toward that limit, so `vercel.json` also turns off Git deployments for `ticket-*`, `chore/*`, `docs/*`, `fix/*` and `feat/*` branches: builder pushes create no deployment at all. A milestone preview is a `preview/<name>` branch cut from the PR head or main with an empty `[preview]` commit. `vercel.json` runs `scripts/vercel-ignore.sh`: `main` (production) always builds, and a PR branch builds only when the pushed commit message contains `[preview]`. Builders never add it. The coordinator pushes `git commit --allow-empty -m "chore: preview for verification [preview]"` to the PR branch at a milestone it wants to check, or when the user asks to see one. CI (ci and e2e on GitHub Actions) still runs on every push.
 
 ## Merge policy
 
