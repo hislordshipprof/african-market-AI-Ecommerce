@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { storeScoped, storeScopedTransaction, lockListingRow } from "../db";
+import { storeScoped, storeScopedTransaction } from "../db";
 import {
   createListing,
   updateListing,
@@ -624,7 +624,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       actor,
     });
 
-    const [r1, r2] = await Promise.all([
+    await Promise.all([
       updateListing({ storeId, listingId: listing.id, qty: 90, actor }),
       updateListing({ storeId, listingId: listing.id, qty: 80, actor }),
     ]);
