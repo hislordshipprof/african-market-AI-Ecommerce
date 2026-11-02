@@ -25,6 +25,8 @@
     "@prisma/client": "^7.10.1",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
+    "@stripe/react-stripe-js": "^7.0.1",
+    "@stripe/stripe-js": "^10.2.0",
     "better-auth": "^1.7.14",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.1",

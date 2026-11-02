@@ -8,7 +8,7 @@ import type {
 
 let _stripeClient: Stripe | null = null;
 
-function getStripeClient(): Stripe {
+export function getStripeClient(): Stripe {
   if (_stripeClient) return _stripeClient;
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) {

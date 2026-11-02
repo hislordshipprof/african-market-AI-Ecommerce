@@ -81,6 +81,9 @@ export function storeScoped(storeId: string) {
     storeCollectionListing: wrapDelegate(storeId, prisma.storeCollectionListing),
     cart: wrapDelegate(storeId, prisma.cart),
     cartLine: wrapDelegate(storeId, prisma.cartLine),
+    customer: wrapDelegate(storeId, prisma.customer),
+    order: wrapDelegate(storeId, prisma.order),
+    orderLine: wrapDelegate(storeId, prisma.orderLine),
   };
 }
 
@@ -130,7 +133,7 @@ export async function platformAdminTransaction<T>(
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "$queryRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -142,6 +145,9 @@ export async function storeScopedTransaction<T>(
       auditLog: tx.auditLog,
       cart: tx.cart,
       cartLine: tx.cartLine,
+      customer: tx.customer,
+      order: tx.order,
+      orderLine: tx.orderLine,
       $queryRaw: tx.$queryRaw.bind(tx),
     });
   });
@@ -149,6 +155,13 @@ export async function storeScopedTransaction<T>(
 
 export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
   await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
+}
+
+export async function getNextOrderNumber(tx: Pick<PrismaClient, "$queryRaw">, storeId: string): Promise<number> {
+  const rows = await tx.$queryRaw<Array<{ max_num: number | null }>>`
+    SELECT MAX(number) AS max_num FROM orders WHERE store_id = ${storeId}
+  `;
+  return (rows[0]?.max_num ?? 0) + 1;
 }
 
 export async function lockListingRow(tx: Pick<PrismaClient, "$queryRaw">, listingId: string) {
