@@ -23,6 +23,8 @@ async function seedDemoStores() {
       ownerPhotoUrl: null,
       neighborhood: "Parkside, Houston TX",
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
+      stripeAccountId: null,
+      stripeOnboardingStatus: "not_started",
       hours: {
         monday: "9:00 AM - 8:00 PM",
         tuesday: "9:00 AM - 8:00 PM",
@@ -72,6 +74,8 @@ async function seedDemoStores() {
       ownerPhotoUrl: null,
       neighborhood: "Little Caribbean, Atlanta GA",
       deliveryInfo: "Next-day delivery within 6 miles · No pickup",
+      stripeAccountId: null,
+      stripeOnboardingStatus: "not_started",
       hours: {
         monday: "10:00 AM - 7:00 PM",
         tuesday: "10:00 AM - 7:00 PM",
