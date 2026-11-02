@@ -2,15 +2,24 @@ import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
+import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
+
+/** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
+const notE2eListing = {
+  OR: [{ customName: null }, { NOT: { customName: { startsWith: E2E_LISTING_PREFIX } } }],
+} satisfies Prisma.ListingWhereInput;
+
+/** Same rule for the raw search SQL. LIKE is wrapped so NULL custom_name rows are kept. */
+const notE2eListingSql = Prisma.sql`(l.custom_name IS NULL OR LEFT(l.custom_name, ${E2E_LISTING_PREFIX.length}) <> ${E2E_LISTING_PREFIX})`;
 
 /** Read-only, tenant-scoped catalog projection for the demo journey adapters. */
 async function readGetFlowCatalog(
   storeId: string,
 ): Promise<FlowCatalogItem[]> {
   const listings = await storeScoped(storeId).listing.findMany({
-    where: { active: true },
+    where: { active: true, ...notE2eListing },
     include: {
       masterProduct: true,
       variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
@@ -162,6 +171,7 @@ async function readListingsByCategory(
   const listings = await scoped.listing.findMany({
     where: {
       active: true,
+      ...notE2eListing,
       masterProduct: { categoryId: category.id },
     },
     include: { masterProduct: { include: { category: true } }, variants: true },
@@ -308,7 +318,7 @@ async function readSearchListings(
         WHERE length(word) >= GREATEST(3, length(${trimmed}) - 1)
       ) terms WHERE term IS NOT NULL
     ) relevance
-    WHERE l.active = true AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND relevance.fuzzy > 0.3))
+    WHERE l.active = true AND ${notE2eListingSql} AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND relevance.fuzzy > 0.3))
     ORDER BY relevance.rank, relevance.fuzzy DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
     LIMIT 50
     `,
@@ -343,7 +353,7 @@ async function readGetActiveListings(
 ): Promise<StorefrontListing[]> {
   const scoped = storeScoped(storeId);
   const listings = await scoped.listing.findMany({
-    where: { active: true },
+    where: { active: true, ...notE2eListing },
     include: { masterProduct: { include: { category: true } }, variants: true },
     orderBy: { createdAt: "desc" },
   });
@@ -439,7 +449,7 @@ async function readGetCollectionListings(
     },
     listings: collection.items
       .map((item) => item.listing)
-      .filter((l) => l.active)
+      .filter((l) => l.active && !l.customName?.startsWith(E2E_LISTING_PREFIX))
       .map(toStorefrontListing),
   };
 }
@@ -492,7 +502,7 @@ async function readGetListingsByCategory(
   const scoped = storeScoped(storeId);
   const MAX_HOMEPAGE_LISTINGS = 120;
   const listings = await scoped.listing.findMany({
-    where: { active: true },
+    where: { active: true, ...notE2eListing },
     include: {
       masterProduct: { include: { category: true } },
       variants: true,

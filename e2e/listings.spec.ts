@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { generateTOTP } from "./totp";
 import { findListingAuditLogs } from "./audit-db";
+import { deleteE2eListings } from "./cleanup-listings";
 
 const OWNER_EMAIL = "owner@mama-ngozi.test";
 const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
@@ -43,8 +44,12 @@ interface CreateListingOptions {
   qty?: string;
 }
 
+/** Names of listings this file created, removed in afterAll (globalTeardown is the backstop). */
+const createdNames: string[] = [];
+
 /** Opens the create dialog, fills it, submits, and returns once the "Listing created" toast shows. */
 async function createListingViaUI(page: Page, opts: CreateListingOptions) {
+  createdNames.push(opts.name);
   await page.goto(LISTINGS_URL);
   await expect(page.locator("h1")).toHaveText("Products");
 
@@ -101,6 +106,10 @@ test.describe("Listing management (unauthenticated)", () => {
 });
 
 test.describe("Listing management (authenticated)", () => {
+  test.afterAll(async () => {
+    await deleteE2eListings({ names: createdNames });
+  });
+
   test.beforeEach(async ({ page }) => {
     await storeOwnerSignIn(page);
   });

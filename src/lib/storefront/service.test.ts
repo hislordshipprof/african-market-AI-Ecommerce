@@ -27,6 +27,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   let listingAId: string;
   let listingBId: string;
   let inactiveListingId: string;
+  let e2eListingId: string;
   let collectionId: string;
 
   it("projects checkout catalog variants without crossing stores or including inactive listings", async () => {
@@ -190,6 +191,27 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     ]);
     inactiveListingId = (inactiveListing[2] as { id: string }).id;
 
+    // An active listing carrying the e2e name prefix: it must never reach customers (#116)
+    const e2eListing = await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.listing.create({
+        data: {
+          storeId: storeAId,
+          masterProductId,
+          customName: "E2E Sentinel Pumpkin",
+          price: 400,
+          stockMode: "counted",
+          qty: 5,
+          frozen: false,
+          perishable: false,
+          confidence: 0.9,
+          variants: { create: [{ label: "1 bunch", price: 400, weightG: 200 }] },
+        },
+      }),
+    ]);
+    e2eListingId = (e2eListing[2] as { id: string }).id;
+
     // Create a collection in store A with an item
     const collection = await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -212,6 +234,9 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       rawPrisma.storeCollectionListing.create({
         data: { collectionId, listingId: listingAId, sortOrder: 0 },
       }),
+      rawPrisma.storeCollectionListing.create({
+        data: { collectionId, listingId: e2eListingId, sortOrder: 1 },
+      }),
     ]);
   });
 
@@ -230,12 +255,12 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listingVariant.deleteMany({ where: { listingId: { in: [listingAId, listingBId, inactiveListingId] } } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listingId: { in: [listingAId, listingBId, inactiveListingId, e2eListingId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listing.deleteMany({ where: { id: { in: [listingAId, listingBId, inactiveListingId] } } }),
+      rawPrisma.listing.deleteMany({ where: { id: { in: [listingAId, listingBId, inactiveListingId, e2eListingId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -413,6 +438,26 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     expect(result.collection!.title).toBe("Test Soup Kit");
     expect(result.listings.length).toBeGreaterThanOrEqual(1);
     expect(result.listings.some((l) => l.id === listingAId)).toBe(true);
+  });
+
+  it("never shows e2e-prefixed listings to customers on any storefront read (#116)", async () => {
+    const [flow, browse, search, active, rails, collection] = await Promise.all([
+      getFlowCatalog(storeAId),
+      listingsByCategory(storeAId, "vegetables"),
+      searchListings(storeAId, "E2E Sentinel"),
+      getActiveListings(storeAId),
+      getListingsByCategory(storeAId),
+      getCollectionListings(storeAId, "test-soup-kit"),
+    ]);
+    expect(flow.some((i) => i.listingId === e2eListingId)).toBe(false);
+    expect(browse.listings.some((i) => i.id === e2eListingId)).toBe(false);
+    expect(search.some((i) => i.id === e2eListingId)).toBe(false);
+    expect(active.some((i) => i.id === e2eListingId)).toBe(false);
+    expect(rails.flatMap((r) => r.listings).some((i) => i.id === e2eListingId)).toBe(false);
+    expect(collection.listings.some((i) => i.id === e2eListingId)).toBe(false);
+    // Unnamed listings (custom_name NULL) must still show: NOT LIKE alone would drop NULLs.
+    expect(active.some((i) => i.id === listingAId)).toBe(true);
+    expect(search.length === 0 || search.every((i) => !i.name.startsWith("E2E "))).toBe(true);
   });
 
   it("getCollectionListings returns null for nonexistent slug", async () => {
