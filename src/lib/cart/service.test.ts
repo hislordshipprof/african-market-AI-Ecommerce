@@ -18,6 +18,7 @@ import {
 const hasDb = !!process.env.DATABASE_URL;
 // Unique per run: lanes share one database and beforeEach wipes the store carts.
 const storeSlug = `cart-svc-test-${process.pid}-${Date.now()}`;
+// Orphans from a killed run are accepted: sweeping the prefix could delete a live lane's store.
 
 describe.skipIf(!hasDb)("Cart service", () => {
   let rawPrisma: PrismaClient;
