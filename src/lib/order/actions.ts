@@ -6,7 +6,6 @@ import {
   acceptOrder,
   markLinePicked,
   completePickup,
-  getOrderById,
 } from "./service";
 import { platform } from "../db";
 
@@ -14,12 +13,6 @@ export async function fetchOrdersAction() {
   const session = await requireStoreMember();
   const orders = await getStoreOrders(session.store.id);
   return { orders, storeId: session.store.id };
-}
-
-export async function fetchOrderAction(orderId: string) {
-  const session = await requireStoreMember();
-  const order = await getOrderById(session.store.id, orderId);
-  return { order, storeId: session.store.id };
 }
 
 export async function acceptOrderAction(orderId: string, prepEstimateMinutes: number) {

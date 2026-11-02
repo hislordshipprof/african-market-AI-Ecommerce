@@ -1,4 +1,4 @@
-import { storeScopedTransaction, storeScoped } from "../db";
+import { storeScopedTransaction, storeScoped, lockStoreRow } from "../db";
 
 export type OrderStatus =
   | "AUTHORIZED"
@@ -24,69 +24,46 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   "AWAITING_PICKUP",
 ];
 
-export async function getStoreOrders(storeId: string) {
-  const scoped = storeScoped(storeId);
-  return scoped.order.findMany({
-    where: { status: { in: ACTIVE_STATUSES } },
+const ORDER_WITH_LINES = {
+  customer: { select: { name: true, phone: true } },
+  lines: {
     include: {
-      customer: { select: { name: true, phone: true } },
-      lines: {
+      listingVariant: {
         include: {
-          listingVariant: {
-            include: {
-              listing: {
-                select: {
-                  id: true,
-                  customName: true,
-                  frozen: true,
-                  perishable: true,
-                  masterProduct: { select: { name: true } },
-                },
-              },
+          listing: {
+            select: {
+              id: true,
+              customName: true,
+              frozen: true,
+              perishable: true,
+              masterProduct: { select: { name: true } },
             },
           },
         },
       },
     },
+  },
+} as const;
+
+export async function getStoreOrders(storeId: string) {
+  const scoped = storeScoped(storeId);
+  return scoped.order.findMany({
+    where: { status: { in: ACTIVE_STATUSES } },
+    include: ORDER_WITH_LINES,
     orderBy: { createdAt: "desc" },
   });
 }
 
 export type StoreOrderRow = Awaited<ReturnType<typeof getStoreOrders>>[number];
 
-export async function getOrderById(storeId: string, orderId: string) {
-  const scoped = storeScoped(storeId);
-  return scoped.order.findUnique({
-    where: { id: orderId },
-    include: {
-      customer: { select: { name: true, phone: true } },
-      lines: {
-        include: {
-          listingVariant: {
-            include: {
-              listing: {
-                select: {
-                  id: true,
-                  customName: true,
-                  frozen: true,
-                  perishable: true,
-                  masterProduct: { select: { name: true } },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-}
-
 export async function acceptOrder(
   storeId: string,
   orderId: string,
   prepEstimateMinutes: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const clamped = Math.max(1, Math.min(120, Math.round(prepEstimateMinutes)));
   return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false, error: "Order not found" };
     if (order.status !== "AUTHORIZED") {
@@ -97,7 +74,7 @@ export async function acceptOrder(
       where: { id: orderId },
       data: {
         status: "ACCEPTED",
-        prepEstimateMinutes: prepEstimateMinutes,
+        prepEstimateMinutes: clamped,
         acceptedAt: new Date(),
       },
     });
@@ -111,9 +88,14 @@ export async function markLinePicked(
   lineId: string,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
   return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+
     const lines = await tx.orderLine.findMany({ where: { id: lineId } });
     const line = lines[0];
     if (!line) return { ok: false, error: "Order line not found" };
+    if (line.status !== "pending") {
+      return { ok: false, error: `Line already resolved (${line.status})` };
+    }
 
     const order = await tx.order.findUnique({ where: { id: line.orderId } });
     if (!order) return { ok: false, error: "Order not found" };
@@ -134,19 +116,16 @@ export async function markLinePicked(
       l.id === lineId ? true : l.status !== "pending",
     );
 
-    let newStatus: OrderStatus = order.status === "ACCEPTED" ? "PICKING" : order.status as OrderStatus;
+    const newStatus: OrderStatus = allResolved
+      ? (order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY")
+      : "PICKING";
 
     if (allResolved) {
-      newStatus = order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
       await tx.order.update({
         where: { id: order.id },
-        data: {
-          status: newStatus,
-          readyAt: new Date(),
-        },
+        data: { status: newStatus, readyAt: new Date() },
       });
     } else if (order.status === "ACCEPTED") {
-      newStatus = "PICKING";
       await tx.order.update({
         where: { id: order.id },
         data: { status: "PICKING" },
@@ -162,6 +141,7 @@ export async function completePickup(
   orderId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false, error: "Order not found" };
     if (order.status !== "AWAITING_PICKUP") {
@@ -178,17 +158,6 @@ export async function completePickup(
 
     return { ok: true };
   });
-}
-
-export interface PickListLine {
-  id: string;
-  productName: string;
-  variantLabel: string;
-  qtyOrdered: number;
-  qtyPicked: number;
-  status: string;
-  frozen: boolean;
-  perishable: boolean;
 }
 
 export { sortPickListLines } from "./pick-sort";

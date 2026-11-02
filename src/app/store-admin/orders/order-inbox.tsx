@@ -42,6 +42,7 @@ import {
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
 import { sortPickListLines } from "@/lib/order/pick-sort";
+import { money } from "@/lib/format";
 
 const STATUS_CONFIG: Record<
   string,
@@ -83,12 +84,24 @@ export function OrderInbox({
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      audioRef.current = new Audio(
-        "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbsGczHjqIr9zwupRBKkeMwO//xpxLM0eNwu//xZpJMkiOw+//xJlIMEqQxO//w5hHL0uRxe//wpZGLk2Txu//wZVFLU6Ux+//wJRELE+VyO//v5NDLVCW"
-      );
-      audioRef.current.volume = 0.5;
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const buf = ctx.createBuffer(1, ctx.sampleRate / 4, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = Math.sin(2 * Math.PI * 880 * (i / ctx.sampleRate)) * Math.exp(-3 * (i / data.length));
+      }
+      audioRef.current = { ctx, buf } as unknown as HTMLAudioElement;
     }
   }, []);
+
+  useEffect(() => {
+    if (!autoAcceptOrders) return;
+    for (const o of initialOrders) {
+      if (o.status === "AUTHORIZED") {
+        autoAcceptOrderAction(o.id).catch(() => {});
+      }
+    }
+  }, [autoAcceptOrders, initialOrders]);
 
   const pollOrders = useCallback(() => {
     startTransition(async () => {
@@ -97,7 +110,11 @@ export function OrderInbox({
         const prevIds = prevOrderIdsRef.current;
         const newOrders = fresh.filter((o) => !prevIds.has(o.id));
         if (newOrders.length > 0 && audioEnabled && audioRef.current) {
-          audioRef.current.play().catch(() => {});
+          const audio = audioRef.current as unknown as { ctx: AudioContext; buf: AudioBuffer };
+          const src = audio.ctx.createBufferSource();
+          src.buffer = audio.buf;
+          src.connect(audio.ctx.destination);
+          src.start();
         }
         if (autoAcceptOrders) {
           for (const o of newOrders) {
@@ -169,10 +186,6 @@ export function OrderInbox({
         toast.error(result.error);
       }
     });
-  }
-
-  function formatCents(cents: number) {
-    return `$${(cents / 100).toFixed(2)}`;
   }
 
   function lineProductName(line: StoreOrderRow["lines"][number]) {
@@ -346,17 +359,17 @@ export function OrderInbox({
                 <div className="mt-4 space-y-1 border-t pt-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>{formatCents(selectedOrder.subtotalCents)}</span>
+                    <span>{money(selectedOrder.subtotalCents)}</span>
                   </div>
                   {selectedOrder.tipCents > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Tip</span>
-                      <span>{formatCents(selectedOrder.tipCents)}</span>
+                      <span>{money(selectedOrder.tipCents)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-sm font-medium">
                     <span>Total</span>
-                    <span>{formatCents(selectedOrder.totalCents || selectedOrder.subtotalCents)}</span>
+                    <span>{money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}</span>
                   </div>
                 </div>
               </CardContent>
@@ -405,7 +418,7 @@ export function OrderInbox({
                               {order.customer.name} &middot;{" "}
                               {order.lines.length} item
                               {order.lines.length !== 1 ? "s" : ""} &middot;{" "}
-                              {formatCents(order.totalCents || order.subtotalCents)}
+                              {money(order.totalCents ?? order.subtotalCents)}
                             </div>
                           </div>
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">

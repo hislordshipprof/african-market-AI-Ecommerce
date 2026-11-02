@@ -742,8 +742,9 @@ async function seedDemoOrders() {
         },
       });
 
-      for (const v of lineVariants) {
-        const isPicked = demo.status === "AWAITING_PICKUP" || (demo.status === "PICKING" && Math.random() > 0.5);
+      for (let li = 0; li < lineVariants.length; li++) {
+        const v = lineVariants[li];
+        const isPicked = demo.status === "AWAITING_PICKUP" || (demo.status === "PICKING" && li === 0);
         await tx.orderLine.create({
           data: {
             storeId: store.id,

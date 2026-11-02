@@ -137,12 +137,14 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     await rawPrisma.$disconnect();
   });
 
+  let orderSeq = 90000;
   async function createTestOrder(status: string = "AUTHORIZED") {
+    const num = ++orderSeq;
     return storeScopedTransaction(storeId, async (tx) => {
       const order = await tx.order.create({
         data: {
           storeId,
-          number: Math.floor(Math.random() * 100000),
+          number: num,
           customerId,
           status,
           fulfillment: "pickup",

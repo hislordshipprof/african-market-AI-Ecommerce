@@ -95,12 +95,11 @@ test.describe("Order inbox", () => {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
-    const pickingOrder = page.locator("button", { hasText: "Picking" });
-    if (await pickingOrder.isVisible()) {
-      await pickingOrder.click();
-      await expect(page.locator("text=Pick list")).toBeVisible();
-      await expect(page.locator("text=Pick").first()).toBeVisible();
-    }
+    const pickingBadge = page.locator("button", { hasText: "Picking" });
+    await expect(pickingBadge).toBeVisible();
+    await pickingBadge.click();
+    await expect(page.locator("text=Pick list")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Pick" }).first()).toBeVisible();
   });
 
   test("no horizontal overflow at 390px mobile", async ({ page }) => {
