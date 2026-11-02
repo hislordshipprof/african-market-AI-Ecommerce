@@ -724,12 +724,9 @@ async function seedDemoOrders() {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
 
-      const existing = await tx.order.findUnique({
-        where: { id: demo.id },
-        include: { lines: { select: { id: true } } },
-      });
-      if (existing && existing.lines.length > 0) return;
-      if (existing && existing.lines.length === 0) {
+      const existing = await tx.order.findUnique({ where: { id: demo.id } });
+      if (existing) {
+        await tx.orderLine.deleteMany({ where: { orderId: demo.id } });
         await tx.order.delete({ where: { id: demo.id } });
       }
 
