@@ -281,6 +281,98 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
     ).rejects.toThrow();
   });
 
+  // --- Cross-store UPDATE/DELETE ---
+
+  it("store B cannot update store A customer", async () => {
+    const scoped = storeScoped(storeBId);
+    const result = await scoped.customer.updateMany({
+      where: { id: customerAId },
+      data: { name: "Hacked" },
+    });
+    expect(result.count).toBe(0);
+  });
+
+  it("store B cannot delete store A customer", async () => {
+    const scoped = storeScoped(storeBId);
+    const result = await scoped.customer.deleteMany({
+      where: { id: customerAId },
+    });
+    expect(result.count).toBe(0);
+  });
+
+  it("store B cannot update store A order", async () => {
+    const scoped = storeScoped(storeBId);
+    const result = await scoped.order.updateMany({
+      where: { id: orderAId },
+      data: { status: "CANCELLED" },
+    });
+    expect(result.count).toBe(0);
+  });
+
+  it("store B cannot delete store A order", async () => {
+    const scoped = storeScoped(storeBId);
+    const result = await scoped.order.deleteMany({
+      where: { id: orderAId },
+    });
+    expect(result.count).toBe(0);
+  });
+
+  it("store B cannot update store A order lines", async () => {
+    const scoped = storeScoped(storeBId);
+    const result = await scoped.orderLine.updateMany({
+      where: { orderId: orderAId },
+      data: { qtyOrdered: 999 },
+    });
+    expect(result.count).toBe(0);
+  });
+
+  it("store B cannot delete store A order lines", async () => {
+    const scoped = storeScoped(storeBId);
+    const result = await scoped.orderLine.deleteMany({
+      where: { orderId: orderAId },
+    });
+    expect(result.count).toBe(0);
+  });
+
+  // --- Composite FK rejection ---
+
+  it("DB rejects order referencing customer from another store", async () => {
+    await expect(
+      storeScopedTransaction(storeAId, async (tx) => {
+        await tx.order.create({
+          data: {
+            storeId: storeAId,
+            number: 9998,
+            customerId: customerBId,
+            status: "AUTHORIZED",
+            fulfillment: "pickup",
+            subtotalCents: 100,
+            bufferCents: 10,
+            totalAuthorizedCents: 110,
+            paymentIntentId: `pi_test_fk_reject_${Date.now()}`,
+          },
+        });
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("DB rejects order line referencing order from another store", async () => {
+    await expect(
+      storeScopedTransaction(storeBId, async (tx) => {
+        await tx.orderLine.create({
+          data: {
+            storeId: storeBId,
+            orderId: orderAId,
+            listingVariantId: variantBId,
+            qtyOrdered: 1,
+            unitPriceCents: 900,
+            swapRule: "exact_only",
+          },
+        });
+      }),
+    ).rejects.toThrow();
+  });
+
   // --- storeScopedTransaction ---
 
   it("storeScopedTransaction enforces isolation for orders", async () => {
