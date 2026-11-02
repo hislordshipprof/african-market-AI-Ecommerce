@@ -155,6 +155,8 @@ function toStorefrontListing(listing: {
   };
 }
 
+// Custom-name-only listings (those without a masterProductId) are excluded by design: categories
+// derive from master products. These listings are reachable via search and the all-products view.
 async function readListingsByCategory(
   storeId: string,
   categorySlug: string,
