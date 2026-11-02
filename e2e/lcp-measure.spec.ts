@@ -1,6 +1,7 @@
+import { storeUrl } from "./urls";
 import { test, expect } from "@playwright/test";
 
-const BASE = "http://mama-ngozi.localhost:3000";
+const BASE = storeUrl("mama-ngozi");
 
 const THROTTLE_4G = {
   offline: false,

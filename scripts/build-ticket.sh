@@ -69,7 +69,7 @@ RULES="Run headless: never ask the user. Never end your turn while a subagent, b
 case "$MODE" in
   build)
     PROMPT="/supermatt:implement #$N
-Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build && pnpm start on http://localhost:3000 using .env.local.
+Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build && pnpm start on http://localhost:$LANE_PORT using .env.local.
 If this ticket touches UI, the design pass in docs/agents/builder.md is part of done: the report must include the impeccable critique score and screenshots at 390px and 1440px (light and dark), or the coordinator will reject the PR.
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
 ${KEYLESS:-}

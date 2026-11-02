@@ -1,6 +1,7 @@
+import { storeUrl } from "./urls";
 import { test, expect } from "@playwright/test";
 
-const BASE = "http://mama-ngozi.localhost:3000";
+const BASE = storeUrl("mama-ngozi");
 
 test.describe("Storefront browse and search (#8 acceptance criteria)", () => {
   test("category page lists active listings and excludes inactive ones", async ({

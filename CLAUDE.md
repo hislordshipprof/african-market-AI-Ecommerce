@@ -30,4 +30,4 @@ Single-context: root `GLOSSARY.md`, ADRs in `docs/adr/`. See `docs/agents/domain
 
 ### External peers
 
-`auto` — Claude or Codex adapter chosen from host metadata, default models, effort high. See `docs/agents/cross-model.json`.
+`host-only` — no external peer on every build; Claude effort high, Codex (gpt-6-astra) effort medium, run by the coordinator at milestones. See `docs/agents/cross-model.json`.
