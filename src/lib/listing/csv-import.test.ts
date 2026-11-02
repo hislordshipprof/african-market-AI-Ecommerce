@@ -187,6 +187,14 @@ describe("parseCsvText", () => {
     expect(rows[1].status).toBe("in_stock");
   });
 
+  it("E8: rejects files over 5000 rows", () => {
+    const rows = Array.from({ length: 5001 }, (_, i) => `Product${i},${i + 1}.00`);
+    const csv = "name,price\n" + rows.join("\n") + "\n";
+    const { errors } = parseCsvText(csv);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].reason).toContain("5000");
+  });
+
   it("missing name column in headers", () => {
     const csv = "product,price\nEgusi,12.50\n";
     const { errors } = parseCsvText(csv);
@@ -552,6 +560,34 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
         actor,
       ),
     ).rejects.toThrow(/invalid|expired|already used/i);
+  });
+
+  it("E14: concurrent imports with separate tokens both succeed", async () => {
+    const csvA = "name,price\nConcurrent Item A T63,3.00\n";
+    const csvB = "name,price\nConcurrent Item B T63,4.00\n";
+
+    const previewA = await generatePreview(storeAId, csvA);
+    const previewB = await generatePreview(storeAId, csvB);
+
+    expect(previewA.importToken).not.toBe(previewB.importToken);
+
+    const [resultA, resultB] = await Promise.all([
+      commitImport(
+        storeAId,
+        previewA.importToken,
+        { matchedRows: [], newItemRows: [2], duplicateRows: [], ambiguousResolutions: [] },
+        actor,
+      ),
+      commitImport(
+        storeAId,
+        previewB.importToken,
+        { matchedRows: [], newItemRows: [2], duplicateRows: [], ambiguousResolutions: [] },
+        actor,
+      ),
+    ]);
+
+    expect(resultA.createdCount).toBe(1);
+    expect(resultB.createdCount).toBe(1);
   });
 
   it("E10: formula injection stored as plain text", async () => {
