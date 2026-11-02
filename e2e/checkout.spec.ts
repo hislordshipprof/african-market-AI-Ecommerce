@@ -70,12 +70,15 @@ test.describe("Guest checkout flow", () => {
     await addItemToCart(page);
     await page.goto(`${base}/checkout`);
 
+    const review = page.locator("#review");
     await expect(
-      page.getByRole("heading", { name: "Your order" }),
+      review.getByRole("heading", { name: "Your order", exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Subtotal")).toBeVisible();
-    await expect(page.getByText("Temporary swap buffer")).toBeVisible();
-    await expect(page.getByText("Authorization hold")).toBeVisible();
+    await expect(review.getByText("Subtotal")).toBeVisible();
+    await expect(review.getByText("Temporary swap buffer")).toBeVisible();
+    await expect(
+      review.getByText("Authorization hold", { exact: true }),
+    ).toBeVisible();
   });
 
   test("demo checkout places order successfully", async ({ page }) => {
