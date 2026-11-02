@@ -287,10 +287,16 @@ test.describe("Catalog review (authenticated)", () => {
     await expect(dialog).toBeVisible({ timeout: 5000 });
     await expect(dialog).toHaveAttribute("aria-modal", "true");
 
-    for (let i = 0; i < 12; i++) {
-      await page.keyboard.press("Tab");
-      const inside = await page.evaluate(() => !!document.activeElement?.closest("[role='dialog']"));
-      expect(inside).toBe(true);
+    // Focus moves into the dialog on open.
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+
+    // Tab (and Shift+Tab) through more stops than the dialog has controls: focus must wrap inside it.
+    for (const key of ["Tab", "Shift+Tab"]) {
+      for (let i = 0; i < 10; i++) {
+        await page.keyboard.press(key);
+        const inside = await page.evaluate(() => !!document.activeElement?.closest("[role='dialog']"));
+        expect(inside, `${key} #${i + 1} left the dialog`).toBe(true);
+      }
     }
 
     await page.keyboard.press("Escape");

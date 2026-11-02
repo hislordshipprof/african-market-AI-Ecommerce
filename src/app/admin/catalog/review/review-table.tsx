@@ -30,6 +30,30 @@ function ConfidenceBadge({ confidence }: { confidence: string | null }) {
   );
 }
 
+const FOCUSABLE = "input, textarea, select, button, a[href], [tabindex]:not([tabindex='-1'])";
+
+/**
+ * Keep Tab inside the dialog. Base UI's focus guards sometimes park focus on <body> at the
+ * end of the loop, after which the next Tab reaches the (non-inert) page behind it.
+ */
+function wrapTabFocus(e: React.KeyboardEvent<HTMLElement>) {
+  if (e.key !== "Tab") return;
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true",
+  );
+  if (items.length === 0) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey && (active === first || active === e.currentTarget)) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 function EditModal({
   product,
   onClose,
@@ -75,10 +99,10 @@ function EditModal({
         if (!open && !isPending) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-lg" showCloseButton={false}>
+      <DialogContent className="sm:max-w-lg" showCloseButton={false} aria-modal="true" onKeyDown={wrapTabFocus}>
         <DialogHeader>
           <DialogTitle className="text-lg font-bold">Edit product</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="dark:text-[#a0a8a3]">
             Changes are saved to the master catalog and recorded in the audit log.
           </DialogDescription>
         </DialogHeader>
@@ -130,8 +154,8 @@ function EditModal({
             />
           </label>
         </div>
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>
+        <DialogFooter className="border-[#e2e4e9] bg-transparent dark:border-[#333]">
+          <Button type="button" variant="ghost" className="dark:text-white dark:hover:bg-[#222]" onClick={onClose} disabled={isPending}>
             Cancel
           </Button>
           <Button type="button" onClick={handleSave} disabled={isPending}>
@@ -214,7 +238,7 @@ export function ReviewTable({
         <p className="mt-1 text-sm text-[#55625A] dark:text-[#a0a8a3]">
           {total} {total === 1 ? "product remains" : "products remain"} on other pages.
         </p>
-        <Button type="button" variant="outline" className="mt-4" onClick={() => goToPage(lastPage)}>
+        <Button type="button" variant="outline" className="mt-4 dark:border-[#444] dark:bg-transparent dark:text-white dark:hover:bg-[#222]" onClick={() => goToPage(lastPage)}>
           Back to page {lastPage}
         </Button>
       </div>
