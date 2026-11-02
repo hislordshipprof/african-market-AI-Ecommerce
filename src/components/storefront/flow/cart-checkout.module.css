@@ -331,9 +331,9 @@
 @media (max-width: 767px) {
   .page {
     /* Fixed stack above the viewport bottom: nav (12px offset + 68px bar)
-       + 8px gap, then the 82px checkout bar, then a 12px scroll margin. */
+       + 8px gap, then the 74px checkout bar, then a 12px scroll margin. */
     --cart-bar-bottom: calc(88px + env(safe-area-inset-bottom));
-    --cart-bar-height: 82px;
+    --cart-bar-height: 74px;
     padding-bottom: calc(var(--cart-bar-bottom) + var(--cart-bar-height) + 12px);
   }
   .mobileAction {
