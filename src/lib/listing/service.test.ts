@@ -637,8 +637,8 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       });
 
       const adjustEvents = events.filter((e) => e.type === "adjust");
+      expect(adjustEvents).toHaveLength(2);
       const deltaSum = adjustEvents.reduce((sum, e) => sum + e.delta, 0);
-
       expect(deltaSum).toBe(finalQty - 100);
     }
   }, 30_000);
