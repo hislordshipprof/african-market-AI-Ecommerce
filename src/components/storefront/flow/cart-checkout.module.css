@@ -322,6 +322,9 @@
 .anchor {
   scroll-margin-top: 168px;
 }
+.stripeCard {
+  padding: 16px 0;
+}
 .mobileAction {
   display: none;
 }
