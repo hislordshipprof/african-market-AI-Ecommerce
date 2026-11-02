@@ -1,6 +1,7 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { runtimeDatabaseUrl } from "./env";
+import type { QueryRawFn } from "./health";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -178,12 +179,15 @@ export { Prisma };
 
 export { prisma as authPrisma };
 
-// No RLS wrapper: health checks read only system catalogs, not store-scoped tables.
-export function healthQueryRaw(
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-): Promise<unknown[]> {
-  return prisma.$queryRaw(strings, ...values) as Promise<unknown[]>;
+/** Minimal slice of a Prisma client needed to run a query under a statement timeout. */
+export interface TransactionalClient {
+  $transaction<T>(
+    fn: (tx: {
+      $executeRaw(strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
+      $queryRaw(strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
+    }) => Promise<T>,
+    options?: { timeout?: number; maxWait?: number },
+  ): Promise<T>;
 }
 
 export async function rateLimitUpsert(
@@ -209,3 +213,19 @@ export async function rateLimitUpsert(
   `;
   return { count: Number(rows[0].count) };
 }
+
+/**
+ * Wraps each query in a transaction that first sets a 5 s server-side statement
+ * timeout, so a slow database cancels the query
+ * instead of hanging until the function timeout.
+ */
+export function withStatementTimeout(client: TransactionalClient): QueryRawFn {
+  return (strings, ...values) =>
+    client.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL statement_timeout = '5000'`;
+      return (await tx.$queryRaw(strings, ...values)) as unknown[];
+    }, { timeout: 7000, maxWait: 2000 });
+}
+
+// No RLS wrapper: health checks read only system catalogs, not store-scoped tables.
+export const healthQueryRaw = withStatementTimeout(prisma);

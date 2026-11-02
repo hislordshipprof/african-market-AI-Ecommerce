@@ -1,13 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isRateLimited } from "./rate-limit";
+import { isRateLimited, resetRateLimiter } from "./rate-limit";
 
 describe("isRateLimited", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    resetRateLimiter();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    resetRateLimiter();
+  });
+
+  it("resetRateLimiter lets an exhausted IP through again", () => {
+    for (let i = 0; i < 10; i++) {
+      isRateLimited("172.16.0.1");
+    }
+    expect(isRateLimited("172.16.0.1")).toBe(true);
+
+    resetRateLimiter();
+    expect(isRateLimited("172.16.0.1")).toBe(false);
   });
 
   it("allows up to 10 requests per IP within a minute", () => {
