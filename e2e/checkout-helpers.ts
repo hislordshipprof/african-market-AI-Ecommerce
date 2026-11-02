@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
+import { storeUrl } from "./urls";
 
-const base = "http://mama-ngozi.localhost:3000";
+const base = storeUrl("mama-ngozi");
 
 export async function addItemToCart(page: Page) {
   await page.goto(`${base}/categories/grains-and-flours`);

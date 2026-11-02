@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { resolve } from "node:path";
 import { addItemToCart } from "./checkout-helpers";
+import { storeUrl } from "./urls";
 
 const OUT = resolve(__dirname, "..", "screenshots");
-const base = "http://mama-ngozi.localhost:3000";
+const base = storeUrl("mama-ngozi");
 
 test.describe("Checkout screenshots", () => {
   test.use({ reducedMotion: "reduce" });
