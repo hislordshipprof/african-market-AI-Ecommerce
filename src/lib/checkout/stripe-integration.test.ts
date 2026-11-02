@@ -37,19 +37,41 @@ describe.skipIf(!hasKey || !hasDb)(
       rawPrisma = new PrismaClient({ adapter });
       await rawPrisma.$connect();
 
-      const stores = await rawPrisma.store.findMany({
-        where: {
-          stripeOnboardingStatus: "complete",
-          stripeAccountId: { not: null },
-        },
-        take: 2,
-      });
-      expect(stores.length).toBeGreaterThanOrEqual(1);
-      storeAId = stores[0].id;
-      stripeAccountAId = stores[0].stripeAccountId!;
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+      const accounts = await stripe.accounts.list({ limit: 2 });
+      expect(accounts.data.length).toBeGreaterThanOrEqual(1);
 
-      if (stores.length >= 2) {
-        storeBId = stores[1].id;
+      const acctA = accounts.data[0];
+      const storeA = await rawPrisma.store.upsert({
+        where: { slug: "stripe-test-a" },
+        update: { stripeAccountId: acctA.id, stripeOnboardingStatus: "complete" },
+        create: {
+          slug: "stripe-test-a",
+          name: "Stripe Test Store A",
+          themePreset: "palm-and-shea",
+          stripeAccountId: acctA.id,
+          stripeOnboardingStatus: "complete",
+          pickupEnabled: true,
+        },
+      });
+      storeAId = storeA.id;
+      stripeAccountAId = acctA.id;
+
+      if (accounts.data.length >= 2) {
+        const acctB = accounts.data[1];
+        const storeB = await rawPrisma.store.upsert({
+          where: { slug: "stripe-test-b" },
+          update: { stripeAccountId: acctB.id, stripeOnboardingStatus: "complete" },
+          create: {
+            slug: "stripe-test-b",
+            name: "Stripe Test Store B",
+            themePreset: "lagoon-and-coral",
+            stripeAccountId: acctB.id,
+            stripeOnboardingStatus: "complete",
+            pickupEnabled: true,
+          },
+        });
+        storeBId = storeB.id;
       } else {
         storeBId = storeAId;
       }
@@ -108,6 +130,9 @@ describe.skipIf(!hasKey || !hasDb)(
           where: { storeId: storeAId, customName: "Stripe Test Product" },
         }),
       ]);
+      await rawPrisma.store.deleteMany({
+        where: { slug: { in: ["stripe-test-a", "stripe-test-b"] } },
+      });
       await rawPrisma.$disconnect();
     });
 
