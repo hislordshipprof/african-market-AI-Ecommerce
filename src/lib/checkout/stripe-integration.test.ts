@@ -38,8 +38,20 @@ describe.skipIf(!hasKey || !hasDb)(
       await rawPrisma.$connect();
 
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-      const accounts = await stripe.accounts.list({ limit: 2 });
-      expect(accounts.data.length).toBeGreaterThanOrEqual(1);
+      // Destination charges need a connected account that can receive transfers. Other test
+      // runs leave un-onboarded accounts in the sandbox, so "newest account" is not usable.
+      const ready: Stripe.Account[] = [];
+      const others: Stripe.Account[] = [];
+      for await (const acct of stripe.accounts.list({ limit: 100 })) {
+        (acct.capabilities?.transfers === "active" ? ready : others).push(acct);
+        if (ready.length >= 1 && others.length >= 1) break;
+      }
+      if (!ready.length) {
+        throw new Error(
+          "No sandbox connected account has the transfers capability; finish hosted onboarding for one store (see #64 step 1).",
+        );
+      }
+      const accounts = { data: [ready[0], ...ready.slice(1), ...others] };
 
       const acctA = accounts.data[0];
       const storeA = await rawPrisma.store.upsert({
