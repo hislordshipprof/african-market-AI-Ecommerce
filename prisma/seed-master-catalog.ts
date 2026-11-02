@@ -1,36 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import { parse } from "csv-parse/sync";
-import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import sharp from "sharp";
 import { S3Client, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
-import { uploadToR2, catalogImageUrl } from "../src/lib/r2";
-
-interface CsvRow {
-  id: string;
-  english_name: string;
-  local_names: string;
-  search_synonyms: string;
-  category: string;
-  subcategory: string;
-  origin_countries: string;
-  product_type: string;
-  common_brands: string;
-  unit: string;
-  common_pack_sizes: string;
-  typical_weight_g: string;
-  storage: string;
-  perishable: string;
-  description: string;
-  image_url: string;
-  image_source_page: string;
-  image_license: string;
-  image_author: string;
-  sources: string;
-  confidence: string;
-  notes: string;
-}
+import { catalogImageUrl } from "../src/lib/r2";
+import { downloadAndUploadImage } from "../src/lib/catalog-image";
+import { upsertMasterProduct, type CsvRow } from "./master-catalog-upsert";
 
 const CATEGORY_SLUG_TO_ID: Record<string, string> = {
   tubers: "cat_tubers",
@@ -51,7 +26,6 @@ const CATEGORY_SLUG_TO_ID: Record<string, string> = {
   "seasonings-and-sauces": "cat_seasonings_sauces",
 };
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_RETRIES = 5;
 
 function getS3Client() {
@@ -99,125 +73,6 @@ async function deleteR2Objects(keys: string[]): Promise<void> {
   }
 }
 
-function toThumbnailUrl(originalUrl: string, width: number): string {
-  try {
-    const url = new URL(originalUrl);
-    if (!url.hostname.endsWith("wikimedia.org")) return originalUrl;
-    const parts = url.pathname.split("/");
-    const commonsIdx = parts.indexOf("commons");
-    if (commonsIdx === -1) return originalUrl;
-    if (parts[commonsIdx + 1] === "thumb") return originalUrl;
-    const filename = parts[parts.length - 1];
-    const thumbSuffix = filename.toLowerCase().endsWith(".svg")
-      ? `${width}px-${filename}.png`
-      : `${width}px-${filename}`;
-    const newParts = [...parts];
-    newParts.splice(commonsIdx + 1, 0, "thumb");
-    newParts.push(thumbSuffix);
-    return `${url.origin}${newParts.join("/")}`;
-  } catch {
-    return originalUrl;
-  }
-}
-
-async function fetchWithRetry(
-  url: string,
-  productId: string,
-): Promise<Buffer | null> {
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "AfricanMarketsPlatform/1.0 (catalog-seed)",
-        },
-        redirect: "follow",
-        signal: AbortSignal.timeout(30000),
-      });
-      if (response.status === 429) {
-        const retryAfter = response.headers.get("Retry-After");
-        const baseMs = retryAfter
-          ? parseInt(retryAfter, 10) * 1000
-          : 1000 * Math.pow(2, attempt);
-        const jitter = Math.random() * 1000;
-        await new Promise((r) => setTimeout(r, Math.min(baseMs + jitter, 60000)));
-        continue;
-      }
-      if (response.status === 404) return null;
-      if (!response.ok) return null;
-      const buf = Buffer.from(await response.arrayBuffer());
-      if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) return null;
-      return buf;
-    } catch {
-      if (attempt < MAX_RETRIES - 1) {
-        const baseMs = 1000 * Math.pow(2, attempt);
-        const jitter = Math.random() * 1000;
-        await new Promise((r) => setTimeout(r, baseMs + jitter));
-        continue;
-      }
-      return null;
-    }
-  }
-  return null;
-}
-
-async function downloadAndOptimize(
-  url: string,
-  productId: string,
-): Promise<{ buffer: Buffer; contentType: string } | null> {
-  const thumbUrl = toThumbnailUrl(url, 960);
-  const urls = thumbUrl !== url ? [thumbUrl, url] : [url];
-  for (const fetchUrl of urls) {
-    const raw = await fetchWithRetry(fetchUrl, productId);
-    if (raw) {
-      try {
-        const webpBuf = await sharp(raw)
-          .resize(960, 960, { fit: "inside", withoutEnlargement: true })
-          .webp({ quality: 80 })
-          .toBuffer();
-        return { buffer: webpBuf, contentType: "image/webp" };
-      } catch {
-        console.warn(`sharp conversion failed for ${productId}`);
-        continue;
-      }
-    }
-  }
-  return null;
-}
-
-function synonymId(productId: string, prefix: string, ...parts: (string | null | undefined)[]): string {
-  const hash = createHash("sha256")
-    .update(parts.filter(Boolean).join("|"))
-    .digest("hex")
-    .substring(0, 12);
-  return `${productId}_${prefix}_${hash}`;
-}
-
-function parseLocalNames(raw: string): { term: string; language: string | null; region: string | null }[] {
-  if (!raw) return [];
-  return raw.split("|").map((entry) => {
-    const trimmed = entry.trim();
-    const match = trimmed.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
-    if (match) {
-      const term = match[1].trim();
-      const parts = match[2].split(",").map((s) => s.trim());
-      const language = parts[0] || null;
-      const region = parts[1] || null;
-      return { term, language, region };
-    }
-    return { term: trimmed, language: null, region: null };
-  }).filter((s) => s.term.length > 0);
-}
-
-function parseSearchSynonyms(raw: string): { term: string }[] {
-  if (!raw) return [];
-  return raw
-    .split("|")
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0)
-    .map((term) => ({ term }));
-}
-
-
 export async function seedMasterCatalog(prisma: PrismaClient) {
   if (process.env.VERCEL_ENV === "production") {
     console.log("Skipping master catalog seed in production");
@@ -258,7 +113,6 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
 
   for (const row of highRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
-    const weightG = row.typical_weight_g ? parseInt(row.typical_weight_g, 10) : null;
     const imageSourceUrl = row.image_url?.trim() || null;
 
     let imageUrl: string | null = null;
@@ -269,16 +123,22 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
         imageUrl = catalogImageUrl(webpKey);
         imageExisting++;
       } else {
-        const img = await downloadAndOptimize(imageSourceUrl, row.id);
-        if (img) {
-          try {
-            imageUrl = await uploadToR2(webpKey, img.buffer, img.contentType);
-            imageUploads++;
-            totalUploadBytes += img.buffer.byteLength;
-          } catch (e) {
-            console.warn(`R2 upload failed for ${row.id}:`, e);
-            failures.push({ id: row.id, reason: "R2 upload failed" });
-          }
+        const img = await downloadAndUploadImage(imageSourceUrl, row.id, {
+          sharp: true,
+          retries: MAX_RETRIES,
+          rewriteWikimedia: true,
+          format: "webp",
+          followRedirects: true,
+          timeoutMs: 30000,
+          userAgent: "AfricanMarketsPlatform/1.0 (catalog-seed)",
+        });
+        if (img.ok) {
+          imageUrl = img.url;
+          imageUploads++;
+          totalUploadBytes += img.bytes;
+        } else if (img.reason === "upload") {
+          console.warn(`R2 upload failed for ${row.id}`);
+          failures.push({ id: row.id, reason: "R2 upload failed" });
         } else {
           imageSkips++;
           failures.push({ id: row.id, reason: "download/convert failed" });
@@ -291,59 +151,15 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
       }
     }
 
-    const productData = {
-      name: row.english_name,
-      categoryId,
-      description: row.description || null,
-      imageSourceUrl,
-      imageAuthor: row.image_author || null,
-      imageLicense: row.image_license || null,
-      unit: row.unit || null,
-      weightG: isNaN(weightG as number) ? null : weightG,
-      frozen: row.storage?.trim().toLowerCase() === "frozen",
-      perishable: row.perishable?.trim().toLowerCase() === "yes",
-      storage: row.storage || null,
-      subcategory: row.subcategory || null,
-      originCountries: row.origin_countries || null,
-      status: "active",
-      confidence: "high",
-    };
-
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.masterProduct.upsert({
-        where: { id: row.id },
-        update: {
-          ...productData,
-          ...(imageUrl !== null ? { imageUrl } : {}),
-        },
-        create: {
-          id: row.id,
-          ...productData,
-          imageUrl,
-        },
+      await upsertMasterProduct(tx, row, categoryId, {
+        statusOnCreate: "active",
+        statusOnUpdate: "active",
+        confidence: "high",
+        imageUrl,
       });
-
-      const localNames = parseLocalNames(row.local_names);
-      for (const syn of localNames) {
-        const synId = synonymId(row.id, "ln", syn.term, syn.language, syn.region);
-        await tx.productSynonym.upsert({
-          where: { id: synId },
-          update: { term: syn.term, language: syn.language, region: syn.region },
-          create: { id: synId, productId: row.id, term: syn.term, language: syn.language, region: syn.region },
-        });
-      }
-
-      const searchSyns = parseSearchSynonyms(row.search_synonyms);
-      for (const syn of searchSyns) {
-        const synId = synonymId(row.id, "ss", syn.term);
-        await tx.productSynonym.upsert({
-          where: { id: synId },
-          update: { term: syn.term },
-          create: { id: synId, productId: row.id, term: syn.term },
-        });
-      }
     });
   }
 
@@ -370,70 +186,15 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
 
   for (const row of reviewRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
-    const weightG = row.typical_weight_g ? parseInt(row.typical_weight_g, 10) : null;
-    const imageSourceUrl = row.image_url?.trim() || null;
 
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.masterProduct.upsert({
-        where: { id: row.id },
-        update: {
-          name: row.english_name,
-          categoryId,
-          description: row.description || null,
-          imageSourceUrl,
-          imageAuthor: row.image_author || null,
-          imageLicense: row.image_license || null,
-          unit: row.unit || null,
-          weightG: isNaN(weightG as number) ? null : weightG,
-          frozen: row.storage?.trim().toLowerCase() === "frozen",
-          perishable: row.perishable?.trim().toLowerCase() === "yes",
-          storage: row.storage || null,
-          subcategory: row.subcategory || null,
-          originCountries: row.origin_countries || null,
-          confidence: row.confidence.trim(),
-        },
-        create: {
-          id: row.id,
-          name: row.english_name,
-          categoryId,
-          description: row.description || null,
-          imageUrl: null,
-          imageSourceUrl,
-          imageAuthor: row.image_author || null,
-          imageLicense: row.image_license || null,
-          unit: row.unit || null,
-          weightG: isNaN(weightG as number) ? null : weightG,
-          frozen: row.storage?.trim().toLowerCase() === "frozen",
-          perishable: row.perishable?.trim().toLowerCase() === "yes",
-          storage: row.storage || null,
-          subcategory: row.subcategory || null,
-          originCountries: row.origin_countries || null,
-          status: "needs_review",
-          confidence: row.confidence.trim(),
-        },
+      await upsertMasterProduct(tx, row, categoryId, {
+        statusOnCreate: "needs_review",
+        confidence: row.confidence.trim(),
+        imageUrl: null,
       });
-
-      const localNames = parseLocalNames(row.local_names);
-      for (const syn of localNames) {
-        const synId = synonymId(row.id, "ln", syn.term, syn.language, syn.region);
-        await tx.productSynonym.upsert({
-          where: { id: synId },
-          update: { term: syn.term, language: syn.language, region: syn.region },
-          create: { id: synId, productId: row.id, term: syn.term, language: syn.language, region: syn.region },
-        });
-      }
-
-      const searchSyns = parseSearchSynonyms(row.search_synonyms);
-      for (const syn of searchSyns) {
-        const synId = synonymId(row.id, "ss", syn.term);
-        await tx.productSynonym.upsert({
-          where: { id: synId },
-          update: { term: syn.term },
-          create: { id: synId, productId: row.id, term: syn.term },
-        });
-      }
     });
   }
 

@@ -264,7 +264,7 @@ test.describe("Catalog review (authenticated)", () => {
     const modal = page.getByRole("heading", { name: "Edit product" });
     await expect(modal).toBeVisible({ timeout: 5000 });
 
-    const nameInput = page.locator(".fixed input").first();
+    const nameInput = page.getByRole("dialog").locator("input").first();
     const editedName = `AAA-E2E-${Date.now()}`;
     await nameInput.fill(editedName);
     await page.getByRole("button", { name: "Save" }).click();
@@ -278,6 +278,29 @@ test.describe("Catalog review (authenticated)", () => {
     await editedRow.getByRole("button", { name: "Approve" }).click();
 
     await expect(page.locator("a[href*='status=active'] span").last()).not.toHaveText(activeCountBefore!, { timeout: 10000 });
+  });
+
+  test("edit modal is an accessible dialog: role, aria-modal, focus trap, Escape", async ({ page }) => {
+    await page.locator("table tbody tr").first().getByRole("button", { name: "Edit" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Edit product" });
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toHaveAttribute("aria-modal", "true");
+
+    // Focus moves into the dialog on open.
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+
+    // Tab (and Shift+Tab) through more stops than the dialog has controls: focus must wrap inside it.
+    for (const key of ["Tab", "Shift+Tab"]) {
+      for (let i = 0; i < 10; i++) {
+        await page.keyboard.press(key);
+        const inside = await page.evaluate(() => !!document.activeElement?.closest("[role='dialog']"));
+        expect(inside, `${key} #${i + 1} left the dialog`).toBe(true);
+      }
+    }
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
   });
 
   test("reject moves product to rejected tab", async ({ page }) => {
