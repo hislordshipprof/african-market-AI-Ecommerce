@@ -1,4 +1,4 @@
-import { storeScoped, storeScopedTransaction } from "../db";
+import { storeScoped, storeScopedTransaction, lockListingRow } from "../db";
 
 export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
@@ -146,6 +146,8 @@ export interface UpdateListingInput {
 
 export async function updateListing(input: UpdateListingInput) {
   return storeScopedTransaction(input.storeId, async (tx) => {
+    await lockListingRow(tx, input.listingId);
+
     const existing = await tx.listing.findUniqueOrThrow({
       where: { id: input.listingId },
     });

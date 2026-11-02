@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { storeScoped } from "../db";
+import { storeScoped, storeScopedTransaction } from "../db";
 import {
   createListing,
   updateListing,
@@ -609,6 +609,138 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     const found = await getListing(storeId, listing.id);
     expect(found!.variants[0].sku).toBe("SKU-1");
     expect(found!.variants[0].barcode).toBe("123456");
+  });
+
+  it("concurrent same-listing updates produce correct stock event delta sum", async () => {
+    for (let round = 0; round < 5; round++) {
+      const listing = await createListing({
+        storeId,
+        customName: `Concurrent Delta R${round}`,
+        price: 500,
+        stockMode: "counted",
+        qty: 100,
+        frozen: false,
+        perishable: false,
+        variants: [{ label: "1kg", price: 500, weightG: 1000 }],
+        actor,
+      });
+
+      await Promise.all([
+        updateListing({ storeId, listingId: listing.id, qty: 90, actor }),
+        updateListing({ storeId, listingId: listing.id, qty: 80, actor }),
+      ]);
+
+      const finalQty = (await getListing(storeId, listing.id))!.qty!;
+      const scoped = storeScoped(storeId);
+      const events = await scoped.stockEvent.findMany({
+        where: { listingId: listing.id },
+      });
+
+      const adjustEvents = events.filter((e) => e.type === "adjust");
+      expect(adjustEvents).toHaveLength(2);
+      const deltaSum = adjustEvents.reduce((sum, e) => sum + e.delta, 0);
+      expect(deltaSum).toBe(finalQty - 100);
+    }
+  }, 30_000);
+
+  it("concurrent updates to different listings do not block each other", async () => {
+    const [l1, l2] = await Promise.all([
+      createListing({
+        storeId,
+        customName: "Concurrent L1",
+        price: 500,
+        stockMode: "counted",
+        qty: 50,
+        frozen: false,
+        perishable: false,
+        variants: [{ label: "1kg", price: 500, weightG: 1000 }],
+        actor,
+      }),
+      createListing({
+        storeId,
+        customName: "Concurrent L2",
+        price: 600,
+        stockMode: "counted",
+        qty: 60,
+        frozen: false,
+        perishable: false,
+        variants: [{ label: "1kg", price: 600, weightG: 1000 }],
+        actor,
+      }),
+    ]);
+
+    const [u1, u2] = await Promise.all([
+      updateListing({ storeId, listingId: l1.id, qty: 40, actor }),
+      updateListing({ storeId, listingId: l2.id, qty: 50, actor }),
+    ]);
+
+    expect(u1.qty).toBe(40);
+    expect(u2.qty).toBe(50);
+  });
+
+  it("cross-store: stock events are not visible to another store", async () => {
+    const otherStore = await rawPrisma.store.upsert({
+      where: { slug: "svc-listing-xstore-stock" },
+      update: {},
+      create: { slug: "svc-listing-xstore-stock", name: "XStore Stock Test", themePreset: "palm-and-shea" },
+    });
+    try {
+      const listing = await createListing({
+        storeId,
+        customName: "XStore Stock Events",
+        price: 500,
+        stockMode: "counted",
+        qty: 10,
+        frozen: false,
+        perishable: false,
+        variants: [{ label: "1kg", price: 500, weightG: 1000 }],
+        actor,
+      });
+
+      await updateListing({ storeId, listingId: listing.id, qty: 5, actor });
+
+      const otherScoped = storeScoped(otherStore.id);
+      const events = await otherScoped.stockEvent.findMany({
+        where: { listingId: listing.id },
+      });
+      expect(events).toHaveLength(0);
+    } finally {
+      await rawPrisma.store.deleteMany({ where: { slug: "svc-listing-xstore-stock" } });
+    }
+  });
+
+  it("cross-store: lockListingRow in store B context does not lock store A listing", async () => {
+    const otherStore = await rawPrisma.store.upsert({
+      where: { slug: "svc-listing-xstore-lock" },
+      update: {},
+      create: { slug: "svc-listing-xstore-lock", name: "XStore Lock Test", themePreset: "palm-and-shea" },
+    });
+    try {
+      const listing = await createListing({
+        storeId,
+        customName: "XStore Lock Target",
+        price: 500,
+        stockMode: "counted",
+        qty: 10,
+        frozen: false,
+        perishable: false,
+        variants: [{ label: "1kg", price: 500, weightG: 1000 }],
+        actor,
+      });
+
+      const rows = await storeScopedTransaction(otherStore.id, async (tx) => {
+        return tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM listings WHERE id = ${listing.id} FOR UPDATE
+        `;
+      });
+      expect(rows).toHaveLength(0);
+
+      const found = await getListing(storeId, listing.id);
+      expect(found).not.toBeNull();
+      expect(found!.qty).toBe(10);
+    } finally {
+      await rawPrisma.store.deleteMany({ where: { slug: "svc-listing-xstore-lock" } });
+    }
   });
 
   it("rolls back the whole update when variant creation fails", async () => {
