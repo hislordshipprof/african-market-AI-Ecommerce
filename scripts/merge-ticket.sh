@@ -20,8 +20,7 @@ if [ "$CMP" != "0" ] && [ "$PENDING_OR_FAILED" = "0" ]; then
   BASE=$(git merge-base origin/main "origin/$HEAD_REF" 2>/dev/null || true)
   if [ -n "$BASE" ]; then
     OVERLAP=$(comm -12 <(git diff --name-only "$BASE" origin/main | sort) <(git diff --name-only "$BASE" "origin/$HEAD_REF" | sort) | grep -vE '^scripts/ticket-env\.txt$' || true)
-    [ -z "$OVERLAP" ] && DISJOINT=yes || echo "Files changed on both sides: $(echo "$OVERLAP" | tr '
-' ' ')"
+    [ -z "$OVERLAP" ] && DISJOINT=yes || echo "Files changed on both sides: $(echo "$OVERLAP" | tr '\n' ' ')"
   fi
 fi
 if { [ "$CMP" = "0" ] || [ "$DISJOINT" = "yes" ]; } && [ "$PENDING_OR_FAILED" = "0" ]; then
