@@ -1,4 +1,4 @@
-import { storeScopedTransaction, storeScoped, lockStoreRow } from "../db";
+import { storeScopedTransaction, lockStoreRow } from "../db";
 
 export type OrderStatus =
   | "AUTHORIZED"
@@ -46,11 +46,12 @@ const ORDER_WITH_LINES = {
 } as const;
 
 export async function getStoreOrders(storeId: string) {
-  const scoped = storeScoped(storeId);
-  return scoped.order.findMany({
-    where: { status: { in: ACTIVE_STATUSES } },
-    include: ORDER_WITH_LINES,
-    orderBy: { createdAt: "desc" },
+  return storeScopedTransaction(storeId, async (tx) => {
+    return tx.order.findMany({
+      where: { status: { in: ACTIVE_STATUSES } },
+      include: ORDER_WITH_LINES,
+      orderBy: { createdAt: "desc" },
+    });
   });
 }
 
