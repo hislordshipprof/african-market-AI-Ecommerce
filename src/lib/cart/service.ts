@@ -1,4 +1,9 @@
-import { storeScoped, storeScopedTransaction, lockCartLineByVariant } from "../db";
+import {
+  storeScoped,
+  storeScopedTransaction,
+  lockCart,
+  lockCartLineByVariant,
+} from "../db";
 import { catalogFor } from "../storefront/catalog";
 import type { SwapRuleValue } from "../storefront/cart-store";
 
@@ -99,6 +104,12 @@ export async function addLine(
     }
 
     const maxPerOrder = variant.listing.maxPerOrder ?? 99;
+
+    // FOR UPDATE on cart_lines cannot lock a row that does not exist yet, so
+    // concurrent first-adds of a variant would both INSERT and one would hit
+    // the (cart_id, variant_id) unique index. Serialize adds per cart on the
+    // cart row, which always exists.
+    await lockCart(tx, cartId);
 
     const existing = await lockCartLineByVariant(tx, cartId, variantId);
     const totalQty = (existing?.qty ?? 0) + qty;
