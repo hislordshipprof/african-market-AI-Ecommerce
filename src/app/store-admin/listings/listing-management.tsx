@@ -247,6 +247,10 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
       })),
     );
     loadMasterProducts();
+    if (listing.masterProductId && listing.masterProductName) {
+      const current = { id: listing.masterProductId, name: listing.masterProductName };
+      setMasterProducts((prev) => prev ?? [current]);
+    }
     setEditListing(listing);
   }
 

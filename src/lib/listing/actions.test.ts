@@ -223,6 +223,16 @@ describe("updateListingAction", () => {
     );
   });
 
+  it("stores a blank custom name as null when a master product is kept", async () => {
+    mockUpdateListing.mockResolvedValueOnce({ id: "listing-1" });
+    await updateListingAction(
+      formData({ listingId: "listing-1", customName: "  ", masterProductId: "mp-1" }),
+    );
+    expect(mockUpdateListing).toHaveBeenCalledWith(
+      expect.objectContaining({ customName: null, masterProductId: "mp-1" }),
+    );
+  });
+
   it("clears maxPerOrder when sent as empty string", async () => {
     mockUpdateListing.mockResolvedValueOnce({ id: "listing-1" });
     const result = await updateListingAction(

@@ -145,7 +145,7 @@ export async function updateListingAction(formData: FormData) {
     const updated = await updateListing({
       storeId: session.store.id,
       listingId,
-      ...(customName !== null && { customName }),
+      ...(customName !== null && { customName: customName.trim() || null }),
       ...(masterProductId !== null && { masterProductId: masterProductId || null }),
       ...(priceRaw !== null && { price: Number(priceRaw) }),
       ...(stockMode !== null && { stockMode: stockMode as StockMode }),

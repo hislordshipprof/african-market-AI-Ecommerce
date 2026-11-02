@@ -620,7 +620,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
         price: 9999,
         variants: [
           { label: "ok", price: 1, weightG: 1 },
-          { label: "bad", price: 1, weightG: 1e12 }, // exceeds INT4, DB rejects
+          { label: "bad", price: 1, weightG: 1e12 }, // out of INT4 range: fails inside the transaction after the update and delete ran
         ],
         actor,
       }),
