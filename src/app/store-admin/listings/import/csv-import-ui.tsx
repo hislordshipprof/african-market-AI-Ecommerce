@@ -4,6 +4,7 @@ import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -179,51 +180,76 @@ export function CsvImportUi({ storeName }: Props) {
           Upload a CSV file to bulk-import products into {storeName}.
         </p>
 
-        {step === "upload" && (
-          <UploadStep
-            selectedFile={selectedFile}
-            dragOver={dragOver}
-            setDragOver={setDragOver}
-            onFileChange={handleFileChange}
-            onUpload={handleUpload}
-            isPending={isPending}
-            fileRef={fileRef}
-          />
-        )}
+        <AnimatePresence mode="wait">
+          {step === "upload" && (
+            <motion.div
+              key="upload"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <UploadStep
+                selectedFile={selectedFile}
+                dragOver={dragOver}
+                setDragOver={setDragOver}
+                onFileChange={handleFileChange}
+                onUpload={handleUpload}
+                isPending={isPending}
+                fileRef={fileRef}
+              />
+            </motion.div>
+          )}
 
-        {step === "preview" && preview && (
-          <PreviewStep
-            preview={preview}
-            selectedMatches={selectedMatches}
-            selectedNew={selectedNew}
-            toggleMatch={toggleMatch}
-            toggleNew={toggleNew}
-            selectAllMatches={selectAllMatches}
-            deselectAllMatches={deselectAllMatches}
-            selectAllNew={selectAllNew}
-            deselectAllNew={deselectAllNew}
-            onCommit={handleCommit}
-            onBack={() => {
-              setStep("upload");
-              setPreview(null);
-              setSelectedFile(null);
-            }}
-            isPending={isPending}
-          />
-        )}
+          {step === "preview" && preview && (
+            <motion.div
+              key="preview"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <PreviewStep
+                preview={preview}
+                selectedMatches={selectedMatches}
+                selectedNew={selectedNew}
+                toggleMatch={toggleMatch}
+                toggleNew={toggleNew}
+                selectAllMatches={selectAllMatches}
+                deselectAllMatches={deselectAllMatches}
+                selectAllNew={selectAllNew}
+                deselectAllNew={deselectAllNew}
+                onCommit={handleCommit}
+                onBack={() => {
+                  setStep("upload");
+                  setPreview(null);
+                  setSelectedFile(null);
+                }}
+                isPending={isPending}
+              />
+            </motion.div>
+          )}
 
-        {step === "success" && (
-          <SuccessStep
-            createdCount={createdCount}
-            onGoToProducts={() => router.push("/store-admin/listings")}
-            onImportMore={() => {
-              setStep("upload");
-              setPreview(null);
-              setSelectedFile(null);
-              setCreatedCount(0);
-            }}
-          />
-        )}
+          {step === "success" && (
+            <motion.div
+              key="success"
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.3 }}
+            >
+              <SuccessStep
+                createdCount={createdCount}
+                onGoToProducts={() => router.push("/store-admin/listings")}
+                onImportMore={() => {
+                  setStep("upload");
+                  setPreview(null);
+                  setSelectedFile(null);
+                  setCreatedCount(0);
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
@@ -484,7 +510,7 @@ function PreviewStep({
       )}
 
       {/* Action bar */}
-      <div className="sticky bottom-0 flex items-center justify-between gap-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-3 shadow-sm">
+      <div className="sticky bottom-0 z-10 flex items-center justify-between gap-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]/95 px-4 py-3 shadow-md backdrop-blur-sm">
         <Button variant="outline" onClick={onBack} disabled={isPending}>
           <ArrowLeft className="mr-1 h-4 w-4" />
           Back
@@ -516,7 +542,13 @@ function SuccessStep({
   return (
     <Card>
       <CardContent className="flex flex-col items-center py-12 text-center">
-        <CheckCircle2 className="mb-4 h-12 w-12 text-[var(--color-success)]" />
+        <motion.div
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: "spring", stiffness: 300, damping: 20, delay: 0.1 }}
+        >
+          <CheckCircle2 className="mb-4 h-12 w-12 text-[var(--color-success)]" />
+        </motion.div>
         <h2 className="text-xl font-bold font-[family-name:var(--font-display)] mb-2">
           Import Complete
         </h2>
