@@ -73,6 +73,7 @@ function getStoreLocalTime(timezone: string, now: Date): { dayOfWeek: number; mi
     hour: "numeric",
     minute: "numeric",
     hour12: false,
+    hourCycle: "h23",
   });
   const parts = fmt.formatToParts(now);
   const weekdayStr = parts.find((p) => p.type === "weekday")?.value ?? "";

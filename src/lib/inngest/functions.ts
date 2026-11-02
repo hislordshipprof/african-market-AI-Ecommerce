@@ -30,6 +30,7 @@ export const acceptanceAlert = inngest.createFunction(
       if (!isStoreOpen(store?.hours, store?.timezone ?? "America/New_York")) return;
 
       await storeScopedTransaction(storeId, async (tx) => {
+        await lockStoreRow(tx, storeId);
         const existing = await tx.auditLog.findFirst({
           where: { entityId: orderId, action: "acceptance_alert" },
         });
