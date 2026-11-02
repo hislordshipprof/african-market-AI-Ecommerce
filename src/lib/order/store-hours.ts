@@ -66,18 +66,60 @@ function findDaySchedule(
   return null;
 }
 
-export function isStoreOpen(hours: unknown, now?: Date): boolean {
+function getStoreLocalTime(timezone: string, now: Date): { dayOfWeek: number; minuteOfDay: number } {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(now);
+  const weekdayStr = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const hourStr = parts.find((p) => p.type === "hour")?.value ?? "0";
+  const minuteStr = parts.find((p) => p.type === "minute")?.value ?? "0";
+
+  const weekdayMap: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+
+  return {
+    dayOfWeek: weekdayMap[weekdayStr] ?? 0,
+    minuteOfDay: parseInt(hourStr, 10) * 60 + parseInt(minuteStr, 10),
+  };
+}
+
+export function isStoreOpen(hours: unknown, timezone: string, now?: Date): boolean {
   if (!hours || typeof hours !== "object") return false;
 
   const h = hours as Record<string, unknown>;
   const d = now ?? new Date();
-  const schedule = findDaySchedule(h, d.getDay());
-  if (!schedule) return false;
+  const local = getStoreLocalTime(timezone, d);
 
-  const openMin = parseTimeMinutes(schedule.open);
-  const closeMin = parseTimeMinutes(schedule.close);
-  if (openMin === null || closeMin === null) return false;
+  const todaySchedule = findDaySchedule(h, local.dayOfWeek);
+  if (todaySchedule) {
+    const openMin = parseTimeMinutes(todaySchedule.open);
+    const closeMin = parseTimeMinutes(todaySchedule.close);
+    if (openMin !== null && closeMin !== null) {
+      if (closeMin > openMin) {
+        if (local.minuteOfDay >= openMin && local.minuteOfDay < closeMin) return true;
+      } else {
+        // Overnight: open >= close means open spans midnight (e.g. 20:00–02:00)
+        if (local.minuteOfDay >= openMin) return true;
+      }
+    }
+  }
 
-  const currentMin = d.getHours() * 60 + d.getMinutes();
-  return currentMin >= openMin && currentMin < closeMin;
+  // Check yesterday's schedule for overnight window carrying into today
+  const yesterdayDow = (local.dayOfWeek + 6) % 7;
+  const yesterdaySchedule = findDaySchedule(h, yesterdayDow);
+  if (yesterdaySchedule) {
+    const openMin = parseTimeMinutes(yesterdaySchedule.open);
+    const closeMin = parseTimeMinutes(yesterdaySchedule.close);
+    if (openMin !== null && closeMin !== null && closeMin <= openMin) {
+      if (local.minuteOfDay < closeMin) return true;
+    }
+  }
+
+  return false;
 }

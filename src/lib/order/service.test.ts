@@ -4,7 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, sortPickListLines } from "./service";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, setAuthorizedAmount } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -46,6 +46,7 @@ describe("sortPickListLines (pure)", () => {
 describe.skipIf(!hasDb)("Order service (database)", () => {
   let rawPrisma: PrismaClient;
   let storeId: string;
+  let storeBId: string;
   let customerId: string;
   let variantId: string;
   let variantFrozenId: string;
@@ -70,6 +71,19 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       },
     });
     storeId = store.id;
+
+    const storeB = await rawPrisma.store.upsert({
+      where: { slug: "order-svc-test-b" },
+      update: { stripeAccountId: "acct_test_order_svc_b" },
+      create: {
+        slug: "order-svc-test-b",
+        name: "Order Service Test Store B",
+        themePreset: "lagoon-and-coral",
+        prepTimeMinutes: 30,
+        stripeAccountId: "acct_test_order_svc_b",
+      },
+    });
+    storeBId = storeB.id;
 
     const scoped = storeScoped(storeId);
 
@@ -131,24 +145,34 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
   afterAll(async () => {
     setStripeProvider(null);
+    const storeIds = [storeId, storeBId];
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.auditLog.deleteMany({ where: { storeId } }),
-      rawPrisma.stockEvent.deleteMany({ where: { storeId } }),
-      rawPrisma.orderLine.deleteMany({ where: { storeId } }),
-      rawPrisma.order.deleteMany({ where: { storeId } }),
-      rawPrisma.customer.deleteMany({ where: { storeId } }),
-      rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId } } }),
-      rawPrisma.listing.deleteMany({ where: { storeId } }),
+      rawPrisma.auditLog.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.orderLine.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.order.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.customer.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: storeIds } } } }),
+      rawPrisma.listing.deleteMany({ where: { storeId: { in: storeIds } } }),
     ]);
-    await rawPrisma.store.deleteMany({ where: { slug: "order-svc-test" } });
+    await rawPrisma.store.deleteMany({ where: { slug: { in: ["order-svc-test", "order-svc-test-b"] } } });
     await rawPrisma.$disconnect();
   });
 
   let orderSeq = 90000;
-  async function createTestOrder(status: string = "AUTHORIZED") {
+  async function createTestOrder(
+    status: string = "AUTHORIZED",
+    opts?: { tipCents?: number; deliveryFeeCents?: number },
+  ) {
     const num = ++orderSeq;
+    const tipCents = opts?.tipCents ?? 0;
+    const deliveryFeeCents = opts?.deliveryFeeCents ?? 0;
+    // Lines: 2x1000 + 1x2000 + 3x500 = 5500
+    const subtotalCents = 5500;
+    const bufferCents = 550;
+    const totalAuthorizedCents = subtotalCents + bufferCents + tipCents + deliveryFeeCents;
     return storeScopedTransaction(storeId, async (tx) => {
       const order = await tx.order.create({
         data: {
@@ -157,10 +181,12 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
           customerId,
           status,
           fulfillment: "pickup",
-          subtotalCents: 3500,
-          bufferCents: 350,
-          totalAuthorizedCents: 3850,
-          totalCents: 3500,
+          subtotalCents,
+          bufferCents,
+          tipCents,
+          deliveryFeeCents,
+          totalAuthorizedCents,
+          totalCents: subtotalCents,
           paymentIntentId: `pi_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
         },
       });
@@ -195,6 +221,10 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
   }
 
+  beforeEach(() => {
+    resetFakeStripe();
+  });
+
   it("acceptOrder transitions AUTHORIZED -> ACCEPTED", async () => {
     const order = await createTestOrder();
     const result = await acceptOrder(storeId, order.id, 20);
@@ -215,9 +245,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     }
   });
 
-  it("acceptOrder rejects wrong store", async () => {
+  it("acceptOrder rejects wrong store (real store isolation)", async () => {
     const order = await createTestOrder();
-    const result = await acceptOrder("nonexistent-store-id", order.id, 20);
+    const result = await acceptOrder(storeBId, order.id, 20);
     expect(result.ok).toBe(false);
   });
 
@@ -284,7 +314,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   it("markReady rejects when lines are unresolved", async () => {
-    resetFakeStripe();
     const order = await createTestOrder();
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({
@@ -300,9 +329,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(capturedPayments.size).toBe(0);
   });
 
-  it("markReady succeeds and captures correct amount for pickup order", async () => {
-    resetFakeStripe();
-    const order = await createTestOrder();
+  it("markReady succeeds and captures correct amount (lines + tip + delivery)", async () => {
+    const order = await createTestOrder("AUTHORIZED", { tipCents: 200, deliveryFeeCents: 300 });
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({
       where: { orderId: order.id },
@@ -314,16 +343,62 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const result = await markReady(storeId, order.id);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      // 2 x 1000 + 1 x 2000 + 3 x 500 = 5500
-      expect(result.capturedAmountCents).toBe(5500);
+      // 2x1000 + 1x2000 + 3x500 = 5500 lines + 200 tip + 300 delivery = 6000
+      expect(result.capturedAmountCents).toBe(6000);
     }
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("AWAITING_PICKUP");
     expect(updated!.readyAt).toBeTruthy();
-    expect(updated!.capturedAmountCents).toBe(5500);
+    expect(updated!.capturedAmountCents).toBe(6000);
 
-    expect(capturedPayments.get(order.paymentIntentId!)).toBe(5500);
+    expect(capturedPayments.get(order.paymentIntentId!)).toBe(6000);
+  });
+
+  it("markReady rejects when capture would exceed authorized amount", async () => {
+    // Create order with very low authorized amount
+    const num = ++orderSeq;
+    const order = await storeScopedTransaction(storeId, async (tx) => {
+      const o = await tx.order.create({
+        data: {
+          storeId,
+          number: num,
+          customerId,
+          status: "AUTHORIZED",
+          fulfillment: "pickup",
+          subtotalCents: 1000,
+          bufferCents: 0,
+          tipCents: 0,
+          deliveryFeeCents: 0,
+          totalAuthorizedCents: 100, // way too low
+          totalCents: 1000,
+          paymentIntentId: `pi_test_cap_${Date.now()}`,
+        },
+      });
+      await tx.orderLine.create({
+        data: {
+          storeId,
+          orderId: o.id,
+          listingVariantId: variantId,
+          qtyOrdered: 2,
+          unitPriceCents: 1000,
+        },
+      });
+      return o;
+    });
+
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("exceeds authorized");
+    }
+    expect(capturedPayments.size).toBe(0);
   });
 
   it("markReady rejects order not in PICKING status", async () => {
@@ -335,7 +410,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     }
   });
 
-  it("markReady rejects when called from wrong store", async () => {
+  it("markReady rejects when called from wrong store (real store isolation)", async () => {
     const order = await createTestOrder();
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({
@@ -344,12 +419,11 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     for (const line of lines) {
       await markLinePicked(storeId, line.id);
     }
-    const result = await markReady("nonexistent-store-id", order.id);
+    const result = await markReady(storeBId, order.id);
     expect(result.ok).toBe(false);
   });
 
   it("autoCancelOrder cancels AUTHORIZED order and voids payment", async () => {
-    resetFakeStripe();
     const order = await createTestOrder();
 
     const result = await autoCancelOrder(storeId, order.id);
@@ -363,7 +437,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   it("autoCancelOrder creates cancel_restore StockEvents with correct deltas", async () => {
-    resetFakeStripe();
     const order = await createTestOrder();
 
     await autoCancelOrder(storeId, order.id);
@@ -383,7 +456,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   it("autoCancelOrder creates auto_cancel AuditLog entry", async () => {
-    resetFakeStripe();
     const order = await createTestOrder();
 
     await autoCancelOrder(storeId, order.id);
@@ -397,7 +469,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   it("autoCancelOrder rejects non-AUTHORIZED order", async () => {
-    resetFakeStripe();
     const order = await createTestOrder();
     await acceptOrder(storeId, order.id, 15);
 
@@ -409,9 +480,30 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(cancelledPayments.size).toBe(0);
   });
 
-  it("autoCancelOrder rejects wrong store", async () => {
+  it("autoCancelOrder rejects wrong store (real store isolation)", async () => {
     const order = await createTestOrder();
-    const result = await autoCancelOrder("nonexistent-store-id", order.id);
+    const result = await autoCancelOrder(storeBId, order.id);
     expect(result.ok).toBe(false);
+  });
+
+  it("markReady idempotent: second call after Stripe already captured succeeds", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    const r1 = await markReady(storeId, order.id);
+    expect(r1.ok).toBe(true);
+
+    // Fake provider returns already-captured for the same PI, so the call doesn't fail.
+    // But markReady checks order status, so it rejects at the DB level (not PICKING).
+    const r2 = await markReady(storeId, order.id);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.error).toContain("Cannot mark ready");
   });
 });

@@ -38,9 +38,11 @@ import {
   acceptOrderAction,
   autoAcceptOrderAction,
   markLinePickedAction,
+  markReadyAction,
   completePickupAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
+import { RESOLVED_LINE_STATUSES } from "@/lib/order/service";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
 
@@ -168,6 +170,18 @@ export function OrderInbox({
       const result = await markLinePickedAction(lineId);
       if (result.ok) {
         toast.success("Line picked");
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleMarkReady(orderId: string) {
+    startTransition(async () => {
+      const result = await markReadyAction(orderId);
+      if (result.ok) {
+        toast.success("Order marked ready");
         pollOrders();
       } else {
         toast.error(result.error);
@@ -344,6 +358,23 @@ export function OrderInbox({
                       ))}
                     </div>
                   </div>
+                )}
+
+                {selectedOrder.status === "PICKING" && (
+                  (() => {
+                    const allResolved = selectedOrder.lines.every(
+                      (l) => RESOLVED_LINE_STATUSES.includes(l.status as "picked" | "refunded" | "substituted"),
+                    );
+                    return (
+                      <Button
+                        className="mb-4 w-full rounded-full"
+                        onClick={() => handleMarkReady(selectedOrder.id)}
+                        disabled={isPending || !allResolved}
+                      >
+                        <CheckCircle2 className="mr-2 size-4" /> Mark ready
+                      </Button>
+                    );
+                  })()
                 )}
 
                 {selectedOrder.status === "AWAITING_PICKUP" && (

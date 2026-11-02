@@ -1,5 +1,4 @@
 import { storeScopedTransaction, lockStoreRow } from "../db";
-import { platform } from "../db";
 import { getStripeProvider } from "../stripe";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
@@ -112,10 +111,6 @@ export async function markLinePicked(
       data: { status: "picked", qtyPicked: line.qtyOrdered },
     });
 
-    const allLines = await tx.orderLine.findMany({
-      where: { orderId: line.orderId },
-    });
-
     if (order.status === "ACCEPTED") {
       await tx.order.update({
         where: { id: order.id },
@@ -133,15 +128,6 @@ export async function markReady(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true; capturedAmountCents: number } | { ok: false; error: string }> {
-  const store = await platform.store.findUnique({
-    where: { id: storeId },
-    select: { stripeAccountId: true },
-  });
-  if (!store?.stripeAccountId) {
-    return { ok: false, error: "Store is not connected to Stripe" };
-  }
-  const stripeAccountId = store.stripeAccountId;
-
   return storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -159,10 +145,19 @@ export async function markReady(
       return { ok: false, error: "Cannot mark ready: unresolved order lines remain" };
     }
 
-    const capturedAmountCents = lines.reduce((sum: number, l: { status: string; qtyPicked: number; unitPriceCents: number }) => {
+    const lineTotalCents = lines.reduce((sum: number, l: { status: string; qtyPicked: number; unitPriceCents: number }) => {
       if (l.status === "refunded") return sum;
       return sum + l.qtyPicked * l.unitPriceCents;
     }, 0);
+
+    const capturedAmountCents = lineTotalCents + order.tipCents + order.deliveryFeeCents;
+
+    if (capturedAmountCents > order.totalAuthorizedCents) {
+      return {
+        ok: false,
+        error: `Capture amount ${capturedAmountCents} exceeds authorized amount ${order.totalAuthorizedCents}`,
+      };
+    }
 
     if (!order.paymentIntentId) {
       return { ok: false, error: "Order has no payment intent" };
@@ -172,9 +167,10 @@ export async function markReady(
     await stripe.capturePaymentIntent(
       order.paymentIntentId,
       capturedAmountCents,
-      stripeAccountId,
+      `capture:${orderId}`,
     );
 
+    // Pickup → AWAITING_PICKUP per spec §4.3 (READY → AWAITING_PICKUP for pickup)
     const newStatus: OrderStatus =
       order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
 
@@ -219,15 +215,6 @@ export async function autoCancelOrder(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const store = await platform.store.findUnique({
-    where: { id: storeId },
-    select: { stripeAccountId: true },
-  });
-  if (!store?.stripeAccountId) {
-    return { ok: false, error: "Store is not connected to Stripe" };
-  }
-  const stripeAccountId = store.stripeAccountId;
-
   return storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -238,7 +225,10 @@ export async function autoCancelOrder(
 
     if (order.paymentIntentId) {
       const stripe = getStripeProvider();
-      await stripe.cancelPaymentIntent(order.paymentIntentId, stripeAccountId);
+      await stripe.cancelPaymentIntent(
+        order.paymentIntentId,
+        `cancel:${orderId}`,
+      );
     }
 
     await tx.order.update({
@@ -250,22 +240,30 @@ export async function autoCancelOrder(
     });
 
     const lines = await tx.orderLine.findMany({ where: { orderId } });
-    for (const line of lines) {
-      const variant = await tx.listingVariant.findUnique({
-        where: { id: line.listingVariantId },
-        select: { listingId: true },
-      });
-      if (variant) {
-        await tx.stockEvent.create({
-          data: {
-            storeId,
-            listingId: variant.listingId,
-            type: "cancel_restore",
-            delta: line.qtyOrdered,
-            actorId: SYSTEM_ACTOR_ID,
-          },
-        });
-      }
+
+    const variantIds = lines.map((l: { listingVariantId: string }) => l.listingVariantId);
+    const variants = await tx.listingVariant.findMany({
+      where: { id: { in: variantIds } },
+      select: { id: true, listingId: true },
+    });
+    const variantToListing = new Map(variants.map((v: { id: string; listingId: string }) => [v.id, v.listingId]));
+
+    const stockEventData = lines
+      .map((line: { listingVariantId: string; qtyOrdered: number }) => {
+        const listingId = variantToListing.get(line.listingVariantId);
+        if (!listingId) return null;
+        return {
+          storeId,
+          listingId,
+          type: "cancel_restore" as const,
+          delta: line.qtyOrdered,
+          actorId: SYSTEM_ACTOR_ID,
+        };
+      })
+      .filter((d): d is NonNullable<typeof d> => d !== null);
+
+    if (stockEventData.length > 0) {
+      await tx.stockEvent.createMany({ data: stockEventData });
     }
 
     await tx.auditLog.create({

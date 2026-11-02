@@ -15,6 +15,7 @@ model Store {
   themePreset          String   @default("palm-and-shea") @map("theme_preset")
   status               String   @default("active")
   hours                Json?
+  timezone             String   @default("America/New_York")
   prepTimeMinutes      Int      @default(30) @map("prep_time_minutes")
   deliveryRadiusMi     Decimal  @default(8) @map("delivery_radius_mi")
   minimumOrderCents    Int      @default(3500) @map("minimum_order_cents")

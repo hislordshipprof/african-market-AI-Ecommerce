@@ -145,28 +145,50 @@ export const stripeProvider: StripeProvider = {
     } satisfies WebhookEvent;
   },
 
-  async capturePaymentIntent(paymentIntentId, amountCents, stripeAccountId) {
+  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey) {
     const stripe = getStripeClient();
-    const pi = await stripe.paymentIntents.capture(paymentIntentId, {
-      amount_to_capture: amountCents,
-    }, {
-      stripeAccount: stripeAccountId,
-    });
-    return {
-      paymentIntentId: pi.id,
-      amountCaptured: pi.amount_received,
-      status: pi.status,
-    } satisfies CaptureResult;
+    try {
+      const pi = await stripe.paymentIntents.capture(paymentIntentId, {
+        amount_to_capture: amountCents,
+      }, idempotencyKey ? { idempotencyKey } : undefined);
+      return {
+        paymentIntentId: pi.id,
+        amountCaptured: pi.amount_received,
+        status: pi.status,
+      } satisfies CaptureResult;
+    } catch (err: unknown) {
+      if (err instanceof Stripe.errors.StripeInvalidRequestError
+        && /already been captured/i.test(err.message)) {
+        const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+        return {
+          paymentIntentId: pi.id,
+          amountCaptured: pi.amount_received,
+          status: pi.status,
+        } satisfies CaptureResult;
+      }
+      throw err;
+    }
   },
 
-  async cancelPaymentIntent(paymentIntentId, stripeAccountId) {
+  async cancelPaymentIntent(paymentIntentId, idempotencyKey) {
     const stripe = getStripeClient();
-    const pi = await stripe.paymentIntents.cancel(paymentIntentId, {}, {
-      stripeAccount: stripeAccountId,
-    });
-    return {
-      paymentIntentId: pi.id,
-      status: pi.status,
-    } satisfies CancelResult;
+    try {
+      const pi = await stripe.paymentIntents.cancel(paymentIntentId, {},
+        idempotencyKey ? { idempotencyKey } : undefined);
+      return {
+        paymentIntentId: pi.id,
+        status: pi.status,
+      } satisfies CancelResult;
+    } catch (err: unknown) {
+      if (err instanceof Stripe.errors.StripeInvalidRequestError
+        && /already been canceled/i.test(err.message)) {
+        const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+        return {
+          paymentIntentId: pi.id,
+          status: pi.status,
+        } satisfies CancelResult;
+      }
+      throw err;
+    }
   },
 };

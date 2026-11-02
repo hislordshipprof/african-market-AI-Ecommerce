@@ -55,12 +55,12 @@ export interface StripeProvider {
   capturePaymentIntent(
     paymentIntentId: string,
     amountCents: number,
-    stripeAccountId: string,
+    idempotencyKey?: string,
   ): Promise<CaptureResult>;
 
   cancelPaymentIntent(
     paymentIntentId: string,
-    stripeAccountId: string,
+    idempotencyKey?: string,
   ): Promise<CancelResult>;
 }
 

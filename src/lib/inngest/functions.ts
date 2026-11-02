@@ -24,12 +24,17 @@ export const acceptanceAlert = inngest.createFunction(
 
       const store = await platform.store.findUnique({
         where: { id: storeId },
-        select: { hours: true },
+        select: { hours: true, timezone: true },
       });
 
-      if (!isStoreOpen(store?.hours)) return;
+      if (!isStoreOpen(store?.hours, store?.timezone ?? "America/New_York")) return;
 
       await storeScopedTransaction(storeId, async (tx) => {
+        const existing = await tx.auditLog.findFirst({
+          where: { entityId: orderId, action: "acceptance_alert" },
+        });
+        if (existing) return;
+
         await tx.auditLog.create({
           data: {
             storeId,

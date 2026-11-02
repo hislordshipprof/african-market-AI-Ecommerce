@@ -12,15 +12,21 @@ const VALID_WEBHOOK_SIGNATURE = "fake_valid_sig";
 const accounts = new Map<string, ConnectAccount>();
 const capturedPayments = new Map<string, number>();
 const cancelledPayments = new Set<string>();
+const authorizedAmounts = new Map<string, number>();
 
 function reset() {
   accounts.clear();
   capturedPayments.clear();
   cancelledPayments.clear();
+  authorizedAmounts.clear();
 }
 
 function getAccounts(): Map<string, ConnectAccount> {
   return accounts;
+}
+
+function setAuthorizedAmount(paymentIntentId: string, amount: number) {
+  authorizedAmounts.set(paymentIntentId, amount);
 }
 
 const fakeStripeProvider: StripeProvider = {
@@ -68,6 +74,19 @@ const fakeStripeProvider: StripeProvider = {
   },
 
   async capturePaymentIntent(paymentIntentId, amountCents) {
+    if (capturedPayments.has(paymentIntentId)) {
+      return {
+        paymentIntentId,
+        amountCaptured: capturedPayments.get(paymentIntentId)!,
+        status: "succeeded",
+      } satisfies CaptureResult;
+    }
+    const authorized = authorizedAmounts.get(paymentIntentId);
+    if (authorized !== undefined && amountCents > authorized) {
+      throw new Error(
+        `Capture amount ${amountCents} exceeds authorized amount ${authorized}`,
+      );
+    }
     capturedPayments.set(paymentIntentId, amountCents);
     return {
       paymentIntentId,
@@ -77,6 +96,12 @@ const fakeStripeProvider: StripeProvider = {
   },
 
   async cancelPaymentIntent(paymentIntentId) {
+    if (cancelledPayments.has(paymentIntentId)) {
+      return {
+        paymentIntentId,
+        status: "canceled",
+      } satisfies CancelResult;
+    }
     cancelledPayments.add(paymentIntentId);
     return {
       paymentIntentId,
@@ -85,4 +110,4 @@ const fakeStripeProvider: StripeProvider = {
   },
 };
 
-export { fakeStripeProvider, reset, getAccounts, capturedPayments, cancelledPayments, VALID_WEBHOOK_SIGNATURE };
+export { fakeStripeProvider, reset, getAccounts, capturedPayments, cancelledPayments, authorizedAmounts, setAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };
