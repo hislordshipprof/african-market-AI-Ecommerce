@@ -9,11 +9,15 @@ export async function addItemToCart(page: Page) {
     .getByTestId("listing-card")
     .filter({ hasText: "Garri" })
     .first();
+  const count = page.getByTestId("storefront-header").getByTestId("cart-count");
   await card.getByTestId("quick-add-btn").click();
-  for (let i = 0; i < 9; i++) await card.getByTestId("stepper-plus").click();
-  await expect(
-    page.getByTestId("storefront-header").getByTestId("cart-count"),
-  ).toHaveText("10");
+  await expect(card.getByTestId("stepper-qty")).toHaveText("1");
+  // Each plus reads the quantity from the last render, so the next click waits for that render.
+  for (let qty = 1; qty < 10; qty++) {
+    await card.getByTestId("stepper-plus").click();
+    await expect(card.getByTestId("stepper-qty")).toHaveText(String(qty + 1));
+  }
+  await expect(count).toHaveText("10");
   await expect(
     page.getByTestId("storefront-header").locator("[data-cart-pending]"),
   ).toBeHidden({ timeout: 10000 });
