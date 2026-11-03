@@ -245,7 +245,7 @@ export function parseCsvText(raw: string): {
     let qty: number | undefined;
     if (qtyRaw !== undefined && qtyRaw !== "") {
       const parsed = parseInt(qtyRaw, 10);
-      if (!isFinite(parsed) || parsed < 0) {
+      if (!isFinite(parsed) || parsed < 0 || parsed > 2_147_483_647) {
         errors.push({
           row: rowNum,
           csvName: rawName,
@@ -294,6 +294,7 @@ export function parsePriceToCents(raw: string): number | null {
   if (!/^\d+$/.test(intPart) || !/^\d{2}$/.test(decPart)) return null;
 
   const cents = parseInt(intPart, 10) * 100 + parseInt(decPart, 10);
+  if (cents > 2_147_483_647) return null;
   return negative ? -cents : cents;
 }
 
@@ -414,7 +415,7 @@ export async function generatePreview(
     const productMatches = matchMap.get(row.name) ?? [];
 
     if (productMatches.length === 0) {
-      const existingCustomId = existingCustomNames.get(normName);
+      const existingCustomId = existingCustomNames.get(normalizeForMatch(sanitizeName(row.name)));
       if (existingCustomId) {
         alreadyListed.push({
           row: row.row,
@@ -457,6 +458,26 @@ export async function generatePreview(
           matchType: m.matchType,
         })),
       });
+    }
+  }
+
+  const MAX_PENDING_IMPORTS = 10;
+  const expiryCutoff = new Date(Date.now() - TOKEN_TTL_MS);
+  await scoped.listingImport.deleteMany({
+    where: { status: "pending", createdAt: { lt: expiryCutoff } },
+  });
+
+  const pendingCount = await scoped.listingImport.count({
+    where: { status: "pending" },
+  });
+  if (pendingCount >= MAX_PENDING_IMPORTS) {
+    const oldest = await scoped.listingImport.findFirst({
+      where: { status: "pending" },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (oldest) {
+      await scoped.listingImport.delete({ where: { id: oldest.id } });
     }
   }
 
@@ -574,6 +595,10 @@ export async function commitImport(
         frozen: false,
         perishable: false,
       });
+    } else {
+      throw new Error(
+        `Row ${rowNum} ("${row.name}") matches multiple master products. Use ambiguous resolutions to pick one.`,
+      );
     }
   }
 

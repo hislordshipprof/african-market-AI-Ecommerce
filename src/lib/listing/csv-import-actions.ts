@@ -77,7 +77,7 @@ export async function csvCommitAction(
     return { result };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
-    const safe = /^(Import token|This import|No rows|No valid|All selected|Resolution for)/.test(msg);
+    const safe = /^(Import token|This import|No rows|No valid|All selected|Resolution for|Row \d)/.test(msg);
     if (!safe) console.error("[csv-import] commit error:", e);
     return { error: safe ? msg : "Import failed. Please try again." };
   }

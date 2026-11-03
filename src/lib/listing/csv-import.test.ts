@@ -44,6 +44,13 @@ describe("parsePriceToCents", () => {
   it("handles $ with space", () => {
     expect(parsePriceToCents("$ 5.99")).toBe(599);
   });
+  it("A1: rejects price that overflows PostgreSQL int4 (>= $21,474,836.48)", () => {
+    expect(parsePriceToCents("30000000.00")).toBeNull();
+    expect(parsePriceToCents("21474836.48")).toBeNull();
+  });
+  it("A1: accepts largest valid price ($21,474,836.47)", () => {
+    expect(parsePriceToCents("21474836.47")).toBe(2_147_483_647);
+  });
 });
 
 describe("parseCsvText", () => {
@@ -115,6 +122,24 @@ describe("parseCsvText", () => {
     expect(errors[0].reason).toContain("zero");
   });
 
+  it("A1: price overflowing int4 becomes a row error", () => {
+    const csv = "name,price\nOk Item,5.00\nBad Item,30000000.00\n";
+    const { rows, errors } = parseCsvText(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe("Ok Item");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].reason).toContain("Invalid price");
+  });
+
+  it("A1: qty overflowing int4 becomes a row error", () => {
+    const csv = "name,price,qty\nOk Item,5.00,10\nBad Item,5.00,3000000000\n";
+    const { rows, errors } = parseCsvText(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe("Ok Item");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].reason).toContain("Invalid quantity");
+  });
+
   it("E3: parses $1,234.50 format", () => {
     const csv = 'name,price\nEgusi,"$1,234.50"\n';
     const { rows } = parseCsvText(csv);
@@ -184,7 +209,7 @@ describe("parseCsvText", () => {
     expect(rows[1].status).toBe("in_stock");
   });
 
-  it("E8: rejects files over 5000 rows", () => {
+  it("rejects files over 5000 rows", () => {
     const rows = Array.from({ length: 5001 }, (_, i) => `Product${i},${i + 1}.00`);
     const csv = "name,price\n" + rows.join("\n") + "\n";
     const { errors } = parseCsvText(csv);
@@ -661,7 +686,38 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(rejected).toHaveLength(1);
   });
 
-  it("E14: concurrent imports with separate tokens both succeed", async () => {
+  it("E14: DB failure mid-commit rolls back entire transaction", async () => {
+    const csv = "name,price\nRollback Test T63,999.99\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+
+    await rawPrisma.$executeRaw`ALTER TABLE listings ADD CONSTRAINT test_reject_rollback CHECK (price != 99999)`;
+
+    try {
+      await expect(
+        commitImport(
+          storeAId,
+          preview.importToken,
+          { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+          actor,
+        ),
+      ).rejects.toThrow();
+
+      const scopedA = storeScoped(storeAId);
+      const orphans = await scopedA.listing.findMany({
+        where: { customName: { contains: "Rollback Test T63" } },
+      });
+      expect(orphans).toHaveLength(0);
+
+      const importRecord = await scopedA.listingImport.findUnique({
+        where: { id: preview.importToken },
+      });
+      expect(importRecord!.status).toBe("pending");
+    } finally {
+      await rawPrisma.$executeRaw`ALTER TABLE listings DROP CONSTRAINT IF EXISTS test_reject_rollback`;
+    }
+  });
+
+  it("concurrent imports with separate tokens both succeed", async () => {
     const csvA = "name,price\nConcurrent Item A T63,3.00\n";
     const csvB = "name,price\nConcurrent Item B T63,4.00\n";
 
@@ -752,6 +808,23 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     const scopedA = storeScoped(storeAId);
     const listing = await scopedA.listing.findUnique({ where: { id: result.listingIds[0] } });
     expect(listing!.customName).toContain("'=");
+  });
+
+  it("A1: formula-prefixed custom name detected as already-listed on re-import", async () => {
+    const csv = 'name,price\n=Special Sauce T63,7.00\n';
+    const preview1 = await generatePreview(storeBId, csv, testUserId);
+    expect(preview1.newItems).toHaveLength(1);
+
+    await commitImport(
+      storeBId,
+      preview1.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+
+    const preview2 = await generatePreview(storeBId, csv, testUserId);
+    expect(preview2.alreadyListed).toHaveLength(1);
+    expect(preview2.newItems).toHaveLength(0);
   });
 
   it("D1: nonexistent import token rejected", async () => {
@@ -898,6 +971,102 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     const record = await scoped.listingImport.findUnique({ where: { id: preview.importToken } });
     expect(record!.status).toBe("committed");
     expect(record!.committedAt).toBeTruthy();
+  });
+
+  it("A2: pending imports capped — oldest evicted when limit reached", { timeout: 15_000 }, async () => {
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.listingImport.deleteMany({ where: { storeId: storeBId } }),
+    ]);
+
+    const scopedB = storeScoped(storeBId);
+    const tokenIds: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const rec = await scopedB.listingImport.create({
+        data: { storeId: storeBId, csvText: `name,price\nCap${i},1.00\n`, rowCount: 1, status: "pending", createdById: testUserId },
+      });
+      tokenIds.push(rec.id);
+    }
+
+    const preview = await generatePreview(storeBId, "name,price\nCap Evict T63,1.00\n", testUserId);
+    expect(preview.importToken).toBeTruthy();
+
+    const oldest = await scopedB.listingImport.findUnique({ where: { id: tokenIds[0] } });
+    expect(oldest).toBeNull();
+
+    const remaining = await scopedB.listingImport.count({ where: { status: "pending" } });
+    expect(remaining).toBeLessThanOrEqual(10);
+  });
+
+  it("A2: expired pending imports cleaned up on new preview", async () => {
+    const scopedB = storeScoped(storeBId);
+    const rec = await scopedB.listingImport.create({
+      data: { storeId: storeBId, csvText: "name,price\nOld,1.00\n", rowCount: 1, status: "pending", createdById: testUserId },
+    });
+
+    const pastDate = new Date(Date.now() - 31 * 60 * 1000);
+    await rawPrisma.$executeRaw`
+      UPDATE listing_imports SET created_at = ${pastDate}
+      WHERE id = ${rec.id}
+    `;
+
+    await generatePreview(storeBId, "name,price\nNew T63,5.00\n", testUserId);
+
+    const expired = await scopedB.listingImport.findUnique({ where: { id: rec.id } });
+    expect(expired).toBeNull();
+  });
+
+  it("S1: expired import token rejected at commit", async () => {
+    const csv = "name,price\nExpiry Test T63,5.00\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+
+    const pastDate = new Date(Date.now() - 31 * 60 * 1000);
+    await rawPrisma.$executeRaw`
+      UPDATE listing_imports SET created_at = ${pastDate}
+      WHERE id = ${preview.importToken}
+    `;
+
+    await expect(
+      commitImport(
+        storeAId,
+        preview.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      ),
+    ).rejects.toThrow(/expired/i);
+  });
+
+  it("A2/E8: row whose match count increases between preview and commit is rejected (no silent pick)", async () => {
+    const soloMp = await platformAdmin.masterProduct.create({
+      data: { name: "Solo Match A2 T63", frozen: false, perishable: false },
+    });
+    mpIds.push(soloMp.id);
+    await platformAdmin.productSynonym.create({
+      data: { productId: soloMp.id, term: "solo a2 t63" },
+    });
+
+    const csv = "name,price\nSolo A2 T63,8.00\n";
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.matches).toHaveLength(1);
+    expect(preview.ambiguous).toHaveLength(0);
+
+    const altMp = await platformAdmin.masterProduct.create({
+      data: { name: "Solo Alt A2 T63", frozen: false, perishable: false },
+    });
+    mpIds.push(altMp.id);
+    await platformAdmin.productSynonym.create({
+      data: { productId: altMp.id, term: "solo a2 t63" },
+    });
+
+    await expect(
+      commitImport(
+        storeBId,
+        preview.importToken,
+        { matchedRows: [2], newItemRows: [], ambiguousResolutions: [] },
+        actor,
+      ),
+    ).rejects.toThrow(/matches multiple master products/);
   });
 });
 
