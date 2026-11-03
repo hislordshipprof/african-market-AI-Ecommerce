@@ -589,7 +589,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     actor = { id: user.id, email: user.email };
 
     const mp = await platformAdmin.masterProduct.create({
-      data: { name: "Kundi Flour T63", frozen: false, perishable: true, status: "active" },
+      data: { name: "Kundi Flour T63", frozen: false, perishable: true, weightG: 11340, status: "active" },
     });
     mpIds.push(mp.id);
 
@@ -1219,6 +1219,82 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
         actor,
       ),
     ).rejects.toThrow(/already listed/i);
+  });
+
+  it("B1: matched import variant uses master product weightG", async () => {
+    const weightMp = await platformAdmin.masterProduct.create({
+      data: { name: "B1 Weight Rice T63", frozen: false, perishable: false, weightG: 11340, status: "active" },
+    });
+    mpIds.push(weightMp.id);
+    await platformAdmin.productSynonym.create({
+      data: { productId: weightMp.id, term: "b1 weight rice t63" },
+    });
+
+    const csv = "name,price\nB1 Weight Rice T63,24.99\n";
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.matches).toHaveLength(1);
+
+    const result = await commitImport(
+      storeBId, preview.importToken,
+      { matchedRows: [2], newItemRows: [], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+
+    const scopedB = storeScoped(storeBId);
+    const listing = await scopedB.listing.findUnique({
+      where: { id: result.listingIds[0] },
+      include: { variants: true },
+    });
+    expect(listing!.variants).toHaveLength(1);
+    expect(listing!.variants[0].weightG).toBe(11340);
+  });
+
+  it("B1: ambiguous-resolved import variant uses master product weightG", async () => {
+    const csv = "name,price\nAmbig T63,10.00\n";
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.ambiguous).toHaveLength(1);
+
+    const result = await commitImport(
+      storeBId, preview.importToken,
+      {
+        matchedRows: [],
+        newItemRows: [],
+        ambiguousResolutions: [{ row: 2, masterProductId: ambigMp2Id }],
+      },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+
+    const scopedB = storeScoped(storeBId);
+    const listing = await scopedB.listing.findUnique({
+      where: { id: result.listingIds[0] },
+      include: { variants: true },
+    });
+    expect(listing!.variants).toHaveLength(1);
+    // ambig2 has no weightG set (null), so fallback to 100
+    expect(listing!.variants[0].weightG).toBe(100);
+  });
+
+  it("B1: new custom item uses fallback weightG of 100", async () => {
+    const csv = "name,price\nB1 Custom Widget T63,5.50\n";
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1);
+
+    const result = await commitImport(
+      storeBId, preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+
+    const scopedB = storeScoped(storeBId);
+    const listing = await scopedB.listing.findUnique({
+      where: { id: result.listingIds[0] },
+      include: { variants: true },
+    });
+    expect(listing!.variants).toHaveLength(1);
+    expect(listing!.variants[0].weightG).toBe(100);
   });
 
   it("D1: committed import token marked in DB", async () => {

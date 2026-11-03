@@ -8,6 +8,7 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MB
 const MAX_ROWS = 5000;
 const MAX_NAME_LENGTH = 200;
 
+const DEFAULT_WEIGHT_G = 100;
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 const PRICE_DOLLAR_RE = /^\$?\s*/;
 const VALID_STATUSES = new Set(["in_stock", "low", "out_of_stock"]);
@@ -326,6 +327,7 @@ function normalizeForMatch(s: string): string {
 interface MasterProductRow {
   id: string;
   name: string;
+  weightG: number | null;
   frozen: boolean;
   perishable: boolean;
   synonyms: Array<{ term: string }>;
@@ -586,6 +588,7 @@ export async function commitImport(
     status: string | null;
     frozen: boolean;
     perishable: boolean;
+    weightG: number;
   }
 
   const toCreate: ListingToCreate[] = [];
@@ -612,6 +615,7 @@ export async function commitImport(
         ...stock,
         frozen: m.product.frozen,
         perishable: m.product.perishable,
+        weightG: (m.product.weightG && m.product.weightG > 0) ? m.product.weightG : DEFAULT_WEIGHT_G,
       });
     } else if (productMatches.length === 0) {
       toCreate.push({
@@ -621,6 +625,7 @@ export async function commitImport(
         ...stock,
         frozen: false,
         perishable: false,
+        weightG: DEFAULT_WEIGHT_G,
       });
     } else {
       throw new Error(
@@ -655,6 +660,7 @@ export async function commitImport(
       ...ambigStock,
       frozen: selectedProduct.frozen,
       perishable: selectedProduct.perishable,
+      weightG: (selectedProduct.weightG && selectedProduct.weightG > 0) ? selectedProduct.weightG : DEFAULT_WEIGHT_G,
     });
   }
 
@@ -731,7 +737,7 @@ export async function commitImport(
         listingId: ids[i],
         label: "Default",
         price: item.price,
-        weightG: 1,
+        weightG: item.weightG,
       })),
     });
 
