@@ -13,6 +13,9 @@ import {
   resolveAuthTrustedOrigins,
   validateAuthSecret,
 } from "./auth";
+import { authPrisma } from "./db";
+
+const mockFindUnique = vi.mocked(authPrisma.user.findUnique);
 
 describe("auth config", () => {
   it("has session cookie cache disabled globally", () => {
@@ -88,6 +91,70 @@ describe("resolveAuthTrustedOrigins", () => {
     });
     expect(origins).toContain("https://a.com");
     expect(origins).not.toContain("");
+  });
+});
+
+describe("C1: session.create.before hook", () => {
+  function getHookBefore() {
+    const opts = auth.options as Record<string, unknown>;
+    const hooks = opts.databaseHooks as Record<string, unknown>;
+    const session = hooks.session as Record<string, unknown>;
+    const create = session.create as Record<string, unknown>;
+    return create.before as (
+      session: { userId: string },
+      ctx?: Record<string, unknown>,
+    ) => Promise<{ data: { twoFactorVerified: boolean } } | undefined>;
+  }
+
+  it("sets twoFactorVerified=true for /two-factor/ path", async () => {
+    mockFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
+    const result = await getHookBefore()(
+      { userId: "user-1" },
+      { path: "/two-factor/verify-totp" },
+    );
+    expect(result).toEqual({ data: { twoFactorVerified: true } });
+  });
+
+  it("does NOT set twoFactorVerified for /sign-in/magic-link path", async () => {
+    mockFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
+    const result = await getHookBefore()(
+      { userId: "user-1" },
+      { path: "/sign-in/magic-link" },
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("does NOT set twoFactorVerified for /phone-number/verify path", async () => {
+    mockFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
+    const result = await getHookBefore()(
+      { userId: "user-1" },
+      { path: "/phone-number/verify" },
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("does NOT set twoFactorVerified for /sign-in/email path", async () => {
+    mockFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
+    const result = await getHookBefore()(
+      { userId: "user-1" },
+      { path: "/sign-in/email" },
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("does nothing when user has 2FA disabled", async () => {
+    mockFindUnique.mockResolvedValueOnce({ twoFactorEnabled: false });
+    const result = await getHookBefore()(
+      { userId: "user-1" },
+      { path: "/two-factor/verify-totp" },
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("does nothing when context is undefined", async () => {
+    mockFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
+    const result = await getHookBefore()({ userId: "user-1" }, undefined);
+    expect(result).toBeUndefined();
   });
 });
 
