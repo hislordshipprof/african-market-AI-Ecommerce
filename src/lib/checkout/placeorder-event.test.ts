@@ -38,8 +38,8 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
     }
     if (!acct) return;
     const store = await rawPrisma.store.upsert({
-      where: { slug: "inngest-event-test" },
-      update: { stripeAccountId: acct.id, stripeOnboardingStatus: "complete" },
+      where: { stripeAccountId: acct.id },
+      update: { stripeOnboardingStatus: "complete" },
       create: {
         slug: "inngest-event-test",
         name: "Inngest Event Test",
@@ -91,7 +91,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
         rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId } } }),
         rawPrisma.listing.deleteMany({ where: { storeId } }),
       ]);
-      await rawPrisma.store.deleteMany({ where: { slug: "inngest-event-test" } });
+      await rawPrisma.store.deleteMany({ where: { id: storeId } });
       await rawPrisma.$disconnect();
     }
   });
