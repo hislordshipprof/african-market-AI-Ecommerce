@@ -67,7 +67,6 @@ export function CustomerSignIn({
     <StorySurface asMain={false}>
       <Card className="border-0 shadow-xl backdrop-blur-sm bg-card/95">
         <CardHeader className="text-center">
-          <p className="text-sm font-semibold tracking-wide text-primary">{storeName}</p>
           <CardTitle className="text-xl font-display">
             {step === "sent" ? "Check your email" : "Sign in"}
           </CardTitle>

@@ -32,16 +32,16 @@ export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
         <div className="sf-header-search">
           <SearchBar storeId={store.id} />
         </div>
+        <Link
+          href={session ? "/account" : "/account/sign-in"}
+          className="sf-header-signin"
+        >
+          {session ? "Account" : "Sign in"}
+        </Link>
         <CartTrigger className="sf-header-cart" />
       </div>
       <nav aria-label="Store categories" className="sf-category-nav">
         <div className="sf-container">
-          <Link
-            href={session ? "/account" : "/account/sign-in"}
-            className="sf-header-account"
-          >
-            {session ? "Account" : "Sign in"}
-          </Link>
           <Link href="/categories">All aisles</Link>
           {categories.slice(0, 8).map((cat) => (
             <Link key={cat.id} href={`/categories/${cat.slug}`}>

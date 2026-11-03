@@ -66,12 +66,15 @@ test.describe("Customer magic-link auth", () => {
 
     // 9. Should redirect to sign-in and the session is gone
     await page.waitForURL("**/account/sign-in", { timeout: 10000 });
-    const sessionRes = await page.request.get(`${base}/api/auth/get-session`);
-    const sessionBody = await sessionRes.json();
+    const sessionBody = await page.evaluate(async () => {
+      const res = await fetch("/api/auth/get-session", { credentials: "include" });
+      return res.json();
+    });
     expect(sessionBody?.session ?? null).toBeNull();
   });
 
   test("signed-out header opens sign-in for this store", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(base);
     await page.getByRole("link", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/account\/sign-in$/);
@@ -82,9 +85,9 @@ test.describe("Customer magic-link auth", () => {
   test("an expired link offers a new sign-in", async ({ page }) => {
     await page.goto(`${base}/account?error=INVALID_TOKEN`);
     await expect(page).toHaveURL(/\/account\/sign-in\?error=INVALID_TOKEN/);
-    await expect(page.getByRole("alert")).toContainText(
-      "This link has expired. Send a new one.",
-    );
+    await expect(
+      page.getByRole("alert").filter({ hasText: "expired" }),
+    ).toContainText("This link has expired. Send a new one.");
   });
 });
 
