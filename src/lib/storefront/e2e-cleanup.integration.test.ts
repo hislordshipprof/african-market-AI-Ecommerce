@@ -413,7 +413,7 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
    * sweep continues. No DB result is replaced; the hook only schedules a competing writer.
    */
   function hookClient(
-    model: "order" | "customer" | "cart",
+    model: "order" | "customer" | "cart" | "cartLine",
     method: "findMany" | "deleteMany",
     hook: () => Promise<void>,
   ): PrismaClient {
@@ -461,21 +461,44 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
     );
   }
 
+  function isForeignKeyRejection(err: unknown): boolean {
+    if (!err || typeof err !== "object") return false;
+    const e = err as {
+      code?: string;
+      message?: string;
+      meta?: { driverAdapterError?: { cause?: { originalCode?: string; kind?: string } } };
+    };
+    if (e.code === "P2003") return true;
+    if (typeof e.message === "string" && /foreign key constraint/i.test(e.message)) return true;
+    const cause = e.meta?.driverAdapterError?.cause;
+    return cause?.originalCode === "23503" || cause?.kind === "ForeignKeyConstraintViolation";
+  }
+
   /**
    * Starts a competing committed write from the hook and waits up to 1.5 s for it. A correct sweep holds
    * row locks, so the writer blocks (never settles inside the window) and then fails its FK once the sweep
-   * commits; an unlocked sweep lets it commit mid-sweep. The write's own outcome is returned for assertions.
+   * commits; an unlocked sweep lets it commit mid-sweep. The promise stays rejected or fulfilled so the
+   * test can require that foreign-key failure or a real insert. Any other error fails the test.
    */
   function racingWrite(write: () => Promise<unknown>) {
-    const state: { outcome?: Promise<boolean> } = {};
+    const state: { outcome?: Promise<unknown> } = {};
     const hook = async () => {
-      state.outcome = write().then(
-        () => true,
-        () => false,
-      );
-      await Promise.race([state.outcome, new Promise((r) => setTimeout(r, 1500))]);
+      const pending = write();
+      state.outcome = pending;
+      await Promise.race([pending.then(() => undefined, () => undefined), new Promise((r) => setTimeout(r, 1500))]);
     };
     return { state, hook };
+  }
+
+  async function writerOutcome(outcome: Promise<unknown> | undefined): Promise<"committed" | "foreign-key"> {
+    expect(outcome, "competing writer never started").toBeDefined();
+    try {
+      await outcome;
+      return "committed";
+    } catch (err) {
+      if (!isForeignKeyRejection(err)) throw err;
+      return "foreign-key";
+    }
   }
 
   it("a normal line added to an emptied order mid-sweep is never cascaded away (AD2)", async () => {
@@ -492,13 +515,11 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
       ),
     );
     await deleteE2eListings({ storeSlug: slugA, client: hookClient("order", "findMany", hook) });
-    const inserted = await state.outcome;
-    if (inserted) {
-      // The writer won: its line and order must have survived the sweep.
+    const outcome = await writerOutcome(state.outcome);
+    if (outcome === "committed") {
       expect(await inA().order(o)).toBe(true);
       expect(await inA().orderLines(o)).toBe(1);
     } else {
-      // The sweep won: the writer failed its FK instead of being silently destroyed.
       expect(await inA().order(o)).toBe(false);
     }
   });
@@ -513,9 +534,9 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
       asStore(raw, storeB, (tx) => tx.cart.create({ data: { id: kB, storeId: storeB, customerId: c } })),
     );
     await deleteE2eListings({ storeSlug: slugA, client: hookClient("cart", "findMany", hook) });
-    const inserted = await state.outcome;
+    const outcome = await writerOutcome(state.outcome);
     const cart = await asAdmin(raw, (tx) => tx.cart.findUnique({ where: { id: kB } }));
-    if (inserted) {
+    if (outcome === "committed") {
       expect(cart?.customerId).toBe(c);
       expect(await inA().customer(c)).toBe(true);
     } else {
@@ -572,6 +593,57 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
     const cart = await asAdmin(raw, (tx) => tx.cart.findUnique({ where: { id: kB } }));
     expect(cart?.customerId).toBe(c);
     await asAdmin(raw, (tx) => tx.cart.deleteMany({ where: { id: kB } }));
+  });
+
+  // The line delete is one statement (DELETE ... RETURNING order_id). This hook commits an order
+  // on the swept variant after the sweep has started and before that delete: the window a separate
+  // findMany used to miss. The emptied order and its customer must go. A retry stays at zero.
+  it("full sweep removes an order committed between discovery and the line delete", async () => {
+    await resetA();
+    const e = await seedListing(storeA, nm("late-discovery"));
+    const c = await seedCustomer(storeA);
+    let lateOrder = "";
+    const result = await deleteE2eListings({
+      storeSlug: slugA,
+      client: hookClient("cartLine", "deleteMany", async () => {
+        lateOrder = await seedOrder(storeA, c, [e.variantId]);
+      }),
+    });
+    expect(lateOrder).not.toBe("");
+    expect(result).toEqual({ listings: 1, orders: 1, customers: 1 });
+    expect(await inA().order(lateOrder)).toBe(false);
+    expect(await inA().orderLines(lateOrder)).toBe(0);
+    expect(await inA().customer(c)).toBe(false);
+    expect(await sweepA()).toEqual(ZERO);
+  });
+
+  it("named sweep removes an order committed between discovery and the line delete", async () => {
+    await resetA();
+    const name = nm("late-named");
+    const otherName = nm("late-named-keep");
+    const e = await seedListing(storeA, name);
+    const other = await seedListing(storeA, otherName);
+    const c = await seedCustomer(storeA);
+    const cOther = await seedCustomer(storeA);
+    const oOther = await seedOrder(storeA, cOther, [other.variantId]);
+    let lateOrder = "";
+    const result = await deleteE2eListings({
+      names: [name],
+      storeSlug: slugA,
+      client: hookClient("cartLine", "deleteMany", async () => {
+        lateOrder = await seedOrder(storeA, c, [e.variantId]);
+      }),
+    });
+    expect(lateOrder).not.toBe("");
+    expect(result).toEqual({ listings: 1, orders: 1, customers: 1 });
+    expect(await inA().order(lateOrder)).toBe(false);
+    expect(await inA().customer(c)).toBe(false);
+    expect(await inA().listing(other.id)).toBe(true);
+    expect(await inA().order(oOther)).toBe(true);
+    expect(await inA().orderLines(oOther)).toBe(1);
+    expect(await inA().customer(cOther)).toBe(true);
+    expect(await sweepA({ names: [name] })).toEqual(ZERO);
+    expect(await inA().order(oOther)).toBe(true);
   });
 
   it("disconnects only a client it created, never an injected one (ST2)", async () => {

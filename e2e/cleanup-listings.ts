@@ -68,20 +68,26 @@ export async function deleteE2eListings(
         const variantIds = (
           await tx.listingVariant.findMany({ where: { listingId: { in: ids } }, select: { id: true } })
         ).map((v) => v.id);
-        const lineWhere = {
-          storeId,
-          OR: [{ listingVariantId: { in: variantIds } }, { substituteVariantId: { in: variantIds } }],
-        };
-
-        // Candidate orders are read before their lines go: only orders this sweep touches may be deleted.
-        const touchedOrderIds = [
-          ...new Set((await tx.orderLine.findMany({ where: lineWhere, select: { orderId: true } })).map((l) => l.orderId)),
-        ];
 
         await tx.cartLine.deleteMany({
           where: { storeId, OR: [{ variantId: { in: variantIds } }, { substituteVariantId: { in: variantIds } }] },
         });
-        await tx.orderLine.deleteMany({ where: lineWhere });
+        // Candidate orders are the parents of the lines this statement deletes. A findMany before a
+        // separate deleteMany misses a line committed in between: under READ COMMITTED the DELETE sees
+        // that line and removes it, but the order was never a candidate, so the emptied parent stays.
+        const deletedLines =
+          variantIds.length === 0
+            ? []
+            : await tx.$queryRaw<Array<{ order_id: string }>>`
+                DELETE FROM order_lines
+                WHERE store_id = ${storeId}
+                  AND (
+                    listing_variant_id = ANY(${variantIds}::text[])
+                    OR substitute_variant_id = ANY(${variantIds}::text[])
+                  )
+                RETURNING order_id
+              `;
+        const touchedOrderIds = [...new Set(deletedLines.map((row) => row.order_id))];
         await tx.stockEvent.deleteMany({ where: { storeId, listingId: { in: ids } } });
         const listings = await tx.listing.deleteMany({ where: { storeId, id: { in: ids } } });
 
