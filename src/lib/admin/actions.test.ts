@@ -482,6 +482,54 @@ describe("createStore", () => {
     expect(createArg.hours).toBeDefined();
   });
 
+  it("K4: rejects invalid timezone", async () => {
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, timezone: "Europe/London" }),
+    );
+    expect(result.fieldErrors?.timezone).toBeDefined();
+    expect(result.fieldErrors?.timezone).toContain("Invalid timezone");
+  });
+
+  it("K4: accepts valid US timezone (America/Chicago)", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "mama-ngozi",
+      name: "Mama Ngozi African Market",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+      timezone: "America/Chicago",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore(
+      {},
+      formData({ ...VALID_STORE, timezone: "America/Chicago" }),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCreate.mock.calls[0][0].data.timezone).toBe("America/Chicago");
+  });
+
+  it("K4: defaults to America/New_York when timezone not provided", async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "store-1",
+      slug: "mama-ngozi",
+      name: "Mama Ngozi African Market",
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+      timezone: "America/New_York",
+    });
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await createStore({}, formData(VALID_STORE));
+    expect(result.success).toBe(true);
+    expect(mockCreate.mock.calls[0][0].data.timezone).toBe("America/New_York");
+  });
+
   it("audit failure propagates (transaction rolls back store creation)", async () => {
     mockFindUnique.mockResolvedValueOnce(null);
     mockCreate.mockResolvedValueOnce({
@@ -610,6 +658,67 @@ describe("updateStore", () => {
     const auditData = mockAuditCreate.mock.calls[0][0].data;
     expect(auditData.before.autoRefundLimitCents).toBe(2500);
     expect(auditData.after.autoRefundLimitCents).toBe(5000);
+  });
+
+  it("K4: rejects invalid timezone on update", async () => {
+    const before = {
+      id: "store-1",
+      slug: "mama-ngozi",
+      name: "Old Name",
+      logoUrl: null,
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+      hours: null,
+      prepTimeMinutes: 30,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 3500,
+      pickupEnabled: false,
+      autoRefundLimitCents: 2500,
+      timezone: "America/New_York",
+    };
+    mockFindUnique.mockResolvedValueOnce(before);
+
+    const result = await updateStore(
+      {},
+      formData({ ...VALID_STORE, storeId: "store-1", timezone: "Asia/Tokyo" }),
+    );
+    expect(result.fieldErrors?.timezone).toBeDefined();
+    expect(result.fieldErrors?.timezone).toContain("Invalid timezone");
+  });
+
+  it("K4: accepts and persists valid timezone on update", async () => {
+    const before = {
+      id: "store-1",
+      slug: "mama-ngozi",
+      name: "Old Name",
+      logoUrl: null,
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+      hours: null,
+      prepTimeMinutes: 30,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 3500,
+      pickupEnabled: false,
+      autoRefundLimitCents: 2500,
+      timezone: "America/New_York",
+    };
+    mockFindUnique.mockResolvedValueOnce(before);
+
+    const updated = { ...before, name: "Mama Ngozi African Market", timezone: "America/Chicago" };
+    mockUpdate.mockResolvedValueOnce(updated);
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const result = await updateStore(
+      {},
+      formData({ ...VALID_STORE, storeId: "store-1", timezone: "America/Chicago" }),
+    );
+    expect(result.success).toBe(true);
+    expect(mockUpdate.mock.calls[0][0].data.timezone).toBe("America/Chicago");
+    const auditData = mockAuditCreate.mock.calls[0][0].data;
+    expect(auditData.before.timezone).toBe("America/New_York");
+    expect(auditData.after.timezone).toBe("America/Chicago");
   });
 
   it("audit failure propagates (transaction rolls back store update)", async () => {

@@ -127,6 +127,19 @@ describe("isStoreOpen", () => {
     expect(isStoreOpen(hours, NY, now)).toBe(false);
   });
 
+  it("K4: Houston store (America/Chicago) at 08:30 local is closed when store opens 09:00", () => {
+    const hours = { mon: { open: "09:00", close: "20:00" } };
+    // Mon 2026-11-02, 08:30 CST = 14:30 UTC (DST ended Nov 1)
+    const at0830central = new Date("2026-11-02T14:30:00Z");
+    // With correct Central timezone: 08:30 < 09:00 → closed
+    expect(isStoreOpen(hours, CHICAGO, at0830central)).toBe(false);
+    // Same UTC instant in Eastern = 09:30 → would incorrectly show open
+    expect(isStoreOpen(hours, NY, at0830central)).toBe(true);
+    // At 09:00 CST (15:00 UTC): now open
+    const at0900central = new Date("2026-11-02T15:00:00Z");
+    expect(isStoreOpen(hours, CHICAGO, at0900central)).toBe(true);
+  });
+
   it("returns false on invalid timezone instead of throwing (A4 fix)", () => {
     const hours = { mon: { open: "09:00", close: "21:00" } };
     const now = new Date("2026-11-02T17:00:00Z");

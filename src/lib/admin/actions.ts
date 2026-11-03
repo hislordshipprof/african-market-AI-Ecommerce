@@ -13,6 +13,17 @@ import { resolveAuthBaseUrl } from "../auth";
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 const MAX_CENTS = 2_147_483_647;
 
+export const VALID_US_TIMEZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Phoenix",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+] as const;
+export type USTimezone = (typeof VALID_US_TIMEZONES)[number];
+
 function parseFloatOrDefault(raw: string | null | undefined, defaultValue: number): number {
   const trimmed = (raw ?? "").trim();
   if (trimmed === "") return defaultValue;
@@ -41,7 +52,7 @@ export type StoreFormState = {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled"]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled", "timezone"]) {
     const v = data.get(key);
     if (v != null) raw[key] = String(v);
   }
@@ -63,6 +74,7 @@ function validateStoreFields(data: FormData): {
     minimumOrderCents: number;
     pickupEnabled: boolean;
     autoRefundLimitCents: number;
+    timezone: string;
   };
 } {
   const errors: Record<string, string> = {};
@@ -83,6 +95,7 @@ function validateStoreFields(data: FormData): {
   const autoRefundLimitCents = Math.round(
     parseFloatOrDefault(data.get("autoRefundLimit") as string, 25) * 100,
   );
+  const timezone = (data.get("timezone") as string)?.trim() || "America/New_York";
 
   if (!slug) errors.slug = "Slug is required";
   else if (!isSlugRoutable(slug)) errors.slug = "This slug is not allowed (reserved, all-digit, or invalid format)";
@@ -148,6 +161,10 @@ function validateStoreFields(data: FormData): {
     errors.autoRefundLimit = "Auto-refund limit is too large";
   }
 
+  if (!(VALID_US_TIMEZONES as readonly string[]).includes(timezone)) {
+    errors.timezone = `Invalid timezone: must be one of ${VALID_US_TIMEZONES.join(", ")}`;
+  }
+
   let hours: unknown = null;
   if (hoursRaw) {
     try {
@@ -172,6 +189,7 @@ function validateStoreFields(data: FormData): {
       minimumOrderCents,
       pickupEnabled,
       autoRefundLimitCents,
+      timezone,
     },
   };
 }
@@ -223,6 +241,7 @@ export async function createStore(
         minimumOrderCents: values.minimumOrderCents,
         pickupEnabled: values.pickupEnabled,
         autoRefundLimitCents: values.autoRefundLimitCents,
+        timezone: values.timezone,
       },
     });
 
@@ -247,6 +266,7 @@ export async function createStore(
           minimumOrderCents: s.minimumOrderCents,
           pickupEnabled: s.pickupEnabled,
           autoRefundLimitCents: s.autoRefundLimitCents,
+          timezone: s.timezone,
         },
       },
     });
@@ -322,6 +342,7 @@ export async function updateStore(
         minimumOrderCents: values.minimumOrderCents,
         pickupEnabled: values.pickupEnabled,
         autoRefundLimitCents: values.autoRefundLimitCents,
+        timezone: values.timezone,
       },
     });
 
@@ -346,6 +367,7 @@ export async function updateStore(
           minimumOrderCents: before.minimumOrderCents,
           pickupEnabled: before.pickupEnabled,
           autoRefundLimitCents: before.autoRefundLimitCents,
+          timezone: before.timezone,
         },
         after: {
           slug: s.slug,
@@ -360,6 +382,7 @@ export async function updateStore(
           minimumOrderCents: s.minimumOrderCents,
           pickupEnabled: s.pickupEnabled,
           autoRefundLimitCents: s.autoRefundLimitCents,
+          timezone: s.timezone,
         },
       },
     });
