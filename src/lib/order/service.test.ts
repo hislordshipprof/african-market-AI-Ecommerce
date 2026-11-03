@@ -1065,4 +1065,80 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
     expect(logs.length).toBe(1);
   });
+
+  // ── M2: Persist Stripe's amount_received, clear capturedAmountCents on cancel ──
+
+  it("M2: markReady persists Stripe amount_received, not requested amount", async () => {
+    const order = await createTestOrder("AUTHORIZED", { tipCents: 200, deliveryFeeCents: 300 });
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    // Simulate Stripe already captured for a slightly different amount (e.g., rounding)
+    const stripeActual = 5900;
+    capturedPayments.set(order.paymentIntentId!, stripeActual);
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.capturedAmountCents).toBe(stripeActual);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.capturedAmountCents).toBe(stripeActual);
+  });
+
+  it("M2: autoCancelOrder sets capturedAmountCents to null", async () => {
+    const order = await createTestOrder();
+    await autoCancelOrder(storeId, order.id);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.capturedAmountCents).toBeNull();
+  });
+
+  it("M2: sweep cancel clears capturedAmountCents", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CAPTURING", capturedAmountCents: 5500 },
+      });
+    });
+    // Stripe canceled (edge: capture attempted but Stripe declined)
+    cancelledPayments.add(order.paymentIntentId!);
+
+    await reconcileStuckOrder(storeId, order.id);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.capturedAmountCents).toBeNull();
+  });
+
+  it("M2: sweep retry capture persists Stripe amount_received", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    const capturedAmount = 5500;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CAPTURING", capturedAmountCents: capturedAmount },
+      });
+    });
+    // Stripe still requires_capture — sweep will retry and capture returns capturedAmount
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("AWAITING_PICKUP");
+    expect(updated!.capturedAmountCents).toBe(capturedAmount);
+  });
 });

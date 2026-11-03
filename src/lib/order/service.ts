@@ -255,13 +255,14 @@ export async function markReady(
 
   // Phase 2: Stripe capture outside transaction (idempotency key makes retry safe)
   const stripe = getStripeProvider();
-  await stripe.capturePaymentIntent(
+  const captureResult = await stripe.capturePaymentIntent(
     validation.paymentIntentId,
     validation.capturedAmountCents,
     `capture:${orderId}`,
   );
 
   // Phase 3: finalize in transaction (verify still CAPTURING)
+  // Persist Stripe's amount_received, not the requested amount (M2)
   const finalize = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -273,7 +274,7 @@ export async function markReady(
       data: {
         status: validation.newStatus,
         readyAt: new Date(),
-        capturedAmountCents: validation.capturedAmountCents,
+        capturedAmountCents: captureResult.amountCaptured,
       },
     });
     return { ok: true as const };
@@ -281,7 +282,7 @@ export async function markReady(
 
   if (!finalize.ok) return finalize;
 
-  return { ok: true, capturedAmountCents: validation.capturedAmountCents };
+  return { ok: true, capturedAmountCents: captureResult.amountCaptured };
 }
 
 export async function completePickup(
@@ -354,6 +355,7 @@ export async function autoCancelOrder(
       data: {
         status: "CANCELLED",
         cancelledAt: new Date(),
+        capturedAmountCents: null,
       },
     });
 
@@ -438,12 +440,12 @@ export async function reconcileStuckOrder(
 
   if (pi.status === "requires_capture") {
     if (order.status === "CAPTURING") {
-      await stripe.capturePaymentIntent(
+      const retryCap = await stripe.capturePaymentIntent(
         order.paymentIntentId,
         order.capturedAmountCents ?? 0,
         `capture:${orderId}`,
       );
-      return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, order.capturedAmountCents ?? 0);
+      return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
     } else {
       await stripe.cancelPaymentIntent(order.paymentIntentId, `cancel:${orderId}`);
       return finalizeCancelFromSweep(storeId, orderId);
@@ -501,7 +503,7 @@ async function finalizeCancelFromSweep(
 
     await tx.order.update({
       where: { id: orderId },
-      data: { status: "CANCELLED", cancelledAt: new Date() },
+      data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
     });
 
     // Stock restore deferred to #141 (order-triggered reservation as a matched pair)
