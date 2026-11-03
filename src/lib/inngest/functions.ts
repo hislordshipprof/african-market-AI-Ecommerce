@@ -6,6 +6,8 @@ import { isStoreOpen } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
+const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
+
 function remainingSleep(authorizedAt: string | undefined, totalMs: number): string {
   if (!authorizedAt) return `${totalMs / 1000}s`;
   const elapsed = Date.now() - new Date(authorizedAt).getTime();
@@ -124,7 +126,35 @@ export const reconcileStuckTransitional = inngest.createFunction(
 
     for (const row of stuck) {
       await step.run(`reconcile-${row.id}`, async () => {
-        await reconcileStuckOrder(row.storeId, row.id);
+        try {
+          await reconcileStuckOrder(row.storeId, row.id);
+        } catch (err) {
+          console.error(`reconcileStuckOrder failed for order ${row.id}:`, err);
+          const recent = await storeScopedTransaction(row.storeId, async (tx) => {
+            return tx.auditLog.findFirst({
+              where: {
+                entityId: row.id,
+                action: "reconcile_failed",
+                createdAt: { gte: new Date(Date.now() - RECONCILE_FAILED_COOLDOWN_MS) },
+              },
+            });
+          });
+          if (!recent) {
+            await storeScopedTransaction(row.storeId, async (tx) => {
+              await tx.auditLog.create({
+                data: {
+                  storeId: row.storeId,
+                  actorId: SYSTEM_ACTOR_ID,
+                  actorEmail: SYSTEM_ACTOR_EMAIL,
+                  action: "reconcile_failed",
+                  entityType: "order",
+                  entityId: row.id,
+                  after: { error: err instanceof Error ? err.message : String(err) },
+                },
+              });
+            });
+          }
+        }
       });
     }
   },

@@ -407,4 +407,57 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       }
     });
   });
+
+  describe("reconcileStuckTransitional", () => {
+    it("M4: bad order does not block healthy order from reconciliation", async () => {
+      const { reconcileStuckTransitional } = await import("./functions");
+      const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+
+      const badOrder = await createTestOrder();
+      const healthyOrder = await createTestOrder();
+
+      // Both stuck in CANCELLING for >5 min
+      const sixMinAgo = new Date(Date.now() - 6 * 60_000);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: badOrder.id },
+          data: { status: "CANCELLING", updatedAt: sixMinAgo },
+        });
+        await tx.order.update({
+          where: { id: healthyOrder.id },
+          data: { status: "CANCELLING", updatedAt: sixMinAgo },
+        });
+      });
+
+      const serviceMod = await import("../order/service");
+      const origReconcile = serviceMod.reconcileStuckOrder;
+      const spy = vi.spyOn(serviceMod, "reconcileStuckOrder").mockImplementation(
+        async (sid: string, oid: string) => {
+          if (oid === badOrder.id) throw new Error("Simulated Stripe timeout");
+          return origReconcile(sid, oid);
+        },
+      );
+
+      const step = makeFakeStep();
+      try {
+        await handler({ step });
+
+        // Healthy order should be reconciled despite bad order throwing
+        const updated = await storeScoped(storeId).order.findUnique({ where: { id: healthyOrder.id } });
+        expect(updated!.status).toBe("CANCELLED");
+
+        // Bad order stays in CANCELLING
+        const bad = await storeScoped(storeId).order.findUnique({ where: { id: badOrder.id } });
+        expect(bad!.status).toBe("CANCELLING");
+
+        // reconcile_failed audit entry for bad order
+        const logs = await storeScoped(storeId).auditLog.findMany({
+          where: { entityId: badOrder.id, action: "reconcile_failed" },
+        });
+        expect(logs.length).toBe(1);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
 });
