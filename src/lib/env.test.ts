@@ -183,6 +183,7 @@ describe("runtimeDatabaseUrl", () => {
       NODE_ENV: "test",
     });
     expect(result).toBe(BASE);
+    expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
   });
 

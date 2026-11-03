@@ -9,7 +9,10 @@ import {
   validateFileSize,
   MAX_FILE_BYTES,
 } from "./csv-import";
-import { storeScoped, platformAdmin } from "../db";
+import { storeScoped, platformAdmin, claimImportRow, storeScopedTransaction, withSessionTimeZone, IMPORT_TOKEN_TTL_MS } from "../db";
+import { probeCrossStoreImportWrites } from "./cross-store-write";
+import { Client } from "pg";
+import { resolveDirectUrl } from "../env";
 import { createListing, resolveStockMode } from "./service";
 import type { Actor } from "./service";
 
@@ -222,7 +225,7 @@ describe("parseCsvText", () => {
     "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.";
 
   async function textFromBytes(bytes: Uint8Array): Promise<string> {
-    return new Blob([bytes]).text();
+    return new Blob([Buffer.from(bytes)]).text();
   }
 
   function expectNonCsv(parsed: ReturnType<typeof parseCsvText>) {
@@ -682,7 +685,7 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
     const scoped = storeScoped(storeAId);
     const before = await scoped.listingImport.count();
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const text = await new Blob([png]).text();
+    const text = await new Blob([Buffer.from(png)]).text();
     const preview = await generatePreview(storeAId, text, testUserId);
     expect(preview.importToken).toBe("");
     expect(preview.errors).toEqual([
@@ -1595,6 +1598,523 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
         actor,
       ),
     ).rejects.toThrow(/matches multiple master products/);
+  });
+
+  async function auditFor(storeId: string, importId: string) {
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { action: "catalog.csv_import" },
+    });
+    const matches = logs.filter((entry) => {
+      const after = entry.after as { importId?: string } | null;
+      return after?.importId === importId;
+    });
+    expect(matches).toHaveLength(1);
+    return matches[0].after as {
+      count: number;
+      listingIds: string[];
+      importId: string;
+      notSelected: number;
+      duplicatesSkipped: number;
+      alreadyListedSkipped: number;
+    };
+  }
+
+  it("N13: audit records duplicates, already listed, and the row left out", async () => {
+    const beta = await platformAdmin.masterProduct.create({
+      data: { name: "Audit Beta T199", status: "active", frozen: false, perishable: false },
+    });
+    const gamma = await platformAdmin.masterProduct.create({
+      data: { name: "Audit Gamma T199", status: "active", frozen: false, perishable: false },
+    });
+    mpIds.push(beta.id, gamma.id);
+    await platformAdmin.productSynonym.create({
+      data: { productId: beta.id, term: "Audit Beta Syn T199" },
+    });
+
+    const csv = [
+      "name,price",
+      "Audit Alpha T199,1.00",
+      "Audit Beta T199,2.00",
+      "Audit Beta Syn T199,2.50",
+      "Audit Gamma T199,3.00",
+      "Audit Delta T199,4.00",
+    ].join("\n");
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.duplicates.map((row) => row.csvName)).toEqual(["Audit Beta Syn T199"]);
+    expect(preview.matches.map((row) => row.csvName)).toEqual(["Audit Beta T199", "Audit Gamma T199"]);
+
+    await storeScoped(storeBId).listing.create({
+      data: {
+        storeId: storeBId,
+        masterProductId: gamma.id,
+        price: 300,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+
+    const result = await commitImport(
+      storeBId,
+      preview.importToken,
+      { matchedRows: [3, 4, 5], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(2);
+
+    const after = await auditFor(storeBId, preview.importToken);
+    expect(after).toMatchObject({
+      count: 2,
+      duplicatesSkipped: 1,
+      alreadyListedSkipped: 1,
+      notSelected: 1,
+      importId: preview.importToken,
+    });
+    expect(after.listingIds).toEqual(result.listingIds);
+    expect(after.count + after.duplicatesSkipped + after.alreadyListedSkipped).toBe(4);
+
+    const created = await storeScoped(storeBId).listing.findMany({
+      where: { id: { in: result.listingIds } },
+    });
+    expect(created.filter((row) => row.customName === "Audit Alpha T199")).toHaveLength(1);
+    expect(created.filter((row) => row.masterProductId === beta.id)).toHaveLength(1);
+    expect(created.some((row) => row.masterProductId === gamma.id)).toBe(false);
+  });
+
+  it("duplicate through an ambiguous resolution skips the second master product", async () => {
+    const exact = await platformAdmin.masterProduct.create({
+      data: { name: "Palm Oil Exact T199", status: "active", frozen: false, perishable: false },
+    });
+    const other = await platformAdmin.masterProduct.create({
+      data: { name: "Palm Oil Other T199", status: "active", frozen: false, perishable: false },
+    });
+    mpIds.push(exact.id, other.id);
+    await platformAdmin.productSynonym.create({
+      data: { productId: exact.id, term: "palm oil ambig t199" },
+    });
+    await platformAdmin.productSynonym.create({
+      data: { productId: other.id, term: "palm oil ambig t199" },
+    });
+
+    const csv = "name,price\nPalm Oil Exact T199,5.00\npalm oil ambig t199,6.00\n";
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.matches).toHaveLength(1);
+    expect(preview.ambiguous).toHaveLength(1);
+
+    const result = await commitImport(
+      storeBId,
+      preview.importToken,
+      {
+        matchedRows: [2],
+        newItemRows: [],
+        ambiguousResolutions: [{ row: 3, masterProductId: exact.id }],
+      },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    const after = await auditFor(storeBId, preview.importToken);
+    expect(after.duplicatesSkipped).toBe(1);
+    expect(after.alreadyListedSkipped).toBe(0);
+    expect(after.count).toBe(1);
+  });
+
+  it("same custom name twice records duplicatesSkipped", async () => {
+    const csv = "name,price\nSuya Mix T199,5.00\nsuya mix t199,6.00\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.duplicatesSkipped).toBe(1);
+    expect(after.notSelected).toBe(0);
+  });
+
+  it("unselected already-listed row counts as notSelected", async () => {
+    await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        customName: "Already Sitting T199",
+        price: 200,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+    const csv = "name,price\nAlready Sitting T199,2.00\nFresh Pick T199,3.00\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.alreadyListed).toHaveLength(1);
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [3], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.notSelected).toBe(1);
+    expect(after.alreadyListedSkipped).toBe(0);
+  });
+
+  it("listed between preview and commit sets alreadyListedSkipped", async () => {
+    const csv = "name,price\nLate List T199,4.00\nKept List T199,5.00\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(2);
+    await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        customName: "Late List T199",
+        price: 400,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.alreadyListedSkipped).toBe(1);
+    expect(after.count).toBe(1);
+    const kept = await storeScoped(storeAId).listing.findFirst({
+      where: { customName: "Kept List T199" },
+    });
+    expect(kept).toBeTruthy();
+  });
+
+  it("retry after a failed commit writes nothing, then one audit", async () => {
+    const product = await platformAdmin.masterProduct.create({
+      data: { name: "Retry After Fail T199", status: "active", frozen: false, perishable: false },
+    });
+    mpIds.push(product.id);
+    const csv = "name,price\nRetry After Fail T199,777.77\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.matches).toHaveLength(1);
+
+    await rawPrisma.$executeRaw`ALTER TABLE listings ADD CONSTRAINT test_reject_retry_199 CHECK (price <> 77777)`;
+    try {
+      await expect(
+        commitImport(
+          storeAId,
+          preview.importToken,
+          { matchedRows: [2], newItemRows: [], ambiguousResolutions: [] },
+          actor,
+        ),
+      ).rejects.toThrow();
+
+      const scoped = storeScoped(storeAId);
+      expect(await scoped.listing.findMany({ where: { masterProductId: product.id } })).toEqual([]);
+      expect(await scoped.listingVariant.findMany({ where: { listing: { masterProductId: product.id } } })).toEqual([]);
+      expect(await scoped.stockEvent.findMany({ where: { listing: { masterProductId: product.id } } })).toEqual([]);
+      const token = await scoped.listingImport.findUnique({ where: { id: preview.importToken } });
+      expect(token?.status).toBe("pending");
+      const logs = await scoped.auditLog.findMany({ where: { action: "catalog.csv_import" } });
+      expect(logs.some((entry) => (entry.after as { importId?: string } | null)?.importId === preview.importToken)).toBe(false);
+    } finally {
+      await rawPrisma.$executeRaw`ALTER TABLE listings DROP CONSTRAINT IF EXISTS test_reject_retry_199`;
+    }
+
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [2], newItemRows: [], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.count).toBe(1);
+    expect(after.duplicatesSkipped).toBe(0);
+    expect(after.alreadyListedSkipped).toBe(0);
+  });
+
+  it("two commits of one token: one audit and the already-committed message", async () => {
+    const csv = "name,price\nDouble Commit T199,8.00\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    const selection = { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] };
+    const results = await Promise.allSettled([
+      commitImport(storeAId, preview.importToken, selection, actor),
+      commitImport(storeAId, preview.importToken, selection, actor),
+    ]);
+    const fulfilled = results.filter((row) => row.status === "fulfilled");
+    const rejected = results.filter((row) => row.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason.message).toBe(
+      "This import has already been committed.",
+    );
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.count).toBe(1);
+  });
+
+  it("two tokens at once: the losing commit keeps its second item", async () => {
+    const shared = "Race Shared Lock T199";
+    const extra = "Race Extra Lock T199";
+    const previewA = await generatePreview(storeAId, `name,price\n${shared},7.00\n`, testUserId);
+    const previewB = await generatePreview(
+      storeAId,
+      `name,price\n${shared},7.00\n${extra},8.00\n`,
+      testUserId,
+    );
+    const client = new Client({ connectionString: resolveDirectUrl() });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT 1 FROM stores WHERE id = $1 FOR UPDATE", [storeAId]);
+      const first = commitImport(
+        storeAId,
+        previewA.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      const second = commitImport(
+        storeAId,
+        previewB.importToken,
+        { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
+        actor,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      await client.query("COMMIT");
+      const [createdA, createdB] = await Promise.all([first, second]);
+      expect(createdA.createdCount).toBe(1);
+      expect(createdB.createdCount).toBe(1);
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.end();
+    }
+
+    const sharedRows = await storeScoped(storeAId).listing.findMany({ where: { customName: shared } });
+    expect(sharedRows).toHaveLength(1);
+    const afterB = await auditFor(storeAId, previewB.importToken);
+    expect(afterB.alreadyListedSkipped).toBe(1);
+    expect(afterB.count).toBe(1);
+  }, 30_000);
+
+  it("cross-store commit leaves the token pending and writes nothing", async () => {
+    const csv = "name,price\nCross Store Commit T199,4.00\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    const before = await storeScoped(storeBId).listing.count({ where: { customName: "Cross Store Commit T199" } });
+    await expect(
+      commitImport(
+        storeBId,
+        preview.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      ),
+    ).rejects.toThrow("Import token is invalid, expired, or already used.");
+    expect(await storeScoped(storeBId).listing.count({ where: { customName: "Cross Store Commit T199" } })).toBe(before);
+    const token = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(token?.status).toBe("pending");
+  });
+
+  it("cross-store write of audit_logs and listing_imports is rejected", async () => {
+    const csvText = "name,price\nKeep Me T199,1.00\n";
+    const row = await storeScoped(storeAId).listingImport.create({
+      data: {
+        storeId: storeAId,
+        csvText,
+        rowCount: 1,
+        status: "pending",
+        createdById: testUserId,
+      },
+    });
+    const probe = await probeCrossStoreImportWrites({
+      storeAId,
+      storeBId,
+      actorId: testUserId,
+      actorEmail: actor.email,
+      listingImportId: row.id,
+      expectedStatus: "pending",
+      expectedCsvText: csvText,
+    });
+    expect(probe).toEqual({
+      auditCreateRejected: true,
+      importCreateRejected: true,
+      updateCount: 0,
+      deleteCount: 0,
+      rowUnchanged: true,
+    });
+  });
+
+  it("T1: a 29-minute token is claimed and a 31-minute token is not, in every zone", async () => {
+    const zones = ["UTC", "America/Denver", "Europe/Berlin"] as const;
+    for (const zone of zones) {
+      const fresh = await storeScoped(storeAId).listingImport.create({
+        data: {
+          storeId: storeAId,
+          csvText: `name,price\nFresh ${zone},1.00\n`,
+          rowCount: 1,
+          status: "pending",
+          createdById: testUserId,
+        },
+      });
+      const stale = await storeScoped(storeAId).listingImport.create({
+        data: {
+          storeId: storeAId,
+          csvText: `name,price\nStale ${zone},1.00\n`,
+          rowCount: 1,
+          status: "pending",
+          createdById: testUserId,
+        },
+      });
+      const age29 = new Date(Date.now() - 29 * 60 * 1000);
+      const age31 = new Date(Date.now() - 31 * 60 * 1000);
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+        rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${age29} WHERE id = ${fresh.id}`,
+        rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${age31} WHERE id = ${stale.id}`,
+      ]);
+
+      const freshClaimed = await storeScopedTransaction(storeAId, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
+        return claimImportRow(tx, fresh.id, IMPORT_TOKEN_TTL_MS);
+      });
+      const staleClaimed = await storeScopedTransaction(storeAId, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
+        return claimImportRow(tx, stale.id, IMPORT_TOKEN_TTL_MS);
+      });
+      expect(freshClaimed).toBe(true);
+      expect(staleClaimed).toBe(false);
+      const staleRow = await storeScoped(storeAId).listingImport.findUnique({ where: { id: stale.id } });
+      expect(staleRow?.status).toBe("pending");
+    }
+  });
+
+  it("T1: commitImport expires a 31-minute token in every zone and keeps it pending", async () => {
+    for (const zone of ["UTC", "America/Denver", "Europe/Berlin"]) {
+      const preview = await generatePreview(
+        storeAId,
+        `name,price\nExpired ${zone} T199,5.00\n`,
+        testUserId,
+      );
+      const past = new Date(Date.now() - 31 * 60 * 1000);
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+        rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${past} WHERE id = ${preview.importToken}`,
+      ]);
+      await expect(
+        withSessionTimeZone(zone, () =>
+          commitImport(
+            storeAId,
+            preview.importToken,
+            { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+            actor,
+          ),
+        ),
+      ).rejects.toThrow("Import token has expired. Please upload the file again.");
+      const token = await storeScoped(storeAId).listingImport.findUnique({
+        where: { id: preview.importToken },
+      });
+      expect(token?.status).toBe("pending");
+    }
+  });
+
+  it("T1: committedAt stays within 5 seconds of now in every zone", async () => {
+    for (const zone of ["UTC", "America/Denver", "Europe/Berlin"]) {
+      const preview = await generatePreview(
+        storeAId,
+        `name,price\nStamp ${zone} T199,3.00\n`,
+        testUserId,
+      );
+      await withSessionTimeZone(zone, () =>
+        commitImport(
+          storeAId,
+          preview.importToken,
+          { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+          actor,
+        ),
+      );
+      const token = await storeScoped(storeAId).listingImport.findUnique({
+        where: { id: preview.importToken },
+      });
+      expect(token?.status).toBe("committed");
+      expect(Math.abs(token!.committedAt!.getTime() - Date.now())).toBeLessThan(5000);
+    }
+  });
+
+  it("expired versus committed: pending claim failure and committed token use different messages", async () => {
+    const preview = await generatePreview(storeAId, "name,price\nMessage Split T199,5.00\n", testUserId);
+    await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    await expect(
+      commitImport(
+        storeAId,
+        preview.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      ),
+    ).rejects.toThrow("This import has already been committed.");
+    const claimedAgain = await storeScopedTransaction(storeAId, (tx) =>
+      claimImportRow(tx, preview.importToken, IMPORT_TOKEN_TTL_MS),
+    );
+    expect(claimedAgain).toBe(false);
+
+    const expired = await generatePreview(storeAId, "name,price\nMessage Expired T199,5.00\n", testUserId);
+    const past = new Date(Date.now() - 31 * 60 * 1000);
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${past} WHERE id = ${expired.importToken}`,
+    ]);
+    const expiredClaim = await storeScopedTransaction(storeAId, (tx) =>
+      claimImportRow(tx, expired.importToken, IMPORT_TOKEN_TTL_MS),
+    );
+    expect(expiredClaim).toBe(false);
+    await expect(
+      commitImport(
+        storeAId,
+        expired.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      ),
+    ).rejects.toThrow("Import token has expired. Please upload the file again.");
+  });
+
+  it("overnight hours: a commit does not consult store opening hours", async () => {
+    const preview = await generatePreview(storeAId, "name,price\nNight Owl T199,2.50\n", testUserId);
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    const listing = await storeScoped(storeAId).listing.findUnique({ where: { id: result.listingIds[0] } });
+    expect(listing?.price).toBe(250);
+  });
+
+  it("maximum input: 5000 selected rows record one audit", async () => {
+    const lines = Array.from({ length: 5000 }, (_, i) => `Max5000 T199 ${i},1.00`);
+    const csv = `name,price\n${lines.join("\n")}\n`;
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(5000);
+    const result = await commitImport(
+      storeBId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: preview.newItems.map((row) => row.row), ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(5000);
+    const after = await auditFor(storeBId, preview.importToken);
+    expect(after.count).toBe(5000);
+    expect(after.duplicatesSkipped).toBe(0);
+    expect(after.alreadyListedSkipped).toBe(0);
+    expect(after.notSelected).toBe(0);
+  }, 120_000);
+
+  it("keys missing at runtime: DATABASE_URL is the DB suite gate", () => {
+    expect(hasDb).toBe(Boolean(process.env.DATABASE_URL));
+    expect(hasDb).toBe(true);
   });
 });
 

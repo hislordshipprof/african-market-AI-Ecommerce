@@ -1,8 +1,6 @@
 import { parse } from "csv-parse/sync";
-import { platform, storeScoped, storeScopedTransaction, claimImportRow, lockStoreRow } from "../db";
+import { platform, storeScoped, storeScopedTransaction, claimImportRow, lockStoreRow, IMPORT_TOKEN_TTL_MS } from "../db";
 import { resolveStockMode, type Actor } from "./service";
-
-const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 const NON_CSV_REASON =
   "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.";
@@ -401,47 +399,86 @@ export async function matchToMasterProducts(
 }
 
 
-export async function generatePreview(
-  storeId: string,
-  csvText: string,
-  actorId: string,
-): Promise<CsvPreviewResult> {
-  const { rows, errors, unknownColumns } = parseCsvText(csvText);
+type ProductMatchList = Array<{ product: MasterProductRow; matchType: "exact" | "synonym" }>;
 
-  if (rows.length === 0) {
+interface ExistingListingRow {
+  id: string;
+  masterProductId: string | null;
+  customName: string | null;
+}
+
+function indexExistingListings(listings: ExistingListingRow[]) {
+  const byMasterId = new Map<string, string>();
+  const byCustomName = new Map<string, string>();
+  for (const listing of listings) {
+    if (listing.masterProductId) {
+      byMasterId.set(listing.masterProductId, listing.id);
+    } else if (listing.customName) {
+      byCustomName.set(normalizeForMatch(listing.customName), listing.id);
+    }
+  }
+  return { byMasterId, byCustomName };
+}
+
+function listingWeightG(weightG: number | null | undefined): number {
+  return weightG && weightG > 0 ? weightG : DEFAULT_WEIGHT_G;
+}
+
+interface ListingToCreate {
+  masterProductId: string | null;
+  customName: string | null;
+  price: number;
+  stockMode: string;
+  qty: number | null;
+  status: string | null;
+  frozen: boolean;
+  perishable: boolean;
+  weightG: number;
+}
+
+function buildListingData(
+  row: ParsedRow,
+  product: Pick<MasterProductRow, "id" | "frozen" | "perishable" | "weightG"> | null,
+  hasQtyColumn: boolean,
+): ListingToCreate {
+  const stock = resolveStockMode({
+    stockMode: row.stockMode,
+    hasQtyColumn,
+    qty: row.qty,
+    status: row.status,
+  });
+  if (!product) {
     return {
-      matches: [],
-      ambiguous: [],
-      newItems: [],
-      alreadyListed: [],
-      duplicates: [],
-      errors,
-      unknownColumns,
-      importToken: "",
+      masterProductId: null,
+      customName: row.name,
+      price: row.price,
+      ...stock,
+      frozen: false,
+      perishable: false,
+      weightG: DEFAULT_WEIGHT_G,
     };
   }
+  return {
+    masterProductId: product.id,
+    customName: null,
+    price: row.price,
+    ...stock,
+    frozen: product.frozen,
+    perishable: product.perishable,
+    weightG: listingWeightG(product.weightG),
+  };
+}
 
+async function matchParsedRows(rows: ParsedRow[]) {
   const uniqueNames = [...new Set(rows.map((r) => r.name))];
-  const matchMap = await matchToMasterProducts(uniqueNames);
+  return matchToMasterProducts(uniqueNames);
+}
 
-  const scoped = storeScoped(storeId);
-  const existingListings = await scoped.listing.findMany({
-    select: { id: true, masterProductId: true, customName: true },
-  });
-  const existingMasterIds = new Set(
-    existingListings.filter((l) => l.masterProductId).map((l) => l.masterProductId!),
-  );
-  const existingListingByMaster = new Map(
-    existingListings
-      .filter((l) => l.masterProductId)
-      .map((l) => [l.masterProductId!, l.id]),
-  );
-  const existingCustomNames = new Map(
-    existingListings
-      .filter((l) => !l.masterProductId && l.customName)
-      .map((l) => [normalizeForMatch(l.customName!), l.id]),
-  );
-
+function classifyPreviewRows(
+  rows: ParsedRow[],
+  matchMap: Map<string, ProductMatchList>,
+  existing: ReturnType<typeof indexExistingListings>,
+) {
   const matches: CsvPreviewMatch[] = [];
   const ambiguous: CsvPreviewAmbiguous[] = [];
   const newItems: CsvPreviewNew[] = [];
@@ -463,7 +500,7 @@ export async function generatePreview(
     const productMatches = matchMap.get(row.name) ?? [];
 
     if (productMatches.length === 0) {
-      const existingCustomId = existingCustomNames.get(normalizeForMatch(row.name));
+      const existingCustomId = existing.byCustomName.get(normName);
       if (existingCustomId) {
         alreadyListed.push({
           row: row.row,
@@ -483,13 +520,14 @@ export async function generatePreview(
         continue;
       }
       seenMasterProductIds.set(m.product.id, row.row);
-      if (existingMasterIds.has(m.product.id)) {
+      const existingListingId = existing.byMasterId.get(m.product.id);
+      if (existingListingId) {
         alreadyListed.push({
           row: row.row,
           csvName: row.name,
           masterProductId: m.product.id,
           masterProductName: m.product.name,
-          existingListingId: existingListingByMaster.get(m.product.id)!,
+          existingListingId,
         });
       } else {
         matches.push({
@@ -515,8 +553,71 @@ export async function generatePreview(
     }
   }
 
+  return { matches, ambiguous, newItems, alreadyListed, duplicates };
+}
+
+function dropDuplicateBuiltItems(items: ListingToCreate[]): {
+  kept: ListingToCreate[];
+  duplicatesSkipped: number;
+} {
+  const seenMasterIds = new Set<string>();
+  const seenCustomNames = new Set<string>();
+  const kept: ListingToCreate[] = [];
+  let duplicatesSkipped = 0;
+  for (const item of items) {
+    if (item.masterProductId) {
+      if (seenMasterIds.has(item.masterProductId)) {
+        duplicatesSkipped += 1;
+        continue;
+      }
+      seenMasterIds.add(item.masterProductId);
+      kept.push(item);
+      continue;
+    }
+    if (item.customName) {
+      const norm = normalizeForMatch(item.customName);
+      if (seenCustomNames.has(norm)) {
+        duplicatesSkipped += 1;
+        continue;
+      }
+      seenCustomNames.add(norm);
+      kept.push(item);
+      continue;
+    }
+    kept.push(item);
+  }
+  return { kept, duplicatesSkipped };
+}
+
+export async function generatePreview(
+  storeId: string,
+  csvText: string,
+  actorId: string,
+): Promise<CsvPreviewResult> {
+  const { rows, errors, unknownColumns } = parseCsvText(csvText);
+
+  if (rows.length === 0) {
+    return {
+      matches: [],
+      ambiguous: [],
+      newItems: [],
+      alreadyListed: [],
+      duplicates: [],
+      errors,
+      unknownColumns,
+      importToken: "",
+    };
+  }
+
+  const matchMap = await matchParsedRows(rows);
+  const scoped = storeScoped(storeId);
+  const existingListings = await scoped.listing.findMany({
+    select: { id: true, masterProductId: true, customName: true },
+  });
+  const classified = classifyPreviewRows(rows, matchMap, indexExistingListings(existingListings));
+
   const MAX_PENDING_IMPORTS = 10;
-  const expiryCutoff = new Date(Date.now() - TOKEN_TTL_MS);
+  const expiryCutoff = new Date(Date.now() - IMPORT_TOKEN_TTL_MS);
   await scoped.listingImport.deleteMany({
     where: { status: "pending", createdAt: { lt: expiryCutoff } },
   });
@@ -546,11 +647,7 @@ export async function generatePreview(
   });
 
   return {
-    matches,
-    ambiguous,
-    newItems,
-    alreadyListed,
-    duplicates,
+    ...classified,
     errors,
     unknownColumns,
     importToken: importRecord.id,
@@ -588,9 +685,6 @@ export async function commitImport(
   if (importRecord.status === "committed") {
     throw new Error("This import has already been committed.");
   }
-  if (Date.now() - importRecord.createdAt.getTime() > TOKEN_TTL_MS) {
-    throw new Error("Import token has expired. Please upload the file again.");
-  }
 
   const { rows, hasQtyColumn } = parseCsvText(importRecord.csvText);
   const rowMap = new Map(rows.map((r) => [r.row, r]));
@@ -604,21 +698,14 @@ export async function commitImport(
     throw new Error("No rows selected for import.");
   }
 
-  const uniqueNames = [...new Set(rows.map((r) => r.name))];
-  const matchMap = await matchToMasterProducts(uniqueNames);
+  const selectedNumbers = new Set<number>([
+    ...selection.matchedRows,
+    ...selection.newItemRows,
+    ...selection.ambiguousResolutions.map((resolution) => resolution.row),
+  ]);
+  const notSelected = rows.filter((row) => !selectedNumbers.has(row.row)).length;
 
-  interface ListingToCreate {
-    masterProductId: string | null;
-    customName: string | null;
-    price: number;
-    stockMode: string;
-    qty: number | null;
-    status: string | null;
-    frozen: boolean;
-    perishable: boolean;
-    weightG: number;
-  }
-
+  const matchMap = await matchParsedRows(rows);
   const toCreate: ListingToCreate[] = [];
 
   for (const rowNum of selectedRows) {
@@ -626,35 +713,10 @@ export async function commitImport(
     if (!row) continue;
 
     const productMatches = matchMap.get(row.name) ?? [];
-
-    const stock = resolveStockMode({
-      stockMode: row.stockMode,
-      hasQtyColumn,
-      qty: row.qty,
-      status: row.status,
-    });
-
     if (productMatches.length === 1) {
-      const m = productMatches[0];
-      toCreate.push({
-        masterProductId: m.product.id,
-        customName: null,
-        price: row.price,
-        ...stock,
-        frozen: m.product.frozen,
-        perishable: m.product.perishable,
-        weightG: (m.product.weightG && m.product.weightG > 0) ? m.product.weightG : DEFAULT_WEIGHT_G,
-      });
+      toCreate.push(buildListingData(row, productMatches[0].product, hasQtyColumn));
     } else if (productMatches.length === 0) {
-      toCreate.push({
-        masterProductId: null,
-        customName: row.name,
-        price: row.price,
-        ...stock,
-        frozen: false,
-        perishable: false,
-        weightG: DEFAULT_WEIGHT_G,
-      });
+      toCreate.push(buildListingData(row, null, hasQtyColumn));
     } else {
       throw new Error(
         `Row ${rowNum} ("${row.name}") matches multiple master products. Use ambiguous resolutions to pick one.`,
@@ -673,41 +735,10 @@ export async function commitImport(
         `Resolution for row ${resolution.row} references product ${resolution.masterProductId} which is not in the match list.`,
       );
     }
-
-    const ambigStock = resolveStockMode({
-      stockMode: row.stockMode,
-      hasQtyColumn,
-      qty: row.qty,
-      status: row.status,
-    });
-
-    toCreate.push({
-      masterProductId: selectedProduct.id,
-      customName: null,
-      price: row.price,
-      ...ambigStock,
-      frozen: selectedProduct.frozen,
-      perishable: selectedProduct.perishable,
-      weightG: (selectedProduct.weightG && selectedProduct.weightG > 0) ? selectedProduct.weightG : DEFAULT_WEIGHT_G,
-    });
+    toCreate.push(buildListingData(row, selectedProduct, hasQtyColumn));
   }
 
-  const seenMasterIds = new Set<string>();
-  const seenCustomNames = new Set<string>();
-  const dedupedToCreate = toCreate.filter((item) => {
-    if (item.masterProductId) {
-      if (seenMasterIds.has(item.masterProductId)) return false;
-      seenMasterIds.add(item.masterProductId);
-      return true;
-    }
-    if (item.customName) {
-      const norm = normalizeForMatch(item.customName);
-      if (seenCustomNames.has(norm)) return false;
-      seenCustomNames.add(norm);
-      return true;
-    }
-    return true;
-  });
+  const { kept: dedupedToCreate, duplicatesSkipped } = dropDuplicateBuiltItems(toCreate);
 
   if (dedupedToCreate.length === 0) {
     throw new Error("No valid rows to import after re-validation.");
@@ -715,27 +746,36 @@ export async function commitImport(
 
   const listingIds = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
-    const didClaim = await claimImportRow(tx, importToken);
+    const didClaim = await claimImportRow(tx, importToken, IMPORT_TOKEN_TTL_MS);
 
     if (!didClaim) {
-      throw new Error("This import has already been committed.");
+      const current = await tx.listingImport.findUnique({
+        where: { id: importToken },
+        select: { status: true },
+      });
+      if (current?.status === "committed") {
+        throw new Error("This import has already been committed.");
+      }
+      throw new Error("Import token has expired. Please upload the file again.");
     }
 
     const existingListings = await tx.listing.findMany({
       select: { id: true, masterProductId: true, customName: true },
     });
-    const existingMasterIds = new Set(
-      existingListings.filter((l) => l.masterProductId).map((l) => l.masterProductId!),
-    );
-    const existingCustomNames = new Set(
-      existingListings
-        .filter((l) => !l.masterProductId && l.customName)
-        .map((l) => normalizeForMatch(l.customName!)),
-    );
+    const existing = indexExistingListings(existingListings);
 
+    let alreadyListedSkipped = 0;
     const toInsert = dedupedToCreate.filter((item) => {
-      if (item.masterProductId && existingMasterIds.has(item.masterProductId)) return false;
-      if (item.customName && existingCustomNames.has(normalizeForMatch(item.customName))) return false;
+      const listedByMaster = item.masterProductId
+        ? existing.byMasterId.has(item.masterProductId)
+        : false;
+      const listedByName = item.customName
+        ? existing.byCustomName.has(normalizeForMatch(item.customName))
+        : false;
+      if (listedByMaster || listedByName) {
+        alreadyListedSkipped += 1;
+        return false;
+      }
       return true;
     });
 
@@ -793,7 +833,14 @@ export async function commitImport(
         action: "catalog.csv_import",
         entityType: "listing",
         entityId: ids[0],
-        after: { count: ids.length, listingIds: ids },
+        after: {
+          count: ids.length,
+          listingIds: ids,
+          importId: importToken,
+          notSelected,
+          duplicatesSkipped,
+          alreadyListedSkipped,
+        },
       },
     });
 
