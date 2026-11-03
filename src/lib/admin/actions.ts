@@ -10,19 +10,10 @@ import { Prisma } from "@prisma/client";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 
+import { VALID_US_TIMEZONES } from "./timezone";
+
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 const MAX_CENTS = 2_147_483_647;
-
-export const VALID_US_TIMEZONES = [
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Phoenix",
-  "America/Los_Angeles",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-] as const;
-export type USTimezone = (typeof VALID_US_TIMEZONES)[number];
 
 function parseFloatOrDefault(raw: string | null | undefined, defaultValue: number): number {
   const trimmed = (raw ?? "").trim();
@@ -59,7 +50,7 @@ function extractRawValues(data: FormData): Record<string, string> {
   return raw;
 }
 
-function validateStoreFields(data: FormData): {
+function validateStoreFields(data: FormData, defaultTimezone = "America/New_York"): {
   errors: Record<string, string>;
   values: {
     slug: string;
@@ -95,7 +86,7 @@ function validateStoreFields(data: FormData): {
   const autoRefundLimitCents = Math.round(
     parseFloatOrDefault(data.get("autoRefundLimit") as string, 25) * 100,
   );
-  const timezone = (data.get("timezone") as string)?.trim() || "America/New_York";
+  const timezone = (data.get("timezone") as string)?.trim() || defaultTimezone;
 
   if (!slug) errors.slug = "Slug is required";
   else if (!isSlugRoutable(slug)) errors.slug = "This slug is not allowed (reserved, all-digit, or invalid format)";
@@ -299,7 +290,7 @@ export async function updateStore(
   if (!before) return { error: "Store not found" };
 
   const raw = extractRawValues(data);
-  const { errors, values } = validateStoreFields(data);
+  const { errors, values } = validateStoreFields(data, before.timezone);
   if (Object.keys(errors).length > 0) {
     return { fieldErrors: errors, submittedValues: raw };
   }

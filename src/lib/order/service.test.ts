@@ -647,6 +647,89 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(capturedPayments.size).toBe(0);
   });
 
+  it("Codex-4: void path sets CANCELLING, blocking concurrent markReady", async () => {
+    const order = await createTestOrder();
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    // Refund all lines so captured amount = 0 (below Stripe minimum)
+    await markLinePicked(storeId, lines[0].id);
+    for (const line of lines) {
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.orderLine.update({
+          where: { id: line.id },
+          data: { status: "refunded", qtyPicked: 0 },
+        });
+      });
+    }
+
+    // Deferred cancel: Phase 1 commits CANCELLING, then blocks on Stripe
+    let resolveCancel!: (v: CancelResult) => void;
+    const cancelDeferred = new Promise<CancelResult>((res) => { resolveCancel = res; });
+    const deferredProvider: StripeProvider = {
+      ...fakeStripeProvider,
+      cancelPaymentIntent: () => cancelDeferred,
+    };
+    setStripeProvider(deferredProvider);
+
+    const readyPromise = markReady(storeId, order.id);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Verify transitional status is CANCELLING while Stripe call is in-flight
+    const mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(mid!.status).toBe("CANCELLING");
+
+    // Concurrent markReady must fail because status is CANCELLING
+    setStripeProvider(fakeStripeProvider);
+    const concurrent = await markReady(storeId, order.id);
+    expect(concurrent.ok).toBe(false);
+    if (!concurrent.ok) expect(concurrent.error).toContain("CANCELLING");
+
+    // Let the deferred cancel complete
+    resolveCancel({ paymentIntentId: order.paymentIntentId!, status: "canceled" });
+    const result = await readyPromise;
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.capturedAmountCents).toBe(0);
+
+    // Final state: CANCELLED with audit log
+    const final = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(final!.status).toBe("CANCELLED");
+    expect(final!.cancelledAt).toBeTruthy();
+
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "void_zero_amount" },
+    });
+    expect(logs.length).toBe(1);
+  });
+
+  it("Codex-4: void finalization verifies CANCELLING before writing CANCELLED", async () => {
+    const order = await createTestOrder();
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    // Refund all lines
+    await markLinePicked(storeId, lines[0].id);
+    for (const line of lines) {
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.orderLine.update({
+          where: { id: line.id },
+          data: { status: "refunded", qtyPicked: 0 },
+        });
+      });
+    }
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    // Verify it went through CANCELLING → CANCELLED (not PICKING → CANCELLED)
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.cancelledAt).toBeTruthy();
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
+  });
+
   it("K2: accept-during-cancel race — accept fails while cancel is in-flight", async () => {
     const order = await createTestOrder();
 
@@ -662,10 +745,12 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const cancelPromise = autoCancelOrder(storeId, order.id);
 
     // Give Phase 1 time to commit CANCELLING
-    await new Promise((r) => setTimeout(r, 100));
-
-    // Verify status is CANCELLING
-    const mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    let mid;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      if (mid!.status === "CANCELLING") break;
+    }
     expect(mid!.status).toBe("CANCELLING");
 
     // Attempt to accept mid-flight — must fail because status is CANCELLING

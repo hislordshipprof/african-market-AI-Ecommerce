@@ -9,13 +9,16 @@ import { fakeStripeProvider, reset as resetFakeStripe } from "../stripe/fake";
 const hasDb = !!process.env.DATABASE_URL;
 
 function makeFakeStep() {
-  const sleeps: string[] = [];
+  const sleeps: Array<{ name: string; duration: string }> = [];
+  const sleepNames: string[] = [];
   const runs: string[] = [];
   return {
     sleeps,
+    sleepNames,
     runs,
-    async sleep(name: string) {
-      sleeps.push(name);
+    async sleep(name: string, duration: string) {
+      sleeps.push({ name, duration });
+      sleepNames.push(name);
     },
     async run<T>(name: string, fn: () => Promise<T>): Promise<T> {
       runs.push(name);
@@ -24,7 +27,7 @@ function makeFakeStep() {
   };
 }
 
-type HandlerCtx = { event: { data: { orderId: string; storeId: string } }; step: ReturnType<typeof makeFakeStep> };
+type HandlerCtx = { event: { data: { orderId: string; storeId: string; authorizedAt?: string } }; step: ReturnType<typeof makeFakeStep> };
 type Handler = (ctx: HandlerCtx) => Promise<void>;
 
 function getHandler(inngestFn: unknown): Handler {
@@ -153,7 +156,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         handler({ event: { data: { orderId: order.id, storeId } }, step }),
       );
 
-      expect(step.sleeps).toContain("wait-15-min");
+      expect(step.sleepNames).toContain("wait-15-min");
       expect(step.runs).toContain("check-and-alert");
 
       const logs = await storeScoped(storeId).auditLog.findMany({
@@ -249,6 +252,41 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         spy.mockRestore();
       }
     });
+
+    it("Codex-3: re-published event with old authorizedAt skips sleep and processes immediately", async () => {
+      const { acceptanceAlert } = await import("./functions");
+      const handler = getHandler(acceptanceAlert);
+      const order = await createTestOrder();
+      const step = makeFakeStep();
+
+      const twentyMinAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      await withMockedTime(new Date("2026-11-03T14:00:00-05:00"), () =>
+        handler({ event: { data: { orderId: order.id, storeId, authorizedAt: twentyMinAgo } }, step }),
+      );
+
+      expect(step.sleepNames).toHaveLength(0);
+      expect(step.runs).toContain("check-and-alert");
+    });
+
+    it("Codex-3: fresh event sleeps the full 15 minutes", async () => {
+      const { acceptanceAlert } = await import("./functions");
+      const handler = getHandler(acceptanceAlert);
+      const order = await createTestOrder();
+      const step = makeFakeStep();
+
+      const mockedNow = new Date("2026-11-03T14:00:00-05:00");
+      const justNow = mockedNow.toISOString();
+      await withMockedTime(mockedNow, () =>
+        handler({ event: { data: { orderId: order.id, storeId, authorizedAt: justNow } }, step }),
+      );
+
+      expect(step.sleepNames).toContain("wait-15-min");
+      const duration = step.sleeps.find(s => s.name === "wait-15-min")?.duration;
+      expect(duration).toBeDefined();
+      const seconds = parseInt(duration!.replace("s", ""), 10);
+      expect(seconds).toBeGreaterThan(800);
+      expect(seconds).toBeLessThanOrEqual(900);
+    });
   });
 
   describe("autoCancel", () => {
@@ -262,7 +300,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         handler({ event: { data: { orderId: order.id, storeId } }, step }),
       );
 
-      expect(step.sleeps).toContain("wait-30-min");
+      expect(step.sleepNames).toContain("wait-30-min");
       const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
       expect(updated!.status).toBe("CANCELLED");
     });
@@ -315,13 +353,29 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       expect(updated!.status).toBe("CANCELLED");
     });
 
+    it("Codex-3: re-published event with 35-min-old authorizedAt skips sleep and cancels immediately", async () => {
+      const { autoCancel } = await import("./functions");
+      const handler = getHandler(autoCancel);
+      const order = await createTestOrder();
+      const step = makeFakeStep();
+
+      const thirtyFiveMinAgo = new Date(Date.now() - 35 * 60 * 1000).toISOString();
+      await withMockedTime(new Date("2026-11-03T14:00:00-05:00"), () =>
+        handler({ event: { data: { orderId: order.id, storeId, authorizedAt: thirtyFiveMinAgo } }, step }),
+      );
+
+      expect(step.sleepNames).toHaveLength(0);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLED");
+    });
+
     it("returns early for invalid event data (A6 guard)", async () => {
       const { autoCancel } = await import("./functions");
       const handler = getHandler(autoCancel);
       const step = makeFakeStep();
 
       await handler({ event: { data: { orderId: "", storeId: "" } }, step });
-      expect(step.sleeps).toHaveLength(0);
+      expect(step.sleepNames).toHaveLength(0);
     });
   });
 

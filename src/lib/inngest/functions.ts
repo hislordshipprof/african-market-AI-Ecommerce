@@ -6,6 +6,13 @@ import { isStoreOpen } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
+function remainingSleep(authorizedAt: string | undefined, totalMs: number): string {
+  if (!authorizedAt) return `${totalMs / 1000}s`;
+  const elapsed = Date.now() - new Date(authorizedAt).getTime();
+  const remaining = Math.max(0, totalMs - elapsed);
+  return `${Math.ceil(remaining / 1000)}s`;
+}
+
 export const acceptanceAlert = inngest.createFunction(
   {
     id: "order/acceptance-alert",
@@ -13,10 +20,13 @@ export const acceptanceAlert = inngest.createFunction(
     triggers: [{ event: "order/authorized" }],
   },
   async ({ event, step }) => {
-    const { orderId, storeId } = event.data as { orderId: string; storeId: string };
+    const { orderId, storeId, authorizedAt } = event.data as { orderId: string; storeId: string; authorizedAt?: string };
     if (!orderId || !storeId) return;
 
-    await step.sleep("wait-15-min", "15m");
+    const sleepDuration = remainingSleep(authorizedAt, 15 * 60 * 1000);
+    if (sleepDuration !== "0s") {
+      await step.sleep("wait-15-min", sleepDuration);
+    }
 
     await step.run("check-and-alert", async () => {
       const order = await storeScopedTransaction(storeId, async (tx) => {
@@ -64,10 +74,13 @@ export const autoCancel = inngest.createFunction(
     triggers: [{ event: "order/authorized" }],
   },
   async ({ event, step }) => {
-    const { orderId, storeId } = event.data as { orderId: string; storeId: string };
+    const { orderId, storeId, authorizedAt } = event.data as { orderId: string; storeId: string; authorizedAt?: string };
     if (!orderId || !storeId) return;
 
-    await step.sleep("wait-30-min", "30m");
+    const sleepDuration = remainingSleep(authorizedAt, 30 * 60 * 1000);
+    if (sleepDuration !== "0s") {
+      await step.sleep("wait-30-min", sleepDuration);
+    }
 
     await step.run("cancel-if-still-authorized", async () => {
       const order = await storeScopedTransaction(storeId, async (tx) => {

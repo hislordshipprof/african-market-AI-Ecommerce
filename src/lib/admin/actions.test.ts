@@ -721,6 +721,35 @@ describe("updateStore", () => {
     expect(auditData.after.timezone).toBe("America/Chicago");
   });
 
+  it("Codex-2: update without timezone field preserves existing timezone", async () => {
+    const before = {
+      id: "store-1",
+      slug: "mama-ngozi",
+      name: "Old Name",
+      logoUrl: null,
+      brandColor: null,
+      themePreset: "palm-and-shea",
+      status: "active",
+      hours: null,
+      prepTimeMinutes: 30,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 3500,
+      pickupEnabled: false,
+      autoRefundLimitCents: 2500,
+      timezone: "America/Chicago",
+    };
+    mockFindUnique.mockResolvedValueOnce(before);
+
+    const updated = { ...before, name: "Mama Ngozi African Market" };
+    mockUpdate.mockResolvedValueOnce(updated);
+    mockAuditCreate.mockResolvedValueOnce({});
+
+    const fd = formData({ ...VALID_STORE, storeId: "store-1" });
+    const result = await updateStore({}, fd);
+    expect(result.success).toBe(true);
+    expect(mockUpdate.mock.calls[0][0].data.timezone).toBe("America/Chicago");
+  });
+
   it("audit failure propagates (transaction rolls back store update)", async () => {
     const before = {
       id: "store-1",

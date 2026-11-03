@@ -170,6 +170,10 @@ export async function markReady(
     // Stripe USD minimum capture is 50 cents ($0.50).
     // https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts
     if (capturedAmountCents < STRIPE_USD_MINIMUM_CENTS) {
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: "CANCELLING" },
+      });
       return {
         ok: true as const,
         capturedAmountCents,
@@ -220,6 +224,10 @@ export async function markReady(
     );
     await storeScopedTransaction(storeId, async (tx) => {
       await lockStoreRow(tx, storeId);
+      const current = await tx.order.findUnique({ where: { id: orderId } });
+      if (!current || current.status !== "CANCELLING") {
+        return;
+      }
       await tx.order.update({
         where: { id: orderId },
         data: {
