@@ -289,7 +289,7 @@ describe("parseCsvText", () => {
 
   it("B2: unrecognised stock_mode is a row error", () => {
     const csv = "name,price,stock_mode\nA,1.00,count\n";
-    const { rows, errors } = parseCsvText(csv);
+    const { errors } = parseCsvText(csv);
     expect(errors).toHaveLength(1);
     expect(errors[0].reason).toContain("stock_mode");
   });
