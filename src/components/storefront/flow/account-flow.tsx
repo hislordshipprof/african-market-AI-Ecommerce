@@ -273,7 +273,7 @@ export function AccountFlow(props: Props) {
                   className="sf-account-form"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void save(profile);
+                    if (!customer) void save(profile);
                   }}
                 >
                   <label>
@@ -282,6 +282,7 @@ export function AccountFlow(props: Props) {
                       required
                       autoComplete="name"
                       value={profile.name}
+                      readOnly={!!customer}
                       onChange={(e) =>
                         setProfile({ ...profile, name: e.target.value })
                       }
@@ -293,6 +294,7 @@ export function AccountFlow(props: Props) {
                       type="tel"
                       autoComplete="tel"
                       value={profile.phone}
+                      readOnly={!!customer}
                       onChange={(e) =>
                         setProfile({ ...profile, phone: e.target.value })
                       }
@@ -304,12 +306,13 @@ export function AccountFlow(props: Props) {
                       type="email"
                       autoComplete="email"
                       value={profile.email}
+                      readOnly={!!customer}
                       onChange={(e) =>
                         setProfile({ ...profile, email: e.target.value })
                       }
                     />
                   </label>
-                  <Button disabled={busy}>Save details</Button>
+                  {!customer && <Button disabled={busy}>Save details</Button>}
                   <button
                     type="button"
                     className="sf-text-link"

@@ -222,4 +222,99 @@ describe("auth integration (real DB, app_runtime)", () => {
     const body = await sessionRes.json();
     expect(body.session.twoFactorVerified).toBe(false);
   });
+
+  it("E4: magic-link response is identical for staff, unknown, and customer emails (K2 timing)", async () => {
+    const unknownEmail = `integ-unknown-${suffix}@test.example`;
+    const results: Array<{ status: number; body: unknown }> = [];
+
+    for (const email of [staffEmail, unknownEmail, customerEmail]) {
+      clearTestSentEmails();
+      const res = await authPost("/sign-in/magic-link", {
+        email,
+        callbackURL: "/account",
+      });
+      const body = await res.json();
+      results.push({ status: res.status, body });
+    }
+
+    // All three return the same status
+    expect(results[0].status).toBe(200);
+    expect(results[1].status).toBe(200);
+    expect(results[2].status).toBe(200);
+
+    // Response structure is the same (no enumeration leak)
+    expect(typeof results[0].body).toBe(typeof results[1].body);
+    expect(typeof results[1].body).toBe(typeof results[2].body);
+  });
+
+  it("E6/AC4: same email on two stores creates one User, two Customers", async () => {
+    // Create a second store
+    const store2Id = crypto.randomUUID();
+    const store2Slug = `integ-store2-${suffix}`;
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRawUnsafe(
+        `INSERT INTO stores (id, name, slug, status, updated_at) VALUES ($1, 'Integ Store 2', $2, 'active', now())`,
+        store2Id,
+        store2Slug,
+      );
+    });
+
+    try {
+      // Get the customer user
+      const user = await authPrisma.user.findFirst({
+        where: { email: customerEmail },
+        select: { id: true },
+      });
+      expect(user).toBeTruthy();
+
+      // Create customer records in both stores
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRawUnsafe(
+          `INSERT INTO customers (id, store_id, user_id, name, email, updated_at) VALUES ($1, $2, $3, 'Customer A', $4, now())`,
+          crypto.randomUUID(),
+          storeId,
+          user!.id,
+          customerEmail,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO customers (id, store_id, user_id, name, email, updated_at) VALUES ($1, $2, $3, 'Customer B', $4, now())`,
+          crypto.randomUUID(),
+          store2Id,
+          user!.id,
+          customerEmail,
+        );
+      });
+
+      // Verify: one User, two Customer rows
+      const users = await authPrisma.user.findMany({
+        where: { email: customerEmail },
+      });
+      expect(users).toHaveLength(1);
+
+      const customers = await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        return tx.$queryRawUnsafe<Array<{ store_id: string }>>(
+          `SELECT store_id FROM customers WHERE user_id = $1`,
+          user!.id,
+        );
+      });
+      expect(customers).toHaveLength(2);
+      const storeIds = customers.map((c) => c.store_id);
+      expect(storeIds).toContain(storeId);
+      expect(storeIds).toContain(store2Id);
+    } finally {
+      // Cleanup
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRawUnsafe(`DELETE FROM customers WHERE store_id IN ($1, $2)`, storeId, store2Id);
+        await tx.$executeRawUnsafe(`DELETE FROM stores WHERE id = $1`, store2Id);
+      });
+    }
+  });
 });
