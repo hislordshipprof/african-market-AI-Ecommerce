@@ -2,7 +2,7 @@
 
 import { type ReactNode } from "react";
 import Image from "next/image";
-import { motion } from "motion/react";
+import { MotionConfig, motion } from "motion/react";
 import posterSrc from "../../../public/images/market-spices-poster.jpg";
 
 /**
@@ -11,16 +11,25 @@ import posterSrc from "../../../public/images/market-spices-poster.jpg";
  */
 export const ENABLE_3D_SCENE = false;
 
-export function StorySurface({ children }: { children: ReactNode }) {
+export function StorySurface({
+  children,
+  asMain = true,
+}: {
+  children: ReactNode;
+  asMain?: boolean;
+}) {
+  const Tag = asMain ? "main" : "div";
   return (
-    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden p-4">
+    <MotionConfig reducedMotion="user">
+    <Tag className="relative flex min-h-dvh items-center justify-center overflow-hidden p-4">
       {/* Poster photograph — first paint, always visible */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
       >
         <motion.div
-          className="absolute inset-0"
+          data-testid="story-poster"
+          className="absolute inset-0 motion-reduce:!transform-none"
           initial={{ scale: 1.05 }}
           animate={{ scale: 1 }}
           transition={{ duration: 20, ease: "linear", repeat: Infinity, repeatType: "reverse" }}
@@ -44,13 +53,14 @@ export function StorySurface({ children }: { children: ReactNode }) {
         <style>{`.story-form{opacity:1!important;transform:none!important}`}</style>
       </noscript>
       <motion.div
-        className="story-form relative z-10 w-full max-w-sm"
+        className="story-form relative z-10 w-full max-w-sm motion-reduce:!transform-none motion-reduce:!opacity-100"
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.4, 0.4, 0, 1] }}
       >
         {children}
       </motion.div>
-    </main>
+    </Tag>
+    </MotionConfig>
   );
 }

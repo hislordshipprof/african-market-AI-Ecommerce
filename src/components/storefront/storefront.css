@@ -247,8 +247,11 @@
   font-size: 13px;
   font-weight: 600;
 }
-.sf-category-nav a:first-child {
+.sf-category-nav a[href="/categories"] {
   color: var(--color-primary);
+}
+.sf-header-account {
+  font-weight: 750;
 }
 .sf-search-form {
   position: relative;

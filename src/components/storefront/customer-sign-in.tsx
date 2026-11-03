@@ -19,9 +19,15 @@ type Step = "form" | "sent";
 
 interface Props {
   callbackUrl?: string;
+  storeName: string;
+  linkError?: string | null;
 }
 
-export function CustomerSignIn({ callbackUrl = "/account" }: Props) {
+export function CustomerSignIn({
+  callbackUrl = "/account",
+  storeName,
+  linkError = null,
+}: Props) {
   const [email, setEmail] = useState("");
   const [step, setStep] = useState<Step>("form");
   const [loading, setLoading] = useState(false);
@@ -55,21 +61,33 @@ export function CustomerSignIn({ callbackUrl = "/account" }: Props) {
     setError("");
   }
 
+  const linkExpired = linkError === "INVALID_TOKEN";
+
   return (
-    <StorySurface>
+    <StorySurface asMain={false}>
       <Card className="border-0 shadow-xl backdrop-blur-sm bg-card/95">
         <CardHeader className="text-center">
+          <p className="text-sm font-semibold tracking-wide text-primary">{storeName}</p>
           <CardTitle className="text-xl font-display">
             {step === "sent" ? "Check your email" : "Sign in"}
           </CardTitle>
           <CardDescription>
             {step === "sent"
               ? `We sent a sign-in link to ${email}`
-              : "Your markets. Your familiar favorites."}
+              : `Sign in to ${storeName}`}
           </CardDescription>
         </CardHeader>
 
         <CardContent>
+          {linkExpired && (
+            <div
+              className="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive"
+              role="alert"
+              aria-live="assertive"
+            >
+              This link has expired. Send a new one.
+            </div>
+          )}
           {error && (
             <div
               className="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive"

@@ -58,10 +58,47 @@ test.describe("Customer magic-link auth", () => {
     const nameInput = page.locator("input[autocomplete='name']");
     await expect(nameInput).toHaveValue("E2E Customer", { timeout: 5000 });
 
+    await expect(page.getByTestId("store-name")).toHaveText("Mama Ngozi African Market");
+    await expect(page.getByText("Mama Ngozi African Market").first()).toBeVisible();
+
     // 8. Click sign out
     await page.getByRole("button", { name: "Sign out" }).click();
 
-    // 9. Should redirect to sign-in
+    // 9. Should redirect to sign-in and the session is gone
     await page.waitForURL("**/account/sign-in", { timeout: 10000 });
+    const sessionRes = await page.request.get(`${base}/api/auth/get-session`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody?.session ?? null).toBeNull();
+  });
+
+  test("signed-out header opens sign-in for this store", async ({ page }) => {
+    await page.goto(base);
+    await page.getByRole("link", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/account\/sign-in$/);
+    await expect(page.getByTestId("store-name")).toHaveText("Mama Ngozi African Market");
+    await expect(page.getByText("Sign in to Mama Ngozi African Market")).toBeVisible();
+  });
+
+  test("an expired link offers a new sign-in", async ({ page }) => {
+    await page.goto(`${base}/account?error=INVALID_TOKEN`);
+    await expect(page).toHaveURL(/\/account\/sign-in\?error=INVALID_TOKEN/);
+    await expect(page.getByRole("alert")).toContainText(
+      "This link has expired. Send a new one.",
+    );
+  });
+});
+
+test.describe("sign-in reduced motion", () => {
+  test.use({ reducedMotion: "reduce" });
+
+  test("the poster stays still", async ({ page }) => {
+    await page.goto(`${base}/account/sign-in`);
+    const poster = page.getByTestId("story-poster");
+    await expect(poster).toBeVisible();
+    await page.waitForTimeout(400);
+    const first = await poster.evaluate((el) => getComputedStyle(el).transform);
+    await page.waitForTimeout(1500);
+    const second = await poster.evaluate((el) => getComputedStyle(el).transform);
+    expect(second).toBe(first);
   });
 });
