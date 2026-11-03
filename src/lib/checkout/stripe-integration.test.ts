@@ -58,16 +58,26 @@ describe.skipIf(!hasKey || !hasDb)(
         where: { stripeAccountId: acctA.id },
       });
       if (!storeA) {
-        storeA = await rawPrisma.store.create({
-          data: {
-            slug: "stripe-test-a",
-            name: "Stripe Test Store A",
-            themePreset: "palm-and-shea",
-            stripeAccountId: acctA.id,
-            stripeOnboardingStatus: "complete",
-            pickupEnabled: true,
-          },
-        });
+        try {
+          storeA = await rawPrisma.store.create({
+            data: {
+              slug: "stripe-test-a",
+              name: "Stripe Test Store A",
+              themePreset: "palm-and-shea",
+              stripeAccountId: acctA.id,
+              stripeOnboardingStatus: "complete",
+              pickupEnabled: true,
+            },
+          });
+        } catch {
+          // placeorder-event.test.ts may have inserted this account first.
+          storeA = await rawPrisma.store.findFirst({
+            where: { stripeAccountId: acctA.id },
+          });
+        }
+      }
+      if (!storeA) {
+        throw new Error(`No store row for connected account ${acctA.id}`);
       }
       storeAId = storeA.id;
       stripeAccountAId = acctA.id;

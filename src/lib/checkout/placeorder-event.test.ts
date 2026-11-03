@@ -21,7 +21,6 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
   let variantId: string;
   let listingId: string;
   let canRun = false;
-  let borrowedStore = false;
   const piToCleanup: string[] = [];
   const cartsCreated: string[] = [];
 
@@ -44,20 +43,26 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
     let store = await rawPrisma.store.findFirst({
       where: { stripeAccountId: acct.id },
     });
-    if (store) {
-      borrowedStore = true;
-    } else {
-      store = await rawPrisma.store.create({
-        data: {
-          slug: "inngest-event-test",
-          name: "Inngest Event Test",
-          themePreset: "palm-and-shea",
-          stripeAccountId: acct.id,
-          stripeOnboardingStatus: "complete",
-          pickupEnabled: true,
-        },
-      });
+    if (!store) {
+      try {
+        store = await rawPrisma.store.create({
+          data: {
+            slug: "inngest-event-test",
+            name: "Inngest Event Test",
+            themePreset: "palm-and-shea",
+            stripeAccountId: acct.id,
+            stripeOnboardingStatus: "complete",
+            pickupEnabled: true,
+          },
+        });
+      } catch {
+        // stripe-integration.test.ts binds the same connected account in parallel.
+        store = await rawPrisma.store.findFirst({
+          where: { stripeAccountId: acct.id },
+        });
+      }
     }
+    if (!store) return;
     storeId = store.id;
     stripeAccountId = acct.id;
 
@@ -111,9 +116,8 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
         rawPrisma.listingVariant.deleteMany({ where: { listingId } }),
         rawPrisma.listing.deleteMany({ where: { id: listingId } }),
       ]);
-      if (!borrowedStore) {
-        await rawPrisma.store.deleteMany({ where: { id: storeId } });
-      }
+      // Leave the store row. stripe-integration.test.ts looks up this same
+      // connected account, and deleting the row mid-run fails its listing insert.
       await rawPrisma.$disconnect();
     }
   });
