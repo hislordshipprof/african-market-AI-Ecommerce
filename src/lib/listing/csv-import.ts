@@ -474,6 +474,50 @@ async function matchParsedRows(rows: ParsedRow[]) {
   return matchToMasterProducts(uniqueNames);
 }
 
+const EXISTING_LISTING_SELECT = {
+  id: true,
+  masterProductId: true,
+  customName: true,
+} as const;
+
+type ExistingListingReader = {
+  listing: {
+    findMany: (args: {
+      select: typeof EXISTING_LISTING_SELECT;
+    }) => Promise<ExistingListingRow[]>;
+  };
+};
+
+export async function buildMatchContext(csvText: string) {
+  const parsed = parseCsvText(csvText);
+  const matchMap =
+    parsed.rows.length === 0
+      ? new Map<string, ProductMatchList>()
+      : await matchParsedRows(parsed.rows);
+
+  return {
+    rows: parsed.rows,
+    errors: parsed.errors,
+    unknownColumns: parsed.unknownColumns,
+    hasQtyColumn: parsed.hasQtyColumn,
+    matchMap,
+    async bindExistingListings(reader: ExistingListingReader) {
+      const listings =
+        parsed.rows.length === 0
+          ? []
+          : await reader.listing.findMany({ select: EXISTING_LISTING_SELECT });
+      return {
+        rows: parsed.rows,
+        errors: parsed.errors,
+        unknownColumns: parsed.unknownColumns,
+        hasQtyColumn: parsed.hasQtyColumn,
+        matchMap,
+        existing: indexExistingListings(listings),
+      };
+    },
+  };
+}
+
 function classifyPreviewRows(
   rows: ParsedRow[],
   matchMap: Map<string, ProductMatchList>,
@@ -594,27 +638,24 @@ export async function generatePreview(
   csvText: string,
   actorId: string,
 ): Promise<CsvPreviewResult> {
-  const { rows, errors, unknownColumns } = parseCsvText(csvText);
+  const context = await buildMatchContext(csvText);
 
-  if (rows.length === 0) {
+  if (context.rows.length === 0) {
     return {
       matches: [],
       ambiguous: [],
       newItems: [],
       alreadyListed: [],
       duplicates: [],
-      errors,
-      unknownColumns,
+      errors: context.errors,
+      unknownColumns: context.unknownColumns,
       importToken: "",
     };
   }
 
-  const matchMap = await matchParsedRows(rows);
   const scoped = storeScoped(storeId);
-  const existingListings = await scoped.listing.findMany({
-    select: { id: true, masterProductId: true, customName: true },
-  });
-  const classified = classifyPreviewRows(rows, matchMap, indexExistingListings(existingListings));
+  const ready = await context.bindExistingListings(scoped);
+  const classified = classifyPreviewRows(ready.rows, ready.matchMap, ready.existing);
 
   const MAX_PENDING_IMPORTS = 10;
   const expiryCutoff = new Date(Date.now() - IMPORT_TOKEN_TTL_MS);
@@ -640,7 +681,7 @@ export async function generatePreview(
     data: {
       storeId,
       csvText,
-      rowCount: rows.length,
+      rowCount: context.rows.length,
       status: "pending",
       createdById: actorId,
     },
@@ -648,8 +689,8 @@ export async function generatePreview(
 
   return {
     ...classified,
-    errors,
-    unknownColumns,
+    errors: context.errors,
+    unknownColumns: context.unknownColumns,
     importToken: importRecord.id,
   };
 }
@@ -686,8 +727,8 @@ export async function commitImport(
     throw new Error("This import has already been committed.");
   }
 
-  const { rows, hasQtyColumn } = parseCsvText(importRecord.csvText);
-  const rowMap = new Map(rows.map((r) => [r.row, r]));
+  const context = await buildMatchContext(importRecord.csvText);
+  const rowMap = new Map(context.rows.map((r) => [r.row, r]));
 
   const selectedRows = new Set([
     ...selection.matchedRows,
@@ -703,9 +744,9 @@ export async function commitImport(
     ...selection.newItemRows,
     ...selection.ambiguousResolutions.map((resolution) => resolution.row),
   ]);
-  const notSelected = rows.filter((row) => !selectedNumbers.has(row.row)).length;
+  const notSelected = context.rows.filter((row) => !selectedNumbers.has(row.row)).length;
 
-  const matchMap = await matchParsedRows(rows);
+  const matchMap = context.matchMap;
   const toCreate: ListingToCreate[] = [];
 
   for (const rowNum of selectedRows) {
@@ -714,9 +755,9 @@ export async function commitImport(
 
     const productMatches = matchMap.get(row.name) ?? [];
     if (productMatches.length === 1) {
-      toCreate.push(buildListingData(row, productMatches[0].product, hasQtyColumn));
+      toCreate.push(buildListingData(row, productMatches[0].product, context.hasQtyColumn));
     } else if (productMatches.length === 0) {
-      toCreate.push(buildListingData(row, null, hasQtyColumn));
+      toCreate.push(buildListingData(row, null, context.hasQtyColumn));
     } else {
       throw new Error(
         `Row ${rowNum} ("${row.name}") matches multiple master products. Use ambiguous resolutions to pick one.`,
@@ -735,7 +776,7 @@ export async function commitImport(
         `Resolution for row ${resolution.row} references product ${resolution.masterProductId} which is not in the match list.`,
       );
     }
-    toCreate.push(buildListingData(row, selectedProduct, hasQtyColumn));
+    toCreate.push(buildListingData(row, selectedProduct, context.hasQtyColumn));
   }
 
   const { kept: dedupedToCreate, duplicatesSkipped } = dropDuplicateBuiltItems(toCreate);
@@ -759,10 +800,8 @@ export async function commitImport(
       throw new Error("Import token has expired. Please upload the file again.");
     }
 
-    const existingListings = await tx.listing.findMany({
-      select: { id: true, masterProductId: true, customName: true },
-    });
-    const existing = indexExistingListings(existingListings);
+    const ready = await context.bindExistingListings(tx);
+    const existing = ready.existing;
 
     let alreadyListedSkipped = 0;
     const toInsert = dedupedToCreate.filter((item) => {

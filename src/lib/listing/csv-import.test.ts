@@ -6,6 +6,7 @@ import {
   parsePriceToCents,
   generatePreview,
   commitImport,
+  buildMatchContext,
   validateFileSize,
   MAX_FILE_BYTES,
 } from "./csv-import";
@@ -1618,6 +1619,38 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
       alreadyListedSkipped: number;
     };
   }
+
+  it("S1: one context carries parsed rows, master matches, and existing listings", async () => {
+    const product = await platformAdmin.masterProduct.create({
+      data: { name: "Context Yam T199", status: "active", frozen: false, perishable: false },
+    });
+    mpIds.push(product.id);
+    const listing = await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        masterProductId: product.id,
+        price: 200,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+
+    const csv = "name,price\nContext Yam T199,2.00\nContext Loose T199,3.00\n";
+    const context = await buildMatchContext(csv);
+    expect(context.rows.map((row) => row.name)).toEqual([
+      "Context Yam T199",
+      "Context Loose T199",
+    ]);
+    expect(context.matchMap.get("Context Yam T199")?.[0]?.matchType).toBe("exact");
+    expect(context.matchMap.get("Context Loose T199")).toEqual([]);
+
+    const ready = await context.bindExistingListings(storeScoped(storeAId));
+    expect(ready.rows).toBe(context.rows);
+    expect(ready.matchMap).toBe(context.matchMap);
+    expect(ready.existing.byMasterId.get(product.id)).toBe(listing.id);
+    const looseKey = "Context Loose T199".normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+    expect(ready.existing.byCustomName.has(looseKey)).toBe(false);
+  });
 
   it("N13: audit records duplicates, already listed, and the row left out", async () => {
     const beta = await platformAdmin.masterProduct.create({
