@@ -549,7 +549,7 @@ model ListingImport {
   store     Store @relation(fields: [storeId], references: [id])
   createdBy User  @relation(fields: [createdById], references: [id])
 
-  @@index([storeId])
+  @@index([createdById])
   @@index([storeId, status])
   @@map("listing_imports")
 }

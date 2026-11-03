@@ -1,7 +1,26 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
+
+/** One TTL for preview cleanup and the import-token claim. */
+export const IMPORT_TOKEN_TTL_MS = 30 * 60 * 1000;
+
+const sessionTimeZone = new AsyncLocalStorage<string>();
+const ALLOWED_SESSION_ZONES = new Set(["UTC", "America/Denver", "Europe/Berlin"]);
+
+/**
+ * Run store-scoped transactions with a Postgres session time zone.
+ * Production calls leave this unset. Tests use it to prove token expiry
+ * does not depend on the database cluster's zone.
+ */
+export function withSessionTimeZone<T>(zone: string, fn: () => Promise<T>): Promise<T> {
+  if (!ALLOWED_SESSION_ZONES.has(zone)) {
+    throw new Error(`Unsupported session time zone: ${zone}`);
+  }
+  return sessionTimeZone.run(zone, fn);
+}
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -120,6 +139,7 @@ export const platformAdmin = {
   masterProduct: wrapPlatformAdminDelegate(prisma.masterProduct),
   category: wrapPlatformAdminDelegate(prisma.category),
   productSynonym: wrapPlatformAdminDelegate(prisma.productSynonym),
+  listingImport: wrapPlatformAdminDelegate(prisma.listingImport),
 };
 
 export async function platformAdminTransaction<T>(
@@ -145,6 +165,10 @@ export async function storeScopedTransaction<T>(
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
+    const zone = sessionTimeZone.getStore();
+    if (zone) {
+      await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
+    }
     return fn({
       listing: tx.listing,
       listingVariant: tx.listingVariant,
@@ -259,13 +283,19 @@ export async function lockCartLineByVariant(
 export async function claimImportRow(
   tx: Pick<PrismaClient, "$queryRaw">,
   importToken: string,
+  ttlMs: number = IMPORT_TOKEN_TTL_MS,
 ): Promise<boolean> {
+  if (!Number.isInteger(ttlMs) || ttlMs <= 0) {
+    throw new Error("Import token TTL must be a positive integer.");
+  }
+  // Integer is validated above. Prisma.raw does not bind it as a parameter.
+  const ttlInterval = Prisma.raw(`${ttlMs} * INTERVAL '1 millisecond'`);
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     UPDATE listing_imports
-    SET status = 'committed', committed_at = NOW()
+    SET status = 'committed', committed_at = (NOW() AT TIME ZONE 'UTC')
     WHERE id = ${importToken}
       AND status IN ('pending', 'failed')
-      AND created_at > NOW() - INTERVAL '30 minutes'
+      AND created_at > (NOW() AT TIME ZONE 'UTC') - ${ttlInterval}
     RETURNING id
   `;
   return rows.length > 0;
