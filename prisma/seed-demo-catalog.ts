@@ -421,7 +421,7 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
     },
     {
       id: `${prefix}_garri_yellow`,
-      masterProductId: null,
+      masterProductId: "mp_garri",
       customName: "Yellow Garri (Ijebu)",
       price: 699,
       stockMode: "counted",

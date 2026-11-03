@@ -1,4 +1,4 @@
-import { Prisma, storeScoped, storeScopedTransaction, lockListingRow } from "../db";
+import { storeScoped, storeScopedTransaction, lockListingRow } from "../db";
 
 export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
@@ -74,31 +74,20 @@ export interface CreateListingInput {
 
 export async function createListing(input: CreateListingInput) {
   return storeScopedTransaction(input.storeId, async (tx) => {
-    let listing;
-    try {
-      listing = await tx.listing.create({
-        data: {
-          storeId: input.storeId,
-          masterProductId: input.masterProductId ?? null,
-          customName: input.customName ?? null,
-          price: input.price,
-          stockMode: input.stockMode,
-          qty: input.stockMode === "counted" ? (input.qty ?? 0) : null,
-          status: input.stockMode === "status" ? (input.status ?? "in_stock") : null,
-          frozen: input.frozen,
-          perishable: input.perishable,
-          maxPerOrder: input.maxPerOrder ?? null,
-        },
-      });
-    } catch (e) {
-      if (
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === "P2002"
-      ) {
-        throw new Error("This product is already listed in your store.");
-      }
-      throw e;
-    }
+    const listing = await tx.listing.create({
+      data: {
+        storeId: input.storeId,
+        masterProductId: input.masterProductId ?? null,
+        customName: input.customName ?? null,
+        price: input.price,
+        stockMode: input.stockMode,
+        qty: input.stockMode === "counted" ? (input.qty ?? 0) : null,
+        status: input.stockMode === "status" ? (input.status ?? "in_stock") : null,
+        frozen: input.frozen,
+        perishable: input.perishable,
+        maxPerOrder: input.maxPerOrder ?? null,
+      },
+    });
 
     const variants = await createVariantRows(tx, listing.id, input.variants);
 

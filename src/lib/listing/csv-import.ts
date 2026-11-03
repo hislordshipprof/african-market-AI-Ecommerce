@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import { Prisma, platform, storeScoped, storeScopedTransaction, claimImportRow } from "../db";
+import { Prisma, platform, storeScoped, storeScopedTransaction, claimImportRow, lockStoreRow } from "../db";
 import type { Actor } from "./service";
 
 const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -648,6 +648,7 @@ export async function commitImport(
   }
 
   const listingIds = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
     const didClaim = await claimImportRow(tx, importToken);
 
     if (!didClaim) {
@@ -736,7 +737,7 @@ export async function commitImport(
     });
 
     return ids;
-  });
+  }, { timeout: 30_000, maxWait: 15_000 });
 
   return { createdCount: listingIds.length, listingIds };
 }

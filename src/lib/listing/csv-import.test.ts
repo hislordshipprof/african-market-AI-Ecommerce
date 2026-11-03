@@ -745,6 +745,41 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(resultB.createdCount).toBe(1);
   });
 
+  it("E7/D2-reversed: concurrent commits of same new item — exactly one listing created", async () => {
+    const csv = "name,price\nRace Item D2 T63,7.00\n";
+
+    const previewA = await generatePreview(storeAId, csv, testUserId);
+    const previewB = await generatePreview(storeAId, csv, testUserId);
+
+    const results = await Promise.allSettled([
+      commitImport(
+        storeAId,
+        previewA.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      ),
+      commitImport(
+        storeAId,
+        previewB.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      ),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((fulfilled[0] as PromiseFulfilledResult<{ createdCount: number }>).value.createdCount).toBe(1);
+    expect((rejected[0] as PromiseRejectedResult).reason.message).toMatch(/already listed/i);
+
+    const scopedA = storeScoped(storeAId);
+    const listings = await scopedA.listing.findMany({
+      where: { customName: "Race Item D2 T63" },
+    });
+    expect(listings).toHaveLength(1);
+  }, 15_000);
+
   it("A3: crafted duplicateRows in selection are ignored (field removed)", async () => {
     const csv = "name,price\nDupe Bypass A T63,5.00\nDupe Bypass A T63,6.00\n";
     const preview = await generatePreview(storeAId, csv, testUserId);
@@ -850,34 +885,31 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     ).rejects.toThrow(/invalid|expired|already used/i);
   });
 
-  it("D2: P2002 already-listed handled gracefully in createListing", async () => {
-    const scopedA = storeScoped(storeAId);
-    const existing = await scopedA.listing.findFirst({ where: { masterProductId: mpIds[0] } });
-    if (!existing) {
-      await createListing({
-        storeId: storeAId,
-        masterProductId: mpIds[0],
-        price: 699,
-        stockMode: "status",
-        frozen: false,
-        perishable: true,
-        variants: [{ label: "Default", price: 699, weightG: 1 }],
-        actor,
-      });
-    }
+  it("D2-reversed: a store can have multiple listings for the same master product", async () => {
+    const first = await createListing({
+      storeId: storeAId,
+      masterProductId: mpIds[0],
+      price: 699,
+      stockMode: "status",
+      frozen: false,
+      perishable: true,
+      variants: [{ label: "Default", price: 699, weightG: 1 }],
+      actor,
+    });
 
-    await expect(
-      createListing({
-        storeId: storeAId,
-        masterProductId: mpIds[0],
-        price: 799,
-        stockMode: "status",
-        frozen: false,
-        perishable: true,
-        variants: [{ label: "Default", price: 799, weightG: 1 }],
-        actor,
-      }),
-    ).rejects.toThrow(/already listed/i);
+    const second = await createListing({
+      storeId: storeAId,
+      masterProductId: mpIds[0],
+      price: 799,
+      stockMode: "status",
+      frozen: false,
+      perishable: true,
+      variants: [{ label: "Default", price: 799, weightG: 1 }],
+      actor,
+    });
+
+    expect(first.id).not.toBe(second.id);
+    expect(second.masterProductId).toBe(mpIds[0]);
   });
 
   it("D3: custom-name already-listed blocked at commit", async () => {

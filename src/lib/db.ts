@@ -132,9 +132,15 @@ export async function platformAdminTransaction<T>(
   });
 }
 
+export interface TransactionOptions {
+  timeout?: number;
+  maxWait?: number;
+}
+
 export async function storeScopedTransaction<T>(
   storeId: string,
   fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -153,7 +159,7 @@ export async function storeScopedTransaction<T>(
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
-  });
+  }, { timeout: opts?.timeout, maxWait: opts?.maxWait });
 }
 
 export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
