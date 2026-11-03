@@ -119,7 +119,7 @@ export const auth = betterAuth({
     }),
     magicLink({
       expiresIn: 900,
-      sendMagicLink: async ({ email, url }, _ctx) => {
+      sendMagicLink: async ({ email, url }) => {
         if (email.endsWith("@phone.placeholder.local")) return;
         const existing = await authPrisma.user.findFirst({
           where: { email },
