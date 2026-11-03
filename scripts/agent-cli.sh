@@ -46,6 +46,17 @@ _cursor_prompt() {
   fi
 }
 
+# Windows caps a command line at about 32 KB, so a long prompt (a fix round carrying full review reports)
+# goes to a file in the ignored .builder/ dir and the agent is told to read it.
+_spill_prompt() {
+  local p="$1" role="$2"
+  if [ "${#p}" -le 20000 ]; then printf '%s' "$p"; return; fi
+  mkdir -p .builder
+  local f; f="$(pwd -W 2>/dev/null || pwd)/.builder/prompt-$role-$(date +%Y%m%d-%H%M%S)-$$.md"
+  printf '%s' "$p" > "$f"
+  printf 'Your full instructions are in the file %s (%s characters). Read the WHOLE file first, then follow it exactly.' "$f" "${#p}"
+}
+
 # role review runs on REVIEW_ENGINE (codex|cursor|claude); review2 (second RISK reviewer) and every
 # other role run on AGENT_ENGINE.
 agent_run() {
@@ -60,7 +71,7 @@ agent_run() {
       [ "${CODEX_REVIEW_SANDBOX:-on}" = off ] && cx_sandbox=(--dangerously-bypass-approvals-and-sandbox)
       codex exec "${cx_sandbox[@]}" --skip-git-repo-check \
         -c model="${CODEX_REVIEW_MODEL:-gpt-6-astra}" -c model_reasoning_effort="${CODEX_REVIEW_EFFORT:-medium}" \
-        -o "$log.last.md" "$(_cursor_prompt "$prompt")" < /dev/null > "$log" 2>&1 ;;
+        -o "$log.last.md" "$(_spill_prompt "$(_cursor_prompt "$prompt")" "$role")" < /dev/null > "$log" 2>&1 ;;
     claude)
       local flags=(--dangerously-skip-permissions --strict-mcp-config --output-format json)
       case "$role" in
@@ -68,9 +79,9 @@ agent_run() {
         build|review|review2) flags+=(--effort high) ;;
       esac
       if [ -n "$resume" ]; then
-        claude -p --resume "$resume" "$prompt" "${flags[@]}" < /dev/null > "$log" 2>&1
+        claude -p --resume "$resume" "$(_spill_prompt "$prompt" "$role")" "${flags[@]}" < /dev/null > "$log" 2>&1
       else
-        claude -p "$prompt" "${flags[@]}" < /dev/null > "$log" 2>&1
+        claude -p "$(_spill_prompt "$prompt" "$role")" "${flags[@]}" < /dev/null > "$log" 2>&1
       fi ;;
     cursor)
       local cmd node js model
@@ -81,7 +92,7 @@ agent_run() {
       [ -n "$model" ] && args+=(--model "$model")
       [ -n "$resume" ] && args+=(--resume "$resume")
       CURSOR_INVOKED_AS=agent NODE_COMPILE_CACHE="${NODE_COMPILE_CACHE:-${LOCALAPPDATA:-}/cursor-compile-cache}" \
-        "$node" "$js" "${args[@]}" "$(_cursor_prompt "$prompt")" < /dev/null > "$log" 2>&1 ;;
+        "$node" "$js" "${args[@]}" "$(_spill_prompt "$(_cursor_prompt "$prompt")" "$role")" < /dev/null > "$log" 2>&1 ;;
     *) echo "Unknown engine '$engine' (claude|cursor|codex)" >&2; return 2 ;;
   esac
 }
