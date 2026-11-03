@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, sortPickListLines } from "./service";
 import { setStripeProvider } from "../stripe";
+import type { StripeProvider } from "../stripe/types";
 import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, setAuthorizedAmount } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
@@ -484,6 +485,51 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const order = await createTestOrder();
     const result = await autoCancelOrder(storeBId, order.id);
     expect(result.ok).toBe(false);
+  });
+
+  it("markReady: Stripe failure leaves order in PICKING (A2 regression)", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    const failProvider: StripeProvider = {
+      ...fakeStripeProvider,
+      async capturePaymentIntent() {
+        throw new Error("Stripe API timeout");
+      },
+    };
+    setStripeProvider(failProvider);
+
+    await expect(markReady(storeId, order.id)).rejects.toThrow("Stripe API timeout");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("PICKING");
+    expect(updated!.capturedAmountCents).toBeNull();
+  });
+
+  it("autoCancelOrder: Stripe failure leaves order AUTHORIZED (A2 regression)", async () => {
+    const order = await createTestOrder();
+
+    const failProvider: StripeProvider = {
+      ...fakeStripeProvider,
+      async cancelPaymentIntent() {
+        throw new Error("Stripe API timeout");
+      },
+    };
+    setStripeProvider(failProvider);
+
+    await expect(autoCancelOrder(storeId, order.id)).rejects.toThrow("Stripe API timeout");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("AUTHORIZED");
+    expect(updated!.cancelledAt).toBeNull();
+    expect(cancelledPayments.size).toBe(0);
   });
 
   it("markReady idempotent: second call after Stripe already captured succeeds", async () => {

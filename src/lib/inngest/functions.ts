@@ -1,8 +1,9 @@
 import { inngest } from "./client";
-import { storeScopedTransaction, lockStoreRow } from "../db";
+import { storeScopedTransaction, lockStoreRow, platformAdminTransaction } from "../db";
 import { platform } from "../db";
 import { autoCancelOrder } from "../order/service";
 import { isStoreOpen } from "../order/store-hours";
+import { sendOrderAuthorized } from "./send";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
 export const acceptanceAlert = inngest.createFunction(
@@ -73,4 +74,31 @@ export const autoCancel = inngest.createFunction(
   },
 );
 
-export const inngestFunctions = [acceptanceAlert, autoCancel];
+export const sweepOrphanedAuthorized = inngest.createFunction(
+  {
+    id: "order/sweep-orphaned-authorized",
+    triggers: [{ cron: "*/2 * * * *" }],
+  },
+  async ({ step }) => {
+    const orphaned = await step.run("find-orphaned", async () => {
+      return platformAdminTransaction(async (tx) => {
+        const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+          SELECT id, store_id FROM orders
+          WHERE status = 'AUTHORIZED'
+            AND inngest_event_sent_at IS NULL
+            AND created_at < NOW() - INTERVAL '1 minute'
+          LIMIT 50
+        `;
+        return rows;
+      });
+    });
+
+    for (const row of orphaned) {
+      await step.run(`resend-${row.id}`, async () => {
+        await sendOrderAuthorized(row.store_id, row.id);
+      });
+    }
+  },
+);
+
+export const inngestFunctions = [acceptanceAlert, autoCancel, sweepOrphanedAuthorized];
