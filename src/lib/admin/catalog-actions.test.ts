@@ -114,16 +114,46 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
   });
 
   it("stats: counts reflect seeded rows", async () => {
-    const before = await getReviewStats();
-    await seed("s1", "needs_review");
-    await seed("s2", "needs_review");
-    await seed("s3", "active");
-    await seed("s4", "rejected");
-    const after = await getReviewStats();
-    expect(after.needsReview - before.needsReview).toBe(2);
-    expect(after.active - before.active).toBe(1);
-    expect(after.rejected - before.rejected).toBe(1);
-    expect(after.total).toBe(after.needsReview + after.active + after.rejected);
+    const created = [
+      await seed("s1", "needs_review"),
+      await seed("s2", "needs_review"),
+      await seed("s3", "active"),
+      await seed("s4", "rejected"),
+    ];
+    // Other files insert active master products at the same time, so a global
+    // before/after delta is not stable. Hold a share lock, then compare
+    // getReviewStats to a recount and to these four rows.
+    const stats = await raw.$transaction(async (tx) => {
+      await tx.$executeRaw`LOCK TABLE master_products IN SHARE MODE`;
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      const [live, needsReview, active, rejected, mine] = await Promise.all([
+        getReviewStats(),
+        tx.masterProduct.count({ where: { status: "needs_review" } }),
+        tx.masterProduct.count({ where: { status: "active" } }),
+        tx.masterProduct.count({ where: { status: "rejected" } }),
+        tx.masterProduct.findMany({
+          where: { id: { in: created.map((p) => p.id) } },
+          select: { status: true },
+        }),
+      ]);
+      expect(live).toEqual({
+        needsReview,
+        active,
+        rejected,
+        total: needsReview + active + rejected,
+      });
+      expect(mine.map((p) => p.status).sort()).toEqual([
+        "active",
+        "needs_review",
+        "needs_review",
+        "rejected",
+      ]);
+      return live;
+    }, { timeout: 20_000 });
+    expect(stats.needsReview).toBeGreaterThanOrEqual(2);
+    expect(stats.active).toBeGreaterThanOrEqual(1);
+    expect(stats.rejected).toBeGreaterThanOrEqual(1);
   });
 
   it("concurrent approve: exactly one audit row, product active (TOCTOU closed)", async () => {

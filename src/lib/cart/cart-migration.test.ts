@@ -92,8 +92,12 @@ describe.skipIf(!hasDb)("Cart migration schema", () => {
     const rows = await db.$queryRaw<
       { relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }[]
     >`
-      SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
-      WHERE relname IN ('carts', 'cart_lines') AND relkind = 'r'`;
+      SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname IN ('carts', 'cart_lines')
+        AND c.relkind = 'r'`;
     expect(rows).toHaveLength(2);
     for (const r of rows) {
       expect(r.relrowsecurity).toBe(true);
