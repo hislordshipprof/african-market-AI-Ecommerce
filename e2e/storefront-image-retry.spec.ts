@@ -65,12 +65,15 @@ test.describe("optimizer accepts ProductImage's single local retry", () => {
 
   test("the storefront lets a failed photo's retry through and shows the photo", async ({ page }) => {
     const retryStatuses: number[] = [];
+    page.on("response", (response) => {
+      if (!response.url().includes("/_next/image")) return;
+      const src = new URL(response.url()).searchParams.get("url") ?? "";
+      if (src.includes("retry=1")) retryStatuses.push(response.status());
+    });
     await page.route("**/_next/image**", async (route) => {
       const src = new URL(route.request().url()).searchParams.get("url") ?? "";
       if (src.includes("retry=1")) {
-        const response = await route.fetch();
-        retryStatuses.push(response.status());
-        await route.fulfill({ response });
+        await route.continue();
         return;
       }
       await route.abort("failed");
