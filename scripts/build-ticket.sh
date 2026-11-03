@@ -15,7 +15,10 @@ FINDINGS="${3:-}"
 
 cd "$ROOT"
 mkdir -p .builder/logs
+. "$ROOT/scripts/agent-cli.sh"
+# Claude keeps the original file name; other engines get their own (their session ids differ).
 SESSION_FILE="$ROOT/.builder/session-$N.txt"
+[ "$AGENT_ENGINE" = "claude" ] || SESSION_FILE="$ROOT/.builder/session-$N.$AGENT_ENGINE.txt"
 REPORT="$ROOT/.builder/report-$N.md"
 LOG="$ROOT/.builder/logs/ticket-$N-$(date +%Y%m%d-%H%M%S).json"
 
@@ -85,18 +88,23 @@ PORT_RULE="This lane's e2e port is $LANE_PORT: run Playwright with E2E_PORT=$LAN
 
 RULES="Run headless: never ask the user. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI, its edge-case rules and its test-double rules) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Turn every edge case listed in the agent brief into a test. Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). While iterating, run only the affected e2e specs and unit tests. When the work is ready, push, then run scripts/ci-local.sh in the worktree: it runs the full CI suite locally and records the local-ci commit status that the merge gate needs. GitHub Actions does not run on your pushes; never add the run-ci label yourself. $REVIEW_RULE $PORT_RULE ${DB_RULE:-} Keep $REPORT updated with: the commit SHA you checked, the QA verdict line, every finding code with how it ended, and the PR URL."
 
+ROLE=build; [ "$TIER" = "light" ] && ROLE=light
 save_session() {
-  node -e 'const fs=require("fs");try{const t=fs.readFileSync(process.argv[1],"utf8");const m=[...t.matchAll(/"session_id"\s*:\s*"([0-9a-f-]{36})"/g)].pop();if(m)fs.writeFileSync(process.argv[2],m[1])}catch(e){}' "$LOG" "$SESSION_FILE"
+  local sid; sid=$(agent_session_id "$LOG"); [ -n "$sid" ] && printf '%s' "$sid" > "$SESSION_FILE"; return 0
 }
+# A fix round on an engine with no saved session starts fresh, told to rebuild context from the PR.
+FRESH_CONTEXT="You are taking over issue #$N in this worktree (branch $BRANCH). Before anything else, read the issue and its comments, the open PR for this branch and its comments, and git log origin/main..HEAD, so you know what was built and decided."
 
 # Fix round in the builder's own session (it knows the code), on findings from someone else.
 run_fix() {
   local findings="$1" sid
-  sid=$(cat "$SESSION_FILE")
+  sid=$(cat "$SESSION_FILE" 2>/dev/null || true)
   LOG="$ROOT/.builder/logs/ticket-$N-fix-$(date +%Y%m%d-%H%M%S).json"
   local prompt="/supermatt:fix-findings $findings
 These findings come from an independent reviewer, not from you. Reproduce each one first (a failing test, or a command showing the failure). If one does not reproduce, say so with the evidence and leave that code alone. Fix the rest test-first, re-run the affected QA and checks, commit, and push to the same PR. Do not review your own fix; the independent reviewer re-reviews it. $RULES"
-  claude -p --resume "$sid" "$prompt" "${MODEL_FLAGS[@]}" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+  [ -n "$sid" ] || prompt="$FRESH_CONTEXT
+$prompt"
+  agent_run "$ROLE" "$LOG" "$prompt" "$sid" || status=$?
   save_session
 }
 
@@ -108,16 +116,16 @@ If this ticket touches UI, the design pass in docs/agents/builder.md is part of 
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
 ${KEYLESS:-}
 $RULES"
-    claude -p "$PROMPT" "${MODEL_FLAGS[@]}" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    agent_run "$ROLE" "$LOG" "$PROMPT" || status=$?
     ;;
   --resume)
     [ -n "$FINDINGS" ] || { echo "--resume needs the finding text"; exit 1; }
-    SID=$(cat "$SESSION_FILE")
     run_fix "$FINDINGS"
     ;;
   --continue)
-    SID=$(cat "$SESSION_FILE")
-    claude -p --resume "$SID" "Continue where you stopped. $RULES" "${MODEL_FLAGS[@]}" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+    SID=$(cat "$SESSION_FILE" 2>/dev/null || true)
+    if [ -n "$SID" ]; then agent_run "$ROLE" "$LOG" "Continue where you stopped. $RULES" "$SID" || status=$?
+    else agent_run "$ROLE" "$LOG" "$FRESH_CONTEXT Then continue the work to done. $RULES" || status=$?; fi
     ;;
   *) echo "unknown mode $MODE"; exit 1 ;;
 esac

@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Commit"
+  short_description: "Commit all changes on the current branch"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Implement"
+  short_description: "Build work from a spec, tickets, or issues"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Improve File Structure"
+  short_description: "Assess file placement and plan a clearer layout"
+policy:
+  allow_implicit_invocation: false

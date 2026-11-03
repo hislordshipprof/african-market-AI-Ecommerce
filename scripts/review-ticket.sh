@@ -9,6 +9,7 @@ set -euo pipefail
 REPO="hislordshipprof/african-market-AI-Ecommerce"
 ROOT="$(git rev-parse --show-toplevel)"
 N="${1:?usage: scripts/review-ticket.sh <issue>}"
+. "$ROOT/scripts/agent-cli.sh"
 WT="$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N"
 OUT="$ROOT/.builder/review-$N.md"
 LOG="$ROOT/.builder/logs/review-$N-$(date +%Y%m%d-%H%M%S).json"
@@ -31,7 +32,7 @@ Hunt for what breaks in production:
 Reproduce what you can: run the affected unit, integration and sandbox tests yourself, and the affected e2e specs with E2E_PORT=$LANE_PORT; stop any server you start.
 Write your result to $OUT. The FIRST line must be exactly 'VERDICT: PASS' (no blocking findings) or 'VERDICT: BLOCKING'. Then list every finding with: severity (blocking = security, data isolation, money or data loss, a failed acceptance criterion, or broken build/CI; otherwise non-blocking), file:line, the concrete failure scenario, and how to reproduce it."
 
-claude -p "$PROMPT" --effort high --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || true
+agent_run review "$LOG" "$PROMPT" || true
 [ -f "$OUT" ] || printf 'VERDICT: BLOCKING\nThe independent review wrote no result; see %s\n' "$LOG" > "$OUT"
 
 if [ "${RISK:-0}" = "1" ]; then

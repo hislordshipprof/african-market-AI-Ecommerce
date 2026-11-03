@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Refactor"
+  short_description: "Assess, then refactor without changing behavior"
+policy:
+  allow_implicit_invocation: false

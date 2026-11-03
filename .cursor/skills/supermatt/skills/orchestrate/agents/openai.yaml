@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Orchestrate"
+  short_description: "Run GitHub or local Markdown queues with workers"
+policy:
+  allow_implicit_invocation: false

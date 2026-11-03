@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Ideate"
+  short_description: "Generate and rank grounded ideas"
+policy:
+  allow_implicit_invocation: false
