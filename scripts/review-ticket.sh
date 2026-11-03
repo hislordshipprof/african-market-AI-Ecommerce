@@ -24,6 +24,15 @@ if [ "$REVIEW_ENGINE" = codex ]; then
   TARGET="$WT/.builder/review-$N.md"; mkdir -p "$WT/.builder"; rm -f "$TARGET"
 fi
 
+# Review round for this ticket (1 = first review). From round 3 on, only real blockers block.
+ROUND="${REVIEW_ROUND:-$(( $(ls "$ROOT"/.builder/logs/review-"$N"-*.json 2>/dev/null | grep -vc '\.second\.json$') ))}"
+[ "$ROUND" -ge 1 ] 2>/dev/null || ROUND=1
+if [ "$ROUND" -ge 3 ]; then
+  ROUND_RULE="This is review round $ROUND. From round 3 on, a finding is blocking ONLY if it is a demonstrated security or secret exposure, a per-store isolation break, money or data loss, an acceptance criterion observed failing, or a broken build or CI. Weak, missing or flaky tests, doc drift, duplication, design tokens and anything outside the brief are non-blocking: list them for the follow-up issue."
+else
+  ROUND_RULE="This is review round $ROUND. Missing or vacuous tests are blocking only for the brief's Required tests and edge cases (including its 'Brief review' comment); other test-strength findings are non-blocking."
+fi
+
 cd "$WT"
 git fetch -q origin main
 
@@ -35,6 +44,7 @@ Hunt for what breaks in production:
 - each edge case listed in the agent brief, and the ones it missed: retries and duplicates, failure partway through (an external call succeeds then the DB write fails), concurrency, cross-store access, timezones and overnight hours, empty and maximum inputs, money rounding and amounts above the authorization;
 - how each external provider actually works (read its official docs when unsure), for example which Stripe account owns a destination charge;
 - whether the tests would catch a regression: test doubles must enforce the provider's real rules, and each external path needs a real sandbox test.
+$ROUND_RULE
 Reproduce what you can: run the affected unit, integration and sandbox tests yourself, and the affected e2e specs with E2E_PORT=$LANE_PORT; stop any server you start.
 Write your result to $TARGET. The FIRST line must be exactly 'VERDICT: PASS' (no blocking findings) or 'VERDICT: BLOCKING'. Then list every finding with: severity (blocking = security, data isolation, money or data loss, a failed acceptance criterion, or broken build/CI; otherwise non-blocking), file:line, the concrete failure scenario, and how to reproduce it."
 
