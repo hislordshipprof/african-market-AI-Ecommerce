@@ -10,7 +10,8 @@ const hasDb = !!process.env.DATABASE_URL;
 
 describe.skipIf(!hasDb)("Auth integration (real DB)", () => {
   let prisma: PrismaClient;
-  let testAuth: ReturnType<typeof betterAuth>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let testAuth: { handler: (request: Request) => Promise<Response> } & Record<string, any>;
 
   const BASE = "http://localhost:3000";
   const ORIGIN = BASE;
