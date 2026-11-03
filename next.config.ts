@@ -6,6 +6,11 @@ const logoHosts = (process.env.LOGO_HOSTS ?? "")
   .filter(Boolean);
 
 const nextConfig: NextConfig = {
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "3mb",
+    },
+  },
   images: {
     // SVG logos are rendered with a plain <img> (StoreLogo), never via the optimizer (#60).
     dangerouslyAllowSVG: false,

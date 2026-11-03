@@ -10,7 +10,7 @@ import {
   MAX_FILE_BYTES,
 } from "./csv-import";
 import { storeScoped, platformAdmin } from "../db";
-import { createListing } from "./service";
+import { createListing, resolveStockMode } from "./service";
 import type { Actor } from "./service";
 
 describe("parsePriceToCents", () => {
@@ -62,6 +62,48 @@ describe("parsePriceToCents", () => {
   });
   it("A1: accepts largest valid price ($21,474,836.47)", () => {
     expect(parsePriceToCents("21474836.47")).toBe(2_147_483_647);
+  });
+});
+
+describe("resolveStockMode (B3)", () => {
+  it("explicit counted mode with qty", () => {
+    const r = resolveStockMode({ stockMode: "counted", hasQtyColumn: true, qty: 25 });
+    expect(r).toEqual({ stockMode: "counted", qty: 25, status: null });
+  });
+
+  it("explicit status mode with out_of_stock", () => {
+    const r = resolveStockMode({ stockMode: "status", hasQtyColumn: false, status: "out_of_stock" });
+    expect(r).toEqual({ stockMode: "status", qty: null, status: "out_of_stock" });
+  });
+
+  it("no stockMode but qty column present → counted", () => {
+    const r = resolveStockMode({ hasQtyColumn: true, qty: 10 });
+    expect(r).toEqual({ stockMode: "counted", qty: 10, status: null });
+  });
+
+  it("no stockMode, no qty column → status with default in_stock", () => {
+    const r = resolveStockMode({ hasQtyColumn: false });
+    expect(r).toEqual({ stockMode: "status", qty: null, status: "in_stock" });
+  });
+
+  it("no stockMode, no qty column, explicit status → preserves status", () => {
+    const r = resolveStockMode({ hasQtyColumn: false, status: "out_of_stock" });
+    expect(r).toEqual({ stockMode: "status", qty: null, status: "out_of_stock" });
+  });
+
+  it("no stockMode, qty column but no qty value → counted with 0", () => {
+    const r = resolveStockMode({ hasQtyColumn: true });
+    expect(r).toEqual({ stockMode: "counted", qty: 0, status: null });
+  });
+
+  it("invalid stockMode with qty column → counted", () => {
+    const r = resolveStockMode({ stockMode: "invalid", hasQtyColumn: true, qty: 5 });
+    expect(r).toEqual({ stockMode: "counted", qty: 5, status: null });
+  });
+
+  it("invalid stockMode without qty column → status", () => {
+    const r = resolveStockMode({ stockMode: "invalid", hasQtyColumn: false });
+    expect(r).toEqual({ stockMode: "status", qty: null, status: "in_stock" });
   });
 });
 
@@ -240,6 +282,30 @@ describe("parseCsvText", () => {
     const { errors } = parseCsvText(csv);
     expect(errors[0].reason).toContain("Missing required column: price");
   });
+
+  it("B3: hasQtyColumn true when qty column present", () => {
+    const csv = "name,price,qty\nEgusi,12.50,10\n";
+    const { hasQtyColumn } = parseCsvText(csv);
+    expect(hasQtyColumn).toBe(true);
+  });
+
+  it("B3: hasQtyColumn true when quantity column present", () => {
+    const csv = "name,price,quantity\nEgusi,12.50,10\n";
+    const { hasQtyColumn } = parseCsvText(csv);
+    expect(hasQtyColumn).toBe(true);
+  });
+
+  it("B3: hasQtyColumn false when no qty/quantity column", () => {
+    const csv = "name,price\nEgusi,12.50\n";
+    const { hasQtyColumn } = parseCsvText(csv);
+    expect(hasQtyColumn).toBe(false);
+  });
+
+  it("B3: hasQtyColumn false when only status column present", () => {
+    const csv = "name,price,status\nEgusi,12.50,in_stock\n";
+    const { hasQtyColumn } = parseCsvText(csv);
+    expect(hasQtyColumn).toBe(false);
+  });
 });
 
 describe("validateFileSize", () => {
@@ -367,6 +433,16 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
     expect(preview.duplicates).toHaveLength(1);
     expect(preview.duplicates[0].csvName).toBe("Bimba Seeds T63");
     expect(preview.duplicates[0].firstRow).toBe(2);
+  });
+
+  it("N3: duplicate rows flagged by masterProductId, not only by name", async () => {
+    const csv = "name,price\nBimba Seeds T63,12.50\nbimba ground t63,15.00\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.duplicates).toHaveLength(1);
+    expect(preview.duplicates[0].csvName).toBe("bimba ground t63");
+    expect(preview.duplicates[0].firstRow).toBe(2);
+    expect(preview.matches).toHaveLength(1);
+    expect(preview.matches[0].csvName).toBe("Bimba Seeds T63");
   });
 
   it("E9: unicode and accented names (Bimba vs Bîmba)", async () => {
@@ -577,6 +653,111 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(logs.length).toBeGreaterThanOrEqual(1);
     expect((logs[0].after as Record<string, unknown>).count).toBe(1);
   });
+
+  it("B3: name,price,qty CSV → counted mode with qty stored", async () => {
+    const csv = "name,price,qty\nB3 Counted Item T63,5.00,42\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1);
+
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+
+    const scopedA = storeScoped(storeAId);
+    const listing = await scopedA.listing.findFirst({ where: { id: { in: result.listingIds } } });
+    expect(listing!.stockMode).toBe("counted");
+    expect(listing!.qty).toBe(42);
+    expect(listing!.status).toBeNull();
+  });
+
+  it("B3: name,price,status CSV with out_of_stock → status mode preserving out_of_stock", async () => {
+    const csv = "name,price,status\nB3 OOS Item T63,3.00,out_of_stock\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1);
+
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+
+    const scopedA = storeScoped(storeAId);
+    const listing = await scopedA.listing.findFirst({ where: { id: { in: result.listingIds } } });
+    expect(listing!.stockMode).toBe("status");
+    expect(listing!.status).toBe("out_of_stock");
+    expect(listing!.qty).toBeNull();
+  });
+
+  it("B3: name,price only CSV → status mode with default in_stock", async () => {
+    const csv = "name,price\nB3 Default Item T63,4.00\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1);
+
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+
+    const scopedA = storeScoped(storeAId);
+    const listing = await scopedA.listing.findFirst({ where: { id: { in: result.listingIds } } });
+    expect(listing!.stockMode).toBe("status");
+    expect(listing!.status).toBe("in_stock");
+    expect(listing!.qty).toBeNull();
+  });
+
+  it("B3: explicit stock_mode=status overrides qty column presence", async () => {
+    const csv = "name,price,stock_mode,qty,status\nB3 Explicit Status T63,6.00,status,,low\n";
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1);
+
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+
+    const scopedA = storeScoped(storeAId);
+    const listing = await scopedA.listing.findFirst({ where: { id: { in: result.listingIds } } });
+    expect(listing!.stockMode).toBe("status");
+    expect(listing!.status).toBe("low");
+    expect(listing!.qty).toBeNull();
+  });
+
+  it("B2: bulk commit of 1000 rows via createMany", async () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => `B2 Bulk ${i} T63,${(i + 1)}.00`);
+    const csv = "name,price\n" + rows.join("\n") + "\n";
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.newItems.length).toBe(1000);
+
+    const newItemRows = preview.newItems.map((n) => n.row);
+    const result = await commitImport(
+      storeBId,
+      preview.importToken,
+      { matchedRows: [], newItemRows, ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1000);
+    expect(result.listingIds).toHaveLength(1000);
+
+    const scopedB = storeScoped(storeBId);
+    const bulkListings = await scopedB.listing.findMany({
+      where: { id: { in: result.listingIds } },
+      include: { variants: true },
+    });
+    expect(bulkListings).toHaveLength(1000);
+    expect(bulkListings.every((l) => l.variants.length === 1)).toBe(true);
+  }, 60_000);
 
   it("D6: store isolation — store B cannot see store A listings", async () => {
     const csv = "name,price\nStore A Only Item T63,7.50\n";
@@ -1050,10 +1231,11 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     });
 
     const pastDate = new Date(Date.now() - 31 * 60 * 1000);
-    await rawPrisma.$executeRaw`
-      UPDATE listing_imports SET created_at = ${pastDate}
-      WHERE id = ${rec.id}
-    `;
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeBId}, true)`,
+      rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${pastDate} WHERE id = ${rec.id}`,
+    ]);
 
     await generatePreview(storeBId, "name,price\nNew T63,5.00\n", testUserId);
 
@@ -1066,10 +1248,11 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     const preview = await generatePreview(storeAId, csv, testUserId);
 
     const pastDate = new Date(Date.now() - 31 * 60 * 1000);
-    await rawPrisma.$executeRaw`
-      UPDATE listing_imports SET created_at = ${pastDate}
-      WHERE id = ${preview.importToken}
-    `;
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${pastDate} WHERE id = ${preview.importToken}`,
+    ]);
 
     await expect(
       commitImport(
@@ -1079,6 +1262,48 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
         actor,
       ),
     ).rejects.toThrow(/expired/i);
+  });
+
+  it("B4: ambiguous resolution creates listing for chosen candidate", async () => {
+    const ambMp1 = await platformAdmin.masterProduct.create({
+      data: { name: "Ambig Product Alpha T63", frozen: true, perishable: false },
+    });
+    mpIds.push(ambMp1.id);
+    const ambMp2 = await platformAdmin.masterProduct.create({
+      data: { name: "Ambig Product Beta T63", frozen: false, perishable: true },
+    });
+    mpIds.push(ambMp2.id);
+    await platformAdmin.productSynonym.create({
+      data: { productId: ambMp1.id, term: "ambig thing t63" },
+    });
+    await platformAdmin.productSynonym.create({
+      data: { productId: ambMp2.id, term: "ambig thing t63" },
+    });
+
+    const csv = "name,price\nAmbig Thing T63,7.50\n";
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.ambiguous).toHaveLength(1);
+    expect(preview.ambiguous[0].candidates).toHaveLength(2);
+
+    const result = await commitImport(
+      storeBId,
+      preview.importToken,
+      {
+        matchedRows: [],
+        newItemRows: [],
+        ambiguousResolutions: [{ row: 2, masterProductId: ambMp2.id }],
+      },
+      actor,
+    );
+
+    expect(result.createdCount).toBe(1);
+    const scopedB = storeScoped(storeBId);
+    const listing = await scopedB.listing.findFirst({
+      where: { masterProductId: ambMp2.id },
+    });
+    expect(listing).toBeTruthy();
+    expect(listing!.price).toBe(750);
+    expect(listing!.perishable).toBe(true);
   });
 
   it("A2/E8: row whose match count increases between preview and commit is rejected (no silent pick)", async () => {

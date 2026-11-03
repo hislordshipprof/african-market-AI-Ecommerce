@@ -1,6 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 import { generateTOTP } from "./totp";
 import { deleteE2eListings } from "./cleanup-listings";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { resolveDirectUrl } from "../src/lib/env";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -160,6 +163,79 @@ test.describe("CSV import (authenticated)", () => {
 
     await expect(
       page.getByText(/select a CSV file|empty|Could not parse/i),
+    ).toBeVisible({ timeout: 10000 });
+  });
+
+  test("B4: ambiguous row resolution via radio buttons", async ({ page }) => {
+    const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    const ts = Date.now();
+    const mpAlpha = await prisma.masterProduct.create({
+      data: { name: `E2E Ambig Alpha ${ts}`, frozen: false, perishable: false },
+    });
+    const mpBeta = await prisma.masterProduct.create({
+      data: { name: `E2E Ambig Beta ${ts}`, frozen: false, perishable: true },
+    });
+    await prisma.productSynonym.createMany({
+      data: [
+        { productId: mpAlpha.id, term: `e2e ambig thing ${ts}` },
+        { productId: mpBeta.id, term: `e2e ambig thing ${ts}` },
+      ],
+    });
+
+    const listingName = `E2E Ambig Thing ${ts}`;
+    createdNames.push(listingName);
+
+    const csvPath = writeTempCsv(`name,price\n${listingName},6.25\n`);
+
+    await page.goto(IMPORT_URL);
+    await page.locator("input[type='file']").setInputFiles(csvPath);
+    await page.click("text=Upload & Preview");
+
+    await expect(page.getByText("Ambiguous Matches")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(listingName)).toBeVisible();
+
+    // Select the Beta candidate via its radio button label
+    await page.locator(`label:has-text("E2E Ambig Beta ${ts}")`).click();
+
+    await page.click("text=Import 1 product(s)");
+
+    await expect(page.getByText("Import Complete")).toBeVisible({ timeout: 15000 });
+
+    // Verify the listing was created with the chosen master product
+    const store = await prisma.store.findUnique({ where: { slug: "mama-ngozi" } });
+    const listing = await prisma.listing.findFirst({
+      where: { storeId: store!.id, masterProductId: mpBeta.id },
+    });
+    expect(listing).toBeTruthy();
+    expect(listing!.perishable).toBe(true);
+
+    // Cleanup test master products
+    await prisma.productSynonym.deleteMany({
+      where: { productId: { in: [mpAlpha.id, mpBeta.id] } },
+    });
+    await prisma.masterProduct.deleteMany({
+      where: { id: { in: [mpAlpha.id, mpBeta.id] } },
+    });
+    await prisma.$disconnect();
+  });
+
+  test("B5: file over 2 MB shows size error", async ({ page }) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "csv-import-b5-"));
+    const bigPath = path.join(dir, "big.csv");
+    const header = "name,price\n";
+    const rowLine = "A".repeat(200) + ",9.99\n";
+    const rowCount = Math.ceil((2.1 * 1024 * 1024) / rowLine.length);
+    const fd = fs.openSync(bigPath, "w");
+    fs.writeSync(fd, header);
+    for (let i = 0; i < rowCount; i++) fs.writeSync(fd, rowLine);
+    fs.closeSync(fd);
+
+    await page.goto(IMPORT_URL);
+    await page.locator("input[type='file']").setInputFiles(bigPath);
+    await page.click("text=Upload & Preview");
+
+    await expect(
+      page.getByText("File exceeds the maximum size of 2 MB"),
     ).toBeVisible({ timeout: 10000 });
   });
 });

@@ -59,6 +59,7 @@ export function CsvImportUi({ storeName }: Props) {
 
   const [selectedMatches, setSelectedMatches] = useState<Set<number>>(new Set());
   const [selectedNew, setSelectedNew] = useState<Set<number>>(new Set());
+  const [ambiguousResolutions, setAmbiguousResolutions] = useState<Map<number, string>>(new Map());
 
   function handleFileChange(file: File | null) {
     if (!file) return;
@@ -68,11 +69,23 @@ export function CsvImportUi({ storeName }: Props) {
   function handleUpload() {
     if (!selectedFile) return;
 
+    const MAX_FILE_BYTES = 2 * 1024 * 1024;
+    if (selectedFile.size > MAX_FILE_BYTES) {
+      toast.error("File exceeds the maximum size of 2 MB.");
+      return;
+    }
+
     startTransition(async () => {
       const fd = new FormData();
       fd.append("file", selectedFile);
 
-      const res: PreviewActionResult = await csvPreviewAction(fd);
+      let res: PreviewActionResult;
+      try {
+        res = await csvPreviewAction(fd);
+      } catch {
+        toast.error("Upload failed. The file may be too large or the server is unavailable.");
+        return;
+      }
 
       if (res.error) {
         toast.error(res.error);
@@ -94,12 +107,16 @@ export function CsvImportUi({ storeName }: Props) {
     const selection: CommitSelection = {
       matchedRows: [...selectedMatches],
       newItemRows: [...selectedNew],
-      ambiguousResolutions: [],
+      ambiguousResolutions: [...ambiguousResolutions.entries()].map(([row, masterProductId]) => ({
+        row,
+        masterProductId,
+      })),
     };
 
     if (
       selection.matchedRows.length === 0 &&
-      selection.newItemRows.length === 0
+      selection.newItemRows.length === 0 &&
+      selection.ambiguousResolutions.length === 0
     ) {
       toast.error("Select at least one row to import.");
       return;
@@ -212,17 +229,27 @@ export function CsvImportUi({ storeName }: Props) {
                 preview={preview}
                 selectedMatches={selectedMatches}
                 selectedNew={selectedNew}
+                ambiguousResolutions={ambiguousResolutions}
                 toggleMatch={toggleMatch}
                 toggleNew={toggleNew}
                 selectAllMatches={selectAllMatches}
                 deselectAllMatches={deselectAllMatches}
                 selectAllNew={selectAllNew}
                 deselectAllNew={deselectAllNew}
+                onResolveAmbiguous={(row, masterProductId) => {
+                  setAmbiguousResolutions((prev) => {
+                    const next = new Map(prev);
+                    if (masterProductId) next.set(row, masterProductId);
+                    else next.delete(row);
+                    return next;
+                  });
+                }}
                 onCommit={handleCommit}
                 onBack={() => {
                   setStep("upload");
                   setPreview(null);
                   setSelectedFile(null);
+                  setAmbiguousResolutions(new Map());
                 }}
                 isPending={isPending}
               />
@@ -345,12 +372,14 @@ function PreviewStep({
   preview,
   selectedMatches,
   selectedNew,
+  ambiguousResolutions,
   toggleMatch,
   toggleNew,
   selectAllMatches,
   deselectAllMatches,
   selectAllNew,
   deselectAllNew,
+  onResolveAmbiguous,
   onCommit,
   onBack,
   isPending,
@@ -358,22 +387,24 @@ function PreviewStep({
   preview: CsvPreviewResult;
   selectedMatches: Set<number>;
   selectedNew: Set<number>;
+  ambiguousResolutions: Map<number, string>;
   toggleMatch: (row: number) => void;
   toggleNew: (row: number) => void;
   selectAllMatches: () => void;
   deselectAllMatches: () => void;
   selectAllNew: () => void;
   deselectAllNew: () => void;
+  onResolveAmbiguous: (row: number, masterProductId: string | null) => void;
   onCommit: () => void;
   onBack: () => void;
   isPending: boolean;
 }) {
-  const totalSelected = selectedMatches.size + selectedNew.size;
+  const totalSelected = selectedMatches.size + selectedNew.size + ambiguousResolutions.size;
 
   return (
     <div className="space-y-4">
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <SummaryCard
           icon={<CheckCircle2 className="h-4 w-4 text-[var(--color-success)]" />}
           label="Matched"
@@ -383,6 +414,11 @@ function PreviewStep({
           icon={<PlusCircle className="h-4 w-4 text-[var(--color-primary)]" />}
           label="New"
           count={preview.newItems.length}
+        />
+        <SummaryCard
+          icon={<HelpCircle className="h-4 w-4 text-[var(--color-deal)]" />}
+          label="Ambiguous"
+          count={preview.ambiguous.length}
         />
         <SummaryCard
           icon={<AlertCircle className="h-4 w-4 text-[var(--color-deal)]" />}
@@ -453,12 +489,17 @@ function PreviewStep({
       {preview.ambiguous.length > 0 && (
         <PreviewSection
           title="Ambiguous Matches"
-          subtitle="Multiple master products match — these rows are skipped for now."
+          subtitle="Multiple master products match — select one per row to import."
           icon={<HelpCircle className="h-4 w-4 text-[var(--color-muted)]" />}
         >
           <div className="divide-y divide-[var(--color-line)]">
             {preview.ambiguous.map((a) => (
-              <AmbiguousRow key={a.row} item={a} />
+              <AmbiguousRow
+                key={a.row}
+                item={a}
+                selectedProductId={ambiguousResolutions.get(a.row) ?? null}
+                onResolve={(mpId) => onResolveAmbiguous(a.row, mpId)}
+              />
             ))}
           </div>
         </PreviewSection>
@@ -692,15 +733,51 @@ function NewRow({
   );
 }
 
-function AmbiguousRow({ item }: { item: CsvPreviewAmbiguous }) {
+function AmbiguousRow({
+  item,
+  selectedProductId,
+  onResolve,
+}: {
+  item: CsvPreviewAmbiguous;
+  selectedProductId: string | null;
+  onResolve: (masterProductId: string | null) => void;
+}) {
   return (
     <div className="px-4 py-2.5">
       <p className="truncate text-sm font-medium">{item.csvName}</p>
-      <p className="text-xs text-[var(--color-muted)]">
+      <p className="mb-2 text-xs text-[var(--color-muted)]">
         <HelpCircle className="mr-1 inline h-3 w-3" />
-        Matches {item.candidates.length} products:{" "}
-        {item.candidates.map((c) => c.masterProductName).join(", ")}
+        Matches {item.candidates.length} products — select one:
       </p>
+      <div className="ml-1 space-y-1">
+        {item.candidates.map((c) => (
+          <label
+            key={c.masterProductId}
+            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-[var(--color-raised)] transition-colors"
+          >
+            <input
+              type="radio"
+              name={`ambiguous-${item.row}`}
+              checked={selectedProductId === c.masterProductId}
+              onChange={() => onResolve(c.masterProductId)}
+              className="h-3.5 w-3.5 accent-[var(--color-primary)]"
+            />
+            <span className="text-sm">{c.masterProductName}</span>
+            <Badge variant="secondary" className="text-[10px]">
+              {c.matchType === "exact" ? "Exact" : "Synonym"}
+            </Badge>
+          </label>
+        ))}
+        {selectedProductId && (
+          <button
+            type="button"
+            className="ml-2 text-xs text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors"
+            onClick={() => onResolve(null)}
+          >
+            Clear selection
+          </button>
+        )}
+      </div>
     </div>
   );
 }

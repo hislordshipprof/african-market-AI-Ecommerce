@@ -1,6 +1,6 @@
 import { parse } from "csv-parse/sync";
-import { Prisma, platform, storeScoped, storeScopedTransaction, claimImportRow, lockStoreRow } from "../db";
-import type { Actor } from "./service";
+import { platform, storeScoped, storeScopedTransaction, claimImportRow, lockStoreRow } from "../db";
+import { resolveStockMode, type Actor } from "./service";
 
 const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -100,6 +100,7 @@ export function parseCsvText(raw: string): {
   rows: ParsedRow[];
   errors: CsvPreviewError[];
   unknownColumns: string[];
+  hasQtyColumn: boolean;
 } {
   const cleaned = stripBom(raw);
   const rows: ParsedRow[] = [];
@@ -119,6 +120,7 @@ export function parseCsvText(raw: string): {
       rows: [],
       errors: [{ row: 0, reason: "Could not parse file as CSV. Check the file format." }],
       unknownColumns: [],
+      hasQtyColumn: false,
     };
   }
 
@@ -127,6 +129,7 @@ export function parseCsvText(raw: string): {
       rows: [],
       errors: [{ row: 0, reason: "File is empty or contains only headers." }],
       unknownColumns: [],
+      hasQtyColumn: false,
     };
   }
 
@@ -135,6 +138,7 @@ export function parseCsvText(raw: string): {
       rows: [],
       errors: [{ row: 0, reason: `File exceeds the maximum of ${MAX_ROWS} rows.` }],
       unknownColumns: [],
+      hasQtyColumn: false,
     };
   }
 
@@ -164,6 +168,7 @@ export function parseCsvText(raw: string): {
       rows: [],
       errors: [{ row: 0, reason: "Missing required column: name" }],
       unknownColumns,
+      hasQtyColumn: false,
     };
   }
   if (!priceCol) {
@@ -171,6 +176,7 @@ export function parseCsvText(raw: string): {
       rows: [],
       errors: [{ row: 0, reason: "Missing required column: price" }],
       unknownColumns,
+      hasQtyColumn: false,
     };
   }
 
@@ -267,7 +273,7 @@ export function parseCsvText(raw: string): {
     });
   }
 
-  return { rows, errors, unknownColumns };
+  return { rows, errors, unknownColumns, hasQtyColumn: !!qtyCol };
 }
 
 const PRICE_THOUSANDS_RE = /^\d{1,3}(,\d{3})*(\.\d{1,2})?$/;
@@ -396,6 +402,7 @@ export async function generatePreview(
   const duplicates: CsvPreviewDuplicate[] = [];
 
   const seenNames = new Map<string, number>();
+  const seenMasterProductIds = new Map<string, number>();
 
   for (const row of rows) {
     const normName = normalizeForMatch(row.name);
@@ -423,6 +430,12 @@ export async function generatePreview(
       }
     } else if (productMatches.length === 1) {
       const m = productMatches[0];
+      const mpDupRow = seenMasterProductIds.get(m.product.id);
+      if (mpDupRow !== undefined) {
+        duplicates.push({ row: row.row, csvName: row.name, firstRow: mpDupRow });
+        continue;
+      }
+      seenMasterProductIds.set(m.product.id, row.row);
       if (existingMasterIds.has(m.product.id)) {
         alreadyListed.push({
           row: row.row,
@@ -532,7 +545,7 @@ export async function commitImport(
     throw new Error("Import token has expired. Please upload the file again.");
   }
 
-  const { rows } = parseCsvText(importRecord.csvText);
+  const { rows, hasQtyColumn } = parseCsvText(importRecord.csvText);
   const rowMap = new Map(rows.map((r) => [r.row, r]));
 
   const selectedRows = new Set([
@@ -566,15 +579,20 @@ export async function commitImport(
 
     const productMatches = matchMap.get(row.name) ?? [];
 
+    const stock = resolveStockMode({
+      stockMode: row.stockMode,
+      hasQtyColumn,
+      qty: row.qty,
+      status: row.status,
+    });
+
     if (productMatches.length === 1) {
       const m = productMatches[0];
       toCreate.push({
         masterProductId: m.product.id,
         customName: null,
         price: row.price,
-        stockMode: row.stockMode ?? "status",
-        qty: row.stockMode === "counted" ? (row.qty ?? 0) : null,
-        status: row.stockMode === "status" ? (row.status ?? "in_stock") : null,
+        ...stock,
         frozen: m.product.frozen,
         perishable: m.product.perishable,
       });
@@ -583,9 +601,7 @@ export async function commitImport(
         masterProductId: null,
         customName: row.name,
         price: row.price,
-        stockMode: row.stockMode ?? "status",
-        qty: row.stockMode === "counted" ? (row.qty ?? 0) : null,
-        status: row.stockMode === "status" ? (row.status ?? "in_stock") : null,
+        ...stock,
         frozen: false,
         perishable: false,
       });
@@ -608,13 +624,18 @@ export async function commitImport(
       );
     }
 
+    const ambigStock = resolveStockMode({
+      stockMode: row.stockMode,
+      hasQtyColumn,
+      qty: row.qty,
+      status: row.status,
+    });
+
     toCreate.push({
       masterProductId: selectedProduct.id,
       customName: null,
       price: row.price,
-      stockMode: row.stockMode ?? "status",
-      qty: row.stockMode === "counted" ? (row.qty ?? 0) : null,
-      status: row.stockMode === "status" ? (row.status ?? "in_stock") : null,
+      ...ambigStock,
       frozen: selectedProduct.frozen,
       perishable: selectedProduct.perishable,
     });
@@ -661,61 +682,56 @@ export async function commitImport(
         .map((l) => normalizeForMatch(l.customName!)),
     );
 
-    const ids: string[] = [];
+    const toInsert = dedupedToCreate.filter((item) => {
+      if (item.masterProductId && existingMasterIds.has(item.masterProductId)) return false;
+      if (item.customName && existingCustomNames.has(normalizeForMatch(item.customName))) return false;
+      return true;
+    });
 
-    for (const item of dedupedToCreate) {
-      if (item.masterProductId && existingMasterIds.has(item.masterProductId)) continue;
-      if (item.customName && existingCustomNames.has(normalizeForMatch(item.customName))) continue;
-
-      try {
-        const listing = await tx.listing.create({
-          data: {
-            storeId,
-            masterProductId: item.masterProductId,
-            customName: item.customName,
-            price: item.price,
-            stockMode: item.stockMode,
-            qty: item.qty,
-            status: item.status,
-            frozen: item.frozen,
-            perishable: item.perishable,
-          },
-        });
-        ids.push(listing.id);
-
-        await tx.listingVariant.create({
-          data: {
-            listingId: listing.id,
-            label: "Default",
-            price: item.price,
-            weightG: 1,
-          },
-        });
-
-        if (item.stockMode === "counted" && (item.qty ?? 0) > 0) {
-          await tx.stockEvent.create({
-            data: {
-              storeId,
-              listingId: listing.id,
-              type: "recount",
-              delta: item.qty!,
-              actorId: actor.id,
-            },
-          });
-        }
-      } catch (e) {
-        if (
-          e instanceof Prisma.PrismaClientKnownRequestError &&
-          e.code === "P2002"
-        ) {
-          continue;
-        }
-        throw e;
-      }
+    if (toInsert.length === 0) {
+      throw new Error("All selected listings are already listed in this store.");
     }
 
-    if (ids.length === 0) {
-      throw new Error("All selected listings are already listed in this store.");
+    const ids = toInsert.map(() => crypto.randomUUID());
+
+    await tx.listing.createMany({
+      data: toInsert.map((item, i) => ({
+        id: ids[i],
+        storeId,
+        masterProductId: item.masterProductId,
+        customName: item.customName,
+        price: item.price,
+        stockMode: item.stockMode,
+        qty: item.qty,
+        status: item.status,
+        frozen: item.frozen,
+        perishable: item.perishable,
+      })),
+    });
+
+    await tx.listingVariant.createMany({
+      data: toInsert.map((item, i) => ({
+        listingId: ids[i],
+        label: "Default",
+        price: item.price,
+        weightG: 1,
+      })),
+    });
+
+    const stockEvents = toInsert
+      .map((item, i) => ({ item, listingId: ids[i] }))
+      .filter(({ item }) => item.stockMode === "counted" && (item.qty ?? 0) > 0);
+
+    if (stockEvents.length > 0) {
+      await tx.stockEvent.createMany({
+        data: stockEvents.map(({ item, listingId }) => ({
+          storeId,
+          listingId,
+          type: "recount",
+          delta: item.qty!,
+          actorId: actor.id,
+        })),
+      });
     }
 
     await tx.auditLog.create({
@@ -731,7 +747,7 @@ export async function commitImport(
     });
 
     return ids;
-  }, { timeout: 30_000, maxWait: 15_000 });
+  }, { timeout: 60_000, maxWait: 15_000 });
 
   return { createdCount: listingIds.length, listingIds };
 }

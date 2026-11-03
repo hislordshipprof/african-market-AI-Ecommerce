@@ -4,6 +4,38 @@ export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
 export type StockEventType = "sale" | "recount" | "restock" | "short" | "adjust";
 
+export interface ResolvedStock {
+  stockMode: StockMode;
+  qty: number | null;
+  status: StockStatus | null;
+}
+
+export function resolveStockMode(input: {
+  stockMode?: string;
+  hasQtyColumn: boolean;
+  qty?: number;
+  status?: string;
+}): ResolvedStock {
+  const mode: StockMode =
+    input.stockMode === "counted" || input.stockMode === "status"
+      ? input.stockMode
+      : input.hasQtyColumn
+        ? "counted"
+        : "status";
+
+  if (mode === "counted") {
+    return { stockMode: "counted", qty: input.qty ?? 0, status: null };
+  }
+  const status = input.status as StockStatus | undefined;
+  return {
+    stockMode: "status",
+    qty: null,
+    status: status === "in_stock" || status === "low" || status === "out_of_stock"
+      ? status
+      : "in_stock",
+  };
+}
+
 export interface CreateVariantInput {
   label: string;
   price: number;
@@ -73,6 +105,13 @@ export interface CreateListingInput {
 }
 
 export async function createListing(input: CreateListingInput) {
+  const stock = resolveStockMode({
+    stockMode: input.stockMode,
+    hasQtyColumn: input.stockMode === "counted",
+    qty: input.qty ?? undefined,
+    status: input.status ?? undefined,
+  });
+
   return storeScopedTransaction(input.storeId, async (tx) => {
     const listing = await tx.listing.create({
       data: {
@@ -80,9 +119,9 @@ export async function createListing(input: CreateListingInput) {
         masterProductId: input.masterProductId ?? null,
         customName: input.customName ?? null,
         price: input.price,
-        stockMode: input.stockMode,
-        qty: input.stockMode === "counted" ? (input.qty ?? 0) : null,
-        status: input.stockMode === "status" ? (input.status ?? "in_stock") : null,
+        stockMode: stock.stockMode,
+        qty: stock.qty,
+        status: stock.status,
         frozen: input.frozen,
         perishable: input.perishable,
         maxPerOrder: input.maxPerOrder ?? null,
@@ -91,13 +130,13 @@ export async function createListing(input: CreateListingInput) {
 
     const variants = await createVariantRows(tx, listing.id, input.variants);
 
-    if (input.stockMode === "counted" && (input.qty ?? 0) > 0) {
+    if (stock.stockMode === "counted" && (stock.qty ?? 0) > 0) {
       await tx.stockEvent.create({
         data: {
           storeId: input.storeId,
           listingId: listing.id,
           type: "recount",
-          delta: input.qty!,
+          delta: stock.qty!,
           actorId: input.actor.id,
         },
       });
