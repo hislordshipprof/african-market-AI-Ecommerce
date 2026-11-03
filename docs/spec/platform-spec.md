@@ -228,7 +228,7 @@ Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_ST
 
 | Transition | Trigger | Side effects |
 |---|---|---|
-| → AUTHORIZED | Stripe PaymentIntent `requires_capture` | Notify store, decrement reserved stock |
+| → AUTHORIZED | Stripe PaymentIntent `requires_capture` | Notify store (stock reservation deferred to #141) |
 | → ACCEPTED | Store tap / auto | Customer notified with prep ETA |
 | → SUBSTITUTION_PENDING | Picker marks short | Customer prompt; timer |
 | → CAPTURING | All lines resolved | Set transitional status; Stripe capture in flight |
@@ -238,7 +238,7 @@ Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_ST
 | fallback | No assignment in 10 min or provider error | Cancel with provider A, create with provider B |
 | → PICKED_UP | Provider webhook | Live map starts |
 | → DELIVERED | Provider webhook + proof | Proof stored; payout eligibility |
-| → CANCELLED | Customer (before ACCEPTED) / store / system | Release auth or refund; restock |
+| → CANCELLED | Customer (before ACCEPTED) / store / system | Release auth or refund (stock restore deferred to #141 as matched pair with reservation) |
 
 Unanswered store: if not ACCEPTED within 15 min (store hours), alert owner (SMS with #128; until then, audit record only); at 30 min auto-cancel and void authorization.
 

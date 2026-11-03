@@ -209,7 +209,7 @@ export const stripeProvider: StripeProvider = {
     const stripe = getStripeClient();
     try {
       const refund = await stripe.refunds.create(
-        { payment_intent: paymentIntentId, amount: amountCents },
+        { payment_intent: paymentIntentId, amount: amountCents, reverse_transfer: true },
         idempotencyKey ? { idempotencyKey } : undefined,
       );
       return {

@@ -5,7 +5,7 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, reconcileStuckOrder, sortPickListLines } from "./service";
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, refundedPayments, setAuthorizedAmount } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, refundedPayments, setAuthorizedAmount, setNextRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -1064,6 +1064,25 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "anomaly_refund" },
     });
     expect(logs.length).toBe(1);
+  });
+
+  it("Codex-2: CANCELLING + Stripe succeeded but refund fails does not finalize CANCELLED", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+    setNextRefundStatus(order.paymentIntentId!, "failed");
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
   });
 
   // ── M2: Persist Stripe's amount_received, clear capturedAmountCents on cancel ──

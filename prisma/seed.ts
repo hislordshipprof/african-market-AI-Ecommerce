@@ -714,6 +714,7 @@ async function seedDemoOrders() {
     { id: "seed-order-2", number: 1002, status: "ACCEPTED", lines: [1, 3] },
     { id: "seed-order-3", number: 1003, status: "PICKING", lines: [0, 2, 4 % variants.length] },
     { id: "seed-order-4", number: 1004, status: "AWAITING_PICKUP", lines: [3 % variants.length, 5 % variants.length] },
+    { id: "seed-order-5", number: 1005, status: "PICKING", lines: [1, 3] },
   ];
 
   for (const demo of demoOrders) {

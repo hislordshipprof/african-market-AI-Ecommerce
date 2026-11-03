@@ -112,7 +112,7 @@ test.describe("Order inbox", () => {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
-    const orderCard = page.locator("button", { hasText: "#1003" });
+    const orderCard = page.locator("button", { hasText: "#1005" });
     await expect(orderCard).toBeVisible();
     await orderCard.click();
     await expect(page.locator("text=Pick list")).toBeVisible();

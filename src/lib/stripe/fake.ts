@@ -16,6 +16,7 @@ const capturedPayments = new Map<string, number>();
 const cancelledPayments = new Set<string>();
 const authorizedAmounts = new Map<string, number>();
 const refundedPayments = new Map<string, number>();
+const nextRefundStatus = new Map<string, string>();
 
 function reset() {
   accounts.clear();
@@ -23,6 +24,7 @@ function reset() {
   cancelledPayments.clear();
   authorizedAmounts.clear();
   refundedPayments.clear();
+  nextRefundStatus.clear();
 }
 
 function getAccounts(): Map<string, ConnectAccount> {
@@ -142,11 +144,12 @@ const fakeStripeProvider: StripeProvider = {
         `Refund amount ${amountCents} exceeds captured amount ${captured}`,
       );
     }
+    const status = nextRefundStatus.get(paymentIntentId) ?? "succeeded";
     refundedPayments.set(paymentIntentId, amountCents);
     return {
       refundId: `re_fake_${paymentIntentId}`,
       amountRefunded: amountCents,
-      status: "succeeded",
+      status,
     } satisfies RefundResult;
   },
 
@@ -177,4 +180,8 @@ const fakeStripeProvider: StripeProvider = {
   },
 };
 
-export { fakeStripeProvider, reset, getAccounts, capturedPayments, cancelledPayments, authorizedAmounts, refundedPayments, setAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };
+function setNextRefundStatus(paymentIntentId: string, status: string) {
+  nextRefundStatus.set(paymentIntentId, status);
+}
+
+export { fakeStripeProvider, reset, getAccounts, capturedPayments, cancelledPayments, authorizedAmounts, refundedPayments, setAuthorizedAmount, setNextRefundStatus, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
