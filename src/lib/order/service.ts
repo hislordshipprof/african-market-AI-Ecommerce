@@ -15,6 +15,10 @@ export type OrderStatus =
   | "COMPLETED"
   | "CANCELLED";
 
+// Stripe USD minimum capture: $0.50 (50 cents).
+// https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts
+const STRIPE_USD_MINIMUM_CENTS = 50;
+
 const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
   "ACCEPTED",
@@ -157,15 +161,30 @@ export async function markReady(
 
     const capturedAmountCents = lineTotalCents + order.tipCents + order.deliveryFeeCents;
 
+    if (!order.paymentIntentId) {
+      return { ok: false as const, error: "Order has no payment intent" };
+    }
+
+    // Stripe USD minimum capture is 50 cents ($0.50).
+    // https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts
+    if (capturedAmountCents < STRIPE_USD_MINIMUM_CENTS) {
+      return {
+        ok: true as const,
+        capturedAmountCents,
+        paymentIntentId: order.paymentIntentId,
+        newStatus: "CANCELLED" as OrderStatus,
+        alreadyClaiming: false,
+        voidInsteadOfCapture: true,
+        orderId: order.id,
+        storeId,
+      };
+    }
+
     if (capturedAmountCents > order.totalAuthorizedCents) {
       return {
         ok: false as const,
         error: `Capture amount ${capturedAmountCents} exceeds authorized amount ${order.totalAuthorizedCents}`,
       };
-    }
-
-    if (!order.paymentIntentId) {
-      return { ok: false as const, error: "Order has no payment intent" };
     }
 
     const newStatus: OrderStatus =
@@ -182,10 +201,44 @@ export async function markReady(
       paymentIntentId: order.paymentIntentId,
       newStatus,
       alreadyClaiming: false,
+      voidInsteadOfCapture: false,
+      orderId: order.id,
+      storeId,
     };
   });
 
   if (!validation.ok) return validation;
+
+  // K3: below-minimum amount — void the authorization instead of capturing
+  if (validation.voidInsteadOfCapture) {
+    const stripe = getStripeProvider();
+    await stripe.cancelPaymentIntent(
+      validation.paymentIntentId,
+      `cancel:${orderId}`,
+    );
+    await storeScopedTransaction(storeId, async (tx) => {
+      await lockStoreRow(tx, storeId);
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          capturedAmountCents: 0,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "void_zero_amount",
+          entityType: "order",
+          entityId: orderId,
+        },
+      });
+    });
+    return { ok: true, capturedAmountCents: 0 };
+  }
 
   // Phase 2: Stripe capture outside transaction (idempotency key makes retry safe)
   const stripe = getStripeProvider();

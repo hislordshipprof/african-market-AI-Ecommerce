@@ -223,17 +223,17 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
 
       let txCallCount = 0;
       const spy = vi.spyOn(dbModule, "storeScopedTransaction").mockImplementation(
-        async (sid: string, fn: (...args: unknown[]) => Promise<unknown>) => {
+        (async (sid: string, fn: Parameters<typeof origTx>[1]) => {
           txCallCount++;
           if (txCallCount === 1) {
-            const result = await origTx(sid, fn as Parameters<typeof origTx>[1]);
+            const result = await origTx(sid, fn);
             await origTx(storeId, async (tx) => {
               await tx.order.update({ where: { id: order.id }, data: { status: "ACCEPTED", acceptedAt: new Date() } });
             });
             return result;
           }
-          return origTx(sid, fn as Parameters<typeof origTx>[1]);
-        },
+          return origTx(sid, fn);
+        }) as typeof origTx,
       );
 
       try {

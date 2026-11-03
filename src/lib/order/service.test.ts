@@ -564,6 +564,89 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("COMPLETED");
   });
 
+  it("K3: markReady voids authorization when final amount is zero (all lines refunded)", async () => {
+    const order = await createTestOrder();
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    // Pick one line to enter PICKING, then refund all lines
+    await markLinePicked(storeId, lines[0].id);
+    for (const line of lines) {
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.orderLine.update({
+          where: { id: line.id },
+          data: { status: "refunded", qtyPicked: 0 },
+        });
+      });
+    }
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.capturedAmountCents).toBe(0);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.cancelledAt).toBeTruthy();
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
+    expect(capturedPayments.size).toBe(0);
+
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "void_zero_amount" },
+    });
+    expect(logs.length).toBe(1);
+  });
+
+  it("K3: markReady voids authorization when final amount is below Stripe minimum (50 cents USD)", async () => {
+    // Create order with a single cheap line
+    const num = ++orderSeq;
+    const order = await storeScopedTransaction(storeId, async (tx) => {
+      const o = await tx.order.create({
+        data: {
+          storeId,
+          number: num,
+          customerId,
+          status: "AUTHORIZED",
+          fulfillment: "pickup",
+          subtotalCents: 30,
+          bufferCents: 10,
+          tipCents: 0,
+          deliveryFeeCents: 0,
+          totalAuthorizedCents: 40,
+          totalCents: 30,
+          paymentIntentId: `pi_test_min_${Date.now()}`,
+        },
+      });
+      await tx.orderLine.create({
+        data: {
+          storeId,
+          orderId: o.id,
+          listingVariantId: variantId,
+          qtyOrdered: 1,
+          unitPriceCents: 30,
+        },
+      });
+      return o;
+    });
+
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({
+      where: { orderId: order.id },
+    });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.capturedAmountCents).toBe(0);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
+    expect(capturedPayments.size).toBe(0);
+  });
+
   it("K2: accept-during-cancel race — accept fails while cancel is in-flight", async () => {
     const order = await createTestOrder();
 
