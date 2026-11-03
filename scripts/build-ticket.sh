@@ -50,6 +50,15 @@ git fetch -q origin main
 cp .env.local "$WT/.env.local"
 cd "$WT"
 
+# Database: each lane gets its own fresh database on the private local Postgres (scripts/local-pg.sh), so builds
+# use no Neon at all and run with CI's roles (row-level security enforced). Recreated every run, like CI's test_db.
+# LANE_DB=neon keeps the shared dev Neon branch from .env.local instead.
+if [ "${LANE_DB:-local}" != "neon" ]; then
+  [ -d node_modules ] || pnpm install --frozen-lockfile >/dev/null
+  bash "$WT/scripts/lane-db.sh" "t$N" "$WT/.env.local" 2>/dev/null || bash "$ROOT/scripts/lane-db.sh" "t$N" "$WT/.env.local"
+fi
+DB_RULE="This lane's database is a private local Postgres database (lane_t$N on localhost:5434, CI's roles, already migrated and seeded); .env.local points at it. Never point it at Neon. To reset it, run scripts/lane-db.sh t$N .env.local (or bash $ROOT/scripts/lane-db.sh if this branch lacks it)."
+
 # Risk: tickets that touch money, auth or an external provider (by their keys in ticket-env.txt, or RISK=1)
 # always build at full tier and also get the Codex review in the independent review step.
 need_keys=$(awk -v n="$N" '$1==n {for (i=2;i<=NF;i++) print $i}' "$ROOT/scripts/ticket-env.txt")
@@ -74,7 +83,7 @@ fi
 REVIEW_RULE="Do NOT run the code-review step on your own work: no agent reviews its own work. When implement reaches its review step, stop there. After you push, an independent reviewer in a separate fresh session reviews the PR (and Codex too for money, auth and external-provider tickets); its findings come back to you as a fix round. Still run the QA pass and every check in the Definition of done yourself."
 PORT_RULE="This lane's e2e port is $LANE_PORT: run Playwright with E2E_PORT=$LANE_PORT and never use another lane's port."
 
-RULES="Run headless: never ask the user. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI, its edge-case rules and its test-double rules) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Turn every edge case listed in the agent brief into a test. Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). While iterating, run only the affected e2e specs and unit tests. When the work is ready, push, then run scripts/ci-local.sh in the worktree: it runs the full CI suite locally and records the local-ci commit status that the merge gate needs. GitHub Actions does not run on your pushes; never add the run-ci label yourself. $REVIEW_RULE $PORT_RULE Keep $REPORT updated with: the commit SHA you checked, the QA verdict line, every finding code with how it ended, and the PR URL."
+RULES="Run headless: never ask the user. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI, its edge-case rules and its test-double rules) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Turn every edge case listed in the agent brief into a test. Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). While iterating, run only the affected e2e specs and unit tests. When the work is ready, push, then run scripts/ci-local.sh in the worktree: it runs the full CI suite locally and records the local-ci commit status that the merge gate needs. GitHub Actions does not run on your pushes; never add the run-ci label yourself. $REVIEW_RULE $PORT_RULE ${DB_RULE:-} Keep $REPORT updated with: the commit SHA you checked, the QA verdict line, every finding code with how it ended, and the PR URL."
 
 save_session() {
   node -e 'const fs=require("fs");try{const t=fs.readFileSync(process.argv[1],"utf8");const m=[...t.matchAll(/"session_id"\s*:\s*"([0-9a-f-]{36})"/g)].pop();if(m)fs.writeFileSync(process.argv[2],m[1])}catch(e){}' "$LOG" "$SESSION_FILE"
