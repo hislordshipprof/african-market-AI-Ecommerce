@@ -119,10 +119,21 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     await seed("s2", "needs_review");
     await seed("s3", "active");
     await seed("s4", "rejected");
+    const mine = await asAdmin((tx) =>
+      tx.masterProduct.findMany({
+        where: { name: { startsWith: `${RUN} s` } },
+        select: { status: true },
+      }),
+    );
     const after = await getReviewStats();
-    expect(after.needsReview - before.needsReview).toBe(2);
-    expect(after.active - before.active).toBe(1);
-    expect(after.rejected - before.rejected).toBe(1);
+    expect(mine.filter((p) => p.status === "needs_review")).toHaveLength(2);
+    expect(mine.filter((p) => p.status === "active")).toHaveLength(1);
+    expect(mine.filter((p) => p.status === "rejected")).toHaveLength(1);
+    // Other files insert master products during the full suite, so the global
+    // delta is a floor, not an exclusive count.
+    expect(after.needsReview).toBeGreaterThanOrEqual(before.needsReview + 2);
+    expect(after.active).toBeGreaterThanOrEqual(before.active + 1);
+    expect(after.rejected).toBeGreaterThanOrEqual(before.rejected + 1);
     expect(after.total).toBe(after.needsReview + after.active + after.rejected);
   });
 
