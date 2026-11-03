@@ -240,7 +240,7 @@ Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_ST
 | → DELIVERED | Provider webhook + proof | Proof stored; payout eligibility |
 | → CANCELLED | Customer (before ACCEPTED) / store / system | Release auth or refund (stock restore deferred to #141 as matched pair with reservation) |
 
-Unanswered store: if not ACCEPTED within 15 min (store hours), alert owner (SMS with #128; until then, audit record only); at 30 min auto-cancel and void authorization.
+Unanswered store: if not ACCEPTED within 15 min while the store is inside its hours, alert owner (SMS with #128; until then, audit record only); at 30 min auto-cancel and void authorization. A day marked `Closed` or `{ closed: true }` is closed. A range that cannot be parsed counts as open so a malformed schedule does not hide the alert.
 
 ---
 

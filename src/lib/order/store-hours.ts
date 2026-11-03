@@ -32,6 +32,7 @@ function parseTimeMinutes(raw: string): number | null {
 
 type DaySchedule =
   | { kind: "range"; open: string; close: string }
+  | { kind: "closed" }
   | { kind: "unparseable"; raw: string };
 
 function findDaySchedule(
@@ -47,6 +48,7 @@ function findDaySchedule(
 
     if (typeof val === "object" && val !== null) {
       const obj = val as Record<string, unknown>;
+      if (obj.closed === true) return { kind: "closed" };
       if (typeof obj.open === "string" && typeof obj.close === "string") {
         return { kind: "range", open: obj.open, close: obj.close };
       }
@@ -54,6 +56,7 @@ function findDaySchedule(
     }
 
     if (typeof val === "string") {
+      if (/^\s*closed\s*$/i.test(val)) return { kind: "closed" };
       const parts = val.split(/\s*[-–—]\s*/);
       if (parts.length === 2 && parts[0] && parts[1]) {
         return { kind: "range", open: parts[0], close: parts[1] };

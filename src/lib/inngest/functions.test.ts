@@ -165,6 +165,40 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       expect(logs.length).toBe(1);
     }, 10_000);
 
+    it("skips the alert on a day the hours mark Closed", async () => {
+      const { acceptanceAlert } = await import("./functions");
+      const handler = getHandler(acceptanceAlert);
+      const order = await createTestOrder();
+      await rawPrisma.store.update({
+        where: { id: storeId },
+        data: { hours: { monday: "10:00 AM - 7:00 PM", sunday: "Closed" } },
+      });
+      try {
+        await withMockedTime(new Date("2026-11-08T15:00:00-05:00"), () =>
+          handler({ event: { data: { orderId: order.id, storeId } }, step: makeFakeStep() }),
+        );
+        const logs = await storeScoped(storeId).auditLog.findMany({
+          where: { entityId: order.id, action: "acceptance_alert" },
+        });
+        expect(logs.length).toBe(0);
+      } finally {
+        await rawPrisma.store.update({
+          where: { id: storeId },
+          data: {
+            hours: {
+              mon: { open: "09:00", close: "20:00" },
+              tue: { open: "09:00", close: "20:00" },
+              wed: { open: "09:00", close: "20:00" },
+              thu: { open: "09:00", close: "20:00" },
+              fri: { open: "09:00", close: "20:00" },
+              sat: { open: "09:00", close: "20:00" },
+              sun: { open: "09:00", close: "20:00" },
+            },
+          },
+        });
+      }
+    });
+
     it("skips audit log when store is closed", async () => {
       const { acceptanceAlert } = await import("./functions");
       const handler = getHandler(acceptanceAlert);

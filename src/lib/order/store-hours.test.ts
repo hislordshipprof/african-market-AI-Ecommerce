@@ -164,6 +164,28 @@ describe("isStoreOpen", () => {
     expect(isStoreOpen({ monday: range }, now === mondayNoonChicago ? CHICAGO : NY, now)).toBe(open);
   });
 
+  it.each([
+    ["Closed", new Date("2026-11-08T20:00:00Z")],
+    [" closed ", new Date("2026-11-08T08:00:00Z")],
+  ])("treats an explicit %j day as closed", (sunday, now) => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      isStoreOpen({ monday: "10:00 AM - 7:00 PM", sunday }, NY, now),
+    ).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("treats { closed: true } as closed for that day", () => {
+    expect(
+      isStoreOpen(
+        { monday: "10:00 AM - 7:00 PM", sunday: { closed: true } },
+        NY,
+        new Date("2026-11-08T20:00:00Z"),
+      ),
+    ).toBe(false);
+  });
+
   it("unparseable hours log and count as open", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(isStoreOpen({ monday: "all day" }, NY, mondayNoonEastern)).toBe(true);

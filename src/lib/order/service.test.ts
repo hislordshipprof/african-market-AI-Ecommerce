@@ -1758,6 +1758,15 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     if (result.ok) expect(result.capturedAmountCents).toBe(2 * 500 + 1 * 2000);
   });
 
+  async function expireCaptureBackoff(orderId: string) {
+    await platformAdminTransaction(async (tx) => {
+      await tx.auditLog.updateMany({
+        where: { entityId: orderId, action: "capture_retry" },
+        data: { createdAt: new Date(Date.now() - 20 * 60_000) },
+      });
+    });
+  }
+
   it("a capture 500 then a later attempt succeeds", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
@@ -1771,13 +1780,19 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(mid!.status).toBe("CAPTURING");
 
+    const blocked = await markReady(storeId, order.id);
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) expect(blocked.error).toMatch(/^Retrying in \d+ min$/);
+    expect(capturedPayments.has(order.paymentIntentId!)).toBe(false);
+
+    await expireCaptureBackoff(order.id);
     const second = await markReady(storeId, order.id);
     expect(second.ok).toBe(true);
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("AWAITING_PICKUP");
   });
 
-  it("repeated capture 500s reach CAPTURE_FAILED", async () => {
+  it("repeated capture 500s release the hold instead of CAPTURE_FAILED", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
     setNextCaptureFailure(order.paymentIntentId!, 10);
@@ -1785,17 +1800,56 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
     for (const line of lines) await markLinePicked(storeId, line.id);
 
-    await markReady(storeId, order.id);
+    const first = await markReady(storeId, order.id);
+    expect(first.ok).toBe(false);
     for (let i = 0; i < 4; i++) {
+      await expireCaptureBackoff(order.id);
       await markReady(storeId, order.id);
     }
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("CAPTURE_FAILED");
-    const alerts = await storeScoped(storeId).auditLog.findMany({
-      where: { entityId: order.id, action: "capture_failed" },
+    expect(updated!.status).toBe("CANCELLED");
+    expect(capturedPayments.has(order.paymentIntentId!)).toBe(false);
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
+  });
+
+  it("a fifth 500 that Stripe already captured finalizes the capture", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    setNextCaptureFailure(pi, 10);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    let calls = 0;
+    const inner = fakeStripeProvider.capturePaymentIntent.bind(fakeStripeProvider);
+    setStripeProvider({
+      ...fakeStripeProvider,
+      capturePaymentIntent: async (id, amount, key, fee) => {
+        calls += 1;
+        if (calls === 5) capturedPayments.set(id, amount);
+        return inner(id, amount, key, fee);
+      },
     });
-    expect(alerts.length).toBe(1);
+
+    try {
+      await markReady(storeId, order.id);
+      for (let i = 0; i < 3; i++) {
+        await expireCaptureBackoff(order.id);
+        await markReady(storeId, order.id);
+      }
+      await expireCaptureBackoff(order.id);
+      const last = await markReady(storeId, order.id);
+      expect(calls).toBe(5);
+      expect(last.ok).toBe(true);
+      if (last.ok) expect(last.capturedAmountCents).toBe(capturedPayments.get(pi));
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("AWAITING_PICKUP");
+      expect(updated!.capturedAmountCents).toBe(capturedPayments.get(pi));
+    } finally {
+      setStripeProvider(fakeStripeProvider);
+    }
   });
 
   it("reconcile waits out capture backoff, then a later attempt can succeed", async () => {

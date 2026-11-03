@@ -155,54 +155,31 @@ async function captureAttemptNumber(storeId: string, orderId: string): Promise<n
   return prior + 1;
 }
 
-async function captureBackoffActive(storeId: string, orderId: string): Promise<boolean> {
+async function captureRetryWaitMs(storeId: string, orderId: string): Promise<number> {
   const latest = await storeScopedTransaction(storeId, async (tx) => {
     return tx.auditLog.findFirst({
       where: { entityId: orderId, action: "capture_retry" },
       orderBy: { createdAt: "desc" },
     });
   });
-  if (!latest) return false;
+  if (!latest) return 0;
   const after = latest.after as { attempt?: number } | null;
   const attempt = typeof after?.attempt === "number" ? after.attempt : 1;
-  return Date.now() - latest.createdAt.getTime() < captureBackoffMs(attempt);
+  const remaining = captureBackoffMs(attempt) - (Date.now() - latest.createdAt.getTime());
+  return remaining > 0 ? remaining : 0;
 }
 
-async function registerE2EPayment(paymentIntentId: string, authorizedCents: number): Promise<void> {
-  // `next start` is NODE_ENV=production. The e2e flag still selects the fake locally.
-  // Vercel must never register seed PaymentIntents on the fake.
-  if (process.env.E2E_FAKE_STRIPE !== "1" || process.env.VERCEL) {
-    return;
-  }
-  const { ensureAuthorizedAmount } = await import("../stripe/fake");
-  ensureAuthorizedAmount(paymentIntentId, authorizedCents);
-}
+type CaptureRetryResult =
+  | { ok: true; capturedAmountCents: number }
+  | { ok: false; error: string; resolved: "cancelled" | "pending" };
 
 async function noteCaptureServerError(
   storeId: string,
   orderId: string,
   attempt: number,
-): Promise<{ ok: false; error: string }> {
+): Promise<CaptureRetryResult> {
   if (attempt >= MAX_CAPTURE_ATTEMPTS) {
-    await storeScopedTransaction(storeId, async (tx) => {
-      await lockStoreRow(tx, storeId);
-      const current = await tx.order.findUnique({ where: { id: orderId } });
-      if (!current || current.status !== "CAPTURING") return;
-      await tx.order.update({ where: { id: orderId }, data: { status: "CAPTURE_FAILED" } });
-      await tx.auditLog.create({
-        data: {
-          storeId,
-          actorId: SYSTEM_ACTOR_ID,
-          actorEmail: SYSTEM_ACTOR_EMAIL,
-          action: "capture_failed",
-          entityType: "order",
-          entityId: orderId,
-          after: { attempt, alert: "store_and_platform" },
-        },
-      });
-    });
-    console.error(`Capture failed after ${attempt} attempts for order ${orderId}. Store and platform alerted.`);
-    return { ok: false, error: "Card capture failed after retries — contact the customer" };
+    return settleUnconfirmedCapture(storeId, orderId);
   }
 
   await storeScopedTransaction(storeId, async (tx) => {
@@ -219,7 +196,74 @@ async function noteCaptureServerError(
       },
     });
   });
-  return { ok: false, error: "Card capture failed temporarily; we'll retry" };
+  return { ok: false, error: "Card capture failed temporarily; we'll retry", resolved: "pending" };
+}
+
+async function settleUnconfirmedCapture(
+  storeId: string,
+  orderId: string,
+): Promise<CaptureRetryResult> {
+  const order = await storeScopedTransaction(storeId, async (tx) => {
+    return tx.order.findUnique({ where: { id: orderId } });
+  });
+  if (!order || order.status !== "CAPTURING" || !order.paymentIntentId) {
+    return { ok: false, error: "Order status changed during capture", resolved: "pending" };
+  }
+
+  const stripe = getStripeProvider();
+  let pi;
+  try {
+    pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
+  } catch (err) {
+    if (isRetryableProviderError(err)) {
+      return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+    }
+    throw err;
+  }
+
+  if (pi.status === "succeeded") {
+    await finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
+    return { ok: true, capturedAmountCents: pi.amountReceived };
+  }
+
+  if (pi.status === "requires_capture") {
+    try {
+      await stripe.cancelPaymentIntent(order.paymentIntentId, `cancel:${orderId}:release-hold`);
+    } catch (err) {
+      if (err instanceof ProviderStateError) {
+        const fresh = await stripe.retrievePaymentIntent(order.paymentIntentId);
+        if (fresh.status === "succeeded") {
+          await finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, fresh.amountReceived);
+          return { ok: true, capturedAmountCents: fresh.amountReceived };
+        }
+      } else if (isRetryableProviderError(err)) {
+        return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (pi.status === "canceled" || pi.status === "requires_capture") {
+    await finalizeCancelFromSweep(storeId, orderId);
+    return {
+      ok: false,
+      error: "Payment authorization was released — order cancelled; contact the customer",
+      resolved: "cancelled",
+    };
+  }
+
+  return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+}
+
+async function registerE2EPayment(paymentIntentId: string, authorizedCents: number): Promise<void> {
+  // `next start` is NODE_ENV=production. The e2e flag still selects the fake locally.
+  // Vercel must never register seed PaymentIntents on the fake.
+  if (process.env.E2E_FAKE_STRIPE !== "1" || process.env.VERCEL) {
+    return;
+  }
+  const { ensureAuthorizedAmount } = await import("../stripe/fake");
+  ensureAuthorizedAmount(paymentIntentId, authorizedCents);
 }
 
 async function persistRefundFailure(
@@ -477,6 +521,15 @@ export async function markReady(
     return { ok: true, capturedAmountCents: 0, voided: true };
   }
 
+  // A staff retry during the backoff would burn the remaining attempts in one tap.
+  if (validation.alreadyClaiming) {
+    const remaining = await captureRetryWaitMs(storeId, orderId);
+    if (remaining > 0) {
+      const minutes = Math.max(1, Math.ceil(remaining / 60_000));
+      return { ok: false, error: `Retrying in ${minutes} min` };
+    }
+  }
+
   // Phase 2: Stripe capture outside the transaction. A 5xx uses a new attempt key
   // because Stripe replays a stored 5xx for the same idempotency key for about 24 hours.
   const stripe = getStripeProvider();
@@ -493,7 +546,9 @@ export async function markReady(
     );
   } catch (err) {
     if (isRetryableProviderError(err)) {
-      return noteCaptureServerError(storeId, orderId, captureAttempt);
+      const settled = await noteCaptureServerError(storeId, orderId, captureAttempt);
+      if (settled.ok) return { ok: true, capturedAmountCents: settled.capturedAmountCents };
+      return { ok: false, error: settled.error };
     }
     if (err instanceof ProviderStateError) {
       await storeScopedTransaction(storeId, async (tx) => {
@@ -705,7 +760,7 @@ export async function reconcileStuckOrder(
 
   if (pi.status === "requires_capture") {
     if (order.status === "CAPTURING") {
-      if (await captureBackoffActive(storeId, orderId)) {
+      if ((await captureRetryWaitMs(storeId, orderId)) > 0) {
         return { ok: false, error: "capture_backoff" };
       }
       const attempt = await captureAttemptNumber(storeId, orderId);
@@ -722,7 +777,10 @@ export async function reconcileStuckOrder(
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {
         if (isRetryableProviderError(err)) {
-          return noteCaptureServerError(storeId, orderId, attempt);
+          const settled = await noteCaptureServerError(storeId, orderId, attempt);
+          if (settled.ok) return { ok: true, action: "finalized_capture" };
+          if (settled.resolved === "cancelled") return { ok: true, action: "finalized_cancel" };
+          return { ok: false, error: settled.error };
         }
         if (err instanceof ProviderStateError) {
           return finalizeCancelFromSweep(storeId, orderId);
