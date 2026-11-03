@@ -37,7 +37,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Locally several build lanes share one machine. Playwright's default (half the CPU cores) runs about 12
+  // browsers per lane and starves memory. E2E_WORKERS overrides it; scripts/build-ticket.sh sets it per lane.
+  workers: process.env.CI ? 1 : Number(process.env.E2E_WORKERS) || 4,
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",

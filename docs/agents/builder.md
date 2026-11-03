@@ -49,7 +49,7 @@ Run and pass all of these, in the worktree:
 4. `pnpm build`
 5. `pnpm test:e2e`: Playwright opens the running app and checks each acceptance criterion that has a visible result.
 
-While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts --workers=1`), and the affected unit tests (`pnpm test <path>`). Run the full e2e suite once, at the end, before you push the final commit. CI runs everything on the PR.
+While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts --workers=1`), and the affected unit tests (`pnpm test <path>`). When the work is ready, push and run `scripts/ci-local.sh` in the worktree. It runs steps 1–5 in full and records a `local-ci` commit status on the pushed HEAD; that status is the merge gate. GitHub Actions does not run on pushes. It runs only when the coordinator adds the `run-ci` label (milestone PRs), to save Actions minutes. Local e2e runs `E2E_WORKERS` browsers (default 4), so lanes sharing the machine don't starve memory.
 
 ### Definition of done (the coordinator rejects the PR if any is missing)
 - The branch is rebased on the latest `origin/main` (`git merge-base --is-ancestor origin/main HEAD` passes).
