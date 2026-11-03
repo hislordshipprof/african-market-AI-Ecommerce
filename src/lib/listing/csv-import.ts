@@ -1,6 +1,8 @@
 import { parse } from "csv-parse/sync";
-import { platform, storeScoped, storeScopedTransaction } from "../db";
+import { Prisma, platform, storeScoped, storeScopedTransaction, claimImportRow } from "../db";
 import type { Actor } from "./service";
+
+const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MB
 const MAX_ROWS = 5000;
@@ -350,73 +352,11 @@ export async function matchToMasterProducts(
   return result;
 }
 
-const importTokens = new Map<
-  string,
-  {
-    storeId: string;
-    csvText: string;
-    createdAt: number;
-    used: boolean;
-  }
->();
-
-const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
-
-function cleanExpiredTokens() {
-  const now = Date.now();
-  for (const [key, val] of importTokens) {
-    if (now - val.createdAt > TOKEN_TTL_MS) {
-      importTokens.delete(key);
-    }
-  }
-}
-
-export function createImportToken(storeId: string, csvText: string): string {
-  cleanExpiredTokens();
-  const token = crypto.randomUUID();
-  importTokens.set(token, { storeId, csvText, createdAt: Date.now(), used: false });
-  return token;
-}
-
-export function getImportTokenData(
-  token: string,
-  storeId: string,
-): { csvText: string } | null {
-  const data = importTokens.get(token);
-  if (!data) return null;
-  if (data.storeId !== storeId) return null;
-  if (Date.now() - data.createdAt > TOKEN_TTL_MS) {
-    importTokens.delete(token);
-    return null;
-  }
-  if (data.used) return null;
-  return { csvText: data.csvText };
-}
-
-export function getAndMarkImportToken(
-  token: string,
-  storeId: string,
-): { csvText: string } | null {
-  const data = importTokens.get(token);
-  if (!data) return null;
-  if (data.storeId !== storeId) return null;
-  if (Date.now() - data.createdAt > TOKEN_TTL_MS) {
-    importTokens.delete(token);
-    return null;
-  }
-  if (data.used) return null;
-  data.used = true;
-  return { csvText: data.csvText };
-}
-
-export function markImportTokenUsed(token: string): void {
-  const data = importTokens.get(token);
-  if (data) data.used = true;
-}
 
 export async function generatePreview(
   storeId: string,
   csvText: string,
+  actorId: string,
 ): Promise<CsvPreviewResult> {
   const { rows, errors, unknownColumns } = parseCsvText(csvText);
 
@@ -438,12 +378,20 @@ export async function generatePreview(
 
   const scoped = storeScoped(storeId);
   const existingListings = await scoped.listing.findMany({
-    where: { masterProductId: { not: null } },
-    select: { id: true, masterProductId: true },
+    select: { id: true, masterProductId: true, customName: true },
   });
-  const existingMasterIds = new Set(existingListings.map((l) => l.masterProductId!));
+  const existingMasterIds = new Set(
+    existingListings.filter((l) => l.masterProductId).map((l) => l.masterProductId!),
+  );
   const existingListingByMaster = new Map(
-    existingListings.map((l) => [l.masterProductId!, l.id]),
+    existingListings
+      .filter((l) => l.masterProductId)
+      .map((l) => [l.masterProductId!, l.id]),
+  );
+  const existingCustomNames = new Map(
+    existingListings
+      .filter((l) => !l.masterProductId && l.customName)
+      .map((l) => [normalizeForMatch(l.customName!), l.id]),
   );
 
   const matches: CsvPreviewMatch[] = [];
@@ -466,7 +414,18 @@ export async function generatePreview(
     const productMatches = matchMap.get(row.name) ?? [];
 
     if (productMatches.length === 0) {
-      newItems.push({ row: row.row, csvName: row.name, reason: "no master product match" });
+      const existingCustomId = existingCustomNames.get(normName);
+      if (existingCustomId) {
+        alreadyListed.push({
+          row: row.row,
+          csvName: row.name,
+          masterProductId: "",
+          masterProductName: row.name,
+          existingListingId: existingCustomId,
+        });
+      } else {
+        newItems.push({ row: row.row, csvName: row.name, reason: "no master product match" });
+      }
     } else if (productMatches.length === 1) {
       const m = productMatches[0];
       if (existingMasterIds.has(m.product.id)) {
@@ -501,7 +460,15 @@ export async function generatePreview(
     }
   }
 
-  const importToken = createImportToken(storeId, csvText);
+  const importRecord = await scoped.listingImport.create({
+    data: {
+      storeId,
+      csvText,
+      rowCount: rows.length,
+      status: "pending",
+      createdById: actorId,
+    },
+  });
 
   return {
     matches,
@@ -511,14 +478,13 @@ export async function generatePreview(
     duplicates,
     errors,
     unknownColumns,
-    importToken,
+    importToken: importRecord.id,
   };
 }
 
 export interface CommitSelection {
   matchedRows: number[];
   newItemRows: number[];
-  duplicateRows: number[];
   ambiguousResolutions: Array<{
     row: number;
     masterProductId: string;
@@ -536,12 +502,22 @@ export async function commitImport(
   selection: CommitSelection,
   actor: Actor,
 ): Promise<CommitResult> {
-  const tokenData = getAndMarkImportToken(importToken, storeId);
-  if (!tokenData) {
+  const scoped = storeScoped(storeId);
+  const importRecord = await scoped.listingImport.findUnique({
+    where: { id: importToken },
+  });
+
+  if (!importRecord) {
     throw new Error("Import token is invalid, expired, or already used.");
   }
+  if (importRecord.status === "committed") {
+    throw new Error("This import has already been committed.");
+  }
+  if (Date.now() - importRecord.createdAt.getTime() > TOKEN_TTL_MS) {
+    throw new Error("Import token has expired. Please upload the file again.");
+  }
 
-  const { rows, errors } = parseCsvText(tokenData.csvText);
+  const { rows } = parseCsvText(importRecord.csvText);
   const rowMap = new Map(rows.map((r) => [r.row, r]));
 
   const selectedRows = new Set([
@@ -555,13 +531,6 @@ export async function commitImport(
 
   const uniqueNames = [...new Set(rows.map((r) => r.name))];
   const matchMap = await matchToMasterProducts(uniqueNames);
-
-  const scoped = storeScoped(storeId);
-  const existingListings = await scoped.listing.findMany({
-    where: { masterProductId: { not: null } },
-    select: { id: true, masterProductId: true },
-  });
-  const existingMasterIds = new Set(existingListings.map((l) => l.masterProductId!));
 
   interface ListingToCreate {
     masterProductId: string | null;
@@ -584,8 +553,6 @@ export async function commitImport(
 
     if (productMatches.length === 1) {
       const m = productMatches[0];
-      if (existingMasterIds.has(m.product.id)) continue;
-
       toCreate.push({
         masterProductId: m.product.id,
         customName: null,
@@ -614,11 +581,13 @@ export async function commitImport(
     const row = rowMap.get(resolution.row);
     if (!row) continue;
 
-    if (existingMasterIds.has(resolution.masterProductId)) continue;
-
     const allProducts = (matchMap.get(row.name) ?? []).map((m) => m.product);
     const selectedProduct = allProducts.find((p) => p.id === resolution.masterProductId);
-    if (!selectedProduct) continue;
+    if (!selectedProduct) {
+      throw new Error(
+        `Resolution for row ${resolution.row} references product ${resolution.masterProductId} which is not in the match list.`,
+      );
+    }
 
     toCreate.push({
       masterProductId: selectedProduct.id,
@@ -654,44 +623,79 @@ export async function commitImport(
   }
 
   const listingIds = await storeScopedTransaction(storeId, async (tx) => {
+    const didClaim = await claimImportRow(tx, importToken);
+
+    if (!didClaim) {
+      throw new Error("This import has already been committed.");
+    }
+
+    const existingListings = await tx.listing.findMany({
+      select: { id: true, masterProductId: true, customName: true },
+    });
+    const existingMasterIds = new Set(
+      existingListings.filter((l) => l.masterProductId).map((l) => l.masterProductId!),
+    );
+    const existingCustomNames = new Set(
+      existingListings
+        .filter((l) => !l.masterProductId && l.customName)
+        .map((l) => normalizeForMatch(l.customName!)),
+    );
+
     const ids: string[] = [];
 
     for (const item of dedupedToCreate) {
-      const listing = await tx.listing.create({
-        data: {
-          storeId,
-          masterProductId: item.masterProductId,
-          customName: item.customName,
-          price: item.price,
-          stockMode: item.stockMode,
-          qty: item.qty,
-          status: item.status,
-          frozen: item.frozen,
-          perishable: item.perishable,
-        },
-      });
-      ids.push(listing.id);
+      if (item.masterProductId && existingMasterIds.has(item.masterProductId)) continue;
+      if (item.customName && existingCustomNames.has(normalizeForMatch(item.customName))) continue;
 
-      await tx.listingVariant.create({
-        data: {
-          listingId: listing.id,
-          label: "Default",
-          price: item.price,
-          weightG: 1,
-        },
-      });
-
-      if (item.stockMode === "counted" && (item.qty ?? 0) > 0) {
-        await tx.stockEvent.create({
+      try {
+        const listing = await tx.listing.create({
           data: {
             storeId,
-            listingId: listing.id,
-            type: "recount",
-            delta: item.qty!,
-            actorId: actor.id,
+            masterProductId: item.masterProductId,
+            customName: item.customName,
+            price: item.price,
+            stockMode: item.stockMode,
+            qty: item.qty,
+            status: item.status,
+            frozen: item.frozen,
+            perishable: item.perishable,
           },
         });
+        ids.push(listing.id);
+
+        await tx.listingVariant.create({
+          data: {
+            listingId: listing.id,
+            label: "Default",
+            price: item.price,
+            weightG: 1,
+          },
+        });
+
+        if (item.stockMode === "counted" && (item.qty ?? 0) > 0) {
+          await tx.stockEvent.create({
+            data: {
+              storeId,
+              listingId: listing.id,
+              type: "recount",
+              delta: item.qty!,
+              actorId: actor.id,
+            },
+          });
+        }
+      } catch (e) {
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === "P2002"
+        ) {
+          continue;
+        }
+        throw e;
       }
+    }
+
+    if (ids.length === 0) {
+      throw new Error("All selected listings are already listed in this store.");
     }
 
     await tx.auditLog.create({

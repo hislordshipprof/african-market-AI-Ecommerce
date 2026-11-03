@@ -74,6 +74,7 @@ export function storeScoped(storeId: string) {
     storeInvite: wrapDelegate(storeId, prisma.storeInvite),
     listing: wrapDelegate(storeId, prisma.listing),
     listingVariant: wrapDelegate(storeId, prisma.listingVariant),
+    listingImport: wrapDelegate(storeId, prisma.listingImport),
     stockEvent: wrapDelegate(storeId, prisma.stockEvent),
     auditLog: wrapDelegate(storeId, prisma.auditLog),
     storeBanner: wrapDelegate(storeId, prisma.storeBanner),
@@ -133,7 +134,7 @@ export async function platformAdminTransaction<T>(
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "$queryRaw" | "$executeRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -141,6 +142,7 @@ export async function storeScopedTransaction<T>(
     return fn({
       listing: tx.listing,
       listingVariant: tx.listingVariant,
+      listingImport: tx.listingImport,
       stockEvent: tx.stockEvent,
       auditLog: tx.auditLog,
       cart: tx.cart,
@@ -149,6 +151,7 @@ export async function storeScopedTransaction<T>(
       order: tx.order,
       orderLine: tx.orderLine,
       $queryRaw: tx.$queryRaw.bind(tx),
+      $executeRaw: tx.$executeRaw.bind(tx),
     });
   });
 }
@@ -195,6 +198,21 @@ export async function lockCartLineByVariant(
     FOR UPDATE
   `;
   return rows[0] ?? null;
+}
+
+export async function claimImportRow(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  importToken: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    UPDATE listing_imports
+    SET status = 'committed', committed_at = NOW()
+    WHERE id = ${importToken}
+      AND status IN ('pending', 'failed')
+      AND created_at > NOW() - INTERVAL '30 minutes'
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 export async function storeScopedRawQuery<T>(

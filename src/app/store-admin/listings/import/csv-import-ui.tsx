@@ -43,7 +43,6 @@ import {
 
 interface Props {
   storeName: string;
-  storeSlug: string;
 }
 
 type Step = "upload" | "preview" | "success";
@@ -95,7 +94,6 @@ export function CsvImportUi({ storeName }: Props) {
     const selection: CommitSelection = {
       matchedRows: [...selectedMatches],
       newItemRows: [...selectedNew],
-      duplicateRows: [],
       ambiguousResolutions: [],
     };
 

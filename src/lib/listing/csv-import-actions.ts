@@ -35,14 +35,16 @@ export async function csvPreviewAction(
   if (sizeError) return { error: sizeError };
 
   const csvText = await file.text();
-  const preview = await generatePreview(session.store.id, csvText);
+  const preview = await generatePreview(session.store.id, csvText, session.user.id);
 
-  if (
-    preview.matches.length === 0 &&
-    preview.newItems.length === 0 &&
-    preview.ambiguous.length === 0 &&
-    preview.errors.length > 0
-  ) {
+  const hasContent =
+    preview.matches.length > 0 ||
+    preview.newItems.length > 0 ||
+    preview.ambiguous.length > 0 ||
+    preview.alreadyListed.length > 0 ||
+    preview.duplicates.length > 0;
+
+  if (!hasContent && preview.errors.length > 0) {
     return { error: preview.errors[0].reason };
   }
 
@@ -75,7 +77,7 @@ export async function csvCommitAction(
     return { result };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
-    const safe = /^(Import token|No rows|No valid)/.test(msg);
+    const safe = /^(Import token|This import|No rows|No valid|All selected|Resolution for)/.test(msg);
     if (!safe) console.error("[csv-import] commit error:", e);
     return { error: safe ? msg : "Import failed. Please try again." };
   }
