@@ -5,6 +5,7 @@ import Image from "next/image";
 import { editorial } from "@/lib/storefront/editorial";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
+import { authClient } from "@/lib/auth-client";
 import type {
   CustomerProfile,
   FlowAddress,
@@ -12,6 +13,7 @@ import type {
   FlowOrder,
   FlowStore,
 } from "@/lib/customer-flow/contracts";
+import type { CustomerProfile as RealCustomerProfile } from "@/lib/customer-auth";
 import { Button, EmptyState } from "../primitives";
 import {
   AddressCard,
@@ -29,6 +31,7 @@ type Props = {
   settings: FlowStore;
   catalog: FlowCatalogItem[];
   enabled: boolean;
+  customer?: RealCustomerProfile | null;
 };
 const message = (e: unknown) =>
   e instanceof Error ? e.message : "Something went wrong. Please try again.";
@@ -172,10 +175,21 @@ export function AccountSignIn(props: Props) {
   );
 }
 export function AccountFlow(props: Props) {
+  const router = useRouter();
   const services = useServices(props);
-  const [profile, setProfile] = useState<CustomerProfile | null>(null);
+  const { customer } = props;
+  const realProfile: CustomerProfile | null = customer
+    ? {
+        id: customer.id,
+        name: customer.name,
+        phone: customer.phone ?? "",
+        email: customer.email ?? "",
+        addresses: [],
+      }
+    : null;
+  const [profile, setProfile] = useState<CustomerProfile | null>(realProfile);
   const [orders, setOrders] = useState<FlowOrder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!customer);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [query, setQuery] = useState("");
@@ -183,7 +197,7 @@ export function AccountFlow(props: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (!services) return;
+    if (customer || !services) return;
     let active = true;
     Promise.all([services.auth.profile(), services.tracking.list()])
       .then(([p, o]) => {
@@ -201,7 +215,7 @@ export function AccountFlow(props: Props) {
     return () => {
       active = false;
     };
-  }, [services]);
+  }, [services, customer]);
   async function save(next: CustomerProfile) {
     if (!services) return;
     setBusy(true);
@@ -228,14 +242,14 @@ export function AccountFlow(props: Props) {
       setBusy(false);
     }
   }
-  if (!services) return <ClosedFlow />;
+  if (!customer && !services) return <ClosedFlow />;
   return (
     <div className="sf-account">
       <FlowHeading
         title="Your account"
         description="A little home for your market life."
       />
-      <DemoNotice />
+      {!customer && <DemoNotice />}
       {error && <FlowError message={error} />}
       <FlowToast message={saved} onClose={() => setSaved("")} />
       {loading ? (
@@ -300,7 +314,12 @@ export function AccountFlow(props: Props) {
                     type="button"
                     className="sf-text-link"
                     onClick={async () => {
-                      await services.auth.signOut();
+                      if (customer) {
+                        await authClient.signOut();
+                        router.push("/account/sign-in");
+                        return;
+                      }
+                      await services?.auth.signOut();
                       setProfile(null);
                       setSaved("Signed out of your demo account.");
                     }}
