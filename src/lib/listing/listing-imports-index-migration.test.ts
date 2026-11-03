@@ -10,6 +10,9 @@ const execFileAsync = promisify(execFile);
 const MIGRATIONS = path.resolve(__dirname, "../../../prisma/migrations");
 const SCHEMA = "tmp_listing_imports_199";
 const connectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+// Shared with the weight-backfill replay. Concurrent CREATE in public raises
+// "tuple concurrently updated" when both scratch schemas replay at once.
+const REPLAY_LOCK = 199031030;
 
 // Replays every migration into an empty scratch schema. listing_imports has forced RLS;
 // index changes do not read or write rows, so the table owner (DIRECT_URL) can create
@@ -24,9 +27,14 @@ describe.skipIf(!connectionString)("listing_imports created_by index migration",
     await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
     await client.query(`CREATE SCHEMA ${SCHEMA}`);
     await client.query(`SET search_path = ${SCHEMA}, public`);
-    const dirs = fs.readdirSync(MIGRATIONS).filter((d) => /^\d/.test(d)).sort();
-    for (const dir of dirs) {
-      await client.query(fs.readFileSync(path.join(MIGRATIONS, dir, "migration.sql"), "utf8"));
+    await client.query("SELECT pg_advisory_lock($1)", [REPLAY_LOCK]);
+    try {
+      const dirs = fs.readdirSync(MIGRATIONS).filter((d) => /^\d/.test(d)).sort();
+      for (const dir of dirs) {
+        await client.query(fs.readFileSync(path.join(MIGRATIONS, dir, "migration.sql"), "utf8"));
+      }
+    } finally {
+      await client.query("SELECT pg_advisory_unlock($1)", [REPLAY_LOCK]);
     }
   }, 120_000);
 
