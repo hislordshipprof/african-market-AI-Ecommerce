@@ -177,6 +177,19 @@ export async function lockListingRow(tx: Pick<PrismaClient, "$queryRaw">, listin
   await tx.$queryRaw`SELECT 1 FROM listings WHERE id = ${listingId} FOR UPDATE`;
 }
 
+export async function findOrphanedAuthorizedOrders(): Promise<Array<{ id: string; storeId: string }>> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+      SELECT id, store_id FROM orders
+      WHERE status = 'AUTHORIZED'
+        AND inngest_event_sent_at IS NULL
+        AND created_at < NOW() - INTERVAL '1 minute'
+      LIMIT 50
+    `;
+    return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
+  });
+}
+
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;

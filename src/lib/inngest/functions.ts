@@ -1,5 +1,5 @@
 import { inngest } from "./client";
-import { storeScopedTransaction, lockStoreRow, platformAdminTransaction } from "../db";
+import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders } from "../db";
 import { platform } from "../db";
 import { autoCancelOrder } from "../order/service";
 import { isStoreOpen } from "../order/store-hours";
@@ -69,6 +69,13 @@ export const autoCancel = inngest.createFunction(
 
       if (!order || order.status !== "AUTHORIZED") return;
 
+      const store = await platform.store.findUnique({
+        where: { id: storeId },
+        select: { hours: true, timezone: true },
+      });
+
+      if (!isStoreOpen(store?.hours, store?.timezone ?? "America/New_York")) return;
+
       await autoCancelOrder(storeId, orderId);
     });
   },
@@ -81,21 +88,12 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
   },
   async ({ step }) => {
     const orphaned = await step.run("find-orphaned", async () => {
-      return platformAdminTransaction(async (tx) => {
-        const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-          SELECT id, store_id FROM orders
-          WHERE status = 'AUTHORIZED'
-            AND inngest_event_sent_at IS NULL
-            AND created_at < NOW() - INTERVAL '1 minute'
-          LIMIT 50
-        `;
-        return rows;
-      });
+      return findOrphanedAuthorizedOrders();
     });
 
     for (const row of orphaned) {
       await step.run(`resend-${row.id}`, async () => {
-        await sendOrderAuthorized(row.store_id, row.id);
+        await sendOrderAuthorized(row.storeId, row.id);
       });
     }
   },

@@ -334,9 +334,7 @@ export async function placeOrder(
     return order.id;
   });
 
-  await sendOrderAuthorized(storeId, orderId).catch((err) => {
-    console.error("sendOrderAuthorized failed (non-fatal):", err);
-  });
+  await sendOrderAuthorized(storeId, orderId);
 
   return { token: orderId, quote };
 }
