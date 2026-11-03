@@ -55,6 +55,16 @@ function getAuthPath(req: NextRequest): string {
   return new URL(req.url).pathname.replace(/^\/api\/auth/, "");
 }
 
+async function parseJsonBody(
+  req: NextRequest,
+): Promise<Record<string, unknown> | null> {
+  try {
+    return await req.clone().json();
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const bad = rejectIfBadCallback(req) ?? rejectIfAdminHost(req);
   if (bad) return bad;
@@ -64,19 +74,18 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const bad = rejectIfAdminHost(req);
   if (bad) return bad;
-  const cloned = req.clone();
-  try {
-    const body = await cloned.json();
+  const body = await parseJsonBody(req);
+  if (body) {
     for (const param of CALLBACK_PARAMS) {
-      if (body?.[param] && !isRelativeUrl(body[param])) {
+      if (body[param] && !isRelativeUrl(body[param] as string)) {
         return NextResponse.json(
           { error: `${param} must be a relative path` },
           { status: 400 },
         );
       }
     }
-    if (getAuthPath(req) === "/phone-number/send-otp" && body?.phoneNumber) {
-      const normalized = normalizePhone(body.phoneNumber);
+    if (getAuthPath(req) === "/phone-number/send-otp" && body.phoneNumber) {
+      const normalized = normalizePhone(body.phoneNumber as string);
       if (normalized) {
         try {
           await checkPhoneRateLimit(normalized);
@@ -91,8 +100,6 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-  } catch {
-    // not JSON body — pass through
   }
   return rawPOST(req);
 }
