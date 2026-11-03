@@ -73,7 +73,7 @@ export async function csvCommitAction(
       selection,
       toActor(session.user),
     );
-    revalidateStorefront(session.store.slug);
+    revalidateStorefront(session.store.id);
     return { result };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";

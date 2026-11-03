@@ -44,6 +44,18 @@ describe("parsePriceToCents", () => {
   it("handles $ with space", () => {
     expect(parsePriceToCents("$ 5.99")).toBe(599);
   });
+  it("N4: rejects European comma decimal like '3,50'", () => {
+    expect(parsePriceToCents("3,50")).toBeNull();
+  });
+  it("N4: rejects misplaced commas like '12,34,56'", () => {
+    expect(parsePriceToCents("12,34,56")).toBeNull();
+  });
+  it("N4: accepts valid thousands separator '1,234'", () => {
+    expect(parsePriceToCents("1,234")).toBe(123400);
+  });
+  it("N4: accepts multi-group thousands '1,234,567.89'", () => {
+    expect(parsePriceToCents("1,234,567.89")).toBe(123456789);
+  });
   it("A1: rejects price that overflows PostgreSQL int4 (>= $21,474,836.48)", () => {
     expect(parsePriceToCents("30000000.00")).toBeNull();
     expect(parsePriceToCents("21474836.48")).toBeNull();
@@ -842,7 +854,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
 
     const scopedA = storeScoped(storeAId);
     const listing = await scopedA.listing.findUnique({ where: { id: result.listingIds[0] } });
-    expect(listing!.customName).toContain("'=");
+    expect(listing!.customName).toBe(`=HYPERLINK("http://evil.com")Attack`);
   });
 
   it("A1: formula-prefixed custom name detected as already-listed on re-import", async () => {

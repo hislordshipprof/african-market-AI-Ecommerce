@@ -4,7 +4,7 @@ import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -158,6 +158,7 @@ export function CsvImportUi({ storeName }: Props) {
   }
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-ink)]">
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
         {/* Header */}
@@ -250,6 +251,7 @@ export function CsvImportUi({ storeName }: Props) {
         </AnimatePresence>
       </div>
     </div>
+    </MotionConfig>
   );
 }
 

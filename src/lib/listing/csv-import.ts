@@ -9,9 +9,7 @@ const MAX_ROWS = 5000;
 const MAX_NAME_LENGTH = 200;
 
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
-const FORMULA_RE = /^[=+\-@]/;
 const PRICE_DOLLAR_RE = /^\$?\s*/;
-const PRICE_COMMAS_RE = /,/g;
 
 export interface CsvPreviewMatch {
   row: number;
@@ -272,26 +270,22 @@ export function parseCsvText(raw: string): {
   return { rows, errors, unknownColumns };
 }
 
+const PRICE_THOUSANDS_RE = /^\d{1,3}(,\d{3})*(\.\d{1,2})?$/;
+const PRICE_PLAIN_RE = /^\d+(\.\d{1,2})?$/;
+
 export function parsePriceToCents(raw: string): number | null {
-  let s = raw.replace(PRICE_DOLLAR_RE, "").replace(PRICE_COMMAS_RE, "").trim();
+  let s = raw.replace(PRICE_DOLLAR_RE, "").trim();
   if (!s) return null;
 
   const negative = s.startsWith("-");
   if (negative) s = s.slice(1);
 
-  const dotIndex = s.indexOf(".");
-  if (dotIndex !== -1) {
-    const decimals = s.length - dotIndex - 1;
-    if (decimals > 2) return null;
-  }
+  if (!PRICE_THOUSANDS_RE.test(s) && !PRICE_PLAIN_RE.test(s)) return null;
 
-  const parts = s.split(".");
-  if (parts.length > 2) return null;
-
+  const clean = s.replace(/,/g, "");
+  const parts = clean.split(".");
   const intPart = parts[0];
   const decPart = (parts[1] ?? "").padEnd(2, "0");
-
-  if (!/^\d+$/.test(intPart) || !/^\d{2}$/.test(decPart)) return null;
 
   const cents = parseInt(intPart, 10) * 100 + parseInt(decPart, 10);
   if (cents > 2_147_483_647) return null;
@@ -415,7 +409,7 @@ export async function generatePreview(
     const productMatches = matchMap.get(row.name) ?? [];
 
     if (productMatches.length === 0) {
-      const existingCustomId = existingCustomNames.get(normalizeForMatch(sanitizeName(row.name)));
+      const existingCustomId = existingCustomNames.get(normalizeForMatch(row.name));
       if (existingCustomId) {
         alreadyListed.push({
           row: row.row,
@@ -587,7 +581,7 @@ export async function commitImport(
     } else if (productMatches.length === 0) {
       toCreate.push({
         masterProductId: null,
-        customName: sanitizeName(row.name),
+        customName: row.name,
         price: row.price,
         stockMode: row.stockMode ?? "status",
         qty: row.stockMode === "counted" ? (row.qty ?? 0) : null,
@@ -740,13 +734,6 @@ export async function commitImport(
   }, { timeout: 30_000, maxWait: 15_000 });
 
   return { createdCount: listingIds.length, listingIds };
-}
-
-function sanitizeName(name: string): string {
-  if (FORMULA_RE.test(name)) {
-    return "'" + name;
-  }
-  return name;
 }
 
 export function validateFileSize(bytes: number): string | null {
