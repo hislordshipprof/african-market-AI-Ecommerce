@@ -179,7 +179,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       rawPrisma.listing.create({
         data: {
           storeId: storeAId,
-          masterProductId,
+          masterProductId: null,
           customName: "Deactivated Pumpkin",
           price: 300,
           stockMode: "counted",
@@ -200,7 +200,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       rawPrisma.listing.create({
         data: {
           storeId: storeAId,
-          masterProductId,
+          masterProductId: null,
           customName: "E2E Sentinel Pumpkin",
           price: 400,
           stockMode: "counted",
@@ -229,7 +229,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       ]);
       return (r[2] as { id: string }).id;
     };
-    frozenListingId = await mkListing({ masterProductId, customName: "Frozen Ugu Cubes", frozen: true });
+    frozenListingId = await mkListing({ masterProductId: null, customName: "Frozen Ugu Cubes", frozen: true });
     customOnlyListingId = await mkListing({ masterProductId: null, customName: "Custom Item", frozen: false });
 
     // Create a collection in store A with an item
