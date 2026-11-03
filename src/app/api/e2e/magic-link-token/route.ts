@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authPrisma } from "@/lib/db";
+import { findRecentMagicLinkVerifications } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   if (process.env.E2E_STORE_OVERRIDE !== "1") {
@@ -11,12 +11,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "email required" }, { status: 400 });
   }
 
-  const rows = await authPrisma.$queryRaw<
-    Array<{ identifier: string; value: string }>
-  >`SELECT identifier, value FROM verifications
-    WHERE identifier LIKE 'magic-link:%'
-    ORDER BY created_at DESC
-    LIMIT 5`;
+  const rows = await findRecentMagicLinkVerifications();
 
   for (const row of rows) {
     try {
