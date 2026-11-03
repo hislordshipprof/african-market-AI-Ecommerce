@@ -85,12 +85,25 @@ export async function deleteE2eListings(
         await tx.stockEvent.deleteMany({ where: { storeId, listingId: { in: ids } } });
         const listings = await tx.listing.deleteMany({ where: { storeId, id: { in: ids } } });
 
+        // Lock the candidate orders before checking they are empty and hold the locks to commit. Inserting
+        // an order line takes a FOR KEY SHARE lock on its order, so a writer adding a normal line now waits
+        // for this sweep and then fails its FK, instead of committing a line the cascade would destroy.
+        if (touchedOrderIds.length > 0) {
+          await tx.$queryRaw`SELECT id FROM orders WHERE store_id = ${storeId} AND id = ANY(${touchedOrderIds}::text[]) ORDER BY id FOR UPDATE`;
+        }
         const emptied = await tx.order.findMany({
           where: { storeId, id: { in: touchedOrderIds }, lines: { none: {} } },
           select: { id: true, customerId: true },
         });
-        const orders = await tx.order.deleteMany({ where: { storeId, id: { in: emptied.map((o) => o.id) } } });
+        const orders = await tx.order.deleteMany({
+          where: { storeId, id: { in: emptied.map((o) => o.id) }, lines: { none: {} } },
+        });
         const candidateCustomerIds = [...new Set(emptied.map((o) => o.customerId))];
+        // Same for customers: a cart insert takes FOR KEY SHARE on its customer, so locking them first makes
+        // a cart written during the sweep wait (and then fail its FK) instead of being SET NULL silently.
+        if (candidateCustomerIds.length > 0) {
+          await tx.$queryRaw`SELECT id FROM customers WHERE store_id = ${storeId} AND id = ANY(${candidateCustomerIds}::text[]) ORDER BY id FOR UPDATE`;
+        }
         // carts.customer_id is a single-column FK (ON DELETE SET NULL), so a cart in ANOTHER store can
         // point at this store's customer, and the store-scoped context cannot see it. Look for such carts
         // under the platform-admin policy (read-only), then drop back to the store context for the delete.

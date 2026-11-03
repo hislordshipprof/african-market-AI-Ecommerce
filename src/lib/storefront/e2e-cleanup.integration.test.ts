@@ -339,7 +339,8 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
       email: `${l.id}@example.com`,
       phone: "5550100",
     }));
-    const base = 5_000_000 + Math.floor(Math.random() * 1_000_000);
+    const base = RUN_BASE + 10_000 + orderNo;
+    orderNo += N;
     const orders = listings.map((l, i) => ({
       id: `${l.id}-o`,
       storeId: storeA,
@@ -408,22 +409,14 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
   });
 
   /**
-   * Wraps the real interactive transaction so a sweep pauses right after `model.method` returns. Both
-   * sweeps wait at the barrier until each has arrived, or 1.5 s pass (a sweep serialized behind a lock
-   * never arrives, which is fine). No DB result is replaced.
+   * Wraps the real interactive transaction so `hook` runs right after `model.method` returns, before the
+   * sweep continues. No DB result is replaced; the hook only schedules a competing writer.
    */
-  function barrierClient(
-    model: "order" | "customer",
+  function hookClient(
+    model: "order" | "customer" | "cart",
     method: "findMany" | "deleteMany",
-    barrier: { n: number; waiters: Array<() => void> },
+    hook: () => Promise<void>,
   ): PrismaClient {
-    const arrive = () =>
-      new Promise<void>((resolve) => {
-        barrier.n += 1;
-        barrier.waiters.push(resolve);
-        if (barrier.n >= 2) barrier.waiters.splice(0).forEach((w) => w());
-        else setTimeout(resolve, 1500);
-      });
     const wrapDelegate = (d: object) =>
       new Proxy(d, {
         get(t, m) {
@@ -431,7 +424,7 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
           if (m !== method) return typeof f === "function" ? f.bind(t) : f;
           return async (...a: unknown[]) => {
             const r = await f.apply(t, a);
-            await arrive();
+            await hook();
             return r;
           };
         },
@@ -455,6 +448,81 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
       },
     }) as unknown as PrismaClient;
   }
+
+  /** Both sweeps wait here until each has arrived, or 1.5 s pass (a sweep serialized behind a lock never arrives). */
+  function barrierClient(model: "order" | "customer", method: "findMany" | "deleteMany", barrier: { n: number; waiters: Array<() => void> }) {
+    return hookClient(model, method, () =>
+      new Promise<void>((resolve) => {
+        barrier.n += 1;
+        barrier.waiters.push(resolve);
+        if (barrier.n >= 2) barrier.waiters.splice(0).forEach((w) => w());
+        else setTimeout(resolve, 1500);
+      }),
+    );
+  }
+
+  /**
+   * Starts a competing committed write from the hook and waits up to 1.5 s for it. A correct sweep holds
+   * row locks, so the writer blocks (never settles inside the window) and then fails its FK once the sweep
+   * commits; an unlocked sweep lets it commit mid-sweep. The write's own outcome is returned for assertions.
+   */
+  function racingWrite(write: () => Promise<unknown>) {
+    const state: { outcome?: Promise<boolean> } = {};
+    const hook = async () => {
+      state.outcome = write().then(
+        () => true,
+        () => false,
+      );
+      await Promise.race([state.outcome, new Promise((r) => setTimeout(r, 1500))]);
+    };
+    return { state, hook };
+  }
+
+  it("a normal line added to an emptied order mid-sweep is never cascaded away (AD2)", async () => {
+    await resetA();
+    const e = await seedListing(storeA, nm("late-line"));
+    const real = await seedListing(storeA, "Seeded Late " + RUN);
+    const c = await seedCustomer(storeA);
+    const o = await seedOrder(storeA, c, [e.variantId]);
+    const { state, hook } = racingWrite(() =>
+      asStore(raw, storeA, (tx) =>
+        tx.orderLine.create({
+          data: { storeId: storeA, orderId: o, listingVariantId: real.variantId, qtyOrdered: 1, unitPriceCents: 500 },
+        }),
+      ),
+    );
+    await deleteE2eListings({ storeSlug: slugA, client: hookClient("order", "findMany", hook) });
+    const inserted = await state.outcome;
+    if (inserted) {
+      // The writer won: its line and order must have survived the sweep.
+      expect(await inA().order(o)).toBe(true);
+      expect(await inA().orderLines(o)).toBe(1);
+    } else {
+      // The sweep won: the writer failed its FK instead of being silently destroyed.
+      expect(await inA().order(o)).toBe(false);
+    }
+  });
+
+  it("a store-B cart created for the customer mid-sweep keeps its customer (SP1/AD1)", async () => {
+    await resetA();
+    const e = await seedListing(storeA, nm("late-cart"));
+    const c = await seedCustomer(storeA);
+    await seedOrder(storeA, c, [e.variantId]);
+    const kB = uid("kb");
+    const { state, hook } = racingWrite(() =>
+      asStore(raw, storeB, (tx) => tx.cart.create({ data: { id: kB, storeId: storeB, customerId: c } })),
+    );
+    await deleteE2eListings({ storeSlug: slugA, client: hookClient("cart", "findMany", hook) });
+    const inserted = await state.outcome;
+    const cart = await asAdmin(raw, (tx) => tx.cart.findUnique({ where: { id: kB } }));
+    if (inserted) {
+      expect(cart?.customerId).toBe(c);
+      expect(await inA().customer(c)).toBe(true);
+    } else {
+      expect(cart).toBeNull();
+    }
+    await asAdmin(raw, (tx) => tx.cart.deleteMany({ where: { id: kB } }));
+  });
 
   it("concurrent sweeps with different names still remove the order they jointly empty (AD2)", async () => {
     await resetA();
