@@ -11,14 +11,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "email required" }, { status: 400 });
   }
 
-  const rows = await authPrisma.$queryRawUnsafe<
+  const rows = await authPrisma.$queryRaw<
     Array<{ identifier: string; value: string }>
-  >(
-    `SELECT identifier, value FROM verifications
-     WHERE identifier LIKE 'magic-link:%'
-     ORDER BY created_at DESC
-     LIMIT 5`,
-  );
+  >`SELECT identifier, value FROM verifications
+    WHERE identifier LIKE 'magic-link:%'
+    ORDER BY created_at DESC
+    LIMIT 5`;
 
   for (const row of rows) {
     try {
