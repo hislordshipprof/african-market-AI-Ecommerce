@@ -67,6 +67,8 @@ model User {
   name             String
   email            String    @unique
   emailVerified    Boolean   @default(false) @map("email_verified")
+  phone            String?   @unique
+  phoneVerified    Boolean   @default(false) @map("phone_verified")
   image            String?
   role             String    @default("customer")
   twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
@@ -80,6 +82,7 @@ model User {
   memberships StoreMembership[]
   invitesSent StoreInvite[]
   stockEvents StockEvent[]
+  customers   Customer[]
 
   @@map("users")
 }
@@ -449,19 +452,21 @@ model Customer {
   storeId          String   @map("store_id")
   userId           String?  @map("user_id")
   name             String
-  email            String
-  phone            String
+  email            String?
+  phone            String?
   marketingConsent Boolean  @default(false) @map("marketing_consent")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  store  Store   @relation(fields: [storeId], references: [id])
+  store  Store    @relation(fields: [storeId], references: [id])
+  user   User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
   orders Order[]
   carts  Cart[]
 
   @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, email])
+  @@index([userId])
   @@map("customers")
 }
 
