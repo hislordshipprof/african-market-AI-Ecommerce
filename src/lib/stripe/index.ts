@@ -9,6 +9,7 @@ export type {
   WebhookEvent,
   CaptureResult,
   CancelResult,
+  RetrieveResult,
 } from "./types";
 export { deriveOnboardingStatus } from "./types";
 

@@ -5,6 +5,7 @@ import type {
   WebhookEvent,
   CaptureResult,
   CancelResult,
+  RetrieveResult,
 } from "./types";
 
 const VALID_WEBHOOK_SIGNATURE = "fake_valid_sig";
@@ -74,6 +75,11 @@ const fakeStripeProvider: StripeProvider = {
   },
 
   async capturePaymentIntent(paymentIntentId, amountCents) {
+    if (cancelledPayments.has(paymentIntentId)) {
+      throw new Error(
+        `PaymentIntent ${paymentIntentId} has already been canceled and cannot be captured.`,
+      );
+    }
     if (capturedPayments.has(paymentIntentId)) {
       return {
         paymentIntentId,
@@ -96,6 +102,11 @@ const fakeStripeProvider: StripeProvider = {
   },
 
   async cancelPaymentIntent(paymentIntentId) {
+    if (capturedPayments.has(paymentIntentId)) {
+      throw new Error(
+        `PaymentIntent ${paymentIntentId} has already been captured (succeeded) and cannot be canceled.`,
+      );
+    }
     if (cancelledPayments.has(paymentIntentId)) {
       return {
         paymentIntentId,
@@ -107,6 +118,32 @@ const fakeStripeProvider: StripeProvider = {
       paymentIntentId,
       status: "canceled",
     } satisfies CancelResult;
+  },
+
+  async retrievePaymentIntent(paymentIntentId) {
+    if (capturedPayments.has(paymentIntentId)) {
+      return {
+        paymentIntentId,
+        status: "succeeded",
+        amountCapturable: 0,
+        amountReceived: capturedPayments.get(paymentIntentId)!,
+      } satisfies RetrieveResult;
+    }
+    if (cancelledPayments.has(paymentIntentId)) {
+      return {
+        paymentIntentId,
+        status: "canceled",
+        amountCapturable: 0,
+        amountReceived: 0,
+      } satisfies RetrieveResult;
+    }
+    const authorized = authorizedAmounts.get(paymentIntentId);
+    return {
+      paymentIntentId,
+      status: "requires_capture",
+      amountCapturable: authorized ?? 0,
+      amountReceived: 0,
+    } satisfies RetrieveResult;
   },
 };
 

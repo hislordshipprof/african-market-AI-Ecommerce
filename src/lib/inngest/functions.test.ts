@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import * as dbModule from "../db";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, reset as resetFakeStripe } from "../stripe/fake";
@@ -212,6 +213,41 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         where: { entityId: order.id, action: "acceptance_alert" },
       });
       expect(logs.length).toBe(1);
+    });
+
+    it("K5: skips alert when order accepted between initial read and locked write", async () => {
+      const { acceptanceAlert } = await import("./functions");
+      const handler = getHandler(acceptanceAlert);
+      const order = await createTestOrder();
+      const origTx = storeScopedTransaction;
+
+      let txCallCount = 0;
+      const spy = vi.spyOn(dbModule, "storeScopedTransaction").mockImplementation(
+        async (sid: string, fn: (...args: unknown[]) => Promise<unknown>) => {
+          txCallCount++;
+          if (txCallCount === 1) {
+            const result = await origTx(sid, fn as Parameters<typeof origTx>[1]);
+            await origTx(storeId, async (tx) => {
+              await tx.order.update({ where: { id: order.id }, data: { status: "ACCEPTED", acceptedAt: new Date() } });
+            });
+            return result;
+          }
+          return origTx(sid, fn as Parameters<typeof origTx>[1]);
+        },
+      );
+
+      try {
+        await withMockedTime(new Date("2026-11-03T14:00:00-05:00"), () =>
+          handler({ event: { data: { orderId: order.id, storeId } }, step: makeFakeStep() }),
+        );
+
+        const logs = await storeScoped(storeId).auditLog.findMany({
+          where: { entityId: order.id, action: "acceptance_alert" },
+        });
+        expect(logs.length).toBe(0);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

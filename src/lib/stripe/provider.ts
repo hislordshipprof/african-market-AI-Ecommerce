@@ -6,6 +6,7 @@ import type {
   WebhookEvent,
   CaptureResult,
   CancelResult,
+  RetrieveResult,
 } from "./types";
 
 let _stripeClient: Stripe | null = null;
@@ -190,5 +191,16 @@ export const stripeProvider: StripeProvider = {
       }
       throw err;
     }
+  },
+
+  async retrievePaymentIntent(paymentIntentId) {
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+    return {
+      paymentIntentId: pi.id,
+      status: pi.status,
+      amountCapturable: pi.amount_capturable ?? 0,
+      amountReceived: pi.amount_received ?? 0,
+    } satisfies RetrieveResult;
   },
 };

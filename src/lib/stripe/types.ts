@@ -32,6 +32,13 @@ export interface CancelResult {
   status: string;
 }
 
+export interface RetrieveResult {
+  paymentIntentId: string;
+  status: string;
+  amountCapturable: number;
+  amountReceived: number;
+}
+
 export interface StripeProvider {
   createConnectAccount(input: {
     email: string;
@@ -62,6 +69,10 @@ export interface StripeProvider {
     paymentIntentId: string,
     idempotencyKey?: string,
   ): Promise<CancelResult>;
+
+  retrievePaymentIntent(
+    paymentIntentId: string,
+  ): Promise<RetrieveResult>;
 }
 
 export function deriveOnboardingStatus(account: {

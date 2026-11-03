@@ -34,6 +34,9 @@ export const acceptanceAlert = inngest.createFunction(
 
       await storeScopedTransaction(storeId, async (tx) => {
         await lockStoreRow(tx, storeId);
+        const current = await tx.order.findUnique({ where: { id: orderId } });
+        if (!current || current.status !== "AUTHORIZED") return;
+
         const existing = await tx.auditLog.findFirst({
           where: { entityId: orderId, action: "acceptance_alert" },
         });
