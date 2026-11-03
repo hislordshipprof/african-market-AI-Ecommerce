@@ -703,10 +703,14 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     setStripeProvider(deferredProvider);
 
     const readyPromise = markReady(storeId, order.id);
-    await new Promise((r) => setTimeout(r, 100));
 
-    // Verify transitional status is CANCELLING while Stripe call is in-flight
-    const mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    // Poll until Phase 1 commits CANCELLING
+    let mid;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      if (mid!.status === "CANCELLING") break;
+    }
     expect(mid!.status).toBe("CANCELLING");
 
     // Concurrent markReady must fail because status is CANCELLING
@@ -732,13 +736,12 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(logs.length).toBe(1);
   }, 10_000);
 
-  it("Codex-4: void finalization verifies CANCELLING before writing CANCELLED", async () => {
+  it("Codex-4: void finalization skips CANCELLED write when status changed mid-flight", async () => {
     const order = await createTestOrder();
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({
       where: { orderId: order.id },
     });
-    // Refund all lines
     await markLinePicked(storeId, lines[0].id);
     for (const line of lines) {
       await storeScopedTransaction(storeId, async (tx) => {
@@ -749,14 +752,43 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       });
     }
 
-    const result = await markReady(storeId, order.id);
+    let resolveCancel!: (v: CancelResult) => void;
+    const cancelDeferred = new Promise<CancelResult>((res) => { resolveCancel = res; });
+    const deferredProvider: StripeProvider = {
+      ...fakeStripeProvider,
+      cancelPaymentIntent: () => cancelDeferred,
+    };
+    setStripeProvider(deferredProvider);
+
+    const readyPromise = markReady(storeId, order.id);
+
+    // Wait for Phase 1 to commit CANCELLING
+    let mid;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      if (mid!.status === "CANCELLING") break;
+    }
+    expect(mid!.status).toBe("CANCELLING");
+
+    // Externally change status away from CANCELLING before Phase 3 runs
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "AUTHORIZED" },
+      });
+    });
+
+    // Resolve Stripe cancel so Phase 3 runs
+    resolveCancel({ paymentIntentId: order.paymentIntentId!, status: "canceled" });
+    setStripeProvider(fakeStripeProvider);
+    const result = await readyPromise;
     expect(result.ok).toBe(true);
 
-    // Verify it went through CANCELLING → CANCELLED (not PICKING → CANCELLED)
-    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("CANCELLED");
-    expect(updated!.cancelledAt).toBeTruthy();
-    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
+    // Phase 3 guard saw status != CANCELLING, so order stayed AUTHORIZED (not CANCELLED)
+    const final = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(final!.status).toBe("AUTHORIZED");
+    expect(final!.cancelledAt).toBeNull();
   });
 
   it("K2: accept-during-cancel race — accept fails while cancel is in-flight", async () => {

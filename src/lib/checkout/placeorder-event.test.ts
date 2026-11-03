@@ -29,16 +29,14 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
 
     const stripe = (await import("stripe")).default;
     const stripeClient = new stripe(process.env.STRIPE_SECRET_KEY!);
-    const ready: Array<{ id: string }> = [];
-    for await (const acct of stripeClient.accounts.list({ limit: 100 })) {
-      if (acct.capabilities?.transfers === "active") {
-        ready.push(acct);
-        if (ready.length >= 2) break;
+    let acct: { id: string } | undefined;
+    for await (const a of stripeClient.accounts.list({ limit: 100 })) {
+      if (a.capabilities?.transfers === "active") {
+        acct = a;
+        break;
       }
     }
-    if (ready.length < 2) return;
-
-    const acct = ready[1];
+    if (!acct) return;
     const store = await rawPrisma.store.upsert({
       where: { slug: "inngest-event-test" },
       update: { stripeAccountId: acct.id, stripeOnboardingStatus: "complete" },

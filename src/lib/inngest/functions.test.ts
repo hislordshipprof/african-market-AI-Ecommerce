@@ -401,7 +401,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       try {
         await handler({ step });
         expect(step.runs).toContain("find-orphaned");
-        expect(spy).toHaveBeenCalled();
+        expect(spy).toHaveBeenCalledWith(storeId, order.id);
       } finally {
         spy.mockRestore();
       }
