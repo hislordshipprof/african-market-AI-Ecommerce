@@ -1,7 +1,10 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { twoFactor } from "better-auth/plugins";
+import { twoFactor, magicLink, phoneNumber } from "better-auth/plugins";
 import { authPrisma } from "./db";
+import { sendEmail } from "./email/send";
+import { getSmsSender } from "./sms";
+import { normalizePhone } from "./phone";
 
 const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
 
@@ -64,6 +67,34 @@ export const auth = betterAuth({
     twoFactor({
       issuer: "African Markets Platform",
     }),
+    magicLink({
+      sendMagicLink: async ({ email, url }) => {
+        await sendEmail({
+          to: email,
+          subject: "Sign in to African Markets",
+          html: `<p>Click <a href="${url}">here</a> to sign in. This link expires in 5 minutes.</p>`,
+        });
+      },
+      disableSignUp: false,
+    }),
+    ...(getSmsSender()
+      ? [
+          phoneNumber({
+            sendOTP: async ({ phoneNumber: phone, code }) => {
+              const sender = getSmsSender();
+              if (!sender) throw new Error("SMS not configured");
+              await sender.send({
+                to: phone,
+                body: `Your African Markets verification code is ${code}. It expires in 5 minutes.`,
+              });
+            },
+            phoneNumberValidator: (phone) => normalizePhone(phone) !== null,
+            signUpOnVerification: {
+              getTempEmail: (phone) => `${phone.replace(/\D/g, "")}@phone.placeholder.local`,
+            },
+          }),
+        ]
+      : []),
   ],
   rateLimit: {
     storage: "database",
@@ -73,18 +104,24 @@ export const auth = betterAuth({
     customRules: {
       "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
+      "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 100 : 5 },
+      "/phone-number/send-otp": { window: 60, max: relaxedAuth ? 100 : 3 },
+      "/sign-in/phone-number": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
   },
   databaseHooks: {
     session: {
       create: {
-        before: async (session) => {
+        before: async (session, ctx) => {
           const user = await authPrisma.user.findUnique({
             where: { id: session.userId },
             select: { twoFactorEnabled: true },
           });
           if (user?.twoFactorEnabled) {
-            return { data: { twoFactorVerified: true } };
+            const path: string = (ctx as Record<string, unknown>)?.path as string ?? "";
+            if (path.startsWith("/two-factor/")) {
+              return { data: { twoFactorVerified: true } };
+            }
           }
         },
         after: async (session) => {
@@ -129,3 +166,5 @@ export const auth = betterAuth({
 });
 
 export type Session = typeof auth.$Infer.Session;
+
+export const smsEnabled = getSmsSender() !== null;
