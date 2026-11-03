@@ -114,7 +114,6 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
   });
 
   it("stats: counts reflect seeded rows", async () => {
-    const before = await getReviewStats();
     await seed("s1", "needs_review");
     await seed("s2", "needs_review");
     await seed("s3", "active");
@@ -125,15 +124,18 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
         select: { status: true },
       }),
     );
+    const needsReview = mine.filter((p) => p.status === "needs_review").length;
+    const active = mine.filter((p) => p.status === "active").length;
+    const rejected = mine.filter((p) => p.status === "rejected").length;
+    expect(needsReview).toBe(2);
+    expect(active).toBe(1);
+    expect(rejected).toBe(1);
+    // Global before/after deltas race with other files that insert and delete
+    // master products. The floor is this file's own rows, which nothing else deletes.
     const after = await getReviewStats();
-    expect(mine.filter((p) => p.status === "needs_review")).toHaveLength(2);
-    expect(mine.filter((p) => p.status === "active")).toHaveLength(1);
-    expect(mine.filter((p) => p.status === "rejected")).toHaveLength(1);
-    // Other files insert master products during the full suite, so the global
-    // delta is a floor, not an exclusive count.
-    expect(after.needsReview).toBeGreaterThanOrEqual(before.needsReview + 2);
-    expect(after.active).toBeGreaterThanOrEqual(before.active + 1);
-    expect(after.rejected).toBeGreaterThanOrEqual(before.rejected + 1);
+    expect(after.needsReview).toBeGreaterThanOrEqual(needsReview);
+    expect(after.active).toBeGreaterThanOrEqual(active);
+    expect(after.rejected).toBeGreaterThanOrEqual(rejected);
     expect(after.total).toBe(after.needsReview + after.active + after.rejected);
   });
 
