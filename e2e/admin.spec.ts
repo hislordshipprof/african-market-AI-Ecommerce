@@ -240,7 +240,7 @@ test.describe("Catalog review (authenticated)", () => {
     await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
   });
 
-  test.fixme("approve moves product to active tab", async ({ page }) => {
+  test("approve moves product to active tab", async ({ page }) => {
     const reviewCountBefore = await page.locator("a[href*='status=needs_review'] span").last().textContent();
     const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
 
@@ -255,7 +255,7 @@ test.describe("Catalog review (authenticated)", () => {
     expect(Number(activeCountAfter)).toBe(Number(activeCountBefore) + 1);
   });
 
-  test.fixme("edit-then-approve updates name and moves to active", async ({ page }) => {
+  test("edit-then-approve updates name and moves to active", async ({ page }) => {
     const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
 
     const firstRow = page.locator("table tbody tr").first();

@@ -113,7 +113,7 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     expect(res).toMatchObject({ total: 1, page: 1, pageSize: 10 });
   });
 
-  it.skip("stats: counts reflect seeded rows — see #191", async () => {
+  it("stats: counts reflect seeded rows", async () => {
     const before = await getReviewStats();
     await seed("s1", "needs_review");
     await seed("s2", "needs_review");

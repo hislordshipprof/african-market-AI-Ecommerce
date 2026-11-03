@@ -513,7 +513,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     expect((await listMasterProducts("   ")).map((p) => p.id)).toEqual((await listMasterProducts()).map((p) => p.id));
   });
 
-  it.skip("listMasterProducts filters by name case-insensitively and respects take — see #191", async () => {
+  it("listMasterProducts filters by name case-insensitively and respects take", async () => {
     const mps = await Promise.all(
       ["Zq110 Egusi Seed", "Zq110 EGUSI Ground", "Zq110 Palm Oil"].map((name) =>
         platformAdmin.masterProduct.create({ data: { name } }),
