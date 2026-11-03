@@ -55,6 +55,13 @@ function writeTempCsv(content: string): string {
   return filePath;
 }
 
+function writeTempBytes(name: string, bytes: Buffer): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "csv-import-e2e-"));
+  const filePath = path.join(dir, name);
+  fs.writeFileSync(filePath, bytes);
+  return filePath;
+}
+
 test.describe("CSV import (unauthenticated)", () => {
   test("redirects to sign-in", async ({ page }) => {
     const response = await page.goto(IMPORT_URL);
@@ -152,6 +159,19 @@ test.describe("CSV import (authenticated)", () => {
 
     await expect(page.getByText("Missing required field: name")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Invalid price")).toBeVisible();
+  });
+
+  test("N14: a PNG upload tells the owner to save a UTF-8 CSV", async ({ page }) => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const filePath = writeTempBytes("photo.png", png);
+
+    await page.goto(IMPORT_URL);
+    await page.locator("input[type='file']").setInputFiles(filePath);
+    await page.click("text=Upload & Preview");
+
+    await expect(
+      page.getByText("This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again."),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("empty file shows error", async ({ page }) => {
