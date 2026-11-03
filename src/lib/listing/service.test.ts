@@ -500,7 +500,11 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       // A bare wildcard matches only names that contain it, not everything.
       expect(await listMasterProducts(`${tag}%zzz`)).toEqual([]);
     } finally {
-      await rawPrisma.masterProduct.deleteMany({ where: { id: { in: mps.map((m) => m.id) } } });
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.masterProduct.deleteMany({ where: { id: { in: mps.map((m) => m.id) } } }),
+      ]);
     }
   });
 
@@ -527,7 +531,11 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       expect((await listMasterProducts()).length).toBeLessThanOrEqual(50);
       expect((await listMasterProducts("")).length).toBeLessThanOrEqual(50);
     } finally {
-      await rawPrisma.masterProduct.deleteMany({ where: { id: { in: mps.map((m) => m.id) } } });
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.masterProduct.deleteMany({ where: { id: { in: mps.map((m) => m.id) } } }),
+      ]);
     }
   });
 
