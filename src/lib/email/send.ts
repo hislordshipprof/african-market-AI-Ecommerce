@@ -2,6 +2,8 @@ export interface EmailMessage {
   to: string;
   subject: string;
   html: string;
+  /** Display name plus address. Falls back to the sender default. */
+  from?: string;
 }
 
 export interface EmailSender {
@@ -25,7 +27,7 @@ export class ResendSender implements EmailSender {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: this.from,
+        from: message.from ?? this.from,
         to: message.to,
         subject: message.subject,
         html: message.html,
@@ -89,6 +91,16 @@ export function createSender(
 
 const sender = createSender();
 
+let testSender: EmailSender | null = null;
+
+/** Vitest-only seam so a slow or failing sender can be observed. */
+export function setEmailSenderForTests(next: EmailSender | null): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("setEmailSenderForTests is only available when NODE_ENV=test");
+  }
+  testSender = next;
+}
+
 export async function sendEmail(message: EmailMessage): Promise<{ id: string }> {
-  return sender.send(message);
+  return (testSender ?? sender).send(message);
 }

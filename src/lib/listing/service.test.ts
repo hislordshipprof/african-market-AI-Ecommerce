@@ -518,15 +518,18 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
   });
 
   it("listMasterProducts filters by name case-insensitively and respects take", async () => {
+    const tag = `Zq${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const ground = `${tag} EGUSI Ground`;
+    const seed = `${tag} Egusi Seed`;
     const mps = await Promise.all(
-      ["Zq110 Egusi Seed", "Zq110 EGUSI Ground", "Zq110 Palm Oil"].map((name) =>
+      [seed, ground, `${tag} Palm Oil`].map((name) =>
         platformAdmin.masterProduct.create({ data: { name } }),
       ),
     );
     try {
-      const hits = await listMasterProducts("zq110 egu");
-      expect(hits.map((p) => p.name)).toEqual(["Zq110 EGUSI Ground", "Zq110 Egusi Seed"]);
-      expect(await listMasterProducts("zq110", 2)).toHaveLength(2);
+      const hits = await listMasterProducts(`${tag} egu`);
+      expect(hits.map((p) => p.name)).toEqual([ground, seed]);
+      expect(await listMasterProducts(tag, 2)).toHaveLength(2);
       expect(await listMasterProducts("zzzznotfound110")).toEqual([]);
       expect((await listMasterProducts()).length).toBeLessThanOrEqual(50);
       expect((await listMasterProducts("")).length).toBeLessThanOrEqual(50);

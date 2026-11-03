@@ -1,8 +1,8 @@
 "use client";
 
 import { type ReactNode } from "react";
-import Image from "next/image";
-import { motion } from "motion/react";
+import { preload } from "react-dom";
+import { MotionConfig, motion } from "motion/react";
 import posterSrc from "../../../public/images/market-spices-poster.jpg";
 
 /**
@@ -11,43 +11,57 @@ import posterSrc from "../../../public/images/market-spices-poster.jpg";
  */
 export const ENABLE_3D_SCENE = false;
 
-export function StorySurface({ children }: { children: ReactNode }) {
+export function StorySurface({
+  children,
+  asMain = true,
+}: {
+  children: ReactNode;
+  asMain?: boolean;
+}) {
+  const Tag = asMain ? "main" : "div";
+  // The poster is the largest element, so it has to start with the document.
+  // Next/Image left this file at default priority and the paint landed after 2.5s.
+  preload(posterSrc.src, { as: "image", fetchPriority: "high" });
   return (
-    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden p-4">
+    <MotionConfig reducedMotion="user">
+    <Tag className="relative flex min-h-dvh items-center justify-center overflow-hidden p-4">
       {/* Poster photograph — first paint, always visible */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
       >
         <motion.div
-          className="absolute inset-0"
+          data-testid="story-poster"
+          className="absolute inset-0 motion-reduce:!transform-none"
           initial={{ scale: 1.05 }}
           animate={{ scale: 1 }}
           transition={{ duration: 20, ease: "linear", repeat: Infinity, repeatType: "reverse" }}
           style={{ willChange: "transform" }}
         >
-          <Image
-            src={posterSrc}
+          <img
+            src={posterSrc.src}
             alt=""
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover motion-reduce:!transform-none"
-            placeholder="blur"
+            fetchPriority="high"
+            decoding="sync"
+            className="absolute inset-0 h-full w-full object-cover motion-reduce:!transform-none"
           />
         </motion.div>
         <div className="absolute inset-0 bg-gradient-to-br from-black/50 via-black/30 to-transparent dark:from-black/70 dark:via-black/50" />
       </div>
 
-      {/* Form panel with entrance motion */}
+      {/* Form panel — visible by default; entrance animation plays on hydration */}
+      <noscript>
+        <style>{`.story-form{opacity:1!important;transform:none!important}`}</style>
+      </noscript>
       <motion.div
-        className="relative z-10 w-full max-w-sm"
+        className="story-form relative z-10 w-full max-w-sm motion-reduce:!transform-none motion-reduce:!opacity-100"
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.4, 0.4, 0, 1] }}
       >
         {children}
       </motion.div>
-    </main>
+    </Tag>
+    </MotionConfig>
   );
 }

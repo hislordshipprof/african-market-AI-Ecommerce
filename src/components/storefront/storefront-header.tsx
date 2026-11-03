@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import type { ValidatedStore } from "@/lib/get-store";
+import { auth } from "@/lib/auth";
 import { listCategories } from "@/lib/storefront/service";
 import { SearchBar } from "./search-bar";
 import { CartTrigger } from "./cart-provider";
@@ -8,7 +10,11 @@ import { ShrinkingHeader } from "./scroll-motion";
 import { StoreLogo } from "./store-logo";
 
 export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
-  const categories = await listCategories();
+  const headerList = await headers();
+  const [categories, session] = await Promise.all([
+    listCategories(),
+    auth.api.getSession({ headers: headerList }),
+  ]);
   return (
     <ShrinkingHeader>
       <div className="sf-header-main sf-container">
@@ -26,6 +32,12 @@ export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
         <div className="sf-header-search">
           <SearchBar storeId={store.id} />
         </div>
+        <Link
+          href={session ? "/account" : "/account/sign-in"}
+          className="sf-header-signin"
+        >
+          {session ? "Account" : "Sign in"}
+        </Link>
         <CartTrigger className="sf-header-cart" />
       </div>
       <nav aria-label="Store categories" className="sf-category-nav">

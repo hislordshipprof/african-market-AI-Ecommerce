@@ -234,6 +234,9 @@ test.describe("Layout regression", () => {
 });
 
 test.describe("Catalog review (authenticated)", () => {
+  // These tests all mutate the first review row. Parallel workers were approving
+  // that row while another test was renaming it.
+  test.describe.configure({ mode: "serial" });
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
     await page.goto("/admin/catalog/review");
