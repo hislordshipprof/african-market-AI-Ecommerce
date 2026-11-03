@@ -6,10 +6,22 @@ import { isRetiredRemote } from "@/lib/storefront/editorial";
 
 const LOCAL_RETRY_PREFIXES = ["/api/catalog-image/", "/images/products/"];
 
+/** Pathname Next's matcher sees: dot segments decoded and collapsed. */
+function localPathname(src: string): string | null {
+  try {
+    return new URL(src, "http://n").pathname;
+  } catch {
+    return null;
+  }
+}
+
 /** One optimizer retry, or null when no localPatterns entry would allow it. */
 export function productImageRetrySrc(src: string | undefined): string | null {
-  if (!src || src.startsWith("/")) {
-    if (!src || src.includes("?") || !LOCAL_RETRY_PREFIXES.some((prefix) => src.startsWith(prefix))) return null;
+  if (!src) return null;
+  if (src.startsWith("/")) {
+    if (src.includes("?")) return null;
+    const pathname = localPathname(src);
+    if (!pathname || !LOCAL_RETRY_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return null;
     return src + "?retry=1";
   }
   return src + (src.includes("?") ? "&" : "?") + "retry=1";

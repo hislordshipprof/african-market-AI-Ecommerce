@@ -44,12 +44,31 @@ describe("storefront local image patterns", () => {
       "/api/catalog-image/catalog/" + "k".repeat(200) + ".jpg",
       "/images/products/a.webp?v=1",
       "/images/market-bodija.webp",
+      "/images/products/../market-bodija.webp",
+      "/images/products/%2e%2e/market-bodija.webp",
     ];
     for (const src of locals) {
       const retry = productImageRetrySrc(src);
       if (retry?.startsWith("/")) expect(hasLocalMatch(patterns, retry), retry).toBe(true);
     }
     expect(productImageRetrySrc("/images/products/a.webp?v=1")).toBeNull();
+  });
+
+  it("does not build a retry whose normalized pathname the optimizer would reject", () => {
+    for (const src of [
+      "/images/products/../market-bodija.webp",
+      "/images/products/%2e%2e/market-bodija.webp",
+      "/api/catalog-image/../images/market-bodija.webp",
+    ]) {
+      const forbidden = src + "?retry=1";
+      expect(hasLocalMatch(patterns, forbidden), forbidden).toBe(false);
+      const retry = productImageRetrySrc(src);
+      expect(retry, src).toBeNull();
+    }
+    const stillAllowed = "/images/products/foo/../a.webp";
+    const retry = productImageRetrySrc(stillAllowed);
+    expect(retry).toBe(stillAllowed + "?retry=1");
+    expect(hasLocalMatch(patterns, retry!)).toBe(true);
   });
 
   it("allows a remote retry with or without an existing query", () => {

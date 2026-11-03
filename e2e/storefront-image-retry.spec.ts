@@ -64,11 +64,12 @@ test.describe("optimizer accepts ProductImage's single local retry", () => {
   });
 
   test("the storefront lets a failed photo's retry through and shows the photo", async ({ page }) => {
-    const retryStatuses: number[] = [];
-    page.on("response", (response) => {
-      if (!response.url().includes("/_next/image")) return;
-      const src = new URL(response.url()).searchParams.get("url") ?? "";
-      if (src.includes("retry=1")) retryStatuses.push(response.status());
+    const retryResponses: Promise<number | null>[] = [];
+    page.on("request", (request) => {
+      if (!request.url().includes("/_next/image")) return;
+      const src = new URL(request.url()).searchParams.get("url") ?? "";
+      if (!src.includes("retry=1")) return;
+      retryResponses.push(request.response().then((response) => response?.status() ?? null));
     });
     await page.route("**/_next/image**", async (route) => {
       const src = new URL(route.request().url()).searchParams.get("url") ?? "";
@@ -79,10 +80,16 @@ test.describe("optimizer accepts ProductImage's single local retry", () => {
       await route.abort("failed");
     });
     await page.goto(`${BASE}/categories/grains-and-flours`);
-    await expect.poll(() => retryStatuses.length, { timeout: 15_000 }).toBeGreaterThan(0);
-    expect(retryStatuses, "a pattern miss is 400").not.toContain(400);
     const shown = page.locator(".sf-product-image").filter({ has: page.locator("img") });
-    await expect(shown.first()).toBeVisible();
+    await expect(shown.first()).toBeVisible({ timeout: 15_000 });
+    await expect.poll(() => retryResponses.length, { timeout: 15_000 }).toBeGreaterThan(0);
+    let statuses: Array<number | null> = [];
+    await expect.poll(async () => {
+      const started = retryResponses.slice();
+      statuses = await Promise.all(started);
+      return retryResponses.length === started.length && statuses.every((status) => status !== null);
+    }, { timeout: 15_000 }).toBe(true);
+    expect(statuses, "a pattern miss is 400").not.toContain(400);
     await expect(shown.first()).not.toContainText("Photo unavailable");
   });
 });
