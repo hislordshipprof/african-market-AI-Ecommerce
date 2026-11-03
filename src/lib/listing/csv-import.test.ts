@@ -353,12 +353,12 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
     testUserId = user.id;
 
     const mp1 = await platformAdmin.masterProduct.create({
-      data: { name: "Zola Citrus Oil T63", frozen: false, perishable: false },
+      data: { name: "Zola Citrus Oil T63", frozen: false, perishable: false, status: "active" },
     });
     mpIds.push(mp1.id);
 
     const mp2 = await platformAdmin.masterProduct.create({
-      data: { name: "Bimba Seed Flour T63", frozen: false, perishable: false },
+      data: { name: "Bimba Seed Flour T63", frozen: false, perishable: false, status: "active" },
     });
     mpIds.push(mp2.id);
 
@@ -390,9 +390,9 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
       rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
       rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } }),
       rawPrisma.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+      rawPrisma.productSynonym.deleteMany({ where: { productId: { in: mpIds } } }),
+      rawPrisma.masterProduct.deleteMany({ where: { id: { in: mpIds } } }),
     ]);
-    await rawPrisma.productSynonym.deleteMany({ where: { productId: { in: mpIds } } });
-    await rawPrisma.masterProduct.deleteMany({ where: { id: { in: mpIds } } });
     await rawPrisma.user.deleteMany({ where: { email: "csv-import-test@example.com" } });
     await rawPrisma.store.deleteMany({ where: { slug: { in: ["csv-import-test-a", "csv-import-test-b"] } } });
     await rawPrisma.$disconnect();
@@ -550,7 +550,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     actor = { id: user.id, email: user.email };
 
     const mp = await platformAdmin.masterProduct.create({
-      data: { name: "Kundi Flour T63", frozen: false, perishable: true },
+      data: { name: "Kundi Flour T63", frozen: false, perishable: true, status: "active" },
     });
     mpIds.push(mp.id);
 
@@ -559,13 +559,13 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     });
 
     const ambig1 = await platformAdmin.masterProduct.create({
-      data: { name: "Ambig Spice T63", frozen: false, perishable: false },
+      data: { name: "Ambig Spice T63", frozen: false, perishable: false, status: "active" },
     });
     ambigMp1Id = ambig1.id;
     mpIds.push(ambig1.id);
 
     const ambig2 = await platformAdmin.masterProduct.create({
-      data: { name: "Ambig Herb T63", frozen: false, perishable: false },
+      data: { name: "Ambig Herb T63", frozen: false, perishable: false, status: "active" },
     });
     ambigMp2Id = ambig2.id;
     mpIds.push(ambig2.id);
@@ -587,9 +587,9 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
       rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
       rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } }),
       rawPrisma.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+      rawPrisma.productSynonym.deleteMany({ where: { productId: { in: mpIds } } }),
+      rawPrisma.masterProduct.deleteMany({ where: { id: { in: mpIds } } }),
     ]);
-    await rawPrisma.productSynonym.deleteMany({ where: { productId: { in: mpIds } } });
-    await rawPrisma.masterProduct.deleteMany({ where: { id: { in: mpIds } } });
     await rawPrisma.user.deleteMany({ where: { email: "csv-commit-test@example.com" } });
     await rawPrisma.store.deleteMany({ where: { slug: { in: ["csv-commit-test-a", "csv-commit-test-b"] } } });
     await rawPrisma.$disconnect();
@@ -1266,11 +1266,11 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
 
   it("B4: ambiguous resolution creates listing for chosen candidate", async () => {
     const ambMp1 = await platformAdmin.masterProduct.create({
-      data: { name: "Ambig Product Alpha T63", frozen: true, perishable: false },
+      data: { name: "Ambig Product Alpha T63", frozen: true, perishable: false, status: "active" },
     });
     mpIds.push(ambMp1.id);
     const ambMp2 = await platformAdmin.masterProduct.create({
-      data: { name: "Ambig Product Beta T63", frozen: false, perishable: true },
+      data: { name: "Ambig Product Beta T63", frozen: false, perishable: true, status: "active" },
     });
     mpIds.push(ambMp2.id);
     await platformAdmin.productSynonym.create({
@@ -1308,7 +1308,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
 
   it("A2/E8: row whose match count increases between preview and commit is rejected (no silent pick)", async () => {
     const soloMp = await platformAdmin.masterProduct.create({
-      data: { name: "Solo Match A2 T63", frozen: false, perishable: false },
+      data: { name: "Solo Match A2 T63", frozen: false, perishable: false, status: "active" },
     });
     mpIds.push(soloMp.id);
     await platformAdmin.productSynonym.create({
@@ -1321,7 +1321,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(preview.ambiguous).toHaveLength(0);
 
     const altMp = await platformAdmin.masterProduct.create({
-      data: { name: "Solo Alt A2 T63", frozen: false, perishable: false },
+      data: { name: "Solo Alt A2 T63", frozen: false, perishable: false, status: "active" },
     });
     mpIds.push(altMp.id);
     await platformAdmin.productSynonym.create({
