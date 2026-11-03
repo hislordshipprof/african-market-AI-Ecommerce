@@ -69,6 +69,7 @@ export interface StripeProvider {
     paymentIntentId: string,
     amountCents: number,
     idempotencyKey?: string,
+    applicationFeeAmount?: number,
   ): Promise<CaptureResult>;
 
   cancelPaymentIntent(

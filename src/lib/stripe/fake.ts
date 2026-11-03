@@ -26,6 +26,7 @@ class FakeStripeError extends Error {
 
 const accounts = new Map<string, ConnectAccount>();
 const capturedPayments = new Map<string, number>();
+const capturedFees = new Map<string, number>();
 const captureKeys = new Map<string, string>();
 const cancelledPayments = new Set<string>();
 const cancelKeys = new Map<string, string>();
@@ -37,6 +38,7 @@ const nextRefundStatus = new Map<string, string>();
 function reset() {
   accounts.clear();
   capturedPayments.clear();
+  capturedFees.clear();
   captureKeys.clear();
   cancelledPayments.clear();
   cancelKeys.clear();
@@ -98,7 +100,7 @@ const fakeStripeProvider: StripeProvider = {
     } satisfies WebhookEvent;
   },
 
-  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey) {
+  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
     if (cancelledPayments.has(paymentIntentId)) {
       throw new ProviderStateError("capture", "canceled");
     }
@@ -123,6 +125,7 @@ const fakeStripeProvider: StripeProvider = {
       );
     }
     capturedPayments.set(paymentIntentId, amountCents);
+    if (applicationFeeAmount !== undefined) capturedFees.set(paymentIntentId, applicationFeeAmount);
     if (idempotencyKey) captureKeys.set(paymentIntentId, idempotencyKey);
     return {
       paymentIntentId,
@@ -225,4 +228,4 @@ function setNextRefundStatus(paymentIntentId: string, status: string) {
   nextRefundStatus.set(paymentIntentId, status);
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, cancelledPayments, authorizedAmounts, refundedPayments, setAuthorizedAmount, setNextRefundStatus, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, setAuthorizedAmount, setNextRefundStatus, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };

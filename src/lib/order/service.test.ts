@@ -6,7 +6,7 @@ import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, refundedPayments, setAuthorizedAmount, setNextRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, setAuthorizedAmount, setNextRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -357,6 +357,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.capturedAmountCents).toBe(6000);
 
     expect(capturedPayments.get(order.paymentIntentId!)).toBe(6000);
+    expect(capturedFees.get(order.paymentIntentId!)).toBe(300);
   });
 
   it("markReady rejects when capture would exceed authorized amount", async () => {
@@ -1531,6 +1532,96 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
+  });
+
+  it("B2: markReady void path failed refund stays CANCELLING for sweep retry", async () => {
+    const num = ++orderSeq;
+    const order = await storeScopedTransaction(storeId, async (tx) => {
+      const o = await tx.order.create({
+        data: {
+          storeId,
+          number: num,
+          customerId,
+          status: "PICKING",
+          fulfillment: "pickup",
+          subtotalCents: 10,
+          bufferCents: 0,
+          tipCents: 0,
+          deliveryFeeCents: 0,
+          totalAuthorizedCents: 100,
+          totalCents: 10,
+          paymentIntentId: `pi_void_b2_${Date.now()}`,
+        },
+      });
+      await tx.orderLine.create({
+        data: {
+          storeId,
+          orderId: o.id,
+          listingVariantId: variantId,
+          qtyOrdered: 1,
+          unitPriceCents: 10,
+          status: "picked",
+          qtyPicked: 1,
+        },
+      });
+      return o;
+    });
+
+    setAuthorizedAmount(order.paymentIntentId!, 100);
+    capturedPayments.set(order.paymentIntentId!, 100);
+    setNextRefundStatus(order.paymentIntentId!, "failed");
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(false);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
+    expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
+  });
+
+  it("B2: markReady void path pending refund stays CANCELLING for sweep retry", async () => {
+    const num = ++orderSeq;
+    const order = await storeScopedTransaction(storeId, async (tx) => {
+      const o = await tx.order.create({
+        data: {
+          storeId,
+          number: num,
+          customerId,
+          status: "PICKING",
+          fulfillment: "pickup",
+          subtotalCents: 10,
+          bufferCents: 0,
+          tipCents: 0,
+          deliveryFeeCents: 0,
+          totalAuthorizedCents: 100,
+          totalCents: 10,
+          paymentIntentId: `pi_void_b2p_${Date.now()}`,
+        },
+      });
+      await tx.orderLine.create({
+        data: {
+          storeId,
+          orderId: o.id,
+          listingVariantId: variantId,
+          qtyOrdered: 1,
+          unitPriceCents: 10,
+          status: "picked",
+          qtyPicked: 1,
+        },
+      });
+      return o;
+    });
+
+    setAuthorizedAmount(order.paymentIntentId!, 100);
+    capturedPayments.set(order.paymentIntentId!, 100);
+    setNextRefundStatus(order.paymentIntentId!, "pending");
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(false);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
     expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
   });
 

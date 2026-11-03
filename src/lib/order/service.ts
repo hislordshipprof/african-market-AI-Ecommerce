@@ -136,9 +136,11 @@ export async function markReady(
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false as const, error: "Order not found" };
     if (order.status === "CAPTURING") {
+      const fee = (order.platformFeeCents ?? 0) + order.deliveryFeeCents;
       return {
         ok: true as const,
         capturedAmountCents: order.capturedAmountCents ?? 0,
+        applicationFeeAmount: fee > 0 ? fee : undefined,
         paymentIntentId: order.paymentIntentId!,
         newStatus: (order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY") as OrderStatus,
         alreadyClaiming: true,
@@ -197,6 +199,8 @@ export async function markReady(
     const newStatus: OrderStatus =
       order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
 
+    const fee = (order.platformFeeCents ?? 0) + order.deliveryFeeCents;
+
     await tx.order.update({
       where: { id: orderId },
       data: { status: "CAPTURING", capturedAmountCents },
@@ -205,6 +209,7 @@ export async function markReady(
     return {
       ok: true as const,
       capturedAmountCents,
+      applicationFeeAmount: fee > 0 ? fee : undefined,
       paymentIntentId: order.paymentIntentId,
       newStatus,
       alreadyClaiming: false,
@@ -233,6 +238,13 @@ export async function markReady(
           pi.amountReceived,
           `refund:${orderId}`,
         );
+        if (refund.status !== "succeeded") {
+          await storeScopedTransaction(storeId, async (tx) => {
+            await lockStoreRow(tx, storeId);
+            await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
+          });
+          return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
+        }
         await storeScopedTransaction(storeId, async (tx) => {
           await lockStoreRow(tx, storeId);
           const current = await tx.order.findUnique({ where: { id: orderId } });
@@ -296,6 +308,7 @@ export async function markReady(
       validation.paymentIntentId,
       validation.capturedAmountCents,
       `capture:${orderId}`,
+      validation.applicationFeeAmount,
     );
   } catch (err) {
     if (err instanceof ProviderStateError) {
@@ -557,10 +570,12 @@ export async function reconcileStuckOrder(
   if (pi.status === "requires_capture") {
     if (order.status === "CAPTURING") {
       try {
+        const sweepFee = (order.platformFeeCents ?? 0) + order.deliveryFeeCents;
         const retryCap = await stripe.capturePaymentIntent(
           order.paymentIntentId,
           order.capturedAmountCents ?? 0,
           `capture:${orderId}`,
+          sweepFee > 0 ? sweepFee : undefined,
         );
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {

@@ -148,11 +148,12 @@ export const stripeProvider: StripeProvider = {
     } satisfies WebhookEvent;
   },
 
-  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey) {
+  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
     const stripe = getStripeClient();
     try {
       const pi = await stripe.paymentIntents.capture(paymentIntentId, {
         amount_to_capture: amountCents,
+        ...(applicationFeeAmount ? { application_fee_amount: applicationFeeAmount } : {}),
       }, idempotencyKey ? { idempotencyKey } : undefined);
       return {
         paymentIntentId: pi.id,
