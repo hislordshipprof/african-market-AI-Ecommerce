@@ -237,31 +237,7 @@ export async function markReady(
         },
       });
 
-      const lines = await tx.orderLine.findMany({ where: { orderId } });
-      const variantIds = lines.map((l: { listingVariantId: string }) => l.listingVariantId);
-      const variants = await tx.listingVariant.findMany({
-        where: { id: { in: variantIds } },
-        select: { id: true, listingId: true },
-      });
-      const variantToListing = new Map(variants.map((v: { id: string; listingId: string }) => [v.id, v.listingId]));
-
-      const stockEventData = lines
-        .map((line: { listingVariantId: string; qtyOrdered: number }) => {
-          const listingId = variantToListing.get(line.listingVariantId);
-          if (!listingId) return null;
-          return {
-            storeId,
-            listingId,
-            type: "cancel_restore" as const,
-            delta: line.qtyOrdered,
-            actorId: SYSTEM_ACTOR_ID,
-          };
-        })
-        .filter((d): d is NonNullable<typeof d> => d !== null);
-
-      if (stockEventData.length > 0) {
-        await tx.stockEvent.createMany({ data: stockEventData });
-      }
+      // Stock restore deferred to #141 (order-triggered reservation as a matched pair)
 
       await tx.auditLog.create({
         data: {
@@ -381,32 +357,7 @@ export async function autoCancelOrder(
       },
     });
 
-    const lines = await tx.orderLine.findMany({ where: { orderId } });
-
-    const variantIds = lines.map((l: { listingVariantId: string }) => l.listingVariantId);
-    const variants = await tx.listingVariant.findMany({
-      where: { id: { in: variantIds } },
-      select: { id: true, listingId: true },
-    });
-    const variantToListing = new Map(variants.map((v: { id: string; listingId: string }) => [v.id, v.listingId]));
-
-    const stockEventData = lines
-      .map((line: { listingVariantId: string; qtyOrdered: number }) => {
-        const listingId = variantToListing.get(line.listingVariantId);
-        if (!listingId) return null;
-        return {
-          storeId,
-          listingId,
-          type: "cancel_restore" as const,
-          delta: line.qtyOrdered,
-          actorId: SYSTEM_ACTOR_ID,
-        };
-      })
-      .filter((d): d is NonNullable<typeof d> => d !== null);
-
-    if (stockEventData.length > 0) {
-      await tx.stockEvent.createMany({ data: stockEventData });
-    }
+    // Stock restore deferred to #141 (order-triggered reservation as a matched pair)
 
     await tx.auditLog.create({
       data: {
@@ -520,44 +471,15 @@ async function finalizeCancelFromSweep(
 ): Promise<{ ok: true; action: string }> {
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      include: { lines: true },
-    });
-    if (!order || (order.status !== "CAPTURING" && order.status !== "CANCELLING")) return;
+    const current = await tx.order.findUnique({ where: { id: orderId } });
+    if (!current || (current.status !== "CAPTURING" && current.status !== "CANCELLING")) return;
 
     await tx.order.update({
       where: { id: orderId },
       data: { status: "CANCELLED", cancelledAt: new Date() },
     });
 
-    const lines = order.lines;
-    const variantIds = lines.map((l: { listingVariantId: string }) => l.listingVariantId);
-    const variants = await tx.listingVariant.findMany({
-      where: { id: { in: variantIds } },
-      select: { id: true, listingId: true },
-    });
-    const variantToListing = new Map(
-      variants.map((v: { id: string; listingId: string }) => [v.id, v.listingId]),
-    );
-
-    const stockEventData = lines
-      .map((line: { listingVariantId: string; qtyOrdered: number }) => {
-        const listingId = variantToListing.get(line.listingVariantId);
-        if (!listingId) return null;
-        return {
-          storeId,
-          listingId,
-          type: "cancel_restore" as const,
-          delta: line.qtyOrdered,
-          actorId: SYSTEM_ACTOR_ID,
-        };
-      })
-      .filter((d): d is NonNullable<typeof d> => d !== null);
-
-    if (stockEventData.length > 0) {
-      await tx.stockEvent.createMany({ data: stockEventData });
-    }
+    // Stock restore deferred to #141 (order-triggered reservation as a matched pair)
 
     await tx.auditLog.create({
       data: {

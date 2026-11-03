@@ -438,23 +438,19 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
   });
 
-  it("autoCancelOrder creates cancel_restore StockEvents with correct deltas", async () => {
+  it("M3: autoCancelOrder does NOT create cancel_restore StockEvents (stock not reserved at checkout, see #141)", async () => {
     const order = await createTestOrder();
+
+    const beforeCount = await storeScoped(storeId).stockEvent.count({
+      where: { type: "cancel_restore" },
+    });
 
     await autoCancelOrder(storeId, order.id);
 
-    const events = await storeScoped(storeId).stockEvent.findMany({
-      where: { actorId: SYSTEM_ACTOR_ID, type: "cancel_restore" },
-      orderBy: { createdAt: "desc" },
-      take: 3,
+    const afterCount = await storeScoped(storeId).stockEvent.count({
+      where: { type: "cancel_restore" },
     });
-    expect(events.length).toBe(3);
-    const deltas = events.map((e: { delta: number }) => e.delta).sort((a: number, b: number) => a - b);
-    // qtyOrdered: 1 (frozen), 2 (regular), 3 (perishable) -> deltas [1, 2, 3]
-    expect(deltas).toEqual([1, 2, 3]);
-    for (const e of events) {
-      expect((e as { actorId: string }).actorId).toBe(SYSTEM_ACTOR_ID);
-    }
+    expect(afterCount).toBe(beforeCount);
   });
 
   it("autoCancelOrder creates auto_cancel AuditLog entry", async () => {
@@ -596,7 +592,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       });
     }
 
-    // F1: count cancel_restore stock events before void
     const beforeCount = await storeScoped(storeId).stockEvent.count({
       where: { type: "cancel_restore" },
     });
@@ -616,19 +611,11 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
     expect(logs.length).toBe(1);
 
-    // F1: void path must create cancel_restore stock events
+    // M3: void path must NOT create cancel_restore stock events (stock not reserved at checkout, see #141)
     const afterCount = await storeScoped(storeId).stockEvent.count({
       where: { type: "cancel_restore" },
     });
-    expect(afterCount - beforeCount).toBe(lines.length);
-    const recentEvents = await storeScoped(storeId).stockEvent.findMany({
-      where: { type: "cancel_restore" },
-      orderBy: { createdAt: "desc" },
-      take: lines.length,
-    });
-    for (const e of recentEvents) {
-      expect((e as { delta: number }).delta).toBeGreaterThan(0);
-    }
+    expect(afterCount).toBe(beforeCount);
   });
 
   it("K3: markReady voids authorization when final amount is below Stripe minimum (50 cents USD)", async () => {
@@ -995,13 +982,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("CANCELLED");
     expect(updated!.cancelledAt).toBeTruthy();
 
-    // Stock restore events created
-    const stockEvents = await storeScoped(storeId).stockEvent.findMany({
-      where: { type: "cancel_restore" },
-      orderBy: { createdAt: "desc" },
-    });
-    const orderLineCount = await storeScoped(storeId).orderLine.count({ where: { orderId: order.id } });
-    expect(stockEvents.length).toBeGreaterThanOrEqual(orderLineCount);
+    // M3: no cancel_restore stock events (stock not reserved at checkout, see #141)
 
     const logs = await storeScoped(storeId).auditLog.findMany({
       where: { entityId: order.id, action: "reconcile_cancel" },
