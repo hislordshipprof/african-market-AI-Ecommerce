@@ -1,7 +1,7 @@
 import { inngest } from "./client";
-import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders } from "../db";
+import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders } from "../db";
 import { platform } from "../db";
-import { autoCancelOrder } from "../order/service";
+import { autoCancelOrder, reconcileStuckOrder } from "../order/service";
 import { isStoreOpen } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
@@ -99,4 +99,22 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
   },
 );
 
-export const inngestFunctions = [acceptanceAlert, autoCancel, sweepOrphanedAuthorized];
+export const reconcileStuckTransitional = inngest.createFunction(
+  {
+    id: "order/reconcile-stuck-transitional",
+    triggers: [{ cron: "*/5 * * * *" }],
+  },
+  async ({ step }) => {
+    const stuck = await step.run("find-stuck", async () => {
+      return findStuckTransitionalOrders();
+    });
+
+    for (const row of stuck) {
+      await step.run(`reconcile-${row.id}`, async () => {
+        await reconcileStuckOrder(row.storeId, row.id);
+      });
+    }
+  },
+);
+
+export const inngestFunctions = [acceptanceAlert, autoCancel, sweepOrphanedAuthorized, reconcileStuckTransitional];

@@ -23,6 +23,8 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
   "ACCEPTED",
   "PICKING",
+  "CAPTURING",
+  "CANCELLING",
   "READY",
   "AWAITING_PICKUP",
 ];
@@ -385,6 +387,150 @@ export async function autoCancelOrder(
   if (!finalize.ok) return finalize;
 
   return { ok: true };
+}
+
+export async function reconcileStuckOrder(
+  storeId: string,
+  orderId: string,
+): Promise<{ ok: true; action: string } | { ok: false; error: string }> {
+  const order = await storeScopedTransaction(storeId, async (tx) => {
+    return tx.order.findUnique({
+      where: { id: orderId },
+      include: { lines: true },
+    });
+  });
+
+  if (!order || (order.status !== "CAPTURING" && order.status !== "CANCELLING")) {
+    return { ok: true, action: "already_resolved" };
+  }
+
+  if (!order.paymentIntentId) {
+    return { ok: false, error: "Order has no payment intent" };
+  }
+
+  const stripe = getStripeProvider();
+  const pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
+
+  if (pi.status === "succeeded") {
+    return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
+  }
+
+  if (pi.status === "canceled") {
+    return finalizeCancelFromSweep(storeId, orderId);
+  }
+
+  if (pi.status === "requires_capture") {
+    if (order.status === "CAPTURING") {
+      await stripe.capturePaymentIntent(
+        order.paymentIntentId,
+        order.capturedAmountCents ?? 0,
+        `capture:${orderId}`,
+      );
+      return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, order.capturedAmountCents ?? 0);
+    } else {
+      await stripe.cancelPaymentIntent(order.paymentIntentId, `cancel:${orderId}`);
+      return finalizeCancelFromSweep(storeId, orderId);
+    }
+  }
+
+  return { ok: true, action: "unknown_stripe_status" };
+}
+
+async function finalizeCaptureFromSweep(
+  storeId: string,
+  orderId: string,
+  fulfillment: string,
+  capturedAmountCents: number,
+): Promise<{ ok: true; action: string }> {
+  const newStatus: OrderStatus =
+    fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const current = await tx.order.findUnique({ where: { id: orderId } });
+    if (!current || (current.status !== "CAPTURING" && current.status !== "CANCELLING")) return;
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: newStatus,
+        readyAt: new Date(),
+        capturedAmountCents,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action: "reconcile_capture",
+        entityType: "order",
+        entityId: orderId,
+      },
+    });
+  });
+
+  return { ok: true, action: "finalized_capture" };
+}
+
+async function finalizeCancelFromSweep(
+  storeId: string,
+  orderId: string,
+): Promise<{ ok: true; action: string }> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: { lines: true },
+    });
+    if (!order || (order.status !== "CAPTURING" && order.status !== "CANCELLING")) return;
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "CANCELLED", cancelledAt: new Date() },
+    });
+
+    const lines = order.lines;
+    const variantIds = lines.map((l: { listingVariantId: string }) => l.listingVariantId);
+    const variants = await tx.listingVariant.findMany({
+      where: { id: { in: variantIds } },
+      select: { id: true, listingId: true },
+    });
+    const variantToListing = new Map(
+      variants.map((v: { id: string; listingId: string }) => [v.id, v.listingId]),
+    );
+
+    const stockEventData = lines
+      .map((line: { listingVariantId: string; qtyOrdered: number }) => {
+        const listingId = variantToListing.get(line.listingVariantId);
+        if (!listingId) return null;
+        return {
+          storeId,
+          listingId,
+          type: "cancel_restore" as const,
+          delta: line.qtyOrdered,
+          actorId: SYSTEM_ACTOR_ID,
+        };
+      })
+      .filter((d): d is NonNullable<typeof d> => d !== null);
+
+    if (stockEventData.length > 0) {
+      await tx.stockEvent.createMany({ data: stockEventData });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action: "reconcile_cancel",
+        entityType: "order",
+        entityId: orderId,
+      },
+    });
+  });
+
+  return { ok: true, action: "finalized_cancel" };
 }
 
 export { sortPickListLines } from "./pick-sort";

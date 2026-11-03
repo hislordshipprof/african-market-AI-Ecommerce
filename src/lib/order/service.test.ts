@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
-import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, sortPickListLines } from "./service";
+import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, reconcileStuckOrder, sortPickListLines } from "./service";
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, setAuthorizedAmount } from "../stripe/fake";
@@ -705,5 +705,207 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const r2 = await markReady(storeId, order.id);
     expect(r2.ok).toBe(false);
     if (!r2.ok) expect(r2.error).toContain("Cannot mark ready");
+  });
+
+  // ── K1: reconcileStuckOrder tests ────────────────────────────────
+
+  it("K1: sweep finalizes CAPTURING order when Stripe already captured (Phase 2 response lost)", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    // Simulate: Phase 1 set CAPTURING and capturedAmountCents, Phase 2 captured on Stripe
+    // but the response was lost (Phase 3 never ran).
+    const capturedAmount = 5500;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CAPTURING", capturedAmountCents: capturedAmount },
+      });
+    });
+    // Mark the PI as captured in fake Stripe
+    capturedPayments.set(order.paymentIntentId!, capturedAmount);
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("finalized_capture");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("AWAITING_PICKUP");
+    expect(updated!.readyAt).toBeTruthy();
+    expect(updated!.capturedAmountCents).toBe(capturedAmount);
+
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "reconcile_capture" },
+    });
+    expect(logs.length).toBe(1);
+  });
+
+  it("K1: sweep finalizes CAPTURING order when Phase 3 DB failure (Stripe succeeded)", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    // Simulate: Phase 1 + Phase 2 succeeded, but Phase 3 DB update failed.
+    // Order is stuck in CAPTURING. Stripe has the captured payment.
+    const capturedAmount = 5500;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CAPTURING", capturedAmountCents: capturedAmount },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, capturedAmount);
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("finalized_capture");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("AWAITING_PICKUP");
+  });
+
+  it("K1: sweep retries capture when Stripe still requires_capture (CAPTURING)", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    const capturedAmount = 5500;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CAPTURING", capturedAmountCents: capturedAmount },
+      });
+    });
+    // Stripe still has requires_capture (no capturedPayments entry)
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("finalized_capture");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("AWAITING_PICKUP");
+    expect(capturedPayments.has(order.paymentIntentId!)).toBe(true);
+  });
+
+  it("K1: retry capture from UI (markReady on CAPTURING order)", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    const capturedAmount = 5500;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CAPTURING", capturedAmountCents: capturedAmount },
+      });
+    });
+
+    // UI calls markReady on a CAPTURING order — Phase 1 treats it as alreadyClaiming
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.capturedAmountCents).toBe(capturedAmount);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("AWAITING_PICKUP");
+  });
+
+  it("K1: sweep twice on same order is a no-op", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) {
+      await markLinePicked(storeId, line.id);
+    }
+
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CAPTURING", capturedAmountCents: 5500 },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5500);
+
+    const r1 = await reconcileStuckOrder(storeId, order.id);
+    expect(r1.ok).toBe(true);
+    if (r1.ok) expect(r1.action).toBe("finalized_capture");
+
+    const r2 = await reconcileStuckOrder(storeId, order.id);
+    expect(r2.ok).toBe(true);
+    if (r2.ok) expect(r2.action).toBe("already_resolved");
+
+    // Only one audit log
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "reconcile_capture" },
+    });
+    expect(logs.length).toBe(1);
+  });
+
+  it("K1: sweep finalizes CANCELLING order when Stripe already canceled", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    cancelledPayments.add(order.paymentIntentId!);
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("finalized_cancel");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.cancelledAt).toBeTruthy();
+
+    // Stock restore events created
+    const stockEvents = await storeScoped(storeId).stockEvent.findMany({
+      where: { type: "cancel_restore" },
+      orderBy: { createdAt: "desc" },
+    });
+    const orderLineCount = await storeScoped(storeId).orderLine.count({ where: { orderId: order.id } });
+    expect(stockEvents.length).toBeGreaterThanOrEqual(orderLineCount);
+
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "reconcile_cancel" },
+    });
+    expect(logs.length).toBe(1);
+  });
+
+  it("K1: sweep retries cancel when Stripe still requires_capture (CANCELLING)", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    // Stripe still has requires_capture (cancel didn't go through)
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("finalized_cancel");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
   });
 });
