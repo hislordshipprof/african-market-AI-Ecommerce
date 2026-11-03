@@ -1,25 +1,38 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { fakeStripeProvider, reset, setAuthorizedAmount } from "./fake";
+import { ProviderStateError } from "./types";
 
 describe("Fake Stripe state machine (K6)", () => {
   beforeEach(() => {
     reset();
   });
 
-  it("capture after cancel throws", async () => {
+  it("capture after cancel throws ProviderStateError", async () => {
     setAuthorizedAmount("pi_1", 1000);
     await fakeStripeProvider.cancelPaymentIntent("pi_1");
     await expect(
       fakeStripeProvider.capturePaymentIntent("pi_1", 500),
-    ).rejects.toThrow(/canceled/i);
+    ).rejects.toThrow(ProviderStateError);
+    try {
+      await fakeStripeProvider.capturePaymentIntent("pi_1", 500);
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProviderStateError);
+      expect((e as ProviderStateError).actualStatus).toBe("canceled");
+    }
   });
 
-  it("cancel after capture throws", async () => {
+  it("cancel after capture throws ProviderStateError", async () => {
     setAuthorizedAmount("pi_2", 1000);
     await fakeStripeProvider.capturePaymentIntent("pi_2", 800);
     await expect(
       fakeStripeProvider.cancelPaymentIntent("pi_2"),
-    ).rejects.toThrow(/captured|succeeded/i);
+    ).rejects.toThrow(ProviderStateError);
+    try {
+      await fakeStripeProvider.cancelPaymentIntent("pi_2");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProviderStateError);
+      expect((e as ProviderStateError).actualStatus).toBe("succeeded");
+    }
   });
 
   it("capture above amount_capturable throws", async () => {
@@ -62,12 +75,12 @@ describe("Fake Stripe state machine (K6)", () => {
     expect(r1).toEqual(r2);
   });
 
-  it("capture with different key on captured PI throws", async () => {
+  it("capture with different key on captured PI returns idempotent result", async () => {
     setAuthorizedAmount("pi_7b", 1000);
     await fakeStripeProvider.capturePaymentIntent("pi_7b", 800, "key_a");
-    await expect(
-      fakeStripeProvider.capturePaymentIntent("pi_7b", 800, "key_b"),
-    ).rejects.toThrow(/already been captured/i);
+    const r2 = await fakeStripeProvider.capturePaymentIntent("pi_7b", 800, "key_b");
+    expect(r2.status).toBe("succeeded");
+    expect(r2.amountCaptured).toBe(800);
   });
 
   it("idempotent cancel with same key returns saved result", async () => {
@@ -77,11 +90,10 @@ describe("Fake Stripe state machine (K6)", () => {
     expect(r1).toEqual(r2);
   });
 
-  it("cancel with different key on cancelled PI throws", async () => {
+  it("cancel with different key on cancelled PI returns idempotent result", async () => {
     await fakeStripeProvider.cancelPaymentIntent("pi_8b", "key_c");
-    await expect(
-      fakeStripeProvider.cancelPaymentIntent("pi_8b", "key_d"),
-    ).rejects.toThrow(/canceled/i);
+    const r2 = await fakeStripeProvider.cancelPaymentIntent("pi_8b", "key_d");
+    expect(r2.status).toBe("canceled");
   });
 
   it("capture below 50c minimum throws amount_too_small", async () => {

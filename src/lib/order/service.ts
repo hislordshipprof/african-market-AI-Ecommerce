@@ -1,5 +1,6 @@
 import { storeScopedTransaction, lockStoreRow } from "../db";
 import { getStripeProvider } from "../stripe";
+import { ProviderStateError } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
 export type { OrderLineStatus } from "./constants";
@@ -218,10 +219,44 @@ export async function markReady(
   // K3: below-minimum amount — void the authorization instead of capturing
   if (validation.voidInsteadOfCapture) {
     const stripe = getStripeProvider();
-    await stripe.cancelPaymentIntent(
-      validation.paymentIntentId,
-      `cancel:${orderId}`,
-    );
+    try {
+      await stripe.cancelPaymentIntent(
+        validation.paymentIntentId,
+        `cancel:${orderId}`,
+      );
+    } catch (err) {
+      if (err instanceof ProviderStateError) {
+        // PI was captured externally — refund and cancel
+        const pi = await stripe.retrievePaymentIntent(validation.paymentIntentId);
+        const refund = await stripe.refundPayment(
+          validation.paymentIntentId,
+          pi.amountReceived,
+          `refund:${orderId}`,
+        );
+        await storeScopedTransaction(storeId, async (tx) => {
+          await lockStoreRow(tx, storeId);
+          const current = await tx.order.findUnique({ where: { id: orderId } });
+          if (!current || current.status !== "CANCELLING") return;
+          await tx.order.update({
+            where: { id: orderId },
+            data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+          });
+          await tx.auditLog.create({
+            data: {
+              storeId,
+              actorId: SYSTEM_ACTOR_ID,
+              actorEmail: SYSTEM_ACTOR_EMAIL,
+              action: "anomaly_refund",
+              entityType: "order",
+              entityId: orderId,
+              after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
+            },
+          });
+        });
+        return { ok: true, capturedAmountCents: 0 };
+      }
+      throw err;
+    }
     await storeScopedTransaction(storeId, async (tx) => {
       await lockStoreRow(tx, storeId);
       const current = await tx.order.findUnique({ where: { id: orderId } });
@@ -255,11 +290,39 @@ export async function markReady(
 
   // Phase 2: Stripe capture outside transaction (idempotency key makes retry safe)
   const stripe = getStripeProvider();
-  const captureResult = await stripe.capturePaymentIntent(
-    validation.paymentIntentId,
-    validation.capturedAmountCents,
-    `capture:${orderId}`,
-  );
+  let captureResult;
+  try {
+    captureResult = await stripe.capturePaymentIntent(
+      validation.paymentIntentId,
+      validation.capturedAmountCents,
+      `capture:${orderId}`,
+    );
+  } catch (err) {
+    if (err instanceof ProviderStateError) {
+      await storeScopedTransaction(storeId, async (tx) => {
+        await lockStoreRow(tx, storeId);
+        const current = await tx.order.findUnique({ where: { id: orderId } });
+        if (!current || current.status !== "CAPTURING") return;
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+        });
+        await tx.auditLog.create({
+          data: {
+            storeId,
+            actorId: SYSTEM_ACTOR_ID,
+            actorEmail: SYSTEM_ACTOR_EMAIL,
+            action: "capture_on_canceled_pi",
+            entityType: "order",
+            entityId: orderId,
+            after: { actualStatus: err.actualStatus },
+          },
+        });
+      });
+      return { ok: false, error: "Payment authorization expired or was voided — order cancelled; contact the customer" };
+    }
+    throw err;
+  }
 
   // Phase 3: finalize in transaction (verify still CAPTURING)
   // Persist Stripe's amount_received, not the requested amount (M2)
@@ -336,10 +399,47 @@ export async function autoCancelOrder(
   // Phase 2: Stripe cancel outside transaction (idempotency key makes retry safe)
   if (validation.paymentIntentId) {
     const stripe = getStripeProvider();
-    await stripe.cancelPaymentIntent(
-      validation.paymentIntentId,
-      `cancel:${orderId}`,
-    );
+    try {
+      await stripe.cancelPaymentIntent(
+        validation.paymentIntentId,
+        `cancel:${orderId}`,
+      );
+    } catch (err) {
+      if (err instanceof ProviderStateError) {
+        // PI was captured externally — refund and cancel
+        const pi = await stripe.retrievePaymentIntent(validation.paymentIntentId);
+        const refund = await stripe.refundPayment(
+          validation.paymentIntentId,
+          pi.amountReceived,
+          `refund:${orderId}`,
+        );
+        if (refund.status !== "succeeded") {
+          return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
+        }
+        await storeScopedTransaction(storeId, async (tx) => {
+          await lockStoreRow(tx, storeId);
+          const current = await tx.order.findUnique({ where: { id: orderId } });
+          if (!current || current.status !== "CANCELLING") return;
+          await tx.order.update({
+            where: { id: orderId },
+            data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+          });
+          await tx.auditLog.create({
+            data: {
+              storeId,
+              actorId: SYSTEM_ACTOR_ID,
+              actorEmail: SYSTEM_ACTOR_EMAIL,
+              action: "anomaly_refund",
+              entityType: "order",
+              entityId: orderId,
+              after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
+            },
+          });
+        });
+        return { ok: true };
+      }
+      throw err;
+    }
   }
 
   // Phase 3: finalize in transaction (verify still CANCELLING)
@@ -443,14 +543,59 @@ export async function reconcileStuckOrder(
 
   if (pi.status === "requires_capture") {
     if (order.status === "CAPTURING") {
-      const retryCap = await stripe.capturePaymentIntent(
-        order.paymentIntentId,
-        order.capturedAmountCents ?? 0,
-        `capture:${orderId}`,
-      );
-      return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
+      try {
+        const retryCap = await stripe.capturePaymentIntent(
+          order.paymentIntentId,
+          order.capturedAmountCents ?? 0,
+          `capture:${orderId}`,
+        );
+        return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
+      } catch (err) {
+        if (err instanceof ProviderStateError) {
+          return finalizeCancelFromSweep(storeId, orderId);
+        }
+        throw err;
+      }
     } else {
-      await stripe.cancelPaymentIntent(order.paymentIntentId, `cancel:${orderId}`);
+      try {
+        await stripe.cancelPaymentIntent(order.paymentIntentId, `cancel:${orderId}`);
+      } catch (err) {
+        if (err instanceof ProviderStateError) {
+          const freshPi = await stripe.retrievePaymentIntent(order.paymentIntentId);
+          if (freshPi.status === "succeeded") {
+            const refund = await stripe.refundPayment(
+              order.paymentIntentId,
+              freshPi.amountReceived,
+              `refund:${orderId}`,
+            );
+            if (refund.status !== "succeeded") {
+              return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
+            }
+            await storeScopedTransaction(storeId, async (tx) => {
+              await lockStoreRow(tx, storeId);
+              const current = await tx.order.findUnique({ where: { id: orderId } });
+              if (!current || current.status !== "CANCELLING") return;
+              await tx.order.update({
+                where: { id: orderId },
+                data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+              });
+              await tx.auditLog.create({
+                data: {
+                  storeId,
+                  actorId: SYSTEM_ACTOR_ID,
+                  actorEmail: SYSTEM_ACTOR_EMAIL,
+                  action: "anomaly_refund",
+                  entityType: "order",
+                  entityId: orderId,
+                  after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
+                },
+              });
+            });
+            return { ok: true, action: "anomaly_refund" };
+          }
+        }
+        throw err;
+      }
       return finalizeCancelFromSweep(storeId, orderId);
     }
   }

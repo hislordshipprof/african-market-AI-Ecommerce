@@ -87,6 +87,15 @@ export interface StripeProvider {
   ): Promise<RefundResult>;
 }
 
+export class ProviderStateError extends Error {
+  actualStatus: string;
+  constructor(expectedOp: "capture" | "cancel", actualStatus: string) {
+    super(`${expectedOp} expected matching terminal status but PI is ${actualStatus}`);
+    this.name = "ProviderStateError";
+    this.actualStatus = actualStatus;
+  }
+}
+
 export function deriveOnboardingStatus(account: {
   chargesEnabled: boolean;
   payoutsEnabled: boolean;

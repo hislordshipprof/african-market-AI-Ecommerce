@@ -8,6 +8,7 @@ import type {
   RetrieveResult,
   RefundResult,
 } from "./types";
+import { ProviderStateError } from "./types";
 
 const VALID_WEBHOOK_SIGNATURE = "fake_valid_sig";
 const STRIPE_USD_MINIMUM_CAPTURE_CENTS = 50;
@@ -97,24 +98,14 @@ const fakeStripeProvider: StripeProvider = {
 
   async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey) {
     if (cancelledPayments.has(paymentIntentId)) {
-      throw new FakeStripeError(
-        "payment_intent_unexpected_state",
-        `You cannot capture this PaymentIntent because it has a status of canceled.`,
-      );
+      throw new ProviderStateError("capture", "canceled");
     }
     if (capturedPayments.has(paymentIntentId)) {
-      const existingKey = captureKeys.get(paymentIntentId);
-      if (idempotencyKey && existingKey === idempotencyKey) {
-        return {
-          paymentIntentId,
-          amountCaptured: capturedPayments.get(paymentIntentId)!,
-          status: "succeeded",
-        } satisfies CaptureResult;
-      }
-      throw new FakeStripeError(
-        "payment_intent_unexpected_state",
-        `This PaymentIntent has already been captured.`,
-      );
+      return {
+        paymentIntentId,
+        amountCaptured: capturedPayments.get(paymentIntentId)!,
+        status: "succeeded",
+      } satisfies CaptureResult;
     }
     if (amountCents < STRIPE_USD_MINIMUM_CAPTURE_CENTS) {
       throw new FakeStripeError(
@@ -140,23 +131,13 @@ const fakeStripeProvider: StripeProvider = {
 
   async cancelPaymentIntent(paymentIntentId, idempotencyKey) {
     if (capturedPayments.has(paymentIntentId)) {
-      throw new FakeStripeError(
-        "payment_intent_unexpected_state",
-        `You cannot cancel this PaymentIntent because it has a status of succeeded.`,
-      );
+      throw new ProviderStateError("cancel", "succeeded");
     }
     if (cancelledPayments.has(paymentIntentId)) {
-      const existingKey = cancelKeys.get(paymentIntentId);
-      if (idempotencyKey && existingKey === idempotencyKey) {
-        return {
-          paymentIntentId,
-          status: "canceled",
-        } satisfies CancelResult;
-      }
-      throw new FakeStripeError(
-        "payment_intent_unexpected_state",
-        `You cannot cancel this PaymentIntent because it has a status of canceled.`,
-      );
+      return {
+        paymentIntentId,
+        status: "canceled",
+      } satisfies CancelResult;
     }
     cancelledPayments.add(paymentIntentId);
     if (idempotencyKey) cancelKeys.set(paymentIntentId, idempotencyKey);

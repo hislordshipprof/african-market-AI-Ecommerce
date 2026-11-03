@@ -5,6 +5,7 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, reconcileStuckOrder, sortPickListLines } from "./service";
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
+import { ProviderStateError } from "../stripe/types";
 import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, refundedPayments, setAuthorizedAmount, setNextRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
@@ -1201,5 +1202,149 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("AWAITING_PICKUP");
     expect(updated!.capturedAmountCents).toBe(capturedAmount);
+  });
+
+  // --- P1: ProviderStateError — never finalize on contradicting Stripe status ---
+
+  it("P1: markReady capture finds PI canceled → CANCELLED + audit + staff error", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    // Simulate: PI was canceled externally before markReady captures
+    cancelledPayments.add(order.paymentIntentId!);
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/authorization expired|voided|cancelled/i);
+    }
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.capturedAmountCents).toBeNull();
+
+    const audit = await storeScoped(storeId).auditLog.findFirst({
+      where: { entityId: order.id, action: "capture_on_canceled_pi" },
+    });
+    expect(audit).toBeTruthy();
+  });
+
+  it("P1: markReady void path finds PI succeeded → refund + CANCELLED + audit", async () => {
+    // Create an order with lines that total below minimum to trigger void path
+    const num = ++orderSeq;
+    const order = await storeScopedTransaction(storeId, async (tx) => {
+      const o = await tx.order.create({
+        data: {
+          storeId,
+          number: num,
+          customerId,
+          status: "PICKING",
+          fulfillment: "pickup",
+          subtotalCents: 10,
+          bufferCents: 0,
+          tipCents: 0,
+          deliveryFeeCents: 0,
+          totalAuthorizedCents: 100,
+          totalCents: 10,
+          paymentIntentId: `pi_void_pse_${Date.now()}`,
+        },
+      });
+      await tx.orderLine.create({
+        data: {
+          storeId,
+          orderId: o.id,
+          listingVariantId: variantId,
+          qtyOrdered: 1,
+          unitPriceCents: 10,
+          status: "picked",
+          qtyPicked: 1,
+        },
+      });
+      return o;
+    });
+
+    setAuthorizedAmount(order.paymentIntentId!, 100);
+    // Simulate: PI was captured externally so cancel throws ProviderStateError
+    capturedPayments.set(order.paymentIntentId!, 100);
+
+    const result = await markReady(storeId, order.id);
+    // Void path should handle ProviderStateError by refunding + cancelling
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+
+    expect(refundedPayments.has(order.paymentIntentId!)).toBe(true);
+
+    const audit = await storeScoped(storeId).auditLog.findFirst({
+      where: { entityId: order.id, action: "anomaly_refund" },
+    });
+    expect(audit).toBeTruthy();
+  });
+
+  it("P1: autoCancelOrder cancel finds PI succeeded → refund + CANCELLED + anomaly_refund audit", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+
+    // Simulate: PI was captured externally before autoCancel
+    capturedPayments.set(order.paymentIntentId!, 5500);
+
+    const result = await autoCancelOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.capturedAmountCents).toBeNull();
+
+    expect(refundedPayments.has(order.paymentIntentId!)).toBe(true);
+
+    const audit = await storeScoped(storeId).auditLog.findFirst({
+      where: { entityId: order.id, action: "anomaly_refund" },
+    });
+    expect(audit).toBeTruthy();
+  });
+
+  it("P1: sweep retry capture on canceled PI → CANCELLED", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CAPTURING", capturedAmountCents: 5500 },
+      });
+    });
+    // PI was canceled externally
+    cancelledPayments.add(order.paymentIntentId!);
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.capturedAmountCents).toBeNull();
+  });
+
+  it("P1: sweep retry cancel on captured PI → refund + CANCELLED", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    // PI was captured externally — cancel will throw ProviderStateError
+    capturedPayments.set(order.paymentIntentId!, 5500);
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+
+    expect(refundedPayments.has(order.paymentIntentId!)).toBe(true);
   });
 });

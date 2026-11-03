@@ -9,6 +9,7 @@ import type {
   RetrieveResult,
   RefundResult,
 } from "./types";
+import { ProviderStateError } from "./types";
 
 let _stripeClient: Stripe | null = null;
 
@@ -162,11 +163,14 @@ export const stripeProvider: StripeProvider = {
       if (err instanceof Stripe.errors.StripeInvalidRequestError
         && err.code === "payment_intent_unexpected_state") {
         const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
-        return {
-          paymentIntentId: pi.id,
-          amountCaptured: pi.amount_received,
-          status: pi.status,
-        } satisfies CaptureResult;
+        if (pi.status === "succeeded") {
+          return {
+            paymentIntentId: pi.id,
+            amountCaptured: pi.amount_received,
+            status: pi.status,
+          } satisfies CaptureResult;
+        }
+        throw new ProviderStateError("capture", pi.status);
       }
       throw err;
     }
@@ -185,10 +189,13 @@ export const stripeProvider: StripeProvider = {
       if (err instanceof Stripe.errors.StripeInvalidRequestError
         && err.code === "payment_intent_unexpected_state") {
         const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
-        return {
-          paymentIntentId: pi.id,
-          status: pi.status,
-        } satisfies CancelResult;
+        if (pi.status === "canceled") {
+          return {
+            paymentIntentId: pi.id,
+            status: pi.status,
+          } satisfies CancelResult;
+        }
+        throw new ProviderStateError("cancel", pi.status);
       }
       throw err;
     }
