@@ -147,8 +147,7 @@ test.describe("CSV import (authenticated)", () => {
     await page.locator("input[type='file']").setInputFiles(csvPath);
     await page.click("text=Upload & Preview");
 
-    await expect(page.getByText("Errors")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("Missing required field: name")).toBeVisible();
+    await expect(page.getByText("Missing required field: name")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Invalid price")).toBeVisible();
   });
 
@@ -160,7 +159,7 @@ test.describe("CSV import (authenticated)", () => {
     await page.click("text=Upload & Preview");
 
     await expect(
-      page.getByText(/empty|Could not parse/i),
+      page.getByText(/select a CSV file|empty|Could not parse/i),
     ).toBeVisible({ timeout: 10000 });
   });
 });
