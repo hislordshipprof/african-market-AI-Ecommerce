@@ -7,6 +7,7 @@ export default async function CsvImportPage() {
   return (
     <CsvImportUi
       storeName={session.store.name}
+      storeSlug={session.store.slug}
     />
   );
 }
