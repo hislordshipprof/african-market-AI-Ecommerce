@@ -74,7 +74,9 @@ export async function csvCommitAction(
     revalidateStorefront(session.store.slug);
     return { result };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Import failed.";
-    return { error: msg };
+    const msg = e instanceof Error ? e.message : "";
+    const safe = /^(Import token|No rows|No valid)/.test(msg);
+    if (!safe) console.error("[csv-import] commit error:", e);
+    return { error: safe ? msg : "Import failed. Please try again." };
   }
 }

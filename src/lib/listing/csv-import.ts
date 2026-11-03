@@ -632,14 +632,31 @@ export async function commitImport(
     });
   }
 
-  if (toCreate.length === 0) {
+  const seenMasterIds = new Set<string>();
+  const seenCustomNames = new Set<string>();
+  const dedupedToCreate = toCreate.filter((item) => {
+    if (item.masterProductId) {
+      if (seenMasterIds.has(item.masterProductId)) return false;
+      seenMasterIds.add(item.masterProductId);
+      return true;
+    }
+    if (item.customName) {
+      const norm = normalizeForMatch(item.customName);
+      if (seenCustomNames.has(norm)) return false;
+      seenCustomNames.add(norm);
+      return true;
+    }
+    return true;
+  });
+
+  if (dedupedToCreate.length === 0) {
     throw new Error("No valid rows to import after re-validation.");
   }
 
   const listingIds = await storeScopedTransaction(storeId, async (tx) => {
     const ids: string[] = [];
 
-    for (const item of toCreate) {
+    for (const item of dedupedToCreate) {
       const listing = await tx.listing.create({
         data: {
           storeId,

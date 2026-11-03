@@ -118,7 +118,7 @@ export function CsvImportUi({ storeName }: Props) {
       if (res.result) {
         setCreatedCount(res.result.createdCount);
         setStep("success");
-        toast.success(`${res.result.createdCount} product(s) imported.`);
+        toast.success(`Imported ${res.result.createdCount} listing(s).`);
       }
     });
   }
@@ -553,7 +553,7 @@ function SuccessStep({
           Import Complete
         </h2>
         <p className="mb-6 text-[var(--color-muted)]">
-          {createdCount} product{createdCount !== 1 ? "s" : ""} successfully imported.
+          Imported {createdCount} listing{createdCount !== 1 ? "s" : ""} successfully.
         </p>
         <div className="flex gap-3">
           <Button variant="outline" onClick={onImportMore}>

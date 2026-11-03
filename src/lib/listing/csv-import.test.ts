@@ -636,6 +636,46 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(listings).toHaveLength(1);
   });
 
+  it("F1: crafted matchedRows with duplicate names creates only one listing per masterProduct", async () => {
+    const csv = "name,price\nKundi T63,6.99\nKundi T63,7.99\n";
+    const preview = await generatePreview(storeBId, csv);
+
+    const result = await commitImport(
+      storeBId,
+      preview.importToken,
+      { matchedRows: [2, 3], newItemRows: [], duplicateRows: [], ambiguousResolutions: [] },
+      actor,
+    );
+
+    expect(result.createdCount).toBe(1);
+
+    const scopedB = storeScoped(storeBId);
+    const listings = await scopedB.listing.findMany({
+      where: { id: { in: result.listingIds } },
+    });
+    expect(listings).toHaveLength(1);
+  });
+
+  it("F1: crafted newItemRows with duplicate custom names creates only one listing", async () => {
+    const csv = "name,price\nUnique Custom F1 T63,6.99\nUnique Custom F1 T63,7.99\n";
+    const preview = await generatePreview(storeAId, csv);
+
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2, 3], duplicateRows: [], ambiguousResolutions: [] },
+      actor,
+    );
+
+    expect(result.createdCount).toBe(1);
+
+    const scopedA = storeScoped(storeAId);
+    const listings = await scopedA.listing.findMany({
+      where: { id: { in: result.listingIds } },
+    });
+    expect(listings).toHaveLength(1);
+  });
+
   it("E10: formula injection stored as plain text", async () => {
     const csv = `name,price\n"=HYPERLINK(""http://evil.com"")Attack",5.00\n`;
     const preview = await generatePreview(storeAId, csv);

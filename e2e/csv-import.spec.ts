@@ -130,7 +130,7 @@ test.describe("CSV import (authenticated)", () => {
     await expect(page.getByText("Import Complete")).toBeVisible({
       timeout: 15000,
     });
-    await expect(page.getByText("2 products successfully imported")).toBeVisible();
+    await expect(page.getByText("Imported 2 listings successfully")).toBeVisible();
 
     await page.click("text=Go to Products");
     await expect(page.locator(`text=${nameA}`)).toBeVisible({ timeout: 10000 });
