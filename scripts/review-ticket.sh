@@ -25,7 +25,9 @@ if [ "$REVIEW_ENGINE" = codex ]; then
 fi
 
 # Review round for this ticket (1 = first review). From round 3 on, only real blockers block.
-ROUND="${REVIEW_ROUND:-$(( $(ls "$ROOT"/.builder/logs/review-"$N"-*.json 2>/dev/null | grep -vc '\.second\.json$') ))}"
+# (grep -c exits 1 on zero matches, so the count is guarded: under set -e a bare pipeline would end the script.)
+PRIOR=$(ls "$ROOT"/.builder/logs/review-"$N"-*.json 2>/dev/null | grep -vc '\.second\.json$' || true)
+ROUND="${REVIEW_ROUND:-$(( ${PRIOR:-0} + 1 ))}"
 [ "$ROUND" -ge 1 ] 2>/dev/null || ROUND=1
 if [ "$ROUND" -ge 3 ]; then
   ROUND_RULE="This is review round $ROUND. From round 3 on, a finding is blocking ONLY if it is a demonstrated security or secret exposure, a per-store isolation break, money or data loss, an acceptance criterion observed failing, or a broken build or CI. Weak, missing or flaky tests, doc drift, duplication, design tokens and anything outside the brief are non-blocking: list them for the follow-up issue."
