@@ -11,7 +11,32 @@ test.describe("Cart sticky checkout bar at 390px", () => {
     page,
   }, testInfo) => {
     await addItemToCart(page);
+    // A second, distinct listing: two cart lines, not qty 2 of one line (#117 AC1).
+    await page.goto(`${base}/categories/grains-and-flours`);
+    const other = page
+      .getByTestId("listing-card")
+      .filter({ hasNotText: "Garri" })
+      .filter({ has: page.getByTestId("quick-add-btn") })
+      .first();
+    const otherName = (
+      await other.locator(".sf-product-name").innerText()
+    ).trim();
+    await other.getByTestId("quick-add-btn").click();
+    await expect(
+      page.getByTestId("storefront-header").getByTestId("cart-count"),
+    ).toHaveText("11");
+    await expect(
+      page.getByTestId("storefront-header").locator("[data-cart-pending]"),
+    ).toBeHidden({ timeout: 10000 });
     await page.goto(`${base}/cart`);
+
+    // Exactly two lines, and the last one is the other product.
+    const rows = page.locator('[class*="lineActions"]:visible');
+    await expect(rows).toHaveCount(2);
+    const lastRow = page.locator('[class*="lineActions"]:visible').last();
+    await expect(lastRow.locator("xpath=ancestor::li[1]")).toContainText(
+      otherName,
+    );
 
     const bar = page.locator('[class*="mobileAction"]');
     const nav = page.getByRole("navigation", { name: "Main navigation" });
