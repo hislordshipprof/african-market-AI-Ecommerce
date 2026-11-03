@@ -1,4 +1,8 @@
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
+
+vi.hoisted(() => {
+  process.env.AUTH_RATE_LIMIT_RELAXED = "1";
+});
 import { generateTOTP } from "../../e2e/totp";
 
 const { headerState } = vi.hoisted(() => ({ headerState: new Headers() }));

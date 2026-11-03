@@ -16,19 +16,23 @@ function deliveryFailureLog(error: unknown): string {
  * Rejections are logged and never include an email address.
  */
 export function scheduleAfterResponse(task: () => Promise<unknown>): void {
-  const run = () => {
-    const pending = task();
-    pending.catch((error: unknown) => {
-      console.error(deliveryFailureLog(error));
-    });
-  };
+  // Start the send during the request, and hand that same promise to
+  // after() so waitUntil keeps the invocation alive until it settles.
+  // A callback that does not return the promise lets the runtime freeze
+  // while the send is still in flight.
+  const pending = task().catch((error: unknown) => {
+    console.error(deliveryFailureLog(error));
+  });
 
   try {
-    after(run);
+    after(pending);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("request scope") || message.includes("`after`")) {
-      run();
+    if (
+      message.includes("request scope") ||
+      message.includes("`after`") ||
+      message.includes("waitUntil")
+    ) {
       return;
     }
     throw error;

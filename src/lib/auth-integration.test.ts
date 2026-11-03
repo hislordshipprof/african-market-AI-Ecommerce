@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+
+vi.hoisted(() => {
+  process.env.AUTH_RATE_LIMIT_RELAXED = "1";
+});
 import { auth } from "./auth";
 import { authPrisma, storeScoped } from "./db";
 import { findOrCreateCustomer } from "./customer-auth";
@@ -116,7 +120,12 @@ describe("auth integration (real DB, app_runtime)", () => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id = ${storeId}`;
-      const emails = [customerEmail, staffEmail, adminEmail];
+      const emails = [
+        customerEmail,
+        staffEmail,
+        adminEmail,
+        `integ-unknown-${suffix}@test.example`,
+      ];
       for (const email of emails) {
         await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
         await tx.$executeRaw`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
@@ -357,13 +366,16 @@ describe("auth integration (real DB, app_runtime)", () => {
     const verifyRes = await authGet(extractVerifyUrl());
     const cookies = collectCookies(verifyRes);
     const before = await authGet(`${BASE}/get-session`, cookies);
-    expect((await before.json()).session).toBeTruthy();
+    const beforeBody = await before.json();
+    expect(beforeBody.session).toBeTruthy();
+    const sessionId = beforeBody.session.id as string;
 
     const signedOut = await authPost("/sign-out", {}, cookies);
     expect(signedOut.status).toBeLessThan(400);
-    const after = await authGet(`${BASE}/get-session`, collectCookies(signedOut));
-    const body = await after.json();
+    const afterSignOut = await authGet(`${BASE}/get-session`, cookies);
+    const body = await afterSignOut.json();
     expect(body?.session ?? null).toBeNull();
+    expect(await authPrisma.session.findUnique({ where: { id: sessionId } })).toBeNull();
   });
 
   it("E6/AC4: two store-host sign-ins sync one user, two sessions, and two isolated customers", async () => {
