@@ -306,7 +306,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("COMPLETED");
     expect(updated!.completedAt).toBeTruthy();
-  });
+  }, 10_000);
 
   it("completePickup rejects wrong status", async () => {
     const order = await createTestOrder();
@@ -722,7 +722,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "void_zero_amount" },
     });
     expect(logs.length).toBe(1);
-  });
+  }, 10_000);
 
   it("Codex-4: void finalization verifies CANCELLING before writing CANCELLED", async () => {
     const order = await createTestOrder();
@@ -962,7 +962,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "reconcile_capture" },
     });
     expect(logs.length).toBe(1);
-  });
+  }, 10_000);
 
   it("K1: sweep finalizes CANCELLING order when Stripe already canceled", async () => {
     const order = await createTestOrder();

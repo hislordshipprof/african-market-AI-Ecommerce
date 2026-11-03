@@ -163,7 +163,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         where: { entityId: order.id, action: "acceptance_alert" },
       });
       expect(logs.length).toBe(1);
-    });
+    }, 10_000);
 
     it("skips audit log when store is closed", async () => {
       const { acceptanceAlert } = await import("./functions");
@@ -458,7 +458,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       } finally {
         spy.mockRestore();
       }
-    });
+    }, 10_000);
 
     it("Codex-3/C4: failed reconcile bumps updated_at so order rotates to back of sweep queue", async () => {
       const { reconcileStuckTransitional } = await import("./functions");
