@@ -215,11 +215,15 @@ test.describe("CSV import (authenticated)", () => {
 
     await expect(page.getByText("Import Complete")).toBeVisible({ timeout: 15000 });
 
-    // Verify the listing was created with the chosen master product
+    // Verify the listing was created with the chosen master product (listings has FORCE RLS)
     const store = await prisma.store.findUnique({ where: { slug: "mama-ngozi" } });
-    const listing = await prisma.listing.findFirst({
-      where: { storeId: store!.id, masterProductId: mpBeta.id },
-    });
+    const [, , listing] = await prisma.$transaction([
+      prisma.$executeRaw`SET LOCAL ROLE app_user`,
+      prisma.$executeRaw`SELECT set_config('app.store_id', ${store!.id}, true)`,
+      prisma.listing.findFirst({
+        where: { storeId: store!.id, masterProductId: mpBeta.id },
+      }),
+    ]);
     expect(listing).toBeTruthy();
     expect(listing!.perishable).toBe(true);
 
