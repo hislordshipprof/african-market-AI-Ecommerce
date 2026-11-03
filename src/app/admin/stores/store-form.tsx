@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { createStore, updateStore } from "@/lib/admin/actions";
 import type { StoreFormState } from "@/lib/admin/actions";
 import type { Store } from "@prisma/client";
+import { VALID_US_TIMEZONES } from "@/lib/admin/timezone";
 
 const PRESETS = [
   { value: "palm-and-shea", label: "Palm & Shea" },
@@ -197,6 +198,29 @@ export function StoreForm({
             {state.fieldErrors?.hours && (
               <p className="mt-1 text-xs text-red-600">
                 {state.fieldErrors.hours}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="timezone" className="mb-1 block text-sm font-medium text-[#15201A]">
+              Timezone
+            </label>
+            <select
+              id="timezone"
+              name="timezone"
+              defaultValue={sv?.timezone ?? store?.timezone ?? "America/New_York"}
+              className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+            >
+              {VALID_US_TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
+            {state.fieldErrors?.timezone && (
+              <p className="mt-1 text-xs text-red-600">
+                {state.fieldErrors.timezone}
               </p>
             )}
           </div>

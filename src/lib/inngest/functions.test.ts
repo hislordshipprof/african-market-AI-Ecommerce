@@ -259,8 +259,9 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       const order = await createTestOrder();
       const step = makeFakeStep();
 
-      const twentyMinAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-      await withMockedTime(new Date("2026-11-03T14:00:00-05:00"), () =>
+      const mockedNow = new Date("2026-11-03T14:00:00-05:00");
+      const twentyMinAgo = new Date(mockedNow.getTime() - 20 * 60 * 1000).toISOString();
+      await withMockedTime(mockedNow, () =>
         handler({ event: { data: { orderId: order.id, storeId, authorizedAt: twentyMinAgo } }, step }),
       );
 
@@ -359,8 +360,9 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       const order = await createTestOrder();
       const step = makeFakeStep();
 
-      const thirtyFiveMinAgo = new Date(Date.now() - 35 * 60 * 1000).toISOString();
-      await withMockedTime(new Date("2026-11-03T14:00:00-05:00"), () =>
+      const mockedNow = new Date("2026-11-03T14:00:00-05:00");
+      const thirtyFiveMinAgo = new Date(mockedNow.getTime() - 35 * 60 * 1000).toISOString();
+      await withMockedTime(mockedNow, () =>
         handler({ event: { data: { orderId: order.id, storeId, authorizedAt: thirtyFiveMinAgo } }, step }),
       );
 

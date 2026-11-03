@@ -236,6 +236,33 @@ export async function markReady(
           capturedAmountCents: 0,
         },
       });
+
+      const lines = await tx.orderLine.findMany({ where: { orderId } });
+      const variantIds = lines.map((l: { listingVariantId: string }) => l.listingVariantId);
+      const variants = await tx.listingVariant.findMany({
+        where: { id: { in: variantIds } },
+        select: { id: true, listingId: true },
+      });
+      const variantToListing = new Map(variants.map((v: { id: string; listingId: string }) => [v.id, v.listingId]));
+
+      const stockEventData = lines
+        .map((line: { listingVariantId: string; qtyOrdered: number }) => {
+          const listingId = variantToListing.get(line.listingVariantId);
+          if (!listingId) return null;
+          return {
+            storeId,
+            listingId,
+            type: "cancel_restore" as const,
+            delta: line.qtyOrdered,
+            actorId: SYSTEM_ACTOR_ID,
+          };
+        })
+        .filter((d): d is NonNullable<typeof d> => d !== null);
+
+      if (stockEventData.length > 0) {
+        await tx.stockEvent.createMany({ data: stockEventData });
+      }
+
       await tx.auditLog.create({
         data: {
           storeId,
@@ -291,6 +318,9 @@ export async function completePickup(
     if (!order) return { ok: false, error: "Order not found" };
     if (order.status !== "AWAITING_PICKUP" && order.status !== "READY") {
       return { ok: false, error: `Cannot complete pickup for order in status ${order.status}` };
+    }
+    if (order.status === "READY" && order.fulfillment !== "pickup") {
+      return { ok: false, error: `Cannot complete pickup for delivery order — use courier dispatch` };
     }
 
     await tx.order.update({
@@ -420,6 +450,9 @@ export async function reconcileStuckOrder(
   const pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
 
   if (pi.status === "succeeded") {
+    if (order.status === "CANCELLING") {
+      return finalizeCancelFromSweep(storeId, orderId);
+    }
     return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
   }
 
@@ -456,7 +489,7 @@ async function finalizeCaptureFromSweep(
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
-    if (!current || (current.status !== "CAPTURING" && current.status !== "CANCELLING")) return;
+    if (!current || current.status !== "CAPTURING") return;
 
     await tx.order.update({
       where: { id: orderId },

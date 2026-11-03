@@ -553,7 +553,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("CANCELLED");
   });
 
-  it("completePickup accepts READY status (A5 delivery fix)", async () => {
+  it("completePickup accepts READY status for pickup orders (A5)", async () => {
     const order = await createTestOrder();
     await storeScopedTransaction(storeId, async (tx) => {
       await tx.order.update({ where: { id: order.id }, data: { status: "READY", readyAt: new Date() } });
@@ -562,6 +562,21 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(result.ok).toBe(true);
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("COMPLETED");
+  });
+
+  it("F3: completePickup rejects delivery order in READY status", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "READY", readyAt: new Date(), fulfillment: "delivery" },
+      });
+    });
+    const result = await completePickup(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("delivery");
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("READY");
   });
 
   it("K3: markReady voids authorization when final amount is zero (all lines refunded)", async () => {
@@ -581,6 +596,11 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       });
     }
 
+    // F1: count cancel_restore stock events before void
+    const beforeCount = await storeScoped(storeId).stockEvent.count({
+      where: { type: "cancel_restore" },
+    });
+
     const result = await markReady(storeId, order.id);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.capturedAmountCents).toBe(0);
@@ -595,6 +615,20 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "void_zero_amount" },
     });
     expect(logs.length).toBe(1);
+
+    // F1: void path must create cancel_restore stock events
+    const afterCount = await storeScoped(storeId).stockEvent.count({
+      where: { type: "cancel_restore" },
+    });
+    expect(afterCount - beforeCount).toBe(lines.length);
+    const recentEvents = await storeScoped(storeId).stockEvent.findMany({
+      where: { type: "cancel_restore" },
+      orderBy: { createdAt: "desc" },
+      take: lines.length,
+    });
+    for (const e of recentEvents) {
+      expect((e as { delta: number }).delta).toBeGreaterThan(0);
+    }
   });
 
   it("K3: markReady voids authorization when final amount is below Stripe minimum (50 cents USD)", async () => {
@@ -992,5 +1026,26 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
     expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
+  });
+
+  it("F2: sweep cancels CANCELLING order even when Stripe shows succeeded (external capture)", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    // Simulate external capture via Stripe dashboard
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("finalized_cancel");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.cancelledAt).toBeTruthy();
   });
 });
