@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # Vercel "Ignored Build Step": exit 1 = build, exit 0 = skip.
-# Previews build only on "[preview]" commits. Production builds unless the merge
-# changed nothing the deployed app uses (docs, scripts, tests, screenshots, research,
-# builder notes, CI config), which saves the Hobby plan's daily build allowance.
+# Deploys happen at milestones only, to save the Hobby plan's build allowance and Neon usage
+# (every production build runs `prisma migrate deploy` against the production database).
+#   Production (main): builds only when the merge commit subject ends with "[deploy]".
+#     The coordinator adds it to the squash subject at a milestone, e.g.
+#     gh pr merge <n> --squash --subject "<title> (#<n>) [deploy]"
+#   Preview: builds only on "[preview]" commits.
 
 if [ "$VERCEL_ENV" = "production" ]; then
-  changed=$(git diff --name-only HEAD^ HEAD 2>/dev/null) || { echo "No diff available; building"; exit 1; }
-  [ -n "$changed" ] || { echo "Empty diff; building"; exit 1; }
-  app=$(printf '%s\n' "$changed" | grep -vE '^(docs/|scripts/|research/|screenshots/|e2e/|\.builder/|\.github/|\.claude/|\.impeccable/)|\.md$|\.test\.tsx?$|^CODEX_REPORT\.md$' || true)
-  if [ -z "$app" ]; then
-    echo "Production: only docs/scripts/tests changed; skipping build"
-    exit 0
-  fi
-  echo "Production build"
-  exit 1
+  # Only the first line, and only as its final token, so merely mentioning the marker never deploys.
+  subject="${VERCEL_GIT_COMMIT_MESSAGE%%$'
+'*}"
+  subject="${subject%"${subject##*[![:space:]]}"}"
+  case "$subject" in
+    *"[deploy]") echo "Production deploy requested by commit subject"; exit 1 ;;
+  esac
+  echo "Production: skipping (milestone deploys only; add [deploy] to the merge commit subject)"; exit 0
 fi
 
 case "$VERCEL_GIT_COMMIT_MESSAGE" in

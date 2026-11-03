@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Jury"
+  short_description: "Put a hard decision to a panel of subagents"
+policy:
+  allow_implicit_invocation: false

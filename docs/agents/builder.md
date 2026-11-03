@@ -49,7 +49,7 @@ Run and pass all of these, in the worktree:
 4. `pnpm build`
 5. `pnpm test:e2e`: Playwright opens the running app and checks each acceptance criterion that has a visible result.
 
-While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts --workers=1`), and the affected unit tests (`pnpm test <path>`). Run the full e2e suite once, at the end, before you push the final commit. CI runs everything on the PR.
+While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts --workers=1`), and the affected unit tests (`pnpm test <path>`). When the work is ready, push and run `scripts/ci-local.sh` in the worktree. It runs steps 1–5 in full and records a `local-ci` commit status on the pushed HEAD; that status is the merge gate. GitHub Actions does not run on pushes. It runs only when the coordinator adds the `run-ci` label (milestone PRs), to save Actions minutes. Local e2e runs `E2E_WORKERS` browsers (default 4), so lanes sharing the machine don't starve memory.
 
 ### Definition of done (the coordinator rejects the PR if any is missing)
 - The branch is rebased on the latest `origin/main` (`git merge-base --is-ancestor origin/main HEAD` passes).
@@ -57,6 +57,7 @@ While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts 
 - For UI: you opened and looked at every screenshot and image you produced (the Read tool shows images). Automated metrics alone don't count as visual review.
 - No "pre-existing failure" claim without proof: name the test and show it failing on `origin/main`.
 - Migrations work on an empty database (`prisma migrate reset`, or a fresh branch), the same way CI and new previews run them.
+- Your lane's database is local, not Neon: `scripts/build-ticket.sh` gives each ticket a fresh `lane_t<N>` database on a private Postgres at localhost:5434 (`scripts/local-pg.sh`), with CI's roles so row-level security is enforced. `.env.local` in the worktree already points at it. Reset it with `scripts/lane-db.sh t<N> .env.local`. Never point a lane at Neon; Neon is touched only by milestone deploys.
 
 - Every row of the agent brief's 'Edge cases' table has a test, and every 'Integration contracts' item is honoured in code.
 - Test doubles enforce the provider's real rules (wrong account, amount above the authorization, already captured or cancelled, signature checks). A fake that accepts anything hides bugs. Each external path also has at least one test against the real sandbox when the keys are in `.env.local`.

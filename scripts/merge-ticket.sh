@@ -10,6 +10,13 @@ PR=$(gh pr list -R "$REPO" --state open --json number,headRefName --jq ".[] | se
 [ -n "$PR" ] || { echo "No open PR for ticket #$N"; exit 1; }
 HEAD_REF=$(gh api "repos/$REPO/pulls/$PR" --jq .head.ref)
 CMP=$(gh api "repos/$REPO/compare/main...$HEAD_REF" --jq .behind_by)
+# CI gate: a green local-ci status (scripts/ci-local.sh) or a green hosted "ci" check (run-ci label) on the PR head.
+HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
+LOCAL_CI=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" --jq '[.statuses[] | select(.context == "local-ci")][0].state // "missing"')
+HOSTED_CI=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" --jq '[.check_runs[] | select(.name == "ci")][0].conclusion // "missing"')
+if [ "$LOCAL_CI" != "success" ] && [ "$HOSTED_CI" != "success" ]; then
+  echo "No green CI on $HEAD_SHA (local-ci: $LOCAL_CI, hosted ci: $HOSTED_CI). Run scripts/ci-local.sh in the worktree, or add the run-ci label."; exit 1
+fi
 # Vercel previews are optional on ticket branches (they build only on "[preview]" commits); a canceled or skipped preview never blocks a merge.
 PENDING_OR_FAILED=$(gh pr checks "$PR" -R "$REPO" --json name,bucket,description --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping") | select((.name | startswith("Vercel")) and ((.description // "") | test("[Cc]ancel|[Ii]gnored|[Ss]kipp|[Rr]ate limit")) | not)] | length')
 # Behind main but disjoint: if no file changed on main since the PR's merge base is also changed by the PR,

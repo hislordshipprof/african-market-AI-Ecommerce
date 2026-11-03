@@ -42,7 +42,8 @@ model Store {
   collections  StoreCollection[]
   carts        Cart[]
   customers    Customer[]
-  orders       Order[]
+  orders          Order[]
+  listingImports  ListingImport[]
 
   @@map("stores")
 }
@@ -79,8 +80,9 @@ model User {
   auditLogs   AuditLog[]
   memberships StoreMembership[]
   invitesSent StoreInvite[]
-  stockEvents StockEvent[]
-  customers   Customer[]
+stockEvents    StockEvent[]
+  customers      Customer[]
+  listingImports ListingImport[]
 
   @@map("users")
 }
@@ -529,4 +531,22 @@ model OrderLine {
   @@index([listingVariantId])
   @@index([substituteVariantId])
   @@map("order_lines")
+}
+
+model ListingImport {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  csvText     String    @map("csv_text")
+  rowCount    Int       @map("row_count")
+  status      String    @default("pending")
+  createdById String    @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  committedAt DateTime? @map("committed_at")
+
+  store     Store @relation(fields: [storeId], references: [id])
+  createdBy User  @relation(fields: [createdById], references: [id])
+
+  @@index([storeId])
+  @@index([storeId, status])
+  @@map("listing_imports")
 }

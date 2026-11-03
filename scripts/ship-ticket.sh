@@ -13,9 +13,10 @@ LOG="$ROOT/.builder/logs/ship-$N-$(date +%Y%m%d-%H%M%S).json"
 cd "$WT"
 
 PROMPT="/supermatt:ship-pr QA of this branch stands: $VERDICT
-The coordinator has verified this PR and delegates the merge for issue #$N only. First rebase onto origin/main; if the rebase changed anything, re-run the affected QA and tests before pushing. Repair CI within ship-pr's bounds, then squash merge and confirm the issue is closed. Never push to main directly and never use --no-verify. Run headless: never ask the user."
+The coordinator has verified this PR and delegates the merge for issue #$N only. First rebase onto origin/main; if the rebase changed anything, re-run the affected QA and tests before pushing. The CI gate is the local-ci commit status: after any rebase, push and run scripts/ci-local.sh, and repair failures within ship-pr's bounds. Do not wait for GitHub Actions; it runs only on PRs that carry the run-ci label. Then squash merge and confirm the issue is closed. Never push to main directly and never use --no-verify. Run headless: never ask the user."
 
-claude -p "$PROMPT" --dangerously-skip-permissions --strict-mcp-config --output-format json < /dev/null > "$LOG" 2>&1 || status=$?
+. "$ROOT/scripts/agent-cli.sh"
+agent_run ship "$LOG" "$PROMPT" || status=$?
 PR=$(gh pr list -R "$REPO" --state all --search "head:ticket-$N-" --json number,state --jq '.[0] | "#\(.number) \(.state)"')
 echo "Ship finished (exit ${status:-0}). PR: $PR. Log: $LOG"
 exit "${status:-0}"

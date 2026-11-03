@@ -1,0 +1,3 @@
+interface:
+  display_name: "SuperMatt: Dependency Vetting"
+  short_description: "Verify a package is authentic before adding it"

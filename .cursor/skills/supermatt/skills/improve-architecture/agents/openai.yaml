@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Improve Architecture"
+  short_description: "Find and design deepening opportunities"
+policy:
+  allow_implicit_invocation: false
