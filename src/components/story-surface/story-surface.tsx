@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode } from "react";
-import Image from "next/image";
+import { preload } from "react-dom";
 import { MotionConfig, motion } from "motion/react";
 import posterSrc from "../../../public/images/market-spices-poster.jpg";
 
@@ -19,6 +19,9 @@ export function StorySurface({
   asMain?: boolean;
 }) {
   const Tag = asMain ? "main" : "div";
+  // The poster is the largest element, so it has to start with the document.
+  // Next/Image left this file at default priority and the paint landed after 2.5s.
+  preload(posterSrc.src, { as: "image", fetchPriority: "high" });
   return (
     <MotionConfig reducedMotion="user">
     <Tag className="relative flex min-h-dvh items-center justify-center overflow-hidden p-4">
@@ -35,14 +38,12 @@ export function StorySurface({
           transition={{ duration: 20, ease: "linear", repeat: Infinity, repeatType: "reverse" }}
           style={{ willChange: "transform" }}
         >
-          <Image
-            src={posterSrc}
+          <img
+            src={posterSrc.src}
             alt=""
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover motion-reduce:!transform-none"
-            placeholder="blur"
+            fetchPriority="high"
+            decoding="sync"
+            className="absolute inset-0 h-full w-full object-cover motion-reduce:!transform-none"
           />
         </motion.div>
         <div className="absolute inset-0 bg-gradient-to-br from-black/50 via-black/30 to-transparent dark:from-black/70 dark:via-black/50" />
