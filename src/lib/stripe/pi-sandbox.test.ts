@@ -1,6 +1,7 @@
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import Stripe from "stripe";
 import { stripeProvider } from "./provider";
+import { ProviderStateError } from "./types";
 
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
 
@@ -112,6 +113,30 @@ describe.skipIf(!hasKey)(
       expect(result.status).toBe("requires_capture");
       expect(result.amountCapturable).toBe(800);
       expect(result.amountReceived).toBe(0);
+    });
+
+    it("P2: capture after cancel throws ProviderStateError", async () => {
+      const piId = await createAuthorizedPI(1000);
+      await stripeProvider.cancelPaymentIntent(piId, `cancel-${piId}`);
+      try {
+        await stripeProvider.capturePaymentIntent(piId, 500, `cap-${piId}`);
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProviderStateError);
+        expect((e as ProviderStateError).actualStatus).toBe("canceled");
+      }
+    });
+
+    it("P2: cancel after capture throws ProviderStateError", async () => {
+      const piId = await createAuthorizedPI(1000);
+      await stripeProvider.capturePaymentIntent(piId, 800, `cap-${piId}`);
+      try {
+        await stripeProvider.cancelPaymentIntent(piId, `cancel-${piId}`);
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProviderStateError);
+        expect((e as ProviderStateError).actualStatus).toBe("succeeded");
+      }
     });
 
     it("capture below 50c throws amount_too_small", async () => {
