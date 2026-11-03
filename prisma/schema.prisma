@@ -67,8 +67,6 @@ model User {
   name             String
   email            String    @unique
   emailVerified    Boolean   @default(false) @map("email_verified")
-  phoneNumber         String?   @unique @map("phone_number")
-  phoneNumberVerified Boolean   @default(false) @map("phone_number_verified")
   image            String?
   role             String    @default("customer")
   twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
@@ -160,15 +158,6 @@ model RateLimit {
   lastRequest BigInt @map("last_request")
 
   @@map("rate_limits")
-}
-
-model PhoneOtpSend {
-  id     String   @id @default(cuid())
-  phone  String
-  sentAt DateTime @default(now()) @map("sent_at")
-
-  @@index([phone, sentAt])
-  @@map("phone_otp_sends")
 }
 
 model AuditLog {

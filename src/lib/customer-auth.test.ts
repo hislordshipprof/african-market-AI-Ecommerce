@@ -81,23 +81,6 @@ describe("findOrCreateCustomer", () => {
     });
   });
 
-  it("passes phone from user when present", async () => {
-    mockFindFirst.mockResolvedValueOnce(null);
-    mockCreate.mockResolvedValueOnce({
-      id: "cust-phone",
-      name: "Ada Lovelace",
-      email: "ada@example.com",
-      phone: "+12025551234",
-    });
-
-    const userWithPhone = { ...fakeUser, phoneNumber: "+12025551234" };
-    await findOrCreateCustomer("store-1", userWithPhone);
-
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ phone: "+12025551234" }),
-    });
-  });
-
   it("handles P2002 race by re-reading", async () => {
     mockFindFirst
       .mockResolvedValueOnce(null)
@@ -132,26 +115,5 @@ describe("findOrCreateCustomer", () => {
     await expect(findOrCreateCustomer("store-1", fakeUser)).rejects.toThrow(
       "DB down",
     );
-  });
-
-  it("filters placeholder emails", async () => {
-    mockFindFirst.mockResolvedValueOnce(null);
-    mockCreate.mockResolvedValueOnce({
-      id: "cust-placeholder",
-      name: "Phone User",
-      email: null,
-      phone: "+12025551234",
-    });
-
-    const userWithPlaceholder = {
-      ...fakeUser,
-      email: "12025551234@phone.placeholder.local",
-      phoneNumber: "+12025551234",
-    };
-    await findOrCreateCustomer("store-1", userWithPlaceholder);
-
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ email: null }),
-    });
   });
 });

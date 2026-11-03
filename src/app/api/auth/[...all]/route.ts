@@ -1,19 +1,11 @@
 import { auth } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextRequest, NextResponse } from "next/server";
-import { normalizePhone } from "@/lib/phone";
-import {
-  checkPhoneRateLimit,
-  PhoneRateLimitError,
-} from "@/lib/phone-rate-limit";
 
 const { GET: rawGET, POST: rawPOST } = toNextJsHandler(auth);
 
 const CUSTOMER_ONLY_PATHS = [
-  "/phone-number/send-otp",
-  "/phone-number/verify",
   "/magic-link/verify",
-  "/sign-in/phone-number",
   "/sign-in/magic-link",
 ];
 
@@ -27,7 +19,7 @@ function rejectIfBadCallback(req: NextRequest): NextResponse | null {
   const url = new URL(req.url);
   for (const param of CALLBACK_PARAMS) {
     const value = url.searchParams.get(param);
-    if (value && !isRelativeUrl(value)) {
+    if (value !== null && (typeof value !== "string" || !isRelativeUrl(value))) {
       return NextResponse.json(
         { error: `${param} must be a relative path` },
         { status: 400 },
@@ -51,20 +43,6 @@ function rejectIfAdminHost(req: NextRequest): NextResponse | null {
   return null;
 }
 
-function getAuthPath(req: NextRequest): string {
-  return new URL(req.url).pathname.replace(/^\/api\/auth/, "");
-}
-
-async function parseJsonBody(
-  req: NextRequest,
-): Promise<Record<string, unknown> | null> {
-  try {
-    return await req.clone().json();
-  } catch {
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest) {
   const bad = rejectIfBadCallback(req) ?? rejectIfAdminHost(req);
   if (bad) return bad;
@@ -74,30 +52,18 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const bad = rejectIfAdminHost(req);
   if (bad) return bad;
-  const body = await parseJsonBody(req);
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = await req.clone().json();
+  } catch {}
   if (body) {
     for (const param of CALLBACK_PARAMS) {
-      if (body[param] && !isRelativeUrl(body[param] as string)) {
+      const val = body[param];
+      if (val !== undefined && (typeof val !== "string" || !isRelativeUrl(val))) {
         return NextResponse.json(
           { error: `${param} must be a relative path` },
           { status: 400 },
         );
-      }
-    }
-    if (getAuthPath(req) === "/phone-number/send-otp" && body.phoneNumber) {
-      const normalized = normalizePhone(body.phoneNumber as string);
-      if (normalized) {
-        try {
-          await checkPhoneRateLimit(normalized);
-        } catch (e) {
-          if (e instanceof PhoneRateLimitError) {
-            return NextResponse.json(
-              { error: "Too many requests. Please try again later." },
-              { status: 429 },
-            );
-          }
-          throw e;
-        }
       }
     }
   }

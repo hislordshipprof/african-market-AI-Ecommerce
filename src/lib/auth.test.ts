@@ -1,10 +1,31 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const {
+  mockUserFindUnique,
+  mockUserFindFirst,
+  mockSessionDeleteMany,
+  mockMembershipFindMany,
+  mockSendEmail,
+} = vi.hoisted(() => ({
+  mockUserFindUnique: vi.fn(),
+  mockUserFindFirst: vi.fn(),
+  mockSessionDeleteMany: vi.fn(),
+  mockMembershipFindMany: vi.fn(),
+  mockSendEmail: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("./db", () => ({
   authPrisma: {
-    user: { findUnique: vi.fn(), findFirst: vi.fn() },
-    session: { deleteMany: vi.fn() },
+    user: { findUnique: mockUserFindUnique, findFirst: mockUserFindFirst },
+    session: { deleteMany: mockSessionDeleteMany },
   },
+  platformAdmin: {
+    storeMembership: { findMany: mockMembershipFindMany },
+  },
+}));
+
+vi.mock("./email/send", () => ({
+  sendEmail: mockSendEmail,
 }));
 
 import {
@@ -14,12 +35,6 @@ import {
   resolveAuthTrustedOrigins,
   validateAuthSecret,
 } from "./auth";
-import { authPrisma } from "./db";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockFindUnique = authPrisma.user.findUnique as any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockFindFirst = (authPrisma.user as any).findFirst as ReturnType<typeof vi.fn>;
 
 describe("auth config", () => {
   it("has session cookie cache disabled globally", () => {
@@ -27,13 +42,6 @@ describe("auth config", () => {
     const session = opts.session as Record<string, unknown>;
     const cookieCache = session.cookieCache as Record<string, unknown>;
     expect(cookieCache.enabled).toBe(false);
-  });
-
-  it("disables password-reset phone endpoints", () => {
-    const opts = auth.options as Record<string, unknown>;
-    const disabled = opts.disabledPaths as string[];
-    expect(disabled).toContain("/phone-number/request-password-reset");
-    expect(disabled).toContain("/phone-number/reset-password");
   });
 
   it("uses dynamic baseURL with allowedHosts", () => {
@@ -48,12 +56,6 @@ describe("auth config", () => {
     const baseURL = opts.baseURL as Record<string, unknown>;
     expect(baseURL).toHaveProperty("fallback");
     expect(typeof baseURL.fallback).toBe("string");
-  });
-
-  it("disables /sign-in/phone-number path", () => {
-    const opts = auth.options as Record<string, unknown>;
-    const disabled = opts.disabledPaths as string[];
-    expect(disabled).toContain("/sign-in/phone-number");
   });
 });
 
@@ -209,14 +211,14 @@ describe("C1: session.create.before hook", () => {
     ) => Promise<{ data: { twoFactorVerified: boolean } } | undefined>;
   }
 
-  const customer = { role: "customer", twoFactorEnabled: false, memberships: [] };
-  const customer2fa = { role: "customer", twoFactorEnabled: true, memberships: [] };
-  const admin = { role: "admin", twoFactorEnabled: false, memberships: [] };
-  const staffMember = { role: "customer", twoFactorEnabled: false, memberships: [{ id: "m1" }] };
-  const staff2fa = { role: "customer", twoFactorEnabled: true, memberships: [{ id: "m1" }] };
+  beforeEach(() => {
+    mockUserFindUnique.mockReset();
+    mockUserFindFirst.mockReset();
+    mockMembershipFindMany.mockReset();
+  });
 
   it("sets twoFactorVerified=true for /two-factor/ path", async () => {
-    mockFindUnique.mockResolvedValueOnce(customer2fa);
+    mockUserFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
     const result = await getHookBefore()(
       { userId: "user-1" },
       { path: "/two-factor/verify-totp" },
@@ -225,7 +227,7 @@ describe("C1: session.create.before hook", () => {
   });
 
   it("does NOT set twoFactorVerified for /sign-in/magic-link path", async () => {
-    mockFindUnique.mockResolvedValueOnce(customer2fa);
+    mockUserFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
     const result = await getHookBefore()(
       { userId: "user-1" },
       { path: "/sign-in/magic-link" },
@@ -234,7 +236,7 @@ describe("C1: session.create.before hook", () => {
   });
 
   it("does NOT set twoFactorVerified for /sign-in/email path", async () => {
-    mockFindUnique.mockResolvedValueOnce(customer2fa);
+    mockUserFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
     const result = await getHookBefore()(
       { userId: "user-1" },
       { path: "/sign-in/email" },
@@ -243,7 +245,7 @@ describe("C1: session.create.before hook", () => {
   });
 
   it("does nothing when user has 2FA disabled", async () => {
-    mockFindUnique.mockResolvedValueOnce(customer);
+    mockUserFindUnique.mockResolvedValueOnce({ twoFactorEnabled: false });
     const result = await getHookBefore()(
       { userId: "user-1" },
       { path: "/two-factor/verify-totp" },
@@ -252,53 +254,43 @@ describe("C1: session.create.before hook", () => {
   });
 
   it("does nothing when context is undefined", async () => {
-    mockFindUnique.mockResolvedValueOnce(customer2fa);
+    mockUserFindUnique.mockResolvedValueOnce({ twoFactorEnabled: true });
     const result = await getHookBefore()({ userId: "user-1" }, undefined);
     expect(result).toBeUndefined();
   });
 
   it("blocks magic-link verify for admin users", async () => {
-    mockFindUnique.mockResolvedValueOnce(admin);
+    mockUserFindUnique.mockResolvedValueOnce({ role: "admin", twoFactorEnabled: false });
+    mockMembershipFindMany.mockResolvedValueOnce([]);
     await expect(
       getHookBefore()({ userId: "user-1" }, { path: "/magic-link/verify" }),
     ).rejects.toThrow("staff accounts");
   });
 
   it("blocks magic-link verify for users with store memberships", async () => {
-    mockFindUnique.mockResolvedValueOnce(staffMember);
+    mockUserFindUnique.mockResolvedValueOnce({ role: "customer", twoFactorEnabled: false });
+    mockMembershipFindMany.mockResolvedValueOnce([{ id: "m1" }]);
     await expect(
       getHookBefore()({ userId: "user-1" }, { path: "/magic-link/verify" }),
     ).rejects.toThrow("staff accounts");
   });
 
   it("blocks magic-link verify for 2FA-enabled users", async () => {
-    mockFindUnique.mockResolvedValueOnce(customer2fa);
+    mockUserFindUnique.mockResolvedValueOnce({ role: "customer", twoFactorEnabled: true });
+    mockMembershipFindMany.mockResolvedValueOnce([]);
     await expect(
       getHookBefore()({ userId: "user-1" }, { path: "/magic-link/verify" }),
     ).rejects.toThrow("staff accounts");
   });
 
-  it("blocks phone-number verify for privileged users", async () => {
-    mockFindUnique.mockResolvedValueOnce(staff2fa);
-    await expect(
-      getHookBefore()({ userId: "user-1" }, { path: "/phone-number/verify" }),
-    ).rejects.toThrow("staff accounts");
-  });
-
   it("allows magic-link verify for plain customers", async () => {
-    mockFindUnique.mockResolvedValueOnce(customer);
+    mockUserFindUnique
+      .mockResolvedValueOnce({ role: "customer", twoFactorEnabled: false })
+      .mockResolvedValueOnce({ twoFactorEnabled: false });
+    mockMembershipFindMany.mockResolvedValueOnce([]);
     const result = await getHookBefore()(
       { userId: "user-1" },
       { path: "/magic-link/verify" },
-    );
-    expect(result).toBeUndefined();
-  });
-
-  it("allows phone-number verify for plain customers", async () => {
-    mockFindUnique.mockResolvedValueOnce(customer);
-    const result = await getHookBefore()(
-      { userId: "user-1" },
-      { path: "/phone-number/verify" },
     );
     expect(result).toBeUndefined();
   });

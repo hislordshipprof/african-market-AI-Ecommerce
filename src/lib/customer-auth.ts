@@ -2,14 +2,6 @@ import { storeScoped } from "./db";
 import type { Session } from "./auth";
 import { Prisma } from "@prisma/client";
 
-const PLACEHOLDER_DOMAIN = "@phone.placeholder.local";
-
-function cleanEmail(email: string | null | undefined): string | null {
-  if (!email) return null;
-  if (email.endsWith(PLACEHOLDER_DOMAIN)) return null;
-  return email;
-}
-
 export interface CustomerProfile {
   id: string;
   name: string;
@@ -42,11 +34,8 @@ export async function findOrCreateCustomer(
         storeId,
         userId: user.id,
         name: user.name,
-        email: cleanEmail(user.email),
-        phone:
-          (user as Record<string, unknown>).phoneNumber as
-            | string
-            | undefined ?? null,
+        email: user.email,
+        phone: null,
       },
     });
 

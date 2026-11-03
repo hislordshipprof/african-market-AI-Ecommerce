@@ -1,14 +1,8 @@
 import { betterAuth, APIError } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { twoFactor, magicLink, phoneNumber } from "better-auth/plugins";
-import { authPrisma } from "./db";
+import { twoFactor, magicLink } from "better-auth/plugins";
+import { authPrisma, platformAdmin } from "./db";
 import { sendEmail } from "./email/send";
-import { getSmsSender } from "./sms";
-import { normalizePhone } from "./phone";
-import {
-  reservePhoneOtpSend,
-  PhoneRateLimitError,
-} from "./phone-rate-limit";
 
 const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
 
@@ -105,11 +99,34 @@ validateAuthSecret();
 
 const baseUrl = resolveAuthBaseUrl();
 
-function normalizePhoneHook(user: Record<string, unknown>) {
-  if (user.phoneNumber) {
-    const normalized = normalizePhone(user.phoneNumber as string);
-    if (normalized) return { data: { ...user, phoneNumber: normalized } };
-  }
+async function isPrivilegedUser(userId: string): Promise<boolean> {
+  const user = await authPrisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true, twoFactorEnabled: true },
+  });
+  if (!user) return false;
+  if (user.role !== "customer" || user.twoFactorEnabled) return true;
+  const memberships = await platformAdmin.storeMembership.findMany({
+    where: { userId },
+    select: { id: true },
+    take: 1,
+  });
+  return memberships.length > 0;
+}
+
+async function isPrivilegedEmail(email: string): Promise<boolean> {
+  const user = await authPrisma.user.findFirst({
+    where: { email },
+    select: { id: true, role: true, twoFactorEnabled: true },
+  });
+  if (!user) return false;
+  if (user.role !== "customer" || user.twoFactorEnabled) return true;
+  const memberships = await platformAdmin.storeMembership.findMany({
+    where: { userId: user.id },
+    select: { id: true },
+    take: 1,
+  });
+  return memberships.length > 0;
 }
 
 export const auth = betterAuth({
@@ -122,11 +139,6 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
-  disabledPaths: [
-    "/phone-number/request-password-reset",
-    "/phone-number/reset-password",
-    "/sign-in/phone-number",
-  ],
   plugins: [
     twoFactor({
       issuer: "African Markets Platform",
@@ -134,49 +146,17 @@ export const auth = betterAuth({
     magicLink({
       expiresIn: 900,
       sendMagicLink: async ({ email, url }) => {
-        if (email.endsWith("@phone.placeholder.local")) return;
         const normalizedEmail = email.trim().toLowerCase();
-        const existing = await authPrisma.user.findFirst({
-          where: { email: normalizedEmail },
-          select: { role: true, twoFactorEnabled: true, memberships: { select: { id: true }, take: 1 } },
-        });
-        if (existing && (existing.role !== "customer" || existing.twoFactorEnabled || existing.memberships.length > 0)) return;
-        await sendEmail({
-          to: email,
+        const privileged = await isPrivilegedEmail(normalizedEmail);
+        if (privileged) return;
+        sendEmail({
+          to: normalizedEmail,
           subject: "Sign in to African Markets",
           html: `<p>Click <a href="${url}">here</a> to sign in. This link expires in 15 minutes.</p>`,
-        });
+        }).catch(() => {});
       },
       disableSignUp: false,
     }),
-    ...(getSmsSender()
-      ? [
-          phoneNumber({
-            sendOTP: async ({ phoneNumber: phone, code }) => {
-              const normalized = normalizePhone(phone);
-              if (!normalized) throw new Error("Invalid phone number");
-              try {
-                await reservePhoneOtpSend(normalized);
-              } catch (e) {
-                if (e instanceof PhoneRateLimitError) {
-                  throw new APIError("TOO_MANY_REQUESTS", { message: "Too many requests. Please try again later." });
-                }
-                throw e;
-              }
-              const sender = getSmsSender();
-              if (!sender) throw new Error("SMS not configured");
-              await sender.send({
-                to: normalized,
-                body: `Your African Markets verification code is ${code}. It expires in 5 minutes.`,
-              });
-            },
-            phoneNumberValidator: (phone) => normalizePhone(phone) === phone,
-            signUpOnVerification: {
-              getTempEmail: (phone) => `${phone.replace(/\D/g, "")}@phone.placeholder.local`,
-            },
-          }),
-        ]
-      : []),
   ],
   rateLimit: {
     storage: "database",
@@ -187,30 +167,24 @@ export const auth = betterAuth({
       "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 100 : 5 },
-      "/phone-number/send-otp": { window: 3600, max: relaxedAuth ? 100 : 10 },
-      "/sign-in/phone-number": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
   },
   databaseHooks: {
-    user: {
-      create: { before: async (user) => normalizePhoneHook(user) },
-      update: { before: async (user) => normalizePhoneHook(user) },
-    },
     session: {
       create: {
         before: async (session, ctx) => {
           const path: string = (ctx as Record<string, unknown>)?.path as string ?? "";
-          const user = await authPrisma.user.findUnique({
-            where: { id: session.userId },
-            select: { role: true, twoFactorEnabled: true, memberships: { select: { id: true }, take: 1 } },
-          });
-          if (!user) return;
-          if (path === "/magic-link/verify" || path === "/phone-number/verify") {
-            if (user.role !== "customer" || user.twoFactorEnabled || user.memberships.length > 0) {
+          if (path === "/magic-link/verify") {
+            const privileged = await isPrivilegedUser(session.userId);
+            if (privileged) {
               throw new APIError("FORBIDDEN", { message: "This sign-in method is not available for staff accounts" });
             }
           }
-          if (user.twoFactorEnabled && path.startsWith("/two-factor/")) {
+          const user = await authPrisma.user.findUnique({
+            where: { id: session.userId },
+            select: { twoFactorEnabled: true },
+          });
+          if (user?.twoFactorEnabled && path.startsWith("/two-factor/")) {
             return { data: { twoFactorVerified: true } };
           }
         },
@@ -256,5 +230,3 @@ export const auth = betterAuth({
 });
 
 export type Session = typeof auth.$Infer.Session;
-
-export const smsEnabled = getSmsSender() !== null;
