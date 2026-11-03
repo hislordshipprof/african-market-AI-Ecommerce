@@ -86,6 +86,20 @@ describe("resolveAuthTrustedOrigins", () => {
     expect(localhostCount).toBe(1);
   });
 
+  it("includes PORT-based wildcard origins", () => {
+    const origins = resolveAuthTrustedOrigins({ PORT: "3200" });
+    expect(origins).toContain("http://localhost:3200");
+    expect(origins).toContain("http://*.localhost:3200");
+    expect(origins).toContain("http://localhost:3000");
+    expect(origins).toContain("http://*.localhost:3000");
+  });
+
+  it("uses port 3000 when PORT is not set", () => {
+    const origins = resolveAuthTrustedOrigins({});
+    expect(origins).toContain("http://localhost:3000");
+    expect(origins).toContain("http://*.localhost:3000");
+  });
+
   it("ignores empty entries in BETTER_AUTH_TRUSTED_ORIGINS", () => {
     const origins = resolveAuthTrustedOrigins({
       BETTER_AUTH_TRUSTED_ORIGINS: "https://a.com,,, ",

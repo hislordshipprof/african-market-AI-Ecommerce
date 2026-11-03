@@ -5,6 +5,7 @@ import { authPrisma } from "./db";
 import { sendEmail } from "./email/send";
 import { getSmsSender } from "./sms";
 import { normalizePhone } from "./phone";
+import { checkPhoneRateLimit, recordPhoneOtpSend } from "./phone-rate-limit";
 
 const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
 
@@ -33,7 +34,11 @@ export function resolveAuthTrustedOrigins(
     origins.push(`https://${env.VERCEL_URL}`);
   }
 
-  origins.push("http://localhost:3000", "http://*.localhost:3000");
+  const port = env.PORT ?? "3000";
+  origins.push(`http://localhost:${port}`, `http://*.localhost:${port}`);
+  if (port !== "3000") {
+    origins.push("http://localhost:3000", "http://*.localhost:3000");
+  }
 
   return [...new Set(origins)];
 }
@@ -81,12 +86,16 @@ export const auth = betterAuth({
       ? [
           phoneNumber({
             sendOTP: async ({ phoneNumber: phone, code }) => {
+              const normalized = normalizePhone(phone);
+              if (!normalized) throw new Error("Invalid phone number");
+              await checkPhoneRateLimit(normalized);
               const sender = getSmsSender();
               if (!sender) throw new Error("SMS not configured");
               await sender.send({
-                to: phone,
+                to: normalized,
                 body: `Your African Markets verification code is ${code}. It expires in 5 minutes.`,
               });
+              await recordPhoneOtpSend(normalized);
             },
             phoneNumberValidator: (phone) => normalizePhone(phone) !== null,
             signUpOnVerification: {

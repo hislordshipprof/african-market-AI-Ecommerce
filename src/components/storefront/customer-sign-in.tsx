@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { syncCustomerAction } from "@/app/account/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -80,6 +81,7 @@ export function CustomerSignIn({ smsEnabled, callbackUrl = "/account" }: Props) 
         setError(result.error.message ?? "Invalid code");
         return;
       }
+      await syncCustomerAction();
       router.push(callbackUrl);
     } catch {
       setError("Verification failed. Please try again.");
@@ -90,6 +92,7 @@ export function CustomerSignIn({ smsEnabled, callbackUrl = "/account" }: Props) 
 
   function reset() {
     setStep("choose");
+    setDestination("");
     setCode("");
     setError("");
   }

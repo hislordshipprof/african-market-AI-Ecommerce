@@ -39,9 +39,12 @@ export function StorySurface({ children }: { children: ReactNode }) {
         <div className="absolute inset-0 bg-gradient-to-br from-black/50 via-black/30 to-transparent dark:from-black/70 dark:via-black/50" />
       </div>
 
-      {/* Form panel with entrance motion */}
+      {/* Form panel — visible by default; entrance animation plays on hydration */}
+      <noscript>
+        <style>{`.story-form{opacity:1!important;transform:none!important}`}</style>
+      </noscript>
       <motion.div
-        className="relative z-10 w-full max-w-sm"
+        className="story-form relative z-10 w-full max-w-sm"
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.4, 0.4, 0, 1] }}

@@ -162,6 +162,15 @@ model RateLimit {
   @@map("rate_limits")
 }
 
+model PhoneOtpSend {
+  id     String   @id @default(cuid())
+  phone  String
+  sentAt DateTime @default(now()) @map("sent_at")
+
+  @@index([phone, sentAt])
+  @@map("phone_otp_sends")
+}
+
 model AuditLog {
   id         String   @id @default(cuid())
   storeId    String?  @map("store_id")
