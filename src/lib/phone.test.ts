@@ -72,16 +72,19 @@ describe("normalizePhone", () => {
     expect(normalizePhone("6045551234")).toBeNull(); // Vancouver
     expect(normalizePhone("5145551234")).toBeNull(); // Montreal
     expect(normalizePhone("9055551234")).toBeNull(); // Ontario
+    expect(normalizePhone("2575551234")).toBeNull(); // Canada 257 (new)
   });
 
   it("rejects Caribbean non-US area codes", () => {
     expect(normalizePhone("2425551234")).toBeNull(); // Bahamas
     expect(normalizePhone("8765551234")).toBeNull(); // Jamaica
     expect(normalizePhone("8685551234")).toBeNull(); // Trinidad
+    expect(normalizePhone("6585551234")).toBeNull(); // Jamaica 658 (new)
   });
 
-  it("rejects unassigned area code 999", () => {
-    expect(normalizePhone("9995551234")).toBeNull();
+  it("rejects unassigned area codes", () => {
+    expect(normalizePhone("9995551234")).toBeNull(); // 999
+    expect(normalizePhone("2005551234")).toBeNull(); // 200
   });
 });
 

@@ -1,11 +1,14 @@
-import { betterAuth } from "better-auth";
+import { betterAuth, APIError } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink, phoneNumber } from "better-auth/plugins";
 import { authPrisma } from "./db";
 import { sendEmail } from "./email/send";
 import { getSmsSender } from "./sms";
 import { normalizePhone } from "./phone";
-import { reservePhoneOtpSend } from "./phone-rate-limit";
+import {
+  reservePhoneOtpSend,
+  PhoneRateLimitError,
+} from "./phone-rate-limit";
 
 const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
 
@@ -42,11 +45,17 @@ export function resolveAuthAllowedHosts(
     }
   }
 
+  if (env.PLATFORM_ROOT_DOMAIN) {
+    hosts.push(env.PLATFORM_ROOT_DOMAIN, `*.${env.PLATFORM_ROOT_DOMAIN}`);
+  }
+
   const port = env.PORT ?? "3000";
   hosts.push(`localhost:${port}`, `*.localhost:${port}`);
   if (port !== "3000") {
     hosts.push("localhost:3000", "*.localhost:3000");
   }
+
+  hosts.push("127.0.0.1:3000", `127.0.0.1:${port}`);
 
   return [...new Set(hosts)];
 }
@@ -104,7 +113,11 @@ function normalizePhoneHook(user: Record<string, unknown>) {
 }
 
 export const auth = betterAuth({
-  baseURL: { allowedHosts: resolveAuthAllowedHosts(), protocol: "auto" as const },
+  baseURL: {
+    allowedHosts: resolveAuthAllowedHosts(),
+    protocol: "auto" as const,
+    fallback: resolveAuthBaseUrl(),
+  },
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
@@ -112,6 +125,7 @@ export const auth = betterAuth({
   disabledPaths: [
     "/phone-number/request-password-reset",
     "/phone-number/reset-password",
+    "/sign-in/phone-number",
   ],
   plugins: [
     twoFactor({
@@ -121,11 +135,12 @@ export const auth = betterAuth({
       expiresIn: 900,
       sendMagicLink: async ({ email, url }) => {
         if (email.endsWith("@phone.placeholder.local")) return;
+        const normalizedEmail = email.trim().toLowerCase();
         const existing = await authPrisma.user.findFirst({
-          where: { email },
-          select: { role: true },
+          where: { email: normalizedEmail },
+          select: { role: true, twoFactorEnabled: true, memberships: { select: { id: true }, take: 1 } },
         });
-        if (existing && existing.role !== "customer") return;
+        if (existing && (existing.role !== "customer" || existing.twoFactorEnabled || existing.memberships.length > 0)) return;
         await sendEmail({
           to: email,
           subject: "Sign in to African Markets",
@@ -140,7 +155,14 @@ export const auth = betterAuth({
             sendOTP: async ({ phoneNumber: phone, code }) => {
               const normalized = normalizePhone(phone);
               if (!normalized) throw new Error("Invalid phone number");
-              await reservePhoneOtpSend(normalized);
+              try {
+                await reservePhoneOtpSend(normalized);
+              } catch (e) {
+                if (e instanceof PhoneRateLimitError) {
+                  throw new APIError("TOO_MANY_REQUESTS", { message: "Too many requests. Please try again later." });
+                }
+                throw e;
+              }
               const sender = getSmsSender();
               if (!sender) throw new Error("SMS not configured");
               await sender.send({
@@ -177,15 +199,19 @@ export const auth = betterAuth({
     session: {
       create: {
         before: async (session, ctx) => {
+          const path: string = (ctx as Record<string, unknown>)?.path as string ?? "";
           const user = await authPrisma.user.findUnique({
             where: { id: session.userId },
-            select: { twoFactorEnabled: true },
+            select: { role: true, twoFactorEnabled: true, memberships: { select: { id: true }, take: 1 } },
           });
-          if (user?.twoFactorEnabled) {
-            const path: string = (ctx as Record<string, unknown>)?.path as string ?? "";
-            if (path.startsWith("/two-factor/")) {
-              return { data: { twoFactorVerified: true } };
+          if (!user) return;
+          if (path === "/magic-link/verify" || path === "/phone-number/verify") {
+            if (user.role !== "customer" || user.twoFactorEnabled || user.memberships.length > 0) {
+              throw new APIError("FORBIDDEN", { message: "This sign-in method is not available for staff accounts" });
             }
+          }
+          if (user.twoFactorEnabled && path.startsWith("/two-factor/")) {
+            return { data: { twoFactorVerified: true } };
           }
         },
         after: async (session) => {
