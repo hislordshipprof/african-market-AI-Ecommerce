@@ -409,8 +409,8 @@ export async function reconcileStuckOrder(
         pi.amountReceived,
         `refund:${orderId}`,
       );
-      if (refund.status === "failed") {
-        return { ok: false, error: "Refund failed — order stays in CANCELLING for retry" };
+      if (refund.status !== "succeeded") {
+        return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
       }
       await storeScopedTransaction(storeId, async (tx) => {
         await lockStoreRow(tx, storeId);

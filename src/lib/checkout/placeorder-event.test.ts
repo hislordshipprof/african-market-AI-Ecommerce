@@ -32,12 +32,12 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
     for await (const acct of stripeClient.accounts.list({ limit: 100 })) {
       if (acct.capabilities?.transfers === "active") {
         ready.push(acct);
-        break;
+        if (ready.length >= 2) break;
       }
     }
-    if (!ready.length) throw new Error("No ready sandbox account");
+    if (ready.length < 2) throw new Error("Need at least 2 transfers-capable sandbox accounts (stripe-integration.test.ts uses the first)");
 
-    const acct = ready[0];
+    const acct = ready[1];
     const store = await rawPrisma.store.upsert({
       where: { slug: "inngest-event-test" },
       update: { stripeAccountId: acct.id, stripeOnboardingStatus: "complete" },

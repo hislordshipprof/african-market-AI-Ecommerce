@@ -31,6 +31,7 @@ import {
   Clock,
   HandMetal,
   Package,
+  RefreshCw,
   ShoppingBag,
 } from "lucide-react";
 import {
@@ -53,6 +54,8 @@ const STATUS_CONFIG: Record<
   AUTHORIZED: { label: "New", variant: "destructive", icon: Bell },
   ACCEPTED: { label: "Accepted", variant: "default", icon: Check },
   PICKING: { label: "Picking", variant: "secondary", icon: Package },
+  CAPTURING: { label: "Capturing…", variant: "secondary", icon: RefreshCw },
+  CANCELLING: { label: "Cancelling…", variant: "destructive", icon: RefreshCw },
   READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
   AWAITING_PICKUP: { label: "Awaiting pickup", variant: "outline", icon: ShoppingBag },
 };
@@ -373,6 +376,17 @@ export function OrderInbox({
                     disabled={isPending || !allLinesResolved}
                   >
                     <CheckCircle2 className="mr-2 size-4" /> Mark ready
+                  </Button>
+                )}
+
+                {selectedOrder.status === "CAPTURING" && (
+                  <Button
+                    className="mb-4 w-full rounded-full"
+                    variant="outline"
+                    onClick={() => handleMarkReady(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <RefreshCw className="mr-2 size-4" /> Retry capture
                   </Button>
                 )}
 

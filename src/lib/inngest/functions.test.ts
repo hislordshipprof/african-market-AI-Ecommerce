@@ -459,5 +459,36 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         spy.mockRestore();
       }
     });
+
+    it("Codex-3/C4: failed reconcile bumps updated_at so order rotates to back of sweep queue", async () => {
+      const { reconcileStuckTransitional } = await import("./functions");
+      const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+
+      const order = await createTestOrder();
+      const tenMinAgo = new Date(Date.now() - 10 * 60_000);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "CANCELLING", updatedAt: tenMinAgo },
+        });
+      });
+
+      const serviceMod = await import("../order/service");
+      const spy = vi.spyOn(serviceMod, "reconcileStuckOrder").mockRejectedValue(
+        new Error("Simulated failure"),
+      );
+
+      const step = makeFakeStep();
+      try {
+        await handler({ step });
+
+        const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+        expect(updated!.status).toBe("CANCELLING");
+        // updated_at should be bumped to recent (within last 30s), not 10 minutes ago
+        expect(updated!.updatedAt.getTime()).toBeGreaterThan(Date.now() - 30_000);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });

@@ -155,6 +155,15 @@ export const reconcileStuckTransitional = inngest.createFunction(
             });
           }
         }
+        // Bump updated_at so persistently failing orders rotate to the back of the sweep queue
+        try {
+          await storeScopedTransaction(row.storeId, async (tx) => {
+            await tx.order.update({
+              where: { id: row.id },
+              data: { updatedAt: new Date() },
+            });
+          });
+        } catch { /* best effort — order may have been resolved */ }
       });
     }
   },

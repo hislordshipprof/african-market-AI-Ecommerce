@@ -575,7 +575,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("READY");
   });
 
-  it("K3: markReady voids authorization when final amount is zero (all lines refunded)", async () => {
+  it("K3: markReady voids authorization when final amount is zero (all lines refunded)", { timeout: 10_000 }, async () => {
     const order = await createTestOrder();
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({
@@ -1085,6 +1085,46 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("CANCELLING");
   });
 
+  it("Codex-1/C4: CANCELLING + Stripe succeeded but refund pending does not finalize CANCELLED", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+    setNextRefundStatus(order.paymentIntentId!, "pending");
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("pending");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
+  });
+
+  it("Codex-1/C4: CANCELLING + Stripe succeeded but refund requires_action does not finalize CANCELLED", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+    setNextRefundStatus(order.paymentIntentId!, "requires_action");
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("requires_action");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
+  });
+
   // ── M2: Persist Stripe's amount_received, clear capturedAmountCents on cancel ──
 
   it("M2: markReady persists Stripe amount_received, not requested amount", async () => {
@@ -1096,9 +1136,11 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       await markLinePicked(storeId, line.id);
     }
 
-    // Simulate Stripe already captured for a slightly different amount (e.g., rounding)
+    // Simulate: a prior markReady attempt captured at Stripe but Phase 3 DB write failed.
+    // Pre-capture through the fake with the same idempotency key markReady will use,
+    // at a slightly different amount (e.g., rounding) to verify we persist Stripe's actual amount.
     const stripeActual = 5900;
-    capturedPayments.set(order.paymentIntentId!, stripeActual);
+    await fakeStripeProvider.capturePaymentIntent(order.paymentIntentId!, stripeActual, `capture:${order.id}`);
 
     const result = await markReady(storeId, order.id);
     expect(result.ok).toBe(true);

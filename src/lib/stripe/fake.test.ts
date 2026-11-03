@@ -55,17 +55,45 @@ describe("Fake Stripe state machine (K6)", () => {
     expect(result.amountReceived).toBe(0);
   });
 
-  it("idempotent capture returns same result", async () => {
+  it("idempotent capture with same key returns saved result", async () => {
     setAuthorizedAmount("pi_7", 1000);
-    const r1 = await fakeStripeProvider.capturePaymentIntent("pi_7", 800);
-    const r2 = await fakeStripeProvider.capturePaymentIntent("pi_7", 800);
+    const r1 = await fakeStripeProvider.capturePaymentIntent("pi_7", 800, "key_a");
+    const r2 = await fakeStripeProvider.capturePaymentIntent("pi_7", 800, "key_a");
     expect(r1).toEqual(r2);
   });
 
-  it("idempotent cancel returns same result", async () => {
+  it("capture with different key on captured PI throws", async () => {
+    setAuthorizedAmount("pi_7b", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_7b", 800, "key_a");
+    await expect(
+      fakeStripeProvider.capturePaymentIntent("pi_7b", 800, "key_b"),
+    ).rejects.toThrow(/already been captured/i);
+  });
+
+  it("idempotent cancel with same key returns saved result", async () => {
     setAuthorizedAmount("pi_8", 1000);
-    const r1 = await fakeStripeProvider.cancelPaymentIntent("pi_8");
-    const r2 = await fakeStripeProvider.cancelPaymentIntent("pi_8");
+    const r1 = await fakeStripeProvider.cancelPaymentIntent("pi_8", "key_c");
+    const r2 = await fakeStripeProvider.cancelPaymentIntent("pi_8", "key_c");
     expect(r1).toEqual(r2);
+  });
+
+  it("cancel with different key on cancelled PI throws", async () => {
+    await fakeStripeProvider.cancelPaymentIntent("pi_8b", "key_c");
+    await expect(
+      fakeStripeProvider.cancelPaymentIntent("pi_8b", "key_d"),
+    ).rejects.toThrow(/canceled/i);
+  });
+
+  it("capture below 50c minimum throws amount_too_small", async () => {
+    setAuthorizedAmount("pi_9", 1000);
+    await expect(
+      fakeStripeProvider.capturePaymentIntent("pi_9", 30),
+    ).rejects.toThrow(/50 cents/i);
+  });
+
+  it("capture without registered PI succeeds (e2e compat)", async () => {
+    const result = await fakeStripeProvider.capturePaymentIntent("pi_unregistered", 500, "key_e");
+    expect(result.amountCaptured).toBe(500);
+    expect(result.status).toBe("succeeded");
   });
 });

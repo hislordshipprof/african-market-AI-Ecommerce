@@ -160,7 +160,7 @@ export const stripeProvider: StripeProvider = {
       } satisfies CaptureResult;
     } catch (err: unknown) {
       if (err instanceof Stripe.errors.StripeInvalidRequestError
-        && /already been captured/i.test(err.message)) {
+        && err.code === "payment_intent_unexpected_state") {
         const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
         return {
           paymentIntentId: pi.id,
@@ -183,7 +183,7 @@ export const stripeProvider: StripeProvider = {
       } satisfies CancelResult;
     } catch (err: unknown) {
       if (err instanceof Stripe.errors.StripeInvalidRequestError
-        && /already been canceled/i.test(err.message)) {
+        && err.code === "payment_intent_unexpected_state") {
         const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
         return {
           paymentIntentId: pi.id,
