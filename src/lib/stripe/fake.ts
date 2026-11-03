@@ -6,6 +6,7 @@ import type {
   CaptureResult,
   CancelResult,
   RetrieveResult,
+  RefundResult,
 } from "./types";
 
 const VALID_WEBHOOK_SIGNATURE = "fake_valid_sig";
@@ -14,12 +15,14 @@ const accounts = new Map<string, ConnectAccount>();
 const capturedPayments = new Map<string, number>();
 const cancelledPayments = new Set<string>();
 const authorizedAmounts = new Map<string, number>();
+const refundedPayments = new Map<string, number>();
 
 function reset() {
   accounts.clear();
   capturedPayments.clear();
   cancelledPayments.clear();
   authorizedAmounts.clear();
+  refundedPayments.clear();
 }
 
 function getAccounts(): Map<string, ConnectAccount> {
@@ -120,6 +123,33 @@ const fakeStripeProvider: StripeProvider = {
     } satisfies CancelResult;
   },
 
+  async refundPayment(paymentIntentId, amountCents) {
+    if (!capturedPayments.has(paymentIntentId)) {
+      throw new Error(
+        `PaymentIntent ${paymentIntentId} has not been captured and cannot be refunded.`,
+      );
+    }
+    if (refundedPayments.has(paymentIntentId)) {
+      return {
+        refundId: `re_fake_${paymentIntentId}`,
+        amountRefunded: refundedPayments.get(paymentIntentId)!,
+        status: "succeeded",
+      } satisfies RefundResult;
+    }
+    const captured = capturedPayments.get(paymentIntentId)!;
+    if (amountCents > captured) {
+      throw new Error(
+        `Refund amount ${amountCents} exceeds captured amount ${captured}`,
+      );
+    }
+    refundedPayments.set(paymentIntentId, amountCents);
+    return {
+      refundId: `re_fake_${paymentIntentId}`,
+      amountRefunded: amountCents,
+      status: "succeeded",
+    } satisfies RefundResult;
+  },
+
   async retrievePaymentIntent(paymentIntentId) {
     if (capturedPayments.has(paymentIntentId)) {
       return {
@@ -147,4 +177,4 @@ const fakeStripeProvider: StripeProvider = {
   },
 };
 
-export { fakeStripeProvider, reset, getAccounts, capturedPayments, cancelledPayments, authorizedAmounts, setAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };
+export { fakeStripeProvider, reset, getAccounts, capturedPayments, cancelledPayments, authorizedAmounts, refundedPayments, setAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };

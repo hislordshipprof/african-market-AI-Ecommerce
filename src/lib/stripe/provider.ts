@@ -7,6 +7,7 @@ import type {
   CaptureResult,
   CancelResult,
   RetrieveResult,
+  RefundResult,
 } from "./types";
 
 let _stripeClient: Stripe | null = null;
@@ -202,5 +203,34 @@ export const stripeProvider: StripeProvider = {
       amountCapturable: pi.amount_capturable ?? 0,
       amountReceived: pi.amount_received ?? 0,
     } satisfies RetrieveResult;
+  },
+
+  async refundPayment(paymentIntentId, amountCents, idempotencyKey) {
+    const stripe = getStripeClient();
+    try {
+      const refund = await stripe.refunds.create(
+        { payment_intent: paymentIntentId, amount: amountCents },
+        idempotencyKey ? { idempotencyKey } : undefined,
+      );
+      return {
+        refundId: refund.id,
+        amountRefunded: refund.amount,
+        status: refund.status,
+      } satisfies RefundResult;
+    } catch (err: unknown) {
+      if (err instanceof Stripe.errors.StripeInvalidRequestError
+        && /already been refunded/i.test(err.message)) {
+        const refunds = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 1 });
+        const existing = refunds.data[0];
+        if (existing) {
+          return {
+            refundId: existing.id,
+            amountRefunded: existing.amount,
+            status: existing.status,
+          } satisfies RefundResult;
+        }
+      }
+      throw err;
+    }
   },
 };

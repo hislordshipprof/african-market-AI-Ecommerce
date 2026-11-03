@@ -39,6 +39,12 @@ export interface RetrieveResult {
   amountReceived: number;
 }
 
+export interface RefundResult {
+  refundId: string;
+  amountRefunded: number;
+  status: string;
+}
+
 export interface StripeProvider {
   createConnectAccount(input: {
     email: string;
@@ -73,6 +79,12 @@ export interface StripeProvider {
   retrievePaymentIntent(
     paymentIntentId: string,
   ): Promise<RetrieveResult>;
+
+  refundPayment(
+    paymentIntentId: string,
+    amountCents: number,
+    idempotencyKey?: string,
+  ): Promise<RefundResult>;
 }
 
 export function deriveOnboardingStatus(account: {

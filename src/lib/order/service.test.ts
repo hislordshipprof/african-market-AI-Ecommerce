@@ -5,7 +5,7 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, reconcileStuckOrder, sortPickListLines } from "./service";
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, setAuthorizedAmount } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, refundedPayments, setAuthorizedAmount } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -1009,7 +1009,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
   });
 
-  it("F2: sweep cancels CANCELLING order even when Stripe shows succeeded (external capture)", async () => {
+  it("M1: CANCELLING + Stripe succeeded issues full refund and anomaly_refund audit", async () => {
     const order = await createTestOrder();
     await storeScopedTransaction(storeId, async (tx) => {
       await tx.order.update({
@@ -1017,16 +1017,52 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
         data: { status: "CANCELLING" },
       });
     });
-    // Simulate external capture via Stripe dashboard
     capturedPayments.set(order.paymentIntentId!, 5000);
     setAuthorizedAmount(order.paymentIntentId!, 5000);
 
     const result = await reconcileStuckOrder(storeId, order.id);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.action).toBe("finalized_cancel");
+    if (result.ok) expect(result.action).toBe("anomaly_refund");
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
     expect(updated!.cancelledAt).toBeTruthy();
+
+    expect(refundedPayments.get(order.paymentIntentId!)).toBe(5000);
+
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "anomaly_refund" },
+    });
+    expect(logs.length).toBe(1);
+    expect(logs[0].actorId).toBe(SYSTEM_ACTOR_ID);
+  });
+
+  it("M1: CANCELLING + Stripe succeeded refund is idempotent (no second refund on re-run)", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+
+    const r1 = await reconcileStuckOrder(storeId, order.id);
+    expect(r1.ok).toBe(true);
+    if (r1.ok) expect(r1.action).toBe("anomaly_refund");
+
+    // Second run: order is now CANCELLED, so reconcile returns already_resolved
+    const r2 = await reconcileStuckOrder(storeId, order.id);
+    expect(r2.ok).toBe(true);
+    if (r2.ok) expect(r2.action).toBe("already_resolved");
+
+    // Only one refund call (fake returns same result on duplicate, but order status blocks re-entry)
+    expect(refundedPayments.get(order.paymentIntentId!)).toBe(5000);
+
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "anomaly_refund" },
+    });
+    expect(logs.length).toBe(1);
   });
 });

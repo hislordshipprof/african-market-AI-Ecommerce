@@ -402,7 +402,32 @@ export async function reconcileStuckOrder(
 
   if (pi.status === "succeeded") {
     if (order.status === "CANCELLING") {
-      return finalizeCancelFromSweep(storeId, orderId);
+      const refund = await stripe.refundPayment(
+        order.paymentIntentId,
+        pi.amountReceived,
+        `refund:${orderId}`,
+      );
+      await storeScopedTransaction(storeId, async (tx) => {
+        await lockStoreRow(tx, storeId);
+        const current = await tx.order.findUnique({ where: { id: orderId } });
+        if (!current || current.status !== "CANCELLING") return;
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+        });
+        await tx.auditLog.create({
+          data: {
+            storeId,
+            actorId: SYSTEM_ACTOR_ID,
+            actorEmail: SYSTEM_ACTOR_EMAIL,
+            action: "anomaly_refund",
+            entityType: "order",
+            entityId: orderId,
+            after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
+          },
+        });
+      });
+      return { ok: true, action: "anomaly_refund" };
     }
     return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
   }
