@@ -65,6 +65,7 @@ export default defineConfig({
         env: {
           NEXT_PUBLIC_DEMO_FLOWS: "1",
           E2E_STORE_OVERRIDE: "1",
+          E2E_FAKE_STRIPE: "1",
           VERCEL_ENV: "preview",
         },
       },

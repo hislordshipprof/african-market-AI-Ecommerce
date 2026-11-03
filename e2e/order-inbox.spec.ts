@@ -108,7 +108,7 @@ test.describe("Order inbox", () => {
     await expect(page.getByRole("button", { name: "Pick" }).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("Mark ready button disabled until all lines picked, enabled after", async ({ page }) => {
+  test("Mark ready button disabled until all lines picked, then captures and transitions", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
@@ -129,6 +129,19 @@ test.describe("Order inbox", () => {
     }
 
     await expect(markReadyBtn).toBeEnabled({ timeout: 10000 });
+
+    await markReadyBtn.click();
+
+    await expect(page.locator("text=Order marked ready")).toBeVisible({ timeout: 15000 });
+
+    const awaitingBadge = page.locator("text=Awaiting pickup");
+    await expect(awaitingBadge).toBeVisible({ timeout: 15000 });
+
+    const handOffBtn = page.getByRole("button", { name: "Hand off" });
+    await expect(handOffBtn).toBeVisible({ timeout: 10000 });
+
+    const totalEl = page.locator("text=/\\$\\d+\\.\\d{2}/").last();
+    await expect(totalEl).toBeVisible();
   });
 
   test("no horizontal overflow at 390px mobile", async ({ page }) => {

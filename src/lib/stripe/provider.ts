@@ -215,7 +215,7 @@ export const stripeProvider: StripeProvider = {
       return {
         refundId: refund.id,
         amountRefunded: refund.amount,
-        status: refund.status,
+        status: refund.status ?? "succeeded",
       } satisfies RefundResult;
     } catch (err: unknown) {
       if (err instanceof Stripe.errors.StripeInvalidRequestError
@@ -226,7 +226,7 @@ export const stripeProvider: StripeProvider = {
           return {
             refundId: existing.id,
             amountRefunded: existing.amount,
-            status: existing.status,
+            status: existing.status ?? "succeeded",
           } satisfies RefundResult;
         }
       }
