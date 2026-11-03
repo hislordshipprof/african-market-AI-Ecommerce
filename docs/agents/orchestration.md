@@ -69,3 +69,22 @@ The owner wants as few bugs as possible, and no agent reviewing its own work in 
 - **Batches:** small follow-ups in one area are grouped under one batch issue ("Batch: …", listing `Closes #a, #b, …`) and built in a single light run.
 - **Codex:** no external peer on every build (`cross-model.json` mode `host-only`). The coordinator runs `scripts/codex-review.sh` (gpt-6-astra, medium effort) at milestones: before merging a money or auth ticket, and on the main-path PR that completes a phase slice. Codex UI builds also run at Astra medium, via `scripts/codex-ui-build.sh <worktree> <brief>`, without the Windows sandbox (owner-approved 2026-11-02) so Codex can run browsers, tests and builds itself. Its guard rules keep it inside the worktree and away from `.env` files.
 
+## Headless engine (Claude Code or Cursor CLI)
+
+Every pipeline script (`plan-ticket.sh`, `build-ticket.sh`, `review-ticket.sh`, `ship-ticket.sh`) runs its agent through `scripts/agent-cli.sh`. `ENGINE` in `scripts/agent-engine.env` picks the CLI; `AGENT_ENGINE=claude|cursor` overrides it for one run.
+
+- **cursor**: the Cursor CLI (`agent`), installed with `irm 'https://cursor.com/install?win32=true' | iex` and signed in once with `agent login`, so it runs on the Cursor subscription with no API key. Headless flags: `-p --force --trust --approve-mcps --output-format json --workspace <worktree>`. Models come from `CURSOR_*_MODEL` in `agent-engine.env` (names from `agent models`). Builders and reviewers use different model families.
+- Cursor cannot load Claude Code plugins, so the SuperMatt skills are vendored in `.cursor/skills/supermatt/` (MIT). A prompt that starts with `/supermatt:<skill>` is rewritten to "read and follow `.cursor/skills/supermatt/skills/<skill>/SKILL.md`". Cursor also reads `CLAUDE.md`, `AGENTS.md` and `.claude/skills/`.
+- Session ids are per engine (`.builder/session-<n>.txt` for Claude, `.builder/session-<n>.cursor.txt` for Cursor). A fix round with no saved session starts fresh and rebuilds context from the issue, the PR and `git log`.
+
+## Coordinator runbook (any engine)
+
+The coordinator is one interactive session that never writes product code. Everything it needs is in the repo:
+
+1. **Queue:** open issues labelled `ready-for-agent`, in build-board order. Keep up to 3 lanes (ports 3000, 3100, 3200) while about 1 GB of RAM stays free. Never start a ticket that edits the same files as a running lane.
+2. **Start a lane:** run `scripts/plan-ticket.sh <n>` if the issue has no "Agent brief" comment, then `E2E_PORT=<port> [TIER=light] [RISK=1] scripts/build-ticket.sh <n>`. Each lane gets its own local Postgres database (`lane_t<n>`); lanes never touch Neon.
+3. **Review loop:** `build-ticket.sh` runs a fresh independent review (`review-ticket.sh`, plus Codex for RISK tickets) after every build and fix round, with at most 2 automatic fix rounds. After that the coordinator writes a decision (findings to fix, scope cuts, deferrals to named follow-up issues) and runs `scripts/build-ticket.sh <n> --resume "<decision>"`.
+4. **Merge gate:** a review verdict of PASS on the PR head, and a `local-ci` success status on that same head (run `E2E_PORT=<port> scripts/ci-local.sh` in the worktree if the builder did not). Then `scripts/merge-ticket.sh <n> "<verdict line>"`. Do not add the `run-ci` label before 2026-12-01 (GitHub Actions budget).
+5. **Deploys:** production builds only when the squash subject ends with `[deploy]`. Use it only at milestones: `gh pr merge <pr> --squash --subject "<title> (#<pr>) [deploy]"`. Never put the marker anywhere else in a title.
+6. **Records:** update the build board row, close or edit follow-up issues, and record every decision on the issue, not only in chat.
+

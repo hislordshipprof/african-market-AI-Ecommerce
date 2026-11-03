@@ -1,0 +1,9 @@
+# Verify a spec (session V)
+
+A spec is a parent issue: its tickets are its sub-issues, or the issues whose `## Parent` section names it. For local Markdown, it is the `spec.md` beside the feature's `issues/` directory. Once the last ticket closes, check that the tickets together delivered what the spec asked for.
+
+1. Show phase `verify`. Start the worker.
+2. Prompt (`--wait`, no timeout) and wait for the worker: `Verify spec REF: all of its tickets are closed. The fixed point is the parent of the oldest commit on DEFAULT that references one of its tickets. Use GitHub numbers or repository-relative local ticket paths as appropriate. From that fixed point, run the qa skill and then the code-review skill, with REF as the spec. Change no file. Then reply with the fixed point, both verdict lines, and one line per gap: each QA fail, and each verified P0 or P1 finding.` If the fixed point cannot be established, park with the missing evidence.
+3. No gap: use the configured tracker's **Close** operation on REF with `Verified since <fixed point>: QA <verdict>, review <verdict>.` Re-read it to confirm closure. Add each P2 or P3 finding to the friction log.
+4. Gaps: for local Markdown acquire the tracker write slot first. Prompt `File one ticket per gap as a child of REF, the way the configured tracker creates children, with acceptance criteria and the READY triage state. Reply with their numbers or canonical file paths.` (`--wait`) and wait for the worker. The spec now has open tickets, so the loop implements them, and the spec comes back here once they close. If this is the spec's second verification in this run that found gaps, park the lane instead of filing.
+5. Stop the worker, remove the worktree, and drop its key from IN_FLIGHT. Report one line: `lane L: DISPLAY spec -> verified, closed` or `lane L: DISPLAY spec -> gaps <child references>`. Go back to Pick the issue.

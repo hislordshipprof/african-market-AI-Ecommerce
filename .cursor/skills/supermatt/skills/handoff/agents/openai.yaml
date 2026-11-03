@@ -1,0 +1,5 @@
+interface:
+  display_name: "SuperMatt: Handoff"
+  short_description: "Write a conversation into a handoff"
+policy:
+  allow_implicit_invocation: false
