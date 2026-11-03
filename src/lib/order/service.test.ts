@@ -4,7 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, sortPickListLines } from "./service";
 import { setStripeProvider } from "../stripe";
-import type { StripeProvider } from "../stripe/types";
+import type { StripeProvider, CancelResult } from "../stripe/types";
 import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, cancelledPayments, setAuthorizedAmount } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
@@ -562,6 +562,45 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(result.ok).toBe(true);
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("COMPLETED");
+  });
+
+  it("K2: accept-during-cancel race — accept fails while cancel is in-flight", async () => {
+    const order = await createTestOrder();
+
+    let resolveCancel!: (v: CancelResult) => void;
+    const cancelDeferred = new Promise<CancelResult>((res) => { resolveCancel = res; });
+    const deferredProvider: StripeProvider = {
+      ...fakeStripeProvider,
+      cancelPaymentIntent: () => cancelDeferred,
+    };
+    setStripeProvider(deferredProvider);
+
+    // Start autoCancelOrder — it will set CANCELLING in Phase 1, then block on Stripe
+    const cancelPromise = autoCancelOrder(storeId, order.id);
+
+    // Give Phase 1 time to commit CANCELLING
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Verify status is CANCELLING
+    const mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(mid!.status).toBe("CANCELLING");
+
+    // Attempt to accept mid-flight — must fail because status is CANCELLING
+    setStripeProvider(fakeStripeProvider);
+    const acceptResult = await acceptOrder(storeId, order.id, 15);
+    expect(acceptResult.ok).toBe(false);
+    if (!acceptResult.ok) expect(acceptResult.error).toContain("CANCELLING");
+
+    // Resolve the deferred Stripe cancel so autoCancelOrder can finalize
+    resolveCancel({ paymentIntentId: order.paymentIntentId!, status: "canceled" });
+    const cancelResult = await cancelPromise;
+    expect(cancelResult.ok).toBe(true);
+
+    // Final state: CANCELLED, payment voided, never ACCEPTED
+    const final = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(final!.status).toBe("CANCELLED");
+    expect(final!.cancelledAt).toBeTruthy();
+    expect(final!.acceptedAt).toBeNull();
   });
 
   it("markReady idempotent: second call after Stripe already captured succeeds", async () => {
