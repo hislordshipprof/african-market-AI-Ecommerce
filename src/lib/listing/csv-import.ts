@@ -4,6 +4,9 @@ import { resolveStockMode, type Actor } from "./service";
 
 const TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+const NON_CSV_REASON =
+  "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.";
+
 const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MB
 const MAX_ROWS = 5000;
 const MAX_NAME_LENGTH = 200;
@@ -99,6 +102,29 @@ function stripBom(text: string): string {
   return text;
 }
 
+function nonCsvParseResult(): {
+  rows: ParsedRow[];
+  errors: CsvPreviewError[];
+  unknownColumns: string[];
+  hasQtyColumn: boolean;
+} {
+  return {
+    rows: [],
+    errors: [{ row: 0, reason: NON_CSV_REASON }],
+    unknownColumns: [],
+    hasQtyColumn: false,
+  };
+}
+
+/** Binary uploads and UTF-16 Excel exports are not CSV. U+FFFD alone is not enough. */
+function isNonCsvText(text: string): boolean {
+  if (text.includes("\u0000")) return true;
+  if (text.startsWith("PK\u0003\u0004")) return true;
+  if (text.startsWith("%PDF")) return true;
+  if (text.startsWith("\uFFFD" + "PNG")) return true;
+  return false;
+}
+
 export function parseCsvText(raw: string): {
   rows: ParsedRow[];
   errors: CsvPreviewError[];
@@ -106,6 +132,8 @@ export function parseCsvText(raw: string): {
   hasQtyColumn: boolean;
 } {
   const cleaned = stripBom(raw);
+  if (isNonCsvText(cleaned)) return nonCsvParseResult();
+
   const rows: ParsedRow[] = [];
   const errors: CsvPreviewError[] = [];
 

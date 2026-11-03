@@ -218,6 +218,134 @@ describe("parseCsvText", () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 
+  const NON_CSV =
+    "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.";
+
+  async function textFromBytes(bytes: Uint8Array): Promise<string> {
+    return new Blob([bytes]).text();
+  }
+
+  function expectNonCsv(parsed: ReturnType<typeof parseCsvText>) {
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.unknownColumns).toEqual([]);
+    expect(parsed.hasQtyColumn).toBe(false);
+    expect(parsed.errors).toEqual([{ row: 0, reason: NON_CSV }]);
+  }
+
+  it("N14: ZIP signature without a newline is rejected before parsing", async () => {
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x01]);
+    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
+  });
+
+  it("N14: ZIP signature with a newline in the first record is rejected", async () => {
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x0a, 0x14, 0x01]);
+    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
+  });
+
+  it("N14: PDF signature is rejected", async () => {
+    const bytes = new TextEncoder().encode("%PDF-1.7\n1 0 obj\n");
+    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
+  });
+
+  it("N14: PNG signature is rejected", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
+  });
+
+  it("N14: UTF-16LE CSV with a BOM is rejected", async () => {
+    const source = "name,price\nRice,5\n";
+    const bytes = new Uint8Array(2 + source.length * 2);
+    bytes[0] = 0xff;
+    bytes[1] = 0xfe;
+    for (let i = 0; i < source.length; i++) {
+      bytes[2 + i * 2] = source.charCodeAt(i) & 0xff;
+      bytes[3 + i * 2] = source.charCodeAt(i) >> 8;
+    }
+    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
+  });
+
+  it("N14: UTF-16BE CSV with a BOM is rejected", async () => {
+    const source = "name,price\nRice,5\n";
+    const bytes = new Uint8Array(2 + source.length * 2);
+    bytes[0] = 0xfe;
+    bytes[1] = 0xff;
+    for (let i = 0; i < source.length; i++) {
+      bytes[2 + i * 2] = source.charCodeAt(i) >> 8;
+      bytes[3 + i * 2] = source.charCodeAt(i) & 0xff;
+    }
+    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
+  });
+
+  it("N14: NUL in an extra column is rejected and does not throw", async () => {
+    const text = await textFromBytes(new TextEncoder().encode("name,price,notes\nRice,5,a\u0000b\n"));
+    expectNonCsv(parseCsvText(text));
+  });
+
+  it("N14: NUL in a name cell is the non-CSV message", async () => {
+    expectNonCsv(parseCsvText("name,price\nRice\u0000,5\n"));
+  });
+
+  it("N14: Windows-1252 Bîmba is not rejected", async () => {
+    const bytes = new Uint8Array([
+      ...new TextEncoder().encode("name,price\n"),
+      0x42, 0xee, 0x6d, 0x62, 0x61,
+      ...new TextEncoder().encode(",5.00\n"),
+    ]);
+    const parsed = parseCsvText(await textFromBytes(bytes));
+    expect(parsed.errors.filter((e) => e.reason === NON_CSV)).toEqual([]);
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0].name).toBe("B\uFFFDmba");
+    expect(parsed.rows[0].price).toBe(500);
+  });
+
+  it("N14: a signature later in the file is a normal row", () => {
+    const parsed = parseCsvText("name,price\n%PDF guide,5\n");
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0].name).toBe("%PDF guide");
+    expect(parsed.rows[0].price).toBe(500);
+  });
+
+  it("N14: UTF-8 BOM, CRLF and Café Noir still parse", async () => {
+    const bytes = new TextEncoder().encode("\uFEFFname,price\r\nCafé Noir,4.50\r\n");
+    const parsed = parseCsvText(await textFromBytes(bytes));
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows).toEqual([
+      expect.objectContaining({ name: "Café Noir", price: 450, row: 2 }),
+    ]);
+  });
+
+  it("empty input: header-only file keeps the empty-file message", async () => {
+    const parsed = parseCsvText(await textFromBytes(new TextEncoder().encode("name,price\n")));
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.errors).toEqual([
+      { row: 0, reason: "File is empty or contains only headers." },
+    ]);
+  });
+
+  it("empty input: a 0-byte file keeps the empty-file message", async () => {
+    const parsed = parseCsvText(await textFromBytes(new Uint8Array()));
+    expect(parsed.errors).toEqual([
+      { row: 0, reason: "File is empty or contains only headers." },
+    ]);
+  });
+
+  it("over the maximum: 5001 rows keeps the row-limit message", () => {
+    const body = Array.from({ length: 5001 }, (_, i) => `Product${i},${i + 1}.00`).join("\n");
+    const parsed = parseCsvText(`name,price\n${body}\n`);
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.errors).toEqual([
+      { row: 0, reason: "File exceeds the maximum of 5000 rows." },
+    ]);
+  });
+
+  it("money rounding: prices stay exact cents and no authorization cap applies", () => {
+    expect(parsePriceToCents("12.50")).toBe(1250);
+    expect(parsePriceToCents("0.01")).toBe(1);
+    expect(parsePriceToCents("10.1")).toBe(1010);
+    expect(parsePriceToCents("12.345")).toBeNull();
+  });
+
   it("missing name in a row", () => {
     const csv = "name,price\n,12.50\n";
     const { errors } = parseCsvText(csv);
@@ -548,6 +676,22 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
         ambiguousResolutions: [],
       }, actor),
     ).rejects.toThrow(/No rows selected/);
+  });
+
+  it("N14: a non-CSV preview creates no import token", async () => {
+    const scoped = storeScoped(storeAId);
+    const before = await scoped.listingImport.count();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const text = await new Blob([png]).text();
+    const preview = await generatePreview(storeAId, text, testUserId);
+    expect(preview.importToken).toBe("");
+    expect(preview.errors).toEqual([
+      {
+        row: 0,
+        reason: "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.",
+      },
+    ]);
+    expect(await scoped.listingImport.count()).toBe(before);
   });
 });
 
