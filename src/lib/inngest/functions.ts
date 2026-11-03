@@ -126,10 +126,19 @@ export const reconcileStuckTransitional = inngest.createFunction(
 
     for (const row of stuck) {
       await step.run(`reconcile-${row.id}`, async () => {
+        let failReason: string | undefined;
         try {
-          await reconcileStuckOrder(row.storeId, row.id);
+          const result = await reconcileStuckOrder(row.storeId, row.id);
+          if (!result.ok) {
+            failReason = result.error;
+          } else if (result.action === "unknown_stripe_status") {
+            failReason = "unknown_stripe_status";
+          }
         } catch (err) {
+          failReason = err instanceof Error ? err.message : String(err);
           console.error(`reconcileStuckOrder failed for order ${row.id}:`, err);
+        }
+        if (failReason) {
           const recent = await storeScopedTransaction(row.storeId, async (tx) => {
             return tx.auditLog.findFirst({
               where: {
@@ -149,7 +158,7 @@ export const reconcileStuckTransitional = inngest.createFunction(
                   action: "reconcile_failed",
                   entityType: "order",
                   entityId: row.id,
-                  after: { error: err instanceof Error ? err.message : String(err) },
+                  after: { error: failReason },
                 },
               });
             });

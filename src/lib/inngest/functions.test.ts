@@ -460,6 +460,111 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       }
     }, 10_000);
 
+    it("P4: {ok:false} result creates reconcile_failed audit entry", async () => {
+      const { reconcileStuckTransitional } = await import("./functions");
+      const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+
+      const order = await createTestOrder();
+      const sixMinAgo = new Date(Date.now() - 6 * 60_000);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "CANCELLING", updatedAt: sixMinAgo },
+        });
+      });
+
+      const serviceMod = await import("../order/service");
+      const spy = vi.spyOn(serviceMod, "reconcileStuckOrder").mockResolvedValue(
+        { ok: false, error: "Refund pending — order stays in CANCELLING for retry" },
+      );
+
+      const step = makeFakeStep();
+      try {
+        await handler({ step });
+
+        const logs = await storeScoped(storeId).auditLog.findMany({
+          where: { entityId: order.id, action: "reconcile_failed" },
+        });
+        expect(logs.length).toBe(1);
+        expect((logs[0].after as { error: string }).error).toContain("pending");
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("P4: unknown_stripe_status action creates reconcile_failed audit entry", async () => {
+      const { reconcileStuckTransitional } = await import("./functions");
+      const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+
+      const order = await createTestOrder();
+      const sixMinAgo = new Date(Date.now() - 6 * 60_000);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "CANCELLING", updatedAt: sixMinAgo },
+        });
+      });
+
+      const serviceMod = await import("../order/service");
+      const spy = vi.spyOn(serviceMod, "reconcileStuckOrder").mockResolvedValue(
+        { ok: true, action: "unknown_stripe_status" },
+      );
+
+      const step = makeFakeStep();
+      try {
+        await handler({ step });
+
+        const logs = await storeScoped(storeId).auditLog.findMany({
+          where: { entityId: order.id, action: "reconcile_failed" },
+        });
+        expect(logs.length).toBe(1);
+        expect((logs[0].after as { error: string }).error).toBe("unknown_stripe_status");
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("P4: reconcile_failed cooldown — no duplicate within 1 hour", async () => {
+      const { reconcileStuckTransitional } = await import("./functions");
+      const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+
+      const order = await createTestOrder();
+      const sixMinAgo = new Date(Date.now() - 6 * 60_000);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "CANCELLING", updatedAt: sixMinAgo },
+        });
+      });
+
+      const serviceMod = await import("../order/service");
+      const spy = vi.spyOn(serviceMod, "reconcileStuckOrder").mockResolvedValue(
+        { ok: false, error: "Refund pending" },
+      );
+
+      const step = makeFakeStep();
+      try {
+        // First sweep: creates audit entry
+        await handler({ step });
+        // Re-stub updated_at back so findStuckTransitionalOrders still returns it
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { updatedAt: sixMinAgo },
+          });
+        });
+        // Second sweep: cooldown should prevent duplicate
+        await handler({ step: makeFakeStep() });
+
+        const logs = await storeScoped(storeId).auditLog.findMany({
+          where: { entityId: order.id, action: "reconcile_failed" },
+        });
+        expect(logs.length).toBe(1);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it("Codex-3/C4: failed reconcile bumps updated_at so order rotates to back of sweep queue", async () => {
       const { reconcileStuckTransitional } = await import("./functions");
       const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
