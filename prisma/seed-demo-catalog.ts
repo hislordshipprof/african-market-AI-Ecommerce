@@ -9,7 +9,7 @@ interface CatalogProduct {
 
 interface CatalogListing {
   id: string;
-  masterProductId: string;
+  masterProductId: string | null;
   customName: string | null;
   price: number;
   stockMode: "counted" | "status";
@@ -421,7 +421,7 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
     },
     {
       id: `${prefix}_garri_yellow`,
-      masterProductId: "mp_garri",
+      masterProductId: null,
       customName: "Yellow Garri (Ijebu)",
       price: 699,
       stockMode: "counted",
@@ -1090,7 +1090,7 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
     // --- Inactive listing (for e2e test: category excludes inactive) ---
     {
       id: `${prefix}_inactive_item`,
-      masterProductId: "mp_garri",
+      masterProductId: null,
       customName: "Garri (Seasonal - Unavailable)",
       price: 599,
       stockMode: "status",
