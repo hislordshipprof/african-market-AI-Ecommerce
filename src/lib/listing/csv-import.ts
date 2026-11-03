@@ -10,6 +10,8 @@ const MAX_NAME_LENGTH = 200;
 
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 const PRICE_DOLLAR_RE = /^\$?\s*/;
+const VALID_STATUSES = new Set(["in_stock", "low", "out_of_stock"]);
+const VALID_STOCK_MODES = new Set(["counted", "status"]);
 
 export interface CsvPreviewMatch {
   row: number;
@@ -242,9 +244,27 @@ export function parseCsvText(raw: string): {
       continue;
     }
 
-    const stockMode = stockModeCol ? record[stockModeCol]?.trim().toLowerCase() : undefined;
+    const stockModeRaw = stockModeCol ? record[stockModeCol]?.trim().toLowerCase().replace(/[\s-]/g, "_") || undefined : undefined;
     const qtyRaw = qtyCol ? record[qtyCol]?.trim() : undefined;
-    const statusRaw = statusCol ? record[statusCol]?.trim().toLowerCase() : undefined;
+    const statusRaw = statusCol ? record[statusCol]?.trim().toLowerCase().replace(/[\s-]/g, "_") || undefined : undefined;
+
+    if (stockModeRaw && !VALID_STOCK_MODES.has(stockModeRaw)) {
+      errors.push({
+        row: rowNum,
+        csvName: rawName,
+        reason: `Unrecognised stock_mode: "${record[stockModeCol!]?.trim()}". Use "counted" or "status".`,
+      });
+      continue;
+    }
+
+    if (statusRaw && !VALID_STATUSES.has(statusRaw)) {
+      errors.push({
+        row: rowNum,
+        csvName: rawName,
+        reason: `Unrecognised status: "${record[statusCol!]?.trim()}". Use "in_stock", "low", or "out_of_stock".`,
+      });
+      continue;
+    }
 
     let qty: number | undefined;
     if (qtyRaw !== undefined && qtyRaw !== "") {
@@ -264,12 +284,9 @@ export function parseCsvText(raw: string): {
       row: rowNum,
       name: rawName,
       price: priceCents,
-      stockMode: stockMode === "counted" || stockMode === "status" ? stockMode : undefined,
+      stockMode: stockModeRaw as "counted" | "status" | undefined,
       qty,
-      status:
-        statusRaw === "in_stock" || statusRaw === "low" || statusRaw === "out_of_stock"
-          ? statusRaw
-          : undefined,
+      status: statusRaw as "in_stock" | "low" | "out_of_stock" | undefined,
     });
   }
 

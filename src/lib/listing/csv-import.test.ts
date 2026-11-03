@@ -263,6 +263,45 @@ describe("parseCsvText", () => {
     expect(rows[1].status).toBe("in_stock");
   });
 
+  it("B2: normalises status spaces/dashes to underscores", () => {
+    const csv = "name,price,status\nA,1.00,Out of stock\nB,2.00,out-of-stock\nC,3.00,In Stock\nD,4.00,LOW\n";
+    const { rows, errors } = parseCsvText(csv);
+    expect(errors).toHaveLength(0);
+    expect(rows.map((r) => r.status)).toEqual(["out_of_stock", "out_of_stock", "in_stock", "low"]);
+  });
+
+  it("B2: normalises stock_mode spaces/dashes to underscores", () => {
+    const csv = "name,price,stock_mode,qty\nA,1.00,Counted,5\nB,2.00,STATUS,\n";
+    const { rows, errors } = parseCsvText(csv);
+    expect(errors).toHaveLength(0);
+    expect(rows.map((r) => r.stockMode)).toEqual(["counted", "status"]);
+  });
+
+  it("B2: unrecognised status is a row error", () => {
+    const csv = "name,price,status\nA,1.00,sold out\nB,2.00,in_stock\n";
+    const { rows, errors } = parseCsvText(csv);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].csvName).toBe("A");
+    expect(errors[0].reason).toContain("status");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("in_stock");
+  });
+
+  it("B2: unrecognised stock_mode is a row error", () => {
+    const csv = "name,price,stock_mode\nA,1.00,count\n";
+    const { rows, errors } = parseCsvText(csv);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].reason).toContain("stock_mode");
+  });
+
+  it("B2: empty status/stock_mode cells are not errors", () => {
+    const csv = "name,price,status,stock_mode\nA,1.00,,\n";
+    const { rows, errors } = parseCsvText(csv);
+    expect(errors).toHaveLength(0);
+    expect(rows[0].status).toBeUndefined();
+    expect(rows[0].stockMode).toBeUndefined();
+  });
+
   it("rejects files over 5000 rows", () => {
     const rows = Array.from({ length: 5001 }, (_, i) => `Product${i},${i + 1}.00`);
     const csv = "name,price\n" + rows.join("\n") + "\n";

@@ -9,7 +9,7 @@ interface CatalogProduct {
 
 interface CatalogListing {
   id: string;
-  masterProductId: string | null;
+  masterProductId: string;
   customName: string | null;
   price: number;
   stockMode: "counted" | "status";
@@ -1090,7 +1090,7 @@ function storeListings(storeId: string, prefix: string): CatalogListing[] {
     // --- Inactive listing (for e2e test: category excludes inactive) ---
     {
       id: `${prefix}_inactive_item`,
-      masterProductId: null,
+      masterProductId: "mp_garri",
       customName: "Garri (Seasonal - Unavailable)",
       price: 599,
       stockMode: "status",

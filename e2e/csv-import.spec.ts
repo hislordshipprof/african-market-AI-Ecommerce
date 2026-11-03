@@ -169,18 +169,32 @@ test.describe("CSV import (authenticated)", () => {
   test("B4: ambiguous row resolution via radio buttons", async ({ page }) => {
     const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
     const ts = Date.now();
-    const mpAlpha = await prisma.masterProduct.create({
-      data: { name: `E2E Ambig Alpha ${ts}`, frozen: false, perishable: false },
-    });
-    const mpBeta = await prisma.masterProduct.create({
-      data: { name: `E2E Ambig Beta ${ts}`, frozen: false, perishable: true },
-    });
-    await prisma.productSynonym.createMany({
-      data: [
-        { productId: mpAlpha.id, term: `e2e ambig thing ${ts}` },
-        { productId: mpBeta.id, term: `e2e ambig thing ${ts}` },
-      ],
-    });
+
+    // Create master products inside a platform admin transaction (master_products has FORCE RLS)
+    const [, , mpAlpha] = await prisma.$transaction([
+      prisma.$executeRaw`SET LOCAL ROLE app_user`,
+      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      prisma.masterProduct.create({
+        data: { name: `E2E Ambig Alpha ${ts}`, frozen: false, perishable: false, status: "active" },
+      }),
+    ]);
+    const [, , mpBeta] = await prisma.$transaction([
+      prisma.$executeRaw`SET LOCAL ROLE app_user`,
+      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      prisma.masterProduct.create({
+        data: { name: `E2E Ambig Beta ${ts}`, frozen: false, perishable: true, status: "active" },
+      }),
+    ]);
+    await prisma.$transaction([
+      prisma.$executeRaw`SET LOCAL ROLE app_user`,
+      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      prisma.productSynonym.createMany({
+        data: [
+          { productId: mpAlpha.id, term: `e2e ambig thing ${ts}` },
+          { productId: mpBeta.id, term: `e2e ambig thing ${ts}` },
+        ],
+      }),
+    ]);
 
     const listingName = `E2E Ambig Thing ${ts}`;
     createdNames.push(listingName);
@@ -209,13 +223,17 @@ test.describe("CSV import (authenticated)", () => {
     expect(listing).toBeTruthy();
     expect(listing!.perishable).toBe(true);
 
-    // Cleanup test master products
-    await prisma.productSynonym.deleteMany({
-      where: { productId: { in: [mpAlpha.id, mpBeta.id] } },
-    });
-    await prisma.masterProduct.deleteMany({
-      where: { id: { in: [mpAlpha.id, mpBeta.id] } },
-    });
+    // Cleanup test master products (inside platform admin transaction for RLS)
+    await prisma.$transaction([
+      prisma.$executeRaw`SET LOCAL ROLE app_user`,
+      prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      prisma.productSynonym.deleteMany({
+        where: { productId: { in: [mpAlpha.id, mpBeta.id] } },
+      }),
+      prisma.masterProduct.deleteMany({
+        where: { id: { in: [mpAlpha.id, mpBeta.id] } },
+      }),
+    ]);
     await prisma.$disconnect();
   });
 
