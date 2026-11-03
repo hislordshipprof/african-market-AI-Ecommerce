@@ -10,6 +10,7 @@ vi.mock("./db", () => ({
 import {
   auth,
   resolveAuthBaseUrl,
+  resolveAuthAllowedHosts,
   resolveAuthTrustedOrigins,
   validateAuthSecret,
 } from "./auth";
@@ -24,6 +25,20 @@ describe("auth config", () => {
     const session = opts.session as Record<string, unknown>;
     const cookieCache = session.cookieCache as Record<string, unknown>;
     expect(cookieCache.enabled).toBe(false);
+  });
+
+  it("disables password-reset phone endpoints", () => {
+    const opts = auth.options as Record<string, unknown>;
+    const disabled = opts.disabledPaths as string[];
+    expect(disabled).toContain("/phone-number/request-password-reset");
+    expect(disabled).toContain("/phone-number/reset-password");
+  });
+
+  it("uses dynamic baseURL with allowedHosts", () => {
+    const opts = auth.options as Record<string, unknown>;
+    const baseURL = opts.baseURL as Record<string, unknown>;
+    expect(baseURL).toHaveProperty("allowedHosts");
+    expect(Array.isArray(baseURL.allowedHosts)).toBe(true);
   });
 });
 
@@ -51,6 +66,45 @@ describe("resolveAuthBaseUrl", () => {
 
   it("defaults to http://localhost:3000 when nothing is set", () => {
     expect(resolveAuthBaseUrl({})).toBe("http://localhost:3000");
+  });
+});
+
+describe("resolveAuthAllowedHosts", () => {
+  it("includes localhost by default", () => {
+    const hosts = resolveAuthAllowedHosts({});
+    expect(hosts).toContain("localhost:3000");
+    expect(hosts).toContain("*.localhost:3000");
+  });
+
+  it("includes BETTER_AUTH_URL host and wildcard subdomain", () => {
+    const hosts = resolveAuthAllowedHosts({
+      BETTER_AUTH_URL: "https://platform.example.com",
+    });
+    expect(hosts).toContain("platform.example.com");
+    expect(hosts).toContain("*.platform.example.com");
+  });
+
+  it("includes VERCEL_URL and wildcard", () => {
+    const hosts = resolveAuthAllowedHosts({
+      VERCEL_URL: "my-app.vercel.app",
+    });
+    expect(hosts).toContain("my-app.vercel.app");
+    expect(hosts).toContain("*.my-app.vercel.app");
+  });
+
+  it("includes custom PORT", () => {
+    const hosts = resolveAuthAllowedHosts({ PORT: "3200" });
+    expect(hosts).toContain("localhost:3200");
+    expect(hosts).toContain("*.localhost:3200");
+    expect(hosts).toContain("localhost:3000");
+  });
+
+  it("deduplicates hosts", () => {
+    const hosts = resolveAuthAllowedHosts({
+      BETTER_AUTH_TRUSTED_ORIGINS: "http://localhost:3000",
+    });
+    const count = hosts.filter((h) => h === "localhost:3000").length;
+    expect(count).toBe(1);
   });
 });
 

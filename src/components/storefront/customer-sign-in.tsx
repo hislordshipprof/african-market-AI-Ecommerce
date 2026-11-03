@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { syncCustomerAction } from "@/app/account/actions";
+import { normalizePhone } from "@/lib/phone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,8 +42,13 @@ export function CustomerSignIn({ smsEnabled, callbackUrl = "/account" }: Props) 
 
     try {
       if (channel === "phone") {
+        const normalized = normalizePhone(destination);
+        if (!normalized) {
+          setError("Please enter a valid US phone number.");
+          return;
+        }
         const result = await authClient.phoneNumber.sendOtp({
-          phoneNumber: destination,
+          phoneNumber: normalized,
         });
         if (result.error) {
           setError(result.error.message ?? "Failed to send code");
@@ -73,8 +79,13 @@ export function CustomerSignIn({ smsEnabled, callbackUrl = "/account" }: Props) 
     setLoading(true);
 
     try {
+      const normalized = normalizePhone(destination);
+      if (!normalized) {
+        setError("Please enter a valid US phone number.");
+        return;
+      }
       const result = await authClient.phoneNumber.verify({
-        phoneNumber: destination,
+        phoneNumber: normalized,
         code,
       });
       if (result.error) {

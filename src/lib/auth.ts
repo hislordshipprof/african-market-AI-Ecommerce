@@ -17,6 +17,40 @@ export function resolveAuthBaseUrl(
   return "http://localhost:3000";
 }
 
+export function resolveAuthAllowedHosts(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const hosts: string[] = [];
+
+  if (env.BETTER_AUTH_URL) {
+    try {
+      const host = new URL(env.BETTER_AUTH_URL).host;
+      hosts.push(host, `*.${host}`);
+    } catch {}
+  }
+
+  if (env.VERCEL_URL) {
+    hosts.push(env.VERCEL_URL, `*.${env.VERCEL_URL}`);
+  }
+
+  if (env.BETTER_AUTH_TRUSTED_ORIGINS) {
+    for (const origin of env.BETTER_AUTH_TRUSTED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)) {
+      try {
+        const host = new URL(origin).host;
+        hosts.push(host, `*.${host}`);
+      } catch {}
+    }
+  }
+
+  const port = env.PORT ?? "3000";
+  hosts.push(`localhost:${port}`, `*.localhost:${port}`);
+  if (port !== "3000") {
+    hosts.push("localhost:3000", "*.localhost:3000");
+  }
+
+  return [...new Set(hosts)];
+}
+
 export function resolveAuthTrustedOrigins(
   env: Record<string, string | undefined> = process.env,
 ): string[] {
@@ -62,30 +96,36 @@ validateAuthSecret();
 
 const baseUrl = resolveAuthBaseUrl();
 
+function normalizePhoneHook(user: Record<string, unknown>) {
+  if (user.phoneNumber) {
+    const normalized = normalizePhone(user.phoneNumber as string);
+    if (normalized) return { data: { ...user, phoneNumber: normalized } };
+  }
+}
+
 export const auth = betterAuth({
-  baseURL: baseUrl,
+  baseURL: { allowedHosts: resolveAuthAllowedHosts(), protocol: "auto" as const },
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
   },
+  disabledPaths: [
+    "/phone-number/request-password-reset",
+    "/phone-number/reset-password",
+  ],
   plugins: [
     twoFactor({
       issuer: "African Markets Platform",
     }),
     magicLink({
       expiresIn: 900,
-      sendMagicLink: async ({ email, url }, ctx) => {
+      sendMagicLink: async ({ email, url }, _ctx) => {
         if (email.endsWith("@phone.placeholder.local")) return;
-        const host = ctx?.request?.headers.get("host");
-        if (host) {
-          const parsed = new URL(url);
-          const proto =
-            ctx?.request?.headers.get("x-forwarded-proto") ??
-            parsed.protocol.replace(":", "");
-          parsed.protocol = `${proto}:`;
-          parsed.host = host;
-          url = parsed.toString();
-        }
+        const existing = await authPrisma.user.findFirst({
+          where: { email },
+          select: { role: true },
+        });
+        if (existing && existing.role !== "customer") return;
         await sendEmail({
           to: email,
           subject: "Sign in to African Markets",
@@ -108,7 +148,7 @@ export const auth = betterAuth({
                 body: `Your African Markets verification code is ${code}. It expires in 5 minutes.`,
               });
             },
-            phoneNumberValidator: (phone) => normalizePhone(phone) !== null,
+            phoneNumberValidator: (phone) => normalizePhone(phone) === phone,
             signUpOnVerification: {
               getTempEmail: (phone) => `${phone.replace(/\D/g, "")}@phone.placeholder.local`,
             },
@@ -125,28 +165,14 @@ export const auth = betterAuth({
       "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 100 : 5 },
-      "/phone-number/send-otp": { window: 60, max: relaxedAuth ? 100 : 3 },
+      "/phone-number/send-otp": { window: 3600, max: relaxedAuth ? 100 : 10 },
       "/sign-in/phone-number": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
   },
   databaseHooks: {
     user: {
-      create: {
-        before: async (user) => {
-          if (user.phoneNumber) {
-            const normalized = normalizePhone(user.phoneNumber as string);
-            if (normalized) return { data: { ...user, phoneNumber: normalized } };
-          }
-        },
-      },
-      update: {
-        before: async (user) => {
-          if (user.phoneNumber) {
-            const normalized = normalizePhone(user.phoneNumber as string);
-            if (normalized) return { data: { ...user, phoneNumber: normalized } };
-          }
-        },
-      },
+      create: { before: async (user) => normalizePhoneHook(user) },
+      update: { before: async (user) => normalizePhoneHook(user) },
     },
     session: {
       create: {

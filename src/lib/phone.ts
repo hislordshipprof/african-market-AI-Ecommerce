@@ -3,6 +3,7 @@
 const DIGITS_RE = /\D/g;
 
 const PREMIUM_NPAS = new Set(["900"]);
+const UNASSIGNED_NPAS = new Set(["999"]);
 const PREMIUM_NXXS = new Set(["976"]);
 const N11_CODES = new Set(["211", "311", "411", "511", "611", "711", "811", "911"]);
 
@@ -40,6 +41,7 @@ export function normalizePhone(raw: string): string | null {
   if (nxx[0] === "0" || nxx[0] === "1") return null;
 
   if (PREMIUM_NPAS.has(npa)) return null;
+  if (UNASSIGNED_NPAS.has(npa)) return null;
   if (PREMIUM_NXXS.has(nxx)) return null;
   if (N11_CODES.has(npa)) return null;
   if (CANADIAN_NPAS.has(npa)) return null;

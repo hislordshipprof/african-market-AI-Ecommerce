@@ -79,6 +79,10 @@ describe("normalizePhone", () => {
     expect(normalizePhone("8765551234")).toBeNull(); // Jamaica
     expect(normalizePhone("8685551234")).toBeNull(); // Trinidad
   });
+
+  it("rejects unassigned area code 999", () => {
+    expect(normalizePhone("9995551234")).toBeNull();
+  });
 });
 
 describe("isValidUsPhone", () => {
