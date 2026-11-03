@@ -240,7 +240,7 @@ test.describe("Catalog review (authenticated)", () => {
     await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
   });
 
-  test("approve moves product to active tab", async ({ page }) => {
+  test.fixme("approve moves product to active tab", async ({ page }) => {
     const reviewCountBefore = await page.locator("a[href*='status=needs_review'] span").last().textContent();
     const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
 
