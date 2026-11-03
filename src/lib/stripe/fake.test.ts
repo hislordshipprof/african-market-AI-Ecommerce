@@ -91,6 +91,7 @@ describe("Fake Stripe state machine (K6)", () => {
   });
 
   it("cancel with different key on cancelled PI returns idempotent result", async () => {
+    setAuthorizedAmount("pi_8b", 1000);
     await fakeStripeProvider.cancelPaymentIntent("pi_8b", "key_c");
     const r2 = await fakeStripeProvider.cancelPaymentIntent("pi_8b", "key_d");
     expect(r2.status).toBe("canceled");
@@ -106,6 +107,21 @@ describe("Fake Stripe state machine (K6)", () => {
   it("capture of an unregistered PaymentIntent is rejected", async () => {
     await expect(
       fakeStripeProvider.capturePaymentIntent("pi_unregistered", 500, "key_e"),
+    ).rejects.toThrow(/No such payment_intent/);
+  });
+
+  it("cancel of an unregistered PaymentIntent is rejected", async () => {
+    await expect(
+      fakeStripeProvider.cancelPaymentIntent("pi_review_unknown", "key_unknown"),
+    ).rejects.toThrow(/No such payment_intent/);
+    await expect(
+      fakeStripeProvider.retrievePaymentIntent("pi_review_unknown"),
+    ).rejects.toThrow(/No such payment_intent/);
+  });
+
+  it("retrieve of an unregistered PaymentIntent is rejected", async () => {
+    await expect(
+      fakeStripeProvider.retrievePaymentIntent("pi_review_unknown2"),
     ).rejects.toThrow(/No such payment_intent/);
   });
 

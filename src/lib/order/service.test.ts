@@ -175,7 +175,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const subtotalCents = 5500;
     const bufferCents = 550;
     const totalAuthorizedCents = subtotalCents + bufferCents + tipCents + deliveryFeeCents;
-    return storeScopedTransaction(storeId, async (tx) => {
+    const order = await storeScopedTransaction(storeId, async (tx) => {
       const order = await tx.order.create({
         data: {
           storeId,
@@ -221,6 +221,10 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       });
       return order;
     });
+    if (order.paymentIntentId) {
+      setAuthorizedAmount(order.paymentIntentId, order.totalAuthorizedCents);
+    }
+    return order;
   }
 
   beforeEach(() => {
@@ -658,6 +662,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       });
       return o;
     });
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
 
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({

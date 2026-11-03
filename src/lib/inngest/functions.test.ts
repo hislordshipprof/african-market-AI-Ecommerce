@@ -4,7 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import * as dbModule from "../db";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, reset as resetFakeStripe } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, setAuthorizedAmount } from "../stripe/fake";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -120,6 +120,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       await tx.orderLine.create({
         data: { storeId, orderId: order.id, listingVariantId: variantId, qtyOrdered: 1, unitPriceCents: 1000 },
       });
+      setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
       return order;
     });
   }

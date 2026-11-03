@@ -201,6 +201,12 @@ const fakeStripeProvider: StripeProvider = {
         status: "canceled",
       } satisfies CancelResult;
     }
+    if (!authorizedAmounts.has(paymentIntentId)) {
+      throw new FakeStripeError(
+        "resource_missing",
+        `No such payment_intent: '${paymentIntentId}'`,
+      );
+    }
     cancelledPayments.add(paymentIntentId);
     if (idempotencyKey) cancelKeys.set(paymentIntentId, idempotencyKey);
     return {
@@ -284,10 +290,16 @@ const fakeStripeProvider: StripeProvider = {
       } satisfies RetrieveResult;
     }
     const authorized = authorizedAmounts.get(paymentIntentId);
+    if (authorized === undefined) {
+      throw new FakeStripeError(
+        "resource_missing",
+        `No such payment_intent: '${paymentIntentId}'`,
+      );
+    }
     return {
       paymentIntentId,
       status: "requires_capture",
-      amountCapturable: authorized ?? 0,
+      amountCapturable: authorized,
       amountReceived: 0,
     } satisfies RetrieveResult;
   },

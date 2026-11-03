@@ -173,6 +173,18 @@ describe.skipIf(!hasKey)(
       expect(fee.amount_refunded).toBe(100);
     });
 
+    it("cancel of an unknown PaymentIntent is resource_missing", async () => {
+      await expect(
+        stripeProvider.cancelPaymentIntent("pi_does_not_exist_review", "cancel-missing"),
+      ).rejects.toMatchObject({ code: "resource_missing" });
+    });
+
+    it("retrieve of an unknown PaymentIntent is resource_missing", async () => {
+      await expect(
+        stripeProvider.retrievePaymentIntent("pi_does_not_exist_review"),
+      ).rejects.toMatchObject({ code: "resource_missing" });
+    });
+
     it("capture above authorization throws amount_too_large", async () => {
       const piId = await createAuthorizedPI(500);
       await expect(
