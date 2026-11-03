@@ -100,7 +100,7 @@ export const auth = betterAuth({
     storage: "database",
     modelName: "rateLimit",
     window: 60,
-    max: 10,
+    max: relaxedAuth ? 1000 : 10,
     customRules: {
       "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
