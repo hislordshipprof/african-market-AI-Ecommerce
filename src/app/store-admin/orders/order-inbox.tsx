@@ -190,7 +190,11 @@ export function OrderInbox({
     startTransition(async () => {
       const result = await markReadyAction(orderId);
       if (result.ok) {
-        toast.success("Order marked ready");
+        if (result.voided) {
+          toast.success("Order cancelled — amount below capture minimum");
+        } else {
+          toast.success("Order marked ready");
+        }
         pollOrders();
       } else {
         toast.error(result.error);

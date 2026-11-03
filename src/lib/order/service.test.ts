@@ -348,6 +348,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     if (result.ok) {
       // 2x1000 + 1x2000 + 3x500 = 5500 lines + 200 tip + 300 delivery = 6000
       expect(result.capturedAmountCents).toBe(6000);
+      expect(result.voided).toBeUndefined();
     }
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
@@ -599,7 +600,10 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     const result = await markReady(storeId, order.id);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.capturedAmountCents).toBe(0);
+    if (result.ok) {
+      expect(result.capturedAmountCents).toBe(0);
+      expect(result.voided).toBe(true);
+    }
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
@@ -661,7 +665,10 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     const result = await markReady(storeId, order.id);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.capturedAmountCents).toBe(0);
+    if (result.ok) {
+      expect(result.capturedAmountCents).toBe(0);
+      expect(result.voided).toBe(true);
+    }
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
@@ -1271,7 +1278,12 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     capturedPayments.set(order.paymentIntentId!, 100);
 
     const result = await markReady(storeId, order.id);
-    // Void path should handle ProviderStateError by refunding + cancelling
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.voided).toBe(true);
+      expect(result.capturedAmountCents).toBe(0);
+    }
+
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
 

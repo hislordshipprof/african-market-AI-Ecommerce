@@ -129,7 +129,7 @@ export async function markLinePicked(
 export async function markReady(
   storeId: string,
   orderId: string,
-): Promise<{ ok: true; capturedAmountCents: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; capturedAmountCents: number; voided?: boolean } | { ok: false; error: string }> {
   // Phase 1: claim with CAPTURING inside transaction (blocks concurrent changes)
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
@@ -253,7 +253,7 @@ export async function markReady(
             },
           });
         });
-        return { ok: true, capturedAmountCents: 0 };
+        return { ok: true, capturedAmountCents: 0, voided: true };
       }
       throw err;
     }
@@ -285,7 +285,7 @@ export async function markReady(
         },
       });
     });
-    return { ok: true, capturedAmountCents: 0 };
+    return { ok: true, capturedAmountCents: 0, voided: true };
   }
 
   // Phase 2: Stripe capture outside transaction (idempotency key makes retry safe)
