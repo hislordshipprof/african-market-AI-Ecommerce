@@ -1,11 +1,16 @@
-import { getFlowContext } from "@/lib/customer-flow/server";
+import { CustomerSignIn } from "@/components/storefront/customer-sign-in";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
-import { AccountSignIn } from "@/components/storefront/flow/account-flow";
-export default async function SignInPage() {
-  const { store, settings, catalog, enabled } = await getFlowContext();
+import { getStore } from "@/lib/get-store";
+
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const [store, params] = await Promise.all([getStore(), searchParams]);
   return (
     <StorefrontShell store={store}>
-      <AccountSignIn settings={settings} catalog={catalog} enabled={enabled} />
+      <CustomerSignIn storeName={store.name} linkError={params.error ?? null} />
     </StorefrontShell>
   );
 }

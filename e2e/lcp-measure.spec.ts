@@ -27,7 +27,7 @@ async function measureLCP(
   await page.waitForTimeout(3000);
 
   const lcpResult = await page.evaluate(() => {
-    return new Promise<{ startTime: number; element: string; url: string; size: number }>(
+    return new Promise<{ startTime: number; element: string; url: string; size: number; transfer: number }>(
       (resolve) => {
         new PerformanceObserver((list) => {
           const entries = list.getEntries();
@@ -36,16 +36,20 @@ async function measureLCP(
             url?: string;
             size?: number;
           };
+          const resource = performance.getEntriesByType("resource").find((entry) => entry.name === last.url) as
+            | (PerformanceResourceTiming & { transferSize?: number })
+            | undefined;
           resolve({
             startTime: last.startTime,
             element: last.element?.tagName ?? "unknown",
             url: last.url ?? "",
             size: last.size ?? 0,
+            transfer: resource?.transferSize ?? -1,
           });
         }).observe({ type: "largest-contentful-paint", buffered: true });
         setTimeout(
           () =>
-            resolve({ startTime: -1, element: "timeout", url: "", size: 0 }),
+            resolve({ startTime: -1, element: "timeout", url: "", size: 0, transfer: -1 }),
           5000,
         );
       },
@@ -53,7 +57,7 @@ async function measureLCP(
   });
   const lcp = lcpResult.startTime;
   console.log(
-    `  LCP element: <${lcpResult.element}> size=${lcpResult.size} url=${lcpResult.url.slice(0, 120)}`,
+    `  LCP element: <${lcpResult.element}> size=${lcpResult.size} transfer=${lcpResult.transfer} url=${lcpResult.url.slice(0, 160)}`,
   );
 
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
@@ -70,7 +74,11 @@ async function measureLCP(
 
 test.describe("LCP measurement (real images, throttled 4G)", () => {
   test.describe.configure({ retries: 1 });
-  for (const [name, path] of [["home", "/"], ["product", "/listings/mn_egusi"]]) {
+  for (const [name, path] of [
+    ["home", "/"],
+    ["product", "/listings/mn_egusi"],
+    ["sign-in", "/account/sign-in"],
+  ]) {
     test(`${name} page LCP under 2.5s`, async ({ page }, testInfo) => {
       const lcp = await measureLCP(page, `${BASE}${path}`);
       const result = { page: name, lcpMs: lcp, network: "1.6Mbps down / 750Kbps up / 150ms RTT", cpuSlowdown: CPU_SLOWDOWN, browserCache: "disabled", imageStubs: false };

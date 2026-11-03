@@ -80,7 +80,8 @@ model User {
   auditLogs   AuditLog[]
   memberships StoreMembership[]
   invitesSent StoreInvite[]
-  stockEvents    StockEvent[]
+stockEvents    StockEvent[]
+  customers      Customer[]
   listingImports ListingImport[]
 
   @@map("users")
@@ -451,19 +452,21 @@ model Customer {
   storeId          String   @map("store_id")
   userId           String?  @map("user_id")
   name             String
-  email            String
-  phone            String
+  email            String?
+  phone            String?
   marketingConsent Boolean  @default(false) @map("marketing_consent")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  store  Store   @relation(fields: [storeId], references: [id])
+  store  Store    @relation(fields: [storeId], references: [id])
+  user   User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
   orders Order[]
   carts  Cart[]
 
   @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, email])
+  @@index([userId])
   @@map("customers")
 }
 

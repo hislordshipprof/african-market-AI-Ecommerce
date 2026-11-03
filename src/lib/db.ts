@@ -236,6 +236,16 @@ export { Prisma };
 
 export { prisma as authPrisma };
 
+export async function findRecentMagicLinkVerifications(): Promise<
+  Array<{ identifier: string; value: string }>
+> {
+  return prisma.$queryRaw<Array<{ identifier: string; value: string }>>`
+    SELECT identifier, value FROM verifications
+    WHERE identifier LIKE 'magic-link:%'
+    ORDER BY created_at DESC
+    LIMIT 5`;
+}
+
 /** Minimal slice of a Prisma client needed to run a query under a statement timeout. */
 export interface TransactionalClient {
   $transaction<T>(
