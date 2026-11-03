@@ -58,7 +58,11 @@ The owner wants as few bugs as possible, and no agent reviewing its own work in 
 - After every build and every fix round, `scripts/build-ticket.sh` runs `scripts/review-ticket.sh <n>`. That is a fresh `claude -p` session at high effort that sees only the diff, the issue and the brief, and writes `.builder/review-<n>.md` (first line `VERDICT: PASS` or `VERDICT: BLOCKING`).
 - RISK tickets also get the Codex review (gpt-6-astra, medium) in the same step. RISK means money, auth or external providers, detected from the keys in `ticket-env.txt`, or set with `RISK=1`. RISK tickets always build at full tier.
 - Blocking findings go back to the builder's session as a fix round. The builder reproduces each finding first, then fixes it test-first. The fix is re-reviewed by a new fresh session. After 2 fix rounds the coordinator decides.
-- Planner briefs include 'Integration contracts' (how each provider really behaves, with doc links) and an 'Edge cases' table. The builder turns each row into a test.
+- Planner briefs include 'Integration contracts' (how each provider really behaves, with doc links), an 'Edge cases' table, a 'Required tests' list (file, name, level, regression caught) and a 'Review checklist'. The builder turns each row into a test.
+- **Brief review (owner decision 2026-11-03):** after the brief is posted, `plan-ticket.sh` runs the review engine (Codex) against the brief before any code exists, acting as the PR reviewer. Its 'Brief review' comment adds the failure modes reviewers used to find after the build as required tests. The builder covers both comments.
+- **Round cap (owner decision 2026-11-03):** from review round 3, only real blockers block (security, isolation, money or data loss, an acceptance criterion observed failing, broken build or CI). Everything else goes to the follow-up issue and the PR merges. The coordinator does not escalate non-blocking findings to blocking in its decisions.
+- **Fix rounds** run only the specs affected by the findings, then `scripts/ci-local.sh` once at the end.
+- **Second review** (CURSOR_REVIEW_MODEL next to Codex) runs only on money and auth tickets: `RISK` is set automatically from STRIPE or BETTER_AUTH keys, or by hand with `RISK=1`.
 - Test doubles must enforce the provider's real rules, and each external path needs a real sandbox test.
 - The coordinator still reads the risky code paths itself before merging.
 
