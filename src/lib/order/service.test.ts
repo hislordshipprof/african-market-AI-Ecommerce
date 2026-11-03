@@ -223,6 +223,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   }
 
   beforeEach(() => {
+    setStripeProvider(fakeStripeProvider);
     resetFakeStripe();
   });
 
@@ -487,7 +488,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("markReady: Stripe failure leaves order in PICKING (A2 regression)", async () => {
+  it("markReady: Stripe failure leaves order in CAPTURING (retryable)", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
     await acceptOrder(storeId, order.id, 15);
@@ -509,11 +510,10 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     await expect(markReady(storeId, order.id)).rejects.toThrow("Stripe API timeout");
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("PICKING");
-    expect(updated!.capturedAmountCents).toBeNull();
+    expect(updated!.status).toBe("CAPTURING");
   });
 
-  it("autoCancelOrder: Stripe failure leaves order AUTHORIZED (A2 regression)", async () => {
+  it("autoCancelOrder: Stripe failure leaves order in CANCELLING (retryable)", async () => {
     const order = await createTestOrder();
 
     const failProvider: StripeProvider = {
@@ -527,9 +527,41 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     await expect(autoCancelOrder(storeId, order.id)).rejects.toThrow("Stripe API timeout");
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("AUTHORIZED");
+    expect(updated!.status).toBe("CANCELLING");
     expect(updated!.cancelledAt).toBeNull();
     expect(cancelledPayments.size).toBe(0);
+  });
+
+  it("acceptOrder rejects CANCELLING order (A1 race fix)", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+    });
+    const result = await acceptOrder(storeId, order.id, 15);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("CANCELLING");
+  });
+
+  it("autoCancelOrder retries from CANCELLING state (idempotent retry)", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+    });
+    const result = await autoCancelOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+  });
+
+  it("completePickup accepts READY status (A5 delivery fix)", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "READY", readyAt: new Date() } });
+    });
+    const result = await completePickup(storeId, order.id);
+    expect(result.ok).toBe(true);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("COMPLETED");
   });
 
   it("markReady idempotent: second call after Stripe already captured succeeds", async () => {

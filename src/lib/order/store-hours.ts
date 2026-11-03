@@ -95,7 +95,12 @@ export function isStoreOpen(hours: unknown, timezone: string, now?: Date): boole
 
   const h = hours as Record<string, unknown>;
   const d = now ?? new Date();
-  const local = getStoreLocalTime(timezone, d);
+  let local: { dayOfWeek: number; minuteOfDay: number };
+  try {
+    local = getStoreLocalTime(timezone, d);
+  } catch {
+    return false;
+  }
 
   const todaySchedule = findDaySchedule(h, local.dayOfWeek);
   if (todaySchedule) {

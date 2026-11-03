@@ -9,10 +9,12 @@ import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 export const acceptanceAlert = inngest.createFunction(
   {
     id: "order/acceptance-alert",
+    idempotency: "event.data.orderId",
     triggers: [{ event: "order/authorized" }],
   },
   async ({ event, step }) => {
     const { orderId, storeId } = event.data as { orderId: string; storeId: string };
+    if (!orderId || !storeId) return;
 
     await step.sleep("wait-15-min", "15m");
 
@@ -55,10 +57,12 @@ export const acceptanceAlert = inngest.createFunction(
 export const autoCancel = inngest.createFunction(
   {
     id: "order/auto-cancel",
+    idempotency: "event.data.orderId",
     triggers: [{ event: "order/authorized" }],
   },
   async ({ event, step }) => {
     const { orderId, storeId } = event.data as { orderId: string; storeId: string };
+    if (!orderId || !storeId) return;
 
     await step.sleep("wait-30-min", "30m");
 
@@ -67,14 +71,7 @@ export const autoCancel = inngest.createFunction(
         return tx.order.findUnique({ where: { id: orderId } });
       });
 
-      if (!order || order.status !== "AUTHORIZED") return;
-
-      const store = await platform.store.findUnique({
-        where: { id: storeId },
-        select: { hours: true, timezone: true },
-      });
-
-      if (!isStoreOpen(store?.hours, store?.timezone ?? "America/New_York")) return;
+      if (!order || (order.status !== "AUTHORIZED" && order.status !== "CANCELLING")) return;
 
       await autoCancelOrder(storeId, orderId);
     });

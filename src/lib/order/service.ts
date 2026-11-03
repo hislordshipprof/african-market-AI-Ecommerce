@@ -8,6 +8,8 @@ export type OrderStatus =
   | "AUTHORIZED"
   | "ACCEPTED"
   | "PICKING"
+  | "CANCELLING"
+  | "CAPTURING"
   | "READY"
   | "AWAITING_PICKUP"
   | "COMPLETED"
@@ -121,11 +123,20 @@ export async function markReady(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true; capturedAmountCents: number } | { ok: false; error: string }> {
-  // Phase 1: validate inside transaction (no Stripe call — avoids tx timeout on slow network)
+  // Phase 1: claim with CAPTURING inside transaction (blocks concurrent changes)
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false as const, error: "Order not found" };
+    if (order.status === "CAPTURING") {
+      return {
+        ok: true as const,
+        capturedAmountCents: order.capturedAmountCents ?? 0,
+        paymentIntentId: order.paymentIntentId!,
+        newStatus: (order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY") as OrderStatus,
+        alreadyClaiming: true,
+      };
+    }
     if (order.status !== "PICKING") {
       return { ok: false as const, error: `Cannot mark ready for order in status ${order.status}` };
     }
@@ -160,11 +171,17 @@ export async function markReady(
     const newStatus: OrderStatus =
       order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
 
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "CAPTURING", capturedAmountCents },
+    });
+
     return {
       ok: true as const,
       capturedAmountCents,
       paymentIntentId: order.paymentIntentId,
       newStatus,
+      alreadyClaiming: false,
     };
   });
 
@@ -178,11 +195,11 @@ export async function markReady(
     `capture:${orderId}`,
   );
 
-  // Phase 3: finalize in transaction (re-check status to guard against concurrent changes)
+  // Phase 3: finalize in transaction (verify still CAPTURING)
   const finalize = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
-    if (!order || order.status !== "PICKING") {
+    if (!order || order.status !== "CAPTURING") {
       return { ok: false as const, error: "Order status changed during capture" };
     }
     await tx.order.update({
@@ -209,7 +226,7 @@ export async function completePickup(
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false, error: "Order not found" };
-    if (order.status !== "AWAITING_PICKUP") {
+    if (order.status !== "AWAITING_PICKUP" && order.status !== "READY") {
       return { ok: false, error: `Cannot complete pickup for order in status ${order.status}` };
     }
 
@@ -229,15 +246,19 @@ export async function autoCancelOrder(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  // Phase 1: validate inside transaction (no Stripe call — avoids tx timeout on slow network)
+  // Phase 1: claim with CANCELLING inside transaction (blocks acceptOrder)
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false as const, error: "Order not found" };
+    if (order.status === "CANCELLING") {
+      return { ok: true as const, paymentIntentId: order.paymentIntentId, alreadyClaiming: true };
+    }
     if (order.status !== "AUTHORIZED") {
       return { ok: false as const, error: `Order is in status ${order.status}, not AUTHORIZED` };
     }
-    return { ok: true as const, paymentIntentId: order.paymentIntentId };
+    await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLING" } });
+    return { ok: true as const, paymentIntentId: order.paymentIntentId, alreadyClaiming: false };
   });
 
   if (!validation.ok) return validation;
@@ -251,11 +272,11 @@ export async function autoCancelOrder(
     );
   }
 
-  // Phase 3: finalize in transaction (re-check status to guard against concurrent changes)
+  // Phase 3: finalize in transaction (verify still CANCELLING)
   const finalize = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
-    if (!order || order.status !== "AUTHORIZED") {
+    if (!order || order.status !== "CANCELLING") {
       return { ok: false as const, error: "Order status changed during cancellation" };
     }
 

@@ -40,7 +40,11 @@ export async function markLinePickedAction(lineId: string) {
 
 export async function markReadyAction(orderId: string) {
   const session = await requireStoreMember();
-  return markReady(session.store.id, orderId);
+  try {
+    return await markReady(session.store.id, orderId);
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : "Stripe capture failed" };
+  }
 }
 
 export async function completePickupAction(orderId: string) {

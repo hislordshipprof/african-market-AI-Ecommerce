@@ -126,4 +126,10 @@ describe("isStoreOpen", () => {
     const now = new Date("2026-11-03T00:00:00Z"); // Mon 19:00 ET
     expect(isStoreOpen(hours, NY, now)).toBe(false);
   });
+
+  it("returns false on invalid timezone instead of throwing (A4 fix)", () => {
+    const hours = { mon: { open: "09:00", close: "21:00" } };
+    const now = new Date("2026-11-02T17:00:00Z");
+    expect(isStoreOpen(hours, "Not/A_Real_Zone", now)).toBe(false);
+  });
 });

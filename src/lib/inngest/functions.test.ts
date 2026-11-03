@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
@@ -123,12 +123,14 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
   function withMockedTime(date: Date, fn: () => Promise<void>): Promise<void> {
     const OrigDate = globalThis.Date;
     const origNow = Date.now;
-    globalThis.Date = function MockDate(...args: unknown[]) {
+    const MockDate = function (this: Date, ...args: unknown[]) {
       if (args.length === 0) return new OrigDate(date);
       return new (OrigDate as unknown as new (...a: unknown[]) => Date)(...args);
     } as unknown as DateConstructor;
-    globalThis.Date.prototype = OrigDate.prototype;
-    globalThis.Date.now = () => date.getTime();
+    Object.setPrototypeOf(MockDate, OrigDate);
+    Object.defineProperty(MockDate, "prototype", { value: OrigDate.prototype });
+    MockDate.now = () => date.getTime();
+    globalThis.Date = MockDate;
     return fn().finally(() => {
       globalThis.Date = OrigDate;
       Date.now = origNow;
@@ -229,7 +231,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       expect(updated!.status).toBe("CANCELLED");
     });
 
-    it("skips cancel when store is closed (Codex-4 regression)", async () => {
+    it("cancels even when store is closed (spec AC#5: unconditional 30-min cancel)", async () => {
       const { autoCancel } = await import("./functions");
       const handler = getHandler(autoCancel);
       const order = await createTestOrder();
@@ -240,7 +242,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       );
 
       const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-      expect(updated!.status).toBe("AUTHORIZED");
+      expect(updated!.status).toBe("CANCELLED");
     });
 
     it("skips cancel when order is already accepted", async () => {
@@ -258,6 +260,59 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
 
       const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
       expect(updated!.status).toBe("ACCEPTED");
+    });
+
+    it("skips cancel when order is in CANCELLING (idempotent retry)", async () => {
+      const { autoCancel } = await import("./functions");
+      const handler = getHandler(autoCancel);
+      const order = await createTestOrder();
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+      });
+      const step = makeFakeStep();
+
+      await withMockedTime(new Date("2026-11-03T14:00:00-05:00"), () =>
+        handler({ event: { data: { orderId: order.id, storeId } }, step }),
+      );
+
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLED");
+    });
+
+    it("returns early for invalid event data (A6 guard)", async () => {
+      const { autoCancel } = await import("./functions");
+      const handler = getHandler(autoCancel);
+      const step = makeFakeStep();
+
+      await handler({ event: { data: { orderId: "", storeId: "" } }, step });
+      expect(step.sleeps).toHaveLength(0);
+    });
+  });
+
+  describe("sweepOrphanedAuthorized", () => {
+    it("re-sends events for orphaned AUTHORIZED orders (S1)", async () => {
+      const { sweepOrphanedAuthorized } = await import("./functions");
+      const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+
+      const order = await createTestOrder();
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { createdAt: new Date(Date.now() - 120_000) },
+        });
+      });
+
+      const sendMod = await import("./send");
+      const spy = vi.spyOn(sendMod, "sendOrderAuthorized").mockResolvedValue();
+      const step = makeFakeStep();
+
+      try {
+        await handler({ step });
+        expect(step.runs).toContain("find-orphaned");
+        expect(spy).toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });
