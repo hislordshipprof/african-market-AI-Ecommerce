@@ -19,8 +19,11 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
   let storeId: string;
   let stripeAccountId: string;
   let variantId: string;
+  let listingId: string;
   let canRun = false;
+  let borrowedStore = false;
   const piToCleanup: string[] = [];
+  const cartsCreated: string[] = [];
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -37,18 +40,24 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
       }
     }
     if (!acct) return;
-    const store = await rawPrisma.store.upsert({
+
+    let store = await rawPrisma.store.findFirst({
       where: { stripeAccountId: acct.id },
-      update: { stripeOnboardingStatus: "complete" },
-      create: {
-        slug: "inngest-event-test",
-        name: "Inngest Event Test",
-        themePreset: "palm-and-shea",
-        stripeAccountId: acct.id,
-        stripeOnboardingStatus: "complete",
-        pickupEnabled: true,
-      },
     });
+    if (store) {
+      borrowedStore = true;
+    } else {
+      store = await rawPrisma.store.create({
+        data: {
+          slug: "inngest-event-test",
+          name: "Inngest Event Test",
+          themePreset: "palm-and-shea",
+          stripeAccountId: acct.id,
+          stripeOnboardingStatus: "complete",
+          pickupEnabled: true,
+        },
+      });
+    }
     storeId = store.id;
     stripeAccountId = acct.id;
 
@@ -63,6 +72,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
         perishable: false,
       },
     });
+    listingId = listing.id;
     const v = await scoped.listingVariant.create({
       data: { listingId: listing.id, label: "500g", price: 1500, weightG: 500 },
     });
@@ -83,15 +93,27 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
       await rawPrisma.$transaction([
         rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
         rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-        rawPrisma.orderLine.deleteMany({ where: { storeId } }),
-        rawPrisma.order.deleteMany({ where: { storeId } }),
-        rawPrisma.customer.deleteMany({ where: { storeId } }),
-        rawPrisma.cartLine.deleteMany({ where: { storeId } }),
-        rawPrisma.cart.deleteMany({ where: { storeId } }),
-        rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId } } }),
-        rawPrisma.listing.deleteMany({ where: { storeId } }),
+        rawPrisma.orderLine.deleteMany({
+          where: { order: { paymentIntentId: { in: piToCleanup } } },
+        }),
+        rawPrisma.order.deleteMany({
+          where: { paymentIntentId: { in: piToCleanup } },
+        }),
+        rawPrisma.customer.deleteMany({
+          where: { storeId, email: { in: ["evt@test.com", "replay@test.com"] } },
+        }),
+        rawPrisma.cartLine.deleteMany({
+          where: { cartId: { in: cartsCreated } },
+        }),
+        rawPrisma.cart.deleteMany({
+          where: { id: { in: cartsCreated } },
+        }),
+        rawPrisma.listingVariant.deleteMany({ where: { listingId } }),
+        rawPrisma.listing.deleteMany({ where: { id: listingId } }),
       ]);
-      await rawPrisma.store.deleteMany({ where: { id: storeId } });
+      if (!borrowedStore) {
+        await rawPrisma.store.deleteMany({ where: { id: storeId } });
+      }
       await rawPrisma.$disconnect();
     }
   });
@@ -107,6 +129,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
 
     const scoped = storeScoped(storeId);
     const cart = await scoped.cart.create({ data: { storeId } });
+    cartsCreated.push(cart.id);
     await scoped.cartLine.create({
       data: { storeId, cartId: cart.id, variantId, qty: 2, swapRule: "exact_only" },
     });
@@ -141,6 +164,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
 
     const scoped = storeScoped(storeId);
     const cart = await scoped.cart.create({ data: { storeId } });
+    cartsCreated.push(cart.id);
     await scoped.cartLine.create({
       data: { storeId, cartId: cart.id, variantId, qty: 2, swapRule: "exact_only" },
     });
@@ -164,8 +188,8 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
     await placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, pi.id);
     vi.mocked(sendOrderAuthorized).mockClear();
 
-    // Create a new cart for the replay (original cart was emptied)
     const cart2 = await scoped.cart.create({ data: { storeId } });
+    cartsCreated.push(cart2.id);
     await scoped.cartLine.create({
       data: { storeId, cartId: cart2.id, variantId, qty: 2, swapRule: "exact_only" },
     });

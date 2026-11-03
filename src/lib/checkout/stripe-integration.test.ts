@@ -30,7 +30,9 @@ describe.skipIf(!hasKey || !hasDb)(
     let stripeAccountAId: string;
     let storeBId: string;
     let variantAId: string;
+    let listingAId: string;
     let cartAId: string;
+    const cartsCreated: string[] = [];
 
     beforeAll(async () => {
       const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -38,8 +40,6 @@ describe.skipIf(!hasKey || !hasDb)(
       await rawPrisma.$connect();
 
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-      // Destination charges need a connected account that can receive transfers. Other test
-      // runs leave un-onboarded accounts in the sandbox, so "newest account" is not usable.
       const ready: Stripe.Account[] = [];
       const others: Stripe.Account[] = [];
       for await (const acct of stripe.accounts.list({ limit: 100 })) {
@@ -54,18 +54,21 @@ describe.skipIf(!hasKey || !hasDb)(
       const accounts = { data: [ready[0], ...ready.slice(1), ...others] };
 
       const acctA = accounts.data[0];
-      const storeA = await rawPrisma.store.upsert({
-        where: { slug: "stripe-test-a" },
-        update: { stripeAccountId: acctA.id, stripeOnboardingStatus: "complete" },
-        create: {
-          slug: "stripe-test-a",
-          name: "Stripe Test Store A",
-          themePreset: "palm-and-shea",
-          stripeAccountId: acctA.id,
-          stripeOnboardingStatus: "complete",
-          pickupEnabled: true,
-        },
+      let storeA = await rawPrisma.store.findFirst({
+        where: { stripeAccountId: acctA.id },
       });
+      if (!storeA) {
+        storeA = await rawPrisma.store.create({
+          data: {
+            slug: "stripe-test-a",
+            name: "Stripe Test Store A",
+            themePreset: "palm-and-shea",
+            stripeAccountId: acctA.id,
+            stripeOnboardingStatus: "complete",
+            pickupEnabled: true,
+          },
+        });
+      }
       storeAId = storeA.id;
       stripeAccountAId = acctA.id;
 
@@ -99,6 +102,7 @@ describe.skipIf(!hasKey || !hasDb)(
           perishable: false,
         },
       });
+      listingAId = listingA.id;
       const vA = await scopedA.listingVariant.create({
         data: {
           listingId: listingA.id,
@@ -111,6 +115,7 @@ describe.skipIf(!hasKey || !hasDb)(
 
       const cart = await scopedA.cart.create({ data: { storeId: storeAId } });
       cartAId = cart.id;
+      cartsCreated.push(cart.id);
       await scopedA.cartLine.create({
         data: {
           storeId: storeAId,
@@ -124,27 +129,35 @@ describe.skipIf(!hasKey || !hasDb)(
 
     afterAll(async () => {
       if (!rawPrisma) return;
-      const storeIds = storeAId === storeBId ? [storeAId] : [storeAId, storeBId];
-      await rawPrisma.$transaction([
-        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
-        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-        rawPrisma.orderLine.deleteMany({ where: { storeId: { in: storeIds } } }),
-        rawPrisma.order.deleteMany({ where: { storeId: { in: storeIds } } }),
-        rawPrisma.customer.deleteMany({
-          where: { storeId: storeAId, email: { in: ["t@t.com", "e2e@test.com", "d@t.com", "x@t.com"] } },
-        }),
-        rawPrisma.cartLine.deleteMany({ where: { storeId: { in: storeIds } } }),
-        rawPrisma.cart.deleteMany({ where: { storeId: { in: storeIds } } }),
-        rawPrisma.listingVariant.deleteMany({
-          where: { listing: { storeId: storeAId, customName: "Stripe Test Product" } },
-        }),
-        rawPrisma.listing.deleteMany({
-          where: { storeId: storeAId, customName: "Stripe Test Product" },
-        }),
-      ]);
-      await rawPrisma.store.deleteMany({
-        where: { slug: { in: ["stripe-test-a", "stripe-test-b"] } },
-      });
+      try {
+        await rawPrisma.$transaction([
+          rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+          rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+          rawPrisma.orderLine.deleteMany({
+            where: { order: { paymentIntentId: { in: piToCleanup } } },
+          }),
+          rawPrisma.order.deleteMany({
+            where: { paymentIntentId: { in: piToCleanup } },
+          }),
+          rawPrisma.customer.deleteMany({
+            where: { storeId: storeAId, email: { in: ["t@t.com", "e2e@test.com", "d@t.com", "x@t.com"] } },
+          }),
+          rawPrisma.cartLine.deleteMany({
+            where: { cartId: { in: cartsCreated } },
+          }),
+          rawPrisma.cart.deleteMany({
+            where: { id: { in: cartsCreated } },
+          }),
+        ]);
+        if (listingAId) {
+          await rawPrisma.$transaction([
+            rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+            rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+            rawPrisma.listingVariant.deleteMany({ where: { listingId: listingAId } }),
+            rawPrisma.listing.deleteMany({ where: { id: listingAId } }),
+          ]);
+        }
+      } catch { /* best-effort cleanup — parallel tests may hold FK refs */ }
       await rawPrisma.$disconnect();
     });
 
@@ -187,6 +200,7 @@ describe.skipIf(!hasKey || !hasDb)(
         );
 
         const freshCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
+        cartsCreated.push(freshCart.id);
         await storeScoped(storeAId).cartLine.create({
           data: {
             storeId: storeAId,
@@ -248,6 +262,7 @@ describe.skipIf(!hasKey || !hasDb)(
         );
 
         const declineCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
+        cartsCreated.push(declineCart.id);
         await storeScoped(storeAId).cartLine.create({
           data: {
             storeId: storeAId,
@@ -299,6 +314,7 @@ describe.skipIf(!hasKey || !hasDb)(
         );
 
         const xCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
+        cartsCreated.push(xCart.id);
         await storeScoped(storeAId).cartLine.create({
           data: {
             storeId: storeAId,
@@ -319,6 +335,7 @@ describe.skipIf(!hasKey || !hasDb)(
         });
 
         const cartB = await storeScoped(storeBId).cart.create({ data: { storeId: storeBId } });
+        cartsCreated.push(cartB.id);
 
         await expect(
           placeOrder(
