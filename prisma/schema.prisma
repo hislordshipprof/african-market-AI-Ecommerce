@@ -67,8 +67,8 @@ model User {
   name             String
   email            String    @unique
   emailVerified    Boolean   @default(false) @map("email_verified")
-  phone            String?   @unique
-  phoneVerified    Boolean   @default(false) @map("phone_verified")
+  phoneNumber         String?   @unique @map("phone_number")
+  phoneNumberVerified Boolean   @default(false) @map("phone_number_verified")
   image            String?
   role             String    @default("customer")
   twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")

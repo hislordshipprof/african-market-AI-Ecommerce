@@ -91,7 +91,7 @@ describe("findOrCreateCustomer", () => {
       phone: "+12025551234",
     });
 
-    const userWithPhone = { ...fakeUser, phone: "+12025551234" };
+    const userWithPhone = { ...fakeUser, phoneNumber: "+12025551234" };
     await findOrCreateCustomer("store-1", userWithPhone);
 
     expect(mockCreate).toHaveBeenCalledWith({

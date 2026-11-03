@@ -35,8 +35,9 @@ export async function findOrCreateCustomer(
           name: user.name,
           email: user.email || null,
           phone:
-            (user as Record<string, unknown>).phone as string | undefined ??
-            null,
+            (user as Record<string, unknown>).phoneNumber as
+              | string
+              | undefined ?? null,
         },
       });
 
