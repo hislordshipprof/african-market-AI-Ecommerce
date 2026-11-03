@@ -393,6 +393,22 @@ export function getImportTokenData(
   return { csvText: data.csvText };
 }
 
+export function getAndMarkImportToken(
+  token: string,
+  storeId: string,
+): { csvText: string } | null {
+  const data = importTokens.get(token);
+  if (!data) return null;
+  if (data.storeId !== storeId) return null;
+  if (Date.now() - data.createdAt > TOKEN_TTL_MS) {
+    importTokens.delete(token);
+    return null;
+  }
+  if (data.used) return null;
+  data.used = true;
+  return { csvText: data.csvText };
+}
+
 export function markImportTokenUsed(token: string): void {
   const data = importTokens.get(token);
   if (data) data.used = true;
@@ -520,7 +536,7 @@ export async function commitImport(
   selection: CommitSelection,
   actor: Actor,
 ): Promise<CommitResult> {
-  const tokenData = getImportTokenData(importToken, storeId);
+  const tokenData = getAndMarkImportToken(importToken, storeId);
   if (!tokenData) {
     throw new Error("Import token is invalid, expired, or already used.");
   }
@@ -531,7 +547,6 @@ export async function commitImport(
   const selectedRows = new Set([
     ...selection.matchedRows,
     ...selection.newItemRows,
-    ...selection.duplicateRows,
   ]);
 
   if (selectedRows.size === 0 && selection.ambiguousResolutions.length === 0) {
@@ -547,10 +562,6 @@ export async function commitImport(
     select: { id: true, masterProductId: true },
   });
   const existingMasterIds = new Set(existingListings.map((l) => l.masterProductId!));
-
-  const ambiguousMap = new Map(
-    selection.ambiguousResolutions.map((a) => [a.row, a.masterProductId]),
-  );
 
   interface ListingToCreate {
     masterProductId: string | null;
@@ -624,8 +635,6 @@ export async function commitImport(
   if (toCreate.length === 0) {
     throw new Error("No valid rows to import after re-validation.");
   }
-
-  markImportTokenUsed(importToken);
 
   const listingIds = await storeScopedTransaction(storeId, async (tx) => {
     const ids: string[] = [];

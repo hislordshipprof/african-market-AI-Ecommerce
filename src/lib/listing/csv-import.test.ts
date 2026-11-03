@@ -590,6 +590,52 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(resultB.createdCount).toBe(1);
   });
 
+  it("A1: concurrent double-submit with same token both rejected after first", async () => {
+    const csv = "name,price\nRace Condition Item T63,8.00\n";
+    const preview = await generatePreview(storeAId, csv);
+
+    const results = await Promise.allSettled([
+      commitImport(
+        storeAId,
+        preview.importToken,
+        { matchedRows: [], newItemRows: [2], duplicateRows: [], ambiguousResolutions: [] },
+        actor,
+      ),
+      commitImport(
+        storeAId,
+        preview.importToken,
+        { matchedRows: [], newItemRows: [2], duplicateRows: [], ambiguousResolutions: [] },
+        actor,
+      ),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+  });
+
+  it("A3: crafted duplicateRows in selection are ignored", async () => {
+    const csv = "name,price\nDupe Bypass A T63,5.00\nDupe Bypass A T63,6.00\n";
+    const preview = await generatePreview(storeAId, csv);
+    expect(preview.duplicates).toHaveLength(1);
+    const dupeRow = preview.duplicates[0].row;
+
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], duplicateRows: [dupeRow], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+
+    const scopedA = storeScoped(storeAId);
+    const listings = await scopedA.listing.findMany({
+      where: { id: { in: result.listingIds } },
+    });
+    expect(listings).toHaveLength(1);
+  });
+
   it("E10: formula injection stored as plain text", async () => {
     const csv = `name,price\n"=HYPERLINK(""http://evil.com"")Attack",5.00\n`;
     const preview = await generatePreview(storeAId, csv);
