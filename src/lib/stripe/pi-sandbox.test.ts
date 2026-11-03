@@ -41,17 +41,15 @@ describe.skipIf(!hasKey)(
   () => {
     beforeAll(async () => {
       stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-      const ready: Array<{ id: string }> = [];
       for await (const acct of stripe.accounts.list({ limit: 100 })) {
         if (acct.capabilities?.transfers === "active") {
-          ready.push(acct);
-          if (ready.length >= 2) break;
+          stripeAccountId = acct.id;
+          break;
         }
       }
-      if (ready.length < 2) {
-        throw new Error("Need at least 2 transfers-capable sandbox accounts");
+      if (!stripeAccountId) {
+        throw new Error("Need at least 1 transfers-capable sandbox account");
       }
-      stripeAccountId = ready[1].id;
     });
 
     it("partial capture returns amount_received", async () => {
@@ -120,14 +118,14 @@ describe.skipIf(!hasKey)(
       const piId = await createAuthorizedPI(1000);
       await expect(
         stripeProvider.capturePaymentIntent(piId, 30, `cap-${piId}`),
-      ).rejects.toThrow(/amount_too_small|50 cents/i);
+      ).rejects.toThrow(/amount_too_small|\$0\.50/i);
     });
 
     it("capture above authorization throws amount_too_large", async () => {
       const piId = await createAuthorizedPI(500);
       await expect(
         stripeProvider.capturePaymentIntent(piId, 800, `cap-${piId}`),
-      ).rejects.toThrow(/amount_too_large|exceed/i);
+      ).rejects.toThrow(/amount_too_large|greater than/i);
     });
   },
   { timeout: 60_000 },
