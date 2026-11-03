@@ -20,6 +20,12 @@ describe("designed image fallback", () => {
       expect(html).not.toContain("Photo unavailable");
     }
   });
+  it("treats an empty source as a designed illustration, not a failed photo", () => {
+    const html = renderToStaticMarkup(createElement(ProductImage, { name: "Yam", src: "" }));
+    expect(html).toContain('data-testid="designed-image-fallback"');
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("Photo unavailable");
+  });
   it("renders the photo with its alt text and no fallback when the source loads", () => {
     const html = renderToStaticMarkup(createElement(ProductImage, {
       src: "https://r2.example.com/catalog/egusi.webp", name: "Egusi", category: "grains-and-flours",

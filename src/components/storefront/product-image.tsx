@@ -4,6 +4,17 @@ import { useState } from "react";
 import { ImageOff, Carrot, Wheat, Leaf, Fish, CupSoda, CookingPot, Package, Droplets, Cookie, Sparkles } from "lucide-react";
 import { isRetiredRemote } from "@/lib/storefront/editorial";
 
+const LOCAL_RETRY_PREFIXES = ["/api/catalog-image/", "/images/products/"];
+
+/** One optimizer retry, or null when no localPatterns entry would allow it. */
+export function productImageRetrySrc(src: string | undefined): string | null {
+  if (!src || src.startsWith("/")) {
+    if (!src || src.includes("?") || !LOCAL_RETRY_PREFIXES.some((prefix) => src.startsWith(prefix))) return null;
+    return src + "?retry=1";
+  }
+  return src + (src.includes("?") ? "&" : "?") + "retry=1";
+}
+
 const glyphs = {
   "tubers-and-roots": Carrot, "grains-and-flours": Wheat, vegetables: Leaf,
   "fish-and-meat": Fish, frozen: Fish, drinks: CupSoda,
@@ -23,10 +34,10 @@ function ProductPhoto({ src, name, category, sizes, priority }: {
 }) {
   const [attempt, setAttempt] = useState(0);
   const Glyph = glyphs[category as keyof typeof glyphs] ?? Package;
-  const retrySrc = src && attempt === 1 ? src + (src.includes("?") ? "&" : "?") + "retry=1" : src;
+  const retrySrc = attempt === 0 ? src : productImageRetrySrc(src);
   return <div className="sf-product-image" data-image-kind={src?.startsWith("/images/products/") ? "cutout" : "photo"}>
-    {src && attempt < 2 ? <Image
-      key={attempt} src={retrySrc!} alt={name} fill sizes={sizes} preload={priority}
+    {src && attempt < 2 && retrySrc ? <Image
+      key={attempt} src={retrySrc} alt={name} fill sizes={sizes} preload={priority}
       onError={() => setAttempt(current => Math.min(current + 1, 2))}
     /> : src ? <div className="sf-product-fallback" role="img" aria-label={"Photo temporarily unavailable for " + name}>
       <ImageOff size={28} aria-hidden /><small>Photo unavailable</small>
