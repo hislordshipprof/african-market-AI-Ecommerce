@@ -212,6 +212,16 @@ export const stripeProvider: StripeProvider = {
     } satisfies RetrieveResult;
   },
 
+  async retrieveRefund(refundId) {
+    const stripe = getStripeClient();
+    const refund = await stripe.refunds.retrieve(refundId);
+    return {
+      refundId: refund.id,
+      amountRefunded: refund.amount,
+      status: refund.status ?? "succeeded",
+    } satisfies RefundResult;
+  },
+
   async refundPayment(paymentIntentId, amountCents, idempotencyKey) {
     const stripe = getStripeClient();
     try {

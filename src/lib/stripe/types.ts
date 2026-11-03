@@ -85,6 +85,10 @@ export interface StripeProvider {
     amountCents: number,
     idempotencyKey?: string,
   ): Promise<RefundResult>;
+
+  retrieveRefund(
+    refundId: string,
+  ): Promise<RefundResult>;
 }
 
 export class ProviderStateError extends Error {

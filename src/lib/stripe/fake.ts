@@ -31,6 +31,7 @@ const cancelledPayments = new Set<string>();
 const cancelKeys = new Map<string, string>();
 const authorizedAmounts = new Map<string, number>();
 const refundedPayments = new Map<string, number>();
+const refunds = new Map<string, { paymentIntentId: string; amountRefunded: number; status: string }>();
 const nextRefundStatus = new Map<string, string>();
 
 function reset() {
@@ -41,6 +42,7 @@ function reset() {
   cancelKeys.clear();
   authorizedAmounts.clear();
   refundedPayments.clear();
+  refunds.clear();
   nextRefundStatus.clear();
 }
 
@@ -154,10 +156,12 @@ const fakeStripeProvider: StripeProvider = {
       );
     }
     if (refundedPayments.has(paymentIntentId)) {
+      const refundId = `re_fake_${paymentIntentId}`;
+      const existing = refunds.get(refundId);
       return {
-        refundId: `re_fake_${paymentIntentId}`,
+        refundId,
         amountRefunded: refundedPayments.get(paymentIntentId)!,
-        status: "succeeded",
+        status: existing?.status === "pending" ? "pending" : "succeeded",
       } satisfies RefundResult;
     }
     const captured = capturedPayments.get(paymentIntentId)!;
@@ -167,11 +171,26 @@ const fakeStripeProvider: StripeProvider = {
       );
     }
     const status = nextRefundStatus.get(paymentIntentId) ?? "succeeded";
+    const refundId = `re_fake_${paymentIntentId}`;
     refundedPayments.set(paymentIntentId, amountCents);
+    refunds.set(refundId, { paymentIntentId, amountRefunded: amountCents, status });
     return {
-      refundId: `re_fake_${paymentIntentId}`,
+      refundId,
       amountRefunded: amountCents,
       status,
+    } satisfies RefundResult;
+  },
+
+  async retrieveRefund(refundId) {
+    const entry = refunds.get(refundId);
+    if (!entry) {
+      throw new Error(`Refund ${refundId} not found`);
+    }
+    // Model pending → succeeded: a later retrieve always sees succeeded
+    return {
+      refundId,
+      amountRefunded: entry.amountRefunded,
+      status: entry.status === "pending" ? "succeeded" : entry.status,
     } satisfies RefundResult;
   },
 

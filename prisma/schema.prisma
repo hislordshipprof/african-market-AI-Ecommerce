@@ -482,6 +482,7 @@ model Order {
   totalAuthorizedCents Int       @map("total_authorized_cents")
   paymentIntentId      String?   @unique @map("payment_intent_id")
   capturedAmountCents  Int?      @map("captured_amount_cents")
+  refundId             String?   @map("refund_id")
   platformFeeCents     Int?      @map("platform_fee_cents")
   deliveryFeeCents     Int       @default(0) @map("delivery_fee_cents")
   totalCents           Int       @default(0) @map("total_cents")

@@ -239,7 +239,7 @@ export async function markReady(
           if (!current || current.status !== "CANCELLING") return;
           await tx.order.update({
             where: { id: orderId },
-            data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+            data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null, refundId: refund.refundId },
           });
           await tx.auditLog.create({
             data: {
@@ -414,6 +414,10 @@ export async function autoCancelOrder(
           `refund:${orderId}`,
         );
         if (refund.status !== "succeeded") {
+          await storeScopedTransaction(storeId, async (tx) => {
+            await lockStoreRow(tx, storeId);
+            await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
+          });
           return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
         }
         await storeScopedTransaction(storeId, async (tx) => {
@@ -422,7 +426,7 @@ export async function autoCancelOrder(
           if (!current || current.status !== "CANCELLING") return;
           await tx.order.update({
             where: { id: orderId },
-            data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+            data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null, refundId: refund.refundId },
           });
           await tx.auditLog.create({
             data: {
@@ -504,12 +508,21 @@ export async function reconcileStuckOrder(
 
   if (pi.status === "succeeded") {
     if (order.status === "CANCELLING") {
-      const refund = await stripe.refundPayment(
-        order.paymentIntentId,
-        pi.amountReceived,
-        `refund:${orderId}`,
-      );
+      let refund;
+      if (order.refundId) {
+        refund = await stripe.retrieveRefund(order.refundId);
+      } else {
+        refund = await stripe.refundPayment(
+          order.paymentIntentId,
+          pi.amountReceived,
+          `refund:${orderId}`,
+        );
+      }
       if (refund.status !== "succeeded") {
+        await storeScopedTransaction(storeId, async (tx) => {
+          await lockStoreRow(tx, storeId);
+          await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
+        });
         return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
       }
       await storeScopedTransaction(storeId, async (tx) => {
@@ -518,7 +531,7 @@ export async function reconcileStuckOrder(
         if (!current || current.status !== "CANCELLING") return;
         await tx.order.update({
           where: { id: orderId },
-          data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+          data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null, refundId: refund.refundId },
         });
         await tx.auditLog.create({
           data: {
@@ -563,12 +576,21 @@ export async function reconcileStuckOrder(
         if (err instanceof ProviderStateError) {
           const freshPi = await stripe.retrievePaymentIntent(order.paymentIntentId);
           if (freshPi.status === "succeeded") {
-            const refund = await stripe.refundPayment(
-              order.paymentIntentId,
-              freshPi.amountReceived,
-              `refund:${orderId}`,
-            );
+            let refund;
+            if (order.refundId) {
+              refund = await stripe.retrieveRefund(order.refundId);
+            } else {
+              refund = await stripe.refundPayment(
+                order.paymentIntentId,
+                freshPi.amountReceived,
+                `refund:${orderId}`,
+              );
+            }
             if (refund.status !== "succeeded") {
+              await storeScopedTransaction(storeId, async (tx) => {
+                await lockStoreRow(tx, storeId);
+                await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
+              });
               return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
             }
             await storeScopedTransaction(storeId, async (tx) => {
@@ -577,7 +599,7 @@ export async function reconcileStuckOrder(
               if (!current || current.status !== "CANCELLING") return;
               await tx.order.update({
                 where: { id: orderId },
-                data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
+                data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null, refundId: refund.refundId },
               });
               await tx.auditLog.create({
                 data: {

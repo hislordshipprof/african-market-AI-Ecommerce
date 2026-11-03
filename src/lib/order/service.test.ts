@@ -1347,4 +1347,191 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     expect(refundedPayments.has(order.paymentIntentId!)).toBe(true);
   });
+
+  // --- P3: Refund persistence — persist refundId, retrieve on retry ---
+
+  it("P3: sweep pending refund persists refundId on order, stays CANCELLING", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+    setNextRefundStatus(order.paymentIntentId!, "pending");
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("pending");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
+    expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
+  });
+
+  it("P3: sweep retry with stored refundId uses retrieveRefund (pending→succeeded)", async () => {
+    const order = await createTestOrder();
+    const refundId = `re_fake_${order.paymentIntentId}`;
+    // Simulate: first sweep already created a pending refund and stored its id
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", refundId },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+    // Pre-populate the fake refunds map with a pending refund (simulating first sweep)
+    setNextRefundStatus(order.paymentIntentId!, "pending");
+    await fakeStripeProvider.refundPayment(order.paymentIntentId!, 5000, `refund:${order.id}`);
+
+    // Second sweep: order.refundId is set, so it calls retrieveRefund
+    // The fake models pending→succeeded on retrieve
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("anomaly_refund");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.refundId).toBe(refundId);
+  });
+
+  it("P3: sweep succeeded refund persists refundId on CANCELLED order", async () => {
+    const order = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    capturedPayments.set(order.paymentIntentId!, 5000);
+    setAuthorizedAmount(order.paymentIntentId!, 5000);
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("anomaly_refund");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
+  });
+
+  it("P3: autoCancelOrder ProviderStateError pending refund persists refundId", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    capturedPayments.set(order.paymentIntentId!, 5500);
+    setNextRefundStatus(order.paymentIntentId!, "pending");
+
+    const result = await autoCancelOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("pending");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
+    expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
+  });
+
+  it("P3: autoCancelOrder ProviderStateError succeeded refund persists refundId on CANCELLED", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    capturedPayments.set(order.paymentIntentId!, 5500);
+
+    const result = await autoCancelOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
+  });
+
+  it("P3: markReady void ProviderStateError refund persists refundId on CANCELLED", async () => {
+    const num = ++orderSeq;
+    const order = await storeScopedTransaction(storeId, async (tx) => {
+      const o = await tx.order.create({
+        data: {
+          storeId,
+          number: num,
+          customerId,
+          status: "PICKING",
+          fulfillment: "pickup",
+          subtotalCents: 10,
+          bufferCents: 0,
+          tipCents: 0,
+          deliveryFeeCents: 0,
+          totalAuthorizedCents: 100,
+          totalCents: 10,
+          paymentIntentId: `pi_void_p3_${Date.now()}`,
+        },
+      });
+      await tx.orderLine.create({
+        data: {
+          storeId,
+          orderId: o.id,
+          listingVariantId: variantId,
+          qtyOrdered: 1,
+          unitPriceCents: 10,
+          status: "picked",
+          qtyPicked: 1,
+        },
+      });
+      return o;
+    });
+
+    setAuthorizedAmount(order.paymentIntentId!, 100);
+    capturedPayments.set(order.paymentIntentId!, 100);
+
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
+  });
+
+  it("P3: sweep requires_capture cancel ProviderStateError pending refund persists refundId", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING" },
+      });
+    });
+    // PI still requires_capture, but cancel throws ProviderStateError because
+    // it was captured between retrieve and cancel
+    const captureAmount = 5500;
+
+    // Use a custom provider that returns requires_capture on retrieve
+    // but throws ProviderStateError on cancel (simulating race)
+    let cancelCalled = false;
+    const raceProvider: StripeProvider = {
+      ...fakeStripeProvider,
+      async retrievePaymentIntent(piId) {
+        if (!cancelCalled) {
+          return { paymentIntentId: piId, status: "requires_capture", amountCapturable: captureAmount, amountReceived: 0 };
+        }
+        return { paymentIntentId: piId, status: "succeeded", amountCapturable: 0, amountReceived: captureAmount };
+      },
+      async cancelPaymentIntent() {
+        cancelCalled = true;
+        throw new ProviderStateError("cancel", "succeeded");
+      },
+      async refundPayment(piId, amount, key) {
+        capturedPayments.set(piId, captureAmount);
+        setNextRefundStatus(piId, "pending");
+        return fakeStripeProvider.refundPayment(piId, amount, key);
+      },
+    };
+    setStripeProvider(raceProvider);
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("pending");
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
+    expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
+  });
 });
