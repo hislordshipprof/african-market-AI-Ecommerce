@@ -44,6 +44,16 @@ function asSession(userId: string, email: string) {
   };
 }
 
+// Store-owned tables have FORCE ROW LEVEL SECURITY, so even the table owner is filtered (CI connects as
+// app_owner, not a BYPASSRLS role). Seed and clean up as platform admin, the way the other suites do.
+async function asAdmin<T>(raw: PrismaClient, op: (tx: Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]) => Promise<T>): Promise<T> {
+  return raw.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    return op(tx);
+  }) as Promise<T>;
+}
+
 describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () => {
   let raw: PrismaClient;
   const slugA = `act147-a-${RUN}`;
@@ -66,21 +76,25 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
     storeB = await raw.store.create({ data: { slug: slugB, name: "Act147 B", themePreset: "palm-and-shea" } });
     await raw.user.create({ data: { id: userA, email: emailA, name: "A Owner", emailVerified: true } });
     await raw.user.create({ data: { id: userB, email: emailB, name: "B Owner", emailVerified: true } });
-    await raw.storeMembership.create({ data: { storeId: storeA.id, userId: userA, role: "owner" } });
-    await raw.storeMembership.create({ data: { storeId: storeB.id, userId: userB, role: "owner" } });
+    await asAdmin(raw, async (tx) => {
+      await tx.storeMembership.create({ data: { storeId: storeA.id, userId: userA, role: "owner" } });
+      await tx.storeMembership.create({ data: { storeId: storeB.id, userId: userB, role: "owner" } });
+    });
 
     // A listing as the #110 backfill leaves it: linked to a master product with no weight, so the
     // variant carries the 100 g fallback.
     const master = await platformAdmin.masterProduct.create({ data: { name: `Act147 Garri ${RUN}`, weightG: null } });
     masterId = master.id;
-    const listing = await raw.listing.create({
-      data: { storeId: storeA.id, masterProductId: masterId, price: 500, stockMode: "counted", qty: 4 },
+    await asAdmin(raw, async (tx) => {
+      const listing = await tx.listing.create({
+        data: { storeId: storeA.id, masterProductId: masterId, price: 500, stockMode: "counted", qty: 4 },
+      });
+      listingId = listing.id;
+      const variant = await tx.listingVariant.create({
+        data: { listingId, label: "Standard", price: 500, weightG: 100 },
+      });
+      variantId = variant.id;
     });
-    listingId = listing.id;
-    const variant = await raw.listingVariant.create({
-      data: { listingId, label: "Standard", price: 500, weightG: 100 },
-    });
-    variantId = variant.id;
   });
 
   afterAll(async () => {
@@ -93,7 +107,7 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
       raw.listing.deleteMany({ where: { storeId: { in: [storeA.id, storeB.id] } } }),
     ]);
     await raw.masterProduct.deleteMany({ where: { id: masterId } });
-    await raw.storeMembership.deleteMany({ where: { storeId: { in: [storeA.id, storeB.id] } } });
+    await asAdmin(raw, (tx) => tx.storeMembership.deleteMany({ where: { storeId: { in: [storeA.id, storeB.id] } } }));
     await raw.user.deleteMany({ where: { id: { in: [userA, userB, staffId] } } });
     await raw.store.deleteMany({ where: { id: { in: [storeA.id, storeB.id] } } });
     await raw.$disconnect();
@@ -125,7 +139,7 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
 
     it("rejects a store member who is not an owner", async () => {
             await raw.user.create({ data: { id: staffId, email: `act147-s-${RUN}@example.com`, name: "Staff", emailVerified: true } });
-      await raw.storeMembership.create({ data: { storeId: storeA.id, userId: staffId, role: "staff" } });
+      await asAdmin(raw, (tx) => tx.storeMembership.create({ data: { storeId: storeA.id, userId: staffId, role: "staff" } }));
       asSession(staffId, `act147-s-${RUN}@example.com`);
       await expect(listMasterProductsAction("garri")).rejects.toThrow(/NEXT_REDIRECT:\/store-admin\?store=/);
     });
@@ -175,7 +189,7 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
 
     it("rejects the database CHECK when a zero weight bypasses action validation", async () => {
       await expect(
-        raw.$executeRaw`UPDATE listing_variants SET weight_g = 0 WHERE listing_id = ${listingId}`,
+        asAdmin(raw, (tx) => tx.$executeRaw`UPDATE listing_variants SET weight_g = 0 WHERE listing_id = ${listingId}`),
       ).rejects.toThrow(/listing_variants_weight_g_positive|violates check constraint/);
     });
 
