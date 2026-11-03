@@ -474,19 +474,43 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
   });
 
   it("listMasterProducts returns matching products ordered by name", async () => {
-    const mpA = await platformAdmin.masterProduct.create({ data: { name: "AAA Test Product" } });
-    const mpZ = await platformAdmin.masterProduct.create({ data: { name: "ZZZ Test Product" } });
+    // Unique per-run prefix: a shared dev DB with leftover rows cannot push these past the 50-row limit.
+    const prefix = `Ord${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const mpZ = await platformAdmin.masterProduct.create({ data: { name: `${prefix} ZZZ` } });
+    const mpA = await platformAdmin.masterProduct.create({ data: { name: `${prefix} AAA` } });
 
     try {
-      const products = await listMasterProducts(" Test Product");
-      expect(products.length).toBeGreaterThanOrEqual(2);
-      const names = products.map((p) => p.name);
-      const idxA = names.indexOf("AAA Test Product");
-      const idxZ = names.indexOf("ZZZ Test Product");
-      expect(idxA).toBeLessThan(idxZ);
+      const products = await listMasterProducts(prefix);
+      expect(products.map((p) => p.name)).toEqual([`${prefix} AAA`, `${prefix} ZZZ`]);
     } finally {
       await rawPrisma.masterProduct.deleteMany({ where: { id: { in: [mpA.id, mpZ.id] } } });
     }
+  });
+
+  // E1: `%` and `_` are LIKE wildcards in Postgres; the picker must match them literally.
+  it("listMasterProducts treats % and _ in the query literally", async () => {
+    const tag = `Wc${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const BS = String.fromCharCode(92);
+    const names = [`${tag} 50% off`, `${tag} 500 off`, `${tag} a_b`, `${tag} axb`, `${tag} back${BS}slash`];
+    const mps = await Promise.all(names.map((name) => platformAdmin.masterProduct.create({ data: { name } })));
+    try {
+      expect((await listMasterProducts(`${tag} 50%`)).map((p) => p.name)).toEqual([`${tag} 50% off`]);
+      expect((await listMasterProducts(`${tag} a_b`)).map((p) => p.name)).toEqual([`${tag} a_b`]);
+      expect((await listMasterProducts(`${tag} back${BS}slash`)).map((p) => p.name)).toEqual([`${tag} back${BS}slash`]);
+      // A bare wildcard matches only names that contain it, not everything.
+      expect(await listMasterProducts(`${tag}%zzz`)).toEqual([]);
+    } finally {
+      await rawPrisma.masterProduct.deleteMany({ where: { id: { in: mps.map((m) => m.id) } } });
+    }
+  });
+
+  // E2: empty or whitespace-only query behaves as "no filter", capped at the page size.
+  it("listMasterProducts treats empty and whitespace queries as unfiltered, capped at the page size", async () => {
+    for (const q of [undefined, "", "   "]) {
+      const hits = await listMasterProducts(q);
+      expect(hits.length).toBeLessThanOrEqual(50);
+    }
+    expect((await listMasterProducts("   ")).map((p) => p.id)).toEqual((await listMasterProducts()).map((p) => p.id));
   });
 
   it("listMasterProducts filters by name case-insensitively and respects take", async () => {
