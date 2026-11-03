@@ -1,4 +1,5 @@
 import type { StripeProvider } from "./types";
+import { fakeStripeProvider } from "./fake";
 import { stripeProvider } from "./provider";
 
 const UNCONFIGURED_MESSAGE =
@@ -44,25 +45,34 @@ export function setStripeProvider(provider: StripeProvider | null): void {
 
 let warnedAboutFake = false;
 
+// Production may use the fake only for CI e2e: the flag, CI=true, and not Vercel.
+// GitHub Actions sets CI. Any other production runtime with no key fails at call time.
+function ciE2EFakeAllowed(): boolean {
+  return (
+    process.env.E2E_FAKE_STRIPE === "1" &&
+    process.env.CI === "true" &&
+    !process.env.VERCEL
+  );
+}
+
+function devFakeAllowed(): boolean {
+  return process.env.E2E_FAKE_STRIPE === "1" && !process.env.VERCEL && !isProductionRuntime();
+}
+
 export function getStripeProvider(): StripeProvider {
   if (_override) return _override;
-  // A production process with no key must fail at call time. Never substitute the fake.
-  if (isProductionRuntime() && !process.env.STRIPE_SECRET_KEY) {
-    return unconfiguredStripeProvider;
-  }
-  // Vercel is a real deploy even if someone sets the e2e flag. Local `next start`
-  // is also NODE_ENV=production, and e2e opts into the fake explicitly.
-  if (process.env.E2E_FAKE_STRIPE === "1" && !process.env.VERCEL) {
+  if (ciE2EFakeAllowed() || devFakeAllowed()) {
     if (!warnedAboutFake) {
       warnedAboutFake = true;
       console.warn(
-        "E2E_FAKE_STRIPE=1 is selecting the fake Stripe provider. Refusing this on Vercel.",
+        "E2E_FAKE_STRIPE=1 is selecting the fake Stripe provider for CI. Refusing this on Vercel and on any other production runtime.",
       );
     }
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { fakeStripeProvider } = require("./fake") as typeof import("./fake");
     _override = fakeStripeProvider;
     return fakeStripeProvider;
+  }
+  if (isProductionRuntime() && !process.env.STRIPE_SECRET_KEY) {
+    return unconfiguredStripeProvider;
   }
   return stripeProvider;
 }
