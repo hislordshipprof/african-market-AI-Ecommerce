@@ -34,3 +34,24 @@ export async function checkPhoneRateLimit(phone: string): Promise<void> {
 export async function recordPhoneOtpSend(phone: string): Promise<void> {
   await prisma.phoneOtpSend.create({ data: { phone } });
 }
+
+export async function reservePhoneOtpSend(phone: string): Promise<void> {
+  await prisma.phoneOtpSend.create({ data: { phone } });
+
+  const now = new Date();
+  const fifteenMinAgo = new Date(now.getTime() - WINDOW_15M_MS);
+  const dayAgo = new Date(now.getTime() - WINDOW_DAY_MS);
+
+  const [recent, daily] = await Promise.all([
+    prisma.phoneOtpSend.count({
+      where: { phone, sentAt: { gte: fifteenMinAgo } },
+    }),
+    prisma.phoneOtpSend.count({
+      where: { phone, sentAt: { gte: dayAgo } },
+    }),
+  ]);
+
+  if (recent > MAX_PER_15M || daily > MAX_PER_DAY) {
+    throw new PhoneRateLimitError();
+  }
+}

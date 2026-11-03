@@ -6,6 +6,21 @@ const PREMIUM_NPAS = new Set(["900"]);
 const PREMIUM_NXXS = new Set(["976"]);
 const N11_CODES = new Set(["211", "311", "411", "511", "611", "711", "811", "911"]);
 
+// Canadian area codes (CRTC, current as of 2025)
+const CANADIAN_NPAS = new Set([
+  "204","226","236","249","250","263","289","306","343","354","365","367",
+  "368","382","387","403","416","418","428","431","437","438","450","468",
+  "474","506","514","519","548","579","581","584","587","604","613","639",
+  "647","672","683","705","709","742","753","778","780","782","807","819",
+  "825","867","873","879","902","905","942",
+]);
+
+// Non-US Caribbean/Atlantic NANP area codes
+const NON_US_CARIBBEAN_NPAS = new Set([
+  "242","246","264","268","284","345","441","473","649","664",
+  "721","758","767","784","809","829","849","868","869","876",
+]);
+
 export function normalizePhone(raw: string): string | null {
   const digits = raw.replace(DIGITS_RE, "");
 
@@ -27,6 +42,8 @@ export function normalizePhone(raw: string): string | null {
   if (PREMIUM_NPAS.has(npa)) return null;
   if (PREMIUM_NXXS.has(nxx)) return null;
   if (N11_CODES.has(npa)) return null;
+  if (CANADIAN_NPAS.has(npa)) return null;
+  if (NON_US_CARIBBEAN_NPAS.has(npa)) return null;
 
   return `+1${nationalDigits}`;
 }

@@ -221,7 +221,7 @@ export function CustomerSignIn({ smsEnabled, callbackUrl = "/account" }: Props) 
               </div>
               <p className="text-center text-sm text-muted-foreground">
                 Click the link in your email to sign in. The link expires in
-                5&nbsp;minutes.
+                15&nbsp;minutes.
               </p>
               <button
                 type="button"

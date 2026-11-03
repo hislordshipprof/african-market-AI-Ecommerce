@@ -13,6 +13,7 @@ import { authPrisma } from "./db";
 import {
   checkPhoneRateLimit,
   recordPhoneOtpSend,
+  reservePhoneOtpSend,
   PhoneRateLimitError,
 } from "./phone-rate-limit";
 
@@ -80,5 +81,28 @@ describe("recordPhoneOtpSend", () => {
     expect(mockCreate).toHaveBeenCalledWith({
       data: { phone: "+12025551234" },
     });
+  });
+});
+
+describe("reservePhoneOtpSend", () => {
+  it("records first then checks (record-first pattern)", async () => {
+    mockCreate.mockResolvedValueOnce({ id: "rec-1", phone: "+12025551234" });
+    mockCount.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+    await reservePhoneOtpSend("+12025551234");
+    expect(mockCreate).toHaveBeenCalledBefore(mockCount);
+  });
+
+  it("allows when count (including self) is at limit", async () => {
+    mockCreate.mockResolvedValueOnce({ id: "rec-1", phone: "+12025551234" });
+    mockCount.mockResolvedValueOnce(3).mockResolvedValueOnce(3);
+    await expect(reservePhoneOtpSend("+12025551234")).resolves.toBeUndefined();
+  });
+
+  it("throws when count exceeds limit", async () => {
+    mockCreate.mockResolvedValueOnce({ id: "rec-1", phone: "+12025551234" });
+    mockCount.mockResolvedValueOnce(4).mockResolvedValueOnce(4);
+    await expect(reservePhoneOtpSend("+12025551234")).rejects.toThrow(
+      PhoneRateLimitError,
+    );
   });
 });

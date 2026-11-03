@@ -48,6 +48,16 @@ describe("createSmsSender", () => {
     expect(sender).not.toBeNull();
     expect(sender).not.toBeInstanceOf(TelnyxSender);
   });
+
+  it("dev sender logs to console", async () => {
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const sender = createSmsSender({ NODE_ENV: "development" });
+    await sender!.send({ to: "+12025551234", body: "Code: 123456" });
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("+12025551234"),
+    );
+    spy.mockRestore();
+  });
 });
 
 describe("TestSender (in test env)", () => {

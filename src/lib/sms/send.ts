@@ -45,6 +45,13 @@ class TestSender implements SmsSender {
   }
 }
 
+class DevLogSender implements SmsSender {
+  async send(message: SmsMessage): Promise<void> {
+    sent.push(message);
+    console.info(`[SMS → ${message.to}] ${message.body}`);
+  }
+}
+
 export function getTestSentSms(): readonly SmsMessage[] {
   return sent;
 }
@@ -75,7 +82,7 @@ export function createSmsSender(
       return null;
     }
     console.warn("TELNYX_API_KEY/TELNYX_FROM_NUMBER not set — SMS will be logged to console");
-    return new TestSender();
+    return new DevLogSender();
   }
 
   return new TelnyxSender(apiKey, from);

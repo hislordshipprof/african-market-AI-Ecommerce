@@ -5,13 +5,12 @@ const mockFindFirst = vi.fn();
 const mockCreate = vi.fn();
 
 vi.mock("./db", () => ({
-  storeScopedTransaction: (_storeId: string, fn: (tx: unknown) => unknown) =>
-    fn({
-      customer: {
-        findFirst: mockFindFirst,
-        create: mockCreate,
-      },
-    }),
+  storeScoped: () => ({
+    customer: {
+      findFirst: mockFindFirst,
+      create: mockCreate,
+    },
+  }),
 }));
 
 import { findOrCreateCustomer } from "./customer-auth";
@@ -133,5 +132,26 @@ describe("findOrCreateCustomer", () => {
     await expect(findOrCreateCustomer("store-1", fakeUser)).rejects.toThrow(
       "DB down",
     );
+  });
+
+  it("filters placeholder emails", async () => {
+    mockFindFirst.mockResolvedValueOnce(null);
+    mockCreate.mockResolvedValueOnce({
+      id: "cust-placeholder",
+      name: "Phone User",
+      email: null,
+      phone: "+12025551234",
+    });
+
+    const userWithPlaceholder = {
+      ...fakeUser,
+      email: "12025551234@phone.placeholder.local",
+      phoneNumber: "+12025551234",
+    };
+    await findOrCreateCustomer("store-1", userWithPlaceholder);
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ email: null }),
+    });
   });
 });

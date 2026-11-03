@@ -60,6 +60,25 @@ describe("normalizePhone", () => {
     expect(normalizePhone("3105551234")).toBe("+13105551234"); // LA
     expect(normalizePhone("7135551234")).toBe("+17135551234"); // Houston
   });
+
+  it("accepts US territory area codes", () => {
+    expect(normalizePhone("7875551234")).toBe("+17875551234"); // Puerto Rico
+    expect(normalizePhone("3405551234")).toBe("+13405551234"); // USVI
+    expect(normalizePhone("6715551234")).toBe("+16715551234"); // Guam
+  });
+
+  it("rejects Canadian area codes", () => {
+    expect(normalizePhone("4165551234")).toBeNull(); // Toronto
+    expect(normalizePhone("6045551234")).toBeNull(); // Vancouver
+    expect(normalizePhone("5145551234")).toBeNull(); // Montreal
+    expect(normalizePhone("9055551234")).toBeNull(); // Ontario
+  });
+
+  it("rejects Caribbean non-US area codes", () => {
+    expect(normalizePhone("2425551234")).toBeNull(); // Bahamas
+    expect(normalizePhone("8765551234")).toBeNull(); // Jamaica
+    expect(normalizePhone("8685551234")).toBeNull(); // Trinidad
+  });
 });
 
 describe("isValidUsPhone", () => {

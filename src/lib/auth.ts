@@ -5,7 +5,7 @@ import { authPrisma } from "./db";
 import { sendEmail } from "./email/send";
 import { getSmsSender } from "./sms";
 import { normalizePhone } from "./phone";
-import { checkPhoneRateLimit, recordPhoneOtpSend } from "./phone-rate-limit";
+import { reservePhoneOtpSend } from "./phone-rate-limit";
 
 const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
 
@@ -73,11 +73,23 @@ export const auth = betterAuth({
       issuer: "African Markets Platform",
     }),
     magicLink({
-      sendMagicLink: async ({ email, url }) => {
+      expiresIn: 900,
+      sendMagicLink: async ({ email, url }, ctx) => {
+        if (email.endsWith("@phone.placeholder.local")) return;
+        const host = ctx?.request?.headers.get("host");
+        if (host) {
+          const parsed = new URL(url);
+          const proto =
+            ctx?.request?.headers.get("x-forwarded-proto") ??
+            parsed.protocol.replace(":", "");
+          parsed.protocol = `${proto}:`;
+          parsed.host = host;
+          url = parsed.toString();
+        }
         await sendEmail({
           to: email,
           subject: "Sign in to African Markets",
-          html: `<p>Click <a href="${url}">here</a> to sign in. This link expires in 5 minutes.</p>`,
+          html: `<p>Click <a href="${url}">here</a> to sign in. This link expires in 15 minutes.</p>`,
         });
       },
       disableSignUp: false,
@@ -88,14 +100,13 @@ export const auth = betterAuth({
             sendOTP: async ({ phoneNumber: phone, code }) => {
               const normalized = normalizePhone(phone);
               if (!normalized) throw new Error("Invalid phone number");
-              await checkPhoneRateLimit(normalized);
+              await reservePhoneOtpSend(normalized);
               const sender = getSmsSender();
               if (!sender) throw new Error("SMS not configured");
               await sender.send({
                 to: normalized,
                 body: `Your African Markets verification code is ${code}. It expires in 5 minutes.`,
               });
-              await recordPhoneOtpSend(normalized);
             },
             phoneNumberValidator: (phone) => normalizePhone(phone) !== null,
             signUpOnVerification: {
@@ -119,6 +130,24 @@ export const auth = betterAuth({
     },
   },
   databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          if (user.phoneNumber) {
+            const normalized = normalizePhone(user.phoneNumber as string);
+            if (normalized) return { data: { ...user, phoneNumber: normalized } };
+          }
+        },
+      },
+      update: {
+        before: async (user) => {
+          if (user.phoneNumber) {
+            const normalized = normalizePhone(user.phoneNumber as string);
+            if (normalized) return { data: { ...user, phoneNumber: normalized } };
+          }
+        },
+      },
+    },
     session: {
       create: {
         before: async (session, ctx) => {
