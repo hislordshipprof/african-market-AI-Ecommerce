@@ -140,8 +140,10 @@ test.describe("Order inbox", () => {
     const handOffBtn = page.getByRole("button", { name: "Hand off" });
     await expect(handOffBtn).toBeVisible({ timeout: 10000 });
 
-    const totalEl = page.locator("text=/\\$\\d+\\.\\d{2}/").last();
-    await expect(totalEl).toBeVisible();
+    const totalText = await page.getByTestId("order-total").innerText();
+    expect(totalText).toMatch(/^\$\d+\.\d{2}$/);
+    expect(totalText).not.toBe("$0.00");
+    await expect(page.getByTestId("order-captured")).toHaveText(totalText);
   });
 
   test("no horizontal overflow at 390px mobile", async ({ page }) => {

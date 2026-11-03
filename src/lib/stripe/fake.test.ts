@@ -103,9 +103,30 @@ describe("Fake Stripe state machine (K6)", () => {
     ).rejects.toThrow(/50 cents/i);
   });
 
-  it("capture without registered PI succeeds (e2e compat)", async () => {
-    const result = await fakeStripeProvider.capturePaymentIntent("pi_unregistered", 500, "key_e");
-    expect(result.amountCaptured).toBe(500);
-    expect(result.status).toBe("succeeded");
+  it("capture of an unregistered PaymentIntent is rejected", async () => {
+    await expect(
+      fakeStripeProvider.capturePaymentIntent("pi_unregistered", 500, "key_e"),
+    ).rejects.toThrow(/No such payment_intent/);
+  });
+
+  it("caps an application fee above the captured amount", async () => {
+    setAuthorizedAmount("pi_fee_cap", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_fee_cap", 500, "key_fee", 800);
+    const { capturedFees } = await import("./fake");
+    expect(capturedFees.get("pi_fee_cap")).toBe(500);
+  });
+
+  it("replays a capture 500 for the same idempotency key and allows a new key to succeed", async () => {
+    const { setNextCaptureFailure } = await import("./fake");
+    setAuthorizedAmount("pi_500", 1000);
+    setNextCaptureFailure("pi_500", 1);
+    await expect(
+      fakeStripeProvider.capturePaymentIntent("pi_500", 500, "same-key"),
+    ).rejects.toThrow(/Internal server error/);
+    await expect(
+      fakeStripeProvider.capturePaymentIntent("pi_500", 500, "same-key"),
+    ).rejects.toThrow(/Internal server error/);
+    const ok = await fakeStripeProvider.capturePaymentIntent("pi_500", 500, "new-key");
+    expect(ok.status).toBe("succeeded");
   });
 });

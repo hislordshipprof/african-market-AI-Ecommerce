@@ -16,9 +16,16 @@ export interface AccountLinkResult {
   url: string;
 }
 
+export interface WebhookRefund {
+  id: string;
+  status: string;
+  paymentIntentId: string;
+}
+
 export interface WebhookEvent {
   type: string;
   accountId: string;
+  refund?: WebhookRefund;
 }
 
 export interface CaptureResult {
@@ -85,6 +92,7 @@ export interface StripeProvider {
     paymentIntentId: string,
     amountCents: number,
     idempotencyKey?: string,
+    options?: { refundApplicationFee?: boolean },
   ): Promise<RefundResult>;
 
   retrieveRefund(

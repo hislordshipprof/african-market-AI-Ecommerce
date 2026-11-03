@@ -16,6 +16,7 @@ const STRIPE_USD_MINIMUM_CAPTURE_CENTS = 50;
 class FakeStripeError extends Error {
   code: string;
   type: string;
+  statusCode?: number;
   constructor(code: string, message: string) {
     super(message);
     this.name = "FakeStripeError";
@@ -34,6 +35,15 @@ const authorizedAmounts = new Map<string, number>();
 const refundedPayments = new Map<string, number>();
 const refunds = new Map<string, { paymentIntentId: string; amountRefunded: number; status: string }>();
 const nextRefundStatus = new Map<string, string>();
+const feeRefunded = new Map<string, number>();
+const refundRequests: Array<{
+  paymentIntentId: string;
+  amountCents: number;
+  idempotencyKey?: string;
+  refundApplicationFee: boolean;
+}> = [];
+const captureErrorBudget = new Map<string, number>();
+const replayedCaptureErrors = new Map<string, true>();
 
 function reset() {
   accounts.clear();
@@ -46,6 +56,10 @@ function reset() {
   refundedPayments.clear();
   refunds.clear();
   nextRefundStatus.clear();
+  feeRefunded.clear();
+  refundRequests.length = 0;
+  captureErrorBudget.clear();
+  replayedCaptureErrors.clear();
 }
 
 function getAccounts(): Map<string, ConnectAccount> {
@@ -93,14 +107,39 @@ const fakeStripeProvider: StripeProvider = {
         "No signatures found matching the expected signature for payload.",
       );
     }
-    const parsed = JSON.parse(payload);
+    const parsed = JSON.parse(payload) as {
+      type?: string;
+      accountId?: string;
+      data?: {
+        object?: {
+          id?: string;
+          object?: string;
+          status?: string;
+          payment_intent?: string | { id?: string };
+        };
+      };
+    };
+    const obj = parsed.data?.object;
+    const paymentIntentId =
+      typeof obj?.payment_intent === "string" ? obj.payment_intent : obj?.payment_intent?.id;
+    const refund =
+      obj?.object === "refund" && obj.id && obj.status && paymentIntentId
+        ? { id: obj.id, status: obj.status, paymentIntentId }
+        : undefined;
     return {
       type: parsed.type as string,
-      accountId: (parsed.accountId ?? parsed.data?.object?.id ?? "") as string,
+      accountId: (parsed.accountId ?? obj?.id ?? "") as string,
+      ...(refund ? { refund } : {}),
     } satisfies WebhookEvent;
   },
 
   async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
+    if (idempotencyKey && replayedCaptureErrors.has(idempotencyKey)) {
+      const replay = new FakeStripeError("api_error", "Internal server error");
+      replay.type = "StripeAPIError";
+      replay.statusCode = 500;
+      throw replay;
+    }
     if (cancelledPayments.has(paymentIntentId)) {
       throw new ProviderStateError("capture", "canceled");
     }
@@ -111,21 +150,39 @@ const fakeStripeProvider: StripeProvider = {
         status: "succeeded",
       } satisfies CaptureResult;
     }
+    if (!authorizedAmounts.has(paymentIntentId)) {
+      throw new FakeStripeError(
+        "resource_missing",
+        `No such payment_intent: '${paymentIntentId}'`,
+      );
+    }
     if (amountCents < STRIPE_USD_MINIMUM_CAPTURE_CENTS) {
       throw new FakeStripeError(
         "amount_too_small",
         `Amount must be at least 50 cents.`,
       );
     }
-    const authorized = authorizedAmounts.get(paymentIntentId);
-    if (authorized !== undefined && amountCents > authorized) {
+    const authorized = authorizedAmounts.get(paymentIntentId)!;
+    if (amountCents > authorized) {
       throw new FakeStripeError(
         "amount_too_large",
         `Capture amount ${amountCents} exceeds authorized amount ${authorized}`,
       );
     }
+    const failuresLeft = captureErrorBudget.get(paymentIntentId) ?? 0;
+    if (failuresLeft > 0) {
+      captureErrorBudget.set(paymentIntentId, failuresLeft - 1);
+      if (idempotencyKey) replayedCaptureErrors.set(idempotencyKey, true);
+      const err = new FakeStripeError("api_error", "Internal server error");
+      err.type = "StripeAPIError";
+      err.statusCode = 500;
+      throw err;
+    }
     capturedPayments.set(paymentIntentId, amountCents);
-    if (applicationFeeAmount !== undefined) capturedFees.set(paymentIntentId, applicationFeeAmount);
+    if (applicationFeeAmount !== undefined) {
+      // Stripe caps application_fee_amount at the captured amount instead of rejecting it.
+      capturedFees.set(paymentIntentId, Math.min(applicationFeeAmount, amountCents));
+    }
     if (idempotencyKey) captureKeys.set(paymentIntentId, idempotencyKey);
     return {
       paymentIntentId,
@@ -152,7 +209,19 @@ const fakeStripeProvider: StripeProvider = {
     } satisfies CancelResult;
   },
 
-  async refundPayment(paymentIntentId, amountCents) {
+  async refundPayment(paymentIntentId, amountCents, idempotencyKey, options) {
+    refundRequests.push({
+      paymentIntentId,
+      amountCents,
+      idempotencyKey,
+      refundApplicationFee: options?.refundApplicationFee === true,
+    });
+    if (options?.refundApplicationFee) {
+      const fee = capturedFees.get(paymentIntentId) ?? 0;
+      const captured = capturedPayments.get(paymentIntentId) ?? 0;
+      const proportional = captured > 0 ? Math.round((fee * amountCents) / captured) : 0;
+      feeRefunded.set(paymentIntentId, Math.min(fee, proportional));
+    }
     if (!capturedPayments.has(paymentIntentId)) {
       throw new Error(
         `PaymentIntent ${paymentIntentId} has not been captured and cannot be refunded.`,
@@ -228,4 +297,14 @@ function setNextRefundStatus(paymentIntentId: string, status: string) {
   nextRefundStatus.set(paymentIntentId, status);
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, setAuthorizedAmount, setNextRefundStatus, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+function setNextCaptureFailure(paymentIntentId: string, times = 1) {
+  captureErrorBudget.set(paymentIntentId, times);
+}
+
+function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
+  if (!authorizedAmounts.has(paymentIntentId)) {
+    authorizedAmounts.set(paymentIntentId, amount);
+  }
+}
+
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextRefundStatus, setNextCaptureFailure, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };

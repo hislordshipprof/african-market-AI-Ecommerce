@@ -1,8 +1,10 @@
-import { storeScopedTransaction, lockStoreRow } from "../db";
+import { storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider } from "../stripe";
-import { ProviderStateError } from "../stripe/types";
+import { isRetryableProviderError } from "../stripe/errors";
+import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
+import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -14,11 +16,27 @@ export type OrderStatus =
   | "READY"
   | "AWAITING_PICKUP"
   | "COMPLETED"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "REFUND_FAILED"
+  | "CAPTURE_FAILED";
 
 // Stripe USD minimum capture: $0.50 (50 cents).
 // https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts
 const STRIPE_USD_MINIMUM_CENTS = 50;
+const MAX_CAPTURE_ATTEMPTS = 5;
+const REFUND_APPLICATION_FEE = { refundApplicationFee: true } as const;
+
+function captureKey(orderId: string, attempt: number): string {
+  return `capture:${orderId}:${attempt}`;
+}
+
+function captureBackoffMs(attempt: number): number {
+  return Math.min(15 * 60_000, 30_000 * 2 ** Math.max(0, attempt - 1));
+}
+
+function isTerminalRefundStatus(status: string): boolean {
+  return status === "failed" || status === "canceled";
+}
 
 const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
@@ -28,6 +46,8 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   "CANCELLING",
   "READY",
   "AWAITING_PICKUP",
+  "REFUND_FAILED",
+  "CAPTURE_FAILED",
 ];
 
 const ORDER_WITH_LINES = {
@@ -126,6 +146,179 @@ export async function markLinePicked(
   });
 }
 
+async function captureAttemptNumber(storeId: string, orderId: string): Promise<number> {
+  const prior = await storeScopedTransaction(storeId, async (tx) => {
+    return tx.auditLog.count({
+      where: { entityId: orderId, action: "capture_retry" },
+    });
+  });
+  return prior + 1;
+}
+
+async function captureBackoffActive(storeId: string, orderId: string): Promise<boolean> {
+  const latest = await storeScopedTransaction(storeId, async (tx) => {
+    return tx.auditLog.findFirst({
+      where: { entityId: orderId, action: "capture_retry" },
+      orderBy: { createdAt: "desc" },
+    });
+  });
+  if (!latest) return false;
+  const after = latest.after as { attempt?: number } | null;
+  const attempt = typeof after?.attempt === "number" ? after.attempt : 1;
+  return Date.now() - latest.createdAt.getTime() < captureBackoffMs(attempt);
+}
+
+async function registerE2EPayment(paymentIntentId: string, authorizedCents: number): Promise<void> {
+  // `next start` is NODE_ENV=production. The e2e flag still selects the fake locally.
+  // Vercel must never register seed PaymentIntents on the fake.
+  if (process.env.E2E_FAKE_STRIPE !== "1" || process.env.VERCEL) {
+    return;
+  }
+  const { ensureAuthorizedAmount } = await import("../stripe/fake");
+  ensureAuthorizedAmount(paymentIntentId, authorizedCents);
+}
+
+async function noteCaptureServerError(
+  storeId: string,
+  orderId: string,
+  attempt: number,
+): Promise<{ ok: false; error: string }> {
+  if (attempt >= MAX_CAPTURE_ATTEMPTS) {
+    await storeScopedTransaction(storeId, async (tx) => {
+      await lockStoreRow(tx, storeId);
+      const current = await tx.order.findUnique({ where: { id: orderId } });
+      if (!current || current.status !== "CAPTURING") return;
+      await tx.order.update({ where: { id: orderId }, data: { status: "CAPTURE_FAILED" } });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "capture_failed",
+          entityType: "order",
+          entityId: orderId,
+          after: { attempt, alert: "store_and_platform" },
+        },
+      });
+    });
+    console.error(`Capture failed after ${attempt} attempts for order ${orderId}. Store and platform alerted.`);
+    return { ok: false, error: "Card capture failed after retries — contact the customer" };
+  }
+
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action: "capture_retry",
+        entityType: "order",
+        entityId: orderId,
+        after: { attempt, alert: "store_and_platform" },
+      },
+    });
+  });
+  return { ok: false, error: "Card capture failed temporarily; we'll retry" };
+}
+
+async function persistRefundFailure(
+  storeId: string,
+  orderId: string,
+  refundId: string,
+  refundStatus: string,
+): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const current = await tx.order.findUnique({ where: { id: orderId } });
+    if (!current || (current.status !== "CANCELLING" && current.status !== "CANCELLED")) return;
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "REFUND_FAILED", refundId },
+    });
+    const existing = await tx.auditLog.findFirst({
+      where: { entityId: orderId, action: "refund_failed" },
+    });
+    if (existing) return;
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action: "refund_failed",
+        entityType: "order",
+        entityId: orderId,
+        after: { refundId, refundStatus, alert: "store_and_platform" },
+      },
+    });
+  });
+  console.error(
+    `Refund ${refundStatus} for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,
+  );
+}
+
+async function settleCapturedRefund(
+  storeId: string,
+  orderId: string,
+  refund: RefundResult,
+): Promise<{ outcome: "refunded" } | { outcome: "failed" | "pending"; error: string }> {
+  if (refund.status === "succeeded") {
+    await storeScopedTransaction(storeId, async (tx) => {
+      await lockStoreRow(tx, storeId);
+      const current = await tx.order.findUnique({ where: { id: orderId } });
+      if (!current || current.status !== "CANCELLING") return;
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          capturedAmountCents: null,
+          refundId: refund.refundId,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "anomaly_refund",
+          entityType: "order",
+          entityId: orderId,
+          after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
+        },
+      });
+    });
+    return { outcome: "refunded" };
+  }
+
+  if (isTerminalRefundStatus(refund.status)) {
+    await persistRefundFailure(storeId, orderId, refund.refundId, refund.status);
+    return { outcome: "failed", error: `Refund ${refund.status} — customer is still charged` };
+  }
+
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
+  });
+  return { outcome: "pending", error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
+}
+
+export async function markTerminalRefundFailure(input: {
+  paymentIntentId: string;
+  refundId: string;
+  refundStatus: string;
+}): Promise<{ ok: true; action: string } | { ok: false; error: string }> {
+  if (!isTerminalRefundStatus(input.refundStatus)) return { ok: true, action: "ignored" };
+  const order = await findOrderByPaymentIntent(input.paymentIntentId);
+  if (!order) return { ok: false, error: "Order not found" };
+  if (order.status === "REFUND_FAILED") return { ok: true, action: "already_recorded" };
+  if (order.status !== "CANCELLING" && order.status !== "CANCELLED") {
+    return { ok: true, action: "ignored" };
+  }
+  await persistRefundFailure(order.storeId, order.id, input.refundId, input.refundStatus);
+  return { ok: true, action: "refund_failed" };
+}
+
 export async function markReady(
   storeId: string,
   orderId: string,
@@ -136,12 +329,14 @@ export async function markReady(
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false as const, error: "Order not found" };
     if (order.status === "CAPTURING") {
-      const fee = (order.platformFeeCents ?? 0) + order.deliveryFeeCents;
+      const amount = order.capturedAmountCents ?? 0;
+      const fee = applicationFeeForCapture(amount, order.deliveryFeeCents);
       return {
         ok: true as const,
-        capturedAmountCents: order.capturedAmountCents ?? 0,
+        capturedAmountCents: amount,
         applicationFeeAmount: fee > 0 ? fee : undefined,
         paymentIntentId: order.paymentIntentId!,
+        totalAuthorizedCents: order.totalAuthorizedCents,
         newStatus: (order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY") as OrderStatus,
         alreadyClaiming: true,
       };
@@ -186,6 +381,7 @@ export async function markReady(
         voidInsteadOfCapture: true,
         orderId: order.id,
         storeId,
+        totalAuthorizedCents: order.totalAuthorizedCents,
       };
     }
 
@@ -199,11 +395,15 @@ export async function markReady(
     const newStatus: OrderStatus =
       order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
 
-    const fee = (order.platformFeeCents ?? 0) + order.deliveryFeeCents;
+    const fee = applicationFeeForCapture(capturedAmountCents, order.deliveryFeeCents);
 
     await tx.order.update({
       where: { id: orderId },
-      data: { status: "CAPTURING", capturedAmountCents },
+      data: {
+        status: "CAPTURING",
+        capturedAmountCents,
+        platformFeeCents: platformFeeCentsForCapture(capturedAmountCents),
+      },
     });
 
     return {
@@ -211,6 +411,7 @@ export async function markReady(
       capturedAmountCents,
       applicationFeeAmount: fee > 0 ? fee : undefined,
       paymentIntentId: order.paymentIntentId,
+      totalAuthorizedCents: order.totalAuthorizedCents,
       newStatus,
       alreadyClaiming: false,
       voidInsteadOfCapture: false,
@@ -237,34 +438,10 @@ export async function markReady(
           validation.paymentIntentId,
           pi.amountReceived,
           `refund:${orderId}`,
+          REFUND_APPLICATION_FEE,
         );
-        if (refund.status !== "succeeded") {
-          await storeScopedTransaction(storeId, async (tx) => {
-            await lockStoreRow(tx, storeId);
-            await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
-          });
-          return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
-        }
-        await storeScopedTransaction(storeId, async (tx) => {
-          await lockStoreRow(tx, storeId);
-          const current = await tx.order.findUnique({ where: { id: orderId } });
-          if (!current || current.status !== "CANCELLING") return;
-          await tx.order.update({
-            where: { id: orderId },
-            data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null, refundId: refund.refundId },
-          });
-          await tx.auditLog.create({
-            data: {
-              storeId,
-              actorId: SYSTEM_ACTOR_ID,
-              actorEmail: SYSTEM_ACTOR_EMAIL,
-              action: "anomaly_refund",
-              entityType: "order",
-              entityId: orderId,
-              after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
-            },
-          });
-        });
+        const settled = await settleCapturedRefund(storeId, orderId, refund);
+        if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true, capturedAmountCents: 0, voided: true };
       }
       throw err;
@@ -300,17 +477,24 @@ export async function markReady(
     return { ok: true, capturedAmountCents: 0, voided: true };
   }
 
-  // Phase 2: Stripe capture outside transaction (idempotency key makes retry safe)
+  // Phase 2: Stripe capture outside the transaction. A 5xx uses a new attempt key
+  // because Stripe replays a stored 5xx for the same idempotency key for about 24 hours.
   const stripe = getStripeProvider();
   let captureResult;
+  let captureAttempt = 1;
   try {
+    captureAttempt = await captureAttemptNumber(storeId, orderId);
+    await registerE2EPayment(validation.paymentIntentId, validation.totalAuthorizedCents);
     captureResult = await stripe.capturePaymentIntent(
       validation.paymentIntentId,
       validation.capturedAmountCents,
-      `capture:${orderId}`,
+      captureKey(orderId, captureAttempt),
       validation.applicationFeeAmount,
     );
   } catch (err) {
+    if (isRetryableProviderError(err)) {
+      return noteCaptureServerError(storeId, orderId, captureAttempt);
+    }
     if (err instanceof ProviderStateError) {
       await storeScopedTransaction(storeId, async (tx) => {
         await lockStoreRow(tx, storeId);
@@ -425,34 +609,10 @@ export async function autoCancelOrder(
           validation.paymentIntentId,
           pi.amountReceived,
           `refund:${orderId}`,
+          REFUND_APPLICATION_FEE,
         );
-        if (refund.status !== "succeeded") {
-          await storeScopedTransaction(storeId, async (tx) => {
-            await lockStoreRow(tx, storeId);
-            await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
-          });
-          return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
-        }
-        await storeScopedTransaction(storeId, async (tx) => {
-          await lockStoreRow(tx, storeId);
-          const current = await tx.order.findUnique({ where: { id: orderId } });
-          if (!current || current.status !== "CANCELLING") return;
-          await tx.order.update({
-            where: { id: orderId },
-            data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null, refundId: refund.refundId },
-          });
-          await tx.auditLog.create({
-            data: {
-              storeId,
-              actorId: SYSTEM_ACTOR_ID,
-              actorEmail: SYSTEM_ACTOR_EMAIL,
-              action: "anomaly_refund",
-              entityType: "order",
-              entityId: orderId,
-              after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
-            },
-          });
-        });
+        const settled = await settleCapturedRefund(storeId, orderId, refund);
+        if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true };
       }
       throw err;
@@ -529,35 +689,11 @@ export async function reconcileStuckOrder(
           order.paymentIntentId,
           pi.amountReceived,
           `refund:${orderId}`,
+          REFUND_APPLICATION_FEE,
         );
       }
-      if (refund.status !== "succeeded") {
-        await storeScopedTransaction(storeId, async (tx) => {
-          await lockStoreRow(tx, storeId);
-          await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
-        });
-        return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
-      }
-      await storeScopedTransaction(storeId, async (tx) => {
-        await lockStoreRow(tx, storeId);
-        const current = await tx.order.findUnique({ where: { id: orderId } });
-        if (!current || current.status !== "CANCELLING") return;
-        await tx.order.update({
-          where: { id: orderId },
-          data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null, refundId: refund.refundId },
-        });
-        await tx.auditLog.create({
-          data: {
-            storeId,
-            actorId: SYSTEM_ACTOR_ID,
-            actorEmail: SYSTEM_ACTOR_EMAIL,
-            action: "anomaly_refund",
-            entityType: "order",
-            entityId: orderId,
-            after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
-          },
-        });
-      });
+      const settled = await settleCapturedRefund(storeId, orderId, refund);
+      if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
       return { ok: true, action: "anomaly_refund" };
     }
     return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
@@ -569,16 +705,25 @@ export async function reconcileStuckOrder(
 
   if (pi.status === "requires_capture") {
     if (order.status === "CAPTURING") {
+      if (await captureBackoffActive(storeId, orderId)) {
+        return { ok: false, error: "capture_backoff" };
+      }
+      const attempt = await captureAttemptNumber(storeId, orderId);
+      const amount = order.capturedAmountCents ?? 0;
+      const sweepFee = applicationFeeForCapture(amount, order.deliveryFeeCents);
       try {
-        const sweepFee = (order.platformFeeCents ?? 0) + order.deliveryFeeCents;
+        await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
         const retryCap = await stripe.capturePaymentIntent(
           order.paymentIntentId,
-          order.capturedAmountCents ?? 0,
-          `capture:${orderId}`,
+          amount,
+          captureKey(orderId, attempt),
           sweepFee > 0 ? sweepFee : undefined,
         );
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {
+        if (isRetryableProviderError(err)) {
+          return noteCaptureServerError(storeId, orderId, attempt);
+        }
         if (err instanceof ProviderStateError) {
           return finalizeCancelFromSweep(storeId, orderId);
         }
@@ -599,35 +744,11 @@ export async function reconcileStuckOrder(
                 order.paymentIntentId,
                 freshPi.amountReceived,
                 `refund:${orderId}`,
+                REFUND_APPLICATION_FEE,
               );
             }
-            if (refund.status !== "succeeded") {
-              await storeScopedTransaction(storeId, async (tx) => {
-                await lockStoreRow(tx, storeId);
-                await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
-              });
-              return { ok: false, error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
-            }
-            await storeScopedTransaction(storeId, async (tx) => {
-              await lockStoreRow(tx, storeId);
-              const current = await tx.order.findUnique({ where: { id: orderId } });
-              if (!current || current.status !== "CANCELLING") return;
-              await tx.order.update({
-                where: { id: orderId },
-                data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null, refundId: refund.refundId },
-              });
-              await tx.auditLog.create({
-                data: {
-                  storeId,
-                  actorId: SYSTEM_ACTOR_ID,
-                  actorEmail: SYSTEM_ACTOR_EMAIL,
-                  action: "anomaly_refund",
-                  entityType: "order",
-                  entityId: orderId,
-                  after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
-                },
-              });
-            });
+            const settled = await settleCapturedRefund(storeId, orderId, refund);
+            if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
             return { ok: true, action: "anomaly_refund" };
           }
         }

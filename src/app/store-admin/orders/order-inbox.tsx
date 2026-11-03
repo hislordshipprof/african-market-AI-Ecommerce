@@ -58,6 +58,8 @@ const STATUS_CONFIG: Record<
   CANCELLING: { label: "Cancelling…", variant: "destructive", icon: RefreshCw },
   READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
   AWAITING_PICKUP: { label: "Awaiting pickup", variant: "outline", icon: ShoppingBag },
+  REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
+  CAPTURE_FAILED: { label: "Capture failed", variant: "destructive", icon: Bell },
 };
 
 interface Props {
@@ -305,6 +307,16 @@ export function OrderInbox({
                     {selectedOrder.notes}
                   </p>
                 )}
+                {selectedOrder.status === "REFUND_FAILED" && (
+                  <p className="mt-2 text-sm text-destructive">
+                    The refund failed and the customer is still charged. Refund them another way, then mark the order resolved with the store owner.
+                  </p>
+                )}
+                {selectedOrder.status === "CAPTURE_FAILED" && (
+                  <p className="mt-2 text-sm text-destructive">
+                    Card capture failed after retries. Contact the customer before collecting payment another way.
+                  </p>
+                )}
               </CardHeader>
               <CardContent>
                 {selectedOrder.status === "AUTHORIZED" && (
@@ -417,8 +429,18 @@ export function OrderInbox({
                   )}
                   <div className="flex justify-between pt-1.5 text-base font-semibold">
                     <span>Total</span>
-                    <span className="tabular-nums">{money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}</span>
+                    <span className="tabular-nums" data-testid="order-total">
+                      {money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}
+                    </span>
                   </div>
+                  {selectedOrder.capturedAmountCents != null && selectedOrder.capturedAmountCents > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Captured</span>
+                      <span className="tabular-nums" data-testid="order-captured">
+                        {money(selectedOrder.capturedAmountCents)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

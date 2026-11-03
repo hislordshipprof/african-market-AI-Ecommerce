@@ -2,6 +2,7 @@ import { storeScopedTransaction, lockStoreRow, getNextOrderNumber, storeScoped }
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { sendOrderAuthorized } from "../inngest/send";
+import { platformFeeCentsForCapture } from "../order/platform-fee";
 import type {
   CheckoutQuote,
   Contact,
@@ -309,6 +310,7 @@ export async function placeOrder(
         bufferCents: quote.bufferCents,
         totalAuthorizedCents: quote.holdCents,
         paymentIntentId,
+        platformFeeCents: platformFeeCentsForCapture(quote.totalCents),
         notes: notes || null,
       },
     });

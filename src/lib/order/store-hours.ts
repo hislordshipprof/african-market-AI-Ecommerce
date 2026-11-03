@@ -9,36 +9,35 @@ const DAY_KEYS: Record<number, string[]> = {
 };
 
 function parseTimeMinutes(raw: string): number | null {
-  const trimmed = raw.trim().toLowerCase();
+  const trimmed = raw.trim().toLowerCase().replace(/\./g, "");
+  // 24h "09:00" / "21:00", 12h "9:00 AM", and compact "9am" / "9 PM".
+  const match = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!match) return null;
 
-  // "HH:MM" (24h)
-  const match24 = trimmed.match(/^(\d{1,2}):(\d{2})$/);
-  if (match24) {
-    const h = parseInt(match24[1], 10);
-    const m = parseInt(match24[2], 10);
-    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return h * 60 + m;
+  let h = parseInt(match[1], 10);
+  const m = match[2] !== undefined ? parseInt(match[2], 10) : 0;
+  const ampm = match[3];
+  if (m < 0 || m > 59) return null;
+
+  if (ampm) {
+    if (h < 1 || h > 12) return null;
+    if (ampm === "am" && h === 12) h = 0;
+    else if (ampm === "pm" && h !== 12) h += 12;
+  } else if (h > 23) {
     return null;
   }
 
-  // "H:MM AM/PM" (12h)
-  const match12 = trimmed.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/);
-  if (match12) {
-    let h = parseInt(match12[1], 10);
-    const m = parseInt(match12[2], 10);
-    const ampm = match12[3];
-    if (h < 1 || h > 12 || m < 0 || m > 59) return null;
-    if (ampm === "am" && h === 12) h = 0;
-    else if (ampm === "pm" && h !== 12) h += 12;
-    return h * 60 + m;
-  }
-
-  return null;
+  return h * 60 + m;
 }
+
+type DaySchedule =
+  | { kind: "range"; open: string; close: string }
+  | { kind: "unparseable"; raw: string };
 
 function findDaySchedule(
   hours: Record<string, unknown>,
   dayOfWeek: number,
-): { open: string; close: string } | null {
+): DaySchedule | null {
   const keys = DAY_KEYS[dayOfWeek];
   if (!keys) return null;
 
@@ -46,24 +45,33 @@ function findDaySchedule(
     const val = hours[key];
     if (!val) continue;
 
-    // Object format: { open: "09:00", close: "20:00" }
     if (typeof val === "object" && val !== null) {
       const obj = val as Record<string, unknown>;
       if (typeof obj.open === "string" && typeof obj.close === "string") {
-        return { open: obj.open, close: obj.close };
+        return { kind: "range", open: obj.open, close: obj.close };
       }
+      return { kind: "unparseable", raw: JSON.stringify(val) };
     }
 
-    // String format: "9:00 AM - 8:00 PM"
     if (typeof val === "string") {
-      const parts = val.split(/\s*[-–]\s*/);
-      if (parts.length === 2) {
-        return { open: parts[0], close: parts[1] };
+      const parts = val.split(/\s*[-–—]\s*/);
+      if (parts.length === 2 && parts[0] && parts[1]) {
+        return { kind: "range", open: parts[0], close: parts[1] };
       }
+      return { kind: "unparseable", raw: val };
     }
+
+    return { kind: "unparseable", raw: String(val) };
   }
 
   return null;
+}
+
+function logUnparseableHours(raw: string): void {
+  console.error(
+    "[store-hours] unparseable hours; treating the store as open for the acceptance alert",
+    raw,
+  );
 }
 
 function getStoreLocalTime(timezone: string, now: Date): { dayOfWeek: number; minuteOfDay: number } {
@@ -103,23 +111,29 @@ export function isStoreOpen(hours: unknown, timezone: string, now?: Date): boole
   }
 
   const todaySchedule = findDaySchedule(h, local.dayOfWeek);
-  if (todaySchedule) {
+  if (todaySchedule?.kind === "unparseable") {
+    logUnparseableHours(todaySchedule.raw);
+    return true;
+  }
+  if (todaySchedule?.kind === "range") {
     const openMin = parseTimeMinutes(todaySchedule.open);
     const closeMin = parseTimeMinutes(todaySchedule.close);
-    if (openMin !== null && closeMin !== null) {
-      if (closeMin > openMin) {
-        if (local.minuteOfDay >= openMin && local.minuteOfDay < closeMin) return true;
-      } else {
-        // Overnight: open >= close means open spans midnight (e.g. 20:00–02:00)
-        if (local.minuteOfDay >= openMin) return true;
-      }
+    if (openMin === null || closeMin === null) {
+      logUnparseableHours(`${todaySchedule.open}-${todaySchedule.close}`);
+      return true;
+    }
+    if (closeMin > openMin) {
+      if (local.minuteOfDay >= openMin && local.minuteOfDay < closeMin) return true;
+    } else if (local.minuteOfDay >= openMin) {
+      // Overnight: open >= close means the window spans midnight (e.g. 20:00–02:00).
+      return true;
     }
   }
 
-  // Check yesterday's schedule for overnight window carrying into today
+  // Yesterday's overnight window can still be open after midnight.
   const yesterdayDow = (local.dayOfWeek + 6) % 7;
   const yesterdaySchedule = findDaySchedule(h, yesterdayDow);
-  if (yesterdaySchedule) {
+  if (yesterdaySchedule?.kind === "range") {
     const openMin = parseTimeMinutes(yesterdaySchedule.open);
     const closeMin = parseTimeMinutes(yesterdaySchedule.close);
     if (openMin !== null && closeMin !== null && closeMin <= openMin) {

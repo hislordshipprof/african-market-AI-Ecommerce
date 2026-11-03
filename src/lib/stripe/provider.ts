@@ -126,10 +126,22 @@ export const stripeProvider: StripeProvider = {
         signature,
         secret,
       );
-      const obj = event.data?.object as { id?: string } | undefined;
+      const obj = event.data?.object as {
+        id?: string;
+        object?: string;
+        status?: string;
+        payment_intent?: string | { id?: string };
+      } | undefined;
+      const paymentIntentId =
+        typeof obj?.payment_intent === "string" ? obj.payment_intent : obj?.payment_intent?.id;
+      const refund =
+        obj?.object === "refund" && obj.id && obj.status && paymentIntentId
+          ? { id: obj.id, status: obj.status, paymentIntentId }
+          : undefined;
       return {
         type: event.type,
         accountId: obj?.id ?? event.account ?? "",
+        ...(refund ? { refund } : {}),
       } satisfies WebhookEvent;
     } catch {
       // v1 parse failed — try v2 thin event
@@ -223,11 +235,16 @@ export const stripeProvider: StripeProvider = {
     } satisfies RefundResult;
   },
 
-  async refundPayment(paymentIntentId, amountCents, idempotencyKey) {
+  async refundPayment(paymentIntentId, amountCents, idempotencyKey, options) {
     const stripe = getStripeClient();
     try {
       const refund = await stripe.refunds.create(
-        { payment_intent: paymentIntentId, amount: amountCents, reverse_transfer: true },
+        {
+          payment_intent: paymentIntentId,
+          amount: amountCents,
+          reverse_transfer: true,
+          ...(options?.refundApplicationFee ? { refund_application_fee: true } : {}),
+        },
         idempotencyKey ? { idempotencyKey } : undefined,
       );
       return {

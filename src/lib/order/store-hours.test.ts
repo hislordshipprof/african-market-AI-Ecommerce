@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { isStoreOpen } from "./store-hours";
 
 const NY = "America/New_York";
@@ -144,5 +144,30 @@ describe("isStoreOpen", () => {
     const hours = { mon: { open: "09:00", close: "21:00" } };
     const now = new Date("2026-11-02T17:00:00Z");
     expect(isStoreOpen(hours, "Not/A_Real_Zone", now)).toBe(false);
+  });
+
+  // Monday 2026-11-02 12:00 in Chicago (CST, UTC-6) and 17:00 UTC = 12:00 ET.
+  const mondayNoonChicago = new Date("2026-11-02T18:00:00Z");
+  const mondayNoonEastern = new Date("2026-11-02T17:00:00Z");
+  const mondayTenPmEastern = new Date("2026-11-03T03:00:00Z");
+
+  it.each([
+    ["9am-9pm", mondayNoonEastern, true],
+    ["09:00-21:00", mondayNoonEastern, true],
+    ["09:00-21:00", mondayTenPmEastern, false],
+    ["9:00 AM - 9:00 PM", mondayNoonEastern, true],
+    ["9 AM - 8 PM", mondayNoonChicago, true],
+    ["9pm-2am", new Date("2026-11-03T04:00:00Z"), true],
+    ["9pm-2am", new Date("2026-11-03T06:00:00Z"), true],
+    ["9pm-2am", new Date("2026-11-03T08:00:00Z"), false],
+  ])("parses %s at %s → open=%s", (range, now, open) => {
+    expect(isStoreOpen({ monday: range }, now === mondayNoonChicago ? CHICAGO : NY, now)).toBe(open);
+  });
+
+  it("unparseable hours log and count as open", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(isStoreOpen({ monday: "all day" }, NY, mondayNoonEastern)).toBe(true);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

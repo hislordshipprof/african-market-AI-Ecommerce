@@ -11,6 +11,11 @@ vi.mock("./update-store-status", () => ({
 }));
 
 import { updateStoreOnboardingStatus } from "./update-store-status";
+import { markTerminalRefundFailure } from "@/lib/order/service";
+
+vi.mock("@/lib/order/service", () => ({
+  markTerminalRefundFailure: vi.fn().mockResolvedValue({ ok: true, action: "refund_failed" }),
+}));
 
 async function callWebhook(body: string, signature: string) {
   const { POST } = await import("@/app/api/webhooks/stripe/route");
@@ -32,6 +37,7 @@ describe("Stripe webhook handler", () => {
     reset();
     setStripeProvider(fakeStripeProvider);
     vi.mocked(updateStoreOnboardingStatus).mockClear();
+    vi.mocked(markTerminalRefundFailure).mockClear();
   });
 
   afterEach(() => {
@@ -73,6 +79,52 @@ describe("Stripe webhook handler", () => {
     expect(updateStoreOnboardingStatus).toHaveBeenCalledWith(
       "acct_fake_store_123",
     );
+  });
+
+  it("refund.failed alerts the order service", async () => {
+    const res = await callWebhook(
+      JSON.stringify({
+        type: "refund.failed",
+        data: {
+          object: {
+            object: "refund",
+            id: "re_failed_1",
+            status: "failed",
+            payment_intent: "pi_failed_1",
+          },
+        },
+      }),
+      VALID_WEBHOOK_SIGNATURE,
+    );
+    expect(res.status).toBe(200);
+    expect(markTerminalRefundFailure).toHaveBeenCalledWith({
+      paymentIntentId: "pi_failed_1",
+      refundId: "re_failed_1",
+      refundStatus: "failed",
+    });
+  });
+
+  it("refund.updated canceled alerts the order service", async () => {
+    const res = await callWebhook(
+      JSON.stringify({
+        type: "refund.updated",
+        data: {
+          object: {
+            object: "refund",
+            id: "re_canceled_1",
+            status: "canceled",
+            payment_intent: "pi_canceled_1",
+          },
+        },
+      }),
+      VALID_WEBHOOK_SIGNATURE,
+    );
+    expect(res.status).toBe(200);
+    expect(markTerminalRefundFailure).toHaveBeenCalledWith({
+      paymentIntentId: "pi_canceled_1",
+      refundId: "re_canceled_1",
+      refundStatus: "canceled",
+    });
   });
 
   it("returns 200 but does not update store for unrelated event types", async () => {

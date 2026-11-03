@@ -192,6 +192,27 @@ export async function findOrphanedAuthorizedOrders(): Promise<Array<{ id: string
   });
 }
 
+export async function findOrderByPaymentIntent(
+  paymentIntentId: string,
+): Promise<{ id: string; storeId: string; status: string; refundId: string | null } | null> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{
+      id: string;
+      store_id: string;
+      status: string;
+      refund_id: string | null;
+    }>>`
+      SELECT id, store_id, status, refund_id
+      FROM orders
+      WHERE payment_intent_id = ${paymentIntentId}
+      LIMIT 1
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    return { id: row.id, storeId: row.store_id, status: row.status, refundId: row.refund_id };
+  });
+}
+
 export async function findStuckTransitionalOrders(): Promise<Array<{ id: string; storeId: string }>> {
   const cutoff = new Date(Date.now() - 5 * 60_000);
   return platformAdminTransaction(async (tx) => {

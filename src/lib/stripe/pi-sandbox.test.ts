@@ -146,6 +146,33 @@ describe.skipIf(!hasKey)(
       ).rejects.toThrow(/amount_too_small|\$0\.50/i);
     });
 
+    it("capture with an application fee refunds that fee on a full refund", async () => {
+      const piId = await createAuthorizedPI(1000);
+      await stripeProvider.capturePaymentIntent(piId, 1000, `cap-fee-${piId}`, 100);
+      const captured = await stripe.paymentIntents.retrieve(piId);
+      expect(captured.application_fee_amount).toBe(100);
+
+      const refund = await stripeProvider.refundPayment(piId, 1000, `refund-fee-${piId}`, {
+        refundApplicationFee: true,
+      });
+      expect(refund.status).toBe("succeeded");
+      expect(refund.amountRefunded).toBe(1000);
+
+      const after = await stripe.paymentIntents.retrieve(piId, {
+        expand: ["latest_charge.application_fee"],
+      });
+      const charge = after.latest_charge;
+      if (!charge || typeof charge === "string") {
+        throw new Error("expected expanded latest_charge");
+      }
+      const fee = charge.application_fee;
+      if (!fee || typeof fee === "string") {
+        throw new Error("expected expanded application_fee");
+      }
+      expect(fee.amount).toBe(100);
+      expect(fee.amount_refunded).toBe(100);
+    });
+
     it("capture above authorization throws amount_too_large", async () => {
       const piId = await createAuthorizedPI(500);
       await expect(
