@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { auth } from "./auth";
-import { authPrisma, platformAdmin } from "./db";
+import { authPrisma } from "./db";
 import { getTestSentEmails, clearTestSentEmails } from "./email/send";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -83,17 +83,8 @@ describe("auth integration (real DB, app_runtime)", () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.$executeRawUnsafe(
-        `INSERT INTO stores (id, name, slug, status, updated_at) VALUES ($1, 'Integ Test Store', $2, 'active', now())`,
-        storeId,
-        storeSlug,
-      );
-      await tx.$executeRawUnsafe(
-        `INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES ($1, $2, $3, 'staff', now())`,
-        crypto.randomUUID(),
-        storeId,
-        staffUserId,
-      );
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, 'Integ Test Store', ${storeSlug}, 'active', now())`;
+      await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeId}, ${staffUserId}, 'staff', now())`;
     });
   });
 
@@ -101,18 +92,15 @@ describe("auth integration (real DB, app_runtime)", () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.$executeRawUnsafe(
-        `DELETE FROM store_memberships WHERE store_id = $1`,
-        storeId,
-      );
+      await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id = ${storeId}`;
       const emails = [customerEmail, staffEmail, adminEmail];
       for (const email of emails) {
-        await tx.$executeRawUnsafe(`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = $1)`, email);
-        await tx.$executeRawUnsafe(`DELETE FROM accounts WHERE user_id IN (SELECT id FROM users WHERE email = $1)`, email);
-        await tx.$executeRawUnsafe(`DELETE FROM verifications WHERE identifier = $1`, email);
-        await tx.$executeRawUnsafe(`DELETE FROM users WHERE email = $1`, email);
+        await tx.$executeRaw`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+        await tx.$executeRaw`DELETE FROM accounts WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+        await tx.$executeRaw`DELETE FROM verifications WHERE identifier = ${email}`;
+        await tx.$executeRaw`DELETE FROM users WHERE email = ${email}`;
       }
-      await tx.$executeRawUnsafe(`DELETE FROM stores WHERE id = $1`, storeId);
+      await tx.$executeRaw`DELETE FROM stores WHERE id = ${storeId}`;
     });
   });
 
@@ -168,11 +156,7 @@ describe("auth integration (real DB, app_runtime)", () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.$executeRawUnsafe(
-        `DELETE FROM store_memberships WHERE store_id = $1 AND user_id = $2`,
-        storeId,
-        staffUserId,
-      );
+      await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id = ${storeId} AND user_id = ${staffUserId}`;
     });
 
     // Now request magic link (should send because user is currently a plain customer)
@@ -188,12 +172,7 @@ describe("auth integration (real DB, app_runtime)", () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.$executeRawUnsafe(
-        `INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES ($1, $2, $3, 'staff', now())`,
-        crypto.randomUUID(),
-        storeId,
-        staffUserId,
-      );
+      await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeId}, ${staffUserId}, 'staff', now())`;
     });
 
     // Verify should now fail because session.create.before sees the membership via platformAdmin
@@ -254,11 +233,7 @@ describe("auth integration (real DB, app_runtime)", () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.$executeRawUnsafe(
-        `INSERT INTO stores (id, name, slug, status, updated_at) VALUES ($1, 'Integ Store 2', $2, 'active', now())`,
-        store2Id,
-        store2Slug,
-      );
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${store2Id}, 'Integ Store 2', ${store2Slug}, 'active', now())`;
     });
 
     try {
@@ -273,20 +248,8 @@ describe("auth integration (real DB, app_runtime)", () => {
       await authPrisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
         await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-        await tx.$executeRawUnsafe(
-          `INSERT INTO customers (id, store_id, user_id, name, email, updated_at) VALUES ($1, $2, $3, 'Customer A', $4, now())`,
-          crypto.randomUUID(),
-          storeId,
-          user!.id,
-          customerEmail,
-        );
-        await tx.$executeRawUnsafe(
-          `INSERT INTO customers (id, store_id, user_id, name, email, updated_at) VALUES ($1, $2, $3, 'Customer B', $4, now())`,
-          crypto.randomUUID(),
-          store2Id,
-          user!.id,
-          customerEmail,
-        );
+        await tx.$executeRaw`INSERT INTO customers (id, store_id, user_id, name, email, updated_at) VALUES (${crypto.randomUUID()}, ${storeId}, ${user!.id}, 'Customer A', ${customerEmail}, now())`;
+        await tx.$executeRaw`INSERT INTO customers (id, store_id, user_id, name, email, updated_at) VALUES (${crypto.randomUUID()}, ${store2Id}, ${user!.id}, 'Customer B', ${customerEmail}, now())`;
       });
 
       // Verify: one User, two Customer rows
@@ -298,10 +261,7 @@ describe("auth integration (real DB, app_runtime)", () => {
       const customers = await authPrisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
         await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-        return tx.$queryRawUnsafe<Array<{ store_id: string }>>(
-          `SELECT store_id FROM customers WHERE user_id = $1`,
-          user!.id,
-        );
+        return tx.$queryRaw<Array<{ store_id: string }>>`SELECT store_id FROM customers WHERE user_id = ${user!.id}`;
       });
       expect(customers).toHaveLength(2);
       const storeIds = customers.map((c) => c.store_id);
@@ -312,8 +272,8 @@ describe("auth integration (real DB, app_runtime)", () => {
       await authPrisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
         await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-        await tx.$executeRawUnsafe(`DELETE FROM customers WHERE store_id IN ($1, $2)`, storeId, store2Id);
-        await tx.$executeRawUnsafe(`DELETE FROM stores WHERE id = $1`, store2Id);
+        await tx.$executeRaw`DELETE FROM customers WHERE store_id IN (${storeId}, ${store2Id})`;
+        await tx.$executeRaw`DELETE FROM stores WHERE id = ${store2Id}`;
       });
     }
   });
