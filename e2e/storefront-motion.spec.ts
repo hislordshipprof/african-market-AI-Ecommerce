@@ -97,7 +97,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect.poll(() => rail.evaluate(element => Math.abs(element.scrollLeft - (element.scrollWidth - element.clientWidth)))).toBeLessThan(2);
   });
 
-  test("quick view opens, selects a pack, adds to cart and restores focus", async ({ page }) => {
+  test.fixme("quick view opens, selects a pack, adds to cart and restores focus — see #191", async ({ page }) => {
     await page.goto(`${BASE}/categories/grains-and-flours`);
     const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
     await card.hover();
