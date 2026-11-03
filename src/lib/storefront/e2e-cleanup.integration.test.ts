@@ -11,6 +11,8 @@ import { E2E_LISTING_PREFIX } from "./e2e-listings";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+// Unique per run; the (store_id, number) constraint needs distinct numbers inside one store.
+const RUN_BASE = 100_000 + Math.floor(Math.random() * 1_000_000_000);
 const ZERO = { listings: 0, orders: 0, customers: 0 };
 
 type Tx = Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0];
@@ -102,7 +104,7 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
         data: {
           id,
           storeId,
-          number: 100000 + ++orderNo + Math.floor(Math.random() * 1_000_000),
+          number: (RUN_BASE + ++orderNo),
           customerId,
           subtotalCents: 500,
           bufferCents: 0,
@@ -387,6 +389,7 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
     const lB = await seedListing(storeB, bName);
     const cB = await seedCustomer(storeB);
     const oB = await seedOrder(storeB, cB, [lB.variantId]);
+    const kB = await seedCart(storeB, null, lB.variantId);
     const lA = await seedListing(storeA, bName);
     const cA = await seedCustomer(storeA);
     const oA = await seedOrder(storeA, cA, [lA.variantId]);
@@ -397,7 +400,129 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
     expect(await inB().order(oB)).toBe(true);
     expect(await inB().orderLines(oB)).toBe(1);
     expect(await inB().customer(cB)).toBe(true);
+    expect(await inB().cart(kB)).toBe(true);
+    expect(await asAdmin(raw, (tx) => tx.cartLine.count({ where: { cartId: kB } }))).toBe(1);
+    expect(await asAdmin(raw, (tx) => tx.stockEvent.count({ where: { storeId: storeB, listingId: lB.id } }))).toBe(1);
+    expect(await asAdmin(raw, (tx) => tx.listingVariant.count({ where: { id: lB.variantId } }))).toBe(1);
     await deleteE2eListings({ storeSlug: slugB });
+  });
+
+  /**
+   * Wraps the real interactive transaction so a sweep pauses right after `model.method` returns. Both
+   * sweeps wait at the barrier until each has arrived, or 1.5 s pass (a sweep serialized behind a lock
+   * never arrives, which is fine). No DB result is replaced.
+   */
+  function barrierClient(
+    model: "order" | "customer",
+    method: "findMany" | "deleteMany",
+    barrier: { n: number; waiters: Array<() => void> },
+  ): PrismaClient {
+    const arrive = () =>
+      new Promise<void>((resolve) => {
+        barrier.n += 1;
+        barrier.waiters.push(resolve);
+        if (barrier.n >= 2) barrier.waiters.splice(0).forEach((w) => w());
+        else setTimeout(resolve, 1500);
+      });
+    const wrapDelegate = (d: object) =>
+      new Proxy(d, {
+        get(t, m) {
+          const f = Reflect.get(t, m, t) as (...a: unknown[]) => Promise<unknown>;
+          if (m !== method) return typeof f === "function" ? f.bind(t) : f;
+          return async (...a: unknown[]) => {
+            const r = await f.apply(t, a);
+            await arrive();
+            return r;
+          };
+        },
+      });
+    const wrapTx = (tx: Tx) =>
+      new Proxy(tx, {
+        get(t, p) {
+          const v = Reflect.get(t, p, t);
+          if (p === model) return wrapDelegate(v as object);
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    return new Proxy(raw, {
+      get(target, prop) {
+        if (prop === "$transaction") {
+          return (fn: (tx: Tx) => Promise<unknown>, opts: unknown) =>
+            (target.$transaction as (f: unknown, o: unknown) => Promise<unknown>)((tx: Tx) => fn(wrapTx(tx)), opts);
+        }
+        const v = Reflect.get(target, prop, target);
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    }) as unknown as PrismaClient;
+  }
+
+  it("concurrent sweeps with different names still remove the order they jointly empty (AD2)", async () => {
+    await resetA();
+    const n1 = nm("j1");
+    const n2 = nm("j2");
+    const l1 = await seedListing(storeA, n1);
+    const l2 = await seedListing(storeA, n2);
+    const c = await seedCustomer(storeA);
+    const o = await seedOrder(storeA, c, [l1.variantId, l2.variantId]);
+    const barrier = { n: 0, waiters: [] as Array<() => void> };
+    await Promise.all([
+      deleteE2eListings({ names: [n1], storeSlug: slugA, client: barrierClient("order", "findMany", barrier) }),
+      deleteE2eListings({ names: [n2], storeSlug: slugA, client: barrierClient("order", "findMany", barrier) }),
+    ]);
+    expect(await inA().orderLines(o)).toBe(0);
+    expect(await inA().order(o)).toBe(false);
+    expect(await inA().customer(c)).toBe(false);
+  });
+
+  it("concurrent sweeps still remove a customer whose two orders are emptied separately (AD2)", async () => {
+    await resetA();
+    const n1 = nm("k1");
+    const n2 = nm("k2");
+    const l1 = await seedListing(storeA, n1);
+    const l2 = await seedListing(storeA, n2);
+    const c = await seedCustomer(storeA);
+    await seedOrder(storeA, c, [l1.variantId]);
+    await seedOrder(storeA, c, [l2.variantId]);
+    const barrier = { n: 0, waiters: [] as Array<() => void> };
+    await Promise.all([
+      deleteE2eListings({ names: [n1], storeSlug: slugA, client: barrierClient("customer", "deleteMany", barrier) }),
+      deleteE2eListings({ names: [n2], storeSlug: slugA, client: barrierClient("customer", "deleteMany", barrier) }),
+    ]);
+    expect(await inA().customer(c)).toBe(false);
+  });
+
+  it("keeps a customer that a cart in another store references (AD1)", async () => {
+    await resetA();
+    const l = await seedListing(storeA, nm("xcart"));
+    const c = await seedCustomer(storeA);
+    await seedOrder(storeA, c, [l.variantId]);
+    const kB = uid("kb");
+    // The single-column carts.customer_id FK accepts a store-B cart pointing at a store-A customer.
+    await asStore(raw, storeB, (tx) => tx.cart.create({ data: { id: kB, storeId: storeB, customerId: c } }));
+    await sweepA();
+    expect(await inA().customer(c)).toBe(true);
+    const cart = await asAdmin(raw, (tx) => tx.cart.findUnique({ where: { id: kB } }));
+    expect(cart?.customerId).toBe(c);
+    await asAdmin(raw, (tx) => tx.cart.deleteMany({ where: { id: kB } }));
+  });
+
+  it("disconnects only a client it created, never an injected one (ST2)", async () => {
+    await resetA();
+    let disconnects = 0;
+    const spy = new Proxy(raw, {
+      get(t, p) {
+        if (p === "$disconnect") return async () => void (disconnects += 1);
+        const v = Reflect.get(t, p, t);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    }) as unknown as PrismaClient;
+    await seedListing(storeA, nm("lc"));
+    await deleteE2eListings({ storeSlug: slugA, client: spy });
+    const failing = new Proxy(spy, {
+      get: (t, p) => (p === "$transaction" ? () => Promise.reject(new Error("boom")) : Reflect.get(t, p, t)),
+    }) as unknown as PrismaClient;
+    await expect(deleteE2eListings({ storeSlug: slugA, client: failing })).rejects.toThrow("boom");
+    expect(disconnects).toBe(0);
   });
 
   it("with app.store_id = A, deleting store-B orders and customers affects 0 rows and creating one fails WITH CHECK", async () => {

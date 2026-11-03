@@ -51,6 +51,11 @@ export async function deleteE2eListings(
       async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
         await tx.$executeRaw`SELECT set_config('app.store_id', ${storeId}, true)`;
+        // Serialize sweeps per store before discovery. Under READ COMMITTED two concurrent sweeps each see
+        // the other's uncommitted line deletes as still present, so neither deletes the order or customer
+        // they jointly empty, and a retry has no candidates left. The lock is transaction-scoped and does
+        // not touch the stores row.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"e2e-sweep:" + storeId}, 0))`;
 
         const ids = (
           await tx.listing.findMany({ where: { storeId, customName: nameFilter }, select: { id: true } })
@@ -85,11 +90,22 @@ export async function deleteE2eListings(
           select: { id: true, customerId: true },
         });
         const orders = await tx.order.deleteMany({ where: { storeId, id: { in: emptied.map((o) => o.id) } } });
+        const candidateCustomerIds = [...new Set(emptied.map((o) => o.customerId))];
+        // carts.customer_id is a single-column FK (ON DELETE SET NULL), so a cart in ANOTHER store can
+        // point at this store's customer, and the store-scoped context cannot see it. Look for such carts
+        // under the platform-admin policy (read-only), then drop back to the store context for the delete.
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        const referenced = new Set(
+          (await tx.cart.findMany({ where: { customerId: { in: candidateCustomerIds } }, select: { customerId: true } })).map(
+            (c) => c.customerId,
+          ),
+        );
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'false', true)`;
         // Orders first: orders.customer_id is RESTRICT. Customers with other orders or any cart stay.
         const customers = await tx.customer.deleteMany({
           where: {
             storeId,
-            id: { in: [...new Set(emptied.map((o) => o.customerId))] },
+            id: { in: candidateCustomerIds.filter((id) => !referenced.has(id)) },
             orders: { none: {} },
             carts: { none: {} },
           },
