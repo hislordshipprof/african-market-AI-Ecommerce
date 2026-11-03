@@ -1,7 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { auth } from "./auth";
-import { authPrisma } from "./db";
-import { getTestSentEmails, clearTestSentEmails } from "./email/send";
+import { authPrisma, storeScoped } from "./db";
+import { findOrCreateCustomer } from "./customer-auth";
+import {
+  getTestSentEmails,
+  clearTestSentEmails,
+  setEmailSenderForTests,
+  type EmailMessage,
+} from "./email/send";
 
 const BASE = "http://localhost:3000/api/auth";
 const suffix = Date.now();
@@ -10,8 +16,12 @@ async function authPost(
   path: string,
   body: unknown,
   cookies?: string,
+  extra?: Record<string, string>,
 ): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...extra,
+  };
   if (cookies) headers.cookie = cookies;
   return auth.handler(
     new Request(`${BASE}${path}`, {
@@ -22,8 +32,12 @@ async function authPost(
   );
 }
 
-async function authGet(url: string, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = {};
+async function authGet(
+  url: string,
+  cookies?: string,
+  extra?: Record<string, string>,
+): Promise<Response> {
+  const headers: Record<string, string> = { ...extra };
   if (cookies) headers.cookie = cookies;
   return auth.handler(new Request(url, { headers, redirect: "manual" }));
 }
@@ -32,13 +46,22 @@ function collectCookies(res: Response): string {
   return (res.headers.getSetCookie?.() ?? []).join("; ");
 }
 
-function extractVerifyUrl(): string {
-  const emails = getTestSentEmails();
-  const last = emails[emails.length - 1];
-  if (!last) throw new Error("No email sent");
-  const match = last.html.match(/href="([^"]+)"/);
+function extractVerifyUrl(html = getTestSentEmails().at(-1)?.html): string {
+  if (!html) throw new Error("No email sent");
+  const match = html.match(/href="([^"]+)"/);
   if (!match) throw new Error("No href in email HTML");
   return match[1].replace(/&amp;/g, "&");
+}
+
+async function latestMagicLink(email: string): Promise<{ token: string; id: string } | null> {
+  const rows = await authPrisma.verification.findMany({
+    where: { identifier: { startsWith: "magic-link:" } },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
+  const row = rows.find((item) => item.value.includes(email));
+  if (!row) return null;
+  return { id: row.id, token: row.identifier.replace(/^magic-link:/, "") };
 }
 
 describe("auth integration (real DB, app_runtime)", () => {
@@ -95,9 +118,10 @@ describe("auth integration (real DB, app_runtime)", () => {
       await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id = ${storeId}`;
       const emails = [customerEmail, staffEmail, adminEmail];
       for (const email of emails) {
+        await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
         await tx.$executeRaw`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
         await tx.$executeRaw`DELETE FROM accounts WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
-        await tx.$executeRaw`DELETE FROM verifications WHERE identifier = ${email}`;
+        await tx.$executeRaw`DELETE FROM verifications WHERE identifier = ${email} OR value LIKE ${"%" + email + "%"}`;
         await tx.$executeRaw`DELETE FROM users WHERE email = ${email}`;
       }
       await tx.$executeRaw`DELETE FROM stores WHERE id = ${storeId}`;
@@ -106,6 +130,7 @@ describe("auth integration (real DB, app_runtime)", () => {
 
   beforeEach(() => {
     clearTestSentEmails();
+    setEmailSenderForTests(null);
   });
 
   it("sends magic link email to plain customer", async () => {
@@ -202,73 +227,233 @@ describe("auth integration (real DB, app_runtime)", () => {
     expect(body.session.twoFactorVerified).toBe(false);
   });
 
-  it("E4: magic-link response is identical for staff, unknown, and customer emails (K2 timing)", async () => {
-    const unknownEmail = `integ-unknown-${suffix}@test.example`;
-    const results: Array<{ status: number; body: unknown }> = [];
+  it("handler responds before a slow sender resolves, and a rejection is logged without the address", async () => {
+    let release: (error: Error) => void = () => {};
+    const gate = new Promise<never>((_, reject) => {
+      release = reject;
+    });
+    let started = false;
+    setEmailSenderForTests({
+      async send() {
+        started = true;
+        await gate;
+        return { id: "never" };
+      },
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    for (const email of [staffEmail, unknownEmail, customerEmail]) {
-      clearTestSentEmails();
-      const res = await authPost("/sign-in/magic-link", {
-        email,
-        callbackURL: "/account",
-      });
-      const body = await res.json();
-      results.push({ status: res.status, body });
-    }
+    const res = await authPost("/sign-in/magic-link", {
+      email: customerEmail,
+      callbackURL: "/account",
+    });
 
-    // All three return the same status
-    expect(results[0].status).toBe(200);
-    expect(results[1].status).toBe(200);
-    expect(results[2].status).toBe(200);
+    expect(started).toBe(true);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: true });
+    expect(errorSpy).not.toHaveBeenCalled();
 
-    // Response structure is the same (no enumeration leak)
-    expect(typeof results[0].body).toBe(typeof results[1].body);
-    expect(typeof results[1].body).toBe(typeof results[2].body);
+    release(new Error(`smtp down for ${customerEmail}`));
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalled();
+    });
+    const logged = errorSpy.mock.calls.flat().join(" ");
+    expect(logged).toContain("magic_link_delivery_failed");
+    expect(logged).toContain("[redacted]");
+    expect(logged).not.toContain(customerEmail);
+    errorSpy.mockRestore();
   });
 
-  it("E6/AC4: same email on two stores creates one User, two Customers", async () => {
-    // Create a second store
+  it("E4: staff, unknown, and customer magic-link responses match and return before a slow sender", async () => {
+    const unknownEmail = `integ-unknown-${suffix}@test.example`;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const recorded: EmailMessage[] = [];
+    setEmailSenderForTests({
+      async send(message) {
+        await gate;
+        recorded.push(message);
+        return { id: "slow" };
+      },
+    });
+
+    const results: Array<{ status: number; body: unknown }> = [];
+    for (const email of [staffEmail, unknownEmail, customerEmail]) {
+      const res = await authPost(
+        "/sign-in/magic-link",
+        { email, callbackURL: "/account" },
+        undefined,
+        { "x-store-slug": storeSlug },
+      );
+      results.push({ status: res.status, body: await res.json() });
+    }
+
+    expect(recorded).toHaveLength(0);
+    expect(results[0]).toEqual(results[1]);
+    expect(results[1]).toEqual(results[2]);
+    expect(results[0]).toEqual({ status: 200, body: { status: true } });
+
+    release();
+    await vi.waitFor(() => {
+      expect(recorded.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("magic-link email uses the store name, not the platform name", async () => {
+    const res = await authPost(
+      "/sign-in/magic-link",
+      { email: customerEmail, callbackURL: "/account" },
+      undefined,
+      { "x-store-slug": storeSlug, host: `${storeSlug}.localhost:3000` },
+    );
+    expect(res.status).toBe(200);
+    const message = getTestSentEmails().at(-1);
+    expect(message?.subject).toBe("Sign in to Integ Test Store");
+    expect(message?.html).toContain("Integ Test Store");
+    expect(message?.html).not.toContain("African Markets");
+    expect(message?.from).toContain("Integ Test Store");
+  });
+
+  it("E5: an expired magic link does not create a session", async () => {
+    await authPost("/sign-in/magic-link", {
+      email: customerEmail,
+      callbackURL: "/account",
+    });
+    const link = await latestMagicLink(customerEmail);
+    expect(link).toBeTruthy();
+    await authPrisma.verification.update({
+      where: { id: link!.id },
+      data: { expiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    const verifyRes = await authGet(
+      `${BASE}/magic-link/verify?token=${link!.token}&callbackURL=/account`,
+    );
+    expect(verifyRes.status).toBeGreaterThanOrEqual(300);
+    expect(verifyRes.headers.get("location")).toContain("INVALID_TOKEN");
+    expect(collectCookies(verifyRes)).not.toContain("session_token");
+  });
+
+  it("E5: a used magic link fails on the second use", async () => {
+    await authPost("/sign-in/magic-link", {
+      email: customerEmail,
+      callbackURL: "/account",
+    });
+    const verifyUrl = extractVerifyUrl();
+    const first = await authGet(verifyUrl);
+    expect(collectCookies(first)).toContain("session_token");
+
+    const second = await authGet(verifyUrl);
+    expect(second.headers.get("location") ?? "").toContain("INVALID_TOKEN");
+    expect(collectCookies(second)).not.toContain("session_token");
+  });
+
+  it("E8: sign-out ends the session", async () => {
+    await authPost("/sign-in/magic-link", {
+      email: customerEmail,
+      callbackURL: "/account",
+    });
+    const verifyRes = await authGet(extractVerifyUrl());
+    const cookies = collectCookies(verifyRes);
+    const before = await authGet(`${BASE}/get-session`, cookies);
+    expect((await before.json()).session).toBeTruthy();
+
+    const signedOut = await authPost("/sign-out", {}, cookies);
+    expect(signedOut.status).toBeLessThan(400);
+    const after = await authGet(`${BASE}/get-session`, collectCookies(signedOut));
+    const body = await after.json();
+    expect(body?.session ?? null).toBeNull();
+  });
+
+  it("E6/AC4: two store-host sign-ins sync one user, two sessions, and two isolated customers", async () => {
     const store2Id = crypto.randomUUID();
     const store2Slug = `integ-store2-${suffix}`;
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${store2Id}, 'Integ Store 2', ${store2Slug}, 'active', now())`;
+      await tx.$executeRaw`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = ${customerEmail})`;
+      await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${customerEmail})`;
     });
 
     try {
-      // Get the customer user
-      const user = await authPrisma.user.findFirst({
-        where: { email: customerEmail },
-        select: { id: true },
-      });
-      expect(user).toBeTruthy();
+      const sessionIds: string[] = [];
+      let user: { id: string; name: string; email: string } | null = null;
 
-      // Create customer records in both stores
-      await authPrisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-        await tx.$executeRaw`INSERT INTO customers (id, store_id, user_id, name, email, updated_at) VALUES (${crypto.randomUUID()}, ${storeId}, ${user!.id}, 'Customer A', ${customerEmail}, now())`;
-        await tx.$executeRaw`INSERT INTO customers (id, store_id, user_id, name, email, updated_at) VALUES (${crypto.randomUUID()}, ${store2Id}, ${user!.id}, 'Customer B', ${customerEmail}, now())`;
-      });
+      for (const [slug, id] of [
+        [storeSlug, storeId],
+        [store2Slug, store2Id],
+      ] as const) {
+        clearTestSentEmails();
+        const sent = await authPost(
+          "/sign-in/magic-link",
+          { email: customerEmail, callbackURL: "/account" },
+          undefined,
+          { "x-store-slug": slug, host: `${slug}.localhost:3000` },
+        );
+        expect(sent.status).toBe(200);
+        const verifyRes = await authGet(extractVerifyUrl(), undefined, {
+          host: `${slug}.localhost:3000`,
+          "x-store-slug": slug,
+        });
+        const cookies = collectCookies(verifyRes);
+        expect(cookies).toContain("session_token");
+        const sessionRes = await authGet(`${BASE}/get-session`, cookies);
+        const sessionBody = await sessionRes.json();
+        expect(sessionBody.user.email).toBe(customerEmail);
+        sessionIds.push(sessionBody.session.id);
+        user = sessionBody.user;
+        await findOrCreateCustomer(id, sessionBody.user);
+      }
 
-      // Verify: one User, two Customer rows
-      const users = await authPrisma.user.findMany({
-        where: { email: customerEmail },
-      });
+      expect(new Set(sessionIds).size).toBe(2);
+      const users = await authPrisma.user.findMany({ where: { email: customerEmail } });
       expect(users).toHaveLength(1);
-
-      const customers = await authPrisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-        return tx.$queryRaw<Array<{ store_id: string }>>`SELECT store_id FROM customers WHERE user_id = ${user!.id}`;
+      const sessions = await authPrisma.session.findMany({
+        where: { id: { in: sessionIds } },
       });
-      expect(customers).toHaveLength(2);
-      const storeIds = customers.map((c) => c.store_id);
-      expect(storeIds).toContain(storeId);
-      expect(storeIds).toContain(store2Id);
+      expect(sessions).toHaveLength(2);
+      expect(sessions.every((row) => row.userId === users[0].id)).toBe(true);
+
+      const rowsA = await storeScoped(storeId).customer.findMany({
+        where: { userId: user!.id },
+      });
+      const rowsB = await storeScoped(store2Id).customer.findMany({
+        where: { userId: user!.id },
+      });
+      expect(rowsA).toHaveLength(1);
+      expect(rowsB).toHaveLength(1);
+      expect(rowsA[0].storeId).toBe(storeId);
+      expect(rowsB[0].storeId).toBe(store2Id);
+      expect(rowsA[0].id).not.toBe(rowsB[0].id);
+
+      const crossRead = await storeScoped(storeId).customer.findMany({
+        where: { id: rowsB[0].id },
+      });
+      expect(crossRead).toHaveLength(0);
+
+      const crossWrite = await storeScoped(storeId).customer.updateMany({
+        where: { id: rowsB[0].id },
+        data: { name: "cross-store write" },
+      });
+      expect(crossWrite.count).toBe(0);
+      const untouched = await storeScoped(store2Id).customer.findFirst({
+        where: { id: rowsB[0].id },
+      });
+      expect(untouched?.name).not.toBe("cross-store write");
+
+      await expect(
+        storeScoped(storeId).customer.create({
+          data: {
+            storeId: store2Id,
+            userId: user!.id,
+            name: "illegal",
+            email: customerEmail,
+          },
+        }),
+      ).rejects.toThrow();
     } finally {
-      // Cleanup
       await authPrisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
         await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;

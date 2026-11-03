@@ -1,8 +1,11 @@
 import { betterAuth, APIError } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
-import { authPrisma, platformAdmin } from "./db";
+import { authPrisma, platform, platformAdmin } from "./db";
 import { sendEmail } from "./email/send";
+import { magicLinkMessage } from "./magic-link-mail";
+import { scheduleAfterResponse } from "./schedule-after-response";
+import { isSlugRoutable, slugFromHost } from "./slug";
 
 const relaxedAuth = process.env.AUTH_RATE_LIMIT_RELAXED === "1";
 
@@ -99,19 +102,27 @@ validateAuthSecret();
 
 const baseUrl = resolveAuthBaseUrl();
 
+function userIsPrivileged(user: {
+  role: string;
+  twoFactorEnabled: boolean;
+  memberships: { id: string }[];
+}): boolean {
+  if (user.role !== "customer" || user.twoFactorEnabled) return true;
+  return user.memberships.length > 0;
+}
+
 async function isPrivilegedUser(userId: string): Promise<boolean> {
   const user = await authPrisma.user.findUnique({
     where: { id: userId },
     select: { role: true, twoFactorEnabled: true },
   });
   if (!user) return false;
-  if (user.role !== "customer" || user.twoFactorEnabled) return true;
   const memberships = await platformAdmin.storeMembership.findMany({
     where: { userId },
     select: { id: true },
     take: 1,
   });
-  return memberships.length > 0;
+  return userIsPrivileged({ ...user, memberships });
 }
 
 async function isPrivilegedEmail(email: string): Promise<boolean> {
@@ -120,13 +131,47 @@ async function isPrivilegedEmail(email: string): Promise<boolean> {
     select: { id: true, role: true, twoFactorEnabled: true },
   });
   if (!user) return false;
-  if (user.role !== "customer" || user.twoFactorEnabled) return true;
   const memberships = await platformAdmin.storeMembership.findMany({
     where: { userId: user.id },
     select: { id: true },
     take: 1,
   });
-  return memberships.length > 0;
+  return userIsPrivileged({ ...user, memberships });
+}
+
+function requestHeaders(ctx: unknown): Headers | null {
+  if (!ctx || typeof ctx !== "object") return null;
+  const record = ctx as { headers?: unknown; request?: { headers?: unknown } };
+  if (record.headers instanceof Headers) return record.headers;
+  if (record.request?.headers instanceof Headers) return record.request.headers;
+  return null;
+}
+
+async function storeNameForMagicLink(ctx: unknown): Promise<string | null> {
+  const headers = requestHeaders(ctx);
+  if (!headers) return null;
+  const headerSlug = headers.get("x-store-slug")?.toLowerCase() ?? null;
+  const host = headers.get("host");
+  const slug =
+    headerSlug && isSlugRoutable(headerSlug)
+      ? headerSlug
+      : host
+        ? slugFromHost(host, process.env.PLATFORM_ROOT_DOMAIN)
+        : null;
+  if (!slug) return null;
+  try {
+    const store = await platform.store.findUnique({
+      where: { slug },
+      select: { name: true },
+    });
+    return store?.name ?? null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "lookup failed";
+    console.error(
+      JSON.stringify({ event: "magic_link_store_lookup_failed", message }),
+    );
+    return null;
+  }
 }
 
 export const auth = betterAuth({
@@ -145,15 +190,18 @@ export const auth = betterAuth({
     }),
     magicLink({
       expiresIn: 900,
-      sendMagicLink: async ({ email, url }) => {
+      sendMagicLink: async ({ email, url }, ctx) => {
         const normalizedEmail = email.trim().toLowerCase();
         const privileged = await isPrivilegedEmail(normalizedEmail);
         if (privileged) return;
-        sendEmail({
+        const storeName = await storeNameForMagicLink(ctx);
+        const message = magicLinkMessage({
           to: normalizedEmail,
-          subject: "Sign in to African Markets",
-          html: `<p>Click <a href="${url}">here</a> to sign in. This link expires in 15 minutes.</p>`,
-        }).catch(() => {});
+          url,
+          storeName,
+          fromAddress: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+        });
+        scheduleAfterResponse(() => sendEmail(message));
       },
       disableSignUp: false,
     }),
