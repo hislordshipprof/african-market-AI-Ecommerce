@@ -35,7 +35,7 @@ afterAll(async () => {
       await stripe.paymentIntents.cancel(id);
     } catch { /* best-effort cleanup */ }
   }
-});
+}, 60_000);
 
 describe.skipIf(!hasKey)(
   "Stripe PI sandbox (capture/cancel/refund/retrieve)",
@@ -51,7 +51,7 @@ describe.skipIf(!hasKey)(
       if (!stripeAccountId) {
         throw new Error("Need at least 1 transfers-capable sandbox account");
       }
-    });
+    }, 60_000);
 
     it("partial capture returns amount_received", async () => {
       const piId = await createAuthorizedPI(1000);
