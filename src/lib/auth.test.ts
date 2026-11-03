@@ -15,7 +15,8 @@ import {
 } from "./auth";
 import { authPrisma } from "./db";
 
-const mockFindUnique = vi.mocked(authPrisma.user.findUnique);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockFindUnique = authPrisma.user.findUnique as any;
 
 describe("auth config", () => {
   it("has session cookie cache disabled globally", () => {
