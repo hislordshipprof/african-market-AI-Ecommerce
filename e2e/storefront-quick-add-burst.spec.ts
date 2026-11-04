@@ -1987,11 +1987,21 @@ test.describe("cart recovery after a failed write", () => {
   test("restoration preserves a named substitute and uses live server data", async ({ page }) => {
     await openGrains(page);
     await addGarri(page);
+    await settle(page);
+    const cartId = await cartCookie(page);
+    await expect.poll(async () => {
+      const lines = await readCartLines("mama-ngozi", cartId);
+      return lines.some((line) => line.listingId === "mn_garri_yellow");
+    }).toBe(true);
     await page.goto(`${base}/cart`);
+    await page.reload();
     await page.getByRole("button", { name: /Replace with/ }).click();
     await page.getByRole("button").filter({ hasText: "White Garri" }).first().click();
-    await settle(page);
-    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    await expect.poll(async () => {
+      const lines = await readCartLines("mama-ngozi", cartId);
+      return lines.find((line) => line.listingId === "mn_garri_yellow")?.swapRule ?? "";
+    }).toBe("named_substitute");
+    const before = await readCartLines("mama-ngozi", cartId);
     const row = before.find((line) => line.listingId === "mn_garri_yellow");
     expect(row?.swapRule).toBe("named_substitute");
     expect(row?.substituteVariantId).toBeTruthy();
