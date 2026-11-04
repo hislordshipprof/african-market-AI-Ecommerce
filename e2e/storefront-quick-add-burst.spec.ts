@@ -778,6 +778,56 @@ test.describe("quick add limits and recovery", () => {
     await expect(page.locator("main").getByRole("listitem").filter({ hasText: "Thyme" }).getByTestId("stepper-qty")).toHaveText("1");
   });
 
+  test("a saved first add shows after reload when the cart cookie reached this host", async ({ page }) => {
+    await openGrains(page);
+    let setCookie = "";
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!setCookie && isAction(request) && body.includes("mn_garri_y_v1")) {
+        const response = await fetchAction(route);
+        expect(response.status()).toBe(200);
+        const text = await response.text();
+        expect(text).not.toContain("Maximum");
+        setCookie = response.headers()["set-cookie"] ?? "";
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expectNoCrash(page);
+    await expect(page.locator("[data-sonner-toast]").first()).toBeVisible();
+    const match = /cart_id=([^;]+)/.exec(setCookie);
+    expect(match?.[1]).toBeTruthy();
+    const saved = await readCartLines("mama-ngozi", match![1]);
+    expect(saved.find((line) => line.listingId === "mn_garri_yellow")?.qty).toBe(1);
+    // route.fetch stores the cookie on 127.0.0.1. A dropped response does not
+    // deliver it to the store host. Plant the cookie the browser would have
+    // kept if the response headers had arrived on this host.
+    await page.unroute("**/*");
+    await page.context().addCookies([
+      {
+        name: "cart_id",
+        value: match![1],
+        domain: "mama-ngozi.localhost",
+        path: "/",
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ]);
+    await page.reload();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await expect(cartCount(page)).toHaveText("1");
+    await page.goto(`${base}/cart`);
+    await expect(page.locator("main").getByRole("heading", { name: "Your basket" })).toBeVisible();
+    await expect(page.locator("main")).toContainText("1 item from");
+    await expect(page.locator("main").getByText("Yellow Garri")).toBeVisible();
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.listingId === "mn_garri_yellow")?.qty).toBe(1);
+  });
+
   test("a decrement the server still rejects stays at the saved quantity", async ({ page }) => {
     await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
     await page.goto(spices);
