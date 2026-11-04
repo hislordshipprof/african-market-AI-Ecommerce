@@ -343,8 +343,8 @@ export function CartProvider({
           paused.current.delete(key);
           return;
         }
-        if (pulled !== "ok") {
-          if (mounted.current) {
+        if (pulled === "failed") {
+          if (mounted.current && !staleDeployment.current) {
             toast.error(OFFLINE);
             setAttention(true);
           }

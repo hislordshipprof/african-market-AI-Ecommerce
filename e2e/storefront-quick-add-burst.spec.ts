@@ -44,6 +44,18 @@ function looksLikeRead(body: string) {
   return quantitiesIn(body).length === 0 && !body.includes("named_substitute") && !body.includes("store_suggests") && !body.includes("exact_only");
 }
 
+/** Node has no hosts entry for *.localhost, so the real request is fetched by IP with the original Host. */
+async function fetchAction(route: Route) {
+  const request = route.request();
+  const url = new URL(request.url());
+  const host = url.host;
+  url.hostname = "127.0.0.1";
+  return route.fetch({
+    url: url.toString(),
+    headers: { ...request.headers(), host },
+  });
+}
+
 async function burst(locator: Locator, times: number) {
   await locator.evaluate((el, n) => {
     const button = el as HTMLButtonElement;
@@ -382,7 +394,7 @@ test.describe("quick add limits and recovery", () => {
         const body = request.postData() ?? "";
         if (!held && isAction(request) && looksLikeRead(body)) {
           held = true;
-          const response = await route.fetch();
+          const response = await fetchAction(route);
           await gate;
           await route.fulfill({ response });
           return;
@@ -419,7 +431,7 @@ test.describe("quick add limits and recovery", () => {
         }
         if (dropped && !heldRead && isAction(request) && looksLikeRead(body)) {
           heldRead = route;
-          const response = await route.fetch();
+          const response = await fetchAction(route);
           await gate;
           await route.fulfill({ response });
           return;
@@ -554,7 +566,7 @@ test.describe("quick add limits and recovery", () => {
       await expect(page.locator("[data-sonner-toast]").first()).toBeVisible();
       await settle(page);
       await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
-      await expect(page.locator("[data-cart-attention]")).toBeVisible();
+      await expect(page.getByTestId("storefront-header").locator("[data-cart-attention]")).toBeVisible();
       await page.unroute("**/*");
       await garri(page).getByTestId("quick-add-btn").click();
       await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
@@ -604,14 +616,14 @@ test.describe("quick add limits and recovery", () => {
     await garri(page).getByTestId("stepper-plus").click();
     await expectNoCrash(page);
     await expect(page.locator("[data-sonner-toast]").first()).toBeVisible();
-    await expect(page.locator("[data-cart-attention]")).toBeVisible();
+    await expect(page.getByTestId("storefront-header").locator("[data-cart-attention]")).toBeVisible();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
     await settle(page);
     await page.unroute("**/*");
     await garri(page).getByTestId("stepper-plus").click();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
     await settle(page);
-    await expect(page.locator("[data-cart-attention]")).toHaveCount(0);
+    await expect(page.getByTestId("storefront-header").locator("[data-cart-attention]")).toHaveCount(0);
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
   });
@@ -668,7 +680,7 @@ test.describe("quick add limits and recovery", () => {
       const body = request.postData() ?? "";
       if (!held && isAction(request) && looksLikeRead(body)) {
         held = true;
-        const response = await route.fetch();
+        const response = await fetchAction(route);
         await gate;
         await route.fulfill({ response });
         return;
@@ -677,14 +689,15 @@ test.describe("quick add limits and recovery", () => {
     });
     await page.getByRole("button").filter({ hasText: "White Garri" }).first().click();
     await expect.poll(() => held).toBe(true);
-    await page.getByTestId("stepper-plus").click();
+    const cartMain = page.locator("main");
+    await cartMain.getByTestId("stepper-plus").click();
     release();
-    await expect(page.getByRole("button", { name: /Named substitute chosen/ })).toBeVisible();
-    await expect(page.getByTestId("stepper-qty")).toHaveText("2");
+    await expect(cartMain.getByRole("button", { name: /Replace with White Garri/ })).toBeVisible();
+    await expect(cartMain.getByTestId("stepper-qty")).toHaveText("2");
     await settle(page);
     await page.reload();
-    await expect(page.getByRole("button", { name: /Named substitute chosen/ })).toBeVisible();
-    await expect(page.getByTestId("stepper-qty")).toHaveText("2");
+    await expect(cartMain.getByRole("button", { name: /Replace with White Garri/ })).toBeVisible();
+    await expect(cartMain.getByTestId("stepper-qty")).toHaveText("2");
     const lines = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(lines.find((line) => line.listingId === "mn_garri_yellow")?.qty).toBe(2);
   });
@@ -722,17 +735,30 @@ test.describe("quick add limits and recovery", () => {
   });
 
   test("an unavailable line on the cart page can go down but not up", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_thyme", thymeStock);
+    await revalidateMama(page);
+    await page.goto(spices);
+    await thyme(page).getByTestId("quick-add-btn").click();
+    await thyme(page).getByTestId("stepper-plus").click();
+    await expect(thyme(page).getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    await writeListingStock("mama-ngozi", "mn_thyme", {
+      ...thymeStock,
+      stockMode: "status",
+      status: "out_of_stock",
+      qty: null,
+    });
+    await revalidateMama(page);
     await page.goto(`${base}/cart`);
-    const line = page.getByRole("listitem").filter({ hasText: "Thyme" });
-    await expect(page.getByText("Unavailable. Remove this item before checkout.")).toBeVisible();
-    const before = Number(await line.getByTestId("stepper-qty").innerText());
-    expect(before).toBeGreaterThan(0);
-    await line.getByTestId("stepper-minus").click();
-    await expect(line.getByTestId("stepper-qty")).toHaveText(String(before - 1));
+    const line = page.locator("main").getByRole("listitem").filter({ hasText: "Thyme" });
+    await expect(line.getByText("Unavailable. Remove this item before checkout.")).toBeVisible();
+    await expect(line.getByTestId("stepper-qty")).toHaveText("2");
     await expect(line.getByTestId("stepper-plus")).toBeDisabled();
+    await line.getByTestId("stepper-minus").click();
+    await expect(line.getByTestId("stepper-qty")).toHaveText("1");
     await settle(page);
     await page.reload();
-    await expect(page.getByRole("listitem").filter({ hasText: "Thyme" }).getByTestId("stepper-qty")).toHaveText(String(before - 1));
+    await expect(page.locator("main").getByRole("listitem").filter({ hasText: "Thyme" }).getByTestId("stepper-qty")).toHaveText("1");
   });
 
   test("a decrement the server still rejects stays at the saved quantity", async ({ page }) => {
