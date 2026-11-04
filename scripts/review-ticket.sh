@@ -75,7 +75,7 @@ elif [ "${RISK:-0}" = "1" ]; then
     if ! grep -q "NO BLOCKING FINDINGS" "$CODEX"; then
       sed -i '1s/^VERDICT: PASS/VERDICT: BLOCKING/' "$OUT"
     fi
-    printf '\n\n## Codex review (independent, gpt-6-astra medium)\n\n' >> "$OUT"
+    printf '\n\n## Codex review (independent, ${CODEX_REVIEW_MODEL:-gpt-6.1-sol} ${CODEX_REVIEW_EFFORT:-high})\n\n' >> "$OUT"
     cat "$CODEX" >> "$OUT"
   fi
 fi

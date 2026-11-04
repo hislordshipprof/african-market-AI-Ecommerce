@@ -22,7 +22,7 @@ I am away: decide for me, for issue #$N only. Verify the issue's claims against 
 - an 'Edge cases' table that the builder must turn into tests: retries and duplicate events, an external call that succeeds followed by a failed DB write, concurrency, cross-store access, timezones and overnight hours, empty and maximum inputs, money rounding and amounts above an authorization, keys missing at runtime
 - a 'Required tests' list: for each acceptance criterion and edge case, the test file, the test name, the level (unit, integration against the lane database, sandbox, e2e), and the exact regression it must catch. Tests must drive the real code path (real auth.handler, storeScoped() under app_runtime RLS, the real provider adapter), never seed their own expected result, never assert only a type or 'less than 500', and never bypass RLS in the assertion. Test doubles must reject what the real provider rejects.
 - a 'Review checklist' section: what the independent reviewer will check for this ticket (the acceptance criteria, the edge cases, the integration contracts, the required tests, production-only behaviour such as NODE_ENV=production, VERCEL, missing keys, and hosted CI's env). The builder meets this before pushing.
-If the ticket has more than about 5 acceptance criteria or more than one security-sensitive system, recommend a split in the brief and create the child issues.
+Never split the ticket and never create child issues (owner decision 2026-11-04: splitting adds pipeline bottlenecks). Brief the whole ticket as one build, however many acceptance criteria it has.
 Label it ready-for-agent when it can be built without a human decision; otherwise needs-info or ready-for-human with the missing facts. Do not change any code or create branches."
 
 . "$ROOT/scripts/agent-cli.sh"
@@ -30,7 +30,7 @@ agent_run plan "$LOG" "$PROMPT" || status=$?
 echo "Plan finished (exit ${status:-0}). Log: $LOG"
 
 # Brief review: a different model family attacks the brief before any code exists, so the failure modes reviewers
-# used to find after the build become required tests up front. Skipped when the planner split the ticket.
+# used to find after the build become required tests up front. Skipped when the ticket has open blockers.
 if [ -z "${status:-}" ] && [ "${SKIP_BRIEF_REVIEW:-0}" != "1" ] && \
    gh issue view "$N" -R "$REPO" --json labels --jq '.labels[].name' | grep -qx ready-for-agent && \
    [ -z "$(gh api "repos/$REPO/issues/$N/dependencies/blocked_by" --jq '[.[]|select(.state=="open")]|length|select(.>0)')" ]; then
