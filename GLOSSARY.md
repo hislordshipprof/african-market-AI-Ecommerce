@@ -109,7 +109,10 @@ The message asking a customer to approve a swap or a refund for a short line bef
 The ordered list of lines staff collect for one or more orders, with frozen items last.
 
 **Ready**:
-The moment staff confirm every line is resolved and the order can be handed off. The final amount is charged at this point.
+The moment staff confirm every line is resolved and the order can be handed off. Marking it ready captures the final amount (goods picked, plus tip, plus delivery fee). Pickup orders then show Awaiting pickup. Delivery orders show Ready.
+
+**System actor**:
+The actor on audit rows written by timers and crons, when no person did the action.
 
 **Capture released**:
 The audit recorded when an unconfirmed card hold is released after capture does not settle. The store and the platform are both alerted.

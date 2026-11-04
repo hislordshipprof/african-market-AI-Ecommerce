@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
@@ -2480,6 +2480,65 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
     expect(logs).toHaveLength(1);
     expect(logs[0].after).toMatchObject({ refundId: newer.refundId, amountRefunded: 1000 });
+  });
+
+  it("reconcile after a restart registers a seeded hold before the first retrieve", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const seeded = `pi_seed_${order.id}`;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { paymentIntentId: seeded, capturedAmountCents: 5500 },
+      });
+    });
+    resetFakeStripe();
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("CI", "true");
+    try {
+      const result = await reconcileStuckOrder(storeId, order.id);
+      expect(result).toEqual({ ok: true, action: "finalized_capture" });
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("AWAITING_PICKUP");
+      expect(updated!.capturedAmountCents).toBe(5500);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a non-seed unknown PaymentIntent still fails with resource_missing", async () => {
+    const order = await createTestOrder("CAPTURING");
+    resetFakeStripe();
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    try {
+      await expect(reconcileStuckOrder(storeId, order.id)).rejects.toMatchObject({
+        code: "resource_missing",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a capture above a seeded order's authorization is rejected", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const seeded = `pi_seed_over_${order.id}`;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { paymentIntentId: seeded, totalAuthorizedCents: 100, capturedAmountCents: 5500 },
+      });
+    });
+    resetFakeStripe();
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    try {
+      await expect(reconcileStuckOrder(storeId, order.id)).rejects.toMatchObject({
+        code: "amount_too_large",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("a failed refund after a completed cancellation moves the order to REFUND_FAILED", async () => {

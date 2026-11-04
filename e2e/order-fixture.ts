@@ -62,6 +62,20 @@ export async function setInboxOrderStatus(number: number, status: string): Promi
   });
 }
 
+export async function seedCaptureLabel(number: number): Promise<string> {
+  return withMama(async (tx, storeId) => {
+    const order = await tx.order.findFirstOrThrow({
+      where: { storeId, number },
+      include: { lines: true },
+    });
+    const cents = order.lines.reduce(
+      (sum, line) => sum + line.unitPriceCents * line.qtyOrdered,
+      0,
+    ) + order.tipCents + order.deliveryFeeCents;
+    return `$${(cents / 100).toFixed(2)}`;
+  });
+}
+
 export async function deleteInboxOrder(number: number): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number } });

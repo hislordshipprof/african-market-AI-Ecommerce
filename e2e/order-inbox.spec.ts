@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { generateTOTP } from "./totp";
-import { deleteInboxOrder, insertInboxOrder, setInboxOrderStatus } from "./order-fixture";
+import { deleteInboxOrder, insertInboxOrder, seedCaptureLabel, setInboxOrderStatus } from "./order-fixture";
 
 const OWNER_EMAIL = "owner@mama-ngozi.test";
 const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
@@ -109,7 +109,7 @@ test.describe("Order inbox", () => {
     await expect(page.getByRole("button", { name: "Pick" }).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("Mark ready button disabled until all lines picked, then captures and transitions", async ({ page }) => {
+  test("picking every line marks the order ready and captures the seed total", async ({ page }) => {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
@@ -143,10 +143,8 @@ test.describe("Order inbox", () => {
     const handOffBtn = page.getByRole("button", { name: "Hand off" });
     await expect(handOffBtn).toBeVisible({ timeout: 10000 });
 
-    const totalText = await page.getByTestId("order-total").innerText();
-    expect(totalText).toMatch(/^\$\d+\.\d{2}$/);
-    expect(totalText).not.toBe("$0.00");
-    await expect(page.getByTestId("order-captured")).toHaveText(totalText);
+    const seedTotal = await seedCaptureLabel(1005);
+    await expect(page.getByTestId("order-captured")).toHaveText(seedTotal);
   });
 
   test("the Captured line appears only after the order is ready", async ({ page }) => {

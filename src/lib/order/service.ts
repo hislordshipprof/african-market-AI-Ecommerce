@@ -1,5 +1,5 @@
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
-import { getStripeProvider } from "../stripe";
+import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError, OverRefundError } from "../stripe/errors";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
@@ -346,11 +346,7 @@ async function settleUnconfirmedCapture(
 }
 
 async function registerE2EPayment(paymentIntentId: string, authorizedCents: number): Promise<void> {
-  // `next start` is NODE_ENV=production. The e2e flag still selects the fake locally.
-  // Vercel must never register seed PaymentIntents on the fake.
-  if (process.env.E2E_FAKE_STRIPE !== "1" || process.env.VERCEL) {
-    return;
-  }
+  if (stripeProviderKind() !== "fake" || !paymentIntentId.startsWith("pi_seed_")) return;
   const { ensureAuthorizedAmount } = await import("../stripe/fake");
   ensureAuthorizedAmount(paymentIntentId, authorizedCents);
 }
@@ -946,6 +942,7 @@ export async function reconcileStuckOrder(
     return { ok: false, error: "Order has no payment intent" };
   }
 
+  await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
   const stripe = getStripeProvider();
   const pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
 

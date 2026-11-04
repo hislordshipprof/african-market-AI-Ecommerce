@@ -22,8 +22,17 @@ const unconfiguredStripeProvider: StripeProvider = {
   retrieveRefund: async () => throwUnconfigured(),
 };
 
-function isProductionRuntime(): boolean {
-  return process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+export type StripeSelection = "fake" | "real" | "unconfigured";
+
+export function stripeProviderKind(env: NodeJS.ProcessEnv = process.env): StripeSelection {
+  const fake =
+    env.E2E_FAKE_STRIPE === "1" &&
+    !env.VERCEL &&
+    (env.CI === "true" || env.NODE_ENV !== "production");
+  if (fake) return "fake";
+  const production = env.NODE_ENV === "production" || Boolean(env.VERCEL);
+  if (production && !env.STRIPE_SECRET_KEY) return "unconfigured";
+  return "real";
 }
 
 export type { StripeProvider } from "./types";
@@ -46,23 +55,9 @@ export function setStripeProvider(provider: StripeProvider | null): void {
 
 let warnedAboutFake = false;
 
-// Production may use the fake only for CI e2e: the flag, CI=true, and not Vercel.
-// GitHub Actions sets CI. Any other production runtime with no key fails at call time.
-function ciE2EFakeAllowed(): boolean {
-  return (
-    process.env.E2E_FAKE_STRIPE === "1" &&
-    process.env.CI === "true" &&
-    !process.env.VERCEL
-  );
-}
-
-function devFakeAllowed(): boolean {
-  return process.env.E2E_FAKE_STRIPE === "1" && !process.env.VERCEL && !isProductionRuntime();
-}
-
 export function getStripeProvider(): StripeProvider {
   if (_override) return _override;
-  if (ciE2EFakeAllowed() || devFakeAllowed()) {
+  if (stripeProviderKind() === "fake") {
     if (!warnedAboutFake) {
       warnedAboutFake = true;
       console.warn(
@@ -72,7 +67,7 @@ export function getStripeProvider(): StripeProvider {
     _override = fakeStripeProvider;
     return fakeStripeProvider;
   }
-  if (isProductionRuntime() && !process.env.STRIPE_SECRET_KEY) {
+  if (stripeProviderKind() === "unconfigured") {
     return unconfiguredStripeProvider;
   }
   return stripeProvider;
