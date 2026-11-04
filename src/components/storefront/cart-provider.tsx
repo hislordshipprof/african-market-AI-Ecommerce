@@ -220,7 +220,9 @@ export function CartProvider({
       const known = confirmed.current.get(key);
       const outstanding = local.quantity !== (known?.qty ?? 0);
       const optimistic = !known?.lineId && local.quantity > 0;
-      if (moved || outstanding || (mode === "keep-intent" && optimistic)) {
+      // server-wins drops an optimistic line the server does not have.
+      // A click during this read is `moved` and is kept.
+      if (moved || (mode === "keep-intent" && (outstanding || optimistic))) {
         next.push(local);
         continue;
       }
@@ -262,8 +264,8 @@ export function CartProvider({
     for (const key of pendingDelete.current.keys()) keys.add(key);
     return [...keys].filter(isDirty);
   }
-  async function onThrown(error: unknown, key: string, uncertainAdd: boolean) {
-    const revAtFailure = revs.current.get(key) ?? 0;
+  async function onThrown(error: unknown, key: string, uncertainAdd: boolean, revAtSend?: number) {
+    const failedRev = revAtSend ?? revs.current.get(key) ?? 0;
     paused.current.add(key);
     if (isStaleAction(error)) {
       staleDeployment.current = true;
@@ -284,7 +286,7 @@ export function CartProvider({
       pulled = await pullServer("keep-intent");
     }
     if (!mounted.current) return;
-    const newer = (revs.current.get(key) ?? 0) > revAtFailure;
+    const newer = (revs.current.get(key) ?? 0) > failedRev;
     if (newer) {
       paused.current.delete(key);
       return;
@@ -303,6 +305,10 @@ export function CartProvider({
       } else {
         showQty(key, known?.qty ?? 0);
       }
+      return;
+    }
+    if ((known?.qty ?? 0) !== intentQty(key)) {
+      showQty(key, known?.qty ?? 0);
       return;
     }
     paused.current.delete(key);
@@ -324,6 +330,7 @@ export function CartProvider({
     if (!mounted.current || staleDeployment.current || paused.current.has(key)) return;
     const doomed = pendingDelete.current.get(key);
     if (doomed) {
+      const revAtSend = revs.current.get(key) ?? 0;
       try {
         const result = await removeCartLine(doomed);
         if (!result.ok && result.code !== "CART_NOT_FOUND") {
@@ -335,7 +342,7 @@ export function CartProvider({
           return;
         }
       } catch (error) {
-        await onThrown(error, key, false);
+        await onThrown(error, key, false, revAtSend);
         return;
       }
       pendingDelete.current.delete(key);
@@ -376,10 +383,11 @@ export function CartProvider({
         return;
       }
       let added: { ok: true } | { ok: false; error: string; code: string };
+      const revAtSend = revs.current.get(key) ?? 0;
       try {
         added = await addToCart(item.variantId, 1);
       } catch (error) {
-        await onThrown(error, key, true);
+        await onThrown(error, key, true, revAtSend);
         return;
       }
       if (!added.ok) {
@@ -387,13 +395,21 @@ export function CartProvider({
           toast.error(added.error);
           setAttention(true);
         }
+        const revAtReject = revs.current.get(key) ?? 0;
         if (added.code === "MAX_PER_ORDER") {
           showQty(key, 0);
           confirmed.current.set(key, { qty: 0 });
         } else {
           await pullServer("server-wins");
+          const newer = (revs.current.get(key) ?? 0) > revAtReject;
+          if (!newer && !confirmed.current.get(key)?.lineId) {
+            showQty(key, 0);
+            confirmed.current.set(key, { qty: 0 });
+            addAccepted.current.delete(key);
+          }
         }
-        paused.current.add(key);
+        if ((revs.current.get(key) ?? 0) > revAtReject) paused.current.delete(key);
+        else paused.current.add(key);
         return;
       }
       const pulled = await pullServer("keep-intent");
@@ -425,10 +441,11 @@ export function CartProvider({
     if (liveTarget === known.qty) return;
     if (liveTarget > known.qty) {
       let result: { ok: true } | { ok: false; error: string; code: string };
+      const revAtSend = revs.current.get(key) ?? 0;
       try {
         result = await serverSetLineQty(lineId, known.qty + 1);
       } catch (error) {
-        await onThrown(error, key, false);
+        await onThrown(error, key, false, revAtSend);
         return;
       }
       if (!result.ok) {
@@ -447,10 +464,11 @@ export function CartProvider({
       return;
     }
     let result: { ok: true } | { ok: false; error: string; code: string };
+    const revAtSend = revs.current.get(key) ?? 0;
     try {
       result = await serverSetLineQty(lineId, liveTarget);
     } catch (error) {
-      await onThrown(error, key, false);
+      await onThrown(error, key, false, revAtSend);
       return;
     }
     if (!result.ok) {

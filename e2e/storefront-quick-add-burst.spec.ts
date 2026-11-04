@@ -1099,6 +1099,100 @@ test.describe("quick add recovery gaps", () => {
     await settle(page);
   });
 
+  test("a lost first add in an established cart is not added twice", async ({ page }) => {
+    await openGrains(page);
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    const cartId = await cartCookie(page);
+    let proved = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!proved && isAction(request) && body.includes("mn_garri_y_v1")) {
+        const response = await fetchAction(route);
+        expect(response.status()).toBe(200);
+        const saved = await readCartLines("mama-ngozi", cartId);
+        const yellow = saved.filter((line) => line.variantId === "mn_garri_y_v1");
+        expect(yellow).toHaveLength(1);
+        expect(yellow[0]?.qty).toBe(1);
+        proved = true;
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expect.poll(() => proved).toBe(true);
+    await settle(page);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    const beforePlus = await readCartLines("mama-ngozi", cartId);
+    expect(beforePlus.filter((line) => line.variantId === "mn_garri_y_v1")).toHaveLength(1);
+    expect(beforePlus.find((line) => line.variantId === "mn_garri_y_v1")?.qty).toBe(1);
+    await page.unroute("**/*");
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    await page.reload();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    const yellow = lines.filter((line) => line.variantId === "mn_garri_y_v1");
+    expect(yellow).toHaveLength(1);
+    expect(yellow[0]?.qty).toBe(2);
+  });
+
+  test("repeated write failures settle on the saved quantity", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    let writes = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && /,\d+\]/.test(body)) {
+        writes += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect.poll(() => writes, { timeout: 8_000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(4_000);
+    expect(writes).toBeLessThan(8);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await page.unroute("**/*");
+    await page.reload();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.variantId === "mn_garri_y_v1")?.qty).toBe(1);
+  });
+
+  test("a rejected first add does not leave a phantom line", async ({ page }) => {
+    await openGrains(page);
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes("mn_garri_y_v1")) {
+        await route.continue({
+          postData: body.replaceAll("mn_garri_y_v1", "mn_no_such_variant"),
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "Variant does not belong to this store" }).first()).toBeVisible();
+    await settle(page);
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("0");
+    await page.unroute("**/*");
+    await page.reload();
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("0");
+  });
+
   test("a click during migration readback survives", async ({ page }) => {
     const store = await storeIdentity("mama-ngozi");
     await page.addInitScript((storeId) => {
