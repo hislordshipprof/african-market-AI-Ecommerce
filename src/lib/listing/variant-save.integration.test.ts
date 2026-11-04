@@ -152,6 +152,42 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
     });
   }
 
+  async function storeLedger(storeId: string) {
+    const scoped = storeScoped(storeId);
+    const [audits, events] = await Promise.all([
+      scoped.auditLog.findMany({ orderBy: { id: "asc" } }),
+      scoped.stockEvent.findMany({ orderBy: { id: "asc" } }),
+    ]);
+    return { audits, events };
+  }
+
+  async function withReferenceReadCounts<T>(run: () => Promise<T>) {
+    const proto = Client.prototype as unknown as {
+      query: (this: Client, ...args: unknown[]) => unknown;
+    };
+    const original = proto.query;
+    let cart = 0;
+    let order = 0;
+    proto.query = function (this: Client, ...args: unknown[]) {
+      const first = args[0];
+      const text = typeof first === "string"
+        ? first
+        : first && typeof first === "object" && "text" in first
+          ? String((first as { text: unknown }).text)
+          : "";
+      const select = /^\s*select\b/i.test(text);
+      if (select && /\bcart_lines\b/i.test(text)) cart += 1;
+      if (select && /\border_lines\b/i.test(text)) order += 1;
+      return original.apply(this, args);
+    };
+    try {
+      const result = await run();
+      return { result, cart, order };
+    } finally {
+      proto.query = original;
+    }
+  }
+
   function row(variant: { id: string }, price: number, weightG: number, label = "1kg"): SaveVariantInput {
     return { id: variant.id, label, price, weightG, sku: null, barcode: null };
   }
@@ -549,6 +585,7 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
   it("a failing variant rolls back earlier in-place updates", async () => {
     const created = await listingWith(storeAId, "Rollback", [{ label: "X", price: 800, weightG: 1000 }]);
     const x = created.variants[0]!;
+    const before = await storeLedger(storeAId);
     await expect(updateListing({
       storeId: storeAId,
       listingId: created.id,
@@ -565,8 +602,11 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
     expect(found!.qty).toBe(10);
     expect(found!.variants).toHaveLength(1);
     expect(found!.variants[0]).toMatchObject({ id: x.id, price: 800, weightG: 1000 });
-    const events = await storeScoped(storeAId).stockEvent.findMany({ where: { listingId: created.id } });
-    expect(events.map((event) => event.type)).toEqual(["recount"]);
+    const after = await storeLedger(storeAId);
+    expect(after.audits).toEqual(before.audits);
+    expect(after.events).toEqual(before.events);
+    expect(after.audits.filter((audit) => audit.entityId === created.id && audit.action === "listing.stock_change")).toEqual([]);
+    expect(after.events.filter((event) => event.listingId === created.id).map((event) => event.type)).toEqual(["recount"]);
     expect(await priceAudits(storeAId, created.id)).toHaveLength(0);
   });
 
@@ -941,7 +981,11 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
       ...kept.map((v) => ({ id: v.id, label: v.label, price: v.price, weightG: v.weightG, sku: null, barcode: null })),
       ...Array.from({ length: 25 }, (_, i) => ({ label: `Q${i}`, price: 900 + i, weightG: 900 + i, sku: null, barcode: null })),
     ];
-    await updateVariants({ storeId: storeAId, listingId: created.id, variants: payload, actor });
+    const reads = await withReferenceReadCounts(() =>
+      updateVariants({ storeId: storeAId, listingId: created.id, variants: payload, actor }),
+    );
+    expect(reads.cart).toBe(1);
+    expect(reads.order).toBe(1);
     const found = await readVariants(storeAId, created.id);
     expect(found!.variants).toHaveLength(50);
     for (const variant of kept) expect(found!.variants.some((v) => v.id === variant.id)).toBe(true);
