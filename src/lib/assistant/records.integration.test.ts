@@ -114,9 +114,17 @@ describe.skipIf(!hasDb)("assistant records isolation", () => {
   });
 
   it("storeScoped(B) cannot update or delete A's conversations or actions", async () => {
+    const beforeConversation = await storeScoped(storeA).aiConversation.findUniqueOrThrow({ where: { id: conversationA } });
+    const beforeAction = await storeScoped(storeA).aiAction.findUniqueOrThrow({ where: { id: actionA } });
     const scoped = storeScoped(storeB);
     await expect(
       scoped.aiConversation.update({ where: { id: conversationA }, data: { model: "stolen" } }),
+    ).rejects.toMatchObject({ code: "P2025" });
+    await expect(
+      scoped.aiConversation.delete({ where: { id: conversationA } }),
+    ).rejects.toMatchObject({ code: "P2025" });
+    await expect(
+      scoped.aiAction.update({ where: { id: actionA }, data: { tool: "stolen" } }),
     ).rejects.toMatchObject({ code: "P2025" });
     await expect(
       scoped.aiAction.delete({ where: { id: actionA } }),
@@ -125,10 +133,24 @@ describe.skipIf(!hasDb)("assistant records isolation", () => {
       where: { id: conversationA },
       data: { model: "stolen" },
     })).toEqual({ count: 0 });
+    expect(await scoped.aiConversation.deleteMany({ where: { id: conversationA } })).toEqual({ count: 0 });
+    expect(await scoped.aiAction.updateMany({
+      where: { id: actionA },
+      data: { tool: "stolen" },
+    })).toEqual({ count: 0 });
     expect(await scoped.aiAction.deleteMany({ where: { id: actionA } })).toEqual({ count: 0 });
-    const still = await storeScoped(storeA).aiConversation.findUnique({ where: { id: conversationA } });
-    expect(still?.model).toBe("claude-haiku-5-5");
-    expect(await storeScoped(storeA).aiAction.findUnique({ where: { id: actionA } })).not.toBeNull();
+    const conversation = await storeScoped(storeA).aiConversation.findUnique({ where: { id: conversationA } });
+    const action = await storeScoped(storeA).aiAction.findUnique({ where: { id: actionA } });
+    expect(conversation).toMatchObject({
+      model: beforeConversation.model,
+      cartId: beforeConversation.cartId,
+      messages: beforeConversation.messages,
+    });
+    expect(action).toMatchObject({
+      tool: beforeAction.tool,
+      ok: beforeAction.ok,
+      conversationId: beforeAction.conversationId,
+    });
   });
 
   it("storeScoped(B) cannot create a conversation for store A, on A's cart, on A's customer, or on a missing cart", async () => {

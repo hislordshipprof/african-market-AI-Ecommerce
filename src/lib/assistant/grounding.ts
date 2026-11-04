@@ -58,7 +58,7 @@ export function groundingTransform(options: GroundingTransformOptions = {}) {
         if (part && typeof part === "object" && "type" in part) {
           const type = (part as { type: string }).type;
           const id = String((part as { id?: string }).id ?? "");
-          if (type === "tool-result" || type === "tool-call") {
+          if (type === "tool-result") {
             allowed = new Set([...allowed, ...collectAllowedCents(part)]);
           }
           if (type === "text-start") {

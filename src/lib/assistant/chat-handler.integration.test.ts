@@ -40,6 +40,21 @@ function streamOf(chunks: Array<Record<string, unknown>>) {
   });
 }
 
+function uiParts(body: string): Array<{ type?: string; toolName?: string; toolCallId?: string; output?: unknown }> {
+  return body.split("\n").flatMap((line) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) return [];
+    const json = trimmed.slice("data:".length).trim();
+    if (!json || json === "[DONE]") return [];
+    try {
+      const parsed = JSON.parse(json) as { type?: string; toolName?: string; toolCallId?: string; output?: unknown };
+      return parsed && typeof parsed === "object" ? [parsed] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 function textStream(text: string) {
   return streamOf([
     { type: "stream-start", warnings: [] },
@@ -182,8 +197,24 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const cookie = response.headers.get("set-cookie") ?? "";
     expect(cookie).toMatch(/cart_id=.*; HttpOnly; SameSite=Lax; Path=\//);
     const body = await response.text();
-    expect(body).toContain("search_catalog");
-    expect(body).toContain("add_to_cart");
+    const parts = uiParts(body);
+    const inputs = parts.filter((part) => part.type === "tool-input-available");
+    const outputs = parts.filter((part) => part.type === "tool-output-available");
+    expect(inputs.map((part) => ({ toolCallId: part.toolCallId, toolName: part.toolName }))).toEqual([
+      { toolCallId: "call-search", toolName: "search_catalog" },
+      { toolCallId: "call-add", toolName: "add_to_cart" },
+    ]);
+    expect(outputs.map((part) => part.toolCallId)).toEqual(["call-search", "call-add"]);
+    expect(outputs[0]?.output).toEqual(expect.objectContaining({
+      ok: true,
+      items: [expect.objectContaining({ variantId, priceCents: 450 })],
+    }));
+    expect(outputs[1]?.output).toEqual(expect.objectContaining({ ok: true, qty: 2 }));
+    for (const output of outputs) {
+      const inputAt = parts.findIndex((part) => part.type === "tool-input-available" && part.toolCallId === output.toolCallId);
+      const outputAt = parts.indexOf(output);
+      expect(outputAt).toBeGreaterThan(inputAt);
+    }
     expect(body).toContain("Added two egusi.");
     const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
     const line = await storeScoped(storeId).cartLine.findFirst({ where: { cartId } });
@@ -402,6 +433,31 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const stored = JSON.stringify(rows[0]?.messages);
     expect(stored).toContain("\"text\":\"one\"");
     expect(stored).not.toContain("\"text\":\"two\"");
+  });
+
+  it("two first turns on a cart that has never chatted yield 200 and assistant_busy", async () => {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return { stream: textStream("ok") };
+      },
+    });
+    const handler = createChatHandler({ model });
+    const settled = await Promise.allSettled([
+      handler(request("first", { ip: "203.0.113.170", cookie })),
+      handler(request("second", { ip: "203.0.113.171", cookie })),
+    ]);
+    const responses = settled.filter((item): item is PromiseFulfilledResult<Response> => item.status === "fulfilled").map((item) => item.value);
+    const statuses = responses.map((response) => response.status).sort((a, b) => a - b);
+    expect(settled.every((item) => item.status === "fulfilled")).toBe(true);
+    expect(statuses).toEqual([200, 409]);
+    const busy = responses.find((response) => response.status === 409);
+    expect((await busy!.json()).error.code).toBe("assistant_busy");
+    const ok = responses.find((response) => response.status === 200);
+    await ok!.text();
+    expect(await storeScoped(storeId).aiConversation.count({ where: { cartId: cart.id } })).toBe(1);
   });
 
   it("masks card numbers before the model and the database", async () => {

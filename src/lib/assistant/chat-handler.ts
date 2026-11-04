@@ -307,6 +307,22 @@ async function takeTurn(
   at: Date,
   modelId: ReturnType<typeof assistantModelId>,
 ) {
+  try {
+    return await claimFirstTurn(storeId, cartId, userId, at, modelId);
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+    return claimFirstTurn(storeId, cartId, userId, at, modelId);
+  }
+}
+
+/** Upsert then claim. A lost insert race retries once; the lease decides who is busy. */
+async function claimFirstTurn(
+  storeId: string,
+  cartId: string,
+  userId: string | null,
+  at: Date,
+  modelId: ReturnType<typeof assistantModelId>,
+) {
   const until = new Date(at.getTime() + LEASE_MS);
   const cart = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
   return storeScopedTransaction(storeId, async (tx) => {

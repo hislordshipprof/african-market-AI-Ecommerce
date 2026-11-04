@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { addLine, updateLineQty } from "../../cart/service";
+import { addToCart as storefrontAddToCart, setLineQty } from "../../cart/actions";
+import { addLine } from "../../cart/service";
 import { storeScoped } from "../../db";
 import {
   addToCart,
@@ -17,13 +18,41 @@ import {
 } from "./execute";
 import { addToCartInput, searchCatalogInput, toolInputSchemas } from "./schemas";
 
-vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
+const { headerState, cartCookies } = vi.hoisted(() => ({
+  headerState: new Headers(),
+  cartCookies: new Map<string, string>(),
+}));
+
+vi.mock("next/headers", () => ({
+  headers: async () => headerState,
+  cookies: async () => ({
+    get: (name: string) => {
+      const value = cartCookies.get(name);
+      return value === undefined ? undefined : { name, value };
+    },
+    set: (name: string, value: string) => {
+      cartCookies.set(name, value);
+    },
+  }),
+}));
+
+vi.mock("next/navigation", () => ({
+  notFound: () => {
+    throw new Error("NOT_FOUND");
+  },
+}));
+
+vi.mock("next/cache", () => ({
+  unstable_cache: (fn: () => unknown) => fn,
+  revalidateTag: () => {},
+}));
 
 const hasDb = !!process.env.DATABASE_URL;
 
 describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   let raw: PrismaClient;
   let storeA = "";
+  let slugA = "";
   let storeB = "";
   let cartA = "";
   let otherCart = "";
@@ -47,6 +76,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       data: { slug: `ai-tool-b-${suffix}`, name: "Tool B", themePreset: "lagoon-and-coral" },
     });
     storeA = a.id;
+    slugA = a.slug;
     storeB = b.id;
     cartA = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
     otherCart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
@@ -224,11 +254,19 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   it("lines the assistant creates are source ai and storefront lines stay manual", async () => {
     const manual = await makeListing(storeA, { name: "Manual Rice", price: 199 });
     const added = await makeListing(storeA, { name: "Assistant Rice", price: 199 });
-    await addLine(storeA, cartA, manual.variantId, 1, null);
-    await addToCart(ctx(), { items: [{ variant_id: manual.variantId, qty: 1 }] });
-    await addToCart(ctx(), { items: [{ variant_id: added.variantId, qty: 1 }] });
-    const manualLine = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: manual.variantId } });
-    const aiLine = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: added.variantId } });
+    headerState.set("x-store-slug", slugA);
+    cartCookies.clear();
+    expect(await storefrontAddToCart(manual.variantId, 1)).toEqual({ ok: true });
+    const cartId = cartCookies.get("cart_id");
+    expect(cartId).toBeTruthy();
+    const talk = await storeScoped(storeA).aiConversation.create({
+      data: { storeId: storeA, cartId: cartId!, model: "claude-haiku-5-5", messages: [] },
+    });
+    const sameCart = ctx({ cartId, conversationId: talk.id });
+    await addToCart(sameCart, { items: [{ variant_id: manual.variantId, qty: 1 }] });
+    await addToCart(sameCart, { items: [{ variant_id: added.variantId, qty: 1 }] });
+    const manualLine = await storeScoped(storeA).cartLine.findFirst({ where: { cartId, variantId: manual.variantId } });
+    const aiLine = await storeScoped(storeA).cartLine.findFirst({ where: { cartId, variantId: added.variantId } });
     expect(manualLine?.source).toBe("manual");
     expect(manualLine?.qty).toBe(2);
     expect(aiLine?.source).toBe("ai");
@@ -254,15 +292,17 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   });
 
   it("get_cart_summary reflects a change made on the cart page", async () => {
-    const cart = await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } });
-    const talk = await storeScoped(storeA).aiConversation.create({
-      data: { storeId: storeA, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
-    });
     const item = await makeListing(storeA, { name: "Page Edit", price: 400 });
-    await addLine(storeA, cart.id, item.variantId, 1, null);
-    const line = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: cart.id } });
-    await updateLineQty(storeA, cart.id, line!.id, 3, null);
-    const summary = await getCartSummary(ctx({ cartId: cart.id, conversationId: talk.id }), {});
+    headerState.set("x-store-slug", slugA);
+    cartCookies.clear();
+    expect(await storefrontAddToCart(item.variantId, 1)).toEqual({ ok: true });
+    const cartId = cartCookies.get("cart_id")!;
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { cartId } });
+    expect(await setLineQty(line!.id, 3)).toEqual({ ok: true });
+    const talk = await storeScoped(storeA).aiConversation.create({
+      data: { storeId: storeA, cartId, model: "claude-haiku-5-5", messages: [] },
+    });
+    const summary = await getCartSummary(ctx({ cartId, conversationId: talk.id }), {});
     expect(summary.ok).toBe(true);
     if (!summary.ok) return;
     const rows = summary.lines as Array<{ lineId: string; qty: number; lineTotalCents: number }>;
@@ -271,7 +311,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(summary.minimumOrderCents).toBe(2000);
     expect(summary.minimumMet).toBe(false);
     expect(summary.missingCents).toBe(800);
-    await storeScoped(storeA).cart.delete({ where: { id: cart.id } });
+    await storeScoped(storeA).cart.delete({ where: { id: cartId } });
   });
 
   it("adds up to max per order and reports the limit", async () => {

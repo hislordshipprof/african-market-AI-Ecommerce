@@ -97,14 +97,97 @@ describe("grounding stream", () => {
       experimental_transform: groundingTransform(),
       stopWhen: stepCountIs(1),
     });
-    const types: string[] = [];
+    const plain = streamText({
+      model: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: streamOf([
+            { type: "stream-start", warnings: [] },
+            { type: "tool-call", toolCallId: "call-1", toolName: "show_products", input: "{\"listing_ids\":[\"a\"]}" },
+            { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+          ]),
+        }),
+      }),
+      prompt: "show",
+      tools: {
+        show_products: tool({
+          description: "Show",
+          inputSchema: z.object({ listing_ids: z.array(z.string()) }),
+          execute: async () => ({ priceCents: 100 }),
+        }),
+      },
+      stopWhen: stepCountIs(1),
+    });
+    const chunks: Array<{ type: string; toolCallId?: string; output?: unknown }> = [];
     for await (const chunk of result.toUIMessageStream()) {
-      types.push((chunk as { type: string }).type);
+      const part = chunk as { type?: string; toolCallId?: string; output?: unknown };
+      if (part.type) chunks.push({ type: part.type, toolCallId: part.toolCallId, output: part.output });
     }
-    const toolIndex = types.indexOf("tool-input-available");
-    const outputIndex = types.findIndex((type) => type.startsWith("tool-"));
-    expect(outputIndex).toBeGreaterThanOrEqual(0);
-    expect(toolIndex === -1 || toolIndex >= outputIndex || types.includes("tool-output-available")).toBe(true);
+    const bare: typeof chunks = [];
+    for await (const chunk of plain.toUIMessageStream()) {
+      const part = chunk as { type?: string; toolCallId?: string; output?: unknown };
+      if (part.type?.startsWith("tool-")) bare.push({ type: part.type, toolCallId: part.toolCallId, output: part.output });
+    }
+    const outputs = chunks.filter((chunk) => chunk.type === "tool-output-available");
+    const inputAt = chunks.findIndex((chunk) => chunk.type === "tool-input-available" && chunk.toolCallId === "call-1");
+    const outputAt = chunks.findIndex((chunk) => chunk.type === "tool-output-available" && chunk.toolCallId === "call-1");
+    expect(inputAt).toBeGreaterThanOrEqual(0);
+    expect(outputAt).toBeGreaterThan(inputAt);
+    expect(outputs).toEqual([
+      expect.objectContaining({ toolCallId: "call-1", output: { priceCents: 100 } }),
+    ]);
+    expect(chunks.filter((chunk) => chunk.type.startsWith("tool-"))).toEqual(bare);
+  });
+
+  it("a rejected tool call cannot whitelist an invented price", async () => {
+    let executions = 0;
+    let call = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        call += 1;
+        const chunks = call === 1
+          ? [
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call",
+                toolCallId: "call-bad",
+                toolName: "search_catalog",
+                input: JSON.stringify({ query: "egusi", limit: 999, priceCents: 777 }),
+              },
+              { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+            ]
+          : [
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "t" },
+              { type: "text-delta", id: "t", delta: "It costs $7.77." },
+              { type: "text-end", id: "t" },
+              { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+            ];
+        return { stream: streamOf(chunks) };
+      },
+    });
+    const result = streamText({
+      model,
+      prompt: "price",
+      stopWhen: stepCountIs(3),
+      tools: {
+        search_catalog: tool({
+          description: "Search",
+          inputSchema: z.object({ query: z.string(), limit: z.number().max(10) }),
+          execute: async () => {
+            executions += 1;
+            return { items: [] };
+          },
+        }),
+      },
+      experimental_transform: groundingTransform(),
+    });
+    let text = "";
+    for await (const chunk of result.toUIMessageStream()) {
+      if ((chunk as { type?: string }).type === "text-delta") text += (chunk as { delta: string }).delta;
+    }
+    expect(executions).toBe(0);
+    expect(text).toBe("It costs (see card).");
+    expect(text).not.toContain("7.77");
   });
 
   it("interleaved text blocks are grounded separately", async () => {
