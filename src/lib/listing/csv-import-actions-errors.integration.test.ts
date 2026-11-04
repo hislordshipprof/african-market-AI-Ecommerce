@@ -21,7 +21,7 @@ const actualBox = vi.hoisted(() => ({
           ambiguousResolutions: Array<{ row: number; masterProductId: string }>;
         },
         actor: { id: string; email: string },
-      ) => Promise<{ createdCount: number; listingIds: string[] }>)
+      ) => Promise<{ createdCount: number; listingIds: string[]; needsWeightCount: number }>)
     | undefined,
 }));
 
