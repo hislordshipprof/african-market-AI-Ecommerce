@@ -496,25 +496,41 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
                 className="min-w-0 @[22rem]:flex-1"
               />
               <div className="flex items-center gap-2">
-                <Input
-                  aria-label="Variant price in dollars"
-                  placeholder="Price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={v.price}
-                  onChange={(e) => updateVariantField(v.key, "price", e.target.value)}
-                  className="w-24"
-                />
-                <Input
-                  aria-label="Variant weight in grams"
-                  placeholder="Weight (g)"
-                  type="number"
-                  min="1"
-                  value={v.weightG}
-                  onChange={(e) => updateVariantField(v.key, "weightG", e.target.value)}
-                  className="w-24"
-                />
+                <div className="relative">
+                  <span
+                    className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-sm text-foreground"
+                    aria-hidden
+                  >
+                    $
+                  </span>
+                  <Input
+                    aria-label="Variant price in dollars"
+                    placeholder="Price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={v.price}
+                    onChange={(e) => updateVariantField(v.key, "price", e.target.value)}
+                    className="w-24 pl-6"
+                  />
+                </div>
+                <div className="relative">
+                  <Input
+                    aria-label="Variant weight in grams"
+                    placeholder="Weight (g)"
+                    type="number"
+                    min="1"
+                    value={v.weightG}
+                    onChange={(e) => updateVariantField(v.key, "weightG", e.target.value)}
+                    className="w-24 pr-6"
+                  />
+                  <span
+                    className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-sm text-foreground"
+                    aria-hidden
+                  >
+                    g
+                  </span>
+                </div>
                 {variants.length > 1 && (
                   <Button
                     type="button"
