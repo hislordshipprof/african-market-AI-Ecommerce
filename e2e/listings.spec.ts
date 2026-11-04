@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { generateTOTP } from "./totp";
 import { findListingAuditLogs } from "./audit-db";
 import { deleteE2eListings } from "./cleanup-listings";
+import { findListingVariants, seedCartLine } from "./listing-db";
 
 const OWNER_EMAIL = "owner@mama-ngozi.test";
 const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
@@ -202,6 +203,53 @@ test.describe("Listing management (authenticated)", () => {
     const row = listingRow(page, uniqueName);
     await expect(row.getByText("In stock", { exact: true })).toBeVisible();
     await expect(row.getByText("10 in stock")).toHaveCount(0);
+  });
+
+  test("editing a carted listing keeps the variant id and the storefront shows the new variant price", async ({ page }) => {
+    const uniqueName = `E2E Carted ${Date.now()}`;
+    await createListingViaUI(page, {
+      name: uniqueName,
+      price: "8.00",
+      variantLabel: "1kg",
+      weightG: "1000",
+    });
+
+    const before = await findListingVariants("mama-ngozi", uniqueName);
+    const variantId = before.variants[0]!.id;
+    expect(before.variants[0]).toMatchObject({ price: 800, label: "1kg" });
+    await seedCartLine("mama-ngozi", variantId);
+
+    const detail = `/listings/${before.id}?store=mama-ngozi`;
+    const product = page.getByTestId("product-detail");
+    await page.goto(detail);
+    await expect(product.getByLabel("$8.00").first()).toBeVisible({ timeout: 10000 });
+
+    await page.goto(LISTINGS_URL);
+    await page.locator(`[aria-label="Edit ${uniqueName}"]`).click();
+    const dialog = page.getByRole("dialog", { name: "Edit listing" });
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await dialog.locator("input[placeholder='Price']").fill("9.50");
+    await dialog.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.locator("text=Listing updated")).toBeVisible({ timeout: 10000 });
+
+    const after = await findListingVariants("mama-ngozi", uniqueName);
+    expect(after.variants.map((variant) => variant.id)).toEqual([variantId]);
+    expect(after.variants[0]).toMatchObject({ price: 950, weightG: 1000 });
+    expect(after.price).toBe(800);
+
+    await page.goto(detail);
+    await expect(product.getByLabel("$9.50").first()).toBeVisible({ timeout: 10000 });
+    await expect(product.getByLabel("$8.00")).toHaveCount(0);
+
+    await page.goto(LISTINGS_URL);
+    await page.locator(`[aria-label="Edit ${uniqueName}"]`).click();
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await dialog.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.locator("text=Listing updated")).toBeVisible({ timeout: 10000 });
+
+    const resaved = await findListingVariants("mama-ngozi", uniqueName);
+    expect(resaved.variants.map((variant) => variant.id)).toEqual([variantId]);
+    expect(resaved.variants[0]?.price).toBe(950);
   });
 
   test("deactivate listing excludes it from active list", async ({ page }) => {

@@ -201,6 +201,17 @@ export async function lockListingRow(tx: Pick<PrismaClient, "$queryRaw">, listin
   await tx.$queryRaw`SELECT 1 FROM listings WHERE id = ${listingId} FOR UPDATE`;
 }
 
+/** Locks variant rows in id order before a removal check, so a concurrent cart insert waits. */
+export async function lockListingVariantRows(tx: Pick<PrismaClient, "$queryRaw">, variantIds: string[]) {
+  if (variantIds.length === 0) return;
+  await tx.$queryRaw`
+    SELECT id FROM listing_variants
+    WHERE id IN (${Prisma.join(variantIds)})
+    ORDER BY id
+    FOR UPDATE
+  `;
+}
+
 export async function findOrphanedAuthorizedOrders(): Promise<Array<{ id: string; storeId: string }>> {
   const cutoff = new Date(Date.now() - 60_000);
   return platformAdminTransaction(async (tx) => {

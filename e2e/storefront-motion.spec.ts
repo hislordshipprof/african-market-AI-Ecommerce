@@ -107,8 +107,13 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(dialog).toBeVisible();
     const packs = dialog.getByRole("group", { name: "Choose pack size" }).getByRole("button");
     await expect(packs.first()).toBeVisible();
-    await packs.last().click();
-    await expect(packs.last()).toHaveAttribute("aria-pressed", "true");
+    // Under a loaded machine the click can land before the dialog hydrates, so the press is lost.
+    await expect(async () => {
+      if ((await packs.last().getAttribute("aria-pressed")) !== "true") {
+        await packs.last().click();
+      }
+      await expect(packs.last()).toHaveAttribute("aria-pressed", "true");
+    }).toPass();
     await dialog.getByTestId("quick-add-btn").click();
     await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("1");
     await dialog.press("Escape");
