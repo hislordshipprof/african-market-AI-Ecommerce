@@ -2,7 +2,9 @@ vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Client } from "pg";
 import { catalogImageUrl } from "../r2";
+import { storeScoped } from "../db";
 
 import {
   listCategories,
@@ -515,4 +517,259 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     expect(vegRail).toBeDefined();
     expect(vegRail!.listings.length).toBeGreaterThanOrEqual(1);
   });
+
+  async function seedProbe(customName: string, variants: { id: string; label: string; price: number; weightG: number }[]) {
+    const listing = await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.listing.create({
+        data: {
+          storeId: storeAId,
+          masterProductId,
+          customName,
+          price: 100,
+          stockMode: "counted",
+          qty: 8,
+          frozen: false,
+          perishable: false,
+          confidence: 0.9,
+        },
+      }),
+    ]);
+    const listingId = (listing[2] as { id: string }).id;
+    for (const variant of variants) {
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+        rawPrisma.listingVariant.create({ data: { ...variant, listingId } }),
+      ]);
+    }
+    const collection = await storeScoped(storeAId).storeCollection.create({
+      data: { storeId: storeAId, title: customName, slug: customName, active: true },
+    });
+    await storeScoped(storeAId).storeCollectionListing.create({
+      data: { collectionId: collection.id, listingId },
+    });
+    return { listingId, collectionId: collection.id };
+  }
+
+  async function dropProbe(listingId: string, collectionId: string) {
+    await storeScoped(storeAId).storeCollectionListing.deleteMany({ where: { listingId } });
+    await storeScoped(storeAId).listingVariant.deleteMany({ where: { listingId } });
+    await storeScoped(storeAId).listing.deleteMany({ where: { id: listingId } });
+    await storeScoped(storeAId).storeCollection.deleteMany({ where: { id: collectionId } });
+  }
+
+  async function packIds(listingId: string, collectionSlug: string) {
+    const [browse, active, detail, rails, collection, flow] = await Promise.all([
+      listingsByCategory(storeAId, "vegetables"),
+      getActiveListings(storeAId),
+      getListingDetail(storeAId, listingId),
+      getListingsByCategory(storeAId),
+      getCollectionListings(storeAId, collectionSlug),
+      getFlowCatalog(storeAId),
+    ]);
+    const fromBrowse = browse.listings.find((item) => item.id === listingId)?.packOptions?.map((pack) => pack.id);
+    const fromActive = active.find((item) => item.id === listingId)?.packOptions?.map((pack) => pack.id);
+    const fromRails = rails.flatMap((rail) => rail.listings).find((item) => item.id === listingId)?.packOptions?.map((pack) => pack.id);
+    const fromCollection = collection.listings.find((item) => item.id === listingId)?.packOptions?.map((pack) => pack.id);
+    const fromDetail = detail?.variants.map((pack) => pack.id);
+    const fromFlow = flow.filter((item) => item.listingId === listingId).map((item) => item.variantId);
+    return { fromBrowse, fromActive, fromRails, fromCollection, fromDetail, fromFlow, detailDefault: browse.listings.find((item) => item.id === listingId)?.variantId };
+  }
+
+  it("list and detail reads return packs cheapest first whatever the stored order", async () => {
+    const prefix = `t226-ord-${Date.now()}`;
+    const high = `${prefix}-high`;
+    const low = `${prefix}-low`;
+    const mid = `${prefix}-mid`;
+    const expected = [low, mid, high];
+    const seeded = await seedProbe(prefix, [
+      { id: high, label: "High", price: 3000, weightG: 300 },
+      { id: low, label: "Low", price: 1000, weightG: 100 },
+      { id: mid, label: "Mid", price: 2000, weightG: 200 },
+    ]);
+    const listener = listenForVariantQueries();
+    try {
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+        rawPrisma.listingVariant.update({ where: { id: low }, data: { label: "Low" } }),
+      ]);
+      const ids = await packIds(seeded.listingId, prefix);
+      expect(ids.fromBrowse).toEqual(expected);
+      expect(ids.fromActive).toEqual(expected);
+      expect(ids.fromRails).toEqual(expected);
+      expect(ids.fromCollection).toEqual(expected);
+      expect(ids.fromDetail).toEqual(expected);
+      expect(ids.fromFlow).toEqual(expected);
+      expect(ids.detailDefault).toBe(low);
+      const search = await searchListings(storeAId, prefix);
+      expect(search.find((item) => item.id === seeded.listingId)?.variantId).toBe(low);
+      const orderedReads = listener.seen.filter((query) => /listing_variants/i.test(query) && /order by/i.test(query));
+      expect(orderedReads.some((query) => /price/i.test(query) && /"id"/i.test(query))).toBe(true);
+    } finally {
+      listener.restore();
+      await dropProbe(seeded.listingId, seeded.collectionId);
+    }
+  });
+
+  it("packs with equal prices are ordered by id in every read", async () => {
+    const prefix = `t226-tie-${Date.now()}`;
+    const low = `${prefix}-m-low`;
+    const upperA = `${prefix}-A.pack`;
+    const upperB = `${prefix}-B-pack`;
+    const lowerA = `${prefix}-a_pack`;
+    const lowerB = `${prefix}-b-pack`;
+    // 0x41 A, 0x42 B, 0x61 a, 0x62 b after the shared prefix.
+    const expected = [low, upperA, upperB, lowerA, lowerB];
+    const seeded = await seedProbe(prefix, [
+      { id: lowerB, label: "b", price: 200, weightG: 20 },
+      { id: lowerA, label: "a", price: 200, weightG: 20 },
+      { id: upperB, label: "B", price: 200, weightG: 20 },
+      { id: upperA, label: "A", price: 200, weightG: 20 },
+      { id: low, label: "low", price: 50, weightG: 5 },
+    ]);
+    try {
+      const ids = await packIds(seeded.listingId, prefix);
+      expect(ids.fromBrowse).toEqual(expected);
+      expect(ids.fromActive).toEqual(expected);
+      expect(ids.fromRails).toEqual(expected);
+      expect(ids.fromCollection).toEqual(expected);
+      expect(ids.fromDetail).toEqual(expected);
+      expect(ids.fromFlow).toEqual(expected);
+      expect(ids.detailDefault).toBe(low);
+      const search = await searchListings(storeAId, prefix);
+      expect(search.find((item) => item.id === seeded.listingId)?.variantId).toBe(low);
+    } finally {
+      await dropProbe(seeded.listingId, seeded.collectionId);
+    }
+  });
+
+  it("store B reads never return store A's listing or packs", async () => {
+    const [browse, active, rails, collection, detail, flow] = await Promise.all([
+      listingsByCategory(storeBId, "vegetables"),
+      getActiveListings(storeBId),
+      getListingsByCategory(storeBId),
+      getCollectionListings(storeBId, "test-soup-kit"),
+      getListingDetail(storeBId, listingAId),
+      getFlowCatalog(storeBId),
+    ]);
+    expect(browse.listings.some((item) => item.id === listingAId)).toBe(false);
+    expect(active.some((item) => item.id === listingAId)).toBe(false);
+    expect(rails.flatMap((rail) => rail.listings).some((item) => item.id === listingAId)).toBe(false);
+    expect(collection.listings.some((item) => item.id === listingAId)).toBe(false);
+    expect(detail).toBeNull();
+    expect(flow.some((item) => item.listingId === listingAId)).toBe(false);
+    const [own, foreign] = await Promise.all([
+      getListingDetail(storeAId, listingAId),
+      getListingDetail(storeBId, listingAId),
+    ]);
+    expect(own?.id).toBe(listingAId);
+    expect(foreign).toBeNull();
+  });
+
+  it("storeScoped(B) cannot write store A's listings, variants or collection items", async () => {
+    const stamp = `t226-rls-${Date.now()}`;
+    const own = await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        customName: stamp,
+        price: 250,
+        stockMode: "counted",
+        qty: 3,
+        frozen: false,
+        perishable: false,
+        confidence: 1,
+      },
+    });
+    const variant = await storeScoped(storeAId).listingVariant.create({
+      data: { listingId: own.id, label: "1 bag", price: 250, weightG: 100 },
+    });
+    const collection = await storeScoped(storeAId).storeCollection.create({
+      data: { storeId: storeAId, title: stamp, slug: stamp, active: true },
+    });
+    const link = await storeScoped(storeAId).storeCollectionListing.create({
+      data: { collectionId: collection.id, listingId: own.id },
+    });
+    const storeBCollection = await storeScoped(storeBId).storeCollection.create({
+      data: { storeId: storeBId, title: `${stamp}-b`, slug: stamp, active: true },
+    });
+    const storeBListing = await storeScoped(storeBId).listing.create({
+      data: {
+        storeId: storeBId,
+        customName: `${stamp}-b`,
+        price: 300,
+        stockMode: "counted",
+        qty: 2,
+        frozen: false,
+        perishable: false,
+        confidence: 1,
+      },
+    });
+    try {
+      await expect(storeScoped(storeBId).listing.create({
+        data: {
+          storeId: storeAId,
+          customName: `${stamp}-stolen`,
+          price: 1,
+          stockMode: "counted",
+          qty: 1,
+          frozen: false,
+          perishable: false,
+          confidence: 1,
+        },
+      })).rejects.toThrow(/42501|row-level security/i);
+      await expect(storeScoped(storeBId).listingVariant.create({
+        data: { listingId: own.id, label: "stolen", price: 1, weightG: 1 },
+      })).rejects.toThrow(/42501|row-level security/i);
+      await expect(storeScoped(storeBId).storeCollection.create({
+        data: { storeId: storeAId, title: "stolen", slug: `${stamp}-stolen`, active: true },
+      })).rejects.toThrow(/42501|row-level security/i);
+      await expect(storeScoped(storeBId).storeCollectionListing.create({
+        data: { collectionId: collection.id, listingId: storeBListing.id },
+      })).rejects.toThrow(/42501|row-level security/i);
+      await expect(storeScoped(storeBId).storeCollectionListing.create({
+        data: { collectionId: storeBCollection.id, listingId: own.id },
+      })).rejects.toThrow(/42501|row-level security/i);
+      expect((await storeScoped(storeBId).listing.updateMany({ where: { id: own.id }, data: { price: 1 } })).count).toBe(0);
+      expect((await storeScoped(storeBId).listing.deleteMany({ where: { id: own.id } })).count).toBe(0);
+      expect((await storeScoped(storeBId).listingVariant.updateMany({ where: { id: variant.id }, data: { price: 1 } })).count).toBe(0);
+      expect((await storeScoped(storeBId).listingVariant.deleteMany({ where: { id: variant.id } })).count).toBe(0);
+      expect((await storeScoped(storeBId).storeCollection.updateMany({ where: { id: collection.id }, data: { title: "stolen" } })).count).toBe(0);
+      expect((await storeScoped(storeBId).storeCollection.deleteMany({ where: { id: collection.id } })).count).toBe(0);
+      expect((await storeScoped(storeBId).storeCollectionListing.deleteMany({ where: { id: link.id } })).count).toBe(0);
+      const reread = await storeScoped(storeAId).listing.findUnique({ where: { id: own.id }, include: { variants: true, collectionItems: true } });
+      expect(reread?.price).toBe(250);
+      expect(reread?.variants.map((item) => item.id)).toEqual([variant.id]);
+      expect(reread?.collectionItems.map((item) => item.id)).toEqual([link.id]);
+      const [aShelf, bShelf] = await Promise.all([
+        getCollectionListings(storeAId, stamp),
+        getCollectionListings(storeBId, stamp),
+      ]);
+      expect(aShelf.listings.map((item) => item.id)).toEqual([own.id]);
+      expect(bShelf.listings.map((item) => item.id)).toEqual([]);
+    } finally {
+      await storeScoped(storeAId).storeCollectionListing.deleteMany({ where: { listingId: own.id } });
+      await storeScoped(storeBId).storeCollectionListing.deleteMany({ where: { listingId: storeBListing.id } });
+      await storeScoped(storeAId).listingVariant.deleteMany({ where: { listingId: own.id } });
+      await storeScoped(storeAId).listing.deleteMany({ where: { id: own.id } });
+      await storeScoped(storeBId).listing.deleteMany({ where: { id: storeBListing.id } });
+      await storeScoped(storeAId).storeCollection.deleteMany({ where: { id: collection.id } });
+      await storeScoped(storeBId).storeCollection.deleteMany({ where: { id: storeBCollection.id } });
+    }
+  });
 });
+
+function listenForVariantQueries() {
+  const seen: string[] = [];
+  const proto = Client.prototype as unknown as { query: (this: unknown, ...args: unknown[]) => unknown };
+  const original = proto.query;
+  proto.query = function (this: unknown, ...args: unknown[]) {
+    const first = args[0] as { text?: string } | string | undefined;
+    const text = typeof first === "string" ? first : first?.text;
+    if (typeof text === "string") seen.push(text);
+    return original.apply(this, args);
+  };
+  return { seen, restore: () => { proto.query = original; } };
+}

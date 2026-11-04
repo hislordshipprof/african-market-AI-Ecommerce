@@ -201,6 +201,24 @@ describe("proxy cookie fallback (override allowed)", () => {
   });
 });
 
+describe("proxy in hosted CI (e2e override, no Vercel)", () => {
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "1");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "example.com");
+  });
+
+  it("ignores a forged store header and keeps the host", () => {
+    const req = new NextRequest("http://mama-ngozi.example.com/", {
+      headers: { host: "mama-ngozi.example.com", "x-store-slug": "tante-marie" },
+    });
+    const res = proxy(req);
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
+  });
+});
+
 describe("proxy in production (override not allowed)", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "production");
@@ -225,6 +243,18 @@ describe("proxy in production (override not allowed)", () => {
     });
     const res = proxy(req);
     expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+  });
+
+  it("production host wins over a forged store header and disallowed overrides", () => {
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "example.com");
+    const req = new NextRequest("http://mama-ngozi.example.com/categories/grains?store=tante-marie", {
+      headers: { host: "mama-ngozi.example.com", "x-store-slug": "tante-marie" },
+    });
+    req.cookies.set("store_override", "tante-marie");
+    const res = proxy(req);
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("store_override")).toBeUndefined();
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
   });
 
   it("still resolves slug from host in production", () => {

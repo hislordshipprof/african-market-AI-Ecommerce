@@ -26,6 +26,27 @@ describe("storefront cache", () => {
     expect(await cachedStorefrontRead("b", "listings", async () => [])).toEqual(["store b"]);
     expect(invalidated).toHaveBeenCalledWith("storefront:a", { expire: 0 });
   });
+  it("store operation and deployment keys remain distinct including a missing deployment id", async () => {
+    const previous = process.env.VERCEL_DEPLOYMENT_ID;
+    delete process.env.VERCEL_DEPLOYMENT_ID;
+    const detailKey = JSON.stringify(["getListingDetail", "mn_egusi"]);
+    expect(await cachedStorefrontRead("store-a", detailKey, async () => ({ id: "mn_egusi" }))).toEqual({ id: "mn_egusi" });
+    expect(cached).toHaveBeenCalledWith(
+      ["storefront-v3", "local", "store-a", detailKey],
+      { tags: ["storefront:store-a"], revalidate: 60 },
+    );
+    process.env.VERCEL_DEPLOYMENT_ID = "dep_226";
+    expect(await cachedStorefrontRead("store-b", detailKey, async () => ({ id: "tm_egusi" }))).toEqual({ id: "tm_egusi" });
+    expect(cached).toHaveBeenCalledWith(
+      ["storefront-v3", "dep_226", "store-b", detailKey],
+      { tags: ["storefront:store-b"], revalidate: 60 },
+    );
+    delete process.env.VERCEL_DEPLOYMENT_ID;
+    expect(await cachedStorefrontRead("store-a", detailKey, async () => ({ id: "leak" }))).toEqual({ id: "mn_egusi" });
+    if (previous === undefined) delete process.env.VERCEL_DEPLOYMENT_ID;
+    else process.env.VERCEL_DEPLOYMENT_ID = previous;
+  });
+
   it("keeps query keys separate and tags every read with its store", async () => {
     expect(await cachedStorefrontRead("a", "search:egusi", async () => ["egusi"])).toEqual(["egusi"]);
     expect(await cachedStorefrontRead("a", "search:garri", async () => ["garri"])).toEqual(["garri"]);

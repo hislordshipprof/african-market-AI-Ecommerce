@@ -54,7 +54,7 @@ A store's offer of a product: its price, sizes and stock at that store.
 _Avoid_: Product (when meaning the store's item), SKU
 
 **Variant**:
-A size or weight option of a Listing, with its own price and weight. Carts and orders point at a variant, so a variant a cart or order uses can't be removed.
+A size or weight option of a **Listing** with its own price and weight. Carts and orders point at a variant, so a variant a cart or order uses can't be removed. Customers always see a listing's packs cheapest first.
 
 **Stock confidence**:
 How sure the platform is that a listing's recorded stock is still true, given that counter sales are invisible to it.
