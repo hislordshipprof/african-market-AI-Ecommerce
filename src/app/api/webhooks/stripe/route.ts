@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
+import { markTerminalRefundFailure } from "@/lib/order/service";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,17 @@ export async function POST(req: NextRequest) {
   ];
   if (accountEventTypes.includes(event.type) && event.accountId) {
     await updateStoreOnboardingStatus(event.accountId);
+  }
+
+  if (
+    event.refund &&
+    (event.refund.status === "failed" || event.refund.status === "canceled")
+  ) {
+    await markTerminalRefundFailure({
+      paymentIntentId: event.refund.paymentIntentId,
+      refundId: event.refund.id,
+      refundStatus: event.refund.status,
+    });
   }
 
   return NextResponse.json({ received: true }, { status: 200 });

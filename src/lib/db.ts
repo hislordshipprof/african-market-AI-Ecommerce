@@ -201,6 +201,56 @@ export async function lockListingRow(tx: Pick<PrismaClient, "$queryRaw">, listin
   await tx.$queryRaw`SELECT 1 FROM listings WHERE id = ${listingId} FOR UPDATE`;
 }
 
+export async function findOrphanedAuthorizedOrders(): Promise<Array<{ id: string; storeId: string }>> {
+  const cutoff = new Date(Date.now() - 60_000);
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+      SELECT id, store_id FROM orders
+      WHERE status = 'AUTHORIZED'
+        AND inngest_event_sent_at IS NULL
+        AND created_at < ${cutoff}
+      ORDER BY created_at ASC
+      LIMIT 50
+    `;
+    return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
+  });
+}
+
+export async function findOrderByPaymentIntent(
+  paymentIntentId: string,
+): Promise<{ id: string; storeId: string; status: string; refundId: string | null } | null> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{
+      id: string;
+      store_id: string;
+      status: string;
+      refund_id: string | null;
+    }>>`
+      SELECT id, store_id, status, refund_id
+      FROM orders
+      WHERE payment_intent_id = ${paymentIntentId}
+      LIMIT 1
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    return { id: row.id, storeId: row.store_id, status: row.status, refundId: row.refund_id };
+  });
+}
+
+export async function findStuckTransitionalOrders(): Promise<Array<{ id: string; storeId: string }>> {
+  const cutoff = new Date(Date.now() - 5 * 60_000);
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+      SELECT id, store_id FROM orders
+      WHERE status IN ('CAPTURING', 'CANCELLING')
+        AND updated_at < ${cutoff}
+      ORDER BY updated_at ASC
+      LIMIT 50
+    `;
+    return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
+  });
+}
+
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;

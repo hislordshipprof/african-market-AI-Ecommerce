@@ -108,6 +108,44 @@ test.describe("Order inbox", () => {
     await expect(page.getByRole("button", { name: "Pick" }).first()).toBeVisible({ timeout: 10000 });
   });
 
+  test("Mark ready button disabled until all lines picked, then captures and transitions", async ({ page }) => {
+    await storeOwnerSignIn(page);
+    await page.goto(ORDERS_URL);
+
+    const orderCard = page.locator("button", { hasText: "#1005" });
+    await expect(orderCard).toBeVisible();
+    await orderCard.click();
+    await expect(page.locator("text=Pick list")).toBeVisible();
+
+    const markReadyBtn = page.getByRole("button", { name: "Mark ready" });
+    await expect(markReadyBtn).toBeVisible({ timeout: 10000 });
+    await expect(markReadyBtn).toBeDisabled();
+
+    const pickButtons = page.getByRole("button", { name: "Pick" });
+    const count = await pickButtons.count();
+    for (let i = 0; i < count; i++) {
+      await pickButtons.first().click();
+      await page.waitForTimeout(500);
+    }
+
+    await expect(markReadyBtn).toBeEnabled({ timeout: 10000 });
+
+    await markReadyBtn.click();
+
+    await expect(page.locator("text=Order marked ready")).toBeVisible({ timeout: 15000 });
+
+    const awaitingBadge = page.locator("text=Awaiting pickup");
+    await expect(awaitingBadge).toBeVisible({ timeout: 15000 });
+
+    const handOffBtn = page.getByRole("button", { name: "Hand off" });
+    await expect(handOffBtn).toBeVisible({ timeout: 10000 });
+
+    const totalText = await page.getByTestId("order-total").innerText();
+    expect(totalText).toMatch(/^\$\d+\.\d{2}$/);
+    expect(totalText).not.toBe("$0.00");
+    await expect(page.getByTestId("order-captured")).toHaveText(totalText);
+  });
+
   test("no horizontal overflow at 390px mobile", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await storeOwnerSignIn(page);

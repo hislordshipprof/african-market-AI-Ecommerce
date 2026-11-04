@@ -10,6 +10,8 @@ import { Prisma } from "@prisma/client";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 
+import { VALID_US_TIMEZONES } from "./timezone";
+
 const HEX_COLOR_RE = /^#[0-9A-Fa-f]{6}$/;
 const MAX_CENTS = 2_147_483_647;
 
@@ -41,14 +43,14 @@ export type StoreFormState = {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled"]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled", "timezone"]) {
     const v = data.get(key);
     if (v != null) raw[key] = String(v);
   }
   return raw;
 }
 
-function validateStoreFields(data: FormData): {
+function validateStoreFields(data: FormData, defaultTimezone = "America/New_York"): {
   errors: Record<string, string>;
   values: {
     slug: string;
@@ -63,6 +65,7 @@ function validateStoreFields(data: FormData): {
     minimumOrderCents: number;
     pickupEnabled: boolean;
     autoRefundLimitCents: number;
+    timezone: string;
   };
 } {
   const errors: Record<string, string> = {};
@@ -83,6 +86,7 @@ function validateStoreFields(data: FormData): {
   const autoRefundLimitCents = Math.round(
     parseFloatOrDefault(data.get("autoRefundLimit") as string, 25) * 100,
   );
+  const timezone = (data.get("timezone") as string)?.trim() || defaultTimezone;
 
   if (!slug) errors.slug = "Slug is required";
   else if (!isSlugRoutable(slug)) errors.slug = "This slug is not allowed (reserved, all-digit, or invalid format)";
@@ -148,6 +152,10 @@ function validateStoreFields(data: FormData): {
     errors.autoRefundLimit = "Auto-refund limit is too large";
   }
 
+  if (!(VALID_US_TIMEZONES as readonly string[]).includes(timezone)) {
+    errors.timezone = `Invalid timezone: must be one of ${VALID_US_TIMEZONES.join(", ")}`;
+  }
+
   let hours: unknown = null;
   if (hoursRaw) {
     try {
@@ -172,6 +180,7 @@ function validateStoreFields(data: FormData): {
       minimumOrderCents,
       pickupEnabled,
       autoRefundLimitCents,
+      timezone,
     },
   };
 }
@@ -223,6 +232,7 @@ export async function createStore(
         minimumOrderCents: values.minimumOrderCents,
         pickupEnabled: values.pickupEnabled,
         autoRefundLimitCents: values.autoRefundLimitCents,
+        timezone: values.timezone,
       },
     });
 
@@ -247,6 +257,7 @@ export async function createStore(
           minimumOrderCents: s.minimumOrderCents,
           pickupEnabled: s.pickupEnabled,
           autoRefundLimitCents: s.autoRefundLimitCents,
+          timezone: s.timezone,
         },
       },
     });
@@ -279,7 +290,7 @@ export async function updateStore(
   if (!before) return { error: "Store not found" };
 
   const raw = extractRawValues(data);
-  const { errors, values } = validateStoreFields(data);
+  const { errors, values } = validateStoreFields(data, before.timezone);
   if (Object.keys(errors).length > 0) {
     return { fieldErrors: errors, submittedValues: raw };
   }
@@ -322,6 +333,7 @@ export async function updateStore(
         minimumOrderCents: values.minimumOrderCents,
         pickupEnabled: values.pickupEnabled,
         autoRefundLimitCents: values.autoRefundLimitCents,
+        timezone: values.timezone,
       },
     });
 
@@ -346,6 +358,7 @@ export async function updateStore(
           minimumOrderCents: before.minimumOrderCents,
           pickupEnabled: before.pickupEnabled,
           autoRefundLimitCents: before.autoRefundLimitCents,
+          timezone: before.timezone,
         },
         after: {
           slug: s.slug,
@@ -360,6 +373,7 @@ export async function updateStore(
           minimumOrderCents: s.minimumOrderCents,
           pickupEnabled: s.pickupEnabled,
           autoRefundLimitCents: s.autoRefundLimitCents,
+          timezone: s.timezone,
         },
       },
     });

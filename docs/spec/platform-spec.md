@@ -215,34 +215,39 @@ Expose store catalogs and checkout via an MCP server and the Agentic Commerce Pr
 ```
 PLACED ──(payment authorized)──► AUTHORIZED ──(store accepts)──► ACCEPTED ──► PICKING
 PICKING ──(line short)──► SUBSTITUTION_PENDING ──(customer answers / 10-min timeout)──► PICKING
-PICKING ──(all lines resolved, capture final amount)──► READY
+PICKING ──(all lines resolved)──► CAPTURING ──(Stripe captured)──► { pickup: AWAITING_PICKUP, delivery: READY }
 READY ──(delivery)──► COURIER_REQUESTED ──► COURIER_ASSIGNED ──► PICKED_UP ──► DELIVERED
-READY ──(pickup)──► AWAITING_PICKUP ──(customer collects)──► COMPLETED
+AWAITING_PICKUP ──(customer collects)──► COMPLETED
 DELIVERED ──(48 h, no issue)──► COMPLETED
 ```
+Transitional statuses `CAPTURING` and `CANCELLING` are set inside a DB transaction before calling Stripe, so concurrent mutations are blocked while the external call is in flight. A reconcile sweep (Inngest cron, every 15 min) recovers orders stuck in either state by checking the real PaymentIntent status. Together with the 15-minute orphan-event sweep this is 5,760 idle runs in a 30-day month.
+
+Pickup orders skip the `READY` status entirely: once all lines are resolved and the Stripe capture succeeds, pickup orders move directly to `AWAITING_PICKUP`. Delivery orders move to `READY`, which triggers the courier dispatch flow. This avoids an ambiguous `READY` state for pickup where the customer would need to be separately notified that the order is ready for collection — `AWAITING_PICKUP` already carries that meaning.
+
 Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_STORE` → redeliver or refund, `ISSUE_REPORTED` → `PARTIALLY_REFUNDED` / `REFUNDED`.
 
 | Transition | Trigger | Side effects |
 |---|---|---|
-| → AUTHORIZED | Stripe PaymentIntent `requires_capture` | Notify store, decrement reserved stock |
+| → AUTHORIZED | Stripe PaymentIntent `requires_capture` | Notify store (stock reservation deferred to #141) |
 | → ACCEPTED | Store tap / auto | Customer notified with prep ETA |
 | → SUBSTITUTION_PENDING | Picker marks short | Customer prompt; timer |
-| → READY | All lines resolved | **Capture** final amount; delivery re-quote |
+| → CAPTURING | All lines resolved | Set transitional status; Stripe capture in flight |
+| → READY / AWAITING_PICKUP | Stripe capture succeeded | Delivery re-quote (delivery) or customer notified (pickup) |
 | → COURIER_REQUESTED | Ready (or Ready-in-X timer) | Create delivery with provider |
 | → COURIER_ASSIGNED | Provider webhook | Courier name/ETA to store & customer |
 | fallback | No assignment in 10 min or provider error | Cancel with provider A, create with provider B |
 | → PICKED_UP | Provider webhook | Live map starts |
 | → DELIVERED | Provider webhook + proof | Proof stored; payout eligibility |
-| → CANCELLED | Customer (before ACCEPTED) / store / system | Release auth or refund; restock |
+| → CANCELLED | Customer (before ACCEPTED) / store / system | Release auth or refund (stock restore deferred to #141 as matched pair with reservation) |
 
-Unanswered store: if not ACCEPTED within 15 min (store hours), alert owner by SMS; at 30 min auto-cancel and void authorization.
+Unanswered store: if not ACCEPTED within 15 min while the store is inside its hours, alert owner (SMS with #128; until then, audit record only); at 30 min auto-cancel and void authorization. A day marked `Closed` or `{ closed: true }` is closed. A range that cannot be parsed counts as open so a malformed schedule does not hide the alert.
 
 ---
 
 ## 10. Payments
 
 - **Stripe Connect** (Express accounts). Each tenant = connected account.
-- **Charge model:** destination charges with `on_behalf_of` the store (store is merchant of record for goods; the store's name shows on statements). `application_fee_amount` = platform per-order fee + courier fee recovery.
+- **Charge model:** destination charges with `on_behalf_of` the store (store is merchant of record for goods; the store's name shows on statements). `application_fee_amount` = platform per-order fee + card-processing recovery + courier fee recovery, capped at the captured amount. The per-order fee stays $0 until §14 pricing is decided. Card-processing recovery is the published US online rate (2.9% + 30¢) because destination charges debit that fee from the platform. A full cancellation before fulfillment sets `refund_application_fee`, which refunds the fee proportionally (the whole fee on a full refund), including courier recovery, because delivery has not completed.
 - **Manual capture:** authorize the order total **plus a buffer of 10% (capped at $20)** at checkout, disclosed to the customer ("you'll be charged the final amount after picking"). Capture the final amount at READY; the unused buffer is released. A swap that costs more (e.g. +$4) needs the customer's tap and must fit within the buffer; swaps that would exceed it are not offered.
 - **Refunds:** issue from the order; the platform fee is refunded proportionally per policy; courier fee non-refundable when delivery completed.
 - **Tips:** collected with the order, passed to provider tip field.

@@ -25,6 +25,7 @@ async function seedDemoStores() {
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
       stripeAccountId: null,
       stripeOnboardingStatus: "not_started",
+      timezone: "America/Chicago",
       hours: {
         monday: "9:00 AM - 8:00 PM",
         tuesday: "9:00 AM - 8:00 PM",
@@ -47,6 +48,7 @@ async function seedDemoStores() {
       minimumOrderCents: 3500,
       pickupEnabled: true,
       autoRefundLimitCents: 2500,
+      timezone: "America/Chicago",
       ownerName: "Ngozi Okafor",
       ownerStory:
         "Mama Ngozi has been bringing the flavors of home to the community since 2009. What started as a small shop in a strip mall is now the neighborhood’s go-to for authentic Nigerian and West African groceries, spices, and fresh produce.",
@@ -76,6 +78,7 @@ async function seedDemoStores() {
       deliveryInfo: "Next-day delivery within 6 miles · No pickup",
       stripeAccountId: null,
       stripeOnboardingStatus: "not_started",
+      timezone: "America/New_York",
       hours: {
         monday: "10:00 AM - 7:00 PM",
         tuesday: "10:00 AM - 7:00 PM",
@@ -98,6 +101,7 @@ async function seedDemoStores() {
       minimumOrderCents: 3000,
       pickupEnabled: false,
       autoRefundLimitCents: 2000,
+      timezone: "America/New_York",
       ownerName: "Marie Desrosiers",
       ownerStory:
         "Tante Marie left Port-au-Prince in 1995 with three recipes and a dream. Today her shop is where Atlanta’s Caribbean community finds scotch bonnet peppers, fresh plantains, and the taste of the islands.",
@@ -710,6 +714,7 @@ async function seedDemoOrders() {
     { id: "seed-order-2", number: 1002, status: "ACCEPTED", lines: [1, 3] },
     { id: "seed-order-3", number: 1003, status: "PICKING", lines: [0, 2, 4 % variants.length] },
     { id: "seed-order-4", number: 1004, status: "AWAITING_PICKUP", lines: [3 % variants.length, 5 % variants.length] },
+    { id: "seed-order-5", number: 1005, status: "PICKING", lines: [1, 3] },
   ];
 
   for (const demo of demoOrders) {
@@ -720,12 +725,9 @@ async function seedDemoOrders() {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
 
-      const existing = await tx.order.findUnique({
-        where: { id: demo.id },
-        include: { lines: { select: { id: true } } },
-      });
-      if (existing && existing.lines.length > 0) return;
-      if (existing && existing.lines.length === 0) {
+      const existing = await tx.order.findUnique({ where: { id: demo.id } });
+      if (existing) {
+        await tx.orderLine.deleteMany({ where: { orderId: demo.id } });
         await tx.order.delete({ where: { id: demo.id } });
       }
 

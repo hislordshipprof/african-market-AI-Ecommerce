@@ -1,6 +1,8 @@
 import { storeScopedTransaction, lockStoreRow, getNextOrderNumber, storeScoped } from "../db";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
+import { sendOrderAuthorized } from "../inngest/send";
+import { platformFeeCentsForCapture } from "../order/platform-fee";
 import type {
   CheckoutQuote,
   Contact,
@@ -236,6 +238,7 @@ export async function placeOrder(
       maxPerOrder: l.variant.listing.maxPerOrder,
     })) : [];
     const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+    // Idempotent replay — don't re-send the Inngest event
     return { token: existingOrder.id, quote };
   }
 
@@ -307,6 +310,7 @@ export async function placeOrder(
         bufferCents: quote.bufferCents,
         totalAuthorizedCents: quote.holdCents,
         paymentIntentId,
+        platformFeeCents: platformFeeCentsForCapture(quote.totalCents),
         notes: notes || null,
       },
     });
@@ -331,6 +335,8 @@ export async function placeOrder(
 
     return order.id;
   });
+
+  await sendOrderAuthorized(storeId, orderId);
 
   return { token: orderId, quote };
 }

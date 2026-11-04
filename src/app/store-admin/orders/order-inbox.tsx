@@ -31,6 +31,7 @@ import {
   Clock,
   HandMetal,
   Package,
+  RefreshCw,
   ShoppingBag,
 } from "lucide-react";
 import {
@@ -38,9 +39,11 @@ import {
   acceptOrderAction,
   autoAcceptOrderAction,
   markLinePickedAction,
+  markReadyAction,
   completePickupAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
+import { RESOLVED_LINE_STATUSES } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
 
@@ -51,8 +54,12 @@ const STATUS_CONFIG: Record<
   AUTHORIZED: { label: "New", variant: "destructive", icon: Bell },
   ACCEPTED: { label: "Accepted", variant: "default", icon: Check },
   PICKING: { label: "Picking", variant: "secondary", icon: Package },
+  CAPTURING: { label: "Capturing…", variant: "secondary", icon: RefreshCw },
+  CANCELLING: { label: "Cancelling…", variant: "destructive", icon: RefreshCw },
   READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
   AWAITING_PICKUP: { label: "Awaiting pickup", variant: "outline", icon: ShoppingBag },
+  REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
+  CAPTURE_FAILED: { label: "Capture failed", variant: "destructive", icon: Bell },
 };
 
 interface Props {
@@ -137,6 +144,12 @@ export function OrderInbox({
   }, [pollOrders]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
+  const allLinesResolved =
+    selectedOrder?.status === "PICKING"
+      ? selectedOrder.lines.every((l) =>
+          RESOLVED_LINE_STATUSES.includes(l.status as "picked" | "refunded" | "substituted"),
+        )
+      : false;
 
   function handleAcceptClick(orderId: string) {
     setAcceptingOrderId(orderId);
@@ -168,6 +181,22 @@ export function OrderInbox({
       const result = await markLinePickedAction(lineId);
       if (result.ok) {
         toast.success("Line picked");
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleMarkReady(orderId: string) {
+    startTransition(async () => {
+      const result = await markReadyAction(orderId);
+      if (result.ok) {
+        if (result.voided) {
+          toast.success("Order cancelled — amount below capture minimum");
+        } else {
+          toast.success("Order marked ready");
+        }
         pollOrders();
       } else {
         toast.error(result.error);
@@ -278,6 +307,16 @@ export function OrderInbox({
                     {selectedOrder.notes}
                   </p>
                 )}
+                {selectedOrder.status === "REFUND_FAILED" && (
+                  <p className="mt-2 text-sm text-destructive">
+                    The refund failed and the customer is still charged. Refund them another way, then mark the order resolved with the store owner.
+                  </p>
+                )}
+                {selectedOrder.status === "CAPTURE_FAILED" && (
+                  <p className="mt-2 text-sm text-destructive">
+                    Card capture failed after retries. Contact the customer before collecting payment another way.
+                  </p>
+                )}
               </CardHeader>
               <CardContent>
                 {selectedOrder.status === "AUTHORIZED" && (
@@ -346,6 +385,27 @@ export function OrderInbox({
                   </div>
                 )}
 
+                {selectedOrder.status === "PICKING" && (
+                  <Button
+                    className="mb-4 w-full rounded-full"
+                    onClick={() => handleMarkReady(selectedOrder.id)}
+                    disabled={isPending || !allLinesResolved}
+                  >
+                    <CheckCircle2 className="mr-2 size-4" /> Mark ready
+                  </Button>
+                )}
+
+                {selectedOrder.status === "CAPTURING" && (
+                  <Button
+                    className="mb-4 w-full rounded-full"
+                    variant="outline"
+                    onClick={() => handleMarkReady(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <RefreshCw className="mr-2 size-4" /> Retry capture
+                  </Button>
+                )}
+
                 {selectedOrder.status === "AWAITING_PICKUP" && (
                   <Button
                     className="w-full rounded-full"
@@ -369,8 +429,18 @@ export function OrderInbox({
                   )}
                   <div className="flex justify-between pt-1.5 text-base font-semibold">
                     <span>Total</span>
-                    <span className="tabular-nums">{money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}</span>
+                    <span className="tabular-nums" data-testid="order-total">
+                      {money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}
+                    </span>
                   </div>
+                  {selectedOrder.capturedAmountCents != null && selectedOrder.capturedAmountCents > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Captured</span>
+                      <span className="tabular-nums" data-testid="order-captured">
+                        {money(selectedOrder.capturedAmountCents)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

@@ -15,6 +15,7 @@ model Store {
   themePreset          String   @default("palm-and-shea") @map("theme_preset")
   status               String   @default("active")
   hours                Json?
+  timezone             String   @default("America/New_York")
   prepTimeMinutes      Int      @default(30) @map("prep_time_minutes")
   deliveryRadiusMi     Decimal  @default(8) @map("delivery_radius_mi")
   minimumOrderCents    Int      @default(3500) @map("minimum_order_cents")
@@ -484,6 +485,7 @@ model Order {
   totalAuthorizedCents Int       @map("total_authorized_cents")
   paymentIntentId      String?   @unique @map("payment_intent_id")
   capturedAmountCents  Int?      @map("captured_amount_cents")
+  refundId             String?   @map("refund_id")
   platformFeeCents     Int?      @map("platform_fee_cents")
   deliveryFeeCents     Int       @default(0) @map("delivery_fee_cents")
   totalCents           Int       @default(0) @map("total_cents")
@@ -493,6 +495,7 @@ model Order {
   readyAt              DateTime? @map("ready_at")
   completedAt          DateTime? @map("completed_at")
   cancelledAt          DateTime? @map("cancelled_at")
+  inngestEventSentAt   DateTime? @map("inngest_event_sent_at")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
 

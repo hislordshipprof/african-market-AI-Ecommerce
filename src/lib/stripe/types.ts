@@ -16,9 +16,42 @@ export interface AccountLinkResult {
   url: string;
 }
 
+export interface WebhookRefund {
+  id: string;
+  status: string;
+  paymentIntentId: string;
+}
+
 export interface WebhookEvent {
   type: string;
   accountId: string;
+  refund?: WebhookRefund;
+}
+
+export interface CaptureResult {
+  paymentIntentId: string;
+  amountCaptured: number;
+  status: string;
+}
+
+export interface CancelResult {
+  paymentIntentId: string;
+  status: string;
+}
+
+export interface RetrieveResult {
+  paymentIntentId: string;
+  status: string;
+  amountCapturable: number;
+  amountReceived: number;
+  /** Already refunded on the charge. Absent means the caller has not been told. */
+  amountRefunded?: number;
+}
+
+export interface RefundResult {
+  refundId: string;
+  amountRefunded: number;
+  status: string;
 }
 
 export interface StripeProvider {
@@ -40,6 +73,45 @@ export interface StripeProvider {
     payload: string;
     signature: string;
   }): WebhookEvent;
+
+  capturePaymentIntent(
+    paymentIntentId: string,
+    amountCents: number,
+    idempotencyKey?: string,
+    applicationFeeAmount?: number,
+  ): Promise<CaptureResult>;
+
+  cancelPaymentIntent(
+    paymentIntentId: string,
+    idempotencyKey?: string,
+  ): Promise<CancelResult>;
+
+  retrievePaymentIntent(
+    paymentIntentId: string,
+  ): Promise<RetrieveResult>;
+
+  refundPayment(
+    paymentIntentId: string,
+    amountCents: number,
+    idempotencyKey?: string,
+    options?: { refundApplicationFee?: boolean },
+  ): Promise<RefundResult>;
+
+  /** Refunds on this PaymentIntent. Pending refunds stay pending. */
+  listRefunds(paymentIntentId: string): Promise<RefundResult[]>;
+
+  retrieveRefund(
+    refundId: string,
+  ): Promise<RefundResult>;
+}
+
+export class ProviderStateError extends Error {
+  actualStatus: string;
+  constructor(expectedOp: "capture" | "cancel", actualStatus: string) {
+    super(`${expectedOp} expected matching terminal status but PI is ${actualStatus}`);
+    this.name = "ProviderStateError";
+    this.actualStatus = actualStatus;
+  }
 }
 
 export function deriveOnboardingStatus(account: {

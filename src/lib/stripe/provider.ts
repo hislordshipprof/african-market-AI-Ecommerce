@@ -4,7 +4,12 @@ import type {
   ConnectAccount,
   AccountLinkResult,
   WebhookEvent,
+  CaptureResult,
+  CancelResult,
+  RetrieveResult,
+  RefundResult,
 } from "./types";
+import { ProviderStateError } from "./types";
 
 let _stripeClient: Stripe | null = null;
 
@@ -121,10 +126,22 @@ export const stripeProvider: StripeProvider = {
         signature,
         secret,
       );
-      const obj = event.data?.object as { id?: string } | undefined;
+      const obj = event.data?.object as {
+        id?: string;
+        object?: string;
+        status?: string;
+        payment_intent?: string | { id?: string };
+      } | undefined;
+      const paymentIntentId =
+        typeof obj?.payment_intent === "string" ? obj.payment_intent : obj?.payment_intent?.id;
+      const refund =
+        obj?.object === "refund" && obj.id && obj.status && paymentIntentId
+          ? { id: obj.id, status: obj.status, paymentIntentId }
+          : undefined;
       return {
         type: event.type,
         accountId: obj?.id ?? event.account ?? "",
+        ...(refund ? { refund } : {}),
       } satisfies WebhookEvent;
     } catch {
       // v1 parse failed — try v2 thin event
@@ -141,5 +158,130 @@ export const stripeProvider: StripeProvider = {
           ? (notification.related_object as { id?: string } | null)?.id
           : undefined) ?? "",
     } satisfies WebhookEvent;
+  },
+
+  async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
+    const stripe = getStripeClient();
+    try {
+      const pi = await stripe.paymentIntents.capture(paymentIntentId, {
+        amount_to_capture: amountCents,
+        ...(applicationFeeAmount ? { application_fee_amount: applicationFeeAmount } : {}),
+      }, idempotencyKey ? { idempotencyKey } : undefined);
+      return {
+        paymentIntentId: pi.id,
+        amountCaptured: pi.amount_received,
+        status: pi.status,
+      } satisfies CaptureResult;
+    } catch (err: unknown) {
+      if (err instanceof Stripe.errors.StripeInvalidRequestError
+        && err.code === "payment_intent_unexpected_state") {
+        const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+        if (pi.status === "succeeded") {
+          return {
+            paymentIntentId: pi.id,
+            amountCaptured: pi.amount_received,
+            status: pi.status,
+          } satisfies CaptureResult;
+        }
+        throw new ProviderStateError("capture", pi.status);
+      }
+      throw err;
+    }
+  },
+
+  async cancelPaymentIntent(paymentIntentId, idempotencyKey) {
+    const stripe = getStripeClient();
+    try {
+      const pi = await stripe.paymentIntents.cancel(paymentIntentId, {},
+        idempotencyKey ? { idempotencyKey } : undefined);
+      return {
+        paymentIntentId: pi.id,
+        status: pi.status,
+      } satisfies CancelResult;
+    } catch (err: unknown) {
+      if (err instanceof Stripe.errors.StripeInvalidRequestError
+        && err.code === "payment_intent_unexpected_state") {
+        const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+        if (pi.status === "canceled") {
+          return {
+            paymentIntentId: pi.id,
+            status: pi.status,
+          } satisfies CancelResult;
+        }
+        throw new ProviderStateError("cancel", pi.status);
+      }
+      throw err;
+    }
+  },
+
+  async retrievePaymentIntent(paymentIntentId) {
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["latest_charge"],
+    });
+    const charge = pi.latest_charge;
+    const amountRefunded =
+      charge && typeof charge !== "string" ? (charge.amount_refunded ?? 0) : 0;
+    return {
+      paymentIntentId: pi.id,
+      status: pi.status,
+      amountCapturable: pi.amount_capturable ?? 0,
+      amountReceived: pi.amount_received ?? 0,
+      amountRefunded,
+    } satisfies RetrieveResult;
+  },
+
+  async listRefunds(paymentIntentId) {
+    const stripe = getStripeClient();
+    const listed = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 100 });
+    return listed.data.map((refund) => ({
+      refundId: refund.id,
+      amountRefunded: refund.amount,
+      status: refund.status ?? "succeeded",
+    })) satisfies RefundResult[];
+  },
+
+  async retrieveRefund(refundId) {
+    const stripe = getStripeClient();
+    const refund = await stripe.refunds.retrieve(refundId);
+    return {
+      refundId: refund.id,
+      amountRefunded: refund.amount,
+      status: refund.status ?? "succeeded",
+    } satisfies RefundResult;
+  },
+
+  async refundPayment(paymentIntentId, amountCents, idempotencyKey, options) {
+    const stripe = getStripeClient();
+    try {
+      const refund = await stripe.refunds.create(
+        {
+          payment_intent: paymentIntentId,
+          amount: amountCents,
+          reverse_transfer: true,
+          ...(options?.refundApplicationFee ? { refund_application_fee: true } : {}),
+        },
+        idempotencyKey ? { idempotencyKey } : undefined,
+      );
+      return {
+        refundId: refund.id,
+        amountRefunded: refund.amount,
+        status: refund.status ?? "succeeded",
+      } satisfies RefundResult;
+    } catch (err: unknown) {
+      if (err instanceof Stripe.errors.StripeInvalidRequestError
+        && /already been refunded/i.test(err.message)) {
+        const refunds = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 1 });
+        const existing = refunds.data[0];
+        if (existing) {
+          return {
+            refundId: existing.id,
+            amountRefunded: existing.amount,
+            status: existing.status ?? "succeeded",
+          } satisfies RefundResult;
+        }
+      }
+      throw err;
+    }
   },
 };
