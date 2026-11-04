@@ -212,14 +212,118 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
     return Number(res.rows[0]?.n ?? 0);
   }
 
-  async function poll(label: string, pred: () => Promise<boolean>) {
+  async function poll(label: string, pred: () => Promise<boolean>, budgetMs = 4000) {
     const start = Date.now();
-    while (Date.now() - start < 4000) {
+    while (Date.now() - start < budgetMs) {
       if (holderError) throw holderError;
       if (await pred()) return;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     throw new Error(`timed out: ${label}`);
+  }
+
+  function pgCode(err: unknown): string | undefined {
+    return err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : undefined;
+  }
+
+  async function waitsOn(waiterPid: number, blockerPid: number): Promise<boolean> {
+    const res = await locks.query<{ ok: boolean }>(
+      `SELECT (
+         $2 = ANY(pg_blocking_pids($1))
+         OR EXISTS (
+           SELECT 1 FROM pg_locks w
+           WHERE w.pid = $1 AND NOT w.granted AND w.locktype = 'transactionid'
+             AND w.transactionid IN (
+               SELECT h.transactionid FROM pg_locks h
+               WHERE h.pid = $2 AND h.granted AND h.locktype = 'transactionid'
+             )
+         )
+       ) AS ok`,
+      [waiterPid, blockerPid],
+    );
+    return Boolean(res.rows[0]?.ok);
+  }
+
+  async function classifyVariantLock(
+    storeId: string,
+    variantId: string,
+  ): Promise<{ kind: "free" } | { kind: "relation" } | { kind: "row"; blockerPid: number }> {
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    let probePid = 0;
+    let outcome: { kind: "free" } | { kind: "relation" } | { kind: "row"; blockerPid: number } = { kind: "free" };
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE app_user");
+      await client.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
+      await client.query("SET LOCAL lock_timeout = '400ms'");
+      const who = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      probePid = Number(who.rows[0]?.pid ?? 0);
+      try {
+        await client.query("LOCK TABLE listing_variants IN ACCESS SHARE MODE");
+      } catch (err) {
+        if (pgCode(err) === "55P03") return { kind: "relation" };
+        if (pgCode(err) !== "42501") throw err;
+        await client.query("ROLLBACK");
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE app_user");
+        await client.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
+      }
+      await client.query("SAVEPOINT rowlock");
+      try {
+        await client.query("SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE NOWAIT", [variantId]);
+        await client.query("ROLLBACK TO SAVEPOINT rowlock");
+        return { kind: "free" };
+      } catch (err) {
+        await client.query("ROLLBACK TO SAVEPOINT rowlock").catch(() => undefined);
+        if (pgCode(err) !== "55P03") throw err;
+      }
+      // The lane role cannot pg_cancel_backend (42501). A waiting FOR UPDATE with
+      // lock_timeout 0 stays open until the holder releases, and an ALTER TABLE
+      // queued behind that probe blocks every later lock on the table. The
+      // statement ends itself; the lock type is read while it is still waiting.
+      await client.query("SET LOCAL lock_timeout = '800ms'");
+      let settled = false;
+      const rowLock = client.query("SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE", [variantId])
+        .then(() => { settled = true; })
+        .catch((err: unknown) => {
+          settled = true;
+          if (pgCode(err) !== "57014" && pgCode(err) !== "55P03") throw err;
+        });
+      const started = Date.now();
+      while (!settled && Date.now() - started < 900) {
+        const pending = await locks.query<{ locktype: string }>(
+          "SELECT locktype FROM pg_locks WHERE pid = $1 AND NOT granted",
+          [probePid],
+        );
+        const types = pending.rows.map((row) => row.locktype);
+        if (types.includes("relation")) {
+          outcome = { kind: "relation" };
+          break;
+        }
+        if (types.includes("transactionid")) {
+          const blockers = await locks.query<{ pid: number }>(
+            `SELECT h.pid
+             FROM pg_locks w
+             JOIN pg_locks h
+               ON h.granted AND h.locktype = 'transactionid' AND h.transactionid = w.transactionid
+             WHERE w.pid = $1 AND NOT w.granted AND w.locktype = 'transactionid' AND h.pid <> $1`,
+            [probePid],
+          );
+          const blockerPid = Number(blockers.rows[0]?.pid ?? 0);
+          if (blockerPid) {
+            outcome = { kind: "row", blockerPid };
+            break;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await rowLock;
+      return outcome;
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.end().catch(() => undefined);
+    }
   }
 
   // A dedicated connection, not the app pool. Prisma's interactive transaction
@@ -719,61 +823,188 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
     expect((await readVariants(storeAId, created.id))!.variants).toHaveLength(2);
   }, 20_000);
 
-  it("reference creation cannot commit after removal wins the variant lock", async () => {
-    async function removalWins(kind: "direct" | "substitute") {
-      const created = await listingWith(storeAId, `Win ${kind}`, [
-        { label: "X", price: 400, weightG: 400 },
-        { label: "Y", price: 400, weightG: 400 },
-      ]);
-      const x = created.variants.find((v) => v.label === "X")!;
-      const y = created.variants.find((v) => v.label === "Y")!;
-      const line = kind === "substitute" ? await seedCartLine(storeAId, x.id) : null;
-      const holder = hold(storeAId, async (client) => {
-        const locked = await client.query(
-          "SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE",
-          [x.id],
-        );
-        if (locked.rowCount !== 1) throw new Error(`holder locked ${locked.rowCount} variants`);
+  async function removalLoses(kind: "direct" | "substitute") {
+    const created = await listingWith(storeAId, `Win ${kind} ${crypto.randomUUID().slice(0, 8)}`, [
+      { label: "X", price: 400, weightG: 400 },
+      { label: "Y", price: 400, weightG: 400 },
+    ]);
+    const x = created.variants.find((v) => v.label === "X")!;
+    const y = created.variants.find((v) => v.label === "Y")!;
+    const line = kind === "substitute" ? await seedCartLine(storeAId, x.id) : null;
+    await poll(
+      "Y is visible and free before the save",
+      async () => (await classifyVariantLock(storeAId, y.id)).kind === "free",
+      20_000,
+    );
+    const holder = hold(storeAId, async (client) => {
+      const locked = await client.query(
+        "SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE",
+        [x.id],
+      );
+      if (locked.rowCount !== 1) throw new Error(`holder locked ${locked.rowCount} variants`);
+    });
+    const holderPid = await holder.ready();
+    const save = updateListing({
+      storeId: storeAId,
+      listingId: created.id,
+      variants: [row(x, 400, 400, "X")],
+      actor,
+    });
+    let inserter: Promise<unknown> = Promise.resolve();
+    try {
+      let savePid = 0;
+      await poll("removal holds the Y row lock", async () => {
+        const found = await classifyVariantLock(storeAId, y.id);
+        if (found.kind !== "row" || !(await waitsOn(found.blockerPid, holderPid))) return false;
+        savePid = found.blockerPid;
+        return true;
+      }, 10_000);
+      let refPid = 0;
+      inserter = storeScopedTransaction(storeAId, async (tx) => {
+        const rows = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid()::int AS pid`;
+        refPid = Number(rows[0]?.pid ?? 0);
+        if (kind === "direct") {
+          const cart = await tx.cart.create({ data: { storeId: storeAId } });
+          await tx.cartLine.create({ data: { storeId: storeAId, cartId: cart.id, variantId: y.id, qty: 1 } });
+        } else {
+          await tx.cartLine.update({ where: { id: line!.id }, data: { substituteVariantId: y.id } });
+        }
       });
-      await holder.ready();
-      const save = updateListing({
+      await poll("reference waits on the removal", async () => refPid > 0 && await waitsOn(refPid, savePid), 10_000);
+      holder.release();
+      await save;
+      await expect(inserter).rejects.toMatchObject({ code: "P2003" });
+    } finally {
+      holder.release();
+      await Promise.allSettled([holder.done, save, inserter]);
+    }
+    const found = await readVariants(storeAId, created.id);
+    expect(found!.variants.map((v) => v.id)).toEqual([x.id]);
+    expect(await storeScoped(storeAId).cartLine.findMany({ where: { variantId: y.id } })).toEqual([]);
+    if (line) {
+      expect((await storeScoped(storeAId).cartLine.findUnique({ where: { id: line.id } }))?.substituteVariantId).toBeNull();
+    }
+  }
+
+  it("reference creation cannot commit after removal wins the variant lock", async () => {
+    await removalLoses("direct");
+    await removalLoses("substitute");
+  }, 90_000);
+
+  it("reference creation waits for removal even when another session waits on the holder", async () => {
+    const created = await listingWith(storeAId, `False waiter ${crypto.randomUUID().slice(0, 8)}`, [
+      { label: "X", price: 400, weightG: 400 },
+      { label: "Y", price: 400, weightG: 400 },
+    ]);
+    const x = created.variants.find((v) => v.label === "X")!;
+    const y = created.variants.find((v) => v.label === "Y")!;
+    await poll(
+      "Y is visible and free before the foreign waiter",
+      async () => (await classifyVariantLock(storeAId, y.id)).kind === "free",
+      20_000,
+    );
+    const holder = hold(storeAId, async (client) => {
+      const locked = await client.query(
+        "SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE",
+        [x.id],
+      );
+      if (locked.rowCount !== 1) throw new Error(`holder locked ${locked.rowCount} variants`);
+    });
+    const holderPid = await holder.ready();
+    const foreign = new Client({ connectionString: process.env.DATABASE_URL });
+    await foreign.connect();
+    let foreignPid = 0;
+    const foreignDone = (async () => {
+      try {
+        await foreign.query("BEGIN");
+        await foreign.query("SET LOCAL ROLE app_user");
+        await foreign.query("SELECT set_config('app.store_id', $1, true)", [storeAId]);
+        const who = await foreign.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+        foreignPid = Number(who.rows[0]?.pid ?? 0);
+        await foreign.query("SELECT id FROM listings WHERE id = $1 FOR KEY SHARE", [created.id]);
+        await foreign.query("SET LOCAL lock_timeout = '1s'");
+        await foreign.query("SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE", [x.id]);
+      } catch (err) {
+        if (pgCode(err) !== "55P03") throw err;
+      } finally {
+        await foreign.query("ROLLBACK").catch(() => undefined);
+        await foreign.end().catch(() => undefined);
+      }
+    })();
+    let save: Promise<unknown> = Promise.resolve();
+    let inserter: Promise<unknown> = Promise.resolve();
+    try {
+      await poll("foreign waiter is blocked on the holder", async () => foreignPid > 0 && await waitsOn(foreignPid, holderPid), 10_000);
+      expect(await waitersOf(holderPid)).toBeGreaterThanOrEqual(1);
+      expect((await classifyVariantLock(storeAId, y.id)).kind).toBe("free");
+      save = updateListing({
         storeId: storeAId,
         listingId: created.id,
         variants: [row(x, 400, 400, "X")],
         actor,
       });
-      let inserter: Promise<unknown> = Promise.resolve();
-      try {
-        await poll("save is waiting to update the kept variant", async () => (await waitersOf(await holder.ready())) >= 1);
-        inserter = kind === "direct"
-          ? storeScopedTransaction(storeAId, async (tx) => {
-              const cart = await tx.cart.create({ data: { storeId: storeAId } });
-              await tx.cartLine.create({ data: { storeId: storeAId, cartId: cart.id, variantId: y.id, qty: 1 } });
-            })
-          : storeScopedTransaction(storeAId, async (tx) => {
-              await tx.cartLine.update({ where: { id: line!.id }, data: { substituteVariantId: y.id } });
-            });
-        await poll(
-          "reference waits on the removed variant",
-          async () => (await waitersOf(await holder.ready())) >= 2,
-        );
-        holder.release();
-        await save;
-        await expect(inserter).rejects.toThrow();
-      } finally {
-        holder.release();
-        await Promise.allSettled([holder.done, save, inserter]);
-      }
-      const found = await readVariants(storeAId, created.id);
-      expect(found!.variants.map((v) => v.id)).toEqual([x.id]);
-      expect(await storeScoped(storeAId).cartLine.findMany({ where: { variantId: y.id } })).toEqual([]);
-      if (line) {
-        expect((await storeScoped(storeAId).cartLine.findUnique({ where: { id: line.id } }))?.substituteVariantId).toBeNull();
-      }
+      let savePid = 0;
+      await poll("removal holds Y even though the holder already has a waiter", async () => {
+        const found = await classifyVariantLock(storeAId, y.id);
+        if (found.kind !== "row" || !(await waitsOn(found.blockerPid, holderPid))) return false;
+        savePid = found.blockerPid;
+        return savePid !== foreignPid;
+      }, 10_000);
+      let refPid = 0;
+      inserter = storeScopedTransaction(storeAId, async (tx) => {
+        const rows = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid()::int AS pid`;
+        refPid = Number(rows[0]?.pid ?? 0);
+        const cart = await tx.cart.create({ data: { storeId: storeAId } });
+        await tx.cartLine.create({ data: { storeId: storeAId, cartId: cart.id, variantId: y.id, qty: 1 } });
+      });
+      await poll("reference waits on the removal", async () => refPid > 0 && await waitsOn(refPid, savePid), 10_000);
+      holder.release();
+      await save;
+      await expect(inserter).rejects.toMatchObject({ code: "P2003" });
+    } finally {
+      holder.release();
+      await Promise.allSettled([holder.done, save, inserter, foreignDone]);
     }
-    await removalWins("direct");
-    await removalWins("substitute");
-  }, 20_000);
+  }, 90_000);
+
+  it("DDL timeout cannot satisfy the Y row-lock barrier", async () => {
+    const created = await listingWith(storeAId, `DDL barrier ${crypto.randomUUID().slice(0, 8)}`, [
+      { label: "X", price: 100, weightG: 100 },
+      { label: "Y", price: 200, weightG: 200 },
+    ]);
+    const y = created.variants.find((v) => v.label === "Y")!;
+    const owner = new Client({ connectionString: process.env.DIRECT_URL });
+    await owner.connect();
+    let held = false;
+    try {
+      const start = Date.now();
+      while (Date.now() - start < 15_000 && !held) {
+        await owner.query("BEGIN");
+        try {
+          // 50ms, then a gap with no request queued. A waiting ACCESS EXCLUSIVE
+          // blocks later locks on the table even before it is granted.
+          await owner.query("SET LOCAL lock_timeout = '50ms'");
+          await owner.query("LOCK TABLE listing_variants IN ACCESS EXCLUSIVE MODE");
+          held = true;
+        } catch (err) {
+          await owner.query("ROLLBACK");
+          if (pgCode(err) !== "55P03") throw err;
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+      expect(held).toBe(true);
+      const found = await classifyVariantLock(storeAId, y.id);
+      expect(found.kind).toBe("relation");
+    } finally {
+      await owner.query("ROLLBACK").catch(() => undefined);
+      await owner.end().catch(() => undefined);
+    }
+  }, 30_000);
+
+  it("direct and substitute reference lose specifically with P2003", async () => {
+    await removalLoses("direct");
+    await removalLoses("substitute");
+  }, 90_000);
 
   it("maps a real delete P2003 even when its direct reference is hidden by RLS", async () => {
     const created = await listingWith(storeAId, "Hidden fk", [{ label: "Only", price: 800, weightG: 1000 }]);

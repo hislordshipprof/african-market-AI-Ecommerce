@@ -105,7 +105,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
           where: { paymentIntentId: { in: piToCleanup } },
         }),
         rawPrisma.customer.deleteMany({
-          where: { storeId, email: { in: ["evt@test.com", "replay@test.com"] } },
+          where: { storeId, email: { in: ["evt@test.com", "replay@test.com", "race@test.com"] } },
         }),
         rawPrisma.cartLine.deleteMany({
           where: { cartId: { in: cartsCreated } },
@@ -202,5 +202,40 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
     expect(result2.token).toBeTruthy();
 
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it("two concurrent placeOrder calls with one PaymentIntent send one order/authorized event", async (ctx) => {
+    if (!canRun) { ctx.skip(); return; }
+    const contact = { name: "Race Test", phone: "+15551234567", email: "race@test.com" };
+    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup");
+    const scoped = storeScoped(storeId);
+    const cart = await scoped.cart.create({ data: { storeId } });
+    cartsCreated.push(cart.id);
+    await scoped.cartLine.create({
+      data: { storeId, cartId: cart.id, variantId, qty: 2, swapRule: "exact_only" },
+    });
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.create({
+      amount: quote.holdCents,
+      currency: "usd",
+      capture_method: "manual",
+      on_behalf_of: stripeAccountId,
+      transfer_data: { destination: stripeAccountId },
+      metadata: { store_id: storeId, cart_id: cart.id },
+    });
+    piToCleanup.push(pi.id);
+    await scoped.cart.update({ where: { id: cart.id }, data: { paymentIntentId: pi.id } });
+    await stripe.paymentIntents.confirm(pi.id, {
+      payment_method: "pm_card_visa",
+      return_url: "https://example.com/return",
+    });
+
+    const [first, second] = await Promise.all([
+      placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, pi.id),
+      placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, pi.id),
+    ]);
+    expect(first.token).toBe(second.token);
+    expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+    expect(sendOrderAuthorized).toHaveBeenCalledWith(storeId, first.token);
   }, 30_000);
 });

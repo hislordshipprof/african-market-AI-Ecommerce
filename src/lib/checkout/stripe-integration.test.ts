@@ -150,7 +150,23 @@ describe.skipIf(!hasKey || !hasDb)(
             where: { paymentIntentId: { in: piToCleanup } },
           }),
           rawPrisma.customer.deleteMany({
-            where: { storeId: storeAId, email: { in: ["t@t.com", "e2e@test.com", "d@t.com", "x@t.com"] } },
+            where: {
+              storeId: storeAId,
+              email: {
+                in: [
+                  "t@t.com",
+                  "e2e@test.com",
+                  "d@t.com",
+                  "x@t.com",
+                  "high@t.com",
+                  "five-0@t.com",
+                  "five-1@t.com",
+                  "five-2@t.com",
+                  "five-3@t.com",
+                  "five-4@t.com",
+                ],
+              },
+            },
           }),
           rawPrisma.cartLine.deleteMany({
             where: { cartId: { in: cartsCreated } },
@@ -359,6 +375,109 @@ describe.skipIf(!hasKey || !hasDb)(
             piResult.paymentIntentId,
           ),
         ).rejects.toThrow(/does not match/);
+      },
+    );
+
+    it(
+      "five concurrent checkouts on one store all place orders",
+      { timeout: 60_000 },
+      async () => {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+        const orders = await Promise.all(
+          Array.from({ length: 5 }, async (_, index) => {
+            const contact = {
+              name: `Five ${index}`,
+              phone: "+15551234567",
+              email: `five-${index}@t.com`,
+            };
+            const quote = computeQuote(
+              0,
+              [{ price: 1500, qty: 2, maxPerOrder: null }],
+              contact,
+              "pickup",
+            );
+            const cart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
+            cartsCreated.push(cart.id);
+            await storeScoped(storeAId).cartLine.create({
+              data: {
+                storeId: storeAId,
+                cartId: cart.id,
+                variantId: variantAId,
+                qty: 2,
+                swapRule: "exact_only",
+              },
+            });
+            const pi = await stripe.paymentIntents.create({
+              amount: quote.holdCents,
+              currency: "usd",
+              capture_method: "manual",
+              on_behalf_of: stripeAccountAId,
+              transfer_data: { destination: stripeAccountAId },
+              metadata: { store_id: storeAId, cart_id: cart.id },
+            });
+            piToCleanup.push(pi.id);
+            await storeScoped(storeAId).cart.update({
+              where: { id: cart.id },
+              data: { paymentIntentId: pi.id },
+            });
+            await stripe.paymentIntents.confirm(pi.id, {
+              payment_method: "pm_card_visa",
+              return_url: "https://example.com/return",
+            });
+            return placeOrder(storeAId, 0, cart.id, contact, "pickup", null, null, pi.id);
+          }),
+        );
+        const tokens = orders.map((order) => order.token);
+        expect(new Set(tokens).size).toBe(5);
+        const saved = await storeScoped(storeAId).order.findMany({
+          where: { id: { in: tokens } },
+        });
+        expect(saved).toHaveLength(5);
+        expect(saved.every((order) => order.status === "AUTHORIZED")).toBe(true);
+      },
+    );
+
+    it(
+      "a PaymentIntent amount above the hold writes no customer or order",
+      { timeout: 20_000 },
+      async () => {
+        const contact = { name: "High Hold", phone: "+15551234567", email: "high@t.com" };
+        const quote = computeQuote(
+          0,
+          [{ price: 1500, qty: 2, maxPerOrder: null }],
+          contact,
+          "pickup",
+        );
+        const cart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
+        cartsCreated.push(cart.id);
+        await storeScoped(storeAId).cartLine.create({
+          data: {
+            storeId: storeAId,
+            cartId: cart.id,
+            variantId: variantAId,
+            qty: 2,
+            swapRule: "exact_only",
+          },
+        });
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+        const pi = await stripe.paymentIntents.create({
+          amount: quote.holdCents + 1,
+          currency: "usd",
+          capture_method: "manual",
+          on_behalf_of: stripeAccountAId,
+          transfer_data: { destination: stripeAccountAId },
+          metadata: { store_id: storeAId, cart_id: cart.id },
+        });
+        piToCleanup.push(pi.id);
+        await stripe.paymentIntents.confirm(pi.id, {
+          payment_method: "pm_card_visa",
+          return_url: "https://example.com/return",
+        });
+        await expect(
+          placeOrder(storeAId, 0, cart.id, contact, "pickup", null, null, pi.id),
+        ).rejects.toThrow(/does not match quote hold/);
+        expect(await storeScoped(storeAId).customer.count({ where: { email: contact.email } })).toBe(0);
+        expect(await storeScoped(storeAId).order.count({ where: { paymentIntentId: pi.id } })).toBe(0);
       },
     );
 
