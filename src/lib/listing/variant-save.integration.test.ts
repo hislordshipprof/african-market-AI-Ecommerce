@@ -270,6 +270,15 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
         await client.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
       }
       await client.query("SET LOCAL lock_timeout = '0'");
+      await client.query("SAVEPOINT rowlock");
+      try {
+        await client.query("SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE NOWAIT", [variantId]);
+        await client.query("ROLLBACK TO SAVEPOINT rowlock");
+        return { kind: "free" };
+      } catch (err) {
+        await client.query("ROLLBACK TO SAVEPOINT rowlock").catch(() => undefined);
+        if (pgCode(err) !== "55P03") throw err;
+      }
       let settled = false;
       const rowLock = client.query("SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE", [variantId])
         .then(() => { settled = true; })
