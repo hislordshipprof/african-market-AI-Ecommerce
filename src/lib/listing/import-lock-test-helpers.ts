@@ -44,6 +44,8 @@ export type LockObserver = LockClient;
 
 type HoldOptions = {
   timeoutMs?: number;
+  /** Isolates pg_stat_activity counts when another file holds a store row at the same time. */
+  applicationName?: string;
   createClient?: (connectionString: string, timeoutMs: number) => LockClient;
 };
 
@@ -288,9 +290,10 @@ function startCommit<T>(run: () => Promise<T>): Promise<T> {
 
 export async function holdStoreRow(storeId: string, options?: HoldOptions): Promise<StoreRowHold> {
   const timeoutMs = options?.timeoutMs ?? LOCK_WAIT_TIMEOUT_MS;
+  const applicationName = options?.applicationName?.trim() || HOLDER_APPLICATION_NAME;
   const connectionString = directUrlForLane();
   const deadline = Date.now() + timeoutMs;
-  const client = (options?.createClient ?? ((cs, ms) => defaultLockClient(cs, ms, HOLDER_APPLICATION_NAME)))(
+  const client = (options?.createClient ?? ((cs, ms) => defaultLockClient(cs, ms, applicationName)))(
     connectionString,
     timeoutMs,
   );

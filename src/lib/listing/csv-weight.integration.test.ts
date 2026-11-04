@@ -6,7 +6,6 @@ import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { commitImport, generatePreview } from "./csv-import";
 import type { Actor } from "./service";
 import {
-  HOLDER_APPLICATION_NAME,
   OVERLAP_TEST_TIMEOUT_MS,
   assertNoLockWaiters,
   commitPairBehindStoreLock,
@@ -503,7 +502,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     expect(byName.has(invalid)).toBe(false);
   });
 
-  async function holderSessions(): Promise<number> {
+  async function holderSessions(applicationName: string): Promise<number> {
     const client = new Client({
       connectionString: directUrlForLane(),
       application_name: "import-lock-counter",
@@ -512,7 +511,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     try {
       const result = await client.query<{ n: number }>(
         "SELECT COUNT(*)::int AS n FROM pg_stat_activity WHERE application_name = $1",
-        [HOLDER_APPLICATION_NAME],
+        [applicationName],
       );
       return Number(result.rows[0]?.n ?? 0);
     } finally {
@@ -521,8 +520,9 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
   }
 
   it("waiting on the store lock names the step when nothing queues", async () => {
-    const before = await holderSessions();
-    const hold = await holdStoreRow(storeAId);
+    const applicationName = `import-lock-holder-quiet-${RUN}`;
+    const before = await holderSessions(applicationName);
+    const hold = await holdStoreRow(storeAId, { applicationName });
     const started = Date.now();
     try {
       await expect(waitForLockWaiters(hold.pid, 1, {
@@ -533,7 +533,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     } finally {
       await hold.rollback();
     }
-    expect(await holderSessions()).toBe(before);
+    expect(await holderSessions(applicationName)).toBe(before);
     const writeStarted = Date.now();
     const created = await storeScoped(storeAId).listing.create({
       data: {
@@ -701,15 +701,16 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
   }, 30_000);
 
   it("missing-store holder and repeated cleanup leave no connection behind", async () => {
-    const before = await holderSessions();
-    await expect(holdStoreRow(crypto.randomUUID())).rejects.toThrow("store row not locked");
-    expect(await holderSessions()).toBe(before);
-    const hold = await holdStoreRow(storeAId);
-    expect(await holderSessions()).toBe(before + 1);
+    const applicationName = `import-lock-holder-leak-${RUN}`;
+    expect(await holderSessions(applicationName)).toBe(0);
+    await expect(holdStoreRow(crypto.randomUUID(), { applicationName })).rejects.toThrow("store row not locked");
+    expect(await holderSessions(applicationName)).toBe(0);
+    const hold = await holdStoreRow(storeAId, { applicationName });
+    expect(await holderSessions(applicationName)).toBe(1);
     await hold.rollback();
     await hold.rollback();
     await hold.commit();
-    expect(await holderSessions()).toBe(before);
+    expect(await holderSessions(applicationName)).toBe(0);
   }, 30_000);
 
   it("waiter count excludes another store and rejects a nonzero baseline", async () => {
