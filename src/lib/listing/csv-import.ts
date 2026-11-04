@@ -540,6 +540,14 @@ function listingWeightG(weightG: number | null | undefined): number {
   return weightG && weightG > 0 ? weightG : DEFAULT_WEIGHT_G;
 }
 
+function resolveImportWeightG(
+  rowWeightG: number | undefined,
+  productWeightG: number | null | undefined,
+): number {
+  if (rowWeightG !== undefined && rowWeightG > 0) return rowWeightG;
+  return listingWeightG(productWeightG);
+}
+
 interface ListingToCreate {
   masterProductId: string | null;
   customName: string | null;
@@ -571,7 +579,7 @@ function buildListingData(
       ...stock,
       frozen: false,
       perishable: false,
-      weightG: DEFAULT_WEIGHT_G,
+      weightG: resolveImportWeightG(row.weightG, null),
     };
   }
   return {
@@ -581,7 +589,7 @@ function buildListingData(
     ...stock,
     frozen: product.frozen,
     perishable: product.perishable,
-    weightG: listingWeightG(product.weightG),
+    weightG: resolveImportWeightG(row.weightG, product.weightG),
   };
 }
 
