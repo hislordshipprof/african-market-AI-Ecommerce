@@ -278,16 +278,25 @@ const fakeStripeProvider: StripeProvider = {
     } satisfies RefundResult;
   },
 
+  async listRefunds(paymentIntentId) {
+    return [...refunds.entries()]
+      .filter(([, entry]) => entry.paymentIntentId === paymentIntentId)
+      .map(([refundId, entry]) => ({
+        refundId,
+        amountRefunded: entry.amountRefunded,
+        status: entry.status,
+      })) satisfies RefundResult[];
+  },
+
   async retrieveRefund(refundId) {
     const entry = refunds.get(refundId);
     if (!entry) {
       throw new Error(`Refund ${refundId} not found`);
     }
-    // Model pending → succeeded: a later retrieve always sees succeeded
     return {
       refundId,
       amountRefunded: entry.amountRefunded,
-      status: entry.status === "pending" ? "succeeded" : entry.status,
+      status: entry.status,
     } satisfies RefundResult;
   },
 
@@ -325,6 +334,11 @@ const fakeStripeProvider: StripeProvider = {
   },
 };
 
+function setRefundStatus(refundId: string, status: string) {
+  const entry = refunds.get(refundId);
+  if (entry) entry.status = status;
+}
+
 function setNextRefundStatus(paymentIntentId: string, status: string) {
   nextRefundStatus.set(paymentIntentId, status);
 }
@@ -339,4 +353,4 @@ function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextRefundStatus, setNextCaptureFailure, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };

@@ -231,6 +231,16 @@ export const stripeProvider: StripeProvider = {
     } satisfies RetrieveResult;
   },
 
+  async listRefunds(paymentIntentId) {
+    const stripe = getStripeClient();
+    const listed = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 100 });
+    return listed.data.map((refund) => ({
+      refundId: refund.id,
+      amountRefunded: refund.amount,
+      status: refund.status ?? "succeeded",
+    })) satisfies RefundResult[];
+  },
+
   async retrieveRefund(refundId) {
     const stripe = getStripeClient();
     const refund = await stripe.refunds.retrieve(refundId);

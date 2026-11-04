@@ -38,11 +38,7 @@ async function refundCapturedBalance(paymentIntentId: string, orderId: string): 
     const already = pi.amountRefunded ?? 0;
     const remaining = Math.max(0, pi.amountReceived - already);
     if (remaining === 0) {
-      return {
-        refundId: `re_external_${paymentIntentId}`,
-        amountRefunded: pi.amountReceived,
-        status: "succeeded",
-      };
+      return refundRecordedOnCharge(paymentIntentId, pi.amountReceived);
     }
     try {
       const refund = await stripe.refundPayment(
@@ -67,6 +63,24 @@ async function refundCapturedBalance(paymentIntentId: string, orderId: string): 
     }
   }
   throw new Error("Refund did not cover the captured amount");
+}
+
+/** A zero balance is not settlement. Pending refunds count toward amount_refunded. */
+async function refundRecordedOnCharge(
+  paymentIntentId: string,
+  amountReceived: number,
+): Promise<RefundResult> {
+  const listed = await getStripeProvider().listRefunds(paymentIntentId);
+  const pending = listed.find((refund) => refund.status === "pending" || refund.status === "requires_action");
+  if (pending) return pending;
+  const succeeded = listed.filter((refund) => refund.status === "succeeded");
+  const covered = succeeded.reduce((sum, refund) => sum + refund.amountRefunded, 0);
+  if (covered >= amountReceived && succeeded.length > 0) {
+    return succeeded[succeeded.length - 1];
+  }
+  const failed = listed.find((refund) => isTerminalRefundStatus(refund.status));
+  if (failed) return failed;
+  throw new Error("Captured amount is marked refunded but no refund covers it");
 }
 
 function captureKey(orderId: string, attempt: number): string {
@@ -674,13 +688,23 @@ export async function autoCancelOrder(
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false as const, error: "Order not found" };
     if (order.status === "CANCELLING") {
-      return { ok: true as const, paymentIntentId: order.paymentIntentId, alreadyClaiming: true };
+      return {
+        ok: true as const,
+        paymentIntentId: order.paymentIntentId,
+        alreadyClaiming: true,
+        refundId: order.refundId,
+      };
     }
     if (order.status !== "AUTHORIZED") {
       return { ok: false as const, error: `Order is in status ${order.status}, not AUTHORIZED` };
     }
     await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLING" } });
-    return { ok: true as const, paymentIntentId: order.paymentIntentId, alreadyClaiming: false };
+    return {
+      ok: true as const,
+      paymentIntentId: order.paymentIntentId,
+      alreadyClaiming: false,
+      refundId: null,
+    };
   });
 
   if (!validation.ok) return validation;
@@ -696,7 +720,9 @@ export async function autoCancelOrder(
     } catch (err) {
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
-        const refund = await refundCapturedBalance(validation.paymentIntentId, orderId);
+        const refund = validation.refundId
+          ? await stripe.retrieveRefund(validation.refundId)
+          : await refundCapturedBalance(validation.paymentIntentId, orderId);
         const settled = await settleCapturedRefund(storeId, orderId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true };

@@ -6,7 +6,7 @@ import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextCaptureFailure, setNextRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextCaptureFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -1481,6 +1481,140 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     60_000,
   );
 
+  it("duplicate autoCancel while a refund is pending stays CANCELLING with the real refund id", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    await fakeStripeProvider.capturePaymentIntent(pi, order.totalAuthorizedCents, "external-capture");
+    setNextRefundStatus(pi, "pending");
+
+    const first = await autoCancelOrder(storeId, order.id);
+    expect(first.ok).toBe(false);
+    const afterFirst = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(afterFirst!.status).toBe("CANCELLING");
+    expect(afterFirst!.refundId).toMatch(/^re_fake_/);
+
+    const second = await autoCancelOrder(storeId, order.id);
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.error).toMatch(/pending/i);
+    const afterSecond = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(afterSecond!.status).toBe("CANCELLING");
+    expect(afterSecond!.refundId).toBe(afterFirst!.refundId);
+  });
+
+  it("reconcile recovers a cleared pending refund id and stays CANCELLING", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    await fakeStripeProvider.capturePaymentIntent(pi, order.totalAuthorizedCents, "external-capture");
+    setNextRefundStatus(pi, "pending");
+    await autoCancelOrder(storeId, order.id);
+    const saved = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    const realRefundId = saved!.refundId;
+    expect(realRefundId).toMatch(/^re_fake_/);
+
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { refundId: null } });
+    });
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
+    expect(updated!.refundId).toBe(realRefundId);
+  });
+
+  it("a succeeded refund settles the cancellation", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    await fakeStripeProvider.capturePaymentIntent(pi, order.totalAuthorizedCents, "external-capture");
+    setNextRefundStatus(pi, "pending");
+    const first = await autoCancelOrder(storeId, order.id);
+    expect(first.ok).toBe(false);
+    const saved = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    setRefundStatus(saved!.refundId!, "succeeded");
+
+    const second = await autoCancelOrder(storeId, order.id);
+    expect(second.ok).toBe(true);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.refundId).toBe(saved!.refundId);
+  });
+
+  it.skipIf(!process.env.STRIPE_SECRET_KEY)(
+    "sandbox: a pending refund stays CANCELLING on a duplicate cancel and a lost refund id",
+    async () => {
+      const Stripe = (await import("stripe")).default;
+      const { stripeProvider } = await import("../stripe/provider");
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+      let accountId = "";
+      for await (const acct of stripe.accounts.list({ limit: 100 })) {
+        if (acct.capabilities?.transfers === "active") {
+          accountId = acct.id;
+          break;
+        }
+      }
+      expect(accountId).toBeTruthy();
+
+      const created = await stripe.paymentIntents.create({
+        amount: 1000,
+        currency: "usd",
+        capture_method: "manual",
+        on_behalf_of: accountId,
+        transfer_data: { destination: accountId },
+      });
+      const confirmed = await stripe.paymentIntents.confirm(created.id, {
+        payment_method: "pm_card_pendingRefund",
+        return_url: "https://example.com/return",
+      });
+      expect(confirmed.status).toBe("requires_capture");
+      await stripe.paymentIntents.capture(created.id, {
+        amount_to_capture: 1000,
+        application_fee_amount: 100,
+      });
+
+      const order = await createTestOrder();
+      await storeScoped(storeId).order.update({
+        where: { id: order.id },
+        data: { paymentIntentId: created.id },
+      });
+      setStripeProvider(stripeProvider);
+      try {
+        const first = await autoCancelOrder(storeId, order.id);
+        expect(first.ok).toBe(false);
+        if (!first.ok) expect(first.error).toMatch(/pending/i);
+        const afterFirst = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+        expect(afterFirst!.status).toBe("CANCELLING");
+        expect(afterFirst!.refundId).toMatch(/^re_/);
+        expect(afterFirst!.refundId).not.toMatch(/^re_external_/);
+        const pending = await stripe.refunds.retrieve(afterFirst!.refundId!);
+        expect(pending.status).toBe("pending");
+
+        const second = await autoCancelOrder(storeId, order.id);
+        expect(second.ok).toBe(false);
+        if (!second.ok) expect(second.error).toMatch(/pending/i);
+        const afterSecond = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+        expect(afterSecond!.status).toBe("CANCELLING");
+        expect(afterSecond!.refundId).toBe(afterFirst!.refundId);
+        const stillPending = await stripe.refunds.retrieve(afterFirst!.refundId!);
+        expect(stillPending.status).toBe("pending");
+
+        await storeScoped(storeId).order.update({
+          where: { id: order.id },
+          data: { refundId: null },
+        });
+        const recovered = await reconcileStuckOrder(storeId, order.id);
+        expect(recovered.ok).toBe(false);
+        const afterRecover = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+        expect(afterRecover!.status).toBe("CANCELLING");
+        expect(afterRecover!.refundId).toBe(afterFirst!.refundId);
+        const listed = await stripe.refunds.retrieve(afterRecover!.refundId!);
+        expect(listed.status).toBe("pending");
+      } finally {
+        setStripeProvider(fakeStripeProvider);
+      }
+    },
+    90_000,
+  );
+
   it("P1: sweep retry capture on canceled PI → CANCELLED", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
@@ -1559,12 +1693,10 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
     capturedPayments.set(order.paymentIntentId!, 5000);
     setAuthorizedAmount(order.paymentIntentId!, 5000);
-    // Pre-populate the fake refunds map with a pending refund (simulating first sweep)
     setNextRefundStatus(order.paymentIntentId!, "pending");
     await fakeStripeProvider.refundPayment(order.paymentIntentId!, 5000, `refund:${order.id}`);
+    setRefundStatus(refundId, "succeeded");
 
-    // Second sweep: order.refundId is set, so it calls retrieveRefund
-    // The fake models pending→succeeded on retrieve
     const result = await reconcileStuckOrder(storeId, order.id);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.action).toBe("anomaly_refund");

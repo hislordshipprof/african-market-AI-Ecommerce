@@ -97,6 +97,9 @@ export interface StripeProvider {
     options?: { refundApplicationFee?: boolean },
   ): Promise<RefundResult>;
 
+  /** Refunds on this PaymentIntent. Pending refunds stay pending. */
+  listRefunds(paymentIntentId: string): Promise<RefundResult[]>;
+
   retrieveRefund(
     refundId: string,
   ): Promise<RefundResult>;
