@@ -590,12 +590,35 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       { id: mid, label: "Mid", price: 2000, weightG: 200 },
     ]);
     const listener = listenForVariantQueries();
+    const take = () => {
+      const batch = listener.seen.slice();
+      listener.seen.length = 0;
+      return batch;
+    };
+    const assertThisReadOrdersVariants = (label: string) => {
+      const variantQueries = take().filter((query) => /listing_variants/i.test(query) && /select/i.test(query));
+      expect(variantQueries.length, label).toBeGreaterThan(0);
+      for (const query of variantQueries) {
+        expect(query, label).toMatch(/order by/i);
+        expect(query, label).toMatch(/price/i);
+        expect(query, label).toMatch(/"id"/i);
+      }
+    };
     try {
       await rawPrisma.$transaction([
         rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
         rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
         rawPrisma.listingVariant.update({ where: { id: low }, data: { label: "Low" } }),
       ]);
+      take();
+      await listingsByCategory(storeAId, "vegetables");
+      assertThisReadOrdersVariants("listingsByCategory");
+      await getActiveListings(storeAId);
+      assertThisReadOrdersVariants("getActiveListings");
+      await getListingsByCategory(storeAId);
+      assertThisReadOrdersVariants("getListingsByCategory");
+      await getCollectionListings(storeAId, prefix);
+      assertThisReadOrdersVariants("getCollectionListings");
       const ids = await packIds(seeded.listingId, prefix);
       expect(ids.fromBrowse).toEqual(expected);
       expect(ids.fromActive).toEqual(expected);
@@ -606,8 +629,6 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       expect(ids.detailDefault).toBe(low);
       const search = await searchListings(storeAId, prefix);
       expect(search.find((item) => item.id === seeded.listingId)?.variantId).toBe(low);
-      const orderedReads = listener.seen.filter((query) => /listing_variants/i.test(query) && /order by/i.test(query));
-      expect(orderedReads.some((query) => /price/i.test(query) && /"id"/i.test(query))).toBe(true);
     } finally {
       listener.restore();
       await dropProbe(seeded.listingId, seeded.collectionId);
@@ -621,15 +642,16 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     const upperB = `${prefix}-B-pack`;
     const lowerA = `${prefix}-a_pack`;
     const lowerB = `${prefix}-b-pack`;
-    // 0x41 A, 0x42 B, 0x61 a, 0x62 b after the shared prefix.
-    const expected = [low, upperA, upperB, lowerA, lowerB];
+    // All five cost the same, so the winner is the id. 0x41 A, 0x42 B, 0x61 a, 0x62 b, then m.
+    const expected = [upperA, upperB, lowerA, lowerB, low];
     const seeded = await seedProbe(prefix, [
+      { id: low, label: "low", price: 200, weightG: 20 },
       { id: lowerB, label: "b", price: 200, weightG: 20 },
       { id: lowerA, label: "a", price: 200, weightG: 20 },
       { id: upperB, label: "B", price: 200, weightG: 20 },
       { id: upperA, label: "A", price: 200, weightG: 20 },
-      { id: low, label: "low", price: 50, weightG: 5 },
     ]);
+    const listener = listenForVariantQueries();
     try {
       const ids = await packIds(seeded.listingId, prefix);
       expect(ids.fromBrowse).toEqual(expected);
@@ -638,10 +660,18 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       expect(ids.fromCollection).toEqual(expected);
       expect(ids.fromDetail).toEqual(expected);
       expect(ids.fromFlow).toEqual(expected);
-      expect(ids.detailDefault).toBe(low);
+      expect(ids.detailDefault).toBe(upperA);
       const search = await searchListings(storeAId, prefix);
-      expect(search.find((item) => item.id === seeded.listingId)?.variantId).toBe(low);
+      expect(search.find((item) => item.id === seeded.listingId)?.variantId).toBe(upperA);
+      const searchOrders = listener.seen.filter((query) => /listing_variants/i.test(query) && /limit 1/i.test(query));
+      expect(searchOrders.length).toBeGreaterThan(0);
+      for (const query of searchOrders) {
+        expect(query).toMatch(/order by/i);
+        expect(query).toMatch(/price/i);
+        expect(query).toMatch(/id collate "C"/i);
+      }
     } finally {
+      listener.restore();
       await dropProbe(seeded.listingId, seeded.collectionId);
     }
   });
