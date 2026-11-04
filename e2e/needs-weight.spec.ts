@@ -51,15 +51,13 @@ test.describe("placeholder weight", () => {
 
     await page.getByRole("button", { name: "Go to Products" }).click();
     await expect(page).toHaveURL(/\/store-admin\/listings/);
-    const active = page.locator("[data-slot=card]").filter({
-      has: page.locator("[data-slot=card-title]", { hasText: "Active listings" }),
-    });
+    const section = (title: string) =>
+      page.locator("[data-slot=card]").filter({ has: page.getByText(title, { exact: true }) });
+    const active = section("Active listings");
     await expect(active.locator("[data-needs-weight]")).toHaveText("Needs weight");
 
     await page.getByRole("switch", { name: `Deactivate ${name}` }).click();
-    const inactive = page.locator("[data-slot=card]").filter({
-      has: page.locator("[data-slot=card-title]", { hasText: "Inactive listings" }),
-    });
+    const inactive = section("Inactive listings");
     await expect(inactive.locator("[data-needs-weight]")).toHaveText("Needs weight", { timeout: 15000 });
     await expect(active.locator("[data-needs-weight]")).toHaveCount(0);
 
