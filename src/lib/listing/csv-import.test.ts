@@ -2422,6 +2422,153 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(after.notSelected).toBe(0);
   }, 120_000);
 
+  it("a counted row commit records one recount event", async () => {
+    const name = `Counted One ${RUN}`;
+    const csv = `name,price,stock_mode,qty\n${name},3.00,counted,3\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    expect(result.listingIds).toHaveLength(1);
+    const events = await storeScoped(storeAId).stockEvent.findMany({
+      where: { listingId: result.listingIds[0] },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("recount");
+    expect(events[0].delta).toBe(3);
+    expect(events[0].storeId).toBe(storeAId);
+    expect(events[0].actorId).toBe(testUserId);
+  });
+
+  it("a commit with no counted rows writes no stock events", async () => {
+    const statusName = `Status Commit ${RUN}`;
+    const statusCsv = `name,price\n${statusName},2.00\n`;
+    const statusPreview = await generatePreview(storeAId, statusCsv, testUserId);
+    const statusResult = await commitImport(
+      storeAId,
+      statusPreview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(statusResult.listingIds).toHaveLength(1);
+    expect(await storeScoped(storeAId).stockEvent.findMany({
+      where: { listingId: statusResult.listingIds[0] },
+    })).toEqual([]);
+
+    const zeroName = `Zero Qty ${RUN}`;
+    const zeroCsv = `name,price,stock_mode,qty\n${zeroName},2.00,counted,0\n`;
+    const zeroPreview = await generatePreview(storeAId, zeroCsv, testUserId);
+    const zeroResult = await commitImport(
+      storeAId,
+      zeroPreview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(zeroResult.listingIds).toHaveLength(1);
+    expect(await storeScoped(storeAId).stockEvent.findMany({
+      where: { listingId: zeroResult.listingIds[0] },
+    })).toEqual([]);
+  });
+
+  it("counted token retries record recount events exactly once", async () => {
+    const sequentialName = `Counted Retry ${RUN}`;
+    const sequentialCsv = `name,price,stock_mode,qty\n${sequentialName},4.00,counted,6\n`;
+    const sequentialPreview = await generatePreview(storeAId, sequentialCsv, testUserId);
+    const selection = { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] };
+    const first = await commitImport(storeAId, sequentialPreview.importToken, selection, actor);
+    await expect(
+      commitImport(storeAId, sequentialPreview.importToken, selection, actor),
+    ).rejects.toThrow(/already.*committed/i);
+    const sequentialEvents = await storeScoped(storeAId).stockEvent.findMany({
+      where: { listingId: first.listingIds[0] },
+    });
+    expect(first.createdCount).toBe(1);
+    expect(sequentialEvents).toHaveLength(1);
+    expect(sequentialEvents[0].type).toBe("recount");
+    expect(sequentialEvents[0].delta).toBe(6);
+    expect(sequentialEvents[0].storeId).toBe(storeAId);
+    expect(sequentialEvents[0].actorId).toBe(testUserId);
+    const listings = await storeScoped(storeAId).listing.findMany({
+      where: { customName: sequentialName },
+    });
+    expect(listings).toHaveLength(1);
+
+    const concurrentName = `Counted Race ${RUN}`;
+    const concurrentCsv = `name,price,stock_mode,qty\n${concurrentName},5.00,counted,8\n`;
+    const concurrentPreview = await generatePreview(storeAId, concurrentCsv, testUserId);
+    const results = await Promise.allSettled([
+      commitImport(storeAId, concurrentPreview.importToken, selection, actor),
+      commitImport(storeAId, concurrentPreview.importToken, selection, actor),
+    ]);
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    if (fulfilled[0].status !== "fulfilled") throw new Error("expected one committed import");
+    expect(fulfilled[0].value.createdCount).toBe(1);
+    expect(fulfilled[0].value.listingIds).toHaveLength(1);
+    const listingId = fulfilled[0].value.listingIds[0];
+    const raced = await storeScoped(storeAId).stockEvent.findMany({ where: { listingId } });
+    expect(raced).toHaveLength(1);
+    expect(raced[0].type).toBe("recount");
+    expect(raced[0].delta).toBe(8);
+    expect(raced[0].storeId).toBe(storeAId);
+    expect(raced[0].actorId).toBe(testUserId);
+    expect(await storeScoped(storeAId).listing.findMany({
+      where: { customName: concurrentName },
+    })).toHaveLength(1);
+    const token = await storeScoped(storeAId).listingImport.findUnique({
+      where: { id: concurrentPreview.importToken },
+    });
+    expect(token?.status).toBe("committed");
+  });
+
+  it("1000 counted rows produce one correct event per returned listing", async () => {
+    const expectedQty = new Map<string, number>();
+    const lines: string[] = [];
+    for (let i = 0; i < 1000; i++) {
+      const name = `Bulk ${RUN} ${i}`;
+      const qty = (i % 5) + 1;
+      expectedQty.set(name, qty);
+      lines.push(`${name},1.50,counted,${qty}`);
+    }
+    const csv = `name,price,stock_mode,qty\n${lines.join("\n")}\n`;
+    const preview = await generatePreview(storeBId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1000);
+    const result = await commitImport(
+      storeBId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: preview.newItems.map((row) => row.row), ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1000);
+    expect(new Set(result.listingIds).size).toBe(1000);
+    const listings = await storeScoped(storeBId).listing.findMany({
+      where: { id: { in: result.listingIds } },
+    });
+    expect(listings).toHaveLength(1000);
+    const events = await storeScoped(storeBId).stockEvent.findMany({
+      where: { listingId: { in: result.listingIds } },
+    });
+    expect(events).toHaveLength(1000);
+    const eventByListing = new Map(events.map((event) => [event.listingId, event]));
+    for (const listing of listings) {
+      const qty = expectedQty.get(listing.customName ?? "");
+      expect(qty).toBeDefined();
+      expect(listing.qty).toBe(qty);
+      expect(listing.storeId).toBe(storeBId);
+      const event = eventByListing.get(listing.id);
+      expect(event?.type).toBe("recount");
+      expect(event?.delta).toBe(qty);
+      expect(event?.storeId).toBe(storeBId);
+      expect(event?.actorId).toBe(testUserId);
+    }
+  }, 60_000);
+
 });
 
 describe("csv import database gate", () => {
