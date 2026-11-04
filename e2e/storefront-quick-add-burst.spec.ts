@@ -1,8 +1,10 @@
 import { expect, test, type Locator, type Page, type Request, type Route } from "@playwright/test";
 import {
+  deleteCartLine,
   readCartLines,
   readListingStock,
   storeIdentity,
+  writeCartLine,
   writeListingStock,
   type ListingStock,
 } from "./listing-db";
@@ -41,7 +43,13 @@ function quantitiesIn(body: string) {
   return [...body.matchAll(/,(\d+)(?=[,\]])/g)].map((match) => Number(match[1]));
 }
 function looksLikeRead(body: string) {
-  return quantitiesIn(body).length === 0 && !body.includes("named_substitute") && !body.includes("store_suggests") && !body.includes("exact_only");
+  if (quantitiesIn(body).length > 0) return false;
+  if (body.includes("named_substitute") || body.includes("store_suggests") || body.includes("exact_only")) {
+    return false;
+  }
+  // A removal posts only a line id. That is not a cart read.
+  if (/"[^"]+"/.test(body)) return false;
+  return true;
 }
 
 /** Node has no hosts entry for *.localhost, so the real request is fetched by IP with the original Host. */
@@ -849,6 +857,109 @@ test.describe("quick add limits and recovery", () => {
     await page.reload();
     await expect(curry(page).getByTestId("stepper-qty")).toHaveText("3");
   });
+
+  test("a rejected decrement keeps another line's queued plus", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
+    await page.goto(spices);
+    await curry(page).getByTestId("quick-add-btn").click();
+    await curry(page).getByTestId("stepper-plus").click();
+    await curry(page).getByTestId("stepper-plus").click();
+    await expect(curry(page).getByTestId("stepper-qty")).toHaveText("3");
+    await settle(page);
+    await page.goto(grains);
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 1 });
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const curryLine = before.find((line) => line.listingId === "mn_curry");
+    expect(curryLine?.qty).toBe(3);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!held && isAction(request) && body.includes(curryLine!.id) && quantitiesIn(body).includes(2)) {
+        held = true;
+        await gate;
+      }
+      await route.fallback();
+    });
+    await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
+    const sheet = page.getByRole("dialog", { name: "Your cart" });
+    await sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-minus").click();
+    await expect.poll(() => held).toBe(true);
+    await sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-plus").click();
+    await expect(sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-qty")).toHaveText("2");
+    release();
+    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "Maximum 1 per order for this item" }).first()).toBeVisible();
+    await expect(sheet.getByRole("listitem").filter({ hasText: "Curry Powder" }).getByTestId("stepper-qty")).toHaveText("3");
+    await expect(sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-qty")).toHaveText("2");
+    await expect(cartCount(page)).toHaveText("5");
+    await settle(page);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    const cents = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
+    const label = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+    await expect(sheet.getByText(label).first()).toBeVisible();
+    expect(lines.find((line) => line.listingId === "mn_curry")?.qty).toBe(3);
+    expect(lines.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
+    await page.reload();
+    await expect(cartCount(page)).toHaveText("5");
+    const after = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(after.find((line) => line.listingId === "mn_curry")?.qty).toBe(3);
+    expect(after.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
+  });
+
+  test("a newer click on the rejected line is kept with another line's queued plus", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: null });
+    await page.goto(spices);
+    await curry(page).getByTestId("quick-add-btn").click();
+    await curry(page).getByTestId("stepper-plus").click();
+    await curry(page).getByTestId("stepper-plus").click();
+    await expect(curry(page).getByTestId("stepper-qty")).toHaveText("3");
+    await settle(page);
+    await page.goto(grains);
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await writeListingStock("mama-ngozi", "mn_curry", { ...curryStock, maxPerOrder: 1 });
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const curryLine = before.find((line) => line.listingId === "mn_curry");
+    expect(curryLine?.id).toBeTruthy();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!held && isAction(request) && body.includes(curryLine!.id) && quantitiesIn(body).includes(2)) {
+        held = true;
+        await gate;
+      }
+      await route.fallback();
+    });
+    await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
+    const sheet = page.getByRole("dialog", { name: "Your cart" });
+    const curryRow = sheet.getByRole("listitem").filter({ hasText: "Curry Powder" });
+    await curryRow.getByTestId("stepper-minus").click();
+    await expect.poll(() => held).toBe(true);
+    await curryRow.getByTestId("stepper-minus").click();
+    await expect(curryRow.getByTestId("stepper-qty")).toHaveText("1");
+    await sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-plus").click();
+    release();
+    await settle(page);
+    await expect(curryRow.getByTestId("stepper-qty")).toHaveText("1");
+    await expect(sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-qty")).toHaveText("2");
+    await page.reload();
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.listingId === "mn_curry")?.qty).toBe(1);
+    expect(lines.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
+  });
 });
 
 test.describe("quick add recovery gaps", () => {
@@ -1072,25 +1183,37 @@ test.describe("quick add recovery gaps", () => {
   test("an unknown server action asks for a reload and a fresh page still adds", async ({ page }) => {
     await openGrains(page);
     await addGarri(page);
+    let actions = 0;
     let rewritten = 0;
     await page.route("**/*", async (route) => {
       const request = route.request();
       const body = request.postData() ?? "";
-      if (isAction(request) && quantitiesIn(body).length > 0 && rewritten === 0) {
+      if (!isAction(request)) {
+        await route.fallback();
+        return;
+      }
+      actions += 1;
+      if (quantitiesIn(body).length > 0 && rewritten === 0) {
         rewritten += 1;
         const headers = { ...request.headers(), "next-action": "a".repeat(42) };
         await route.continue({ headers });
         return;
       }
-      await route.continue();
+      await route.fallback();
     });
     await garri(page).getByTestId("stepper-plus").click();
     await expectNoCrash(page);
     await expect(page.locator("[data-sonner-toast]").filter({ hasText: "This page is out of date" }).first()).toBeVisible();
-    const afterFirst = rewritten;
+    const actionsAtToast = actions;
+    const qtyAtToast = await garri(page).getByTestId("stepper-qty").innerText();
+    expect(rewritten).toBe(1);
+    await settle(page);
     await garri(page).getByTestId("stepper-plus").click();
-    await expect(garri(page).getByTestId("stepper-qty")).not.toHaveText("3");
-    expect(rewritten).toBe(afterFirst);
+    await settle(page);
+    await page.waitForTimeout(400);
+    expect(actions).toBe(actionsAtToast);
+    expect(rewritten).toBe(1);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText(qtyAtToast);
     await page.unroute("**/*");
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
@@ -1235,5 +1358,772 @@ test.describe("quick add recovery gaps", () => {
     await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
     const lines = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(lines.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
+  });
+});
+
+function moneyLabel(cents: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+}
+
+async function openSheet(page: Page) {
+  await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
+  const sheet = page.getByRole("dialog", { name: "Your cart" });
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
+function attention(page: Page) {
+  return page.getByTestId("storefront-header").locator("[data-cart-attention]");
+}
+
+test.describe("cart recovery after a failed write", () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  test("cart recovery helpers cannot read or mutate another store's line", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const cartId = await cartCookie(page);
+    const lines = await readCartLines("mama-ngozi", cartId);
+    const yellow = lines.find((line) => line.listingId === "mn_garri_yellow");
+    expect(yellow?.id).toBeTruthy();
+    expect(await readCartLines("tante-marie", cartId)).toHaveLength(0);
+    expect(await deleteCartLine("tante-marie", yellow!.id)).toBe(false);
+    expect(await writeCartLine("tante-marie", yellow!.id, { qty: 9, swapRule: "store_suggests" })).toBe(false);
+    const still = await readCartLines("mama-ngozi", cartId);
+    expect(still.find((line) => line.id === yellow!.id)).toMatchObject({ qty: 1, swapRule: "exact_only" });
+  });
+
+  test("a failed removal shows the saved line again", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    expect(row?.qty).toBe(1);
+    let aborted = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (aborted === 0 && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        aborted += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => aborted).toBe(1);
+    await expect(page.locator("[data-sonner-toast]").first()).toBeVisible();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await expect(cartCount(page)).toHaveText("1");
+    await settle(page);
+    const sheet = await openSheet(page);
+    await expect(sheet.getByRole("heading", { name: "Your next good meal starts here" })).toHaveCount(0);
+    await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toBeVisible();
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.id === row!.id)?.qty).toBe(1);
+    const cents = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
+    await expect(sheet.getByText(moneyLabel(cents)).first()).toBeVisible();
+    await expect(attention(page)).toBeVisible();
+    await page.reload();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+  });
+
+  test("a failed trash removal shows the saved line again", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let aborted = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (aborted === 0 && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        aborted += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    const sheet = await openSheet(page);
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    await expect.poll(() => aborted).toBe(1);
+    await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toBeVisible();
+    await expect(cartCount(page)).toHaveText("1");
+    await settle(page);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.id === row!.id)?.qty).toBe(1);
+    await page.reload();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+  });
+
+  test("after a failed removal the next plus updates the same row", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await page.goto(`${base}/cart`);
+    await page.getByRole("button", { name: /Replace with/ }).click();
+    await page.getByRole("button", { name: "Let the store suggest a swap" }).click();
+    await settle(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    expect(row?.swapRule).toBe("store_suggests");
+    let removals = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (removals === 0 && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        removals += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await page.goto(grains);
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => removals).toBe(1);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await page.unroute("**/*");
+    let laterRemoves = 0;
+    let laterAdds = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) laterRemoves += 1;
+      if (isAction(request) && body.includes("mn_garri_y_v1") && !body.includes(row!.id)) laterAdds += 1;
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    expect(laterRemoves).toBe(0);
+    expect(laterAdds).toBe(0);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    const saved = lines.find((line) => line.listingId === "mn_garri_yellow");
+    expect(saved?.id).toBe(row!.id);
+    expect(saved?.qty).toBe(2);
+    expect(saved?.swapRule).toBe("store_suggests");
+    const sheet = await openSheet(page);
+    await expect(sheet.getByText("Store suggests a swap")).toBeVisible();
+  });
+
+  test("a removal the server saved but whose response was lost stays removed", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const cartId = await cartCookie(page);
+    const before = await readCartLines("mama-ngozi", cartId);
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let proved = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!proved && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        await fetchAction(route);
+        const saved = await readCartLines("mama-ngozi", cartId);
+        expect(saved.find((line) => line.id === row!.id)).toBeUndefined();
+        proved = true;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => proved).toBe(true);
+    await settle(page);
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await expect(cartCount(page)).toHaveText("0");
+    await page.unroute("**/*");
+    let adds = 0;
+    let removes = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes("mn_garri_y_v1")) adds += 1;
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) removes += 1;
+      await route.fallback();
+    });
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    expect(adds).toBeGreaterThan(0);
+    expect(removes).toBe(0);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(1);
+  });
+
+  test("a failed removal with failed recovery reads restores the last saved line", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let removals = 0;
+    let reads = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        removals += 1;
+        await route.abort("failed");
+        return;
+      }
+      if (removals > 0 && isAction(request) && looksLikeRead(body)) {
+        reads += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => reads).toBeGreaterThan(0);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await expect(attention(page)).toBeVisible();
+    await settle(page);
+    expect(removals).toBe(1);
+    await page.unroute("**/*");
+    let laterRemoves = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) laterRemoves += 1;
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    expect(laterRemoves).toBe(0);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.id === row!.id)?.qty).toBe(2);
+  });
+
+  test("a removal that fails twice is restored twice and a later removal succeeds", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const cartId = await cartCookie(page);
+    const before = await readCartLines("mama-ngozi", cartId);
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let removals = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0 && removals < 2) {
+        removals += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    expect(removals).toBe(2);
+    await page.unroute("**/*");
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await settle(page);
+    const lines = await readCartLines("mama-ngozi", cartId);
+    expect(lines.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
+  });
+
+  test("a failed removal then a newer re-add ends at the newer quantity", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!held && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        held = true;
+        await gate;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => held).toBe(true);
+    await garri(page).getByTestId("quick-add-btn").click();
+    release();
+    await settle(page);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(1);
+    expect(lines.find((line) => line.listingId === "mn_garri_yellow")?.qty).toBe(1);
+  });
+
+  test("a rejected plus on a deleted line keeps another line's queued plus", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const yellow = before.find((line) => line.listingId === "mn_garri_yellow");
+    expect(await deleteCartLine("mama-ngozi", yellow!.id)).toBe(true);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!held && isAction(request) && body.includes(yellow!.id)) {
+        held = true;
+        await gate;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect.poll(() => held).toBe(true);
+    await whiteGarri(page).getByTestId("stepper-plus").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+    release();
+    await settle(page);
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.id === yellow!.id)).toBeUndefined();
+    expect(lines.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
+    await page.reload();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+  });
+
+  test("a failed removal restores confirmed quantity rather than queued quantity", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let reads = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        await route.abort("failed");
+        return;
+      }
+      if (isAction(request) && looksLikeRead(body)) {
+        reads += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    const sheet = await openSheet(page);
+    const rowUi = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await rowUi.evaluate((el) => {
+      const plus = el.querySelector("[data-testid='stepper-plus']") as HTMLButtonElement | null;
+      const trash = el.querySelector("button[aria-label$='from cart']") as HTMLButtonElement | null;
+      plus?.click();
+      trash?.click();
+    });
+    await expect.poll(() => reads).toBeGreaterThan(0);
+    await expect(rowUi.getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.id === row!.id)?.qty).toBe(2);
+  });
+
+  test("a committed removal with failed recovery reads is removed after the next rejected update", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const cartId = await cartCookie(page);
+    const before = await readCartLines("mama-ngozi", cartId);
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let proved = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!proved && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        await fetchAction(route);
+        const saved = await readCartLines("mama-ngozi", cartId);
+        expect(saved.find((line) => line.id === row!.id)).toBeUndefined();
+        proved = true;
+        await route.abort("failed");
+        return;
+      }
+      if (proved && isAction(request) && looksLikeRead(body)) {
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => proved).toBe(true);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await page.unroute("**/*");
+    let adds = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes("mn_garri_y_v1") && !body.includes(row!.id)) adds += 1;
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await settle(page);
+    expect(adds).toBe(0);
+    const lines = await readCartLines("mama-ngozi", cartId);
+    expect(lines.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
+  });
+
+  test("a rejected first add keeps another line's queued plus", async ({ page }) => {
+    await openGrains(page);
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!held && isAction(request) && body.includes("mn_garri_y_v1")) {
+        held = true;
+        await gate;
+        await route.continue({ postData: body.replaceAll("mn_garri_y_v1", "mn_no_such_variant") });
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expect.poll(() => held).toBe(true);
+    await whiteGarri(page).getByTestId("stepper-plus").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+    release();
+    await settle(page);
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
+    expect(lines.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
+  });
+
+  test("unrelated success does not clear failed-removal attention", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await expect(attention(page)).toBeVisible();
+    await settle(page);
+    await page.unroute("**/*");
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await expect(attention(page)).toBeVisible();
+    await expect(pending(page)).toHaveCount(0);
+  });
+
+  test("unknown removal and recovery actions freeze the cart until reload", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let actions = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!isAction(request)) {
+        await route.fallback();
+        return;
+      }
+      actions += 1;
+      if (body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        await route.continue({ headers: { ...request.headers(), "next-action": "b".repeat(42) } });
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "This page is out of date" }).first()).toBeVisible();
+    const atToast = actions;
+    const countAtToast = await cartCount(page).innerText();
+    await garri(page).getByTestId("quick-add-btn").click();
+    await settle(page);
+    await page.waitForTimeout(400);
+    expect(actions).toBe(atToast);
+    await expect(cartCount(page)).toHaveText(countAtToast);
+    await page.unroute("**/*");
+    await page.reload();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+  });
+
+  test("authoritative empty recovery clears the old row identity", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        await page.context().clearCookies({ name: "cart_id" });
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    await settle(page);
+    await page.unroute("**/*");
+    let updates = 0;
+    let adds = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id)) updates += 1;
+      if (isAction(request) && body.includes("mn_garri_y_v1")) adds += 1;
+      await route.fallback();
+    });
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    expect(updates).toBe(0);
+    expect(adds).toBeGreaterThan(0);
+  });
+
+  test("a rejected write with failed recovery does not retry or starve another line", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const yellow = before.find((line) => line.listingId === "mn_garri_yellow");
+    expect(await deleteCartLine("mama-ngozi", yellow!.id)).toBe(true);
+    let yellowWrites = 0;
+    let reads = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(yellow!.id)) {
+        yellowWrites += 1;
+        await route.fallback();
+        return;
+      }
+      if (yellowWrites > 0 && isAction(request) && looksLikeRead(body)) {
+        reads += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await whiteGarri(page).getByTestId("stepper-plus").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+    await settle(page);
+    expect(yellowWrites).toBeLessThan(4);
+    expect(reads).toBeGreaterThan(0);
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(lines.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
+  });
+
+  test("reconciliation preserves a sibling pack's queued plus", async ({ page }) => {
+    await page.goto(`${base}/listings/mn_garri_yellow`);
+    const detail = page.getByTestId("product-detail");
+    await detail.getByTestId("quick-add-btn").click();
+    await expect(detail.getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    await detail.getByTestId("pack-option").filter({ hasText: "5 lb bag" }).click();
+    await detail.getByTestId("quick-add-btn").click();
+    await expect(detail.getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const pound = before.find((line) => line.variantId === "mn_garri_y_v1");
+    expect(await deleteCartLine("mama-ngozi", pound!.id)).toBe(true);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!held && isAction(request) && body.includes(pound!.id)) {
+        held = true;
+        await gate;
+      }
+      await route.fallback();
+    });
+    await detail.getByTestId("pack-option").filter({ hasText: "1 lb" }).click();
+    await detail.getByTestId("stepper-plus").click();
+    await expect.poll(() => held).toBe(true);
+    await detail.getByTestId("pack-option").filter({ hasText: "5 lb bag" }).click();
+    await detail.getByTestId("stepper-plus").click();
+    await expect(detail.getByTestId("stepper-qty")).toHaveText("2");
+    release();
+    await settle(page);
+    const saved = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(saved.find((line) => line.id === pound!.id)).toBeUndefined();
+    expect(saved.find((line) => line.variantId === "mn_garri_y_v2")?.qty).toBe(2);
+  });
+
+  test("restoration preserves a named substitute and uses live server data", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await page.goto(`${base}/cart`);
+    await page.getByRole("button", { name: /Replace with/ }).click();
+    await page.getByRole("button").filter({ hasText: "White Garri" }).first().click();
+    await settle(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    expect(row?.swapRule).toBe("named_substitute");
+    expect(row?.substituteVariantId).toBeTruthy();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let removed = false;
+    let held = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!removed && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        removed = true;
+        await route.abort("failed");
+        return;
+      }
+      if (removed && !held && isAction(request) && looksLikeRead(body)) {
+        held = true;
+        expect(await writeCartLine("mama-ngozi", row!.id, { qty: 4 })).toBe(true);
+        const response = await fetchAction(route);
+        await gate;
+        await route.fulfill({ response });
+        return;
+      }
+      await route.fallback();
+    });
+    await page.goto(grains);
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => held).toBe(true);
+    release();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("4");
+    await settle(page);
+    const sheet = await openSheet(page);
+    await expect(sheet.getByText("Named substitute chosen")).toBeVisible();
+    const saved = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(saved.find((line) => line.id === row!.id)).toMatchObject({
+      qty: 4,
+      swapRule: "named_substitute",
+      substituteVariantId: row!.substituteVariantId,
+    });
+  });
+
+  test("an old provider recovery cannot restore into another store", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const mamaCart = await cartCookie(page);
+    const before = await readCartLines("mama-ngozi", mamaCart);
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let removed = false;
+    let held = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!removed && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        removed = true;
+        await route.abort("failed");
+        return;
+      }
+      if (removed && !held && isAction(request) && looksLikeRead(body)) {
+        held = true;
+        await gate;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => held).toBe(true);
+    const going = page.goto(`${storeUrl("tante-marie")}/`);
+    release();
+    await going;
+    await expect(cartCount(page)).toHaveText("0");
+    await page.unroute("**/*");
+    await page.goto(grains);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    expect((await readCartLines("mama-ngozi", mamaCart)).find((line) => line.id === row!.id)?.qty).toBe(1);
+  });
+
+  test("newer intent survives rejection before and during recovery", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const yellow = before.find((line) => line.listingId === "mn_garri_yellow");
+    expect(await deleteCartLine("mama-ngozi", yellow!.id)).toBe(true);
+    let releaseWrite: () => void = () => {};
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let releaseRead: () => void = () => {};
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let heldWrite = false;
+    let heldRead = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!heldWrite && isAction(request) && body.includes(yellow!.id)) {
+        heldWrite = true;
+        await writeGate;
+        await route.fallback();
+        return;
+      }
+      if (heldWrite && !heldRead && isAction(request) && looksLikeRead(body)) {
+        heldRead = true;
+        const response = await fetchAction(route);
+        await readGate;
+        await route.fulfill({ response });
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect.poll(() => heldWrite).toBe(true);
+    const sheet = await openSheet(page);
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    releaseWrite();
+    await expect.poll(() => heldRead).toBe(true);
+    await sheet.getByRole("listitem").filter({ hasText: "White Garri" }).getByTestId("stepper-plus").click();
+    releaseRead();
+    await settle(page);
+    await page.getByRole("button", { name: "Close cart" }).click();
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    const saved = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(saved.filter((line) => line.listingId === "mn_garri_yellow")).toHaveLength(0);
+    expect(saved.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(2);
   });
 });
