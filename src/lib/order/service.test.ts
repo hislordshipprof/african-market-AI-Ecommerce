@@ -3,7 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
-import { setStripeProvider } from "../stripe";
+import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
 import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
@@ -619,6 +619,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.capturedAmountCents).toBeNull();
     expect(updated!.cancelledAt).toBeTruthy();
     expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
     expect(capturedPayments.size).toBe(0);
@@ -1554,8 +1555,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(result.ok).toBe(false);
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLING");
-    // Stripe lists refunds newest first, so the open remainder refund is the one saved.
-    expect(updated!.refundId).toBe(`re_fake_${pi}_1000`);
+    const listed = await fakeStripeProvider.listRefunds(pi);
+    expect(listed[0]?.status).toBe("pending");
+    expect(updated!.refundId).toBe(listed[0]?.refundId);
   });
 
   it("reconcile stays CANCELLING when a saved refund succeeded and another is pending", async () => {
@@ -2478,6 +2480,108 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
     expect(logs).toHaveLength(1);
     expect(logs[0].after).toMatchObject({ refundId: newer.refundId, amountRefunded: 1000 });
+  });
+
+  it("a failed refund after a completed cancellation moves the order to REFUND_FAILED", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 5500);
+    await fakeStripeProvider.capturePaymentIntent(pi, 5500, "cap-a1");
+    const cancelled = await autoCancelOrder(storeId, order.id);
+    expect(cancelled.ok).toBe(true);
+    const settled = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(settled!.status).toBe("CANCELLED");
+    expect(settled!.capturedAmountCents).toBeNull();
+    setRefundStatus(settled!.refundId!, "failed");
+
+    const result = await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: settled!.refundId!,
+      refundStatus: "failed",
+    });
+    expect(result).toEqual({ ok: true, action: "refund_failed" });
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("REFUND_FAILED");
+  });
+
+  it("a transient refund list failure does not mark a covered cancellation REFUND_FAILED", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 5500);
+    await fakeStripeProvider.capturePaymentIntent(pi, 5500, "cap-a2");
+    const older = await fakeStripeProvider.refundPayment(pi, 5500, "old-cover");
+    setRefundStatus(older.refundId, "failed");
+    await fakeStripeProvider.refundPayment(pi, 5500, "new-cover");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: 5500 },
+      });
+    });
+
+    const provider = getStripeProvider();
+    let failedOnce = false;
+    setStripeProvider({
+      ...provider,
+      async listRefunds(paymentIntentId: string) {
+        if (!failedOnce) {
+          failedOnce = true;
+          const err = new Error("stripe unavailable") as Error & { statusCode: number };
+          err.statusCode = 500;
+          throw err;
+        }
+        return provider.listRefunds(paymentIntentId);
+      },
+    });
+    try {
+      const first = await markTerminalRefundFailure({
+        paymentIntentId: pi,
+        refundId: older.refundId,
+        refundStatus: "failed",
+      });
+      expect(first).toEqual({ ok: false, error: "Refund coverage could not be read", retry: true });
+      const mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(mid!.status).toBe("CANCELLING");
+
+      const second = await markTerminalRefundFailure({
+        paymentIntentId: pi,
+        refundId: older.refundId,
+        refundStatus: "failed",
+      });
+      expect(second).toEqual({ ok: true, action: "covered" });
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLING");
+    } finally {
+      setStripeProvider(fakeStripeProvider);
+    }
+  });
+
+  it("markReady returns success when a sweep already finalized the capture", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    const provider = getStripeProvider();
+    setStripeProvider({
+      ...provider,
+      async capturePaymentIntent(...args) {
+        const captured = await provider.capturePaymentIntent(...args);
+        await reconcileStuckOrder(storeId, order.id);
+        return captured;
+      },
+    });
+    try {
+      const result = await markReady(storeId, order.id);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.capturedAmountCents).toBeGreaterThan(0);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("AWAITING_PICKUP");
+      expect(updated!.capturedAmountCents).toBe(result.ok ? result.capturedAmountCents : null);
+    } finally {
+      setStripeProvider(fakeStripeProvider);
+    }
   });
 
   it("a refund.failed for an older refund leaves an order covered by a newer refund CANCELLED", async () => {

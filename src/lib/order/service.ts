@@ -480,7 +480,7 @@ export async function markTerminalRefundFailure(input: {
   paymentIntentId: string;
   refundId: string;
   refundStatus: string;
-}): Promise<{ ok: true; action: string } | { ok: false; error: string }> {
+}): Promise<{ ok: true; action: string } | { ok: false; error: string; retry?: boolean }> {
   if (!isTerminalRefundStatus(input.refundStatus)) return { ok: true, action: "ignored" };
   const order = await findOrderByPaymentIntent(input.paymentIntentId);
   if (!order) {
@@ -495,10 +495,6 @@ export async function markTerminalRefundFailure(input: {
 
   const current = await storeScoped(order.storeId).order.findUnique({ where: { id: order.id } });
   if (!current) return { ok: false, error: "Order not found" };
-  if (current.status === "CANCELLED" && (current.capturedAmountCents ?? 0) === 0) {
-    return { ok: true, action: "ignored" };
-  }
-
   let listed: RefundResult[] = [];
   let amountReceived = 0;
   try {
@@ -510,9 +506,13 @@ export async function markTerminalRefundFailure(input: {
     listed = refunds;
     amountReceived = pi.amountReceived;
   } catch (err) {
-    console.warn(`refund.failed could not read Stripe for ${input.paymentIntentId}`, err);
+    if (isRetryableProviderError(err)) {
+      return { ok: false, error: "Refund coverage could not be read", retry: true };
+    }
+    throw err;
   }
-  const captured = amountReceived > 0 ? amountReceived : (current.capturedAmountCents ?? 0);
+  if (amountReceived === 0) return { ok: true, action: "ignored" };
+  const captured = amountReceived;
   const covered = refundStillCovers(listed, captured);
   const action = covered ? "refund_failed_while_covered" : "refund_failed";
 
@@ -696,7 +696,7 @@ export async function markReady(
         data: {
           status: "CANCELLED",
           cancelledAt: new Date(),
-          capturedAmountCents: 0,
+          capturedAmountCents: null,
         },
       });
 
@@ -777,6 +777,15 @@ export async function markReady(
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order || order.status !== "CAPTURING") {
+      if (order?.status === validation.newStatus && order.capturedAmountCents != null) {
+        return { ok: true as const, capturedAmountCents: order.capturedAmountCents };
+      }
+      if (order?.status === "CANCELLED") {
+        return {
+          ok: false as const,
+          error: "Payment authorization was released — order cancelled; contact the customer",
+        };
+      }
       return { ok: false as const, error: "Order status changed during capture" };
     }
     await tx.order.update({
@@ -787,12 +796,12 @@ export async function markReady(
         capturedAmountCents: captureResult.amountCaptured,
       },
     });
-    return { ok: true as const };
+    return { ok: true as const, capturedAmountCents: captureResult.amountCaptured };
   });
 
   if (!finalize.ok) return finalize;
 
-  return { ok: true, capturedAmountCents: captureResult.amountCaptured };
+  return { ok: true, capturedAmountCents: finalize.capturedAmountCents };
 }
 
 export async function completePickup(

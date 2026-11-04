@@ -144,10 +144,12 @@ describe("Stripe webhook signatures", () => {
   const platformSecret = "whsec_platform_test_secret_186";
   const connectSecret = "whsec_connect_test_secret_186";
   const previousSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const previousKey = process.env.STRIPE_SECRET_KEY;
   const previousNodeEnv = process.env.NODE_ENV;
   const previousVercel = process.env.VERCEL;
 
   beforeEach(async () => {
+    if (!process.env.STRIPE_SECRET_KEY) process.env.STRIPE_SECRET_KEY = "sk_test_placeholder";
     const { stripeProvider } = await import("./provider");
     setStripeProvider(stripeProvider);
     process.env.STRIPE_WEBHOOK_SECRET = `${platformSecret}, ${connectSecret}`;
@@ -155,6 +157,8 @@ describe("Stripe webhook signatures", () => {
 
   afterEach(() => {
     setStripeProvider(null);
+    if (previousKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = previousKey;
     if (previousSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
     else process.env.STRIPE_WEBHOOK_SECRET = previousSecret;
     vi.stubEnv("NODE_ENV", previousNodeEnv ?? "test");

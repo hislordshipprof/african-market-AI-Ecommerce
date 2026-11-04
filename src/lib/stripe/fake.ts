@@ -434,9 +434,10 @@ const fakeStripeProvider: StripeProvider = {
       }
       const status = nextRefundStatus.get(paymentIntentId) ?? "succeeded";
       const prior = [...refunds.values()].filter((entry) => entry.paymentIntentId === paymentIntentId);
+      refundSeq += 1;
       const refundId = prior.length === 0
         ? `re_fake_${paymentIntentId}`
-        : `re_fake_${paymentIntentId}_${already + amountCents}`;
+        : `re_fake_${paymentIntentId}_n${refundSeq}`;
       const countedFee = [...refunds.values()]
         .filter((entry) => entry.paymentIntentId === paymentIntentId && countsTowardBalance(entry.status))
         .reduce((sum, entry) => sum + entry.feePortion, 0);
@@ -446,7 +447,6 @@ const fakeStripeProvider: StripeProvider = {
         const proportional = Math.round((chargedFee * amountCents) / captured);
         feePortion = Math.max(0, Math.min(proportional, chargedFee - countedFee));
       }
-      refundSeq += 1;
       refunds.set(refundId, {
         paymentIntentId,
         amountRefunded: amountCents,

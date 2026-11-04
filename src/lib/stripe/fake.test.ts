@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { fakeStripeProvider, reset, setAuthorizedAmount } from "./fake";
+import { fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "./fake";
 import { ProviderStateError } from "./types";
 
 describe("Fake Stripe state machine (K6)", () => {
@@ -336,6 +336,20 @@ describe("Fake Stripe state machine (K6)", () => {
       type: "StripeInvalidRequestError",
       message: expect.stringContaining("uncaptured Charge"),
     });
+  });
+
+  it("a replaced failed refund keeps its own id and replays as failed", async () => {
+    const pi = "pi_refund_replace";
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    const first = await fakeStripeProvider.refundPayment(pi, 400, "r1");
+    const failed = await fakeStripeProvider.refundPayment(pi, 300, "r2");
+    setRefundStatus(failed.refundId, "failed");
+    const replacement = await fakeStripeProvider.refundPayment(pi, 300, "r3");
+    expect(new Set([first.refundId, failed.refundId, replacement.refundId]).size).toBe(3);
+    expect(await fakeStripeProvider.listRefunds(pi)).toHaveLength(3);
+    const replay = await fakeStripeProvider.refundPayment(pi, 300, "r2");
+    expect(replay).toEqual({ refundId: failed.refundId, amountRefunded: 300, status: "failed" });
   });
 
   it("lists refunds newest first", async () => {

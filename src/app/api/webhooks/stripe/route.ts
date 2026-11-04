@@ -54,11 +54,14 @@ export async function POST(req: NextRequest) {
     event.refund &&
     (event.refund.status === "failed" || event.refund.status === "canceled")
   ) {
-    await markTerminalRefundFailure({
+    const settled = await markTerminalRefundFailure({
       paymentIntentId: event.refund.paymentIntentId,
       refundId: event.refund.id,
       refundStatus: event.refund.status,
     });
+    if (!settled.ok && settled.retry) {
+      return NextResponse.json({ error: settled.error }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ received: true }, { status: 200 });
