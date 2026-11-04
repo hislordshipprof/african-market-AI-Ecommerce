@@ -412,10 +412,14 @@ async function readUserMessage(request: Request): Promise<{ ok: true; text: stri
   if (record.role !== "user" || !Array.isArray(record.parts)) {
     return { ok: false, message: "Send one user message." };
   }
-  if (record.parts.some((part) => !part || typeof part !== "object" || (part as { type?: unknown }).type !== "text")) {
+  if (record.parts.some((part) => {
+    if (!part || typeof part !== "object") return true;
+    const typed = part as { type?: unknown; text?: unknown };
+    return typed.type !== "text" || typeof typed.text !== "string";
+  })) {
     return { ok: false, message: "Send plain text." };
   }
-  const text = record.parts.map((part) => String((part as { text?: unknown }).text ?? "")).join("").trim();
+  const text = record.parts.map((part) => (part as { text: string }).text).join("").trim();
   if (text.length < 1 || text.length > 2000) return { ok: false, message: "Write between 1 and 2000 characters." };
   return { ok: true, text };
 }

@@ -271,6 +271,15 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       body: JSON.stringify({ message: { role: "assistant", parts: [{ type: "text", text: "hi" }] } }),
     }));
     expect(role.status).toBe(400);
+    for (const text of [123, { hello: "world" }, null]) {
+      const malformed = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json", host, origin: `http://${host}`, "x-store-slug": slug },
+        body: JSON.stringify({ message: { role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      expect(malformed.status, JSON.stringify(text)).toBe(400);
+      expect((await malformed.json()).error.code).toBe("invalid_request");
+    }
     const foreign = await handler(request("hello", { origin: "http://evil.test", ip: "203.0.113.23" }));
     expect(foreign.status).toBe(403);
     const missingOrigin = await handler(new Request(`http://${host}/api/assistant/chat`, {
