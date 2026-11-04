@@ -88,6 +88,17 @@ describe("parseCsvText weight column", () => {
     expect(rows[0]).toMatchObject({ row: 7, name: "Ok", weightG: 907 });
   });
 
+  it("a short first row still applies later weight cells", () => {
+    const csv = ["name,price,weight", "First,1", "Heavy,45,50 lb", "Invalid,1,1001 lb"].join("\n");
+    const { rows, errors, unknownColumns } = parseCsvText(csv);
+    expect(unknownColumns).toEqual([]);
+    expect(errors).toEqual([{ row: 4, csvName: "Invalid", reason: TOO_LARGE }]);
+    expect(rows.map((row) => ({ name: row.name, weightG: row.weightG }))).toEqual([
+      { name: "First", weightG: undefined },
+      { name: "Heavy", weightG: 22680 },
+    ]);
+  });
+
   it("two weight columns, even identical or case-different, reject the file", () => {
     for (const header of ["name,price,weight,weight", "name,price,weight,Weight (kg)", "name,price,Weight,weight"]) {
       const parsed = parseCsvText(`${header}\nRice,1.00,2 lb,3 lb\n`);

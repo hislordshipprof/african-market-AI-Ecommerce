@@ -411,6 +411,34 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     expect(created).toEqual([]);
   });
 
+  it("a short first row still stores later CSV weights and rejects an excessive cell", async () => {
+    const first = `Short First ${RUN}`;
+    const heavy = `Short Heavy ${RUN}`;
+    const invalid = `Short Invalid ${RUN}`;
+    const csv = `name,price,weight\n${first},1.00\n${heavy},45.00,50 lb\n${invalid},1.00,1001 lb\n`;
+    const preview = await generatePreview(storeAId, csv, userId);
+    expect(preview.errors).toEqual([{ row: 4, csvName: invalid, reason: "Weight looks too large. Check the unit" }]);
+    expect(preview.newItems.map((item) => item.csvName)).toEqual([first, heavy]);
+
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2, 3, 4], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(2);
+
+    const rows = await storeScoped(storeAId).listing.findMany({
+      where: { customName: { in: [first, heavy, invalid] } },
+      include: { variants: true },
+    });
+    const byName = new Map(rows.map((row) => [row.customName, row]));
+    expect(byName.get(first)?.variants[0]?.weightG).toBe(100);
+    expect(byName.get(heavy)?.variants[0]?.weightG).toBe(22680);
+    expect(byName.get(heavy)?.price).toBe(4500);
+    expect(byName.has(invalid)).toBe(false);
+  });
+
   it("the suite connects as app_runtime", async () => {
     const rows = (await healthQueryRaw`SELECT current_user`) as { current_user: string }[];
     expect(rows[0]?.current_user).toBe("app_runtime");

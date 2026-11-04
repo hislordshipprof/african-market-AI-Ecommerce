@@ -295,10 +295,10 @@ export function parseCsvText(raw: string): {
     };
   }
 
-  const weightHeaderCount = rawHeaders.filter(
+  const weightHeaders = rawHeaders.filter(
     (header) => headerWeightUnit(normalizeHeader(header)) !== undefined,
-  ).length;
-  if (weightHeaderCount > 1) {
+  );
+  if (weightHeaders.length > 1) {
     return {
       rows: [],
       errors: [{ row: 0, reason: "Use one weight column" }],
@@ -307,12 +307,9 @@ export function parseCsvText(raw: string): {
     };
   }
 
-  const weightCol = headers.find(
-    (header) => headerWeightUnit(normalizedMap.get(header) ?? "") !== undefined,
-  );
-  const headerUnit = weightCol
-    ? headerWeightUnit(normalizedMap.get(weightCol) ?? "") ?? null
-    : null;
+  // A short first record omits trailing keys. The header row still names the column.
+  const weightCol = weightHeaders[0];
+  const headerUnit = weightCol ? headerWeightUnit(normalizeHeader(weightCol)) ?? null : null;
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
