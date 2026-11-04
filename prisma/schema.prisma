@@ -445,6 +445,7 @@ model CartLine {
   @@index([storeId])
   @@index([cartId])
   @@index([variantId])
+  @@index([substituteVariantId])
   @@map("cart_lines")
 }
 
