@@ -66,19 +66,27 @@ export async function csvCommitAction(
     return { error: "Missing import token. Please upload the file again." };
   }
 
+  let result: CommitResult;
   try {
-    const result = await commitImport(
+    result = await commitImport(
       session.store.id,
       importToken,
       selection,
       toActor(session.user),
     );
-    revalidateStorefront(session.store.id);
-    return { result };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     const safe = /^(Import token|This import|No rows|No valid|All selected|Resolution for|Row \d)/.test(msg);
     if (!safe) console.error("[csv-import] commit error:", e);
     return { error: safe ? msg : "Import failed. Please try again." };
   }
+
+  // Only a synchronous throw is caught here. Next applies queued tags after
+  // this function returns, and a failure there is outside this result.
+  try {
+    revalidateStorefront(session.store.id);
+  } catch (e) {
+    console.error("[csv-import] storefront revalidation failed:", e);
+  }
+  return { result };
 }
