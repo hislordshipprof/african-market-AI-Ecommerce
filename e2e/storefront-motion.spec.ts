@@ -1,6 +1,64 @@
 import { storeUrl } from "./urls";
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 const BASE = storeUrl("mama-ngozi");
+const PACKS = ["8 oz", "1 lb", "5 lb bag"];
+
+function packButtons(page: Page) {
+  return page.getByRole("dialog", { name: /Quick view/ }).getByRole("group", { name: "Choose pack size" }).getByRole("button");
+}
+
+async function browserJson(page: Page, url: string): Promise<{ variants?: { id: string; label: string }[]; badge?: string }> {
+  const helper = await page.context().newPage();
+  try {
+    await helper.goto(`${new URL(url).origin}/`);
+    return await helper.evaluate(async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`detail ${response.status}`);
+      return response.json();
+    }, url);
+  } finally {
+    await helper.close();
+  }
+}
+
+async function holdListingDetail(page: Page, edit?: (body: { variants?: { id: string; label: string }[]; badge?: string }) => void) {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/storefront/listings/**", async (route: Route) => {
+    await gate;
+    try {
+      if (!edit) {
+        await route.continue();
+        return;
+      }
+      const json = await browserJson(page, route.request().url());
+      edit(json);
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json) });
+    } catch (error) {
+      if (edit) throw error;
+    }
+  });
+  return () => release();
+}
+
+async function openEgusi(page: Page) {
+  await page.goto(`${BASE}/categories/grains-and-flours`);
+  const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+  await card.hover();
+  const trigger = card.getByRole("button", { name: /Quick view/ });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: /Quick view/ });
+  await expect(dialog).toBeVisible();
+  return { card, trigger, dialog };
+}
+
+async function settleCart(page: Page) {
+  const cart = page.getByRole("button", { name: "Shopping cart" });
+  await expect(cart).not.toHaveAttribute("data-cart-pending");
+  await page.reload();
+  await page.getByRole("button", { name: "Shopping cart" }).click();
+  return page.getByRole("dialog", { name: "Your cart" });
+}
 
 test.describe("Phase 3 motion and depth", () => {
   test.use({ reducedMotion: "no-preference" });
@@ -98,22 +156,281 @@ test.describe("Phase 3 motion and depth", () => {
   });
 
   test("quick view opens, selects a pack, adds to cart and restores focus", async ({ page }) => {
-    await page.goto(`${BASE}/categories/grains-and-flours`);
-    const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
-    await card.hover();
-    const trigger = card.getByRole("button", { name: /Quick view/ });
-    await trigger.click();
-    const dialog = page.getByRole("dialog", { name: /Quick view/ });
-    await expect(dialog).toBeVisible();
-    const packs = dialog.getByRole("group", { name: "Choose pack size" }).getByRole("button");
-    await expect(packs.first()).toBeVisible();
-    await packs.last().click();
-    await expect(packs.last()).toHaveAttribute("aria-pressed", "true");
+    const release = await holdListingDetail(page);
+    const { trigger, dialog } = await openEgusi(page);
+    await expect(dialog.getByText("Loading pack sizes…")).toBeVisible();
+    const packs = packButtons(page);
+    await expect(packs).toHaveText(PACKS);
+    const five = dialog.getByRole("button", { name: "5 lb bag", exact: true });
+    await five.click();
+    await expect(five).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByRole("button", { name: "1 lb", exact: true })).toHaveAttribute("aria-pressed", "false");
+    release();
+    await expect(dialog.getByText("Add to your basket")).toBeVisible();
+    await expect(packs).toHaveText(PACKS);
+    await expect(five).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByLabel("$79.99")).toBeVisible();
     await dialog.getByTestId("quick-add-btn").click();
     await expect(page.getByTestId("storefront-header").getByTestId("cart-count")).toHaveText("1");
     await dialog.press("Escape");
     await expect(dialog).not.toBeVisible();
     await expect(trigger).toBeFocused();
+    const cart = await settleCart(page);
+    await expect(cart.getByRole("listitem")).toHaveCount(1);
+    await expect(cart).toContainText("$79.99 / 5 lb bag");
+  });
+
+  test("quick view says when the chosen pack is gone and adds only the new pick", async ({ page }) => {
+    const release = await holdListingDetail(page, (body) => {
+      body.variants = body.variants?.filter((variant) => variant.label !== "1 lb");
+    });
+    const { dialog } = await openEgusi(page);
+    await expect(dialog.getByText("Loading pack sizes…")).toBeVisible();
+    await dialog.getByRole("button", { name: "1 lb", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "1 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
+    release();
+    await expect(dialog.getByRole("status")).toHaveText("The 1 lb pack is no longer available. Choose another pack size.");
+    await expect(packButtons(page)).toHaveText(["8 oz", "5 lb bag"]);
+    for (const button of await packButtons(page).all()) {
+      await expect(button).toHaveAttribute("aria-pressed", "false");
+    }
+    await expect(dialog.getByTestId("quick-add-btn")).toBeDisabled();
+    await dialog.getByRole("button", { name: "8 oz", exact: true }).click();
+    await expect(dialog.getByTestId("quick-add-btn")).toBeEnabled();
+    await dialog.getByTestId("quick-add-btn").click();
+    const cart = await settleCart(page);
+    await expect(cart.getByRole("listitem")).toHaveCount(1);
+    await expect(cart).toContainText("$10.99 / 8 oz");
+    await expect(cart).not.toContainText("1 lb");
+  });
+
+  test("latest real click wins across a held detail response", async ({ page }) => {
+    const release = await holdListingDetail(page);
+    const { dialog } = await openEgusi(page);
+    await expect(dialog.getByText("Loading pack sizes…")).toBeVisible();
+    await dialog.getByRole("button", { name: "1 lb", exact: true }).click();
+    await dialog.getByRole("button", { name: "5 lb bag", exact: true }).click();
+    await dialog.getByRole("button", { name: "5 lb bag", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("button", { name: "1 lb", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "false");
+    release();
+    await expect(dialog.getByText("Add to your basket")).toBeVisible();
+    await expect(packButtons(page)).toHaveText(PACKS);
+    await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("button", { name: "1 lb", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await dialog.getByRole("button", { name: "1 lb", exact: true }).click();
+    await expect(dialog.getByRole("group", { name: "Choose pack size" }).getByRole("button", { pressed: true })).toHaveCount(1);
+    await expect(dialog.getByRole("button", { name: "1 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByLabel("$18.99")).toBeVisible();
+    await dialog.getByTestId("quick-add-btn").click();
+    const cart = await settleCart(page);
+    await expect(cart.getByRole("listitem")).toHaveCount(1);
+    await expect(cart).toContainText("$18.99 / 1 lb");
+    await expect(cart).not.toContainText("5 lb bag");
+  });
+
+  test("closing the quick view before details arrive leaves no errors", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    let egusiFailure = "pending";
+    page.on("requestfailed", (request) => {
+      if (egusiFailure === "pending" && request.url().includes("/api/storefront/listings/mn_egusi")) {
+        egusiFailure = request.failure()?.errorText ?? "failed";
+      }
+    });
+    page.on("requestfinished", (request) => {
+      if (egusiFailure === "pending" && request.url().includes("/api/storefront/listings/mn_egusi")) {
+        egusiFailure = "finished";
+      }
+    });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await page.route("**/api/storefront/listings/**", async (route) => {
+      if (!route.request().url().includes("mn_egusi")) {
+        await route.continue();
+        return;
+      }
+      await gate;
+      try {
+        await route.continue();
+      } catch {
+        // The browser already aborted this request. requestfailed records the reason.
+      }
+    });
+    const { dialog } = await openEgusi(page);
+    await expect(dialog.getByText("Loading pack sizes…")).toBeVisible();
+    await dialog.getByRole("button", { name: "5 lb bag", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await dialog.press("Escape");
+    await expect(dialog).toBeHidden();
+    const ofada = page.getByTestId("listing-card").filter({ hasText: "Ofada Rice" }).first();
+    await ofada.hover();
+    await ofada.getByRole("button", { name: /Quick view/ }).click();
+    const other = page.getByRole("dialog", { name: "Quick view: Ofada Rice" });
+    await expect(other.getByText("Add to your basket")).toBeVisible();
+    await expect(other.getByRole("group", { name: "Choose pack size" }).getByRole("button")).toHaveText(["2 lb", "10 lb bag"]);
+    await expect(other.getByRole("button", { name: "2 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(other.getByLabel("$8.99")).toBeVisible();
+    release();
+    await expect.poll(() => egusiFailure).toMatch(/net::ERR_ABORTED/);
+    await expect(other.getByRole("button", { name: "2 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(other.getByRole("button", { name: "5 lb bag", exact: true })).toHaveCount(0);
+    await other.getByTestId("quick-add-btn").click();
+    await expect(other.getByTestId("stepper-qty")).toHaveText("1");
+    await expect(page.getByRole("button", { name: "Shopping cart" })).not.toHaveAttribute("data-cart-pending");
+    await other.press("Escape");
+    const ofadaCart = await settleCart(page);
+    await expect(ofadaCart.getByRole("listitem")).toHaveCount(1);
+    await expect(ofadaCart).toContainText("$8.99 / 2 lb");
+    await expect(ofadaCart).not.toContainText("5 lb bag");
+    await page.keyboard.press("Escape");
+    const egusi = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+    await egusi.hover();
+    await egusi.getByRole("button", { name: /Quick view/ }).click();
+    const reopened = page.getByRole("dialog", { name: /Quick view: Egusi/ });
+    await expect(reopened.getByText("Add to your basket")).toBeVisible();
+    await expect(reopened.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(reopened.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(reopened.getByRole("status")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("two adds and existing-line plus settle to one selected-variant line", async ({ page }) => {
+    let releaseAdd: () => void = () => {};
+    const addGate = new Promise<void>((resolve) => { releaseAdd = resolve; });
+    await page.route("**/*", async (route) => {
+      if (route.request().method() === "POST" && route.request().headers()["next-action"]) await addGate;
+      try { await route.continue(); } catch { /* the page navigated */ }
+    });
+    const { dialog } = await openEgusi(page);
+    await expect(dialog.getByText("Add to your basket")).toBeVisible();
+    await dialog.getByRole("button", { name: "5 lb bag", exact: true }).click();
+    await dialog.getByTestId("quick-add-btn").click();
+    await expect(dialog.getByTestId("stepper-qty")).toHaveText("1");
+    const cartButton = page.getByRole("button", { name: "Shopping cart" });
+    await expect(cartButton).toHaveAttribute("data-cart-pending", "true");
+    await dialog.getByTestId("stepper-plus").click();
+    await expect(dialog.getByTestId("stepper-qty")).toHaveText("2");
+    await expect(cartButton).toHaveAttribute("data-cart-pending", "true");
+    releaseAdd();
+    await expect(cartButton).not.toHaveAttribute("data-cart-pending");
+    const pendingCart = await settleCart(page);
+    await expect(pendingCart.getByRole("listitem")).toHaveCount(1);
+    await expect(pendingCart.getByTestId("stepper-qty")).toHaveText("2");
+    await expect(pendingCart).toContainText("$79.99 / 5 lb bag");
+    await page.keyboard.press("Escape");
+    const again = await openEgusi(page);
+    await expect(again.dialog.getByText("Add to your basket")).toBeVisible();
+    await again.dialog.getByRole("button", { name: "5 lb bag", exact: true }).click();
+    await expect(again.dialog.getByTestId("stepper-qty")).toHaveText("2");
+    await again.dialog.getByTestId("stepper-plus").click();
+    await expect(again.dialog.getByTestId("stepper-qty")).toHaveText("3");
+    await expect(page.getByRole("button", { name: "Shopping cart" })).not.toHaveAttribute("data-cart-pending");
+    const settled = await settleCart(page);
+    await expect(settled.getByRole("listitem")).toHaveCount(1);
+    await expect(settled.getByTestId("stepper-qty")).toHaveText("3");
+    await expect(settled).toContainText("$79.99 / 5 lb bag");
+  });
+
+  test("loading failure and ask-store details disable add and existing-line plus", async ({ page }) => {
+    const { dialog } = await openEgusi(page);
+    await expect(dialog.getByText("Add to your basket")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await dialog.getByTestId("quick-add-btn").click();
+    await expect(dialog.getByTestId("stepper-qty")).toHaveText("1");
+    await expect(page.getByRole("button", { name: "Shopping cart" })).not.toHaveAttribute("data-cart-pending");
+    await dialog.press("Escape");
+    const release = await holdListingDetail(page);
+    const loading = await openEgusi(page);
+    await expect(loading.dialog.getByText("Loading pack sizes…")).toBeVisible();
+    await expect(loading.dialog.getByTestId("stepper-plus")).toBeDisabled();
+    release();
+    await expect(loading.dialog.getByText("Add to your basket")).toBeVisible();
+    await expect(loading.dialog.getByTestId("stepper-plus")).toBeEnabled();
+    await loading.dialog.press("Escape");
+    await page.unroute("**/api/storefront/listings/**");
+    await page.route("**/api/storefront/listings/**", async (route) => {
+      const json = await browserJson(page, route.request().url());
+      json.badge = "ask-store";
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json) });
+    });
+    const ask = await openEgusi(page);
+    await expect(ask.dialog.getByText("Add to your basket")).toBeVisible();
+    await expect(ask.dialog.getByTestId("stepper-plus")).toBeDisabled();
+    await expect(ask.dialog.getByRole("status")).toHaveCount(0);
+    await ask.dialog.press("Escape");
+    await page.unroute("**/api/storefront/listings/**");
+    await page.route("**/api/storefront/listings/**", async (route) => {
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "failed" }) });
+    });
+    const failed = await openEgusi(page);
+    await expect(failed.dialog.getByRole("status")).toHaveText("Pack details could not load. Open the product page to try again.");
+    await expect(failed.dialog.getByText("no longer available")).toHaveCount(0);
+    await expect(failed.dialog.getByTestId("stepper-plus")).toBeDisabled();
+  });
+
+  test("category pack filter reaches the actual quick view default", async ({ page }) => {
+    const release = await holdListingDetail(page);
+    await page.goto(`${BASE}/categories/grains-and-flours?sizes=1`);
+    await page.getByTestId("filter-pack-option").filter({ hasText: "5 lb bag" }).click();
+    const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+    await card.hover();
+    await card.getByRole("button", { name: /Quick view/ }).click();
+    const dialog = page.getByRole("dialog", { name: /Quick view/ });
+    await expect(dialog.getByText("Loading pack sizes…")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "true");
+    release();
+    await expect(dialog.getByText("Add to your basket")).toBeVisible();
+    await expect(packButtons(page)).toHaveText(PACKS);
+    await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByLabel("$79.99")).toBeVisible();
+  });
+
+  test("warm and overlapping A B detail requests remain store scoped", async ({ browser }) => {
+    const mama = await browser.newContext();
+    const tante = await browser.newContext();
+    const mamaPage = await mama.newPage();
+    const tantePage = await tante.newPage();
+    const read = (page: Page, path: string) => page.evaluate(async (path) => {
+      const response = await fetch(path);
+      return { status: response.status, text: await response.text() };
+    }, path);
+    await mamaPage.goto(storeUrl("mama-ngozi"));
+    await tantePage.goto(storeUrl("tante-marie"));
+    const warm = await read(mamaPage, "/api/storefront/listings/mn_egusi");
+    expect(warm.status).toBe(200);
+    expect(JSON.parse(warm.text).variants.map((variant: { label: string }) => variant.label)).toEqual(PACKS);
+    const [again, foreign, own] = await Promise.all([
+      read(mamaPage, "/api/storefront/listings/mn_egusi"),
+      read(tantePage, "/api/storefront/listings/mn_egusi"),
+      read(tantePage, "/api/storefront/listings/tm_egusi"),
+    ]);
+    expect(again.status).toBe(200);
+    expect(JSON.parse(again.text).id).toBe("mn_egusi");
+    expect(foreign.status).toBe(404);
+    expect(JSON.parse(foreign.text)).toEqual({ error: "Listing not found" });
+    expect(own.status).toBe(200);
+    const ownBody = JSON.parse(own.text);
+    expect(ownBody.id).toBe("tm_egusi");
+    expect(ownBody.variants.every((variant: { id: string }) => variant.id.startsWith("tm_"))).toBe(true);
+    const mamaShelf = await mamaPage.goto(`${storeUrl("mama-ngozi")}/collections/soup-essentials`);
+    expect(mamaShelf?.status()).toBe(200);
+    await expect(mamaPage.getByRole("heading", { name: "Soup essentials" })).toBeVisible();
+    await expect(mamaPage.getByRole("link", { name: "View Egusi (Melon Seeds)" })).toBeVisible();
+    await tantePage.goto(`${storeUrl("tante-marie")}/collections/soup-essentials`);
+    await expect(tantePage.getByRole("heading", { level: 1 })).toHaveText("Tante Marie Caribbean Grocer");
+    await expect(tantePage.getByTestId("page-not-found")).toBeVisible();
+    await expect(tantePage.getByRole("heading", { name: "Soup essentials" })).toHaveCount(0);
+    await expect(tantePage.getByText("mn_egusi")).toHaveCount(0);
+    await mama.close();
+    await tante.close();
   });
 
   test("fly-to-cart updates the accessible badge immediately", async ({ page }) => {

@@ -439,12 +439,13 @@ model CartLine {
 
   cart              Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
   variant           ListingVariant  @relation(fields: [variantId], references: [id])
-  substituteVariant ListingVariant? @relation("substituteVariant", fields: [substituteVariantId], references: [id])
+  substituteVariant ListingVariant? @relation("substituteVariant", fields: [substituteVariantId], references: [id], onDelete: Restrict)
 
   @@unique([cartId, variantId])
   @@index([storeId])
   @@index([cartId])
   @@index([variantId])
+  @@index([substituteVariantId])
   @@map("cart_lines")
 }
 
@@ -527,7 +528,7 @@ model OrderLine {
 
   order              Order          @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
   listingVariant     ListingVariant @relation(fields: [listingVariantId], references: [id])
-  substituteVariant  ListingVariant? @relation("substituteOrderLine", fields: [substituteVariantId], references: [id])
+  substituteVariant  ListingVariant? @relation("substituteOrderLine", fields: [substituteVariantId], references: [id], onDelete: Restrict)
 
   @@index([storeId])
   @@index([orderId])

@@ -69,7 +69,7 @@ describe.skipIf(!hasDb)("Cart migration schema", () => {
       carts_store_id_fkey: "RESTRICT",
       cart_lines_cart_id_fkey: "CASCADE",
       cart_lines_variant_id_fkey: "RESTRICT",
-      cart_lines_substitute_variant_id_fkey: "SET NULL",
+      cart_lines_substitute_variant_id_fkey: "RESTRICT",
     });
   });
 

@@ -46,6 +46,7 @@ import {
   reactivateListingAction,
   listMasterProductsAction,
 } from "@/lib/listing/actions";
+import { loadedVariantRow, serializeVariants } from "./variant-form";
 import {
   ArrowLeft,
   Plus,
@@ -120,6 +121,8 @@ function stockBadgeVariant(listing: Listing): "default" | "secondary" | "destruc
 
 interface VariantFormRow {
   key: string;
+  /** Present only for a row loaded from the listing. Never the React key of a new row. */
+  id?: string;
   label: string;
   price: string;
   weightG: string;
@@ -144,19 +147,6 @@ interface ListingFormFields {
   masterProductId: string | null;
 }
 
-function buildVariantsJson(variants: VariantFormRow[]) {
-  return JSON.stringify(
-    variants
-      .filter((v) => v.label.trim())
-      .map((v) => ({
-        label: v.label.trim(),
-        price: Math.round(parseFloat(v.price || "0") * 100),
-        weightG: parseInt(v.weightG || "0", 10),
-        sku: v.sku ?? null,
-        barcode: v.barcode ?? null,
-      })),
-  );
-}
 
 /** Serialises the listing form for create and update; update passes `listingId`. */
 function buildListingFormData(
@@ -177,7 +167,7 @@ function buildListingFormData(
   if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
   if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
   else if (listingId) fd.set("masterProductId", "");
-  fd.set("variants", buildVariantsJson(variants));
+  fd.set("variants", serializeVariants(variants));
   return fd;
 }
 
@@ -262,16 +252,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setPerishable(listing.perishable);
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
     setMasterProductId(listing.masterProductId);
-    setVariants(
-      listing.variants.map((v) => ({
-        key: v.id,
-        label: v.label,
-        price: (v.price / 100).toFixed(2),
-        weightG: String(v.weightG),
-        sku: v.sku,
-        barcode: v.barcode,
-      })),
-    );
+    setVariants(listing.variants.map(loadedVariantRow));
     searchMasterProducts("");
     const currentMaster =
       listing.masterProductId && listing.masterProductName
@@ -504,43 +485,65 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
             <Plus className="size-3.5" /> Add
           </Button>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="@container flex flex-col gap-2">
           {variants.map((v) => (
-            <div key={v.key} className="flex items-center gap-2">
+            <div key={v.key} className="flex flex-col gap-2 @[22rem]:flex-row @[22rem]:items-center">
               <Input
+                aria-label="Variant label"
                 placeholder="Label (e.g. 1kg)"
                 value={v.label}
                 onChange={(e) => updateVariantField(v.key, "label", e.target.value)}
-                className="flex-1"
+                className="min-w-0 @[22rem]:flex-1"
               />
-              <Input
-                placeholder="Price"
-                type="number"
-                min="0"
-                step="0.01"
-                value={v.price}
-                onChange={(e) => updateVariantField(v.key, "price", e.target.value)}
-                className="w-24"
-              />
-              <Input
-                placeholder="Weight (g)"
-                type="number"
-                min="1"
-                value={v.weightG}
-                onChange={(e) => updateVariantField(v.key, "weightG", e.target.value)}
-                className="w-24"
-              />
-              {variants.length > 1 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => removeVariantRow(v.key)}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <span
+                    className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-sm text-foreground"
+                    aria-hidden
+                  >
+                    $
+                  </span>
+                  <Input
+                    aria-label="Variant price in dollars"
+                    placeholder="Price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={v.price}
+                    onChange={(e) => updateVariantField(v.key, "price", e.target.value)}
+                    className="w-24 pl-6"
+                  />
+                </div>
+                <div className="relative">
+                  <Input
+                    aria-label="Variant weight in grams"
+                    placeholder="Weight (g)"
+                    type="number"
+                    min="1"
+                    value={v.weightG}
+                    onChange={(e) => updateVariantField(v.key, "weightG", e.target.value)}
+                    className="w-24 pr-6"
+                  />
+                  <span
+                    className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-sm text-foreground"
+                    aria-hidden
+                  >
+                    g
+                  </span>
+                </div>
+                {variants.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`Remove ${v.label || "variant"}`}
+                    onClick={() => removeVariantRow(v.key)}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                )}
+              </div>
             </div>
           ))}
         </div>

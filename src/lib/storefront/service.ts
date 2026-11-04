@@ -1,5 +1,6 @@
 import { cachedStorefrontRead } from "./cache";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
+import { orderPacks } from "./pack-order";
 import { stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
 import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
@@ -14,6 +15,11 @@ const notE2eListing = {
 /** Same rule for the raw search SQL. LIKE is wrapped so NULL custom_name rows are kept. */
 const notE2eListingSql = Prisma.sql`(l.custom_name IS NULL OR LEFT(l.custom_name, ${E2E_LISTING_PREFIX.length}) <> ${E2E_LISTING_PREFIX})`;
 
+/** Cheapest pack first, then id. The projection sorts the same way with UTF-8 bytes. */
+const variantsCheapestFirst = {
+  orderBy: [{ price: "asc" as const }, { id: "asc" as const }],
+};
+
 /** Read-only, tenant-scoped catalog projection for the demo journey adapters. */
 async function readGetFlowCatalog(
   storeId: string,
@@ -22,12 +28,13 @@ async function readGetFlowCatalog(
     where: { active: true, ...notE2eListing },
     include: {
       masterProduct: true,
-      variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
+      variants: variantsCheapestFirst,
     },
     orderBy: { createdAt: "desc" },
   });
   return listings.flatMap((listing) => {
-    const item = toStorefrontListing(listing);
+    const item = projectStorefrontListing(listing);
+    const variants = orderPacks(listing.variants);
     const base = {
       listingId: listing.id,
       name: item.displayName,
@@ -39,8 +46,8 @@ async function readGetFlowCatalog(
         !(listing.stockMode === "counted" && (listing.qty ?? 0) <= 0) &&
         !(listing.stockMode === "status" && listing.status === "out_of_stock"),
     };
-    return listing.variants.length
-      ? listing.variants.map((variant) => ({
+    return variants.length
+      ? variants.map((variant) => ({
           ...base,
           variantId: variant.id,
           price: variant.price,
@@ -96,7 +103,7 @@ function deriveNames(
   return { displayName: local || english || "Unnamed" };
 }
 
-function toStorefrontListing(listing: {
+export function projectStorefrontListing(listing: {
   id: string;
   customName: string | null;
   price: number;
@@ -110,18 +117,23 @@ function toStorefrontListing(listing: {
   masterProduct: { name: string; imageUrl?: string | null; category?: { slug: string } | null } | null;
   variants: { id?: string; label?: string; price: number; weightG?: number }[];
 }): StorefrontListing {
-  const startingPrice =
-    listing.variants.length > 0
-      ? Math.min(...listing.variants.map((v) => v.price))
-      : listing.price;
-
   const names = deriveNames(
     listing.customName,
     listing.masterProduct?.name ?? null,
   );
-  const pack = [...listing.variants].sort(
-    (a, b) => a.price - b.price || (a.id ?? "").localeCompare(b.id ?? ""),
-  )[0];
+  const ordered = orderPacks(
+    listing.variants.flatMap((variant) =>
+      variant.id
+        ? [{ id: variant.id, label: variant.label, price: variant.price, weightG: variant.weightG }]
+        : [],
+    ),
+  );
+  const pack = ordered[0];
+  const startingPrice = pack ? pack.price : listing.price;
+  const packLabels: string[] = [];
+  for (const variant of ordered) {
+    if (variant.label && !packLabels.includes(variant.label)) packLabels.push(variant.label);
+  }
   return {
     id: listing.id,
     ...names,
@@ -131,18 +143,12 @@ function toStorefrontListing(listing: {
     variantId: pack?.id,
     packLabel: pack?.label ?? "Each",
     weightG: pack?.weightG,
-    packOptions: listing.variants.flatMap((v) =>
-      v.id && v.label
-        ? [{ id: v.id, label: v.label, price: v.price, weightG: v.weightG }]
+    packOptions: ordered.flatMap((variant) =>
+      variant.label
+        ? [{ id: variant.id, label: variant.label, price: variant.price, weightG: variant.weightG }]
         : [],
     ),
-    packLabels: [
-      ...new Set(
-        listing.variants
-          .map((v) => v.label)
-          .filter((label): label is string => !!label),
-      ),
-    ],
+    packLabels,
     startingPrice,
     badge: stockBadge({
       confidence: listing.confidence,
@@ -176,13 +182,13 @@ async function readListingsByCategory(
       ...notE2eListing,
       masterProduct: { categoryId: category.id },
     },
-    include: { masterProduct: { include: { category: true } }, variants: true },
+    include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
     orderBy: { createdAt: "desc" },
   });
 
   return {
     category: { name: category.name, slug: category.slug },
-    listings: listings.map(toStorefrontListing),
+    listings: listings.map(projectStorefrontListing),
   };
 }
 
@@ -214,7 +220,7 @@ async function readGetListingDetail(
     where: { id: listingId },
     include: {
       masterProduct: { include: { category: true } },
-      variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
+      variants: variantsCheapestFirst,
     },
   });
 
@@ -242,7 +248,7 @@ async function readGetListingDetail(
     } satisfies StockBadgeInput),
     frozen: listing.frozen,
     perishable: listing.perishable,
-    variants: listing.variants.map((v) => ({
+    variants: orderPacks(listing.variants).map((v) => ({
       id: v.id,
       label: v.label,
       price: v.price,
@@ -304,7 +310,7 @@ async function readSearchListings(
     LEFT JOIN categories c ON mp.category_id = c.id
     LEFT JOIN LATERAL (
       SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
-      WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id LIMIT 1
+      WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id COLLATE "C" LIMIT 1
     ) pack ON true
     CROSS JOIN LATERAL (
       SELECT MIN(CASE
@@ -356,11 +362,11 @@ async function readGetActiveListings(
   const scoped = storeScoped(storeId);
   const listings = await scoped.listing.findMany({
     where: { active: true, ...notE2eListing },
-    include: { masterProduct: { include: { category: true } }, variants: true },
+    include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
     orderBy: { createdAt: "desc" },
   });
 
-  return listings.map(toStorefrontListing);
+  return listings.map(projectStorefrontListing);
 }
 
 export interface StorefrontBanner {
@@ -432,7 +438,7 @@ async function readGetCollectionListings(
         orderBy: { sortOrder: "asc" },
         include: {
           listing: {
-            include: { masterProduct: { include: { category: true } }, variants: true },
+            include: { masterProduct: { include: { category: true } }, variants: variantsCheapestFirst },
           },
         },
       },
@@ -452,7 +458,7 @@ async function readGetCollectionListings(
     listings: collection.items
       .map((item) => item.listing)
       .filter((l) => l.active && !l.customName?.startsWith(E2E_LISTING_PREFIX))
-      .map(toStorefrontListing),
+      .map(projectStorefrontListing),
   };
 }
 
@@ -507,7 +513,7 @@ async function readGetListingsByCategory(
     where: { active: true, ...notE2eListing },
     include: {
       masterProduct: { include: { category: true } },
-      variants: true,
+      variants: variantsCheapestFirst,
     },
     orderBy: { createdAt: "desc" },
     take: MAX_HOMEPAGE_LISTINGS,
@@ -521,7 +527,7 @@ async function readGetListingsByCategory(
     const catName = listing.masterProduct?.category?.name ?? "Other";
     const catSlug = listing.masterProduct?.category?.slug ?? "other";
     const existing = byCategory.get(catName) ?? { slug: catSlug, listings: [] };
-    existing.listings.push(toStorefrontListing(listing));
+    existing.listings.push(projectStorefrontListing(listing));
     byCategory.set(catName, existing);
   }
 
