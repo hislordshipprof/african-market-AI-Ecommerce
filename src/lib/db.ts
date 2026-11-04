@@ -458,3 +458,96 @@ export function withStatementTimeout(client: TransactionalClient): QueryRawFn {
 
 // No RLS wrapper: health checks read only system catalogs, not store-scoped tables.
 export const healthQueryRaw = withStatementTimeout(prisma);
+
+/** Takes the conversation lease only when it is free. Same transaction as the upsert. */
+export async function claimConversationLease(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  cartId: string,
+  until: Date,
+  at: Date,
+): Promise<{ id: string; messages: unknown } | null> {
+  const rows = await tx.$queryRaw<Array<{ id: string; messages: unknown }>>`
+    UPDATE ai_conversations
+    SET in_flight_until = ${until}
+    WHERE store_id = ${storeId} AND cart_id = ${cartId}
+      AND (in_flight_until IS NULL OR in_flight_until < ${at})
+    RETURNING id, messages
+  `;
+  return rows[0] ?? null;
+}
+
+/** Deletes one batch of actions older than the naive timestamp. Returns the row count. */
+export function deleteExpiredAssistantActions(cutoff: string, batchSize: number): Promise<number> {
+  return platformAdminTransaction((tx) =>
+    tx.$executeRaw`
+      DELETE FROM ai_actions
+      WHERE id IN (
+        SELECT id FROM ai_actions
+        WHERE created_at < ${cutoff}
+        ORDER BY created_at, id
+        LIMIT ${batchSize}
+      )
+    `,
+  );
+}
+
+/** Deletes one batch of idle conversations older than the naive timestamp. */
+export function deleteExpiredAssistantConversations(
+  cutoff: string,
+  now: string,
+  batchSize: number,
+): Promise<number> {
+  return platformAdminTransaction((tx) =>
+    tx.$executeRaw`
+      DELETE FROM ai_conversations
+      WHERE id IN (
+        SELECT id FROM ai_conversations
+        WHERE created_at < ${cutoff}
+          AND (in_flight_until IS NULL OR in_flight_until <= ${now})
+        ORDER BY created_at, id
+        LIMIT ${batchSize}
+      )
+    `,
+  );
+}
+
+/** Adds the call cost to the UTC day. The day is a YYYY-MM-DD string, cast in SQL. */
+export async function insertAssistantSpend(day: string, amount: bigint): Promise<void> {
+  await appUserQuery((tx) =>
+    tx.$executeRaw`
+      INSERT INTO assistant_spend_days (day, cost_micros, updated_at)
+      VALUES (CAST(${day} AS date), ${amount}, now())
+      ON CONFLICT (day) DO UPDATE
+      SET cost_micros = assistant_spend_days.cost_micros + EXCLUDED.cost_micros,
+          updated_at = now()
+    `,
+  );
+}
+
+export async function sumAssistantSpend(): Promise<bigint> {
+  const rows = await appUserQuery((tx) =>
+    tx.$queryRaw<Array<{ spent: bigint }>>`
+      SELECT COALESCE(SUM(cost_micros), 0) AS spent FROM assistant_spend_days
+    `,
+  );
+  return BigInt(rows[0]?.spent ?? 0);
+}
+
+/** Inserts the day if needed, then claims the once-per-day alert. */
+export async function claimAssistantCapDay(day: string): Promise<boolean> {
+  return appUserQuery(async (tx) => {
+    await tx.$executeRaw`
+      INSERT INTO assistant_spend_days (day, cost_micros, updated_at)
+      VALUES (CAST(${day} AS date), 0, now())
+      ON CONFLICT (day) DO NOTHING
+    `;
+    const rows = await tx.$queryRaw<Array<{ day: Date }>>`
+      UPDATE assistant_spend_days
+      SET cap_alerted_at = now(), updated_at = now()
+      WHERE day = CAST(${day} AS date) AND cap_alerted_at IS NULL
+      RETURNING day
+    `;
+    return rows.length > 0;
+  });
+}

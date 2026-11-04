@@ -1,4 +1,4 @@
-import { appUserQuery } from "../db";
+import { claimAssistantCapDay, insertAssistantSpend, sumAssistantSpend } from "../db";
 
 const DEFAULT_CAP_MICROS = BigInt(10_000_000);
 let invalidCapLogged = false;
@@ -36,15 +36,7 @@ export async function recordSpend(micros: bigint, at: Date = new Date()): Promis
   }
   const day = utcDay(at);
   const amount = micros < BigInt(0) ? BigInt(0) : micros;
-  await appUserQuery((tx) =>
-    tx.$executeRaw`
-      INSERT INTO assistant_spend_days (day, cost_micros, updated_at)
-      VALUES (CAST(${day} AS date), ${amount}, now())
-      ON CONFLICT (day) DO UPDATE
-      SET cost_micros = assistant_spend_days.cost_micros + EXCLUDED.cost_micros,
-          updated_at = now()
-    `,
-  );
+  await insertAssistantSpend(day, amount);
 }
 
 export async function assistantSpendState(env: { ASSISTANT_SPEND_CAP_USD?: string } = {
@@ -59,12 +51,7 @@ export async function assistantSpendState(env: { ASSISTANT_SPEND_CAP_USD?: strin
     invalidCapLogged = true;
     console.error("[assistant] ASSISTANT_SPEND_CAP_USD is invalid; the helper is resting");
   }
-  const rows = await appUserQuery((tx) =>
-    tx.$queryRaw<Array<{ spent: bigint }>>`
-      SELECT COALESCE(SUM(cost_micros), 0) AS spent FROM assistant_spend_days
-    `,
-  );
-  const spentMicros = BigInt(rows[0]?.spent ?? 0);
+  const spentMicros = await sumAssistantSpend();
   return {
     spentMicros,
     capMicros: cap.invalid ? BigInt(0) : cap.micros,
@@ -73,20 +60,7 @@ export async function assistantSpendState(env: { ASSISTANT_SPEND_CAP_USD?: strin
 }
 
 export async function claimCapAlert(day: string): Promise<boolean> {
-  const won = await appUserQuery(async (tx) => {
-    await tx.$executeRaw`
-      INSERT INTO assistant_spend_days (day, cost_micros, updated_at)
-      VALUES (CAST(${day} AS date), 0, now())
-      ON CONFLICT (day) DO NOTHING
-    `;
-    const rows = await tx.$queryRaw<Array<{ day: Date }>>`
-      UPDATE assistant_spend_days
-      SET cap_alerted_at = now(), updated_at = now()
-      WHERE day = CAST(${day} AS date) AND cap_alerted_at IS NULL
-      RETURNING day
-    `;
-    return rows.length > 0;
-  });
+  const won = await claimAssistantCapDay(day);
   if (won) {
     const state = await assistantSpendState();
     console.error("[assistant] spend cap reached", {

@@ -1,4 +1,4 @@
-import { platformAdminTransaction } from "../db";
+import { deleteExpiredAssistantActions, deleteExpiredAssistantConversations } from "../db";
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -37,18 +37,7 @@ export async function runAssistantRetention(
     "ai_actions",
     batchSize,
     maxBatches,
-    () =>
-      platformAdminTransaction((tx) =>
-        tx.$executeRaw`
-          DELETE FROM ai_actions
-          WHERE id IN (
-            SELECT id FROM ai_actions
-            WHERE created_at < ${cutoff}
-            ORDER BY created_at, id
-            LIMIT ${batchSize}
-          )
-        `,
-      ),
+    () => deleteExpiredAssistantActions(cutoff, batchSize),
   );
   const conversationsDeleted = await deleteInBatches(
     step,
@@ -56,19 +45,7 @@ export async function runAssistantRetention(
     "ai_conversations",
     batchSize,
     maxBatches,
-    () =>
-      platformAdminTransaction((tx) =>
-        tx.$executeRaw`
-          DELETE FROM ai_conversations
-          WHERE id IN (
-            SELECT id FROM ai_conversations
-            WHERE created_at < ${cutoff}
-              AND (in_flight_until IS NULL OR in_flight_until <= ${now})
-            ORDER BY created_at, id
-            LIMIT ${batchSize}
-          )
-        `,
-      ),
+    () => deleteExpiredAssistantConversations(cutoff, now, batchSize),
   );
   return { actionsDeleted, conversationsDeleted };
 }

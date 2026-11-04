@@ -13,7 +13,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
 import { CartError, getOrCreateCart } from "../cart/service";
-import { rateLimitUpsert, storeScoped, storeScopedTransaction } from "../db";
+import { claimConversationLease, rateLimitUpsert, storeScoped, storeScopedTransaction } from "../db";
 import { findStore } from "../get-store";
 import { auth } from "../auth";
 import { scrubCardNumbers } from "./card-scrub";
@@ -315,14 +315,7 @@ async function takeTurn(storeId: string, cartId: string, userId: string | null, 
       },
       update: userId ? { customerId: cart?.customerId ?? undefined } : {},
     });
-    const rows = await tx.$queryRaw<Array<{ id: string; messages: unknown }>>`
-      UPDATE ai_conversations
-      SET in_flight_until = ${until}
-      WHERE store_id = ${storeId} AND cart_id = ${cartId}
-        AND (in_flight_until IS NULL OR in_flight_until < ${at})
-      RETURNING id, messages
-    `;
-    return rows[0] ?? null;
+    return claimConversationLease(tx, storeId, cartId, until, at);
   });
 }
 
