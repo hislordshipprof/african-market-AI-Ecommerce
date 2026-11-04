@@ -53,15 +53,21 @@ test.describe("placeholder weight", () => {
     await expect(page).toHaveURL(/\/store-admin\/listings/);
     const section = (title: string) =>
       page.locator("[data-slot=card]").filter({ has: page.getByText(title, { exact: true }) });
-    const active = section("Active listings");
-    await expect(active.locator("[data-needs-weight]")).toHaveText("Needs weight");
+    const rowFor = (title: string) =>
+      section(title)
+        .getByRole("button", { name: `Edit ${name}`, exact: true })
+        .locator("xpath=ancestor::div[contains(@class,'flex-wrap')][1]");
+    await expect(rowFor("Active listings").locator("[data-needs-weight]")).toHaveText("Needs weight");
 
     await page.getByRole("switch", { name: `Deactivate ${name}` }).click();
-    const inactive = section("Inactive listings");
-    await expect(inactive.locator("[data-needs-weight]")).toHaveText("Needs weight", { timeout: 15000 });
-    await expect(active.locator("[data-needs-weight]")).toHaveCount(0);
+    await expect(rowFor("Inactive listings").locator("[data-needs-weight]")).toHaveText("Needs weight", {
+      timeout: 15000,
+    });
+    await expect(
+      section("Active listings").getByRole("button", { name: `Edit ${name}`, exact: true }),
+    ).toHaveCount(0);
 
-    await inactive.getByRole("button", { name: `Edit ${name}` }).click();
+    await section("Inactive listings").getByRole("button", { name: `Edit ${name}` }).click();
     const dialog = page.getByRole("dialog", { name: "Edit listing" });
     const weight = dialog.getByLabel("Variant weight in grams");
     await expect(weight).toHaveAttribute("placeholder", "Needs weight");
@@ -81,7 +87,12 @@ test.describe("placeholder weight", () => {
     await weight.fill("22680");
     await dialog.getByRole("button", { name: "Save changes" }).click();
     await expect(dialog).toBeHidden();
-    await expect(page.locator("[data-needs-weight]")).toHaveCount(0);
+    await expect(
+      page
+        .getByRole("button", { name: `Edit ${name}`, exact: true })
+        .locator("xpath=ancestor::div[contains(@class,'flex-wrap')][1]")
+        .locator("[data-needs-weight]"),
+    ).toHaveCount(0);
 
     await page.getByRole("button", { name: `Edit ${name}` }).click();
     const saved = page.getByRole("dialog", { name: "Edit listing" }).getByLabel("Variant weight in grams");
