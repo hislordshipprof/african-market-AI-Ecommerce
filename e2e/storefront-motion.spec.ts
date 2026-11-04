@@ -221,16 +221,34 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(packButtons(page)).toHaveText(PACKS);
     await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.getByRole("button", { name: "1 lb", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await dialog.getByRole("button", { name: "1 lb", exact: true }).click();
+    await expect(dialog.getByRole("group", { name: "Choose pack size" }).getByRole("button", { pressed: true })).toHaveCount(1);
+    await expect(dialog.getByRole("button", { name: "1 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("button", { name: "5 lb bag", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.getByLabel("$18.99")).toBeVisible();
     await dialog.getByTestId("quick-add-btn").click();
     const cart = await settleCart(page);
-    await expect(cart).toContainText("$79.99 / 5 lb bag");
+    await expect(cart.getByRole("listitem")).toHaveCount(1);
+    await expect(cart).toContainText("$18.99 / 1 lb");
+    await expect(cart).not.toContainText("5 lb bag");
   });
 
   test("closing the quick view before details arrive leaves no errors", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-    let egusiSettled = "pending";
+    let egusiFailure = "pending";
+    page.on("requestfailed", (request) => {
+      if (egusiFailure === "pending" && request.url().includes("/api/storefront/listings/mn_egusi")) {
+        egusiFailure = request.failure()?.errorText ?? "failed";
+      }
+    });
+    page.on("requestfinished", (request) => {
+      if (egusiFailure === "pending" && request.url().includes("/api/storefront/listings/mn_egusi")) {
+        egusiFailure = "finished";
+      }
+    });
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => { release = resolve; });
     await page.route("**/api/storefront/listings/**", async (route) => {
@@ -241,9 +259,8 @@ test.describe("Phase 3 motion and depth", () => {
       await gate;
       try {
         await route.continue();
-        egusiSettled = "completed";
       } catch {
-        egusiSettled = "aborted";
+        // The browser already aborted this request. requestfailed records the reason.
       }
     });
     const { dialog } = await openEgusi(page);
@@ -261,7 +278,7 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(other.getByRole("button", { name: "2 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(other.getByLabel("$8.99")).toBeVisible();
     release();
-    await expect.poll(() => egusiSettled).not.toBe("pending");
+    await expect.poll(() => egusiFailure).toMatch(/net::ERR_ABORTED/);
     await expect(other.getByRole("button", { name: "2 lb", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(other.getByRole("button", { name: "5 lb bag", exact: true })).toHaveCount(0);
     await other.getByTestId("quick-add-btn").click();

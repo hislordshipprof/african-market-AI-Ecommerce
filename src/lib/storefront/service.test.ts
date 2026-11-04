@@ -598,11 +598,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     const assertThisReadOrdersVariants = (label: string) => {
       const variantQueries = take().filter((query) => /listing_variants/i.test(query) && /select/i.test(query));
       expect(variantQueries.length, label).toBeGreaterThan(0);
-      for (const query of variantQueries) {
-        expect(query, label).toMatch(/order by/i);
-        expect(query, label).toMatch(/price/i);
-        expect(query, label).toMatch(/"id"/i);
-      }
+      for (const query of variantQueries) assertPackQueryOrder(query, label);
     };
     try {
       await rawPrisma.$transaction([
@@ -620,6 +616,9 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       await getCollectionListings(storeAId, prefix);
       assertThisReadOrdersVariants("getCollectionListings");
       const ids = await packIds(seeded.listingId, prefix);
+      const packedReads = take().filter((query) => /listing_variants/i.test(query) && /select/i.test(query));
+      expect(packedReads.length, "detail and flow").toBeGreaterThan(0);
+      for (const query of packedReads) assertPackQueryOrder(query, "detail and flow");
       expect(ids.fromBrowse).toEqual(expected);
       expect(ids.fromActive).toEqual(expected);
       expect(ids.fromRails).toEqual(expected);
@@ -628,6 +627,9 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       expect(ids.fromFlow).toEqual(expected);
       expect(ids.detailDefault).toBe(low);
       const search = await searchListings(storeAId, prefix);
+      const searchQueries = take().filter((query) => /listing_variants/i.test(query) && /select/i.test(query));
+      expect(searchQueries.length, "searchListings").toBeGreaterThan(0);
+      for (const query of searchQueries) assertPackQueryOrder(query, "searchListings");
       expect(search.find((item) => item.id === seeded.listingId)?.variantId).toBe(low);
     } finally {
       listener.restore();
@@ -663,13 +665,9 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       expect(ids.detailDefault).toBe(upperA);
       const search = await searchListings(storeAId, prefix);
       expect(search.find((item) => item.id === seeded.listingId)?.variantId).toBe(upperA);
-      const searchOrders = listener.seen.filter((query) => /listing_variants/i.test(query) && /limit 1/i.test(query));
-      expect(searchOrders.length).toBeGreaterThan(0);
-      for (const query of searchOrders) {
-        expect(query).toMatch(/order by/i);
-        expect(query).toMatch(/price/i);
-        expect(query).toMatch(/id collate "C"/i);
-      }
+      const variantQueries = listener.seen.filter((query) => /listing_variants/i.test(query) && /select/i.test(query));
+      expect(variantQueries.length).toBeGreaterThan(0);
+      for (const query of variantQueries) assertPackQueryOrder(query, "equal price");
     } finally {
       listener.restore();
       await dropProbe(seeded.listingId, seeded.collectionId);
@@ -768,11 +766,13 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
       expect((await storeScoped(storeBId).listingVariant.deleteMany({ where: { id: variant.id } })).count).toBe(0);
       expect((await storeScoped(storeBId).storeCollection.updateMany({ where: { id: collection.id }, data: { title: "stolen" } })).count).toBe(0);
       expect((await storeScoped(storeBId).storeCollection.deleteMany({ where: { id: collection.id } })).count).toBe(0);
+      expect((await storeScoped(storeBId).storeCollectionListing.updateMany({ where: { id: link.id }, data: { sortOrder: 9 } })).count).toBe(0);
       expect((await storeScoped(storeBId).storeCollectionListing.deleteMany({ where: { id: link.id } })).count).toBe(0);
       const reread = await storeScoped(storeAId).listing.findUnique({ where: { id: own.id }, include: { variants: true, collectionItems: true } });
       expect(reread?.price).toBe(250);
       expect(reread?.variants.map((item) => item.id)).toEqual([variant.id]);
       expect(reread?.collectionItems.map((item) => item.id)).toEqual([link.id]);
+      expect(reread?.collectionItems.map((item) => item.sortOrder)).toEqual([0]);
       const [aShelf, bShelf] = await Promise.all([
         getCollectionListings(storeAId, stamp),
         getCollectionListings(storeBId, stamp),
@@ -790,6 +790,20 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     }
   });
 });
+
+const PRISMA_PACK_ORDER = '"public"."listing_variants"."price" ASC, "public"."listing_variants"."id" ASC';
+const SEARCH_PACK_ORDER = 'lv.price, lv.id COLLATE "C"';
+
+function orderByClause(query: string): string {
+  const match = query.match(/\bORDER BY\s+([\s\S]+?)(?:\s+OFFSET\b|\s+LIMIT\b|\s+FOR\b|$)/i);
+  return match?.[1].replace(/\s+/g, " ").trim() ?? "";
+}
+
+function assertPackQueryOrder(query: string, label: string) {
+  const clause = orderByClause(query);
+  const expected = /\blv\.price\b/i.test(clause) ? SEARCH_PACK_ORDER : PRISMA_PACK_ORDER;
+  expect(clause, label).toBe(expected);
+}
 
 function listenForVariantQueries() {
   const seen: string[] = [];
