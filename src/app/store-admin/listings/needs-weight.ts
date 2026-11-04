@@ -1,4 +1,5 @@
 export function listingNeedsWeight(listing: {
+  active?: boolean;
   variants: { weightPlaceholder: boolean }[];
 }): boolean {
   return listing.variants.some((variant) => variant.weightPlaceholder);
