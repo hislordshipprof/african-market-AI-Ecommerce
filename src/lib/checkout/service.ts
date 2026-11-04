@@ -1,4 +1,5 @@
-import { storeScopedTransaction, lockStoreRow, getNextOrderNumber, storeScoped } from "../db";
+import { Prisma } from "@prisma/client";
+import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped } from "../db";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { sendOrderAuthorized } from "../inngest/send";
@@ -170,6 +171,155 @@ export async function createPaymentIntent(
   return { clientSecret: pi.client_secret, paymentIntentId: pi.id };
 }
 
+/**
+ * Test-only pause after placeOrder's pre-transaction order lookup misses.
+ * Production leaves this null. NODE_ENV=test is required before it runs,
+ * so a leaked hook cannot stall a live checkout.
+ */
+export const checkoutTestHooks: {
+  afterMissedOrderLookup: (() => Promise<void>) | null;
+} = { afterMissedOrderLookup: null };
+
+export interface AuthorizedOrderLine {
+  variantId: string;
+  qty: number;
+  price: number;
+  swapRule: string;
+  substituteVariantId: string | null;
+}
+
+export interface RecordAuthorizedOrderInput {
+  cartId: string;
+  contact: Contact;
+  fulfillment: Fulfillment;
+  pickupSlot: string | null;
+  notes: string | null;
+  paymentIntentId: string;
+  quote: CheckoutQuote;
+  lines: AuthorizedOrderLine[];
+}
+
+function paymentIntentTaken(err: unknown): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2002") {
+    return false;
+  }
+  const target = err.meta?.target;
+  const text = `${err.message} ${JSON.stringify(target ?? "")}`;
+  return text.includes("payment_intent") || text.includes("paymentIntentId");
+}
+
+/**
+ * Trusted persistence for an already-verified PaymentIntent. Does not call
+ * Stripe and does not look up another store's order. The caller has checked
+ * the PaymentIntent's status, destination, on_behalf_of, store metadata and
+ * amount. A cart or variant this store cannot see is rejected before any write.
+ */
+export async function recordAuthorizedOrder(
+  storeId: string,
+  input: RecordAuthorizedOrderInput,
+): Promise<{ orderId: string; created: boolean }> {
+  try {
+    return await storeScopedTransaction(storeId, async (tx) => {
+      await lockStoreRow(tx, storeId);
+
+      const existing = await tx.order.findUnique({
+        where: { paymentIntentId: input.paymentIntentId },
+      });
+      if (existing) {
+        return { orderId: existing.id, created: false };
+      }
+
+      if (input.lines.length === 0) {
+        throw new Error("Order lines are required");
+      }
+
+      await lockCart(tx, input.cartId);
+      const cart = await tx.cart.findUnique({ where: { id: input.cartId } });
+      if (!cart || cart.storeId !== storeId) {
+        throw new Error("Cart not found");
+      }
+
+      const variantIds = [
+        ...new Set(
+          input.lines.flatMap((line) =>
+            line.substituteVariantId
+              ? [line.variantId, line.substituteVariantId]
+              : [line.variantId],
+          ),
+        ),
+      ];
+      const owned = await tx.listingVariant.findMany({
+        where: { id: { in: variantIds } },
+        include: { listing: true },
+      });
+      const ownedById = new Map(owned.map((variant) => [variant.id, variant]));
+      for (const line of input.lines) {
+        const variant = ownedById.get(line.variantId);
+        if (!variant || variant.listing.storeId !== storeId) {
+          throw new Error(`Variant ${line.variantId} does not belong to this store`);
+        }
+        if (line.substituteVariantId) {
+          const substitute = ownedById.get(line.substituteVariantId);
+          if (!substitute || substitute.listing.storeId !== storeId) {
+            throw new Error(
+              `Substitute variant ${line.substituteVariantId} does not belong to this store`,
+            );
+          }
+        }
+      }
+
+      const customer = await tx.customer.create({
+        data: {
+          storeId,
+          name: input.contact.name.trim(),
+          email: input.contact.email.trim().toLowerCase(),
+          phone: input.contact.phone.trim(),
+        },
+      });
+      const nextNumber = await getNextOrderNumber(tx, storeId);
+      const order = await tx.order.create({
+        data: {
+          storeId,
+          number: nextNumber,
+          customerId: customer.id,
+          status: "AUTHORIZED",
+          fulfillment: input.fulfillment,
+          pickupSlot: input.pickupSlot !== "asap" ? input.pickupSlot : null,
+          subtotalCents: input.quote.subtotalCents,
+          tipCents: input.quote.tipCents,
+          bufferCents: input.quote.bufferCents,
+          totalAuthorizedCents: input.quote.holdCents,
+          paymentIntentId: input.paymentIntentId,
+          platformFeeCents: platformFeeCentsForCapture(input.quote.totalCents),
+          notes: input.notes || null,
+        },
+      });
+      await tx.orderLine.createMany({
+        data: input.lines.map((line) => ({
+          storeId,
+          orderId: order.id,
+          listingVariantId: line.variantId,
+          substituteVariantId: line.substituteVariantId,
+          qtyOrdered: line.qty,
+          unitPriceCents: line.price,
+          swapRule: line.swapRule,
+        })),
+      });
+      await tx.cartLine.deleteMany({ where: { cartId: input.cartId } });
+      await tx.cart.update({
+        where: { id: input.cartId },
+        data: { paymentIntentId: null },
+      });
+      return { orderId: order.id, created: true };
+    }, { timeout: 20_000, maxWait: 8_000 });
+  } catch (err) {
+    if (paymentIntentTaken(err)) {
+      throw new Error("PaymentIntent is already recorded");
+    }
+    throw err;
+  }
+}
+
 function cartLinesToOrderLines(
   cart: { lines: CartLineView[] },
 ): Array<{
@@ -231,19 +381,24 @@ export async function placeOrder(
     where: { paymentIntentId },
   });
   if (existingOrder) {
-    const cart = await getCartWithLines(storeId, cartId);
-    const serverLines = cart ? cart.lines.map((l) => ({
-      price: l.variant.price,
-      qty: l.qty,
-      maxPerOrder: l.variant.listing.maxPerOrder,
-    })) : [];
-    const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
-    // Idempotent replay — don't re-send the Inngest event
+    const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
+    // Idempotent replay — don't re-send the Inngest event or touch the cart.
     return { token: existingOrder.id, quote };
+  }
+
+  if (process.env.NODE_ENV === "test" && checkoutTestHooks.afterMissedOrderLookup) {
+    await checkoutTestHooks.afterMissedOrderLookup();
   }
 
   const cart = await getCartWithLines(storeId, cartId);
   if (!cart || !cart.lines.length) {
+    const raced = await storeScoped(storeId).order.findUnique({
+      where: { paymentIntentId },
+    });
+    if (raced) {
+      const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
+      return { token: raced.id, quote };
+    }
     throw new Error("Cart is empty");
   }
 
@@ -284,59 +439,44 @@ export async function placeOrder(
     }
   }
 
-  const orderId = await storeScopedTransaction(storeId, async (tx) => {
-    const customer = await tx.customer.create({
-      data: {
-        storeId,
-        name: contact.name.trim(),
-        email: contact.email.trim().toLowerCase(),
-        phone: contact.phone.trim(),
-      },
-    });
-
-    await lockStoreRow(tx, storeId);
-    const nextNumber = await getNextOrderNumber(tx, storeId);
-
-    const order = await tx.order.create({
-      data: {
-        storeId,
-        number: nextNumber,
-        customerId: customer.id,
-        status: "AUTHORIZED",
-        fulfillment,
-        pickupSlot: pickupSlot !== "asap" ? pickupSlot : null,
-        subtotalCents: quote.subtotalCents,
-        tipCents: quote.tipCents,
-        bufferCents: quote.bufferCents,
-        totalAuthorizedCents: quote.holdCents,
-        paymentIntentId,
-        platformFeeCents: platformFeeCentsForCapture(quote.totalCents),
-        notes: notes || null,
-      },
-    });
-
-    await tx.orderLine.createMany({
-      data: orderLineData.map((line) => ({
-        storeId,
-        orderId: order.id,
-        listingVariantId: line.variantId,
-        substituteVariantId: line.substituteVariantId,
-        qtyOrdered: line.qty,
-        unitPriceCents: line.price,
-        swapRule: line.swapRule,
-      })),
-    });
-
-    await tx.cartLine.deleteMany({ where: { cartId } });
-    await tx.cart.update({
-      where: { id: cartId },
-      data: { paymentIntentId: null },
-    });
-
-    return order.id;
+  const recorded = await recordAuthorizedOrder(storeId, {
+    cartId,
+    contact,
+    fulfillment,
+    pickupSlot,
+    notes,
+    paymentIntentId,
+    quote,
+    lines: orderLineData.map((line) => ({
+      variantId: line.variantId,
+      qty: line.qty,
+      price: line.price,
+      swapRule: line.swapRule,
+      substituteVariantId: line.substituteVariantId,
+    })),
   });
 
-  await sendOrderAuthorized(storeId, orderId);
+  if (recorded.created) {
+    await sendOrderAuthorized(storeId, recorded.orderId);
+  }
 
-  return { token: orderId, quote };
+  return { token: recorded.orderId, quote };
+}
+
+async function quoteFromCart(
+  storeId: string,
+  minimumOrderCents: number,
+  cartId: string,
+  contact: Contact,
+  fulfillment: Fulfillment,
+): Promise<CheckoutQuote> {
+  const cart = await getCartWithLines(storeId, cartId);
+  const serverLines = cart
+    ? cart.lines.map((line) => ({
+        price: line.variant.price,
+        qty: line.qty,
+        maxPerOrder: line.variant.listing.maxPerOrder,
+      }))
+    : [];
+  return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
 }
