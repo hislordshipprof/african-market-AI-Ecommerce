@@ -328,7 +328,7 @@ describe.skipIf(!connectionString)("stock_events same-store migration replay", (
       await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     }
     await client.end();
-  });
+  }, 120_000);
 
   async function use(schema: string) {
     assertSchema(schema);
@@ -744,7 +744,7 @@ describe.skipIf(!connectionString)("stock_events migration deploy recovery", () 
     } finally {
       await maintenance.end();
     }
-  });
+  }, 120_000);
 
   it("a fresh empty database applies the stock_events migration and seed", async () => {
     const name = `t235_empty_${Date.now().toString(36)}`;
