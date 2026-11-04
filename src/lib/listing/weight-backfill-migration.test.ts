@@ -27,16 +27,16 @@ describe.skipIf(!connectionString)("zero-weight variant backfill migration", () 
 
   beforeAll(async () => {
     await client.connect();
-    await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
-    await client.query(`CREATE SCHEMA ${SCHEMA}`);
-    await client.query(`SET search_path = ${SCHEMA}, public`);
     await client.query("SELECT pg_advisory_lock($1)", [REPLAY_LOCK]);
     const dirs = fs.readdirSync(MIGRATIONS).filter((d) => /^\d/.test(d)).sort();
     try {
+      await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
+      await client.query(`CREATE SCHEMA ${SCHEMA}`);
+      await client.query(`SET search_path = ${SCHEMA}, public`);
       for (const d of dirs) {
         if (d === TARGET) {
           for (const t of ["stores", "master_products", "listings", "listing_variants"])
-            await client.query(`ALTER TABLE ${t} DISABLE ROW LEVEL SECURITY`);
+            await client.query(`ALTER TABLE ${SCHEMA}.${t} DISABLE ROW LEVEL SECURITY`);
           await client.query(`insert into stores(id,slug,name,updated_at) values('s1','s1','S1',now())`);
           await client.query(`insert into master_products(id,name,weight_g,updated_at) values('m1','M1',750,now()),('m2','M2',null,now())`);
           await client.query(`insert into listings(id,store_id,master_product_id,price,stock_mode,updated_at) values('l1','s1','m1',100,'counted',now()),('l2','s1','m2',100,'counted',now()),('l3','s1',null,100,'counted',now())`);
