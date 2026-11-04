@@ -138,6 +138,10 @@ describe.skipIf(!hasDb)("Cart service", () => {
         where: { listing: { storeId } },
       }),
       rawPrisma.listing.deleteMany({ where: { storeId } }),
+      rawPrisma.listingVariant.deleteMany({
+        where: { listing: { storeId: storeBId } },
+      }),
+      rawPrisma.listing.deleteMany({ where: { storeId: storeBId } }),
     ]);
     await rawPrisma.user.deleteMany({ where: { email: { in: [buyerEmail, otherEmail] } } });
     await rawPrisma.store.deleteMany({ where: { slug: { in: [storeSlug, storeBSlug] } } });
@@ -785,6 +789,89 @@ describe.skipIf(!hasDb)("Cart service", () => {
       const result = await checkMinimumOrder(storeId, cartId);
       expect(result.allowed).toBe(true);
       expect(result.currentCents).toBe(3000);
+    });
+  });
+
+  describe("absolute quantity and cross-store lines", () => {
+    async function lineOnStoreB() {
+      const listing = await storeScoped(storeBId).listing.create({
+        data: {
+          storeId: storeBId,
+          customName: "Store B Pepper",
+          price: 400,
+          stockMode: "unlimited",
+          frozen: false,
+          perishable: false,
+        },
+      });
+      const variant = await storeScoped(storeBId).listingVariant.create({
+        data: { listingId: listing.id, label: "Each", price: 400, weightG: 100 },
+      });
+      const cartB = await getOrCreateCart(storeBId, null, null);
+      await addLine(storeBId, cartB, variant.id, 2);
+      const cart = await getCartWithLines(storeBId, cartB);
+      return { cartB, lineId: cart!.lines[0].id, listingId: listing.id };
+    }
+
+    it("sequential absolute updates keep the last quantity", async () => {
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, variantId, 1);
+      const cart = await getCartWithLines(storeId, cartId);
+      const lineId = cart!.lines[0].id;
+      await updateLineQty(storeId, cartId, lineId, 2);
+      await updateLineQty(storeId, cartId, lineId, 4);
+      const row = await storeScoped(storeId).cartLine.findUniqueOrThrow({ where: { id: lineId } });
+      expect(row.qty).toBe(4);
+    });
+
+    it("a rejected update above maxPerOrder leaves the stored quantity", async () => {
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, variantId, 2);
+      const cart = await getCartWithLines(storeId, cartId);
+      const lineId = cart!.lines[0].id;
+      await expect(updateLineQty(storeId, cartId, lineId, 10)).rejects.toMatchObject({
+        code: "MAX_PER_ORDER",
+      });
+      const row = await storeScoped(storeId).cartLine.findUniqueOrThrow({ where: { id: lineId } });
+      expect(row.qty).toBe(2);
+    });
+
+    it("updateLineQty with another store's id cannot change or reveal its line", async () => {
+      const { cartB, lineId } = await lineOnStoreB();
+      await expect(updateLineQty(storeId, cartB, lineId, 9)).rejects.toMatchObject({
+        code: "CART_NOT_FOUND",
+      });
+      const row = await storeScoped(storeBId).cartLine.findUniqueOrThrow({ where: { id: lineId } });
+      expect(row.qty).toBe(2);
+      const revealed = await storeScoped(storeId).cartLine.findUnique({ where: { id: lineId } });
+      expect(revealed).toBeNull();
+    });
+
+    it("removeLine with another store's id leaves the line", async () => {
+      const { cartB, lineId } = await lineOnStoreB();
+      await expect(removeLine(storeId, cartB, lineId)).rejects.toMatchObject({
+        code: "CART_NOT_FOUND",
+      });
+      const row = await storeScoped(storeBId).cartLine.findUniqueOrThrow({ where: { id: lineId } });
+      expect(row.qty).toBe(2);
+    });
+
+    it("foreign line update rejects and foreign line remove is a no-op in an owned cart", async () => {
+      const { lineId } = await lineOnStoreB();
+      const cartA = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartA, variantId, 1);
+      const owned = await getCartWithLines(storeId, cartA);
+      await expect(updateLineQty(storeId, cartA, lineId, 9)).rejects.toMatchObject({
+        code: "CART_NOT_FOUND",
+      });
+      await removeLine(storeId, cartA, lineId);
+      const foreign = await storeScoped(storeBId).cartLine.findUniqueOrThrow({ where: { id: lineId } });
+      expect(foreign.qty).toBe(2);
+      await updateLineQty(storeId, cartA, owned!.lines[0].id, 3);
+      const row = await storeScoped(storeId).cartLine.findUniqueOrThrow({
+        where: { id: owned!.lines[0].id },
+      });
+      expect(row.qty).toBe(3);
     });
   });
 });

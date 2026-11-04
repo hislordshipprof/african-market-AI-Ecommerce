@@ -19,6 +19,71 @@ async function withStore<T>(
   }
 }
 
+export type ListingStock = {
+  maxPerOrder: number | null;
+  stockMode: string;
+  status: string | null;
+  qty: number | null;
+};
+
+export async function storeIdentity(storeSlug: string) {
+  const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+  try {
+    const store = await prisma.store.findUniqueOrThrow({
+      where: { slug: storeSlug },
+      select: { id: true, slug: true },
+    });
+    return store;
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+export async function readListingStock(storeSlug: string, listingId: string): Promise<ListingStock> {
+  return withStore(storeSlug, async (tx, storeId) => {
+    const listing = await tx.listing.findFirstOrThrow({
+      where: { id: listingId, storeId },
+      select: { maxPerOrder: true, stockMode: true, status: true, qty: true },
+    });
+    return listing;
+  });
+}
+
+export async function writeListingStock(
+  storeSlug: string,
+  listingId: string,
+  stock: ListingStock,
+): Promise<void> {
+  await withStore(storeSlug, async (tx, storeId) => {
+    const listing = await tx.listing.findFirstOrThrow({
+      where: { id: listingId, storeId },
+      select: { id: true },
+    });
+    await tx.listing.update({
+      where: { id: listing.id },
+      data: stock,
+    });
+  });
+}
+
+export async function readCartLines(storeSlug: string, cartId: string) {
+  return withStore(storeSlug, async (tx, storeId) => {
+    const lines = await tx.cartLine.findMany({
+      where: { cartId, storeId },
+      include: { variant: { select: { price: true, label: true, listingId: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    return lines.map((line) => ({
+      id: line.id,
+      variantId: line.variantId,
+      listingId: line.variant.listingId,
+      qty: line.qty,
+      price: line.variant.price,
+      label: line.variant.label,
+    }));
+  });
+}
+
 export async function findListingVariants(storeSlug: string, listingName: string) {
   return withStore(storeSlug, async (tx, storeId) => {
     const listing = await tx.listing.findFirst({
