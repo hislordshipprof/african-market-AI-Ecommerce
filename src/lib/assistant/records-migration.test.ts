@@ -67,12 +67,32 @@ describe.skipIf(!connectionString)("assistant records migration", () => {
     }
   });
 
+  it("creates the platform spend ledger on an empty schema without RLS or a delete grant", async () => {
+    const sql = fs.readFileSync(
+      path.join(MIGRATIONS, "20261104230000_assistant_spend_days", "migration.sql"),
+      "utf8",
+    );
+    const upper = sql.toUpperCase();
+    expect(upper).not.toContain("GRANT DELETE");
+    expect(upper).not.toContain("DELETE FROM");
+    const table = await client.query<{ relrowsecurity: boolean }>(
+      `SELECT relrowsecurity
+       FROM pg_class
+       WHERE relname = 'assistant_spend_days'
+         AND relnamespace = $1::regnamespace`,
+      [SCHEMA],
+    );
+    expect(table.rows).toHaveLength(1);
+    expect(table.rows[0]?.relrowsecurity).toBe(false);
+  });
+
   it("adds cart_lines.source with a manual default and no backfill", async () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS, "20261104220000_cart_line_source", "migration.sql"),
       "utf8",
     );
-    expect(sql.toLowerCase()).not.toContain("update ");
+    const statements = sql.replace(/--[^\n]*/g, "").toLowerCase();
+    expect(statements).not.toContain("update ");
     const column = await client.query<{ column_default: string; is_nullable: string }>(
       `SELECT column_default, is_nullable
        FROM information_schema.columns
