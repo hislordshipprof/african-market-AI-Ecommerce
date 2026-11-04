@@ -122,6 +122,16 @@ describe("runtimeDatabaseUrl", () => {
     ).toThrow(/APP_RUNTIME_PASSWORD is required/);
   });
 
+  it("production with a database URL and no runtime password fails closed when NEXT_PHASE is unset", () => {
+    expect(() =>
+      runtimeDatabaseUrl({
+        DATABASE_URL: BASE,
+        NODE_ENV: "production",
+        VERCEL: "1",
+      }),
+    ).toThrow(/APP_RUNTIME_PASSWORD is required in production/);
+  });
+
   it("throws in NODE_ENV=production even when VERCEL_ENV is unset", () => {
     expect(() =>
       runtimeDatabaseUrl({ DATABASE_URL: BASE, NODE_ENV: "production" }),
