@@ -4,10 +4,18 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@ai-sdk/anthropic@4.0.96':
+    hash: 2a2abeeb4cb82183fa1d0ec1bd0b79e66e2492f339e812ab01f17e9de08378c1
+    path: patches/@ai-sdk__anthropic@4.0.96.patch
+
 importers:
 
   .:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: 4.0.96
+        version: 4.0.96(patch_hash=2a2abeeb4cb82183fa1d0ec1bd0b79e66e2492f339e812ab01f17e9de08378c1)(zod@4.6.7)
       '@aws-sdk/client-s3':
         specifier: ^3.1161.0
         version: 3.1161.0
@@ -35,6 +43,9 @@ importers:
       '@stripe/stripe-js':
         specifier: ^10.2.0
         version: 10.2.0
+      ai:
+        specifier: 7.0.162
+        version: 7.0.162(zod@4.6.7)
       better-auth:
         specifier: 1.7.14
         version: 1.7.14(@opentelemetry/api@1.10.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@22.20.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3))(typescript@5.9.3))(mysql2@3.24.4(@types/node@22.20.5))(next@16.4.3(@babel/core@7.29.7)(@opentelemetry/api@1.10.0)(@playwright/test@1.64.1)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(pg@8.23.1)(prisma@7.10.1(@types/node@22.20.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))
@@ -71,6 +82,9 @@ importers:
       react-dom:
         specifier: ^19.1.0
         version: 19.3.1(react@19.3.1)
+      server-only:
+        specifier: 0.0.1
+        version: 0.0.1
       shadcn:
         specifier: ^4.23.0
         version: 4.23.0
@@ -86,6 +100,9 @@ importers:
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.3.1
@@ -155,6 +172,28 @@ importers:
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
 
 packages:
+
+  '@ai-sdk/anthropic@4.0.96':
+    resolution: {integrity: sha512-eq6rKebpYwvOmFkvhbgrQ7J+TtPsGk3KoEDr+Hu0R1EANm562CAly4s0zaCAQW7Xzw1261oWhOnU8zYLPRxzhA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/gateway@4.0.135':
+    resolution: {integrity: sha512-gnMpZP42WIhy24fpnbbtV7SBqEhYY8ZSMsfgoNRh5r41D1HwnJTm1k7d4uYSIpiaEb5J8IPTHVSzwgWmGoSFEA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@5.0.74':
+    resolution: {integrity: sha512-42R/bzs520oy3PMj8FI1KGegjLEjaUsNcaEltb6yxN0KnmhihWvlgMb19pEF8CKKqv6Bq6+qMVji8mtyrMubSQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider@4.0.35':
+    resolution: {integrity: sha512-yBz6fmLS8MSCIzy7NiHEUAq56ZLD4ZA1GR6bpXBxgbwUacP1La7LuwAr/xy9jSzthem4F8Xu2OrhvU/JrE9fYA==}
+    engines: {node: '>=22'}
 
   '@alloc/quick-lru@5.3.0':
     resolution: {integrity: sha512-U4+70Pc5ZS9osnCBCE5Jha/ciHM+Yp+CNMNC/7HvYbNRk1Ldd+f7qO65W5qfhu/TCv+/ozljlXXe9Nj8419DMA==}
@@ -2402,6 +2441,10 @@ packages:
     peerDependencies:
       react: '>= 16.8.0'
 
+  '@vercel/oidc@3.2.0':
+    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
+    engines: {node: '>= 20'}
+
   '@visx/curve@4.0.1-alpha.0':
     resolution: {integrity: sha512-jRu61Uz274pV1zyioXmboyrLutYbnKsgjj4njSGCnhdXj5GkZvZbg+ThDb6oOzoAnJOBRLz4rzPlWvNJOzuVMg==}
 
@@ -2466,6 +2509,9 @@ packages:
   '@vitest/utils@3.2.7':
     resolution: {integrity: sha512-x6BDOd7dyo3PFLY3I9/HJ25X/6OurhGXk2/B9gOZNPF7XDVjeBK4k01lQE5uvDpbuheErh91qYuE1E2OEjK3Rw==}
 
+  '@workflow/serde@4.1.0':
+    resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
+
   acorn-import-attributes@1.9.5:
     resolution: {integrity: sha512-n02Vykv5uA3eHGM/Z2dQrcD56kL8TyDb2p1+0P83PClMnC/nc+anbQRhIOWnSq4Ke/KvDPrY3C9hDtC/A3eHnQ==}
     peerDependencies:
@@ -2484,6 +2530,12 @@ packages:
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
+
+  ai@7.0.162:
+    resolution: {integrity: sha512-NPzL6/GmjjPwhzM1kGP9O60TfJ3uXV4Z4A/ztljxcJFAmRAFAjgk5mAHaikk3sE8NQo4NbRCiS+DgHinE2d0sQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   ajv-formats@2.1.1:
     resolution: {integrity: sha512-Wx0Kx52hxE7C18hkMEggYlEifqWZtYaRgouJor+WMdPnQyEK13vgEWyVNup7SoeeoLMsr4kf5h6dOW11I15MUA==}
@@ -3282,6 +3334,10 @@ packages:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
 
+  eventsource-parser@3.1.1:
+    resolution: {integrity: sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ==}
+    engines: {node: '>=18.0.0'}
+
   execa@5.1.1:
     resolution: {integrity: sha512-8uSpZZocAZRBAPIEINJj3Lo9HyGitllczc27Eh5YYojjMFMn8yHMDMaUHE2Jqfq05D/wucwI4JGURyXt1vchyg==}
     engines: {node: '>=10'}
@@ -3921,6 +3977,9 @@ packages:
 
   json-schema-typed@7.0.3:
     resolution: {integrity: sha512-7DE8mpG+/fVw+dTpjbxnx47TaMnDfOI1jwft9g1VybltZCduyRQPJPvc+zzKY9WPHxhPWczyFuYa6I8Mw4iU5A==}
+
+  json-schema@0.4.0:
+    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
 
   json-stable-stringify-without-jsonify@1.0.1:
     resolution: {integrity: sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==}
@@ -4714,6 +4773,9 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
+  server-only@0.0.1:
+    resolution: {integrity: sha512-qepMx2JxAa5jjfzxG79yPPq+8BuFToHd1hm7kI+Z4zAq1ftQiP7HcxMhDDItrbtwVeLg/cY2JnKnrcFkmiswNA==}
+
   set-cookie-parser@3.2.2:
     resolution: {integrity: sha512-df017qMeYuXo4emL09nlyMpi2i2MtEIKS/6jtXH3vmjFgIRsOi852/5RmhJ4EkvN3ZF8jXadM/EkTPXgc8yPIw==}
 
@@ -5361,6 +5423,32 @@ packages:
         optional: true
 
 snapshots:
+
+  '@ai-sdk/anthropic@4.0.96(patch_hash=2a2abeeb4cb82183fa1d0ec1bd0b79e66e2492f339e812ab01f17e9de08378c1)(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.35
+      '@ai-sdk/provider-utils': 5.0.74(zod@4.6.7)
+      zod: 4.6.7
+
+  '@ai-sdk/gateway@4.0.135(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.35
+      '@ai-sdk/provider-utils': 5.0.74(zod@4.6.7)
+      '@vercel/oidc': 3.2.0
+      zod: 4.6.7
+
+  '@ai-sdk/provider-utils@5.0.74(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.35
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.1
+      undici: 7.30.1
+      zod: 4.6.7
+
+  '@ai-sdk/provider@4.0.35':
+    dependencies:
+      json-schema: 0.4.0
 
   '@alloc/quick-lru@5.3.0': {}
 
@@ -7755,6 +7843,8 @@ snapshots:
       '@use-gesture/core': 10.3.1
       react: 19.3.1
 
+  '@vercel/oidc@3.2.0': {}
+
   '@visx/curve@4.0.1-alpha.0':
     dependencies:
       '@visx/vendor': 4.0.0-alpha.0
@@ -7874,6 +7964,8 @@ snapshots:
       loupe: 3.2.1
       tinyrainbow: 2.0.0
 
+  '@workflow/serde@4.1.0': {}
+
   acorn-import-attributes@1.9.5(acorn@8.19.0):
     dependencies:
       acorn: 8.19.0
@@ -7885,6 +7977,13 @@ snapshots:
   acorn@8.19.0: {}
 
   agent-base@7.1.4: {}
+
+  ai@7.0.162(zod@4.6.7):
+    dependencies:
+      '@ai-sdk/gateway': 4.0.135(zod@4.6.7)
+      '@ai-sdk/provider': 4.0.35
+      '@ai-sdk/provider-utils': 5.0.74(zod@4.6.7)
+      zod: 4.6.7
 
   ajv-formats@2.1.1(ajv@8.20.0):
     optionalDependencies:
@@ -8803,6 +8902,8 @@ snapshots:
 
   esutils@2.0.3: {}
 
+  eventsource-parser@3.1.1: {}
+
   execa@5.1.1:
     dependencies:
       cross-spawn: 7.0.6
@@ -9419,6 +9520,8 @@ snapshots:
   json-schema-traverse@1.0.0: {}
 
   json-schema-typed@7.0.3: {}
+
+  json-schema@0.4.0: {}
 
   json-stable-stringify-without-jsonify@1.0.1: {}
 
@@ -10197,6 +10300,8 @@ snapshots:
   semver@6.3.1: {}
 
   semver@7.8.5: {}
+
+  server-only@0.0.1: {}
 
   set-cookie-parser@3.2.2: {}
 

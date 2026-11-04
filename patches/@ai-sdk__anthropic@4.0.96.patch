@@ -1,0 +1,63 @@
+diff --git a/dist/index.js b/dist/index.js
+index 52290d72d5d7f5d80dbd35cde7ec42174246eb20..d33f86e666f70ce54b1fce53ef0c1ce11691bf9d 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -7453,8 +7453,23 @@ function createAnthropic(options = {}) {
+ }
+ /**
+ * Default Anthropic provider instance.
++* Built on first use so importing createAnthropic does not read ANTHROPIC_BASE_URL.
+ */
+-const anthropic = createAnthropic();
++let defaultAnthropic;
++function loadDefaultAnthropic() {
++	if (defaultAnthropic === void 0) defaultAnthropic = createAnthropic();
++	return defaultAnthropic;
++}
++const anthropic = new Proxy(function() {}, {
++	apply(_target, thisArg, args) {
++		return Reflect.apply(loadDefaultAnthropic(), thisArg, args);
++	},
++	get(_target, prop) {
++		const provider = loadDefaultAnthropic();
++		const value = Reflect.get(provider, prop, provider);
++		return typeof value === "function" ? value.bind(provider) : value;
++	}
++});
+ //#endregion
+ //#region src/forward-anthropic-container-id-from-last-step.ts
+ /**
+diff --git a/src/anthropic-provider.ts b/src/anthropic-provider.ts
+index 75e9ab7515fcf75291971104632bc1ad5ff219e7..9b2b31846cac049f9814a8fe3cfe2e415f77337f 100644
+--- a/src/anthropic-provider.ts
++++ b/src/anthropic-provider.ts
+@@ -269,5 +269,28 @@ export function createAnthropic(
+ 
+ /**
+  * Default Anthropic provider instance.
++ * Built on first use so importing `createAnthropic` does not read
++ * `ANTHROPIC_BASE_URL`. An empty value throws inside `createAnthropic()`.
+  */
+-export const anthropic = createAnthropic();
++let defaultAnthropic: AnthropicProvider | undefined;
++
++function loadDefaultAnthropic(): AnthropicProvider {
++  if (defaultAnthropic === undefined) {
++    defaultAnthropic = createAnthropic();
++  }
++  return defaultAnthropic;
++}
++
++export const anthropic: AnthropicProvider = new Proxy(
++  function () {} as unknown as AnthropicProvider,
++  {
++    apply(_target, thisArg, args) {
++      return Reflect.apply(loadDefaultAnthropic(), thisArg, args as []);
++    },
++    get(_target, prop) {
++      const provider = loadDefaultAnthropic();
++      const value = Reflect.get(provider, prop, provider);
++      return typeof value === 'function' ? value.bind(provider) : value;
++    },
++  },
++);
