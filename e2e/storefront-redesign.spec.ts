@@ -99,9 +99,16 @@ test.describe("Storefront redesign interactions", () => {
     await page.getByTestId("filter-frozen").click();
     await expect(page).toHaveURL(/frozen=1/);
     const cards = page.getByTestId("listing-card");
-    await expect(cards.first()).toBeVisible();
-    for (const card of await cards.all())
-      await expect(card.locator(".sf-photo-tag")).toHaveText("Frozen");
+    await expect
+      .poll(async () => {
+        const countText = await page.locator(".sf-result-count").innerText();
+        const shown = Number(countText.match(/^(\d+)/)?.[1]);
+        const n = await cards.count();
+        if (!shown || n !== shown) return false;
+        const tags = await cards.locator(".sf-photo-tag").allTextContents();
+        return tags.length === n && tags.every((tag) => tag === "Frozen");
+      })
+      .toBe(true);
     const label = await cards
       .first()
       .locator(".sf-product-meta > span")
@@ -113,9 +120,16 @@ test.describe("Storefront redesign interactions", () => {
     await expect(
       page.getByTestId("filter-pack-option").filter({ hasText: label }).first(),
     ).toHaveAttribute("aria-current", "page");
-    await expect(cards.first()).toBeVisible();
-    for (const card of await cards.all())
-      await expect(card.locator(".sf-product-meta")).toContainText(label);
+    await expect
+      .poll(async () => {
+        const countText = await page.locator(".sf-result-count").innerText();
+        const shown = Number(countText.match(/^(\d+)/)?.[1]);
+        const n = await cards.count();
+        if (!shown || n !== shown) return false;
+        const metas = await cards.locator(".sf-product-meta").allTextContents();
+        return metas.length === n && metas.every((meta) => meta.includes(label));
+      })
+      .toBe(true);
   });
 
   test("instant synonym search opens a scoped product", async ({ page }) => {
