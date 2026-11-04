@@ -7,7 +7,9 @@ import { symmetricEncrypt } from "better-auth/crypto";
 import { resolveDirectUrl } from "../src/lib/env";
 import { assertNotProduction } from "../src/lib/seed-guard";
 import { seedDemoCatalog } from "./seed-demo-catalog";
-import { seedMasterCatalog } from "./seed-master-catalog";
+import { decideCliCatalogPrune, seedMasterCatalog, type SeedMasterCatalogDeps } from "./seed-master-catalog";
+import { readCatalogImageReferences } from "../src/lib/catalog-prune-reader";
+import { CatalogPruneRefusal, type DatabaseIdentity } from "../src/lib/catalog-prune";
 import { revalidateSeededStores } from "../scripts/revalidate-storefront";
 
 const adapter = new PrismaPg(resolveDirectUrl());
@@ -771,14 +773,39 @@ async function seedDemoOrders() {
   console.log(`Seeded ${demoOrders.length} demo orders for mama-ngozi`);
 }
 
-async function main() {
+async function observeSeedConnection(): Promise<DatabaseIdentity> {
+  const rows = await prisma.$queryRaw<Array<{ database: string; host: string; port: string }>>`
+    SELECT current_database() AS database,
+           COALESCE(host(inet_server_addr()), '127.0.0.1') AS host,
+           inet_server_port()::text AS port
+  `;
+  const row = rows[0];
+  if (!row?.database || !row.host || !row.port) {
+    throw new CatalogPruneRefusal("Refusing catalog prune: the effective database connection was not observed");
+  }
+  return { host: row.host, port: String(row.port), database: row.database };
+}
+
+export async function runSeed(deps: SeedMasterCatalogDeps = {}) {
+  const execution = deps.execution ?? { kind: "cli" as const };
+  let priorReferences: string[] = [];
+  if (execution.kind === "cli") {
+    const decision = await decideCliCatalogPrune(process.env, () => observeSeedConnection());
+    if ("refused" in decision) throw new CatalogPruneRefusal(decision.refused);
+    if (decision.mode !== "off") {
+      priorReferences = (await readCatalogImageReferences()).references;
+    }
+  } else if (execution.mode !== "off") {
+    priorReferences = (await readCatalogImageReferences()).references;
+  }
+
   await seedDemoStores();
   await seedCategoryMetadata();
   await seedDemoCatalog(prisma);
   await seedStoreBanners();
   await seedStoreCollections();
 
-  await seedMasterCatalog(prisma);
+  await seedMasterCatalog(prisma, { ...deps, execution, priorReferences });
 
   if (process.env.SEED_TEST_ADMIN === "1") {
     await seedTestAdmin();
@@ -788,9 +815,13 @@ async function main() {
   await revalidateSeededStores(await prisma.store.findMany({ where: { slug: { in: ["mama-ngozi", "tante-marie"] } }, select: { id: true, slug: true } }));
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+export { prisma as seedPrisma };
+
+if (process.env.VITEST !== "true") {
+  runSeed()
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    })
+    .finally(() => prisma.$disconnect());
+}

@@ -35,7 +35,7 @@ if [ "$MODE" = "build" ]; then
   fi
 
   # Preflight 3: required keys present in .env.local (values never printed).
-  need=$(awk -v n="$N" '$1==n {for (i=2;i<=NF;i++) print $i}' scripts/ticket-env.txt)
+  need=$(node "$ROOT/scripts/lane-env.mjs" keys "$N" "$ROOT/scripts/ticket-env.txt")
   missing=()
   for k in $need; do grep -Eq "^$k=.+" .env.local 2>/dev/null || missing+=("$k"); done
   if [ ${#missing[@]} -gt 0 ] && [ "${NO_KEYS:-}" != "1" ]; then
@@ -50,7 +50,9 @@ BRANCH="ticket-$N-$slug"
 WT="${WT:-$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N}"
 git fetch -q origin main
 [ -d "$WT" ] || git worktree add -q -B "$BRANCH" "$WT" origin/main
-cp .env.local "$WT/.env.local"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lane-env.sh"
+prepare_lane_env "$N" "$ROOT/.env.local" "$WT/.env.local" "$ROOT/scripts/ticket-env.txt"
 cd "$WT"
 
 # Database: each lane gets its own fresh database on the private local Postgres (scripts/local-pg.sh), so builds
@@ -64,7 +66,7 @@ DB_RULE="This lane's database is a private local Postgres database (lane_t$N on 
 
 # Risk: money and auth tickets (Stripe or Better Auth keys in ticket-env.txt, or RISK=1) always build at full
 # tier and also get the second independent review (owner decision 2026-11-03).
-need_keys=$(awk -v n="$N" '$1==n {for (i=2;i<=NF;i++) print $i}' "$ROOT/scripts/ticket-env.txt")
+need_keys=$(node "$ROOT/scripts/lane-env.mjs" keys "$N" "$ROOT/scripts/ticket-env.txt")
 if [ -z "${RISK:-}" ]; then
   if printf '%s\n' "$need_keys" | grep -qE 'STRIPE|BETTER_AUTH'; then RISK=1; else RISK=0; fi
 fi
@@ -139,7 +141,8 @@ save_session
 if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
   cd "$ROOT"
   for round in 1 2 3; do
-    verdict=$(E2E_PORT="$LANE_PORT" bash scripts/review-ticket.sh "$N" | tail -1)
+    REVIEW_TICKET="${REVIEW_TICKET:-$ROOT/scripts/review-ticket.sh}"
+    verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
     echo "Independent review $round: $verdict"
     [ "$verdict" = "VERDICT: PASS" ] && break
     [ "$round" = "3" ] && { echo "Still blocking after 2 fix rounds; the coordinator decides. See .builder/review-$N.md"; break; }

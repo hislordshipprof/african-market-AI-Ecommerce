@@ -1,3 +1,5 @@
+import { editWeightField } from "./needs-weight";
+
 /** One variant row from the listing form. `key` is a React key and is never sent. */
 export interface VariantFormSnapshot {
   key?: string;
@@ -7,6 +9,8 @@ export interface VariantFormSnapshot {
   /** Dollars, as typed. */
   price: string;
   weightG: string;
+  /** True only for a row whose stored weight is still the import fallback. */
+  weightPlaceholder?: boolean;
   sku?: string | null;
   barcode?: string | null;
 }
@@ -17,15 +21,18 @@ export function loadedVariantRow(variant: {
   label: string;
   price: number;
   weightG: number;
+  weightPlaceholder: boolean;
   sku: string | null;
   barcode: string | null;
 }): VariantFormSnapshot & { key: string } {
+  const weight = editWeightField(variant);
   return {
     key: variant.id,
     id: variant.id,
     label: variant.label,
     price: (variant.price / 100).toFixed(2),
-    weightG: String(variant.weightG),
+    weightG: weight.value,
+    weightPlaceholder: variant.weightPlaceholder,
     sku: variant.sku,
     barcode: variant.barcode,
   };

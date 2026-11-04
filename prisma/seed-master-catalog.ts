@@ -1,11 +1,29 @@
 import { PrismaClient } from "@prisma/client";
+import type { Client } from "pg";
+import { lookup } from "node:dns/promises";
 import { parse } from "csv-parse/sync";
 import * as fs from "fs";
 import * as path from "path";
-import { S3Client, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { S3Client } from "@aws-sdk/client-s3";
 import { catalogImageUrl } from "../src/lib/r2";
 import { downloadAndUploadImage } from "../src/lib/catalog-image";
 import { upsertMasterProduct, type CsvRow } from "./master-catalog-upsert";
+import {
+  catalogPruneMode,
+  CatalogPruneRefusal,
+  databaseIdentityFromUrl,
+  planCatalogPrune,
+  type PruneDecision,
+} from "../src/lib/catalog-prune";
+import { CATALOG_PRUNE_OWNERSHIP } from "../src/lib/catalog-prune-ownership";
+import { deleteCatalogCandidates, listCatalogObjects } from "../src/lib/catalog-prune-execute";
+import type { R2SendClient } from "../src/lib/catalog-prune-fake-r2";
+import {
+  assertUpsertsVisible,
+  readCatalogImageReferences,
+} from "../src/lib/catalog-prune-reader";
+import { resolveDirectUrl } from "../src/lib/env";
+import type { DatabaseIdentity } from "../src/lib/catalog-prune";
 
 const CATEGORY_SLUG_TO_ID: Record<string, string> = {
   tubers: "cat_tubers",
@@ -28,6 +46,45 @@ const CATEGORY_SLUG_TO_ID: Record<string, string> = {
 
 const MAX_RETRIES = 5;
 
+export type CatalogPruneExecution =
+  | { kind: "cli" }
+  | { kind: "harness"; mode: "off" | "dry-run" | "delete" };
+
+export type WriterGate = { exclusive(): boolean };
+
+/** Production gate. approveProduct and external restores do not join it. */
+export const uncoordinatedCatalogWriters: WriterGate = { exclusive: () => false };
+
+export type SeedMasterCatalogDeps = {
+  r2?: R2SendClient;
+  csvPath?: string;
+  now?: () => Date;
+  log?: (line: string) => void;
+  /**
+   * Test-only. The CLI never sets `harness`, and no environment variable can.
+   * Harness mode skips the environment guard so a lane database can exercise
+   * the real reader and a fake R2 client. It does not weaken the CLI guard.
+   */
+  execution?: CatalogPruneExecution;
+  priorReferences?: string[];
+  writerGate?: WriterGate;
+  afterReferenceSnapshot?: (client: Client) => Promise<void>;
+  /**
+   * Test seam for a successful object write that then fails to commit.
+   * The CLI does not set it. When set, it runs instead of the network uploader.
+   */
+  uploadImage?: (
+    sourceUrl: string,
+    productId: string,
+  ) => Promise<{ ok: true; url: string; bytes: number } | { ok: false; reason: string }>;
+};
+
+function hasAllR2Keys(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(
+    env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET,
+  );
+}
+
 function getS3Client() {
   return new S3Client({
     region: "auto",
@@ -39,47 +96,104 @@ function getS3Client() {
   });
 }
 
-async function listR2Objects(prefix: string): Promise<string[]> {
-  const client = getS3Client();
-  const keys: string[] = [];
-  let token: string | undefined;
-  do {
-    const resp = await client.send(
-      new ListObjectsV2Command({
-        Bucket: process.env.R2_BUCKET!,
-        Prefix: prefix,
-        ContinuationToken: token,
-      }),
-    );
-    for (const obj of resp.Contents ?? []) {
-      if (obj.Key) keys.push(obj.Key);
+async function resolveDatabaseHost(host: string): Promise<readonly string[]> {
+  try {
+    const records = await lookup(host, { all: true, verbatim: true });
+    return records.map((record) => record.address);
+  } catch {
+    return [];
+  }
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\/\d{1,3}$/, "");
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+export async function decideCliCatalogPrune(
+  env: NodeJS.ProcessEnv = process.env,
+  observe?: () => Promise<DatabaseIdentity>,
+  lookupHost: (host: string) => Promise<readonly string[]> = resolveDatabaseHost,
+): Promise<PruneDecision> {
+  const raw = env.SEED_PRUNE_R2;
+  if (raw === undefined || raw.trim() === "") return { mode: "off" };
+  let databaseUrl: string | null = null;
+  try {
+    databaseUrl = resolveDirectUrl();
+  } catch {
+    databaseUrl = null;
+  }
+  const preliminary = catalogPruneMode({
+    env,
+    databaseUrl,
+    ownership: CATALOG_PRUNE_OWNERSHIP,
+    writersCoordinated: false,
+  });
+  if ("refused" in preliminary && !preliminary.refused.includes("was not observed")) return preliminary;
+  if (!observe) {
+    return { refused: "Refusing catalog prune: the effective database connection was not observed" };
+  }
+  try {
+    const observed = await observe();
+    const resolvedHosts: Record<string, readonly string[]> = {};
+    const fromUrl = databaseUrl ? databaseIdentityFromUrl(databaseUrl) : null;
+    if (fromUrl && !isLoopbackHost(fromUrl.host)) {
+      resolvedHosts[fromUrl.host] = await lookupHost(fromUrl.host);
     }
-    token = resp.NextContinuationToken;
-  } while (token);
-  return keys;
+    return catalogPruneMode({
+      env,
+      databaseUrl,
+      observed,
+      ownership: CATALOG_PRUNE_OWNERSHIP,
+      writersCoordinated: false,
+      resolvedHosts,
+    });
+  } catch (error) {
+    if (error instanceof CatalogPruneRefusal) return { refused: error.message };
+    return { refused: "Refusing catalog prune: the effective database connection was not observed" };
+  }
 }
 
-async function deleteR2Objects(keys: string[]): Promise<void> {
-  if (keys.length === 0) return;
-  const client = getS3Client();
-  for (let i = 0; i < keys.length; i += 1000) {
-    const batch = keys.slice(i, i + 1000);
-    await client.send(
-      new DeleteObjectsCommand({
-        Bucket: process.env.R2_BUCKET!,
-        Delete: { Objects: batch.map((Key) => ({ Key })) },
-      }),
+async function observePrisma(prisma: PrismaClient): Promise<DatabaseIdentity> {
+  const rows = await prisma.$queryRaw<Array<{ database: string; host: string; port: string }>>`
+    SELECT current_database() AS database,
+           COALESCE(host(inet_server_addr()), '127.0.0.1') AS host,
+           inet_server_port()::text AS port
+  `;
+  const row = rows[0];
+  if (!row?.database || !row.host || !row.port) {
+    throw new CatalogPruneRefusal(
+      "Refusing catalog prune: the effective database connection was not observed",
     );
   }
+  return { host: row.host, port: String(row.port), database: row.database };
 }
 
-export async function seedMasterCatalog(prisma: PrismaClient) {
-  if (process.env.VERCEL_ENV === "production") {
-    console.log("Skipping master catalog seed in production");
-    return;
+export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCatalogDeps = {}) {
+  const startedAt = (deps.now ?? (() => new Date()))();
+  const log = deps.log ?? ((line: string) => console.log(line));
+  const execution = deps.execution ?? { kind: "cli" as const };
+
+  let mode: "off" | "dry-run" | "delete";
+  if (execution.kind === "harness") {
+    mode = execution.mode;
+  } else {
+    const decision = await decideCliCatalogPrune(process.env, () => observePrisma(prisma));
+    if ("refused" in decision) throw new CatalogPruneRefusal(decision.refused);
+    if (decision.mode === "off" && process.env.VERCEL_ENV === "production") {
+      log("Skipping master catalog seed in production");
+      return;
+    }
+    mode = decision.mode;
   }
 
-  const csvPath = path.join(__dirname, "..", "research", "catalog", "master-catalog.csv");
+  if (mode === "off") {
+    log(
+      "Catalog prune skipped (SEED_PRUNE_R2 is unset). Request a dry-run with SEED_PRUNE_R2=dry-run, or a delete with SEED_PRUNE_R2 set to the R2_BUCKET value.",
+    );
+  }
+
+  const csvPath = deps.csvPath ?? path.join(__dirname, "..", "research", "catalog", "master-catalog.csv");
   const csvContent = fs.readFileSync(csvPath, "utf-8");
   const rows: CsvRow[] = parse(csvContent, {
     columns: true,
@@ -87,37 +201,46 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
     relax_column_count: true,
   });
 
-  const hasR2 = !!(
-    process.env.R2_ACCOUNT_ID &&
-    process.env.R2_ACCESS_KEY_ID &&
-    process.env.R2_SECRET_ACCESS_KEY &&
-    process.env.R2_BUCKET
-  );
+  const useRealR2 = execution.kind !== "harness" && !deps.r2 && hasAllR2Keys(process.env);
+  const listClient: R2SendClient | null = deps.r2 ?? (useRealR2 ? getS3Client() : null);
+  const bucket = process.env.R2_BUCKET;
 
-  const highRows = rows.filter((r) => r.confidence.trim() === "high");
-  const reviewRows = rows.filter((r) => r.confidence.trim() !== "high");
-
-  console.log(`Master catalog: ${highRows.length} high, ${reviewRows.length} review (${rows.length} total)`);
+  const highRows = rows.filter((row) => row.confidence.trim() === "high");
+  const reviewRows = rows.filter((row) => row.confidence.trim() !== "high");
+  log(`Master catalog: ${highRows.length} high, ${reviewRows.length} review (${rows.length} total)`);
 
   let imageUploads = 0;
   let imageSkips = 0;
   let imageExisting = 0;
   let totalUploadBytes = 0;
   const failures: { id: string; reason: string }[] = [];
+  const upsertedIds: string[] = [];
 
-  const existingR2Keys = hasR2 ? new Set(await listR2Objects("catalog/")) : new Set<string>();
-  const oldKeysToDelete = [...existingR2Keys].filter((k) => !k.endsWith(".webp"));
+  const existingR2Keys =
+    listClient && bucket
+      ? new Set((await listCatalogObjects(listClient, bucket)).map((object) => object.key))
+      : new Set<string>();
 
-  const withImages = highRows.filter((r) => r.image_url?.trim());
+  const withImages = highRows.filter((row) => row.image_url?.trim());
   let processed = 0;
 
   for (const row of highRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
     const imageSourceUrl = row.image_url?.trim() || null;
-
     let imageUrl: string | null = null;
 
-    if (hasR2 && imageSourceUrl) {
+    if (imageSourceUrl && (deps.uploadImage || useRealR2)) {
+      if (deps.uploadImage) {
+        const img = await deps.uploadImage(imageSourceUrl, row.id);
+        if (img.ok) {
+          imageUrl = img.url;
+          imageUploads++;
+          totalUploadBytes += img.bytes;
+        } else {
+          imageSkips++;
+          failures.push({ id: row.id, reason: img.reason });
+        }
+      } else if (useRealR2) {
       const webpKey = `catalog/${row.id}.webp`;
       if (existingR2Keys.has(webpKey)) {
         imageUrl = catalogImageUrl(webpKey);
@@ -137,17 +260,18 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
           imageUploads++;
           totalUploadBytes += img.bytes;
         } else if (img.reason === "upload") {
-          console.warn(`R2 upload failed for ${row.id}`);
+          log(`R2 upload failed for ${row.id}`);
           failures.push({ id: row.id, reason: "R2 upload failed" });
         } else {
           imageSkips++;
           failures.push({ id: row.id, reason: "download/convert failed" });
         }
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
       processed++;
       if (processed % 10 === 0) {
-        console.log(`  images: ${processed}/${withImages.length} (${imageUploads} new, ${imageExisting} cached, ${imageSkips} failed)`);
+        log(`  images: ${processed}/${withImages.length} (${imageUploads} new, ${imageExisting} cached, ${imageSkips} failed)`);
+      }
       }
     }
 
@@ -161,32 +285,11 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
         imageUrl,
       });
     });
-  }
-
-  if (hasR2 && oldKeysToDelete.length > 0) {
-    await deleteR2Objects(oldKeysToDelete);
-    console.log(`Deleted ${oldKeysToDelete.length} old non-webp R2 objects`);
-  }
-
-  const coveragePct = highRows.length > 0
-    ? (((imageUploads + imageExisting) / highRows.filter((r) => r.image_url?.trim()).length) * 100).toFixed(1)
-    : "N/A";
-  console.log(
-    `Seeded ${highRows.length} high-confidence products ` +
-    `(${imageUploads} webp uploaded [${(totalUploadBytes / 1024 / 1024).toFixed(2)} MB], ` +
-    `${imageExisting} existing, ${imageSkips} skipped, ` +
-    `coverage: ${coveragePct}%)`,
-  );
-  if (failures.length > 0) {
-    console.log(`Image failures (${failures.length}):`);
-    for (const f of failures) {
-      console.log(`  ${f.id}: ${f.reason}`);
-    }
+    upsertedIds.push(row.id);
   }
 
   for (const row of reviewRows) {
     const categoryId = CATEGORY_SLUG_TO_ID[row.category.trim()] ?? null;
-
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
@@ -196,7 +299,48 @@ export async function seedMasterCatalog(prisma: PrismaClient) {
         imageUrl: null,
       });
     });
+    upsertedIds.push(row.id);
   }
 
-  console.log(`Seeded ${reviewRows.length} review-queue products (status='needs_review')`);
+  const imageRowCount = highRows.filter((row) => row.image_url?.trim()).length;
+  const coveragePct = imageRowCount > 0
+    ? (((imageUploads + imageExisting) / imageRowCount) * 100).toFixed(1)
+    : "N/A";
+  log(
+    `Seeded ${highRows.length} high-confidence products ` +
+    `(${imageUploads} webp uploaded [${(totalUploadBytes / 1024 / 1024).toFixed(2)} MB], ` +
+    `${imageExisting} existing, ${imageSkips} skipped, ` +
+    `coverage: ${coveragePct}%)`,
+  );
+  if (failures.length > 0) {
+    log(`Image failures (${failures.length}):`);
+    for (const failure of failures) log(`  ${failure.id}: ${failure.reason}`);
+  }
+  log(`Seeded ${reviewRows.length} review-queue products (status='needs_review')`);
+
+  if (mode === "off") return;
+
+  if (!listClient || !bucket) {
+    throw new CatalogPruneRefusal("Refusing catalog prune: missing R2_BUCKET");
+  }
+
+  const objects = await listCatalogObjects(listClient, bucket);
+  const read = await readCatalogImageReferences({ afterSnapshot: deps.afterReferenceSnapshot });
+  assertUpsertsVisible(read.masterProductIds, upsertedIds);
+  const references = [...read.references, ...(deps.priorReferences ?? [])];
+  const candidates = planCatalogPrune({ objects, references, now: startedAt });
+
+  if (mode === "dry-run") {
+    for (const key of candidates) log(`candidate ${key}`);
+    log(`catalog prune dry-run: ${candidates.length} candidates, 0 deleted`);
+    return;
+  }
+
+  const gate = deps.writerGate ?? uncoordinatedCatalogWriters;
+  if (!gate.exclusive()) {
+    throw new CatalogPruneRefusal(
+      "Refusing catalog prune: catalog writers are not coordinated for the scan-to-delete interval",
+    );
+  }
+  await deleteCatalogCandidates({ client: listClient, bucket, keys: candidates, log });
 }
