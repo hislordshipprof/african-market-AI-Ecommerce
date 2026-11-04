@@ -169,6 +169,41 @@ describe("auditCatalogPhotos", () => {
     expect(report).toContain("local catalog URL is not a bare key or the allowlisted ?retry=1 query");
   });
 
+  it("derives the extension from the credential-free pathname (E31)", async () => {
+    const head = vi.fn(async (): Promise<HeadResult> => {
+      throw new Error("head should not run");
+    });
+    const audited = await auditCatalogPhotos({
+      products: [
+        product({ id: "q", name: "Query", imageUrl: "/api/catalog-image/catalog/x.jpg?token=prefix.SECRET123" }),
+        product({ id: "f", name: "Fragment", imageUrl: "/api/catalog-image/catalog/y.jpg#prefix.SECRET456" }),
+        product({ id: "u", name: "Userinfo", imageUrl: "https://alice:prefix.SECRET789@old.example.com/catalog/x.JPG" }),
+      ],
+      headObject: head,
+    });
+    const report = formatCatalogAuditReport({
+      rows: audited.rows,
+      counts: audited.counts,
+      dbReadAt: new Date("2026-11-04T00:00:00.000Z"),
+      completedAt: new Date("2026-11-04T00:00:01.000Z"),
+      dbHost: "localhost",
+      bucket: "review",
+    });
+    expect(head).not.toHaveBeenCalled();
+    expect(audited.counts["invalid-key"]).toBe(3);
+    expect(audited.counts.checkedKeys).toBe(0);
+    expect(report.includes("SECRET123")).toBe(false);
+    expect(report.includes("SECRET456")).toBe(false);
+    expect(report.includes("SECRET789")).toBe(false);
+    expect(report.includes("alice:")).toBe(false);
+    expect(report).toContain("/api/catalog-image/catalog/x.jpg");
+    expect(report).toContain("/api/catalog-image/catalog/y.jpg");
+    expect(report).toContain("https://old.example.com/catalog/x.JPG");
+    expect(audited.rows.find((row) => row.id === "q")?.ext).toBe("jpg");
+    expect(audited.rows.find((row) => row.id === "f")?.ext).toBe("jpg");
+    expect(audited.rows.find((row) => row.id === "u")?.ext).toBe("JPG");
+  });
+
   it("skips null, empty and whitespace image URLs without a check (E12, E24)", async () => {
     const head = vi.fn(async (): Promise<HeadResult> => "missing");
     const { rows, counts } = await auditCatalogPhotos({

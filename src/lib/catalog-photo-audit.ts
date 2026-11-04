@@ -65,8 +65,25 @@ export function assertConcurrency(concurrency: number | undefined): number {
   return concurrency;
 }
 
+/**
+ * A report key keeps the path that explains an invalid catalog URL.
+ * Userinfo, query, and fragment can carry credentials and are omitted.
+ */
+function stripUrlCredentials(value: string): string {
+  const absolute = /^([a-z][a-z0-9+.-]*:)\/\/(?:[^/?#]*@)?([^/?#]*)([^?#]*)/i.exec(value);
+  if (absolute?.[1] != null && absolute[2] != null) {
+    return `${absolute[1]}//${absolute[2]}${absolute[3] ?? ""}`;
+  }
+  if (value.startsWith("/") || value.startsWith("catalog/")) {
+    const cut = value.search(/[?#]/);
+    return cut === -1 ? value : value.slice(0, cut);
+  }
+  return value;
+}
+
 function extensionOf(key: string): string | null {
-  const match = /\.([A-Za-z0-9]+)$/.exec(key);
+  const pathname = stripUrlCredentials(key);
+  const match = /\.([A-Za-z0-9]+)$/.exec(pathname);
   return match?.[1] ?? null;
 }
 
@@ -281,22 +298,6 @@ export function escapeField(value: string): string {
     .replace(/\t/g, "\\t")
     .replace(/\|/g, "\\|")
     .replace(/[\u0000-\u001F\u007F]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`);
-}
-
-/**
- * A report key keeps the path that explains an invalid catalog URL.
- * Userinfo, query, and fragment can carry credentials and are omitted.
- */
-function stripUrlCredentials(value: string): string {
-  const absolute = /^([a-z][a-z0-9+.-]*:)\/\/(?:[^/?#]*@)?([^/?#]*)([^?#]*)/i.exec(value);
-  if (absolute?.[1] != null && absolute[2] != null) {
-    return `${absolute[1]}//${absolute[2]}${absolute[3] ?? ""}`;
-  }
-  if (value.startsWith("/") || value.startsWith("catalog/")) {
-    const cut = value.search(/[?#]/);
-    return cut === -1 ? value : value.slice(0, cut);
-  }
-  return value;
 }
 
 export function formatCatalogAuditReport(input: {
