@@ -2,6 +2,7 @@
 import { m, useReducedMotion } from "motion/react";
 import { Plus, Minus } from "lucide-react";
 import { cartItemKey, type CartItem } from "@/lib/storefront/cart-store";
+import { cartQuantityCeiling } from "@/lib/storefront/cart-quantity";
 import { useCart } from "./cart-provider";
 import { flyToCart } from "./cart-flight";
 import styles from "./cart.module.css";
@@ -18,6 +19,7 @@ export function QuickAddStepper({
   const qty =
     lines.find((line) => cartItemKey(line) === cartItemKey(item))?.quantity ??
     0;
+  const ceiling = cartQuantityCeiling(maxQuantity);
   const reduced = useReducedMotion();
   const press = reduced ? undefined : { scale: 0.95 };
   return (
@@ -39,7 +41,7 @@ export function QuickAddStepper({
             whileTap={press}
             data-testid="stepper-minus"
             disabled={disabled}
-            onClick={() => store.setQuantity(item, qty - 1)}
+            onClick={() => store.adjust(item, -1, maxQuantity)}
             aria-label={`Remove one ${item.name}`}
           >
             <Minus size={18} />
@@ -51,8 +53,8 @@ export function QuickAddStepper({
             type="button"
             whileTap={press}
             data-testid="stepper-plus"
-            disabled={disabled || qty >= Math.min(99, maxQuantity)}
-            onClick={e => { store.setQuantity(item, qty + 1); flyToCart(e.currentTarget); }}
+            disabled={disabled || qty >= ceiling}
+            onClick={e => { store.adjust(item, 1, maxQuantity); flyToCart(e.currentTarget); }}
             aria-label={`Add another ${item.name}`}
           >
             <Plus size={18} />
@@ -63,8 +65,8 @@ export function QuickAddStepper({
           type="button"
           whileTap={press}
           data-testid="quick-add-btn"
-          disabled={disabled || maxQuantity < 1}
-          onClick={e => { store.setQuantity(item, 1); flyToCart(e.currentTarget); }}
+          disabled={disabled || ceiling < 1}
+          onClick={e => { store.adjust(item, 1, maxQuantity); flyToCart(e.currentTarget); }}
           aria-label={`Add ${item.name} to cart`}
         >
           <Plus size={20} />

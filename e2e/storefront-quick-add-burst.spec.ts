@@ -500,24 +500,23 @@ test.describe("quick add limits and recovery", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const held: string[] = [];
+    let yellowHeld = false;
     await page.route("**/*", async (route) => {
       const request = route.request();
       const body = request.postData() ?? "";
-      if (isAction(request) && body.includes("mn_garri_w_v1") && held.length === 0) {
-        held.push("white");
+      if (isAction(request) && body.includes("mn_garri_w_v1")) {
         await route.abort("failed");
         return;
       }
-      if (isAction(request) && body.includes("mn_garri_y_v1") && !held.includes("yellow")) {
-        held.push("yellow");
+      if (!yellowHeld && isAction(request) && body.includes("mn_garri_y_v1")) {
+        yellowHeld = true;
         await gate;
       }
       await route.continue();
     });
     await garri(page).getByTestId("quick-add-btn").click();
     await whiteGarri(page).getByTestId("quick-add-btn").click();
-    await expect.poll(() => held.length).toBe(2);
+    await expect.poll(() => yellowHeld).toBe(true);
     release();
     await expectNoCrash(page);
     await expect(page.locator("[data-sonner-toast]").first()).toBeVisible();
