@@ -888,6 +888,11 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
     ]);
     const x = created.variants.find((v) => v.label === "X")!;
     const y = created.variants.find((v) => v.label === "Y")!;
+    await poll(
+      "Y is visible and free before the foreign waiter",
+      async () => (await classifyVariantLock(storeAId, y.id)).kind === "free",
+      20_000,
+    );
     const holder = hold(storeAId, async (client) => {
       const locked = await client.query(
         "SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE",
@@ -896,11 +901,6 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
       if (locked.rowCount !== 1) throw new Error(`holder locked ${locked.rowCount} variants`);
     });
     const holderPid = await holder.ready();
-    await poll(
-      "Y is visible and free before the foreign waiter",
-      async () => (await classifyVariantLock(storeAId, y.id)).kind === "free",
-      20_000,
-    );
     const foreign = new Client({ connectionString: process.env.DATABASE_URL });
     await foreign.connect();
     let foreignPid = 0;
@@ -965,17 +965,29 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
     const y = created.variants.find((v) => v.label === "Y")!;
     const owner = new Client({ connectionString: process.env.DIRECT_URL });
     await owner.connect();
+    let held = false;
     try {
-      await owner.query("BEGIN");
-      await owner.query("SET LOCAL lock_timeout = '8s'");
-      await owner.query("LOCK TABLE listing_variants IN ACCESS EXCLUSIVE MODE");
+      const start = Date.now();
+      while (Date.now() - start < 15_000 && !held) {
+        await owner.query("BEGIN");
+        try {
+          await owner.query("SET LOCAL lock_timeout = '200ms'");
+          await owner.query("LOCK TABLE listing_variants IN ACCESS EXCLUSIVE MODE");
+          held = true;
+        } catch (err) {
+          await owner.query("ROLLBACK");
+          if (pgCode(err) !== "55P03") throw err;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      expect(held).toBe(true);
       const found = await classifyVariantLock(storeAId, y.id);
       expect(found.kind).toBe("relation");
     } finally {
       await owner.query("ROLLBACK").catch(() => undefined);
       await owner.end().catch(() => undefined);
     }
-  }, 20_000);
+  }, 30_000);
 
   it("direct and substitute reference lose specifically with P2003", async () => {
     await removalLoses("direct");
