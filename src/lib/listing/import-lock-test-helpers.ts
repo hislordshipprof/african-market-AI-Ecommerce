@@ -424,6 +424,7 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
     observer.on("error", (err) => {
       observerError = err;
     });
+    armHandshakeReset(observer, true);
     const failObserver = () => {
       if (observerError) throw observerError;
     };
@@ -433,8 +434,9 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
       if (state) return new Error(`commit settled before it queued on the store lock: ${label}`);
       return observerError;
     };
-    const connecting = observer.connect().finally(() => {
+    const connecting = observer.connect().then(() => {
       connectSettled = true;
+      armHandshakeReset(observer, false);
     });
     await withinDeadline(connecting, deadline, label, errorOf);
     failObserver();
@@ -460,18 +462,27 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
   }
 }
 
+function clientStream(observer: LockObserver): { resetAndClosing?: boolean } | undefined {
+  if (!(observer instanceof Client)) return undefined;
+  return (observer as Client & {
+    connection?: { stream?: { resetAndClosing?: boolean } };
+  }).connection?.stream;
+}
+
+function armHandshakeReset(observer: LockObserver, armed: boolean) {
+  const stream = clientStream(observer);
+  if (stream) stream.resetAndClosing = armed;
+}
+
 function endObserver(observer: LockObserver, connectSettled: boolean): Promise<void> {
   // A stalled handshake leaves pg waiting on a graceful Terminate. destroy()
   // only half-closes that socket unless resetAndClosing is set, which is what
-  // Socket.resetAndDestroy() does before it calls destroy().
-  if (!connectSettled && observer instanceof Client) {
-    const real = observer as Client & {
-      _queryable: boolean;
-      connection?: { stream?: { resetAndClosing?: boolean } };
-    };
-    real._queryable = false;
-    const stream = real.connection?.stream;
-    if (stream) stream.resetAndClosing = true;
+  // Socket.resetAndDestroy() does before it calls destroy(). Arm it before
+  // connect as well, so Postgres's own connection timeout resets the peer.
+  if (!connectSettled) {
+    const real = observer as Client & { _queryable?: boolean };
+    if (observer instanceof Client) real._queryable = false;
+    armHandshakeReset(observer, true);
   }
   return observer.end().catch(() => undefined);
 }

@@ -265,6 +265,49 @@ describe("import lock test helpers", () => {
     }
   });
 
+  it("a stalled handshake timeout closes the accepted socket", async () => {
+    const sockets = new Set<Socket>();
+    const server = createServer({ allowHalfOpen: true }, (socket) => {
+      sockets.add(socket);
+      socket.on("data", () => undefined);
+      socket.on("error", () => undefined);
+      socket.on("close", () => sockets.delete(socket));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    const previous = {
+      DATABASE_URL: process.env.DATABASE_URL,
+      DIRECT_URL: process.env.DIRECT_URL,
+      DATABASE_URL_UNPOOLED: process.env.DATABASE_URL_UNPOOLED,
+    };
+    const url = `postgres://review:review@127.0.0.1:${port}/review`;
+    process.env.DATABASE_URL = url;
+    process.env.DIRECT_URL = url;
+    delete process.env.DATABASE_URL_UNPOOLED;
+    try {
+      for (let i = 0; i < 6; i += 1) {
+        await expect(waitForLockWaiters(1, 1, {
+          label: `stalled timeout ${i}`,
+          timeoutMs: 1_000,
+        })).rejects.toThrow(`timed out: stalled timeout ${i}`);
+        const closedBy = Date.now() + 200;
+        while (sockets.size > 0 && Date.now() < closedBy) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(sockets.size).toBe(0);
+      }
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (previous.DATABASE_URL === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previous.DATABASE_URL;
+      if (previous.DIRECT_URL === undefined) delete process.env.DIRECT_URL;
+      else process.env.DIRECT_URL = previous.DIRECT_URL;
+      if (previous.DATABASE_URL_UNPOOLED === undefined) delete process.env.DATABASE_URL_UNPOOLED;
+      else process.env.DATABASE_URL_UNPOOLED = previous.DATABASE_URL_UNPOOLED;
+    }
+  }, 20_000);
+
   it("observer query failure and idle errors close the observer", async () => {
     let ended = 0;
     await expect(waitForLockWaiters(3, 1, {
