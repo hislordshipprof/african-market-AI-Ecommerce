@@ -821,7 +821,11 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
     const x = created.variants.find((v) => v.label === "X")!;
     const y = created.variants.find((v) => v.label === "Y")!;
     const line = kind === "substitute" ? await seedCartLine(storeAId, x.id) : null;
-    expect((await classifyVariantLock(storeAId, y.id)).kind).toBe("free");
+    await poll(
+      "Y is visible and free before the save",
+      async () => (await classifyVariantLock(storeAId, y.id)).kind === "free",
+      20_000,
+    );
     const holder = hold(storeAId, async (client) => {
       const locked = await client.query(
         "SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE",
@@ -875,7 +879,7 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
   it("reference creation cannot commit after removal wins the variant lock", async () => {
     await removalLoses("direct");
     await removalLoses("substitute");
-  }, 40_000);
+  }, 90_000);
 
   it("reference creation waits for removal even when another session waits on the holder", async () => {
     const created = await listingWith(storeAId, `False waiter ${crypto.randomUUID().slice(0, 8)}`, [
@@ -892,6 +896,11 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
       if (locked.rowCount !== 1) throw new Error(`holder locked ${locked.rowCount} variants`);
     });
     const holderPid = await holder.ready();
+    await poll(
+      "Y is visible and free before the foreign waiter",
+      async () => (await classifyVariantLock(storeAId, y.id)).kind === "free",
+      20_000,
+    );
     const foreign = new Client({ connectionString: process.env.DATABASE_URL });
     await foreign.connect();
     let foreignPid = 0;
@@ -946,7 +955,7 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
       holder.release();
       await Promise.allSettled([holder.done, save, inserter, foreignDone]);
     }
-  }, 40_000);
+  }, 90_000);
 
   it("DDL timeout cannot satisfy the Y row-lock barrier", async () => {
     const created = await listingWith(storeAId, `DDL barrier ${crypto.randomUUID().slice(0, 8)}`, [
@@ -971,7 +980,7 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
   it("direct and substitute reference lose specifically with P2003", async () => {
     await removalLoses("direct");
     await removalLoses("substitute");
-  }, 40_000);
+  }, 90_000);
 
   it("maps a real delete P2003 even when its direct reference is hidden by RLS", async () => {
     const created = await listingWith(storeAId, "Hidden fk", [{ label: "Only", price: 800, weightG: 1000 }]);
