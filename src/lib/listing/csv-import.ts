@@ -533,16 +533,18 @@ function indexExistingListings(listings: ExistingListingRow[]) {
   return { byMasterId, byCustomName };
 }
 
-function listingWeightG(weightG: number | null | undefined): number {
-  return weightG && weightG > 0 ? weightG : DEFAULT_WEIGHT_G;
-}
-
-function resolveImportWeightG(
+/** CSV weight, then master weight, then the 100 g fallback. The flag is which branch ran. */
+function resolveImportWeight(
   rowWeightG: number | undefined,
   productWeightG: number | null | undefined,
-): number {
-  if (rowWeightG !== undefined && rowWeightG > 0) return rowWeightG;
-  return listingWeightG(productWeightG);
+): { weightG: number; placeholder: boolean } {
+  if (rowWeightG !== undefined && rowWeightG > 0) {
+    return { weightG: rowWeightG, placeholder: false };
+  }
+  if (productWeightG != null && productWeightG > 0) {
+    return { weightG: productWeightG, placeholder: false };
+  }
+  return { weightG: DEFAULT_WEIGHT_G, placeholder: true };
 }
 
 interface ListingToCreate {
@@ -555,6 +557,7 @@ interface ListingToCreate {
   frozen: boolean;
   perishable: boolean;
   weightG: number;
+  weightPlaceholder: boolean;
 }
 
 function buildListingData(
@@ -568,6 +571,9 @@ function buildListingData(
     qty: row.qty,
     status: row.status,
   });
+  const weight = product
+    ? resolveImportWeight(row.weightG, product.weightG)
+    : resolveImportWeight(row.weightG, null);
   if (!product) {
     return {
       masterProductId: null,
@@ -576,7 +582,8 @@ function buildListingData(
       ...stock,
       frozen: false,
       perishable: false,
-      weightG: resolveImportWeightG(row.weightG, null),
+      weightG: weight.weightG,
+      weightPlaceholder: weight.placeholder,
     };
   }
   return {
@@ -586,7 +593,8 @@ function buildListingData(
     ...stock,
     frozen: product.frozen,
     perishable: product.perishable,
-    weightG: resolveImportWeightG(row.weightG, product.weightG),
+    weightG: weight.weightG,
+    weightPlaceholder: weight.placeholder,
   };
 }
 
@@ -828,6 +836,7 @@ export interface CommitSelection {
 export interface CommitResult {
   createdCount: number;
   listingIds: string[];
+  needsWeightCount: number;
 }
 
 export async function commitImport(
@@ -906,7 +915,7 @@ export async function commitImport(
     throw new Error("No valid rows to import after re-validation.");
   }
 
-  const listingIds = await storeScopedTransaction(storeId, async (tx) => {
+  const committed = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const didClaim = await claimImportRow(tx, importToken, IMPORT_TOKEN_TTL_MS);
 
@@ -944,6 +953,7 @@ export async function commitImport(
     }
 
     const ids = toInsert.map(() => crypto.randomUUID());
+    const needsWeightCount = toInsert.filter((item) => item.weightPlaceholder).length;
 
     await tx.listing.createMany({
       data: toInsert.map((item, i) => ({
@@ -966,6 +976,7 @@ export async function commitImport(
         label: "Default",
         price: item.price,
         weightG: item.weightG,
+        weightPlaceholder: item.weightPlaceholder,
       })),
     });
 
@@ -1000,14 +1011,19 @@ export async function commitImport(
           notSelected,
           duplicatesSkipped,
           alreadyListedSkipped,
+          needsWeightCount,
         },
       },
     });
 
-    return ids;
+    return { ids, needsWeightCount };
   }, { timeout: 60_000, maxWait: 15_000 });
 
-  return { createdCount: listingIds.length, listingIds };
+  return {
+    createdCount: committed.ids.length,
+    listingIds: committed.ids,
+    needsWeightCount: committed.needsWeightCount,
+  };
 }
 
 export function validateFileSize(bytes: number): string | null {
