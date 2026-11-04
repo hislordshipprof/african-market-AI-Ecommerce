@@ -5,7 +5,12 @@ import { storeUrl } from "./urls";
 const base = storeUrl("mama-ngozi");
 
 test.describe("Guest checkout flow", () => {
+  test.describe.configure({ retries: 0 });
   test.use({ reducedMotion: "reduce" });
+
+  test("nine plain quick-add clicks reach ten", async ({ page }) => {
+    await addItemToCart(page);
+  });
 
   test("checkout page shows guest contact form with required fields", async ({
     page,

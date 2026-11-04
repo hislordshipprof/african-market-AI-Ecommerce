@@ -17,6 +17,7 @@ export function StorefrontShell({
   return (
     <div className="sf-storefront">
       <StorefrontMotion><CartProvider
+        key={store.id}
         storeId={store.id}
         storeName={store.name}
         minimumOrderCents={store.minimumOrderCents}

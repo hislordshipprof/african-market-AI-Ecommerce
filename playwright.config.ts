@@ -28,6 +28,7 @@ const E2E_PORT = process.env.E2E_PORT || "3000";
 // Explicit values (CI job env, shell) still win.
 process.env.BETTER_AUTH_URL ??= `http://localhost:${E2E_PORT}`;
 process.env.BETTER_AUTH_TRUSTED_ORIGINS ??= `http://localhost:${E2E_PORT}`;
+process.env.STOREFRONT_REVALIDATION_SECRET ??= "e2e-storefront-revalidate";
 
 loadEnvFile(resolve(__dirname, ".env.e2e"));
 loadEnvFile(resolve(__dirname, ".env.local"));
@@ -72,6 +73,7 @@ export default defineConfig({
           CI: "true",
           STRIPE_SECRET_KEY: "",
           VERCEL_ENV: "preview",
+          STOREFRONT_REVALIDATION_SECRET: "e2e-storefront-revalidate",
         },
       },
 });

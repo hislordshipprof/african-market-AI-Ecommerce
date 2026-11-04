@@ -190,6 +190,29 @@ describe.skipIf(!hasDb)("Cart and CartLine RLS isolation", () => {
     ).rejects.toThrow();
   });
 
+  it("store A cannot update or delete store B cart lines", async () => {
+    const before = await storeScoped(storeBId).cartLine.findFirstOrThrow({
+      where: { cartId: cartBId },
+    });
+    expect(before.qty).toBe(1);
+    const scopedA = storeScoped(storeAId);
+    await expect(
+      scopedA.cartLine.update({ where: { id: before.id }, data: { qty: 9 } }),
+    ).rejects.toMatchObject({ code: "P2025" });
+    expect(
+      (await scopedA.cartLine.updateMany({ where: { id: before.id }, data: { qty: 9 } })).count,
+    ).toBe(0);
+    expect((await scopedA.cartLine.deleteMany({ where: { id: before.id } })).count).toBe(0);
+    const after = await storeScoped(storeBId).cartLine.findUniqueOrThrow({
+      where: { id: before.id },
+    });
+    expect(after.qty).toBe(1);
+    const owned = await storeScoped(storeAId).cartLine.findFirstOrThrow({
+      where: { cartId: cartAId },
+    });
+    expect(owned.qty).toBe(2);
+  });
+
   it("storeScopedTransaction enforces isolation for cart operations", async () => {
     await storeScopedTransaction(storeAId, async (tx) => {
       const carts = await tx.cart.findMany();

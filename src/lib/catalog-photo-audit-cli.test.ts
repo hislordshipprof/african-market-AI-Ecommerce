@@ -176,6 +176,20 @@ describe("catalog photo audit CLI", () => {
     expect(result.stdout).toBe("");
   });
 
+  it("production child reports each missing runtime key before loading dependencies", async () => {
+    for (const missing of RUNTIME_KEYS) {
+      const env = { ...inertEnv, NODE_ENV: "production", VERCEL: "1" } as Record<string, string | undefined>;
+      delete env.NEXT_PHASE;
+      env[missing] = "";
+      const result = await collect(spawnEntry(env));
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).toContain(`Missing environment: ${missing}`);
+      expect(result.stderr).not.toMatch(/\n\s+at /);
+      expect(result.stderr).not.toContain("app must connect as app_runtime");
+      expect(result.stdout).toBe("");
+    }
+  });
+
   it("NODE_ENV=production without APP_RUNTIME_PASSWORD fails with the env message (E19)", async () => {
     const result = await collect(spawnEntry({
       ...inertEnv,
