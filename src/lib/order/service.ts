@@ -17,8 +17,7 @@ export type OrderStatus =
   | "AWAITING_PICKUP"
   | "COMPLETED"
   | "CANCELLED"
-  | "REFUND_FAILED"
-  | "CAPTURE_FAILED";
+  | "REFUND_FAILED";
 
 // Stripe USD minimum capture: $0.50 (50 cents).
 // https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts
@@ -137,7 +136,6 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   "READY",
   "AWAITING_PICKUP",
   "REFUND_FAILED",
-  "CAPTURE_FAILED",
 ];
 
 const ORDER_WITH_LINES = {
@@ -850,11 +848,11 @@ export async function completePickup(
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false, error: "Order not found" };
-    if (order.status !== "AWAITING_PICKUP" && order.status !== "READY") {
-      return { ok: false, error: `Cannot complete pickup for order in status ${order.status}` };
-    }
-    if (order.status === "READY" && order.fulfillment !== "pickup") {
-      return { ok: false, error: `Cannot complete pickup for delivery order — use courier dispatch` };
+    if (order.status !== "AWAITING_PICKUP") {
+      if (order.fulfillment === "delivery") {
+        return { ok: false, error: "Cannot complete pickup for delivery order — use courier dispatch" };
+      }
+      return { ok: false, error: "Order is not awaiting pickup" };
     }
 
     await tx.order.update({

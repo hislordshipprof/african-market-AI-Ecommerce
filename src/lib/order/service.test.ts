@@ -294,7 +294,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     if (!result.ok) expect(result.error).toContain("Cannot pick");
   });
 
-  it("completePickup transitions AWAITING_PICKUP -> COMPLETED", async () => {
+  it("completePickup completes an order awaiting pickup once", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
     await acceptOrder(storeId, order.id, 15);
@@ -308,6 +308,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
     const result = await completePickup(storeId, order.id);
     expect(result.ok).toBe(true);
+    const again = await completePickup(storeId, order.id);
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.error).toBe("Order is not awaiting pickup");
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("COMPLETED");
@@ -318,7 +321,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const order = await createTestOrder();
     const result = await completePickup(storeId, order.id);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("Cannot complete");
+    if (!result.ok) expect(result.error).toBe("Order is not awaiting pickup");
   });
 
   it("markReady rejects when lines are unresolved", async () => {
@@ -559,15 +562,16 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("CANCELLED");
   });
 
-  it("completePickup accepts READY status for pickup orders (A5)", async () => {
+  it("completePickup refuses a pickup order in READY", async () => {
     const order = await createTestOrder();
     await storeScopedTransaction(storeId, async (tx) => {
       await tx.order.update({ where: { id: order.id }, data: { status: "READY", readyAt: new Date() } });
     });
     const result = await completePickup(storeId, order.id);
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("Order is not awaiting pickup");
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("COMPLETED");
+    expect(updated!.status).toBe("READY");
   });
 
   it("F3: completePickup rejects delivery order in READY status", async () => {

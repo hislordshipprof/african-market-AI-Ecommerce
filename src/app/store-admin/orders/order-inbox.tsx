@@ -46,6 +46,7 @@ import type { StoreOrderRow } from "@/lib/order/service";
 import { RESOLVED_LINE_STATUSES } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
+import { REFUND_FAILED_STAFF_COPY, showCapturedLine } from "@/lib/order/staff-copy";
 
 const STATUS_CONFIG: Record<
   string,
@@ -59,7 +60,6 @@ const STATUS_CONFIG: Record<
   READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
   AWAITING_PICKUP: { label: "Awaiting pickup", variant: "outline", icon: ShoppingBag },
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
-  CAPTURE_FAILED: { label: "Capture failed", variant: "destructive", icon: Bell },
 };
 
 interface Props {
@@ -309,12 +309,7 @@ export function OrderInbox({
                 )}
                 {selectedOrder.status === "REFUND_FAILED" && (
                   <p className="mt-2 text-sm text-destructive">
-                    The refund failed and the customer is still charged. Refund them another way, then mark the order resolved with the store owner.
-                  </p>
-                )}
-                {selectedOrder.status === "CAPTURE_FAILED" && (
-                  <p className="mt-2 text-sm text-destructive">
-                    Card capture failed after retries. Contact the customer before collecting payment another way.
+                    {REFUND_FAILED_STAFF_COPY}
                   </p>
                 )}
               </CardHeader>
@@ -433,14 +428,18 @@ export function OrderInbox({
                       {money(selectedOrder.totalCents ?? selectedOrder.subtotalCents)}
                     </span>
                   </div>
-                  {selectedOrder.capturedAmountCents != null && selectedOrder.capturedAmountCents > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Captured</span>
-                      <span className="tabular-nums" data-testid="order-captured">
-                        {money(selectedOrder.capturedAmountCents)}
-                      </span>
-                    </div>
-                  )}
+                  {(() => {
+                    const captured = selectedOrder.capturedAmountCents;
+                    if (captured == null || !showCapturedLine(selectedOrder.status, captured)) return null;
+                    return (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Captured</span>
+                        <span className="tabular-nums" data-testid="order-captured">
+                          {money(captured)}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </CardContent>
             </Card>

@@ -122,13 +122,15 @@ test.describe("Order inbox", () => {
     await expect(markReadyBtn).toBeDisabled();
 
     const pickButtons = page.getByRole("button", { name: "Pick" });
-    const count = await pickButtons.count();
-    for (let i = 0; i < count; i++) {
+    let remaining = await pickButtons.count();
+    while (remaining > 0) {
       await pickButtons.first().click();
-      await page.waitForTimeout(500);
+      remaining -= 1;
+      await expect(pickButtons).toHaveCount(remaining);
     }
 
     await expect(markReadyBtn).toBeEnabled({ timeout: 10000 });
+    await expect(page.getByTestId("order-captured")).toHaveCount(0);
 
     await markReadyBtn.click();
 
@@ -150,8 +152,7 @@ test.describe("Order inbox", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
-
-    await page.waitForTimeout(1000);
+    await expect(page.getByRole("heading", { name: /orders/i })).toBeVisible();
     const scrollWidth = await page.evaluate(() => document.body.scrollWidth);
     expect(scrollWidth).toBeLessThanOrEqual(390);
   });

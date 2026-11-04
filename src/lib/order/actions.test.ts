@@ -19,34 +19,54 @@ vi.mock("../db", () => ({
   platform: { store: { findUnique: vi.fn() } },
 }));
 
+import { STAFF_GENERIC_ERROR } from "./staff-copy";
+
 describe("markReadyAction", () => {
-  it("K8: returns ok:false with safe message when Stripe provider throws", async () => {
+  it("markReadyAction returns the generic message and logs the raw error for a provider failure", async () => {
     const { markReady } = await import("./service");
     const { markReadyAction } = await import("./actions");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     (markReady as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("PaymentIntent pi_xxx has already been canceled and cannot be captured."),
+      new Error("PaymentIntent pi_123 has already been canceled"),
     );
 
     const result = await markReadyAction("order-1");
 
+    expect(result).toEqual({ ok: false, error: STAFF_GENERIC_ERROR });
+    expect(result.ok === false && result.error.includes("pi_")).toBe(false);
+    const logged = errorSpy.mock.calls.flat().join(" ");
+    expect(logged).toContain("order_action_failed");
+    expect(logged).toContain("pi_123");
+    expect(logged).toContain("order-1");
+    errorSpy.mockRestore();
+  });
+
+  it("markReadyAction passes an allow-listed service message through", async () => {
+    const { markReady } = await import("./service");
+    const { markReadyAction } = await import("./actions");
+    (markReady as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: "Cannot mark ready for order in status AUTHORIZED",
+    });
+
+    const result = await markReadyAction("order-1");
     expect(result).toEqual({
       ok: false,
-      error: "PaymentIntent pi_xxx has already been canceled and cannot be captured.",
+      error: "Cannot mark ready for order in status AUTHORIZED",
     });
   });
 
-  it("K8: returns ok:false with fallback message for non-Error throws", async () => {
+  it("a thrown non-Error becomes the generic message", async () => {
     const { markReady } = await import("./service");
     const { markReadyAction } = await import("./actions");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     (markReady as ReturnType<typeof vi.fn>).mockRejectedValue("network timeout");
 
     const result = await markReadyAction("order-1");
-
-    expect(result).toEqual({
-      ok: false,
-      error: "Stripe capture failed",
-    });
+    expect(result).toEqual({ ok: false, error: STAFF_GENERIC_ERROR });
+    expect(errorSpy.mock.calls.flat().join(" ")).toContain("network timeout");
+    errorSpy.mockRestore();
   });
 });
