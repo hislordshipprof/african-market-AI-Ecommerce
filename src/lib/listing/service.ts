@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { storeScoped, storeScopedTransaction, lockListingRow } from "../db";
+import { storeScoped, storeScopedTransaction, lockListingRow, lockListingVariantRows } from "../db";
 
 export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
@@ -438,12 +438,7 @@ async function saveVariantsInPlace(
 
   if (removed.length > 0) {
     const removedIds = removed.map((variant) => variant.id);
-    await tx.$queryRaw`
-      SELECT id FROM listing_variants
-      WHERE id IN (${Prisma.join(removedIds)})
-      ORDER BY id
-      FOR UPDATE
-    `;
+    await lockListingVariantRows(tx, removedIds);
     const removedSet = new Set(removedIds);
     const [cartRefs, orderRefs] = await Promise.all([
       tx.cartLine.findMany({

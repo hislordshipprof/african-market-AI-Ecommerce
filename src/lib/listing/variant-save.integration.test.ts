@@ -7,7 +7,6 @@ import {
   createListing,
   updateListing,
   updateVariants,
-  getListing,
   type Actor,
   type SaveVariantInput,
 } from "./service";
@@ -291,7 +290,7 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
       { label: "Y", price: 500, weightG: 500 },
       { label: "Z", price: 700, weightG: 700 },
     ]);
-    const [x, y, z] = [...created.variants].sort((a, b) => a.label.localeCompare(b.label));
+    const [x, , z] = [...created.variants].sort((a, b) => a.label.localeCompare(b.label));
     await seedCartLine(storeAId, x!.id, z!.id);
     await expect(updateListing({
       storeId: storeAId,
