@@ -91,7 +91,56 @@ it("production import is inert and configuration fails only on invocation", () =
   expect(request.text).toBe("ok");
 });
 
+it("production import is inert when the Anthropic key is absent", () => {
+  vi.stubEnv("ASSISTANT_MODEL", undefined);
+  vi.stubEnv("ANTHROPIC_API_KEY", undefined);
+  vi.stubEnv("ANTHROPIC_BASE_URL", undefined);
+  const report = runProbe("absent-key", {
+    ANTHROPIC_BASE_URL: "",
+    VERCEL: "1",
+    CI: "1",
+    VERCEL_OIDC_TOKEN: "oidc-fixture",
+    AI_GATEWAY_API_KEY: "gateway-fixture",
+  });
+  expect(report.imported).toBe(true);
+  expect(report.fetchesDuringImport).toBe(0);
+  expect(report.keyDefined).toBe(false);
+  expect(report.modelDefined).toBe(false);
+  expect(report.steps.map((step) => step.kind)).toEqual(["model", "error", "error", "request"]);
+  const seen = report.steps[0];
+  const absent = report.steps[1];
+  const whitespace = report.steps[2];
+  const request = report.steps[3];
+  if (
+    seen?.kind !== "model" ||
+    absent?.kind !== "error" ||
+    whitespace?.kind !== "error" ||
+    request?.kind !== "request"
+  ) {
+    throw new Error("probe steps did not match the absent-key sequence");
+  }
+  expect(seen.modelId).toBe(HAIKU);
+  expect(seen.fetchCount).toBe(0);
+  expect(absent.name).toBe("AssistantConfigError");
+  expect(absent.message).toContain("ANTHROPIC_API_KEY");
+  expect(absent.message.includes("oidc-fixture")).toBe(false);
+  expect(absent.message.includes("gateway-fixture")).toBe(false);
+  expect(absent.fetchCount).toBe(0);
+  expect(whitespace.name).toBe("AssistantConfigError");
+  expect(whitespace.message).toContain("ANTHROPIC_API_KEY");
+  expect(whitespace.fetchCount).toBe(0);
+  expect(request.url).toBe("https://api.anthropic.com/v1/messages");
+  expect(request.bodyModel).toBe(HAIKU);
+  expect(request.modelId).toBe(HAIKU);
+  expect(request.provider).toBe("anthropic.messages");
+  expect(request.hasAuthorization).toBe(false);
+  expect(request.keyDigest).toBe(digest(KEY));
+  expect(request.fetchCount).toBe(1);
+  expect(request.text).toBe("ok");
+});
+
 type ProbeStep =
+  | { kind: "model"; modelId: string; fetchCount: number }
   | { kind: "error"; name: string; message: string; fetchCount: number }
   | {
       kind: "request";
@@ -116,6 +165,8 @@ type ProbeReport = {
   fetchesDuringImport: number;
   errorName: string | null;
   errorMessage: string | null;
+  keyDefined: boolean;
+  modelDefined: boolean;
   steps: ProbeStep[];
 };
 
@@ -183,6 +234,7 @@ const moduleUrl = process.argv[2];
 const scenario = process.argv[3];
 const key = process.argv[4];
 const calls = [];
+let allowFetch = scenario !== "absent-key";
 
 function digest(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -220,9 +272,33 @@ async function record(input, init) {
   }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
-globalThis.fetch = (input, init) => record(input, init);
+globalThis.fetch = async (input, init) => {
+  if (!allowFetch) {
+    calls.push({
+      url: "rejected",
+      method: "REJECT",
+      bodyModel: null,
+      hasAuthorization: false,
+      keyDigest: digest(""),
+      thinking: null,
+      effort: null,
+      sampling: [],
+      messageIncludesGateway: false,
+    });
+    throw new Error("fetch was called");
+  }
+  return record(input, init);
+};
 
-const report = { imported: false, fetchesDuringImport: 0, errorName: null, errorMessage: null, steps: [] };
+const report = {
+  imported: false,
+  fetchesDuringImport: 0,
+  errorName: null,
+  errorMessage: null,
+  keyDefined: Object.hasOwn(process.env, "ANTHROPIC_API_KEY"),
+  modelDefined: Object.hasOwn(process.env, "ASSISTANT_MODEL"),
+  steps: [],
+};
 try {
   const mod = await import(moduleUrl);
   report.imported = true;
@@ -250,6 +326,31 @@ try {
     } catch (error) {
       report.steps.push({ kind: "error", name: error.name, message: String(error.message).slice(0, 240), fetchCount: calls.length });
     }
+    process.env.ANTHROPIC_API_KEY = key;
+    const model = mod.createAssistantModel();
+    const result = await generateText({
+      model,
+      prompt: "ping",
+      providerOptions: mod.assistantProviderOptions(model.modelId),
+    });
+    const call = calls[calls.length - 1];
+    report.steps.push({ kind: "request", ...call, modelId: model.modelId, provider: model.provider, warningCount: result.warnings.length, text: result.text, fetchCount: calls.length });
+  } else if (scenario === "absent-key") {
+    report.steps.push({ kind: "model", modelId: mod.assistantModelId(), fetchCount: calls.length });
+    try {
+      mod.createAssistantModel();
+      report.steps.push({ kind: "error", name: "none", message: "absent key was accepted", fetchCount: calls.length });
+    } catch (error) {
+      report.steps.push({ kind: "error", name: error.name, message: String(error.message).slice(0, 240), fetchCount: calls.length });
+    }
+    process.env.ANTHROPIC_API_KEY = "   ";
+    try {
+      mod.createAssistantModel();
+      report.steps.push({ kind: "error", name: "none", message: "whitespace key was accepted", fetchCount: calls.length });
+    } catch (error) {
+      report.steps.push({ kind: "error", name: error.name, message: String(error.message).slice(0, 240), fetchCount: calls.length });
+    }
+    allowFetch = true;
     process.env.ANTHROPIC_API_KEY = key;
     const model = mod.createAssistantModel();
     const result = await generateText({

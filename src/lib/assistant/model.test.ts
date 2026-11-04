@@ -296,8 +296,8 @@ it("created models retain credentials model and transport across interleaved req
 it("provider options do not share mutable nested state", () => {
   const haiku = assistantProviderOptions(HAIKU);
   const sonnet = assistantProviderOptions(SONNET);
-  const mutableHaiku = haiku.anthropic as { thinking?: { type: string }; effort: string };
-  mutableHaiku.thinking = { type: "enabled" };
+  const mutableHaiku = haiku.anthropic as { thinking: { type: string }; effort: string };
+  mutableHaiku.thinking.type = "enabled";
   mutableHaiku.effort = "max";
   const mutableSonnet = sonnet.anthropic as { effort: string };
   mutableSonnet.effort = "low";
