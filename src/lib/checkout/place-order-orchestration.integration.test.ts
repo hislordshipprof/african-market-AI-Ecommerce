@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { storeScoped } from "../db";
+import { addLine } from "../cart/service";
+import { healthQueryRaw, storeScoped } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 
 const { retrieve, paymentIntents } = vi.hoisted(() => {
@@ -70,10 +71,19 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   beforeAll(async () => {
     raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
     await raw.$connect();
+    const login = (await healthQueryRaw`SELECT current_user, session_user`) as Array<{
+      current_user: string;
+      session_user: string;
+    }>;
+    if (login[0]?.current_user !== "app_runtime" || login[0]?.session_user !== "app_runtime") {
+      throw new Error("placeOrder orchestration must run as app_runtime");
+    }
   }, 30_000);
 
   afterEach(() => {
     checkoutTestHooks.afterMissedOrderLookup = null;
+    checkoutTestHooks.aroundCartRead = null;
+    checkoutTestHooks.afterPostReadLookupMiss = null;
     retrieve.mockClear();
     paymentIntents.clear();
     vi.mocked(sendOrderAuthorized).mockClear();
@@ -157,6 +167,150 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     return { orders, customers };
   }
 
+  async function persistedOrder(storeId: string, orderId: string) {
+    const order = await storeScoped(storeId).order.findUnique({
+      where: { id: orderId },
+      include: { customer: true, lines: { orderBy: { id: "asc" } } },
+    });
+    if (!order) throw new Error("expected the winner order to stay readable");
+    return {
+      customer: {
+        id: order.customer.id,
+        name: order.customer.name,
+        email: order.customer.email,
+        phone: order.customer.phone,
+        updatedAt: order.customer.updatedAt.toISOString(),
+      },
+      order: {
+        id: order.id,
+        number: order.number,
+        status: order.status,
+        customerId: order.customerId,
+        paymentIntentId: order.paymentIntentId,
+        subtotalCents: order.subtotalCents,
+        bufferCents: order.bufferCents,
+        totalAuthorizedCents: order.totalAuthorizedCents,
+        fulfillment: order.fulfillment,
+        notes: order.notes,
+        updatedAt: order.updatedAt.toISOString(),
+      },
+      lines: order.lines.map((line) => ({
+        id: line.id,
+        listingVariantId: line.listingVariantId,
+        qtyOrdered: line.qtyOrdered,
+        unitPriceCents: line.unitPriceCents,
+        swapRule: line.swapRule,
+        updatedAt: line.updatedAt.toISOString(),
+      })),
+    };
+  }
+
+  async function cartSnapshot(storeId: string, cartId: string) {
+    const cart = await storeScoped(storeId).cart.findUnique({
+      where: { id: cartId },
+      include: { lines: { orderBy: { id: "asc" } } },
+    });
+    return {
+      paymentIntentId: cart?.paymentIntentId ?? null,
+      lines: (cart?.lines ?? []).map((line) => ({
+        id: line.id,
+        variantId: line.variantId,
+        qty: line.qty,
+      })),
+    };
+  }
+
+  function watch<T>(promise: Promise<T>) {
+    const settled = promise.then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    return { promise, settled };
+  }
+
+  function pauseOn(hook: "afterMissedOrderLookup" | "afterPostReadLookupMiss") {
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    let entered = false;
+    let released = false;
+    const pause = async () => {
+      entered = true;
+      checkoutTestHooks[hook] = null;
+      await gate;
+    };
+    checkoutTestHooks[hook] = pause;
+    return {
+      release() {
+        if (!released) {
+          released = true;
+          releaseGate();
+        }
+      },
+      async wait() {
+        const start = Date.now();
+        while (!entered && Date.now() - start < 10_000) {
+          await new Promise((resolve) => setTimeout(resolve, 15));
+        }
+        if (!entered) throw new Error(`checkout did not reach ${hook}`);
+      },
+    };
+  }
+
+  function pauseAroundCartRead() {
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    let entered = false;
+    let released = false;
+    checkoutTestHooks.aroundCartRead = async (read) => {
+      entered = true;
+      checkoutTestHooks.aroundCartRead = null;
+      await gate;
+      return read();
+    };
+    return {
+      release() {
+        if (!released) {
+          released = true;
+          releaseGate();
+        }
+      },
+      async wait() {
+        const start = Date.now();
+        while (!entered && Date.now() - start < 10_000) {
+          await new Promise((resolve) => setTimeout(resolve, 15));
+        }
+        if (!entered) throw new Error("checkout did not reach the cart read");
+      },
+    };
+  }
+
+  async function seedPricedCart(label: string, price = 500, qty = 1) {
+    const store = await makeStore(label);
+    const variant = await makeVariant(store.id, price);
+    const paymentIntentId = `pi_${crypto.randomUUID()}`;
+    const cart = await storeScoped(store.id).cart.create({
+      data: { storeId: store.id, paymentIntentId },
+    });
+    await storeScoped(store.id).cartLine.create({
+      data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty, swapRule: "exact_only" },
+    });
+    const amount = holdFor(price, qty);
+    paymentIntents.set(
+      paymentIntentId,
+      paymentIntent({
+        amount,
+        destination: store.stripeAccountId!,
+        onBehalfOf: store.stripeAccountId!,
+        storeId: store.id,
+      }),
+    );
+    return { store, variant, cart, paymentIntentId, amount };
+  }
+
   it("duplicate checkout resumes after winner clears cart", async () => {
     const store = await makeStore("resume");
     const variant = await makeVariant(store.id);
@@ -174,38 +328,27 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       storeId: store.id,
     }));
 
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let entered = false;
-    checkoutTestHooks.afterMissedOrderLookup = async () => {
-      entered = true;
-      checkoutTestHooks.afterMissedOrderLookup = null;
-      await gate;
-    };
-
-    const loser = placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId);
-    const start = Date.now();
-    while (!entered && Date.now() - start < 10_000) {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+    const pause = pauseOn("afterMissedOrderLookup");
+    const loser = watch(placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId));
+    try {
+      await pause.wait();
+      const winner = await placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId);
+      pause.release();
+      const resumed = await loser.promise;
+      expect(resumed.token).toBe(winner.token);
+      expect(await counts(store.id)).toEqual({ orders: 1, customers: 1 });
+      expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+      expect(sendOrderAuthorized).toHaveBeenCalledWith(store.id, winner.token);
+      const emptied = await storeScoped(store.id).cart.findUnique({
+        where: { id: cart.id },
+        include: { lines: true },
+      });
+      expect(emptied?.paymentIntentId).toBeNull();
+      expect(emptied?.lines).toEqual([]);
+    } finally {
+      pause.release();
+      await Promise.allSettled([loser.promise]);
     }
-    expect(entered).toBe(true);
-
-    const winner = await placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId);
-    release();
-    const resumed = await loser;
-
-    expect(resumed.token).toBe(winner.token);
-    expect(await counts(store.id)).toEqual({ orders: 1, customers: 1 });
-    expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
-    expect(sendOrderAuthorized).toHaveBeenCalledWith(store.id, winner.token);
-    const emptied = await storeScoped(store.id).cart.findUnique({
-      where: { id: cart.id },
-      include: { lines: true },
-    });
-    expect(emptied?.paymentIntentId).toBeNull();
-    expect(emptied?.lines).toEqual([]);
   }, 20_000);
 
   it("foreign unrecorded payment intent is rejected before persistence", async () => {
@@ -389,4 +532,822 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
   });
+
+  it("duplicate checkout returns the winner's order whatever the refilled cart holds", async () => {
+    const rows: Array<{
+      label: string;
+      minimum: number;
+      refill: (storeId: string, cartId: string, variantId: string) => Promise<void>;
+      nextIntent?: boolean;
+    }> = [
+      {
+        label: "different amount",
+        minimum: 0,
+        refill: (storeId, cartId, variantId) => addLine(storeId, cartId, variantId, 2),
+      },
+      {
+        label: "same amount",
+        minimum: 0,
+        refill: (storeId, cartId, variantId) => addLine(storeId, cartId, variantId, 1),
+      },
+      {
+        label: "below minimum",
+        minimum: 500,
+        refill: async (storeId, cartId) => {
+          const cheap = await makeVariant(storeId, 100);
+          await addLine(storeId, cartId, cheap.id, 1);
+        },
+      },
+      {
+        label: "buffer capped at $20",
+        minimum: 0,
+        refill: async (storeId, cartId) => {
+          const bulk = await makeVariant(storeId, 20_000);
+          await addLine(storeId, cartId, bulk.id, 1);
+        },
+      },
+      {
+        label: "second payment intent",
+        minimum: 0,
+        nextIntent: true,
+        refill: (storeId, cartId, variantId) => addLine(storeId, cartId, variantId, 2),
+      },
+    ];
+
+    for (const row of rows) {
+      vi.mocked(sendOrderAuthorized).mockClear();
+      retrieve.mockClear();
+      const seeded = await seedPricedCart(row.label.replace(/\s+/g, "-"), 500, 1);
+      expect(seeded.amount).toBe(550);
+      const pause = pauseOn("afterMissedOrderLookup");
+      const loser = watch(
+        placeOrder(
+          seeded.store.id,
+          row.minimum,
+          seeded.cart.id,
+          CONTACT,
+          "pickup",
+          null,
+          null,
+          seeded.paymentIntentId,
+        ),
+      );
+      try {
+        await pause.wait();
+        const winner = await placeOrder(
+          seeded.store.id,
+          row.minimum,
+          seeded.cart.id,
+          CONTACT,
+          "pickup",
+          null,
+          null,
+          seeded.paymentIntentId,
+        );
+        const beforeRows = await persistedOrder(seeded.store.id, winner.token);
+        await row.refill(seeded.store.id, seeded.cart.id, seeded.variant.id);
+        let nextIntent: string | null = null;
+        if (row.nextIntent) {
+          nextIntent = `pi_next_${crypto.randomUUID()}`;
+          await storeScoped(seeded.store.id).cart.update({
+            where: { id: seeded.cart.id },
+            data: { paymentIntentId: nextIntent },
+          });
+        }
+        const beforeCart = await cartSnapshot(seeded.store.id, seeded.cart.id);
+        if (row.label === "different amount") expect(beforeCart.lines.map((line) => line.qty)).toEqual([2]);
+        pause.release();
+        const resumed = await loser.promise;
+        expect(resumed.token, row.label).toBe(winner.token);
+        expect(await counts(seeded.store.id), row.label).toEqual({ orders: 1, customers: 1 });
+        expect(sendOrderAuthorized, row.label).toHaveBeenCalledTimes(1);
+        expect(sendOrderAuthorized).toHaveBeenCalledWith(seeded.store.id, winner.token);
+        expect(await persistedOrder(seeded.store.id, winner.token), row.label).toEqual(beforeRows);
+        expect(await cartSnapshot(seeded.store.id, seeded.cart.id), row.label).toEqual(beforeCart);
+        expect(retrieve.mock.calls.map((call) => call[0]), row.label).toEqual([
+          seeded.paymentIntentId,
+          seeded.paymentIntentId,
+        ]);
+        if (nextIntent) {
+          expect(retrieve.mock.calls.some((call) => call[0] === nextIntent)).toBe(false);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`${row.label}: ${message}`);
+      } finally {
+        pause.release();
+        await loser.settled;
+      }
+    }
+  }, 30_000);
+
+  it("winner commits while duplicate cart read is pending", async () => {
+    const seeded = await seedPricedCart("during-read");
+    const pause = pauseAroundCartRead();
+    const loser = watch(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, seeded.paymentIntentId),
+    );
+    try {
+      await pause.wait();
+      const winner = await placeOrder(
+        seeded.store.id,
+        0,
+        seeded.cart.id,
+        CONTACT,
+        "pickup",
+        null,
+        null,
+        seeded.paymentIntentId,
+      );
+      const beforeRows = await persistedOrder(seeded.store.id, winner.token);
+      await addLine(seeded.store.id, seeded.cart.id, seeded.variant.id, 2);
+      const beforeCart = await cartSnapshot(seeded.store.id, seeded.cart.id);
+      expect(beforeCart.lines.map((line) => line.qty)).toEqual([2]);
+      pause.release();
+      const resumed = await loser.promise;
+      expect(resumed.token).toBe(winner.token);
+      expect(await persistedOrder(seeded.store.id, winner.token)).toEqual(beforeRows);
+      expect(await cartSnapshot(seeded.store.id, seeded.cart.id)).toEqual(beforeCart);
+      expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+      expect(sendOrderAuthorized).toHaveBeenCalledWith(seeded.store.id, winner.token);
+      expect(retrieve.mock.calls.map((call) => call[0])).toEqual([
+        seeded.paymentIntentId,
+        seeded.paymentIntentId,
+      ]);
+    } finally {
+      pause.release();
+      await loser.settled;
+    }
+  }, 20_000);
+
+  it("duplicate checkout that read the cart before the winner committed returns the winner's order", async () => {
+    const seeded = await seedPricedCart("before-commit");
+    const pause = pauseOn("afterPostReadLookupMiss");
+    const loser = watch(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, seeded.paymentIntentId),
+    );
+    try {
+      await pause.wait();
+      const winner = await placeOrder(
+        seeded.store.id,
+        0,
+        seeded.cart.id,
+        CONTACT,
+        "pickup",
+        null,
+        null,
+        seeded.paymentIntentId,
+      );
+      const beforeRows = await persistedOrder(seeded.store.id, winner.token);
+      const beforeCart = await cartSnapshot(seeded.store.id, seeded.cart.id);
+      expect(beforeCart.lines).toEqual([]);
+      pause.release();
+      const resumed = await loser.promise;
+      expect(resumed.token).toBe(winner.token);
+      expect(await persistedOrder(seeded.store.id, winner.token)).toEqual(beforeRows);
+      expect(await cartSnapshot(seeded.store.id, seeded.cart.id)).toEqual(beforeCart);
+      expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+      expect(sendOrderAuthorized).toHaveBeenCalledWith(seeded.store.id, winner.token);
+      expect(retrieve.mock.calls.map((call) => call[0])).toEqual([
+        seeded.paymentIntentId,
+        seeded.paymentIntentId,
+      ]);
+    } finally {
+      pause.release();
+      await loser.settled;
+    }
+  }, 20_000);
+
+  it("a new order still checks the PaymentIntent amount against the hold", async () => {
+    const store = await makeStore("amount");
+    const variant = await makeVariant(store.id, 555);
+    const quote = computeQuote(0, [{ price: 555, qty: 1, maxPerOrder: null }], CONTACT, "pickup");
+    expect(quote.bufferCents).toBe(56);
+    expect(quote.holdCents).toBe(611);
+
+    for (const amount of [610, 612]) {
+      const paymentIntentId = `pi_${amount}_${crypto.randomUUID()}`;
+      const cart = await storeScoped(store.id).cart.create({
+        data: { storeId: store.id, paymentIntentId },
+      });
+      await storeScoped(store.id).cartLine.create({
+        data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
+      });
+      paymentIntents.set(
+        paymentIntentId,
+        paymentIntent({
+          amount,
+          destination: store.stripeAccountId!,
+          onBehalfOf: store.stripeAccountId!,
+          storeId: store.id,
+        }),
+      );
+      await expect(
+        placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId),
+      ).rejects.toThrow(/does not match quote hold/);
+      const kept = await storeScoped(store.id).cart.findUnique({ where: { id: cart.id } });
+      expect(kept?.paymentIntentId).toBe(paymentIntentId);
+    }
+    expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
+    expect(sendOrderAuthorized).not.toHaveBeenCalled();
+
+    const paymentIntentId = `pi_611_${crypto.randomUUID()}`;
+    const cart = await storeScoped(store.id).cart.create({
+      data: { storeId: store.id, paymentIntentId },
+    });
+    await storeScoped(store.id).cartLine.create({
+      data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
+    });
+    paymentIntents.set(
+      paymentIntentId,
+      paymentIntent({
+        amount: 611,
+        destination: store.stripeAccountId!,
+        onBehalfOf: store.stripeAccountId!,
+        storeId: store.id,
+      }),
+    );
+    const placed = await placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId);
+    const order = await storeScoped(store.id).order.findUnique({ where: { id: placed.token } });
+    expect(order?.totalAuthorizedCents).toBe(611);
+    expect(order?.paymentIntentId).toBe(paymentIntentId);
+    expect(order?.status).toBe("AUTHORIZED");
+    expect(await counts(store.id)).toEqual({ orders: 1, customers: 1 });
+    expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+    expect(sendOrderAuthorized).toHaveBeenCalledWith(store.id, placed.token);
+  }, 20_000);
+
+  it("a replay is still rejected when the PaymentIntent is no longer requires_capture", async () => {
+    const seeded = await seedPricedCart("status-replay");
+    const winner = await placeOrder(
+      seeded.store.id,
+      0,
+      seeded.cart.id,
+      CONTACT,
+      "pickup",
+      null,
+      null,
+      seeded.paymentIntentId,
+    );
+    const beforeRows = await persistedOrder(seeded.store.id, winner.token);
+    vi.mocked(sendOrderAuthorized).mockClear();
+    for (const status of ["canceled", "succeeded"]) {
+      paymentIntents.set(
+        seeded.paymentIntentId,
+        paymentIntent({
+          status,
+          amount: seeded.amount,
+          destination: seeded.store.stripeAccountId!,
+          onBehalfOf: seeded.store.stripeAccountId!,
+          storeId: seeded.store.id,
+        }),
+      );
+      const rejected = placeOrder(
+        seeded.store.id,
+        0,
+        seeded.cart.id,
+        CONTACT,
+        "pickup",
+        null,
+        null,
+        seeded.paymentIntentId,
+      );
+      await expect(rejected).rejects.toThrow(new RegExp(status));
+      await expect(rejected).rejects.not.toThrow(winner.token);
+    }
+    expect(await persistedOrder(seeded.store.id, winner.token)).toEqual(beforeRows);
+    expect(sendOrderAuthorized).not.toHaveBeenCalled();
+    expect(await counts(seeded.store.id)).toEqual({ orders: 1, customers: 1 });
+  }, 20_000);
+
+  it("recorded replay still validates each provenance field", async () => {
+    const store = await makeStore("prov");
+    const other = await makeStore("prov-other");
+    const seeded = await seedPricedCart("prov-cart");
+    // seedPricedCart creates its own store. Use that store as the owner.
+    const owner = seeded.store;
+    const winner = await placeOrder(owner.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, seeded.paymentIntentId);
+    const beforeRows = await persistedOrder(owner.id, winner.token);
+    vi.mocked(sendOrderAuthorized).mockClear();
+    const cases: Array<{
+      label: string;
+      destination?: string;
+      onBehalfOf?: string;
+      meta?: string;
+      omitTransfer?: boolean;
+      omitBehalf?: boolean;
+      omitMeta?: boolean;
+      message: RegExp;
+    }> = [
+      {
+        label: "destination",
+        destination: other.stripeAccountId!,
+        onBehalfOf: owner.stripeAccountId!,
+        meta: owner.id,
+        message: /destination does not match store/,
+      },
+      {
+        label: "missing destination",
+        onBehalfOf: owner.stripeAccountId!,
+        meta: owner.id,
+        omitTransfer: true,
+        message: /destination does not match store/,
+      },
+      {
+        label: "on_behalf_of",
+        destination: owner.stripeAccountId!,
+        onBehalfOf: other.stripeAccountId!,
+        meta: owner.id,
+        message: /on_behalf_of does not match store/,
+      },
+      {
+        label: "missing on_behalf_of",
+        destination: owner.stripeAccountId!,
+        meta: owner.id,
+        omitBehalf: true,
+        message: /on_behalf_of does not match store/,
+      },
+      {
+        label: "metadata",
+        destination: owner.stripeAccountId!,
+        onBehalfOf: owner.stripeAccountId!,
+        meta: other.id,
+        message: /store_id metadata does not match/,
+      },
+      {
+        label: "missing metadata",
+        destination: owner.stripeAccountId!,
+        onBehalfOf: owner.stripeAccountId!,
+        omitMeta: true,
+        message: /store_id metadata does not match/,
+      },
+    ];
+    for (const field of cases) {
+      paymentIntents.set(seeded.paymentIntentId, {
+        status: "requires_capture",
+        amount: seeded.amount,
+        ...(field.omitBehalf ? {} : { on_behalf_of: field.onBehalfOf }),
+        ...(field.omitTransfer ? {} : { transfer_data: { destination: field.destination } }),
+        metadata: field.omitMeta ? {} : { store_id: field.meta },
+      });
+      const rejected = placeOrder(owner.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, seeded.paymentIntentId);
+      await expect(rejected, field.label).rejects.toThrow(field.message);
+      await expect(rejected, field.label).rejects.not.toThrow(winner.token);
+    }
+    await expect(
+      placeOrder(owner.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId),
+    ).rejects.toThrow(/Only pickup fulfillment is supported/);
+    expect(await persistedOrder(owner.id, winner.token)).toEqual(beforeRows);
+    expect(sendOrderAuthorized).not.toHaveBeenCalled();
+    expect(await counts(owner.id)).toEqual({ orders: 1, customers: 1 });
+    expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
+  }, 20_000);
+
+  it("store B never receives store A's order for a PaymentIntent A recorded", async () => {
+    const seeded = await seedPricedCart("owner-pi");
+    const storeB = await makeStore("bidder-pi");
+    const winner = await placeOrder(
+      seeded.store.id,
+      0,
+      seeded.cart.id,
+      CONTACT,
+      "pickup",
+      null,
+      null,
+      seeded.paymentIntentId,
+    );
+    const beforeRows = await persistedOrder(seeded.store.id, winner.token);
+    const cartB = await storeScoped(storeB.id).cart.create({ data: { storeId: storeB.id } });
+    await storeScoped(storeB.id).cartLine.create({
+      data: {
+        storeId: storeB.id,
+        cartId: cartB.id,
+        variantId: (await makeVariant(storeB.id)).id,
+        qty: 2,
+        swapRule: "exact_only",
+      },
+    });
+    vi.mocked(sendOrderAuthorized).mockClear();
+    const rejected = placeOrder(
+      storeB.id,
+      0,
+      cartB.id,
+      CONTACT,
+      "pickup",
+      null,
+      null,
+      seeded.paymentIntentId,
+    );
+    await expect(rejected).rejects.toThrow(/destination does not match store/);
+    await expect(rejected).rejects.not.toThrow(winner.token);
+    expect(await counts(storeB.id)).toEqual({ orders: 0, customers: 0 });
+    expect(await persistedOrder(seeded.store.id, winner.token)).toEqual(beforeRows);
+    expect(sendOrderAuthorized).not.toHaveBeenCalled();
+  }, 20_000);
+
+  it("post-read lookup cannot reveal another store's newly committed order", async () => {
+    // Injected security fixture. A confirmed Stripe PaymentIntent cannot change
+    // destination. The strict double serves store B on B's retrieve, then store A
+    // on A's retrieve, so the store-scoped lookup is what keeps A's order hidden.
+    for (const shape of ["empty", "different-amount"] as const) {
+      vi.mocked(sendOrderAuthorized).mockClear();
+      retrieve.mockClear();
+      const storeA = await makeStore(`hid-a-${shape}`);
+      const storeB = await makeStore(`hid-b-${shape}`);
+      const variantA = await makeVariant(storeA.id, 500);
+      const variantB = await makeVariant(storeB.id, 500);
+      const paymentIntentId = `pi_${crypto.randomUUID()}`;
+      const cartB = await storeScoped(storeB.id).cart.create({
+        data: { storeId: storeB.id, paymentIntentId },
+      });
+      if (shape === "different-amount") {
+        await storeScoped(storeB.id).cartLine.create({
+          data: { storeId: storeB.id, cartId: cartB.id, variantId: variantB.id, qty: 2, swapRule: "exact_only" },
+        });
+      }
+      paymentIntents.set(
+        paymentIntentId,
+        paymentIntent({
+          amount: holdFor(500, 1),
+          destination: storeB.stripeAccountId!,
+          onBehalfOf: storeB.stripeAccountId!,
+          storeId: storeB.id,
+        }),
+      );
+      const pause = pauseOn("afterMissedOrderLookup");
+      const loser = watch(
+        placeOrder(storeB.id, 0, cartB.id, { ...CONTACT, email: `b-${shape}@t240.test` }, "pickup", null, null, paymentIntentId),
+      );
+      let postReadMisses = 0;
+      try {
+        await pause.wait();
+        paymentIntents.set(
+          paymentIntentId,
+          paymentIntent({
+            amount: holdFor(500, 1),
+            destination: storeA.stripeAccountId!,
+            onBehalfOf: storeA.stripeAccountId!,
+            storeId: storeA.id,
+          }),
+        );
+        const cartA = await storeScoped(storeA.id).cart.create({ data: { storeId: storeA.id } });
+        await storeScoped(storeA.id).cartLine.create({
+          data: { storeId: storeA.id, cartId: cartA.id, variantId: variantA.id, qty: 1, swapRule: "exact_only" },
+        });
+        const winner = await placeOrder(
+          storeA.id,
+          0,
+          cartA.id,
+          { ...CONTACT, email: `a-${shape}@t240.test` },
+          "pickup",
+          null,
+          null,
+          paymentIntentId,
+        );
+        const beforeRows = await persistedOrder(storeA.id, winner.token);
+        const beforeCart = await cartSnapshot(storeB.id, cartB.id);
+        checkoutTestHooks.afterPostReadLookupMiss = async () => {
+          postReadMisses += 1;
+        };
+        pause.release();
+        const outcome = await loser.settled;
+        expect(outcome.ok, shape).toBe(false);
+        if (!outcome.ok) {
+          const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+          expect(message, shape).not.toContain(winner.token);
+          expect(message, shape).toBe(
+            shape === "empty"
+              ? "Cart is empty"
+              : "PaymentIntent amount (550) does not match quote hold (1100)",
+          );
+        }
+        expect(postReadMisses, shape).toBe(1);
+        expect(await persistedOrder(storeA.id, winner.token), shape).toEqual(beforeRows);
+        expect(await cartSnapshot(storeB.id, cartB.id), shape).toEqual(beforeCart);
+        expect(await counts(storeB.id), shape).toEqual({ orders: 0, customers: 0 });
+        expect(sendOrderAuthorized, shape).toHaveBeenCalledTimes(1);
+        expect(sendOrderAuthorized).toHaveBeenCalledWith(storeA.id, winner.token);
+        expect(retrieve.mock.calls.map((call) => call[0]), shape).toEqual([paymentIntentId, paymentIntentId]);
+      } finally {
+        pause.release();
+        checkoutTestHooks.afterPostReadLookupMiss = null;
+        await loser.settled;
+      }
+    }
+  }, 30_000);
+
+  it("replay ignores invalid contact and a lowered quantity limit", async () => {
+    const badContact: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "not-an-email" };
+    const contactCase = await seedPricedCart("bad-contact");
+    const contactPause = pauseOn("afterMissedOrderLookup");
+    const contactLoser = watch(
+      placeOrder(contactCase.store.id, 0, contactCase.cart.id, badContact, "pickup", null, null, contactCase.paymentIntentId),
+    );
+    try {
+      await contactPause.wait();
+      const winner = await placeOrder(
+        contactCase.store.id,
+        0,
+        contactCase.cart.id,
+        CONTACT,
+        "pickup",
+        null,
+        null,
+        contactCase.paymentIntentId,
+      );
+      const beforeRows = await persistedOrder(contactCase.store.id, winner.token);
+      await addLine(contactCase.store.id, contactCase.cart.id, contactCase.variant.id, 2);
+      const beforeCart = await cartSnapshot(contactCase.store.id, contactCase.cart.id);
+      contactPause.release();
+      const resumed = await contactLoser.promise;
+      expect(resumed.token).toBe(winner.token);
+      expect(await persistedOrder(contactCase.store.id, winner.token)).toEqual(beforeRows);
+      expect(await cartSnapshot(contactCase.store.id, contactCase.cart.id)).toEqual(beforeCart);
+      expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+    } finally {
+      contactPause.release();
+      await contactLoser.settled;
+    }
+
+    vi.mocked(sendOrderAuthorized).mockClear();
+    retrieve.mockClear();
+    const limitCase = await seedPricedCart("qty-limit");
+    const owned = await storeScoped(limitCase.store.id).listingVariant.findUnique({
+      where: { id: limitCase.variant.id },
+      include: { listing: true },
+    });
+    if (!owned) throw new Error("variant missing");
+    const limitPause = pauseOn("afterMissedOrderLookup");
+    const limitLoser = watch(
+      placeOrder(limitCase.store.id, 0, limitCase.cart.id, CONTACT, "pickup", null, null, limitCase.paymentIntentId),
+    );
+    try {
+      await limitPause.wait();
+      const winner = await placeOrder(
+        limitCase.store.id,
+        0,
+        limitCase.cart.id,
+        CONTACT,
+        "pickup",
+        null,
+        null,
+        limitCase.paymentIntentId,
+      );
+      const beforeRows = await persistedOrder(limitCase.store.id, winner.token);
+      await addLine(limitCase.store.id, limitCase.cart.id, limitCase.variant.id, 2);
+      await storeScoped(limitCase.store.id).listing.update({
+        where: { id: owned.listing.id },
+        data: { maxPerOrder: 1 },
+      });
+      const beforeCart = await cartSnapshot(limitCase.store.id, limitCase.cart.id);
+      expect(beforeCart.lines.map((line) => line.qty)).toEqual([2]);
+      limitPause.release();
+      const resumed = await limitLoser.promise;
+      expect(resumed.token).toBe(winner.token);
+      expect(await persistedOrder(limitCase.store.id, winner.token)).toEqual(beforeRows);
+      expect(await cartSnapshot(limitCase.store.id, limitCase.cart.id)).toEqual(beforeCart);
+      expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+      expect(sendOrderAuthorized).toHaveBeenCalledWith(limitCase.store.id, winner.token);
+    } finally {
+      limitPause.release();
+      await limitLoser.settled;
+    }
+  }, 20_000);
+
+  it("missing cart replays only when an order exists", async () => {
+    const seeded = await seedPricedCart("deleted-cart");
+    const winner = await placeOrder(
+      seeded.store.id,
+      0,
+      seeded.cart.id,
+      CONTACT,
+      "pickup",
+      null,
+      null,
+      seeded.paymentIntentId,
+    );
+    await storeScoped(seeded.store.id).cartLine.deleteMany({ where: { cartId: seeded.cart.id } });
+    await storeScoped(seeded.store.id).cart.delete({ where: { id: seeded.cart.id } });
+    const beforeRows = await persistedOrder(seeded.store.id, winner.token);
+    vi.mocked(sendOrderAuthorized).mockClear();
+    retrieve.mockClear();
+    const replay = await placeOrder(
+      seeded.store.id,
+      0,
+      seeded.cart.id,
+      CONTACT,
+      "pickup",
+      null,
+      null,
+      seeded.paymentIntentId,
+    );
+    expect(replay.token).toBe(winner.token);
+    expect(await persistedOrder(seeded.store.id, winner.token)).toEqual(beforeRows);
+    expect(sendOrderAuthorized).not.toHaveBeenCalled();
+    expect(retrieve.mock.calls.map((call) => call[0])).toEqual([seeded.paymentIntentId]);
+
+    const fresh = await makeStore("missing-cart");
+    const missingId = `pi_missing_${crypto.randomUUID()}`;
+    const missingCartId = `cart_${crypto.randomUUID()}`;
+    paymentIntents.set(
+      missingId,
+      paymentIntent({
+        amount: 550,
+        destination: fresh.stripeAccountId!,
+        onBehalfOf: fresh.stripeAccountId!,
+        storeId: fresh.id,
+      }),
+    );
+    await expect(
+      placeOrder(fresh.id, 0, missingCartId, CONTACT, "pickup", null, null, missingId),
+    ).rejects.toThrow("Cart is empty");
+    expect(await counts(fresh.id)).toEqual({ orders: 0, customers: 0 });
+    expect(sendOrderAuthorized).not.toHaveBeenCalled();
+  }, 20_000);
+
+  it("replay preserves winner rows and the next checkout intent", async () => {
+    const seeded = await seedPricedCart("next-intent");
+    const pause = pauseOn("afterMissedOrderLookup");
+    const loser = watch(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, seeded.paymentIntentId),
+    );
+    const nextIntent = `pi_same_${crypto.randomUUID()}`;
+    try {
+      await pause.wait();
+      const winner = await placeOrder(
+        seeded.store.id,
+        0,
+        seeded.cart.id,
+        CONTACT,
+        "pickup",
+        null,
+        null,
+        seeded.paymentIntentId,
+      );
+      const beforeRows = await persistedOrder(seeded.store.id, winner.token);
+      await addLine(seeded.store.id, seeded.cart.id, seeded.variant.id, 1);
+      await storeScoped(seeded.store.id).cart.update({
+        where: { id: seeded.cart.id },
+        data: { paymentIntentId: nextIntent },
+      });
+      const beforeCart = await cartSnapshot(seeded.store.id, seeded.cart.id);
+      expect(beforeCart.paymentIntentId).toBe(nextIntent);
+      expect(beforeCart.lines.map((line) => line.qty)).toEqual([1]);
+      pause.release();
+      const resumed = await loser.promise;
+      expect(resumed.token).toBe(winner.token);
+      expect(await persistedOrder(seeded.store.id, winner.token)).toEqual(beforeRows);
+      expect(await cartSnapshot(seeded.store.id, seeded.cart.id)).toEqual(beforeCart);
+      expect(retrieve.mock.calls.map((call) => call[0])).toEqual([
+        seeded.paymentIntentId,
+        seeded.paymentIntentId,
+      ]);
+      expect(retrieve.mock.calls.some((call) => call[0] === nextIntent)).toBe(false);
+      expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+      expect(sendOrderAuthorized).toHaveBeenCalledWith(seeded.store.id, winner.token);
+    } finally {
+      pause.release();
+      await loser.settled;
+    }
+  }, 20_000);
+
+  it("a failed winner still releases the gate and the loser settles", async () => {
+    const seeded = await seedPricedCart("winner-fails");
+    const pause = pauseOn("afterMissedOrderLookup");
+    const loser = watch(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, seeded.paymentIntentId),
+    );
+    const started = Date.now();
+    let outcome: Awaited<typeof loser.settled> | undefined;
+    try {
+      await pause.wait();
+      await expect(
+        placeOrder(
+          seeded.store.id,
+          0,
+          seeded.cart.id,
+          { ...CONTACT, email: "not-an-email" },
+          "pickup",
+          null,
+          null,
+          seeded.paymentIntentId,
+        ),
+      ).rejects.toThrow(/Name, email, and a valid phone number are required/);
+      expect(await counts(seeded.store.id)).toEqual({ orders: 0, customers: 0 });
+      expect(sendOrderAuthorized).not.toHaveBeenCalled();
+    } finally {
+      pause.release();
+      outcome = await loser.settled;
+    }
+    expect(Date.now() - started).toBeLessThan(8_000);
+    expect(outcome?.ok).toBe(true);
+    if (outcome?.ok) {
+      expect(await counts(seeded.store.id)).toEqual({ orders: 1, customers: 1 });
+      expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+      expect(sendOrderAuthorized).toHaveBeenCalledWith(seeded.store.id, outcome.value.token);
+      const order = await storeScoped(seeded.store.id).order.findUnique({ where: { id: outcome.value.token } });
+      expect(order?.paymentIntentId).toBe(seeded.paymentIntentId);
+    }
+  }, 15_000);
+
+  it("gate cleanup survives arrival and winner failure and asserts loser outcome", async () => {
+    const thrown = await seedPricedCart("arrival-throw");
+    checkoutTestHooks.afterMissedOrderLookup = async () => {
+      throw new Error("arrival failed before the gate");
+    };
+    const thrownLoser = watch(
+      placeOrder(thrown.store.id, 0, thrown.cart.id, CONTACT, "pickup", null, null, thrown.paymentIntentId),
+    );
+    let arrivalRejection = "";
+    try {
+      await expect(thrownLoser.promise).rejects.toThrow(/arrival failed before the gate/);
+    } finally {
+      const settled = await Promise.allSettled([thrownLoser.promise]);
+      const first = settled[0];
+      if (first?.status === "rejected") {
+        arrivalRejection = first.reason instanceof Error ? first.reason.message : String(first.reason);
+      }
+      checkoutTestHooks.afterMissedOrderLookup = null;
+    }
+    expect(arrivalRejection).toBe("arrival failed before the gate");
+    expect(await counts(thrown.store.id)).toEqual({ orders: 0, customers: 0 });
+
+    const aborted = await seedPricedCart("arrival-assert");
+    const pause = pauseOn("afterMissedOrderLookup");
+    const loser = watch(
+      placeOrder(aborted.store.id, 0, aborted.cart.id, CONTACT, "pickup", null, null, aborted.paymentIntentId),
+    );
+    let retained = "";
+    let loserToken = "";
+    try {
+      await pause.wait();
+      throw new Error("arrival assertion failed");
+    } catch (err) {
+      retained = err instanceof Error ? err.message : String(err);
+    } finally {
+      pause.release();
+      const outcome = await loser.settled;
+      if (outcome.ok) loserToken = outcome.value.token;
+    }
+    expect(retained).toBe("arrival assertion failed");
+    expect(loserToken).not.toBe("");
+    const order = await storeScoped(aborted.store.id).order.findUnique({ where: { id: loserToken } });
+    expect(order?.paymentIntentId).toBe(aborted.paymentIntentId);
+    expect(await counts(aborted.store.id)).toEqual({ orders: 1, customers: 1 });
+    expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+    expect(sendOrderAuthorized).toHaveBeenCalledWith(aborted.store.id, loserToken);
+  }, 20_000);
+
+  async function placeWithThrowingHooks(label: string, vercel: "1" | undefined) {
+    const calls = { missed: 0, around: 0, post: 0 };
+    const seeded = await seedPricedCart(label);
+    checkoutTestHooks.afterMissedOrderLookup = async () => {
+      calls.missed += 1;
+      throw new Error("missed hook");
+    };
+    checkoutTestHooks.aroundCartRead = async () => {
+      calls.around += 1;
+      throw new Error("around hook");
+    };
+    checkoutTestHooks.afterPostReadLookupMiss = async () => {
+      calls.post += 1;
+      throw new Error("post hook");
+    };
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", vercel ?? "");
+    try {
+      const placed = await placeOrder(
+        seeded.store.id,
+        0,
+        seeded.cart.id,
+        CONTACT,
+        "pickup",
+        null,
+        null,
+        seeded.paymentIntentId,
+      );
+      expect(calls).toEqual({ missed: 0, around: 0, post: 0 });
+      const order = await storeScoped(seeded.store.id).order.findUnique({ where: { id: placed.token } });
+      expect(order?.status).toBe("AUTHORIZED");
+      expect(order?.paymentIntentId).toBe(seeded.paymentIntentId);
+      expect(await counts(seeded.store.id)).toEqual({ orders: 1, customers: 1 });
+      expect(sendOrderAuthorized).toHaveBeenCalledWith(seeded.store.id, placed.token);
+    } finally {
+      vi.unstubAllEnvs();
+      checkoutTestHooks.afterMissedOrderLookup = null;
+      checkoutTestHooks.aroundCartRead = null;
+      checkoutTestHooks.afterPostReadLookupMiss = null;
+    }
+  }
+
+  it("checkout test hooks are ignored outside NODE_ENV=test", async () => {
+    await placeWithThrowingHooks("hooks-off", undefined);
+  }, 20_000);
+
+  it("all checkout hooks are ignored in production with and without Vercel", async () => {
+    await placeWithThrowingHooks("hooks-prod", undefined);
+    vi.mocked(sendOrderAuthorized).mockClear();
+    await placeWithThrowingHooks("hooks-vercel", "1");
+  }, 20_000);
 });
+
