@@ -1,3 +1,5 @@
+import { stepCartQuantity } from "./cart-quantity";
+
 export type SwapRuleValue = "exact_only" | "store_suggests" | "named_substitute";
 
 export interface CartItem {
@@ -19,6 +21,8 @@ export interface CartStore {
   snapshot: () => readonly CartLine[];
   subscribe: (listener: () => void) => () => void;
   setQuantity: (item: CartItem, quantity: number) => void;
+  /** One stepper step from the latest quantity. No-op when the step changes nothing. */
+  adjust: (item: CartItem, delta: 1 | -1, max?: number) => void;
   remove: (key: string) => void;
 }
 export const cartItemKey = (item: Pick<CartItem, "listingId" | "variantId">) =>
@@ -140,7 +144,7 @@ export function createCartStore(storeId: string): CartStore {
     }
     notify();
   };
-  return {
+  const store: CartStore = {
     snapshot: () => lines,
     subscribe(listener) {
       if (listeners.size === 0 && typeof window !== "undefined") {
@@ -168,8 +172,16 @@ export function createCartStore(storeId: string): CartStore {
       }
       commit(next);
     },
+    adjust(item, delta, max) {
+      const current =
+        lines.find((line) => cartItemKey(line) === cartItemKey(item))?.quantity ?? 0;
+      const next = stepCartQuantity(current, delta, max);
+      if (next === null) return;
+      store.setQuantity(item, next);
+    },
     remove(key) {
       commit(lines.filter((line) => cartItemKey(line) !== key));
     },
   };
+  return store;
 }

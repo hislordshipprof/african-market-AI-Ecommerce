@@ -41,6 +41,20 @@ describe("storefront cart", () => {
     expect(cart.snapshot()).toHaveLength(2);
     expect(createCartStore("b").snapshot()).toEqual([]);
   });
+  it("steps one from the latest quantity and stops at the ceiling", () => {
+    storage();
+    const cart = createCartStore("a");
+    cart.adjust(item, 1);
+    cart.adjust(item, 1);
+    expect(cart.snapshot()[0]?.quantity).toBe(2);
+    cart.adjust(item, 1, 2);
+    expect(cart.snapshot()[0]?.quantity).toBe(2);
+    cart.adjust(item, -1, 0);
+    expect(cart.snapshot()[0]?.quantity).toBe(1);
+    cart.adjust(item, -1, 0);
+    cart.adjust(item, -1, 0);
+    expect(cart.snapshot()).toEqual([]);
+  });
   it("caps quantities and removes zero, negative and explicit removals", () => {
     storage();
     const cart = createCartStore("a");
