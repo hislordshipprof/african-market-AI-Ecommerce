@@ -60,6 +60,7 @@ import { revalidateTag } from "next/cache";
 import { headers } from "next/headers";
 import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
+import * as db from "../db";
 import { authPrisma, healthQueryRaw, platformAdmin, storeScoped, withSessionTimeZone } from "../db";
 import { csvCommitAction, csvPreviewAction, type CommitActionResult } from "./csv-import-actions";
 import { commitImport, type CommitSelection, type CsvPreviewResult } from "./csv-import";
@@ -260,8 +261,10 @@ function cacheInvariant(storeId: string): Error {
   return new Error(`Invariant: static generation store missing in revalidateTag("storefront:${storeId}")`);
 }
 
-function openWhenBothArrive() {
+function openWhenBothArrive(timeoutMessage = "both commits did not reach commitImport") {
   let arrived = 0;
+  let waiting = 0;
+  let overlapped = false;
   let opened = false;
   let resolve = () => {};
   const gate = new Promise<void>((done) => {
@@ -274,21 +277,69 @@ function openWhenBothArrive() {
   };
   return {
     arrived: () => arrived,
+    overlapped: () => overlapped,
     release,
     async enter() {
       arrived += 1;
+      waiting += 1;
+      if (waiting >= 2) overlapped = true;
       if (arrived >= 2) release();
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<void>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("both commits did not reach commitImport")), 8_000);
+        timer = setTimeout(() => reject(new Error(timeoutMessage)), 8_000);
       });
       try {
         await Promise.race([gate, timeout]);
       } finally {
+        waiting -= 1;
         if (timer) clearTimeout(timer);
       }
     },
   };
+}
+
+// Hold both commits at lockStoreRow, before its FOR UPDATE. A barrier before
+// commitImport lets one transaction finish and the other take the early
+// already-committed branch without ever locking.
+async function commitsShareTheStoreLock<T>(storeId: string, run: () => Promise<T>): Promise<T> {
+  const realLock = db.lockStoreRow;
+  const gate = openWhenBothArrive("both commits did not reach the store lock");
+  const spy = vi.spyOn(db, "lockStoreRow").mockImplementation(async (tx, id) => {
+    if (id !== storeId) return realLock(tx, id);
+    try {
+      await gate.enter();
+      return await realLock(tx, id);
+    } finally {
+      gate.release();
+    }
+  });
+  try {
+    const result = await run();
+    expect(gate.arrived()).toBe(2);
+    expect(gate.overlapped()).toBe(true);
+    return result;
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+async function expectRejectedRetryLeavesCommit(
+  storeId: string,
+  tokenId: string,
+  retry: () => Promise<CommitActionResult>,
+): Promise<void> {
+  const before = await fiveTables(storeId);
+  const beforeToken = before.imports.find((row) => row.id === tokenId);
+  expect(beforeToken?.status).toBe("committed");
+  expect(beforeToken?.committedAt).not.toBeNull();
+  const res = await retry();
+  expect(res.error).toBe(ALREADY_COMMITTED);
+  expect(res.result).toBeUndefined();
+  const after = await fiveTables(storeId);
+  expect(after).toEqual(before);
+  const afterToken = after.imports.find((row) => row.id === tokenId);
+  expect(afterToken?.status).toBe(beforeToken?.status);
+  expect(afterToken?.committedAt).toBe(beforeToken?.committedAt);
 }
 
 async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
@@ -512,13 +563,12 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     expect(first.error).toBeUndefined();
     expect(first.result?.createdCount).toBe(1);
     expect(revalidateTagMock).toHaveBeenCalledTimes(1);
-    const second = await commitAs(storeASlug, cookies.ownerA, preview.importToken, newItems([2]));
-    expect(second.error).toBe(ALREADY_COMMITTED);
-    expect(second.result).toBeUndefined();
+    await expectRejectedRetryLeavesCommit(storeAId, preview.importToken, () =>
+      commitAs(storeASlug, cookies.ownerA, preview.importToken, newItems([2])),
+    );
     expect(csvImportLogs()).toEqual([]);
     expect(revalidateTagMock).toHaveBeenCalledTimes(1);
     expect(await storeScoped(storeAId).listing.count({ where: { customName: name } })).toBe(1);
-    expect((await tokenRow(storeAId, preview.importToken))?.status).toBe("committed");
   });
 
   it("empty selection returns no rows selected", async () => {
@@ -749,9 +799,9 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     expect(token?.status).toBe("committed");
     expect(token?.committedAt).not.toBeNull();
     consoleSpy?.mockClear();
-    const retry = await commitAs(storeASlug, cookies.ownerA, preview.importToken, newItems([2, 3]));
-    expect(retry.error).toBe(ALREADY_COMMITTED);
-    expect(retry.result).toBeUndefined();
+    await expectRejectedRetryLeavesCommit(storeAId, preview.importToken, () =>
+      commitAs(storeASlug, cookies.ownerA, preview.importToken, newItems([2, 3])),
+    );
     expect(csvImportLogs()).toEqual([]);
     expect(await storeScoped(storeAId).listing.count({ where: { customName: { in: [left, right] } } })).toBe(2);
   });
@@ -768,8 +818,9 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
       where: { action: "catalog.csv_import" },
     });
     consoleSpy?.mockClear();
-    const retry = await commitAs(storeASlug, cookies.ownerA, preview.importToken, newItems([2]));
-    expect(retry.error).toBe(ALREADY_COMMITTED);
+    await expectRejectedRetryLeavesCommit(storeAId, preview.importToken, () =>
+      commitAs(storeASlug, cookies.ownerA, preview.importToken, newItems([2])),
+    );
     expect(await storeScoped(storeAId).listing.count({ where: { customName: name } })).toBe(1);
     expect(await storeScoped(storeAId).auditLog.count({ where: { action: "catalog.csv_import" } })).toBe(auditsBefore);
     expect(csvImportLogs().some((call) => call[0] === COMMIT_LOG)).toBe(false);
@@ -951,29 +1002,19 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
   it("parallel commits of one token: one result, one already committed", async () => {
     const name = `Parallel ${RUN}`;
     const preview = await previewCsv(storeASlug, cookies.ownerA, priceCsv(name));
-    const gate = openWhenBothArrive();
-    const real = actualBox.commitImport;
-    if (!real) throw new Error("real commitImport was not captured");
-    commitImportMock.mockImplementation(async (storeId, token, selection, actor) => {
-      try {
-        await gate.enter();
-        return await real(storeId, token, selection, actor);
-      } finally {
-        gate.release();
-      }
-    });
     const headers = headersFor(storeASlug, cookies.ownerA);
-    const [first, second] = await Promise.all([
-      inStore(headers, () => csvCommitAction(preview.importToken, newItems([2]))),
-      inStore(headers, () => csvCommitAction(preview.importToken, newItems([2]))),
-    ]);
-    expect(gate.arrived()).toBe(2);
-    const results = [first, second];
-    expect(results.filter((row) => row.result).length).toBe(1);
-    expect(results.filter((row) => row.error === ALREADY_COMMITTED).length).toBe(1);
-    expect(results.some((row) => row.error === GENERIC)).toBe(false);
-    expect(revalidateTagMock).toHaveBeenCalledTimes(1);
-    expect(revalidateTagMock).toHaveBeenCalledWith(`storefront:${storeAId}`, { expire: 0 });
+    await commitsShareTheStoreLock(storeAId, async () => {
+      const [first, second] = await Promise.all([
+        inStore(headers, () => csvCommitAction(preview.importToken, newItems([2]))),
+        inStore(headers, () => csvCommitAction(preview.importToken, newItems([2]))),
+      ]);
+      const results = [first, second];
+      expect(results.filter((row) => row.result).length).toBe(1);
+      expect(results.filter((row) => row.error === ALREADY_COMMITTED).length).toBe(1);
+      expect(results.some((row) => row.error === GENERIC)).toBe(false);
+      expect(revalidateTagMock).toHaveBeenCalledTimes(1);
+      expect(revalidateTagMock).toHaveBeenCalledWith(`storefront:${storeAId}`, { expire: 0 });
+    });
     expect(await storeScoped(storeAId).listing.count({ where: { customName: name } })).toBe(1);
     const audits = await storeScoped(storeAId).auditLog.findMany({ where: { action: "catalog.csv_import" } });
     expect(audits.filter((row) => importIdOf(row.after) === preview.importToken)).toHaveLength(1);
@@ -982,34 +1023,24 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
   it("contending commits preserve one success when winner revalidation throws", async () => {
     const name = `Contend ${RUN}`;
     const preview = await previewCsv(storeASlug, cookies.ownerA, countedCsv([[name, "4.50", 2]]));
-    const gate = openWhenBothArrive();
-    const real = actualBox.commitImport;
-    if (!real) throw new Error("real commitImport was not captured");
     const thrown = cacheInvariant(storeAId);
-    commitImportMock.mockImplementation(async (storeId, token, selection, actor) => {
-      try {
-        await gate.enter();
-        return await real(storeId, token, selection, actor);
-      } finally {
-        gate.release();
-      }
-    });
     revalidateTagMock.mockImplementation(() => {
       throw thrown;
     });
     const headers = headersFor(storeASlug, cookies.ownerA);
-    const results = await Promise.all([
-      inStore(headers, () => csvCommitAction(preview.importToken, newItems([2]))),
-      inStore(headers, () => csvCommitAction(preview.importToken, newItems([2]))),
-    ]);
-    expect(gate.arrived()).toBe(2);
-    expect(results.filter((row) => row.result?.createdCount === 1)).toHaveLength(1);
-    expect(results.filter((row) => row.error === ALREADY_COMMITTED)).toHaveLength(1);
-    expect(revalidateTagMock).toHaveBeenCalledTimes(1);
-    const logs = csvImportLogs();
-    expect(logs).toHaveLength(1);
-    expect(logs[0]?.[0]).toBe(REVALIDATE_LOG);
-    expect(logs[0]?.[1]).toBe(thrown);
+    await commitsShareTheStoreLock(storeAId, async () => {
+      const results = await Promise.all([
+        inStore(headers, () => csvCommitAction(preview.importToken, newItems([2]))),
+        inStore(headers, () => csvCommitAction(preview.importToken, newItems([2]))),
+      ]);
+      expect(results.filter((row) => row.result?.createdCount === 1)).toHaveLength(1);
+      expect(results.filter((row) => row.error === ALREADY_COMMITTED)).toHaveLength(1);
+      expect(revalidateTagMock).toHaveBeenCalledTimes(1);
+      const logs = csvImportLogs();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]?.[0]).toBe(REVALIDATE_LOG);
+      expect(logs[0]?.[1]).toBe(thrown);
+    });
     expect(await storeScoped(storeAId).listing.count({ where: { customName: name } })).toBe(1);
     const tables = await fiveTables(storeAId);
     expect(tables.imports.find((row) => row.id === preview.importToken)?.status).toBe("committed");
