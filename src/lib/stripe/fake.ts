@@ -9,6 +9,7 @@ import type {
   RefundResult,
 } from "./types";
 import { ProviderStateError } from "./types";
+import { OverRefundError } from "./errors";
 
 const VALID_WEBHOOK_SIGNATURE = "fake_valid_sig";
 const STRIPE_USD_MINIMUM_CAPTURE_CENTS = 50;
@@ -357,8 +358,7 @@ const fakeStripeProvider: StripeProvider = {
             `Charge ch_fake_${paymentIntentId} has already been refunded.`,
           );
         }
-        throw new FakeStripeError(
-          "",
+        throw new OverRefundError(
           `Refund amount (${usd(amountCents)}) is greater than unrefunded amount on charge (${usd(remaining)})`,
         );
       }

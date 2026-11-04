@@ -10,6 +10,7 @@ import type {
   RefundResult,
 } from "./types";
 import { ProviderStateError } from "./types";
+import { WebhookSecretMissingError, mapRefundStatus, overRefundError } from "./errors";
 
 let _stripeClient: Stripe | null = null;
 
@@ -25,14 +26,10 @@ export function getStripeClient(): Stripe {
   return _stripeClient;
 }
 
-function getWebhookSecret(): string {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret) {
-    throw new Error(
-      "STRIPE_WEBHOOK_SECRET is not set. Webhook verification requires this key at runtime.",
-    );
-  }
-  return secret;
+function webhookSecrets(): string[] {
+  const raw = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!raw?.trim()) throw new WebhookSecretMissingError();
+  return raw.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -119,45 +116,47 @@ export const stripeProvider: StripeProvider = {
 
   verifyWebhookSignature({ payload, signature }) {
     const stripe = getStripeClient();
-    const secret = getWebhookSecret();
-    try {
-      const event = stripe.webhooks.constructEvent(
-        payload,
-        signature,
-        secret,
-      );
-      const obj = event.data?.object as {
-        id?: string;
-        object?: string;
-        status?: string;
-        payment_intent?: string | { id?: string };
-      } | undefined;
-      const paymentIntentId =
-        typeof obj?.payment_intent === "string" ? obj.payment_intent : obj?.payment_intent?.id;
-      const refund =
-        obj?.object === "refund" && obj.id && obj.status && paymentIntentId
-          ? { id: obj.id, status: obj.status, paymentIntentId }
-          : undefined;
-      return {
-        type: event.type,
-        accountId: obj?.id ?? event.account ?? "",
-        ...(refund ? { refund } : {}),
-      } satisfies WebhookEvent;
-    } catch {
-      // v1 parse failed — try v2 thin event
+    const secrets = webhookSecrets();
+    let lastError: unknown;
+    for (const secret of secrets) {
+      try {
+        const event = stripe.webhooks.constructEvent(payload, signature, secret);
+        const obj = event.data?.object as {
+          id?: string;
+          object?: string;
+          status?: string | null;
+          payment_intent?: string | { id?: string };
+        } | undefined;
+        const paymentIntentId =
+          typeof obj?.payment_intent === "string" ? obj.payment_intent : obj?.payment_intent?.id;
+        const refund =
+          obj?.object === "refund" && obj.id && paymentIntentId
+            ? { id: obj.id, status: mapRefundStatus(obj.status), paymentIntentId }
+            : undefined;
+        return {
+          type: event.type,
+          accountId: obj?.id ?? event.account ?? "",
+          ...(refund ? { refund } : {}),
+        } satisfies WebhookEvent;
+      } catch (err) {
+        lastError = err;
+      }
     }
-    const notification = stripe.parseEventNotification(
-      payload,
-      signature,
-      secret,
-    );
-    return {
-      type: notification.type,
-      accountId:
-        ("related_object" in notification
-          ? (notification.related_object as { id?: string } | null)?.id
-          : undefined) ?? "",
-    } satisfies WebhookEvent;
+    for (const secret of secrets) {
+      try {
+        const notification = stripe.parseEventNotification(payload, signature, secret);
+        return {
+          type: notification.type,
+          accountId:
+            ("related_object" in notification
+              ? (notification.related_object as { id?: string } | null)?.id
+              : undefined) ?? "",
+        } satisfies WebhookEvent;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Invalid webhook signature");
   },
 
   async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
@@ -233,11 +232,13 @@ export const stripeProvider: StripeProvider = {
 
   async listRefunds(paymentIntentId) {
     const stripe = getStripeClient();
-    const listed = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 100 });
-    return listed.data.map((refund) => ({
+    const listed = await stripe.refunds
+      .list({ payment_intent: paymentIntentId, limit: 100 })
+      .autoPagingToArray({ limit: 10_000 });
+    return listed.map((refund) => ({
       refundId: refund.id,
       amountRefunded: refund.amount,
-      status: refund.status ?? "succeeded",
+      status: mapRefundStatus(refund.status),
     })) satisfies RefundResult[];
   },
 
@@ -247,7 +248,7 @@ export const stripeProvider: StripeProvider = {
     return {
       refundId: refund.id,
       amountRefunded: refund.amount,
-      status: refund.status ?? "succeeded",
+      status: mapRefundStatus(refund.status),
     } satisfies RefundResult;
   },
 
@@ -266,21 +267,23 @@ export const stripeProvider: StripeProvider = {
       return {
         refundId: refund.id,
         amountRefunded: refund.amount,
-        status: refund.status ?? "succeeded",
+        status: mapRefundStatus(refund.status),
       } satisfies RefundResult;
     } catch (err: unknown) {
       if (err instanceof Stripe.errors.StripeInvalidRequestError
-        && /already been refunded/i.test(err.message)) {
+        && err.code === "charge_already_refunded") {
         const refunds = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 1 });
         const existing = refunds.data[0];
         if (existing) {
           return {
             refundId: existing.id,
             amountRefunded: existing.amount,
-            status: existing.status ?? "succeeded",
+            status: mapRefundStatus(existing.status),
           } satisfies RefundResult;
         }
       }
+      const over = overRefundError(err);
+      if (over) throw over;
       throw err;
     }
   },

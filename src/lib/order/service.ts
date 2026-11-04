@@ -1,6 +1,6 @@
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider } from "../stripe";
-import { isRetryableProviderError } from "../stripe/errors";
+import { isRetryableProviderError, OverRefundError } from "../stripe/errors";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
@@ -27,7 +27,7 @@ const MAX_CAPTURE_ATTEMPTS = 5;
 const REFUND_APPLICATION_FEE = { refundApplicationFee: true } as const;
 
 function greaterThanUnrefunded(err: unknown): boolean {
-  return err instanceof Error && /greater than unrefunded amount/i.test(err.message);
+  return err instanceof OverRefundError;
 }
 
 /** Refund whatever of a captured charge is still unrefunded. A concurrent refund is re-read once. */

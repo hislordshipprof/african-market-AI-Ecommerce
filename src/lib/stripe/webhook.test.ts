@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import Stripe from "stripe";
 import { fakeStripeProvider, reset, VALID_WEBHOOK_SIGNATURE } from "./fake";
 import { setStripeProvider } from "./index";
 import type { WebhookEvent } from "./types";
@@ -11,11 +12,7 @@ vi.mock("./update-store-status", () => ({
 }));
 
 import { updateStoreOnboardingStatus } from "./update-store-status";
-import { markTerminalRefundFailure } from "@/lib/order/service";
-
-vi.mock("@/lib/order/service", () => ({
-  markTerminalRefundFailure: vi.fn().mockResolvedValue({ ok: true, action: "refund_failed" }),
-}));
+import * as orderService from "@/lib/order/service";
 
 async function callWebhook(body: string, signature: string) {
   const { POST } = await import("@/app/api/webhooks/stripe/route");
@@ -37,11 +34,12 @@ describe("Stripe webhook handler", () => {
     reset();
     setStripeProvider(fakeStripeProvider);
     vi.mocked(updateStoreOnboardingStatus).mockClear();
-    vi.mocked(markTerminalRefundFailure).mockClear();
+    vi.spyOn(orderService, "markTerminalRefundFailure");
   });
 
   afterEach(() => {
     setStripeProvider(null);
+    vi.mocked(orderService.markTerminalRefundFailure).mockRestore();
   });
 
   it("returns 400 when stripe-signature header is missing", async () => {
@@ -97,7 +95,7 @@ describe("Stripe webhook handler", () => {
       VALID_WEBHOOK_SIGNATURE,
     );
     expect(res.status).toBe(200);
-    expect(markTerminalRefundFailure).toHaveBeenCalledWith({
+    expect(orderService.markTerminalRefundFailure).toHaveBeenCalledWith({
       paymentIntentId: "pi_failed_1",
       refundId: "re_failed_1",
       refundStatus: "failed",
@@ -120,7 +118,7 @@ describe("Stripe webhook handler", () => {
       VALID_WEBHOOK_SIGNATURE,
     );
     expect(res.status).toBe(200);
-    expect(markTerminalRefundFailure).toHaveBeenCalledWith({
+    expect(orderService.markTerminalRefundFailure).toHaveBeenCalledWith({
       paymentIntentId: "pi_canceled_1",
       refundId: "re_canceled_1",
       refundStatus: "canceled",
@@ -139,5 +137,83 @@ describe("Stripe webhook handler", () => {
     );
     expect(res.status).toBe(200);
     expect(updateStoreOnboardingStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("Stripe webhook signatures", () => {
+  const platformSecret = "whsec_platform_test_secret_186";
+  const connectSecret = "whsec_connect_test_secret_186";
+  const previousSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousVercel = process.env.VERCEL;
+
+  beforeEach(async () => {
+    const { stripeProvider } = await import("./provider");
+    setStripeProvider(stripeProvider);
+    process.env.STRIPE_WEBHOOK_SECRET = `${platformSecret}, ${connectSecret}`;
+  });
+
+  afterEach(() => {
+    setStripeProvider(null);
+    if (previousSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+    else process.env.STRIPE_WEBHOOK_SECRET = previousSecret;
+    process.env.NODE_ENV = previousNodeEnv;
+    if (previousVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = previousVercel;
+  });
+
+  async function post(payload: string, signature: string) {
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const { NextRequest } = await import("next/server");
+    return POST(new NextRequest("http://localhost:3000/api/webhooks/stripe", {
+      method: "POST",
+      body: payload,
+      headers: { "stripe-signature": signature, "content-type": "application/json" },
+    }));
+  }
+
+  function sign(payload: string, secret: string, timestamp?: number) {
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder");
+    return stripe.webhooks.generateTestHeaderString({
+      payload,
+      secret,
+      ...(timestamp ? { timestamp } : {}),
+    });
+  }
+
+  it("account.updated signed with the connect secret verifies when both secrets are listed", async () => {
+    const payload = JSON.stringify({
+      id: "evt_connect",
+      object: "event",
+      type: "account.updated",
+      data: { object: { id: "acct_connect_186", object: "account" } },
+    });
+    const res = await post(payload, sign(payload, connectSecret));
+    expect(res.status).toBe(200);
+    expect(updateStoreOnboardingStatus).toHaveBeenCalledWith("acct_connect_186");
+  });
+
+  it("a payload signed with an unlisted secret is rejected with 400", async () => {
+    const payload = JSON.stringify({ id: "evt_bad", object: "event", type: "account.updated", data: { object: { id: "acct_x", object: "account" } } });
+    const res = await post(payload, sign(payload, "whsec_not_listed"));
+    expect(res.status).toBe(400);
+  });
+
+  it("a stale signature timestamp is rejected with 400", async () => {
+    const payload = JSON.stringify({ id: "evt_stale", object: "event", type: "account.updated", data: { object: { id: "acct_x", object: "account" } } });
+    const res = await post(payload, sign(payload, platformSecret, Math.floor(Date.now() / 1000) - 600));
+    expect(res.status).toBe(400);
+  });
+
+  it("a missing webhook secret in production returns 500 and logs the key", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.VERCEL;
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const payload = JSON.stringify({ id: "evt_missing", object: "event", type: "account.updated", data: { object: { id: "acct_x", object: "account" } } });
+    const res = await post(payload, "t=1,v1=dead");
+    expect(res.status).toBe(500);
+    expect(error.mock.calls.some((call) => String(call[0]).includes("STRIPE_WEBHOOK_SECRET"))).toBe(true);
+    error.mockRestore();
   });
 });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
 import { markTerminalRefundFailure } from "@/lib/order/service";
+import { WebhookSecretMissingError } from "@/lib/stripe/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,15 @@ export async function POST(req: NextRequest) {
       payload: rawBody,
       signature,
     });
-  } catch {
+  } catch (err) {
+    const production = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+    if (production && err instanceof WebhookSecretMissingError) {
+      console.error("STRIPE_WEBHOOK_SECRET");
+      return NextResponse.json(
+        { error: "Webhook secret is not configured" },
+        { status: 500 },
+      );
+    }
     return NextResponse.json(
       { error: "Invalid webhook signature" },
       { status: 400 },
