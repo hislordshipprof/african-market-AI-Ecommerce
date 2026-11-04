@@ -6,7 +6,7 @@ import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -2126,6 +2126,34 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
     expect(released).not.toBeNull();
     expect((released!.after as { alert: string }).alert).toBe("store_and_platform");
+  });
+
+  it("two concurrent markReady calls reserve one attempt and capture once", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    const entered = holdNextCapture();
+    const first = markReady(storeId, order.id);
+    await entered;
+    const denied = await markReady(storeId, order.id);
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.error).toMatch(/^Retrying in \d+ min$/);
+    releaseHeldCaptures();
+    const winner = await first;
+    expect(winner.ok).toBe(true);
+    expect(
+      await storeScoped(storeId).auditLog.count({
+        where: { entityId: order.id, action: "capture_retry" },
+      }),
+    ).toBe(1);
+    expect(captureCalls.filter((key) => key === `capture:${order.id}:1`)).toEqual([
+      `capture:${order.id}:1`,
+    ]);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("AWAITING_PICKUP");
   });
 
   it("a fifth 500 after Stripe applied the capture finalizes the capture", async () => {

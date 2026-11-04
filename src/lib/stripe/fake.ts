@@ -100,7 +100,27 @@ const cancelUnexpected = new Set<string>();
 const refundErrorBudget = new Map<string, number>();
 const retrieveScript = new Map<string, string[]>();
 const idempotency = new Map<string, IdemRecord>();
+const captureCalls: string[] = [];
+let captureHold: Promise<void> | null = null;
+let releaseCaptureHold: (() => void) | null = null;
+let notifyCaptureEntered: (() => void) | null = null;
 let refundSeq = 0;
+
+function holdNextCapture(): Promise<void> {
+  const entered = new Promise<void>((resolve) => {
+    notifyCaptureEntered = resolve;
+  });
+  captureHold = new Promise<void>((resolve) => {
+    releaseCaptureHold = resolve;
+  });
+  return entered;
+}
+
+function releaseHeldCaptures(): void {
+  releaseCaptureHold?.();
+  captureHold = null;
+  releaseCaptureHold = null;
+}
 
 function reset() {
   accounts.clear();
@@ -122,6 +142,10 @@ function reset() {
   refundErrorBudget.clear();
   retrieveScript.clear();
   idempotency.clear();
+  captureCalls.length = 0;
+  captureHold = null;
+  releaseCaptureHold = null;
+  notifyCaptureEntered = null;
   refundSeq = 0;
 }
 
@@ -265,6 +289,13 @@ const fakeStripeProvider: StripeProvider = {
   },
 
   async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
+    captureCalls.push(idempotencyKey ?? "");
+    if (captureHold) {
+      const notify = notifyCaptureEntered;
+      notifyCaptureEntered = null;
+      notify?.();
+      await captureHold;
+    }
     const fingerprint = `capture:${paymentIntentId}:${amountCents}:${applicationFeeAmount ?? ""}`;
     return withIdempotency(idempotencyKey, fingerprint, async () => {
       if (cancelledPayments.has(paymentIntentId)) {
@@ -525,4 +556,4 @@ function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };

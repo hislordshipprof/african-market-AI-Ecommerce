@@ -111,6 +111,9 @@ The ordered list of lines staff collect for one or more orders, with frozen item
 **Ready**:
 The moment staff confirm every line is resolved and the order can be handed off. The final amount is charged at this point.
 
+**Capture released**:
+The audit recorded when an unconfirmed card hold is released after capture does not settle. The store and the platform are both alerted.
+
 **Refund failed**:
 The capture still stands because the refund did not cover it. Staff see that the platform is resolving the refund and do not refund the customer themselves. There is no Capture failed status.
 

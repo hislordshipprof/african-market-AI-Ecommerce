@@ -43,7 +43,11 @@ async function refundCapturedBalance(
     if (remaining === 0) {
       return refundRecordedOnCharge(paymentIntentId, pi.amountReceived);
     }
-    const refundAttempt = await operationAttempt(storeId, orderId, "refund_retry");
+    const reservedRefund = await reserveAttempt(storeId, orderId, "refund_retry", {
+      alreadyRefundedCents: already,
+    });
+    if (!reservedRefund.ok) throw new Error("Refund attempt is still in backoff");
+    const refundAttempt = reservedRefund.attempt;
     try {
       const refund = await stripe.refundPayment(
         paymentIntentId,
@@ -59,22 +63,6 @@ async function refundCapturedBalance(
       }
       return refund;
     } catch (err) {
-      if (isRetryableProviderError(err)) {
-        await storeScopedTransaction(storeId, async (tx) => {
-          await lockStoreRow(tx, storeId);
-          await tx.auditLog.create({
-            data: {
-              storeId,
-              actorId: SYSTEM_ACTOR_ID,
-              actorEmail: SYSTEM_ACTOR_EMAIL,
-              action: "refund_retry",
-              entityType: "order",
-              entityId: orderId,
-              after: { attempt: refundAttempt, alreadyRefundedCents: already },
-            },
-          });
-        });
-      }
       if (attempt === 0 && greaterThanUnrefunded(err)) {
         pi = await stripe.retrievePaymentIntent(paymentIntentId);
         continue;
@@ -112,11 +100,39 @@ function cancelKey(orderId: string, attempt: number): string {
   return `cancel:${orderId}:${attempt}`;
 }
 
-async function operationAttempt(storeId: string, orderId: string, action: string): Promise<number> {
-  const prior = await storeScopedTransaction(storeId, async (tx) => {
-    return tx.auditLog.count({ where: { entityId: orderId, action } });
+async function reserveAttempt(
+  storeId: string,
+  orderId: string,
+  action: "capture_retry" | "cancel_retry" | "refund_retry",
+  extra: Record<string, unknown> = {},
+): Promise<{ ok: true; attempt: number } | { ok: false; waitMs: number }> {
+  return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const prior = await tx.auditLog.findMany({
+      where: { entityId: orderId, action },
+      orderBy: { createdAt: "desc" },
+    });
+    if (action === "capture_retry" && prior.length > 0) {
+      const latest = prior[0];
+      const after = latest.after as { attempt?: number } | null;
+      const previous = typeof after?.attempt === "number" ? after.attempt : prior.length;
+      const waitMs = captureBackoffMs(previous) - (Date.now() - latest.createdAt.getTime());
+      if (waitMs > 0) return { ok: false, waitMs };
+    }
+    const attempt = prior.length + 1;
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action,
+        entityType: "order",
+        entityId: orderId,
+        after: { attempt, ...extra },
+      },
+    });
+    return { ok: true, attempt };
   });
-  return prior + 1;
 }
 
 function captureBackoffMs(attempt: number): number {
@@ -234,29 +250,6 @@ export async function markLinePicked(
   });
 }
 
-async function captureAttemptNumber(storeId: string, orderId: string): Promise<number> {
-  const prior = await storeScopedTransaction(storeId, async (tx) => {
-    return tx.auditLog.count({
-      where: { entityId: orderId, action: "capture_retry" },
-    });
-  });
-  return prior + 1;
-}
-
-async function captureRetryWaitMs(storeId: string, orderId: string): Promise<number> {
-  const latest = await storeScopedTransaction(storeId, async (tx) => {
-    return tx.auditLog.findFirst({
-      where: { entityId: orderId, action: "capture_retry" },
-      orderBy: { createdAt: "desc" },
-    });
-  });
-  if (!latest) return 0;
-  const after = latest.after as { attempt?: number } | null;
-  const attempt = typeof after?.attempt === "number" ? after.attempt : 1;
-  const remaining = captureBackoffMs(attempt) - (Date.now() - latest.createdAt.getTime());
-  return remaining > 0 ? remaining : 0;
-}
-
 type CaptureRetryResult =
   | { ok: true; capturedAmountCents: number }
   | { ok: false; error: string; resolved: "cancelled" | "pending" };
@@ -269,21 +262,6 @@ async function noteCaptureServerError(
   if (attempt >= MAX_CAPTURE_ATTEMPTS) {
     return settleUnconfirmedCapture(storeId, orderId);
   }
-
-  await storeScopedTransaction(storeId, async (tx) => {
-    await lockStoreRow(tx, storeId);
-    await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action: "capture_retry",
-        entityType: "order",
-        entityId: orderId,
-        after: { attempt, alert: "store_and_platform" },
-      },
-    });
-  });
   return { ok: false, error: "Card capture failed temporarily; we'll retry", resolved: "pending" };
 }
 
@@ -315,25 +293,15 @@ async function settleUnconfirmedCapture(
   }
 
   if (pi.status === "requires_capture") {
-    const releaseAttempt = await operationAttempt(storeId, orderId, "cancel_retry");
+    const reservedRelease = await reserveAttempt(storeId, orderId, "cancel_retry", { releaseHold: true });
+    if (!reservedRelease.ok) {
+      return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+    }
+    const releaseAttempt = reservedRelease.attempt;
     try {
       await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, releaseAttempt));
     } catch (err) {
       if (isRetryableProviderError(err)) {
-        await storeScopedTransaction(storeId, async (tx) => {
-          await lockStoreRow(tx, storeId);
-          await tx.auditLog.create({
-            data: {
-              storeId,
-              actorId: SYSTEM_ACTOR_ID,
-              actorEmail: SYSTEM_ACTOR_EMAIL,
-              action: "cancel_retry",
-              entityType: "order",
-              entityId: orderId,
-              after: { attempt: releaseAttempt, releaseHold: true },
-            },
-          });
-        });
         return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
       }
       if (err instanceof ProviderStateError) {
@@ -698,27 +666,14 @@ export async function markReady(
   if (validation.voidInsteadOfCapture) {
     const stripe = getStripeProvider();
     try {
+      const reservedCancel = await reserveAttempt(storeId, orderId, "cancel_retry");
+      if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank" };
       await stripe.cancelPaymentIntent(
         validation.paymentIntentId,
-        cancelKey(orderId, await operationAttempt(storeId, orderId, "cancel_retry")),
+        cancelKey(orderId, reservedCancel.attempt),
       );
     } catch (err) {
       if (isRetryableProviderError(err)) {
-        const attempt = await operationAttempt(storeId, orderId, "cancel_retry");
-        await storeScopedTransaction(storeId, async (tx) => {
-          await lockStoreRow(tx, storeId);
-          await tx.auditLog.create({
-            data: {
-              storeId,
-              actorId: SYSTEM_ACTOR_ID,
-              actorEmail: SYSTEM_ACTOR_EMAIL,
-              action: "cancel_retry",
-              entityType: "order",
-              entityId: orderId,
-              after: { attempt },
-            },
-          });
-        });
         return { ok: false, error: "Cancellation is still confirming with the bank" };
       }
       if (err instanceof ProviderStateError) {
@@ -761,22 +716,19 @@ export async function markReady(
     return { ok: true, capturedAmountCents: 0, voided: true };
   }
 
-  // A staff retry during the backoff would burn the remaining attempts in one tap.
-  if (validation.alreadyClaiming) {
-    const remaining = await captureRetryWaitMs(storeId, orderId);
-    if (remaining > 0) {
-      const minutes = Math.max(1, Math.ceil(remaining / 60_000));
-      return { ok: false, error: `Retrying in ${minutes} min` };
-    }
-  }
-
-  // Phase 2: Stripe capture outside the transaction. A 5xx uses a new attempt key
-  // because Stripe replays a stored 5xx for the same idempotency key for about 24 hours.
+  // Phase 2: reserve the attempt, then call Stripe outside the lock.
+  // A stored 5xx is pinned to its key, so the next attempt is a new row.
   const stripe = getStripeProvider();
+  const reservedCapture = await reserveAttempt(storeId, orderId, "capture_retry", {
+    alert: "store_and_platform",
+  });
+  if (!reservedCapture.ok) {
+    const minutes = Math.max(1, Math.ceil(reservedCapture.waitMs / 60_000));
+    return { ok: false, error: `Retrying in ${minutes} min` };
+  }
+  const captureAttempt = reservedCapture.attempt;
   let captureResult;
-  let captureAttempt = 1;
   try {
-    captureAttempt = await captureAttemptNumber(storeId, orderId);
     await registerE2EPayment(validation.paymentIntentId, validation.totalAuthorizedCents);
     captureResult = await stripe.capturePaymentIntent(
       validation.paymentIntentId,
@@ -901,28 +853,16 @@ export async function autoCancelOrder(
   // Phase 2: Stripe cancel outside transaction (idempotency key makes retry safe)
   if (validation.paymentIntentId) {
     const stripe = getStripeProvider();
-    const cancelAttempt = await operationAttempt(storeId, orderId, "cancel_retry");
+    const reservedCancel = await reserveAttempt(storeId, orderId, "cancel_retry");
+    if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank" };
     try {
       await stripe.cancelPaymentIntent(
         validation.paymentIntentId,
-        cancelKey(orderId, cancelAttempt),
+        cancelKey(orderId, reservedCancel.attempt),
       );
     } catch (err) {
       if (isRetryableProviderError(err)) {
-        await storeScopedTransaction(storeId, async (tx) => {
-          await lockStoreRow(tx, storeId);
-          await tx.auditLog.create({
-            data: {
-              storeId,
-              actorId: SYSTEM_ACTOR_ID,
-              actorEmail: SYSTEM_ACTOR_EMAIL,
-              action: "cancel_retry",
-              entityType: "order",
-              entityId: orderId,
-              after: { attempt: cancelAttempt },
-            },
-          });
-        });
+        return { ok: false, error: "Cancellation is still confirming with the bank" };
       }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
@@ -1020,10 +960,13 @@ export async function reconcileStuckOrder(
 
   if (pi.status === "requires_capture") {
     if (order.status === "CAPTURING") {
-      if ((await captureRetryWaitMs(storeId, orderId)) > 0) {
+      const reservedCapture = await reserveAttempt(storeId, orderId, "capture_retry", {
+        alert: "store_and_platform",
+      });
+      if (!reservedCapture.ok) {
         return { ok: false, error: "capture_backoff", waiting: true };
       }
-      const attempt = await captureAttemptNumber(storeId, orderId);
+      const attempt = reservedCapture.attempt;
       const amount = order.capturedAmountCents ?? 0;
       const sweepFee = applicationFeeForCapture(amount, order.deliveryFeeCents);
       try {
@@ -1049,25 +992,14 @@ export async function reconcileStuckOrder(
       }
     } else {
       try {
-        const cancelAttempt = await operationAttempt(storeId, orderId, "cancel_retry");
+        const reservedCancel = await reserveAttempt(storeId, orderId, "cancel_retry");
+        if (!reservedCancel.ok) {
+          return { ok: false, error: "Cancellation is still confirming with the bank", waiting: true };
+        }
         try {
-          await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, cancelAttempt));
+          await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, reservedCancel.attempt));
         } catch (err) {
           if (isRetryableProviderError(err)) {
-            await storeScopedTransaction(storeId, async (tx) => {
-              await lockStoreRow(tx, storeId);
-              await tx.auditLog.create({
-                data: {
-                  storeId,
-                  actorId: SYSTEM_ACTOR_ID,
-                  actorEmail: SYSTEM_ACTOR_EMAIL,
-                  action: "cancel_retry",
-                  entityType: "order",
-                  entityId: orderId,
-                  after: { attempt: cancelAttempt },
-                },
-              });
-            });
             return { ok: false, error: "Cancellation is still confirming with the bank", waiting: true };
           }
           throw err;
