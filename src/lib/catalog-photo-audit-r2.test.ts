@@ -204,6 +204,9 @@ describe("createR2HeadObject", () => {
     send.mockImplementationOnce(async () => { throw statusError("NotFound", 403); });
     await expect(api.headObject("catalog/named-403.webp")).rejects.toThrow("HTTP 403");
 
+    send.mockImplementationOnce(async () => { throw statusError("Unknown", 404); });
+    await expect(api.headObject("catalog/unexpected-name.webp")).resolves.toBe("missing");
+
     send.mockImplementationOnce(async () => { throw statusError("NotFound"); });
     await expect(api.headObject("catalog/named-bare.webp")).rejects.toThrow("no status");
 

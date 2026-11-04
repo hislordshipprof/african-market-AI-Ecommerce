@@ -283,6 +283,22 @@ export function escapeField(value: string): string {
     .replace(/[\u0000-\u001F\u007F]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
+/**
+ * A report key keeps the path that explains an invalid catalog URL.
+ * Userinfo, query, and fragment can carry credentials and are omitted.
+ */
+function stripUrlCredentials(value: string): string {
+  const absolute = /^([a-z][a-z0-9+.-]*:)\/\/(?:[^/?#]*@)?([^/?#]*)([^?#]*)/i.exec(value);
+  if (absolute?.[1] != null && absolute[2] != null) {
+    return `${absolute[1]}//${absolute[2]}${absolute[3] ?? ""}`;
+  }
+  if (value.startsWith("/") || value.startsWith("catalog/")) {
+    const cut = value.search(/[?#]/);
+    return cut === -1 ? value : value.slice(0, cut);
+  }
+  return value;
+}
+
 export function formatCatalogAuditReport(input: {
   rows: AuditRow[];
   counts: AuditCounts;
@@ -293,7 +309,7 @@ export function formatCatalogAuditReport(input: {
 }): string {
   const lines = input.rows.map((row) =>
     [row.status, row.name, row.id, row.productStatus, row.key ?? "", row.ext ?? "", row.reason]
-      .map(escapeField)
+      .map((field) => escapeField(stripUrlCredentials(field)))
       .join(" | "),
   );
   const extensions = Object.keys(input.counts.missingExtensions)

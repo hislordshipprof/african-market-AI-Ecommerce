@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { auditCatalogPhotos, type AuditProduct, type HeadResult } from "./catalog-photo-audit";
+import { auditCatalogPhotos, formatCatalogAuditReport, type AuditProduct, type HeadResult } from "./catalog-photo-audit";
 
 function product(partial: Partial<AuditProduct> & Pick<AuditProduct, "id" | "name">): AuditProduct {
   return {
@@ -137,6 +137,36 @@ describe("auditCatalogPhotos", () => {
       status: "not-r2",
       reason: "storefront returns this URL unchanged",
     });
+  });
+
+  it("redacts userinfo and query credentials from the report (E31)", async () => {
+    const head = vi.fn(async (): Promise<HeadResult> => {
+      throw new Error("head should not run");
+    });
+    const audited = await auditCatalogPhotos({
+      products: [
+        product({ id: "1", name: "Userinfo", imageUrl: "https://alice:secret-token@old.example.com/catalog/x.JPG" }),
+        product({ id: "2", name: "Query", imageUrl: "/api/catalog-image/catalog/x.jpg?token=secret-token" }),
+      ],
+      headObject: head,
+    });
+    const report = formatCatalogAuditReport({
+      rows: audited.rows,
+      counts: audited.counts,
+      dbReadAt: new Date("2026-11-04T00:00:00.000Z"),
+      completedAt: new Date("2026-11-04T00:00:01.000Z"),
+      dbHost: "db.example.com",
+      bucket: "photo-bucket",
+    });
+    expect(head).not.toHaveBeenCalled();
+    expect(audited.counts["invalid-key"]).toBe(2);
+    expect(audited.counts.checkedKeys).toBe(0);
+    expect(report.includes("secret-token")).toBe(false);
+    expect(report.includes("alice:")).toBe(false);
+    expect(report).toContain("https://old.example.com/catalog/x.JPG");
+    expect(report).toContain("/api/catalog-image/catalog/x.jpg");
+    expect(report).toContain("extension is not a lowercase jpg, png, or webp catalog key");
+    expect(report).toContain("local catalog URL is not a bare key or the allowlisted ?retry=1 query");
   });
 
   it("skips null, empty and whitespace image URLs without a check (E12, E24)", async () => {
