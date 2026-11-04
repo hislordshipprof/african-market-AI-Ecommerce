@@ -6,7 +6,7 @@ import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextCaptureFailure, setNextCancelFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextCaptureFailure, setNextCancelFailure, setNextRefundFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -2185,6 +2185,26 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const retried = await reconcileStuckOrder(storeId, order.id);
     expect(retried.ok).toBe(true);
     if (retried.ok) expect(retried.action).toBe("finalized_capture");
+  });
+
+  it("a stored 500 on the refund key moves to the next attempt key", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    capturedPayments.set(pi, order.totalAuthorizedCents);
+    setNextRefundFailure(pi, 1);
+
+    await expect(autoCancelOrder(storeId, order.id)).rejects.toThrow(/internal server error/i);
+    const stuck = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(stuck!.status).toBe("CANCELLING");
+
+    const retried = await autoCancelOrder(storeId, order.id);
+    expect(retried.ok).toBe(true);
+    const keys = refundRequests
+      .filter((request) => request.paymentIntentId === pi)
+      .map((request) => request.idempotencyKey);
+    expect(keys[0]).toBe(`refund:${order.id}:0:1`);
+    expect(keys[1]).toBe(`refund:${order.id}:0:2`);
   });
 
   it("a stored 500 on the cancel key moves to the next attempt key after a retrieve", async () => {

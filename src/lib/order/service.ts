@@ -31,7 +31,11 @@ function greaterThanUnrefunded(err: unknown): boolean {
 }
 
 /** Refund whatever of a captured charge is still unrefunded. A concurrent refund is re-read once. */
-async function refundCapturedBalance(paymentIntentId: string, orderId: string): Promise<RefundResult> {
+async function refundCapturedBalance(
+  paymentIntentId: string,
+  orderId: string,
+  storeId: string,
+): Promise<RefundResult> {
   const stripe = getStripeProvider();
   let pi = await stripe.retrievePaymentIntent(paymentIntentId);
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -40,11 +44,12 @@ async function refundCapturedBalance(paymentIntentId: string, orderId: string): 
     if (remaining === 0) {
       return refundRecordedOnCharge(paymentIntentId, pi.amountReceived);
     }
+    const refundAttempt = await operationAttempt(storeId, orderId, "refund_retry");
     try {
       const refund = await stripe.refundPayment(
         paymentIntentId,
         remaining,
-        `refund:${orderId}:${already}`,
+        `refund:${orderId}:${already}:${refundAttempt}`,
         REFUND_APPLICATION_FEE,
       );
       const after = await stripe.retrievePaymentIntent(paymentIntentId);
@@ -55,6 +60,22 @@ async function refundCapturedBalance(paymentIntentId: string, orderId: string): 
       }
       return refund;
     } catch (err) {
+      if (isRetryableProviderError(err)) {
+        await storeScopedTransaction(storeId, async (tx) => {
+          await lockStoreRow(tx, storeId);
+          await tx.auditLog.create({
+            data: {
+              storeId,
+              actorId: SYSTEM_ACTOR_ID,
+              actorEmail: SYSTEM_ACTOR_EMAIL,
+              action: "refund_retry",
+              entityType: "order",
+              entityId: orderId,
+              after: { attempt: refundAttempt, alreadyRefundedCents: already },
+            },
+          });
+        });
+      }
       if (attempt === 0 && greaterThanUnrefunded(err)) {
         pi = await stripe.retrievePaymentIntent(paymentIntentId);
         continue;
@@ -377,7 +398,7 @@ async function settleCapturedRefund(
   paymentIntentId: string,
   refund: RefundResult,
 ): Promise<{ outcome: "refunded" } | { outcome: "failed" | "pending"; error: string }> {
-  const decision = await refundReadyToSettle(paymentIntentId, orderId, refund);
+  const decision = await refundReadyToSettle(paymentIntentId, orderId, storeId, refund);
   if (decision.status === "succeeded") {
     await storeScopedTransaction(storeId, async (tx) => {
       await lockStoreRow(tx, storeId);
@@ -423,6 +444,7 @@ async function settleCapturedRefund(
 async function refundReadyToSettle(
   paymentIntentId: string,
   orderId: string,
+  storeId: string,
   refund: RefundResult,
 ): Promise<RefundResult> {
   if (refund.status !== "succeeded") return refund;
@@ -438,7 +460,7 @@ async function refundReadyToSettle(
   const captured = await stripe.retrievePaymentIntent(paymentIntentId);
   if (succeededTotal(listed) >= captured.amountReceived) return refund;
 
-  const gap = await refundCapturedBalance(paymentIntentId, orderId);
+  const gap = await refundCapturedBalance(paymentIntentId, orderId, storeId);
   if (gap.status !== "succeeded") return gap;
   const again = await stripe.listRefunds(paymentIntentId);
   const stillPending = open(again);
@@ -671,7 +693,7 @@ export async function markReady(
       }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
-        const refund = await refundCapturedBalance(validation.paymentIntentId, orderId);
+        const refund = await refundCapturedBalance(validation.paymentIntentId, orderId, storeId);
         const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true, capturedAmountCents: 0, voided: true };
@@ -849,17 +871,34 @@ export async function autoCancelOrder(
   // Phase 2: Stripe cancel outside transaction (idempotency key makes retry safe)
   if (validation.paymentIntentId) {
     const stripe = getStripeProvider();
+    const cancelAttempt = await operationAttempt(storeId, orderId, "cancel_retry");
     try {
       await stripe.cancelPaymentIntent(
         validation.paymentIntentId,
-        `cancel:${orderId}`,
+        cancelKey(orderId, cancelAttempt),
       );
     } catch (err) {
+      if (isRetryableProviderError(err)) {
+        await storeScopedTransaction(storeId, async (tx) => {
+          await lockStoreRow(tx, storeId);
+          await tx.auditLog.create({
+            data: {
+              storeId,
+              actorId: SYSTEM_ACTOR_ID,
+              actorEmail: SYSTEM_ACTOR_EMAIL,
+              action: "cancel_retry",
+              entityType: "order",
+              entityId: orderId,
+              after: { attempt: cancelAttempt },
+            },
+          });
+        });
+      }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
         const refund = validation.refundId
           ? await stripe.retrieveRefund(validation.refundId)
-          : await refundCapturedBalance(validation.paymentIntentId, orderId);
+          : await refundCapturedBalance(validation.paymentIntentId, orderId, storeId);
         const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true };
@@ -934,7 +973,7 @@ export async function reconcileStuckOrder(
       if (order.refundId) {
         refund = await stripe.retrieveRefund(order.refundId);
       } else {
-        refund = await refundCapturedBalance(order.paymentIntentId, orderId);
+        refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
       }
       const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
       if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
@@ -1009,7 +1048,7 @@ export async function reconcileStuckOrder(
             if (order.refundId) {
               refund = await stripe.retrieveRefund(order.refundId);
             } else {
-              refund = await refundCapturedBalance(order.paymentIntentId, orderId);
+              refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
             }
             const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
             if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
