@@ -517,9 +517,10 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     await storeScoped(storeId).cartLine.create({
       data: { storeId, cartId: cart.id, variantId: variants[0]!.id, qty: 4, swapRule: "exact_only" },
     });
+    const refilledPi = `pi_refilled_${crypto.randomUUID()}`;
     await storeScoped(storeId).cart.update({
       where: { id: cart.id },
-      data: { paymentIntentId: "pi_refilled_link" },
+      data: { paymentIntentId: refilledPi },
     });
     const secondPi = `pi_${crypto.randomUUID()}`;
     const second = await makeCart(storeId, [variants[0]!.id], 3, secondPi);
@@ -529,7 +530,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       where: { id: cart.id },
       include: { lines: true },
     });
-    expect(refilled?.paymentIntentId).toBe("pi_refilled_link");
+    expect(refilled?.paymentIntentId).toBe(refilledPi);
     expect(refilled?.lines.map((line) => line.qty)).toEqual([4]);
     const other = await storeScoped(storeId).cart.findUnique({
       where: { id: second.cart.id },
@@ -819,11 +820,12 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     const paymentIntentId = `pi_${crypto.randomUUID()}`;
     const { cart } = await makeCart(storeId, [variants[0]!.id], 1, paymentIntentId);
     if (!/^[a-z0-9]+$/i.test(cart.id)) throw new Error("unexpected cart id");
+    const trap = `t236_fail_${cart.id}`;
     const owner = new Client({ connectionString: process.env.DIRECT_URL });
     await owner.connect();
     try {
       await owner.query(`
-        CREATE OR REPLACE FUNCTION t236_fail_cart_pi_clear() RETURNS trigger
+        CREATE OR REPLACE FUNCTION ${trap}() RETURNS trigger
         LANGUAGE plpgsql AS $fn$
         BEGIN
           IF NEW.id = '${cart.id}'
@@ -835,12 +837,12 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
         END;
         $fn$
       `);
-      await owner.query("DROP TRIGGER IF EXISTS t236_fail_cart_pi_clear ON carts");
+      await owner.query(`DROP TRIGGER IF EXISTS ${trap} ON carts`);
       await owner.query(`
-        CREATE TRIGGER t236_fail_cart_pi_clear
+        CREATE TRIGGER ${trap}
         BEFORE UPDATE ON carts
         FOR EACH ROW
-        EXECUTE FUNCTION t236_fail_cart_pi_clear()
+        EXECUTE FUNCTION ${trap}()
       `);
       await expect(
         recordAuthorizedOrder(
@@ -849,8 +851,8 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
         ),
       ).rejects.toThrow(/t236 forced cart reset failure/);
     } finally {
-      await owner.query("DROP TRIGGER IF EXISTS t236_fail_cart_pi_clear ON carts").catch(() => undefined);
-      await owner.query("DROP FUNCTION IF EXISTS t236_fail_cart_pi_clear()").catch(() => undefined);
+      await owner.query(`DROP TRIGGER IF EXISTS ${trap} ON carts`).catch(() => undefined);
+      await owner.query(`DROP FUNCTION IF EXISTS ${trap}()`).catch(() => undefined);
       await owner.end().catch(() => undefined);
     }
     expect(await storeScoped(storeId).customer.count()).toBe(0);
