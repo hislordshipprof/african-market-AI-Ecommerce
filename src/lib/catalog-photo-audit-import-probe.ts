@@ -1,6 +1,10 @@
 import http from "node:http";
 import https from "node:https";
+import { createRequire } from "node:module";
 import net from "node:net";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import type { S3Client } from "@aws-sdk/client-s3";
 
 function blocked(kind: string): () => never {
   return () => {
@@ -12,8 +16,22 @@ net.Socket.prototype.connect = blocked("socket") as typeof net.Socket.prototype.
 http.request = blocked("http") as typeof http.request;
 https.request = blocked("https") as typeof https.request;
 
+const require = createRequire(pathToFileURL(path.join(process.cwd(), "package.json")).href);
+const sdk = require("@aws-sdk/client-s3") as { S3Client: typeof S3Client };
+const OriginalS3Client = sdk.S3Client;
+let s3ClientConstructions = 0;
+sdk.S3Client = class CountingS3Client extends OriginalS3Client {
+  constructor(...args: ConstructorParameters<typeof OriginalS3Client>) {
+    s3ClientConstructions += 1;
+    super(...args);
+  }
+};
+
 async function main(): Promise<void> {
   const { httpStatusOf, statusLabel } = await import("./catalog-photo-audit");
+  if (s3ClientConstructions !== 0) {
+    throw new Error(`S3Client constructed ${s3ClientConstructions} time(s) during core import`);
+  }
 
   if (
     process.env.R2_ACCOUNT_ID

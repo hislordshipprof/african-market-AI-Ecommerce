@@ -1,9 +1,0 @@
-import { describe, expect, it } from "vitest";
-
-const hasRuntime = !!process.env.DATABASE_URL && !!process.env.APP_RUNTIME_PASSWORD;
-
-describe.skipIf(!hasRuntime)("catalog photo audit reader skips without a runtime password", () => {
-  it("does not run when the runtime password is absent", () => {
-    expect(process.env.APP_RUNTIME_PASSWORD).toBeTruthy();
-  });
-});
