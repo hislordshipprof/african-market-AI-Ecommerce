@@ -36,6 +36,7 @@ vi.mock("next/navigation", () => ({
 import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { addToCart, clearCart, getServerCart } from "./actions";
+import { addLine, getOrCreateCart } from "./service";
 import { quoteCheckoutAction } from "../checkout/actions";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -401,5 +402,53 @@ describe.skipIf(!hasDb)("authenticated cart actions (real session, lane DB)", ()
     expect(lines[0].qty).toBe(1);
     const otherCart = await storeScoped(storeId).cart.findUnique({ where: { id: theirs.id } });
     expect(otherCart?.userId).toBe(otherId);
+  });
+
+  it("does not clear lines an account added after claiming the guest cart", async () => {
+    await wipeCarts();
+    asStore(storeSlug);
+    expect(await addToCart(variantId, 1)).toEqual({ ok: true });
+    const id = cartCookies.get("cart_id");
+    expect(id).toEqual(expect.any(String));
+
+    const prisma = (globalThis as unknown as {
+      prisma: { $transaction: (...args: unknown[]) => Promise<unknown> };
+    }).prisma;
+    const original = prisma.$transaction.bind(prisma);
+    let release: () => void = () => {};
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const paused = new Promise<void>((resolve) => {
+      prisma.$transaction = (async (...args: unknown[]) => {
+        const result = await original(...args);
+        const row = Array.isArray(result) ? (result[2] as { id?: string; userId?: string | null }) : undefined;
+        if (row != null && row.id === id && row.userId === null) {
+          resolve();
+          await resume;
+        }
+        return result;
+      }) as typeof prisma.$transaction;
+    });
+
+    try {
+      asStore(storeSlug);
+      const pending = clearCart();
+      await paused;
+      const claimed = await getOrCreateCart(storeId, id!, userId);
+      expect(claimed).toBe(id);
+      await addLine(storeId, id!, variantId, 2, userId);
+      const before = await storeScoped(storeId).cartLine.findMany({ where: { cartId: id } });
+      expect(before).toHaveLength(1);
+      expect(before[0].qty).toBe(3);
+      release();
+      await pending;
+      const after = await storeScoped(storeId).cartLine.findMany({ where: { cartId: id } });
+      expect(after).toHaveLength(1);
+      expect(after[0].qty).toBe(3);
+    } finally {
+      release();
+      prisma.$transaction = original;
+    }
   });
 });

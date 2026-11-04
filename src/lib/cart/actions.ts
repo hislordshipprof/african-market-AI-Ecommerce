@@ -28,7 +28,11 @@ async function sessionUserId(): Promise<string | null> {
   return session?.user.id ?? null;
 }
 
-async function ensureCartId(): Promise<{ storeId: string; cartId: string }> {
+async function ensureCartId(): Promise<{
+  storeId: string;
+  cartId: string;
+  userId: string | null;
+}> {
   const [store, cookieCartId, userId] = await Promise.all([
     getStore(),
     getCartIdFromCookie(),
@@ -38,7 +42,7 @@ async function ensureCartId(): Promise<{ storeId: string; cartId: string }> {
   if (cartId !== cookieCartId) {
     await setCartIdCookie(cartId);
   }
-  return { storeId: store.id, cartId };
+  return { storeId: store.id, cartId, userId };
 }
 
 /**
@@ -46,7 +50,11 @@ async function ensureCartId(): Promise<{ storeId: string; cartId: string }> {
  * A cookie that names an account cart the current session does not own is
  * replaced, so a signed-out shopper neither sees nor clears that basket.
  */
-export async function resolveShopperCart(): Promise<{ storeId: string; cartId: string } | null> {
+export async function resolveShopperCart(): Promise<{
+  storeId: string;
+  cartId: string;
+  userId: string | null;
+} | null> {
   const cookieCartId = await getCartIdFromCookie();
   if (!cookieCartId) return null;
   return ensureCartId();
@@ -63,8 +71,8 @@ export async function addToCart(
   qty: number,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
   try {
-    const { storeId, cartId } = await ensureCartId();
-    await addLine(storeId, cartId, variantId, qty);
+    const { storeId, cartId, userId } = await ensureCartId();
+    await addLine(storeId, cartId, variantId, qty, userId);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -79,8 +87,8 @@ export async function setLineQty(
   qty: number,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
   try {
-    const { storeId, cartId } = await ensureCartId();
-    await updateLineQty(storeId, cartId, lineId, qty);
+    const { storeId, cartId, userId } = await ensureCartId();
+    await updateLineQty(storeId, cartId, lineId, qty, userId);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -96,8 +104,15 @@ export async function setSwapRule(
   substituteVariantId: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
   try {
-    const { storeId, cartId } = await ensureCartId();
-    await updateLineSwapRule(storeId, cartId, lineId, swapRule, substituteVariantId);
+    const { storeId, cartId, userId } = await ensureCartId();
+    await updateLineSwapRule(
+      storeId,
+      cartId,
+      lineId,
+      swapRule,
+      substituteVariantId,
+      userId,
+    );
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -111,8 +126,8 @@ export async function removeCartLine(
   lineId: string,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
   try {
-    const { storeId, cartId } = await ensureCartId();
-    await removeLine(storeId, cartId, lineId);
+    const { storeId, cartId, userId } = await ensureCartId();
+    await removeLine(storeId, cartId, lineId, userId);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -126,7 +141,7 @@ export async function clearCart(): Promise<{ ok: true } | { ok: false; error: st
   try {
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: true };
-    await clearAllLines(resolved.storeId, resolved.cartId);
+    await clearAllLines(resolved.storeId, resolved.cartId, resolved.userId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
@@ -155,7 +170,7 @@ export async function migrateLocalCart(
   }>,
 ): Promise<{ ok: true; cartId: string } | { ok: false; error: string }> {
   try {
-    const { storeId, cartId } = await ensureCartId();
+    const { storeId, cartId, userId } = await ensureCartId();
     const existingCart = await getCartWithLines(storeId, cartId);
     if (existingCart && existingCart.lines.length > 0) {
       return { ok: true, cartId };
@@ -163,7 +178,7 @@ export async function migrateLocalCart(
     for (const line of localLines) {
       if (!line.variantId || line.qty <= 0) continue;
       try {
-        await addLine(storeId, cartId, line.variantId, line.qty);
+        await addLine(storeId, cartId, line.variantId, line.qty, userId);
         if (line.swapRule && line.swapRule !== "exact_only") {
           const cart = await getCartWithLines(storeId, cartId);
           const serverLine = cart?.lines.find(
@@ -176,6 +191,7 @@ export async function migrateLocalCart(
               serverLine.id,
               line.swapRule,
               line.substituteVariantId ?? null,
+              userId,
             );
           }
         }

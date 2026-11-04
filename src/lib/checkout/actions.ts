@@ -88,6 +88,7 @@ export async function placeOrderAction(
       notes || null,
       slot !== "asap" ? slot : null,
       paymentIntentId,
+      resolved.userId,
     );
     return { ok: true, token: result.token };
   } catch (e) {

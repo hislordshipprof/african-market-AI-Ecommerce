@@ -313,7 +313,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
 
     it("opens a fresh unlinked cart when no session holds an account cart", async () => {
       const cartId = await getOrCreateCart(storeId, null, buyerId);
-      await addLine(storeId, cartId, variantId, 1);
+      await addLine(storeId, cartId, variantId, 1, buyerId);
       const original = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
       const guestId = await getOrCreateCart(storeId, cartId, null);
       expect(guestId).not.toBe(cartId);

@@ -197,6 +197,8 @@ export interface RecordAuthorizedOrderInput {
   paymentIntentId: string;
   quote: CheckoutQuote;
   lines: AuthorizedOrderLine[];
+  /** When set, including null for a guest, the locked cart must still belong to this actor. */
+  actorUserId?: string | null;
 }
 
 function paymentIntentTaken(err: unknown): boolean {
@@ -236,6 +238,9 @@ export async function recordAuthorizedOrder(
       await lockCart(tx, input.cartId);
       const cart = await tx.cart.findUnique({ where: { id: input.cartId } });
       if (!cart || cart.storeId !== storeId) {
+        throw new Error("Cart not found");
+      }
+      if (input.actorUserId !== undefined && cart.userId !== input.actorUserId) {
         throw new Error("Cart not found");
       }
 
@@ -351,6 +356,7 @@ export async function placeOrder(
   notes: string | null,
   pickupSlot: string | null,
   paymentIntentId: string,
+  actorUserId: string | null = null,
 ): Promise<{ token: string; quote: CheckoutQuote }> {
   const store = await getStripeStore(storeId);
 
@@ -447,6 +453,7 @@ export async function placeOrder(
     notes,
     paymentIntentId,
     quote,
+    actorUserId,
     lines: orderLineData.map((line) => ({
       variantId: line.variantId,
       qty: line.qty,
