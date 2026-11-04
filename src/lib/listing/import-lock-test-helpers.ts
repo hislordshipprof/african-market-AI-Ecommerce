@@ -44,7 +44,7 @@ export type LockObserver = LockClient;
 
 type HoldOptions = {
   timeoutMs?: number;
-  /** Isolates pg_stat_activity counts when another file holds a store row at the same time. */
+  /** Keeps this hold's session out of another file's connection count. */
   applicationName?: string;
   createClient?: (connectionString: string, timeoutMs: number) => LockClient;
 };
