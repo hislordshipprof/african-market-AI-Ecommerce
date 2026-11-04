@@ -16,11 +16,11 @@ describe.skipIf(!connectionString)("cart_lines substitute variant index migratio
 
   beforeAll(async () => {
     await client.connect();
-    await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
-    await client.query(`CREATE SCHEMA ${SCHEMA}`);
-    await client.query(`SET search_path = ${SCHEMA}, public`);
     await client.query("SELECT pg_advisory_lock($1)", [REPLAY_LOCK]);
     try {
+      await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
+      await client.query(`CREATE SCHEMA ${SCHEMA}`);
+      await client.query(`SET search_path = ${SCHEMA}, public`);
       const dirs = fs.readdirSync(MIGRATIONS).filter((d) => /^\d/.test(d)).sort();
       for (const dir of dirs) {
         await client.query(fs.readFileSync(path.join(MIGRATIONS, dir, "migration.sql"), "utf8"));

@@ -314,8 +314,9 @@ model ListingVariant {
   listingId String   @map("listing_id")
   label     String
   price     Int
-  weightG   Int      @map("weight_g")
-  sku       String?
+  weightG           Int      @map("weight_g")
+  weightPlaceholder Boolean  @default(false) @map("weight_placeholder")
+  sku               String?
   barcode   String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

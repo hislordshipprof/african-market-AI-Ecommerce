@@ -8,6 +8,7 @@ describe("loadedVariantRow", () => {
       label: "1kg",
       price: 800,
       weightG: 1000,
+      weightPlaceholder: false,
       sku: "SKU-1",
       barcode: null,
     })).toEqual({
@@ -16,9 +17,22 @@ describe("loadedVariantRow", () => {
       label: "1kg",
       price: "8.00",
       weightG: "1000",
+      weightPlaceholder: false,
       sku: "SKU-1",
       barcode: null,
     });
+  });
+
+  it("a placeholder weight starts empty so saving cannot clear the flag by accident", () => {
+    expect(loadedVariantRow({
+      id: "var_ph",
+      label: "Default",
+      price: 100,
+      weightG: 100,
+      weightPlaceholder: true,
+      sku: null,
+      barcode: null,
+    }).weightG).toBe("");
   });
 });
 
@@ -37,11 +51,12 @@ describe("serializeVariants", () => {
 
   it("serialization preserves loaded IDs and carried fields but never promotes new React keys", () => {
     const json = serializeVariants([
-      { key: "crypto-random-uuid", label: "500g", price: "4.00", weightG: "500", sku: null, barcode: null },
+      { key: "crypto-random-uuid", label: "500g", price: "4.00", weightG: "500", sku: null, barcode: null, weightPlaceholder: true },
     ]);
     const row = JSON.parse(json)[0] as Record<string, unknown>;
     expect(row).not.toHaveProperty("id");
     expect(row).not.toHaveProperty("key");
+    expect(row).not.toHaveProperty("weightPlaceholder");
     expect(row).toEqual({ label: "500g", price: 400, weightG: 500, sku: null, barcode: null });
   });
 });

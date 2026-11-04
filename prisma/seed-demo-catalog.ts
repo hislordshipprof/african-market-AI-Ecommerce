@@ -1184,7 +1184,7 @@ export async function seedDemoCatalog(prisma: PrismaClient) {
           },
         });
         for (const v of l.variants) {
-          const variantData = { label: v.label, price: v.price, weightG: v.weightG };
+          const variantData = { label: v.label, price: v.price, weightG: v.weightG, weightPlaceholder: false };
           await tx.listingVariant.upsert({
             where: { id: v.id },
             update: variantData,

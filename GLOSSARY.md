@@ -56,6 +56,10 @@ _Avoid_: Product (when meaning the store's item), SKU
 **Variant**:
 A size or weight option of a **Listing** with its own price and weight. Carts and orders point at a variant, so a variant a cart or order uses can't be removed. Customers always see a listing's packs cheapest first.
 
+**Placeholder weight**:
+The 100 g weight the platform stores for a variant when nobody has given its real weight. Shown to the owner as "Needs weight" until they enter one.
+_Avoid_: default weight, fake weight
+
 **Stock confidence**:
 How sure the platform is that a listing's recorded stock is still true, given that counter sales are invisible to it.
 
