@@ -1366,6 +1366,18 @@ function moneyLabel(cents: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 }
 
+async function openSavedYellowCart(page: Page) {
+  await settle(page);
+  const cartId = await cartCookie(page);
+  await expect.poll(async () => {
+    const lines = await readCartLines("mama-ngozi", cartId);
+    return lines.some((line) => line.listingId === "mn_garri_yellow");
+  }).toBe(true);
+  await page.goto(`${base}/cart`);
+  await page.reload();
+  return cartId;
+}
+
 async function openSheet(page: Page) {
   await page.getByTestId("storefront-header").getByRole("button", { name: "Shopping cart" }).click();
   const sheet = page.getByRole("dialog", { name: "Your cart" });
@@ -1460,11 +1472,14 @@ test.describe("cart recovery after a failed write", () => {
   test("after a failed removal the next plus updates the same row", async ({ page }) => {
     await openGrains(page);
     await addGarri(page);
-    await page.goto(`${base}/cart`);
+    const cartId = await openSavedYellowCart(page);
     await page.getByRole("button", { name: /Replace with/ }).click();
     await page.getByRole("button", { name: "Let the store suggest a swap" }).click();
-    await settle(page);
-    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    await expect.poll(async () => {
+      const lines = await readCartLines("mama-ngozi", cartId);
+      return lines.find((line) => line.listingId === "mn_garri_yellow")?.swapRule ?? "";
+    }).toBe("store_suggests");
+    const before = await readCartLines("mama-ngozi", cartId);
     const row = before.find((line) => line.listingId === "mn_garri_yellow");
     expect(row?.swapRule).toBe("store_suggests");
     let removals = 0;
@@ -1987,14 +2002,7 @@ test.describe("cart recovery after a failed write", () => {
   test("restoration preserves a named substitute and uses live server data", async ({ page }) => {
     await openGrains(page);
     await addGarri(page);
-    await settle(page);
-    const cartId = await cartCookie(page);
-    await expect.poll(async () => {
-      const lines = await readCartLines("mama-ngozi", cartId);
-      return lines.some((line) => line.listingId === "mn_garri_yellow");
-    }).toBe(true);
-    await page.goto(`${base}/cart`);
-    await page.reload();
+    const cartId = await openSavedYellowCart(page);
     await page.getByRole("button", { name: /Replace with/ }).click();
     await page.getByRole("button").filter({ hasText: "White Garri" }).first().click();
     await expect.poll(async () => {
