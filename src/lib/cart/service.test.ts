@@ -27,6 +27,12 @@ describe.skipIf(!hasDb)("Cart service", () => {
   let variant2Id: string;
   let listingId: string;
   let imageVariantId: string;
+  let buyerId: string;
+  let otherId: string;
+  let storeBId: string;
+  const buyerEmail = `buyer-${storeSlug}@example.com`;
+  const otherEmail = `other-${storeSlug}@example.com`;
+  const storeBSlug = `${storeSlug}-b`;
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
@@ -99,6 +105,23 @@ describe.skipIf(!hasDb)("Cart service", () => {
       },
     });
     imageVariantId = v3.id;
+
+    buyerId = `buyer-${storeSlug}`;
+    otherId = `other-${storeSlug}`;
+    await rawPrisma.user.create({
+      data: { id: buyerId, name: "Ada Buyer", email: buyerEmail },
+    });
+    await rawPrisma.user.create({
+      data: { id: otherId, name: "Other Buyer", email: otherEmail },
+    });
+    const storeB = await rawPrisma.store.create({
+      data: {
+        slug: storeBSlug,
+        name: "Cart Service Test Store B",
+        themePreset: "palm-and-shea",
+      },
+    });
+    storeBId = storeB.id;
   });
 
   afterAll(async () => {
@@ -107,12 +130,17 @@ describe.skipIf(!hasDb)("Cart service", () => {
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.cartLine.deleteMany({ where: { storeId } }),
       rawPrisma.cart.deleteMany({ where: { storeId } }),
+      rawPrisma.customer.deleteMany({ where: { storeId } }),
+      rawPrisma.cartLine.deleteMany({ where: { storeId: storeBId } }),
+      rawPrisma.cart.deleteMany({ where: { storeId: storeBId } }),
+      rawPrisma.customer.deleteMany({ where: { storeId: storeBId } }),
       rawPrisma.listingVariant.deleteMany({
         where: { listing: { storeId } },
       }),
       rawPrisma.listing.deleteMany({ where: { storeId } }),
     ]);
-    await rawPrisma.store.deleteMany({ where: { slug: storeSlug } });
+    await rawPrisma.user.deleteMany({ where: { email: { in: [buyerEmail, otherEmail] } } });
+    await rawPrisma.store.deleteMany({ where: { slug: { in: [storeSlug, storeBSlug] } } });
     await rawPrisma.$disconnect();
   });
 
@@ -122,6 +150,10 @@ describe.skipIf(!hasDb)("Cart service", () => {
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.cartLine.deleteMany({ where: { storeId } }),
       rawPrisma.cart.deleteMany({ where: { storeId } }),
+      rawPrisma.customer.deleteMany({ where: { storeId } }),
+      rawPrisma.cartLine.deleteMany({ where: { storeId: storeBId } }),
+      rawPrisma.cart.deleteMany({ where: { storeId: storeBId } }),
+      rawPrisma.customer.deleteMany({ where: { storeId: storeBId } }),
     ]);
   });
 
@@ -140,6 +172,213 @@ describe.skipIf(!hasDb)("Cart service", () => {
       expect(carts[0].storeId).toBe(storeId);
       expect(carts[0].source).toBe("manual");
       expect(carts[0].userId).toBeNull();
+      expect(carts[0].customerId).toBeNull();
+      const customers = await storeScoped(storeId).customer.findMany();
+      expect(customers).toHaveLength(0);
+    });
+
+    it("links a new cart to a Customer for the signed-in account", async () => {
+      const cartId = await getOrCreateCart(storeId, null, buyerId);
+      const cart = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
+      expect(cart?.userId).toBe(buyerId);
+      expect(cart?.customerId).toEqual(expect.any(String));
+
+      const customer = await storeScoped(storeId).customer.findUnique({
+        where: { id: cart!.customerId! },
+      });
+      expect(customer).toMatchObject({
+        userId: buyerId,
+        storeId,
+        name: "Ada Buyer",
+        email: buyerEmail,
+        marketingConsent: false,
+      });
+    });
+
+    it("reuses the same Customer when the account opens another cart", async () => {
+      const first = await getOrCreateCart(storeId, null, buyerId);
+      const second = await getOrCreateCart(storeId, null, buyerId);
+      expect(second).not.toBe(first);
+      const carts = await storeScoped(storeId).cart.findMany({
+        where: { id: { in: [first, second] } },
+      });
+      expect(carts).toHaveLength(2);
+      expect(carts[0].customerId).toEqual(expect.any(String));
+      expect(carts[1].customerId).toBe(carts[0].customerId);
+      const customers = await storeScoped(storeId).customer.findMany({
+        where: { userId: buyerId },
+      });
+      expect(customers).toHaveLength(1);
+    });
+
+    it("links a guest cart to the account and keeps its lines", async () => {
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, variantId, 2);
+      const linked = await getOrCreateCart(storeId, cartId, buyerId);
+      expect(linked).toBe(cartId);
+      const cart = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
+      expect(cart?.userId).toBe(buyerId);
+      expect(cart?.customerId).toEqual(expect.any(String));
+      const withLines = await getCartWithLines(storeId, cartId);
+      expect(withLines?.lines).toHaveLength(1);
+      expect(withLines?.lines[0].qty).toBe(2);
+    });
+
+    it("opens a new cart when the cookie cart belongs to another account", async () => {
+      const theirs = await getOrCreateCart(storeId, null, otherId);
+      const mine = await getOrCreateCart(storeId, theirs, buyerId);
+      expect(mine).not.toBe(theirs);
+      const otherCart = await storeScoped(storeId).cart.findUnique({ where: { id: theirs } });
+      const myCart = await storeScoped(storeId).cart.findUnique({ where: { id: mine } });
+      expect(otherCart?.userId).toBe(otherId);
+      expect(myCart?.userId).toBe(buyerId);
+      expect(myCart?.customerId).toEqual(expect.any(String));
+      expect(myCart?.customerId).not.toBe(otherCart?.customerId);
+    });
+
+    it("keeps one Customer per account per store and hides it from the other store", async () => {
+      const cartA = await getOrCreateCart(storeId, null, buyerId);
+      const cartB = await getOrCreateCart(storeBId, null, buyerId);
+      const rowA = await storeScoped(storeId).cart.findUnique({ where: { id: cartA } });
+      const rowB = await storeScoped(storeBId).cart.findUnique({ where: { id: cartB } });
+      expect(rowA?.customerId).toEqual(expect.any(String));
+      expect(rowB?.customerId).toEqual(expect.any(String));
+      expect(rowA?.customerId).not.toBe(rowB?.customerId);
+
+      const visibleToB = await storeScoped(storeBId).customer.findMany({
+        where: { id: rowA!.customerId! },
+      });
+      expect(visibleToB).toHaveLength(0);
+      const visibleToA = await storeScoped(storeId).customer.findMany({
+        where: { userId: buyerId },
+      });
+      expect(visibleToA).toHaveLength(1);
+      expect(visibleToA[0].storeId).toBe(storeId);
+
+      await expect(
+        storeScoped(storeId).customer.create({
+          data: {
+            storeId: storeBId,
+            userId: buyerId,
+            name: "Cross store",
+            email: buyerEmail,
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it("does not create a cart when the account id is unknown", async () => {
+      await expect(getOrCreateCart(storeId, null, "missing-account")).rejects.toMatchObject({
+        name: "CartError",
+        code: "USER_NOT_FOUND",
+      });
+      const carts = await storeScoped(storeId).cart.findMany();
+      expect(carts).toHaveLength(0);
+      const customers = await storeScoped(storeId).customer.findMany();
+      expect(customers).toHaveLength(0);
+    });
+
+    it("rejects a second Customer for the same account in one store", async () => {
+      await getOrCreateCart(storeId, null, buyerId);
+      await expect(
+        storeScoped(storeId).customer.create({
+          data: {
+            storeId,
+            userId: buyerId,
+            name: "Ada Buyer",
+            email: buyerEmail,
+          },
+        }),
+      ).rejects.toThrow(/Unique constraint/);
+    });
+
+    it("keeps a single Customer when two carts for the account start together", async () => {
+      const [first, second] = await Promise.all([
+        getOrCreateCart(storeId, null, buyerId),
+        getOrCreateCart(storeId, null, buyerId),
+      ]);
+      expect(first).not.toBe(second);
+      const customers = await storeScoped(storeId).customer.findMany({
+        where: { userId: buyerId },
+      });
+      expect(customers).toHaveLength(1);
+      const carts = await storeScoped(storeId).cart.findMany({
+        where: { id: { in: [first, second] } },
+      });
+      expect(carts.map((cart) => cart.customerId)).toEqual([
+        customers[0].id,
+        customers[0].id,
+      ]);
+    });
+
+    it("leaves an account cart unchanged when no account is passed", async () => {
+      const cartId = await getOrCreateCart(storeId, null, buyerId);
+      const again = await getOrCreateCart(storeId, cartId, null);
+      expect(again).toBe(cartId);
+      const row = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
+      expect(row?.userId).toBe(buyerId);
+      expect(row?.customerId).toEqual(expect.any(String));
+    });
+
+    it("fills customerId when the cart already names the account", async () => {
+      const cart = await storeScoped(storeId).cart.create({
+        data: { storeId, userId: buyerId, source: "manual" },
+      });
+      const linked = await getOrCreateCart(storeId, cart.id, buyerId);
+      expect(linked).toBe(cart.id);
+      const row = await storeScoped(storeId).cart.findUnique({ where: { id: cart.id } });
+      const customer = await storeScoped(storeId).customer.findUnique({
+        where: { id: row!.customerId! },
+      });
+      expect(customer?.userId).toBe(buyerId);
+      expect(customer?.storeId).toBe(storeId);
+    });
+
+    it("returns the same linked cart without a second Customer", async () => {
+      const cartId = await getOrCreateCart(storeId, null, buyerId);
+      const again = await getOrCreateCart(storeId, cartId, buyerId);
+      expect(again).toBe(cartId);
+      const customers = await storeScoped(storeId).customer.findMany({
+        where: { userId: buyerId },
+      });
+      expect(customers).toHaveLength(1);
+    });
+
+    it("points an unowned cart at the account Customer", async () => {
+      const guest = await storeScoped(storeId).customer.create({
+        data: {
+          storeId,
+          name: "Guest Shopper",
+          email: "guest-shopper@example.com",
+          phone: "5550199",
+        },
+      });
+      const cart = await storeScoped(storeId).cart.create({
+        data: { storeId, customerId: guest.id, source: "manual" },
+      });
+      const linked = await getOrCreateCart(storeId, cart.id, buyerId);
+      expect(linked).toBe(cart.id);
+      const row = await storeScoped(storeId).cart.findUnique({ where: { id: cart.id } });
+      expect(row?.userId).toBe(buyerId);
+      expect(row?.customerId).not.toBe(guest.id);
+      const accountCustomers = await storeScoped(storeId).customer.findMany({
+        where: { userId: buyerId },
+      });
+      expect(accountCustomers).toHaveLength(1);
+      expect(row?.customerId).toBe(accountCustomers[0].id);
+    });
+
+    it("allows more than one guest Customer with no account in the same store", async () => {
+      const scoped = storeScoped(storeId);
+      const first = await scoped.customer.create({
+        data: { storeId, name: "Guest One", email: "guest-one@example.com", phone: "5550101" },
+      });
+      const second = await scoped.customer.create({
+        data: { storeId, name: "Guest Two", email: "guest-two@example.com", phone: "5550102" },
+      });
+      expect(first.userId).toBeNull();
+      expect(second.userId).toBeNull();
+      expect(first.id).not.toBe(second.id);
     });
 
     it("returns existing cart when valid id given", async () => {

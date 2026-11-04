@@ -1,4 +1,6 @@
+import { findOrCreateCustomer } from "../customer-auth";
 import {
+  authPrisma,
   storeScoped,
   storeScopedTransaction,
   lockCart,
@@ -56,7 +58,8 @@ export class CartError extends Error {
       | "VARIANT_STORE_MISMATCH"
       | "INVALID_SWAP_RULE"
       | "INVALID_SUBSTITUTE"
-      | "CART_NOT_FOUND",
+      | "CART_NOT_FOUND"
+      | "USER_NOT_FOUND",
   ) {
     super(message);
     this.name = "CartError";
@@ -72,17 +75,40 @@ export async function getOrCreateCart(
 
   if (cartId) {
     const existing = await scoped.cart.findUnique({ where: { id: cartId } });
-    if (existing) return existing.id;
+    const claimable =
+      existing &&
+      (!userId || existing.userId === null || existing.userId === userId);
+    if (existing && claimable) {
+      if (userId && (existing.userId !== userId || existing.customerId === null)) {
+        const customerId = await customerIdForCartUser(storeId, userId);
+        await scoped.cart.update({
+          where: { id: existing.id },
+          data: { userId, customerId },
+        });
+      }
+      return existing.id;
+    }
   }
 
+  const customerId = userId ? await customerIdForCartUser(storeId, userId) : null;
   const cart = await scoped.cart.create({
     data: {
       storeId,
       userId,
+      customerId,
       source: "manual",
     },
   });
   return cart.id;
+}
+
+async function customerIdForCartUser(storeId: string, userId: string): Promise<string> {
+  const user = await authPrisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw new CartError("Signed-in account was not found", "USER_NOT_FOUND");
+  }
+  const customer = await findOrCreateCustomer(storeId, user);
+  return customer.id;
 }
 
 export async function addLine(
