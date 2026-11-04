@@ -1,17 +1,35 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 
-function getR2Client() {
+export type R2Credentials = {
+  accountId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+};
+
+/** Endpoint, region and credentials shared by uploads and the catalog audit. */
+export function r2ClientConfig(credentials: R2Credentials) {
+  return {
+    region: "auto" as const,
+    endpoint: `https://${credentials.accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+    },
+  };
+}
+
+function credentialsFromEnv(): R2Credentials {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
   if (!accountId || !accessKeyId || !secretAccessKey) {
     throw new Error("R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY are required");
   }
-  return new S3Client({
-    region: "auto",
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId, secretAccessKey },
-  });
+  return { accountId, accessKeyId, secretAccessKey };
+}
+
+export function getR2Client(credentials?: R2Credentials) {
+  return new S3Client(r2ClientConfig(credentials ?? credentialsFromEnv()));
 }
 
 export function catalogImageUrl(key: string): string {
@@ -45,10 +63,15 @@ export async function uploadToR2(
 
 const ALLOWED_KEY_RE = /^catalog\/[a-zA-Z0-9_-]+\.(jpg|png|svg|webp)$/;
 
+/** Route allowlist for `/api/catalog-image`. Dots in the object name fail. */
+export function isServableCatalogKey(key: string): boolean {
+  return ALLOWED_KEY_RE.test(key);
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
-  if (!ALLOWED_KEY_RE.test(key)) return null;
+  if (!isServableCatalogKey(key)) return null;
 
   const bucket = process.env.R2_BUCKET;
   if (!bucket) return null;

@@ -327,6 +327,23 @@ export { Prisma };
 
 export { prisma as authPrisma };
 
+/**
+ * Login role of the shared client. `SET LOCAL ROLE` changes `current_user`
+ * and leaves `session_user` as the role that opened the connection.
+ */
+export async function platformSessionUser(): Promise<string> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    const rows = await tx.$queryRaw<Array<{ session_user: string }>>`
+      SELECT session_user::text AS session_user`;
+    return rows[0]?.session_user ?? "";
+  });
+}
+
+export async function disconnectPlatformClient(): Promise<void> {
+  await prisma.$disconnect();
+}
+
 export async function findRecentMagicLinkVerifications(): Promise<
   Array<{ identifier: string; value: string }>
 > {

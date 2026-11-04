@@ -130,3 +130,48 @@ describe("streamFromR2 key allowlist", () => {
     expect(result).toBeNull();
   });
 });
+
+describe("shared catalog key rule", () => {
+  it("accepts a route key and rejects dotted names", async () => {
+    const { isServableCatalogKey } = await import("./r2");
+    expect(isServableCatalogKey("catalog/foo-bar_123.webp")).toBe(true);
+    expect(isServableCatalogKey("catalog/logo.svg")).toBe(true);
+    expect(isServableCatalogKey("catalog/a.b.jpg")).toBe(false);
+    expect(isServableCatalogKey("catalog/../x.jpg")).toBe(false);
+  });
+
+  it("builds a client from supplied credentials without reading ambient R2 env", async () => {
+    delete process.env.R2_ACCOUNT_ID;
+    delete process.env.R2_ACCESS_KEY_ID;
+    delete process.env.R2_SECRET_ACCESS_KEY;
+    const s3 = await import("@aws-sdk/client-s3") as unknown as { S3Client: ReturnType<typeof vi.fn> };
+    s3.S3Client.mockClear();
+    const { getR2Client } = await import("./r2");
+    getR2Client({ accountId: "acct-a", accessKeyId: "key-a", secretAccessKey: "secret-a" });
+    expect(s3.S3Client).toHaveBeenCalledWith({
+      region: "auto",
+      endpoint: "https://acct-a.r2.cloudflarestorage.com",
+      credentials: { accessKeyId: "key-a", secretAccessKey: "secret-a" },
+    });
+  });
+
+  it("shared imports remain inert with no R2 env in a production build context", async () => {
+    vi.resetModules();
+    const s3 = await import("@aws-sdk/client-s3") as unknown as { S3Client: ReturnType<typeof vi.fn> };
+    s3.S3Client.mockClear();
+    delete process.env.R2_ACCOUNT_ID;
+    delete process.env.R2_ACCESS_KEY_ID;
+    delete process.env.R2_SECRET_ACCESS_KEY;
+    delete process.env.R2_BUCKET;
+    delete process.env.R2_PUBLIC_URL;
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PHASE", "phase-production-build");
+    try {
+      await import("./r2");
+      await import("./storefront/images");
+      expect(s3.S3Client).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
