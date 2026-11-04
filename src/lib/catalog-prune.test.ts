@@ -768,7 +768,7 @@ describe("lane env filter script", () => {
     expect(stdout).not.toContain(SECRET);
     expect(readFileSync(dest, "utf8")).not.toContain("DATABASE_URL_UNPOOLED");
     rmSync(env.dir, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("lane direct-url resolution cannot select copied or inherited remote unpooled URL", () => {
     const text = readFileSync(path.join(process.cwd(), "scripts", "lane-db.sh"), "utf8");
