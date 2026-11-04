@@ -41,13 +41,18 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 
+function countPhrase(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 interface Props {
   storeName: string;
+  storeSlug: string;
 }
 
 type Step = "upload" | "preview" | "success";
 
-export function CsvImportUi({ storeName }: Props) {
+export function CsvImportUi({ storeName, storeSlug }: Props) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
   const [isPending, startTransition] = useTransition();
@@ -133,7 +138,9 @@ export function CsvImportUi({ storeName }: Props) {
       if (res.result) {
         setCreatedCount(res.result.createdCount);
         setStep("success");
-        toast.success(`Imported ${res.result.createdCount} listing(s).`);
+        toast.success(
+          `Imported ${countPhrase(res.result.createdCount, "listing", "listings")}.`,
+        );
       }
     });
   }
@@ -181,7 +188,7 @@ export function CsvImportUi({ storeName }: Props) {
         {/* Header */}
         <div className="mb-6 flex items-center gap-3">
           <Link
-            href="/store-admin/listings"
+            href={`/store-admin/listings?store=${storeSlug}`}
             className="inline-flex items-center gap-1 text-sm text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -190,10 +197,10 @@ export function CsvImportUi({ storeName }: Props) {
         </div>
 
         <h1 className="text-2xl font-bold font-[family-name:var(--font-display)] mb-1">
-          Import Products
+          Import listings
         </h1>
         <p className="text-sm text-[var(--color-muted)] mb-6">
-          Upload a CSV file to bulk-import products into {storeName}.
+          Upload a CSV file to add listings to {storeName}.
         </p>
 
         <AnimatePresence mode="wait">
@@ -265,7 +272,9 @@ export function CsvImportUi({ storeName }: Props) {
             >
               <SuccessStep
                 createdCount={createdCount}
-                onGoToProducts={() => router.push("/store-admin/listings")}
+                onGoToProducts={() =>
+                  router.push(`/store-admin/listings?store=${storeSlug}`)
+                }
                 onImportMore={() => {
                   setStep("upload");
                   setPreview(null);
@@ -421,7 +430,7 @@ function PreviewStep({
           count={preview.ambiguous.length}
         />
         <SummaryCard
-          icon={<AlertCircle className="h-4 w-4 text-[var(--color-deal)]" />}
+          icon={<AlertCircle className="h-4 w-4 text-destructive" />}
           label="Errors"
           count={preview.errors.length}
         />
@@ -442,7 +451,7 @@ function PreviewStep({
       {/* Matched products */}
       {preview.matches.length > 0 && (
         <PreviewSection
-          title="Matched Products"
+          title="Matched listings"
           subtitle="These CSV rows matched a master product."
           icon={<CheckCircle2 className="h-4 w-4 text-[var(--color-success)]" />}
           selectAll={selectAllMatches}
@@ -465,7 +474,7 @@ function PreviewStep({
       {/* New items */}
       {preview.newItems.length > 0 && (
         <PreviewSection
-          title="New Products"
+          title="New listings"
           subtitle="No master product match — will be created as custom listings."
           icon={<PlusCircle className="h-4 w-4 text-[var(--color-primary)]" />}
           selectAll={selectAllNew}
@@ -509,7 +518,7 @@ function PreviewStep({
       {preview.alreadyListed.length > 0 && (
         <PreviewSection
           title="Already Listed"
-          subtitle="These products already exist in your store — they will be skipped."
+          subtitle="Already listed in your store. These rows will be skipped."
           icon={<Ban className="h-4 w-4 text-[var(--color-muted)]" />}
         >
           <div className="divide-y divide-[var(--color-line)]">
@@ -540,7 +549,7 @@ function PreviewStep({
         <PreviewSection
           title="Errors"
           subtitle="These rows have validation errors and cannot be imported."
-          icon={<AlertCircle className="h-4 w-4 text-[var(--color-deal)]" />}
+          icon={<AlertCircle className="h-4 w-4 text-destructive" />}
         >
           <div className="divide-y divide-[var(--color-line)]">
             {preview.errors.map((e, i) => (
@@ -551,17 +560,23 @@ function PreviewStep({
       )}
 
       {/* Action bar */}
-      <div className="sticky bottom-0 z-10 flex items-center justify-between gap-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]/95 px-4 py-3 shadow-md backdrop-blur-sm">
-        <Button variant="outline" onClick={onBack} disabled={isPending}>
+      <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]/95 px-4 py-3 shadow-md backdrop-blur-sm">
+        <Button variant="outline" onClick={onBack} disabled={isPending} className="shrink-0">
           <ArrowLeft className="mr-1 h-4 w-4" />
           Back
         </Button>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-[var(--color-muted)]">
+        <div className="flex min-w-0 max-w-full flex-1 flex-wrap items-center justify-end gap-3">
+          <span className="text-sm text-[var(--color-muted)] tabular-nums">
             {totalSelected} selected
           </span>
-          <Button onClick={onCommit} disabled={totalSelected === 0 || isPending}>
-            {isPending ? "Importing..." : `Import ${totalSelected} product(s)`}
+          <Button
+            onClick={onCommit}
+            disabled={totalSelected === 0 || isPending}
+            className="h-auto max-w-full whitespace-normal px-3 py-2 text-center"
+          >
+            {isPending
+              ? "Importing..."
+              : `Import ${countPhrase(totalSelected, "listing", "listings")}`}
           </Button>
         </div>
       </div>
@@ -747,7 +762,7 @@ function AmbiguousRow({
       <p className="truncate text-sm font-medium">{item.csvName}</p>
       <p className="mb-2 text-xs text-[var(--color-muted)]">
         <HelpCircle className="mr-1 inline h-3 w-3" />
-        Matches {item.candidates.length} products — select one:
+        Matches {countPhrase(item.candidates.length, "master product", "master products")} — select one:
       </p>
       <div className="ml-1 space-y-1">
         {item.candidates.map((c) => (
@@ -809,11 +824,11 @@ function DuplicateRow({ item }: { item: CsvPreviewDuplicate }) {
 function ErrorRow({ item }: { item: CsvPreviewError }) {
   return (
     <div className="px-4 py-2.5">
-      <p className="truncate text-sm font-medium text-[var(--color-deal)]">
+      <p className="truncate text-sm font-medium text-destructive">
         {item.csvName ?? `Row ${item.row}`}
       </p>
-      <p className="text-xs text-[var(--color-muted)]">
-        <AlertCircle className="mr-1 inline h-3 w-3 text-[var(--color-deal)]" />
+      <p className="text-xs text-destructive">
+        <AlertCircle className="mr-1 inline h-3 w-3 text-destructive" />
         {item.reason}
       </p>
     </div>
