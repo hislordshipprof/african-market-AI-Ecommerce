@@ -66,6 +66,18 @@ test.describe("placeholder weight", () => {
     const weight = dialog.getByLabel("Variant weight in grams");
     await expect(weight).toHaveAttribute("placeholder", "Needs weight");
     await expect(weight).toHaveValue("");
+    await page.setViewportSize({ width: 390, height: 844 });
+    const weightFit = await weight.evaluate((el) => {
+      const style = getComputedStyle(el);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return { text: 0, room: 0 };
+      ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const text = ctx.measureText(el.getAttribute("placeholder") ?? "").width;
+      const room = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      return { text, room };
+    });
+    expect(weightFit.text).toBeLessThanOrEqual(weightFit.room);
     await weight.fill("22680");
     await dialog.getByRole("button", { name: "Save changes" }).click();
     await expect(dialog).toBeHidden();

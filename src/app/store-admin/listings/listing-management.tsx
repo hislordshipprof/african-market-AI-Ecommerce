@@ -517,7 +517,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
                     className="w-24 pl-6"
                   />
                 </div>
-                <div className="relative">
+                <div className="relative shrink-0">
                   <Input
                     aria-label="Variant weight in grams"
                     placeholder={v.weightPlaceholder ? "Needs weight" : "Weight (g)"}
@@ -525,7 +525,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
                     min="1"
                     value={v.weightG}
                     onChange={(e) => updateVariantField(v.key, "weightG", e.target.value)}
-                    className="w-24 pr-6"
+                    className="w-44 pr-8"
                   />
                   <span
                     className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-sm text-foreground"
