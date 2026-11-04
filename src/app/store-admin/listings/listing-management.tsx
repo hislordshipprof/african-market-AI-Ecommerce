@@ -561,7 +561,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
             <h1 className="text-base font-semibold text-foreground">Products</h1>
             <p className="text-xs text-muted-foreground">{storeName}</p>
           </div>
-          <Link href="/store-admin/listings/import">
+          <Link href={`/store-admin/listings/import?store=${storeParam}`}>
             <Button size="sm" variant="outline">
               <Upload className="size-4" /> Import CSV
             </Button>
