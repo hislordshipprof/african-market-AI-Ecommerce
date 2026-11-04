@@ -73,8 +73,8 @@ export function validateRuntimeEnv(env: Record<string, string | undefined>): Run
 /** Strip connection strings and known secret values from a diagnostic. */
 export function redactSecrets(text: string, secrets: Array<string | undefined>): string {
   let out = text.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "[redacted-url]");
-  for (const secret of secrets) {
-    if (!secret || secret.length < 8) continue;
+  const values = secrets.filter((secret): secret is string => !!secret).sort((a, b) => b.length - a.length);
+  for (const secret of values) {
     out = out.split(secret).join("[redacted]");
   }
   return out;

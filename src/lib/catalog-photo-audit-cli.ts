@@ -1,3 +1,5 @@
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   auditCatalogPhotos,
   formatCatalogAuditReport,
@@ -28,16 +30,27 @@ export async function loadAuditDeps(config: RuntimeConfig): Promise<AuditDeps> {
     import("./catalog-photo-audit-reader"),
     import("./catalog-photo-audit-r2"),
   ]);
+  const headFixture = process.env.CATALOG_PHOTO_AUDIT_HEAD;
+  let openHead = () => createR2HeadObject({
+    accountId: config.accountId,
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    bucket: config.bucket,
+  });
+  if (headFixture) {
+    if (!path.isAbsolute(headFixture)) {
+      throw new Error("CATALOG_PHOTO_AUDIT_HEAD must be an absolute path");
+    }
+    const loaded = await import(pathToFileURL(headFixture).href) as {
+      createHead: () => ReturnType<typeof openHead>;
+    };
+    openHead = () => loaded.createHead();
+  }
   let head: { close: () => void } | undefined;
   return {
     readProducts: () => readMasterProductsForPhotoAudit(),
     openR2: () => {
-      const opened = createR2HeadObject({
-        accountId: config.accountId,
-        accessKeyId: config.accessKeyId,
-        secretAccessKey: config.secretAccessKey,
-        bucket: config.bucket,
-      });
+      const opened = openHead();
       head = opened;
       return Promise.resolve(opened);
     },

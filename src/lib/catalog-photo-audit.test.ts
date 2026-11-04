@@ -107,6 +107,38 @@ describe("auditCatalogPhotos", () => {
     });
   });
 
+  it("classifies malformed remote catalog paths as invalid-key (E14)", async () => {
+    const head = vi.fn(async (): Promise<HeadResult> => "present");
+    const { rows } = await auditCatalogPhotos({
+      products: [
+        product({ id: "1", name: "Upper", imageUrl: "https://old.example.com/catalog/x.JPG" }),
+        product({ id: "2", name: "Nested", imageUrl: "https://old.example.com/catalog/sub/x.jpg" }),
+        product({ id: "3", name: "Query", imageUrl: "https://old.example.com/catalog/yam.webp?x=1" }),
+        product({ id: "4", name: "Fragment", imageUrl: "https://old.example.com/catalog/yam.webp#frag" }),
+      ],
+      headObject: head,
+    });
+    expect(head).not.toHaveBeenCalled();
+    expect(rows.find((row) => row.id === "1")).toMatchObject({
+      status: "invalid-key",
+      key: "https://old.example.com/catalog/x.JPG",
+      reason: "extension is not a lowercase jpg, png, or webp catalog key",
+    });
+    expect(rows.find((row) => row.id === "2")).toMatchObject({
+      status: "invalid-key",
+      key: "https://old.example.com/catalog/sub/x.jpg",
+      reason: "catalog path is not a single object key",
+    });
+    expect(rows.find((row) => row.id === "3")).toMatchObject({
+      status: "not-r2",
+      reason: "storefront returns this URL unchanged",
+    });
+    expect(rows.find((row) => row.id === "4")).toMatchObject({
+      status: "not-r2",
+      reason: "storefront returns this URL unchanged",
+    });
+  });
+
   it("skips null, empty and whitespace image URLs without a check (E12, E24)", async () => {
     const head = vi.fn(async (): Promise<HeadResult> => "missing");
     const { rows, counts } = await auditCatalogPhotos({

@@ -2,15 +2,13 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { main, type AuditDeps } from "./catalog-photo-audit-cli";
-import { RUNTIME_KEYS, type RuntimeConfig } from "./catalog-photo-audit-env";
+import { redactSecrets, RUNTIME_KEYS, type RuntimeConfig } from "./catalog-photo-audit-env";
 import type { AuditProduct, HeadResult } from "./catalog-photo-audit";
 
 const tsxCli = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
 const entry = path.join(process.cwd(), "scripts", "audit-catalog-photos.ts");
-const readerHref = pathToFileURL(path.join(process.cwd(), "src", "lib", "catalog-photo-audit-reader.ts")).href;
 
 const inertEnv = {
   DATABASE_URL: "postgresql://app_runtime:super-secret-pw@db.example.com:5432/neondb",
@@ -388,11 +386,28 @@ describe("catalog photo audit CLI", () => {
     child.stdout?.resume();
     const result = await pending;
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("missing=4000");
-    expect(result.stdout).toContain("4000 checked");
-    expect(result.stdout).toContain("not an atomic snapshot");
-    expect(result.stdout).toContain("db-read:");
-    expect(result.stdout).toContain("completed:");
+    const xs = "x".repeat(60);
+    const rows = Array.from({ length: 4000 }, (_, index) => {
+      const name = `Product ${String(index).padStart(4, "0")} ${xs}`;
+      return `missing | ${name} | id-${index} | active | catalog/p${index}.webp | webp | R2 HeadObject returned 404`;
+    });
+    const trailer = [
+      "counts ok=0 missing=4000 invalid-key=0 not-r2=0 no-image=0",
+      "missing-extensions webp=4000",
+      "4000 checked",
+      "db-read: TIMESTAMP",
+      "completed: TIMESTAMP",
+      "db-host: db.example.com",
+      "bucket: photo-bucket",
+      "note: R2 results are observations between db-read and completed, not an atomic snapshot",
+      "",
+    ];
+    expect(result.stdout).toMatch(/db-read: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
+    expect(result.stdout).toMatch(/completed: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
+    const normalized = result.stdout
+      .replace(/db-read: .*/g, "db-read: TIMESTAMP")
+      .replace(/completed: .*/g, "completed: TIMESTAMP");
+    expect(normalized).toBe([...rows, ...trailer].join("\n"));
   });
 
   it("a broken stdout pipe exits nonzero", async () => {
@@ -422,20 +437,37 @@ describe("catalog photo audit CLI", () => {
     expect(result.code).not.toBe(0);
   });
 
+  it("redacts every nonempty configured secret, including short passwords (E31)", async () => {
+    expect(redactSecrets("password pw123 rejected", ["pw123"])).toBe("password [redacted] rejected");
+    const stderr = memoryStream();
+    const code = await main({
+      env: { ...inertEnv, APP_RUNTIME_PASSWORD: "pw123" },
+      stdout: memoryStream() as unknown as NodeJS.WritableStream,
+      stderr: stderr as unknown as NodeJS.WritableStream,
+      loadDeps: async () => ({
+        readProducts: async () => {
+          throw new Error("password pw123 rejected");
+        },
+        openR2: async () => {
+          throw new Error("R2 should not open");
+        },
+        close: async () => undefined,
+      }),
+    });
+    expect(code).toBe(1);
+    expect(stderr.text()).toBe("Database read failed: password [redacted] rejected\n");
+  });
+
   it("DIRECT_URL is absent and the actual runtime loader still succeeds (E19, E26)", async () => {
     if (!process.env.DATABASE_URL || !process.env.APP_RUNTIME_PASSWORD) return;
-    const fixture = path.join(tmpdir(), `catalog-audit-reader-${process.pid}.ts`);
-    writeFileSync(fixture, `
-      export async function loadDeps() {
-        const reader = await import(${JSON.stringify(readerHref)});
+    const head = path.join(tmpdir(), `catalog-audit-head-${process.pid}.ts`);
+    writeFileSync(head, `
+      export function createHead() {
         return {
-          readProducts: () => reader.readMasterProductsForPhotoAudit(),
-          openR2: async () => ({
-            bucket: "photo-bucket",
-            headBucket: async () => undefined,
-            headObject: async () => "present",
-          }),
-          close: () => reader.disconnectPhotoAudit(),
+          bucket: "photo-bucket",
+          headBucket: async () => undefined,
+          headObject: async () => "present",
+          close() {},
         };
       }
     `);
@@ -447,7 +479,7 @@ describe("catalog photo audit CLI", () => {
       R2_SECRET_ACCESS_KEY: "secret-access-key",
       R2_BUCKET: "photo-bucket",
       NODE_ENV: "production",
-      CATALOG_PHOTO_AUDIT_FIXTURE: fixture,
+      CATALOG_PHOTO_AUDIT_HEAD: head,
       TZ: "America/Denver",
     }), 30000);
     expect(result.code).toBe(0);

@@ -104,7 +104,8 @@ export function classifyCatalogImage(imageUrl: string | null | undefined): Decis
   if (retry?.[1]) return decisionForKey(retry[1]);
   const extracted = catalogKeyFromUrl(imageUrl);
   if (extracted) return decisionForKey(extracted);
-  if (imageUrl.startsWith("/api/catalog-image/") || imageUrl.startsWith("catalog/")) {
+  const bareRemoteCatalog = /^https:\/\/[^/]+\/catalog\//.test(imageUrl) && !imageUrl.includes("?") && !imageUrl.includes("#");
+  if (imageUrl.startsWith("/api/catalog-image/") || imageUrl.startsWith("catalog/") || bareRemoteCatalog) {
     return { kind: "invalid-key", key: imageUrl, reason: invalidCatalogReason(imageUrl) };
   }
   return { kind: "not-r2", reason: "storefront returns this URL unchanged" };
