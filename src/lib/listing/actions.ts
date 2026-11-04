@@ -2,6 +2,7 @@
 import { revalidateStorefront } from "../storefront/cache";
 
 import { requireStoreOwner } from "../store-admin/session";
+import { parseVariantsJson } from "./parse-variants";
 import {
   createListing,
   updateListing,
@@ -11,32 +12,12 @@ import {
   type Actor,
   type StockMode,
   type StockStatus,
-  type CreateVariantInput,
 } from "./service";
 
 const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
 
 function toActor(user: { id: string; email: string }): Actor {
   return { id: user.id, email: user.email };
-}
-
-function parseVariantsJson(raw: string | null): CreateVariantInput[] {
-  if (!raw) return [];
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed)) throw new Error("variants must be an array");
-  return parsed.map((v: Record<string, unknown>, i: number) => {
-    const price = Number(v.price);
-    const weightG = Number(v.weightG);
-    if (!isFinite(price) || price < 0) throw new Error(`Variant ${i + 1}: valid non-negative price is required`);
-    if (!isFinite(weightG) || weightG <= 0) throw new Error(`Variant ${i + 1}: weight must be greater than 0`);
-    return {
-      label: String(v.label ?? ""),
-      price,
-      weightG,
-      sku: v.sku ? String(v.sku) : null,
-      barcode: v.barcode ? String(v.barcode) : null,
-    };
-  });
 }
 
 export async function createListingAction(formData: FormData) {
@@ -128,7 +109,7 @@ export async function updateListingAction(formData: FormData) {
     if (!isFinite(q) || q < 0) return { error: "Quantity must be a non-negative number" };
   }
 
-  let parsedVariants: CreateVariantInput[] | undefined;
+  let parsedVariants: ReturnType<typeof parseVariantsJson> | undefined;
   if (variantsJson !== null) {
     try {
       parsedVariants = parseVariantsJson(variantsJson);

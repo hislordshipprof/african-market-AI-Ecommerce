@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockListingRow } from "../db";
 
 export type StockMode = "counted" | "status";
@@ -42,6 +43,11 @@ export interface CreateVariantInput {
   weightG: number;
   sku?: string | null;
   barcode?: string | null;
+}
+
+/** A variant row on a save. `id` is set when the row already belongs to this listing. */
+export interface SaveVariantInput extends CreateVariantInput {
+  id?: string;
 }
 
 /** The signed-in user performing a listing mutation, recorded in audit rows. */
@@ -180,16 +186,17 @@ export interface UpdateListingInput {
   perishable?: boolean;
   maxPerOrder?: number | null;
   actor: Actor;
-  variants?: CreateVariantInput[];
+  variants?: SaveVariantInput[];
 }
 
 export async function updateListing(input: UpdateListingInput) {
   return storeScopedTransaction(input.storeId, async (tx) => {
     await lockListingRow(tx, input.listingId);
 
-    const existing = await tx.listing.findUniqueOrThrow({
+    const existing = await tx.listing.findUnique({
       where: { id: input.listingId },
     });
+    if (!existing) throw new Error("Listing not found");
 
     const data: Record<string, unknown> = {};
     if (input.customName !== undefined) data.customName = input.customName;
@@ -283,32 +290,13 @@ export async function updateListing(input: UpdateListingInput) {
       }
     }
 
-    if (input.variants) {
-      const existingVariants = await tx.listingVariant.findMany({
-        where: { listingId: input.listingId },
+    if (input.variants !== undefined) {
+      await saveVariantsInPlace(tx, {
+        storeId: input.storeId,
+        listingId: input.listingId,
+        variants: input.variants,
+        actor: input.actor,
       });
-
-      await tx.listingVariant.deleteMany({ where: { listingId: input.listingId } });
-      await createVariantRows(tx, input.listingId, input.variants);
-
-      const oldPrices = sortedPrices(existingVariants);
-      const newPrices = sortedPrices(input.variants);
-      const pricesChanged = variantPricesDiffer(oldPrices, newPrices);
-
-      if (pricesChanged) {
-        await tx.auditLog.create({
-          data: {
-            storeId: input.storeId,
-            actorId: input.actor.id,
-            actorEmail: input.actor.email,
-            action: "listing.variant_price_change",
-            entityType: "listing",
-            entityId: input.listingId,
-            before: { variants: oldPrices },
-            after: { variants: newPrices },
-          },
-        });
-      }
     }
 
     return updated;
@@ -391,36 +379,162 @@ export async function listMasterProducts(query?: string, take = MASTER_PRODUCT_P
 export interface UpdateVariantsInput {
   storeId: string;
   listingId: string;
-  variants: (CreateVariantInput & { id?: string })[];
+  variants: SaveVariantInput[];
   actor: Actor;
 }
 
 export async function updateVariants(input: UpdateVariantsInput) {
   return storeScopedTransaction(input.storeId, async (tx) => {
-    const existingVariants = await tx.listingVariant.findMany({
-      where: { listingId: input.listingId },
-    });
-
-    await tx.listingVariant.deleteMany({ where: { listingId: input.listingId } });
-    const created = await createVariantRows(tx, input.listingId, input.variants);
-
-    const oldPrices = sortedPrices(existingVariants);
-    const newPrices = sortedPrices(input.variants);
-    if (variantPricesDiffer(oldPrices, newPrices)) {
-      await tx.auditLog.create({
-        data: {
-          storeId: input.storeId,
-          actorId: input.actor.id,
-          actorEmail: input.actor.email,
-          action: "listing.variant_price_change",
-          entityType: "listing",
-          entityId: input.listingId,
-          before: { variants: oldPrices },
-          after: { variants: newPrices },
-        },
-      });
-    }
-
-    return created;
+    return saveVariantsInPlace(tx, input);
   });
+}
+
+const CANT_REMOVE = (label: string) =>
+  `"${label}" is in a customer's cart or an order, so it can't be removed.`;
+
+function isForeignKeyViolation(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003";
+}
+
+/**
+ * Updates, creates and deletes variants inside the caller's transaction.
+ * The caller already holds the listing row lock when this runs from updateListing;
+ * updateVariants enters here with no lock yet, so the lock is taken again (same
+ * transaction: a no-op if already held).
+ */
+async function saveVariantsInPlace(
+  tx: ListingTx,
+  input: {
+    storeId: string;
+    listingId: string;
+    variants: SaveVariantInput[];
+    actor: Actor;
+  },
+) {
+  if (input.variants.length === 0) {
+    throw new Error("At least one variant is required");
+  }
+
+  await lockListingRow(tx, input.listingId);
+  const listing = await tx.listing.findUnique({ where: { id: input.listingId } });
+  if (!listing) throw new Error("Listing not found");
+
+  const existing = await tx.listingVariant.findMany({
+    where: { listingId: input.listingId },
+  });
+  const byId = new Map(existing.map((variant) => [variant.id, variant]));
+
+  const seen = new Set<string>();
+  for (const variant of input.variants) {
+    if (!variant.id) continue;
+    if (seen.has(variant.id)) throw new Error("A variant appears twice in this save.");
+    seen.add(variant.id);
+    if (!byId.has(variant.id)) throw new Error("Variant not found");
+  }
+
+  const removed = existing
+    .filter((variant) => !seen.has(variant.id))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  if (removed.length > 0) {
+    const removedIds = removed.map((variant) => variant.id);
+    await tx.$queryRaw`
+      SELECT id FROM listing_variants
+      WHERE id IN (${Prisma.join(removedIds)})
+      ORDER BY id
+      FOR UPDATE
+    `;
+    const removedSet = new Set(removedIds);
+    const [cartRefs, orderRefs] = await Promise.all([
+      tx.cartLine.findMany({
+        where: {
+          OR: [
+            { variantId: { in: removedIds } },
+            { substituteVariantId: { in: removedIds } },
+          ],
+        },
+        select: { variantId: true, substituteVariantId: true },
+      }),
+      tx.orderLine.findMany({
+        where: {
+          OR: [
+            { listingVariantId: { in: removedIds } },
+            { substituteVariantId: { in: removedIds } },
+          ],
+        },
+        select: { listingVariantId: true, substituteVariantId: true },
+      }),
+    ]);
+    const referenced = new Set<string>();
+    for (const row of cartRefs) {
+      if (removedSet.has(row.variantId)) referenced.add(row.variantId);
+      if (row.substituteVariantId && removedSet.has(row.substituteVariantId)) {
+        referenced.add(row.substituteVariantId);
+      }
+    }
+    for (const row of orderRefs) {
+      if (removedSet.has(row.listingVariantId)) referenced.add(row.listingVariantId);
+      if (row.substituteVariantId && removedSet.has(row.substituteVariantId)) {
+        referenced.add(row.substituteVariantId);
+      }
+    }
+    const hit = removed.find((variant) => referenced.has(variant.id));
+    if (hit) throw new Error(CANT_REMOVE(hit.label));
+  }
+
+  for (const variant of input.variants) {
+    if (!variant.id) continue;
+    await tx.listingVariant.update({
+      where: { id: variant.id },
+      data: {
+        label: variant.label,
+        price: variant.price,
+        weightG: variant.weightG,
+        sku: variant.sku ?? null,
+        barcode: variant.barcode ?? null,
+      },
+    });
+  }
+
+  for (const variant of removed) {
+    try {
+      await tx.listingVariant.delete({ where: { id: variant.id } });
+    } catch (err) {
+      if (isForeignKeyViolation(err)) throw new Error(CANT_REMOVE(variant.label));
+      throw err;
+    }
+  }
+
+  for (const variant of input.variants) {
+    if (variant.id) continue;
+    await tx.listingVariant.create({
+      data: {
+        listingId: input.listingId,
+        label: variant.label,
+        price: variant.price,
+        weightG: variant.weightG,
+        sku: variant.sku ?? null,
+        barcode: variant.barcode ?? null,
+      },
+    });
+  }
+
+  const oldPrices = sortedPrices(existing);
+  const newPrices = sortedPrices(input.variants);
+  if (variantPricesDiffer(oldPrices, newPrices)) {
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.actor.id,
+        actorEmail: input.actor.email,
+        action: "listing.variant_price_change",
+        entityType: "listing",
+        entityId: input.listingId,
+        before: { variants: oldPrices },
+        after: { variants: newPrices },
+      },
+    });
+  }
+
+  return tx.listingVariant.findMany({ where: { listingId: input.listingId } });
 }

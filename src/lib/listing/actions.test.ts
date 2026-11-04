@@ -34,6 +34,7 @@ import {
   reactivateListingAction,
   listMasterProductsAction,
 } from "./actions";
+import { parseVariantsJson } from "./parse-variants";
 
 function formData(entries: Record<string, string>): FormData {
   const fd = new FormData();
@@ -320,5 +321,82 @@ describe("listMasterProductsAction", () => {
     mockListMasterProducts.mockResolvedValueOnce([]);
     await listMasterProductsAction("egu");
     expect(mockListMasterProducts).toHaveBeenLastCalledWith("egu", 50);
+  });
+});
+
+const INT4_MAX = 2147483647;
+
+describe("parseVariantsJson", () => {
+  it("parseVariantsJson passes string ids, rejects bad ids and non-whole or out-of-range amounts", () => {
+    expect(parseVariantsJson(JSON.stringify([
+      { id: "var_1", label: "1kg", price: 800, weightG: 1000 },
+    ]))).toEqual([
+      { id: "var_1", label: "1kg", price: 800, weightG: 1000, sku: null, barcode: null },
+    ]);
+
+    for (const id of [5, {}, "", null, false, ["var_1"]]) {
+      expect(() => parseVariantsJson(JSON.stringify([
+        { label: "1kg", price: 800, weightG: 1000 },
+        { id, label: "2kg", price: 900, weightG: 2000 },
+      ]))).toThrow("Variant 2: invalid id");
+    }
+
+    expect(() => parseVariantsJson(JSON.stringify([
+      { label: "1kg", price: 12.5, weightG: 1000 },
+    ]))).toThrow("Variant 1: price must be a whole number of cents");
+    expect(() => parseVariantsJson(JSON.stringify([
+      { label: "1kg", price: INT4_MAX + 1, weightG: 1000 },
+    ]))).toThrow("Variant 1: price must be a whole number of cents");
+    expect(() => parseVariantsJson(JSON.stringify([
+      { label: "1kg", price: 800, weightG: 1.5 },
+    ]))).toThrow("Variant 1: weight must be a whole number of grams");
+    expect(() => parseVariantsJson(JSON.stringify([
+      { label: "1kg", price: 800, weightG: INT4_MAX + 1 },
+    ]))).toThrow("Variant 1: weight must be a whole number of grams");
+  });
+
+  it("validates optional IDs and both numeric boundaries without forwarding unknown fields", () => {
+    const parsed = parseVariantsJson(JSON.stringify([
+      {
+        id: "var_edge",
+        label: "1kg",
+        price: INT4_MAX,
+        weightG: INT4_MAX,
+        sku: "SKU-1",
+        barcode: "123",
+        listingId: "other-listing",
+        storeId: "other-store",
+      },
+      { label: "2kg", price: 0, weightG: 1 },
+    ]));
+    expect(parsed).toEqual([
+      { id: "var_edge", label: "1kg", price: INT4_MAX, weightG: INT4_MAX, sku: "SKU-1", barcode: "123" },
+      { label: "2kg", price: 0, weightG: 1, sku: null, barcode: null },
+    ]);
+    expect(parsed[0]).not.toHaveProperty("listingId");
+    expect(parsed[0]).not.toHaveProperty("storeId");
+
+    expect(() => parseVariantsJson(JSON.stringify([
+      { label: "1kg", price: -1, weightG: 1000 },
+    ]))).toThrow("Variant 1: valid non-negative price is required");
+    expect(() => parseVariantsJson(JSON.stringify([
+      { label: "1kg", price: 800, weightG: 0 },
+    ]))).toThrow("Variant 1: weight must be greater than 0");
+  });
+
+  it("does not call the listing service when an id or amount is invalid", async () => {
+    const bad = await updateListingAction(formData({
+      listingId: "listing-1",
+      variants: JSON.stringify([{ id: 5, label: "1kg", price: 800, weightG: 1000 }]),
+    }));
+    expect(bad.error).toBe("Variant 1: invalid id");
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+
+    const fractional = await updateListingAction(formData({
+      listingId: "listing-1",
+      variants: JSON.stringify([{ label: "1kg", price: 12.5, weightG: 1000 }]),
+    }));
+    expect(fractional.error).toBe("Variant 1: price must be a whole number of cents");
+    expect(mockUpdateListing).not.toHaveBeenCalled();
   });
 });

@@ -46,6 +46,7 @@ import {
   reactivateListingAction,
   listMasterProductsAction,
 } from "@/lib/listing/actions";
+import { serializeVariants } from "./variant-form";
 import {
   ArrowLeft,
   Plus,
@@ -120,6 +121,8 @@ function stockBadgeVariant(listing: Listing): "default" | "secondary" | "destruc
 
 interface VariantFormRow {
   key: string;
+  /** Present only for a row loaded from the listing. Never the React key of a new row. */
+  id?: string;
   label: string;
   price: string;
   weightG: string;
@@ -144,19 +147,6 @@ interface ListingFormFields {
   masterProductId: string | null;
 }
 
-function buildVariantsJson(variants: VariantFormRow[]) {
-  return JSON.stringify(
-    variants
-      .filter((v) => v.label.trim())
-      .map((v) => ({
-        label: v.label.trim(),
-        price: Math.round(parseFloat(v.price || "0") * 100),
-        weightG: parseInt(v.weightG || "0", 10),
-        sku: v.sku ?? null,
-        barcode: v.barcode ?? null,
-      })),
-  );
-}
 
 /** Serialises the listing form for create and update; update passes `listingId`. */
 function buildListingFormData(
@@ -177,7 +167,7 @@ function buildListingFormData(
   if (listingId || fields.maxPerOrder) fd.set("maxPerOrder", fields.maxPerOrder);
   if (fields.masterProductId) fd.set("masterProductId", fields.masterProductId);
   else if (listingId) fd.set("masterProductId", "");
-  fd.set("variants", buildVariantsJson(variants));
+  fd.set("variants", serializeVariants(variants));
   return fd;
 }
 
@@ -265,6 +255,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setVariants(
       listing.variants.map((v) => ({
         key: v.id,
+        id: v.id,
         label: v.label,
         price: (v.price / 100).toFixed(2),
         weightG: String(v.weightG),
