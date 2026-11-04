@@ -28,6 +28,14 @@ function makeFakeStep() {
 }
 
 type HandlerCtx = { event: { data: { orderId: string; storeId: string; authorizedAt?: string } }; step: ReturnType<typeof makeFakeStep> };
+
+describe("sweep configuration", () => {
+  it("both sweeps are singletons that skip overlapping runs", async () => {
+    const { sweepOrphanedAuthorized, reconcileStuckTransitional } = await import("./functions");
+    expect(sweepOrphanedAuthorized.opts.singleton).toEqual({ mode: "skip" });
+    expect(reconcileStuckTransitional.opts.singleton).toEqual({ mode: "skip" });
+  });
+});
 type Handler = (ctx: HandlerCtx) => Promise<void>;
 
 function getHandler(inngestFn: unknown): Handler {

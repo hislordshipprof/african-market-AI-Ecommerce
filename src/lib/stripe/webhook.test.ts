@@ -157,7 +157,7 @@ describe("Stripe webhook signatures", () => {
     setStripeProvider(null);
     if (previousSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
     else process.env.STRIPE_WEBHOOK_SECRET = previousSecret;
-    process.env.NODE_ENV = previousNodeEnv;
+    vi.stubEnv("NODE_ENV", previousNodeEnv ?? "test");
     if (previousVercel === undefined) delete process.env.VERCEL;
     else process.env.VERCEL = previousVercel;
   });
@@ -206,7 +206,7 @@ describe("Stripe webhook signatures", () => {
   });
 
   it("a missing webhook secret in production returns 500 and logs the key", async () => {
-    process.env.NODE_ENV = "production";
+    vi.stubEnv("NODE_ENV", "production");
     delete process.env.VERCEL;
     delete process.env.STRIPE_WEBHOOK_SECRET;
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

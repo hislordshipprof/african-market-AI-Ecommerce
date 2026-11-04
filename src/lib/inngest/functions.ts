@@ -99,6 +99,7 @@ export const autoCancel = inngest.createFunction(
 export const sweepOrphanedAuthorized = inngest.createFunction(
   {
     id: "order/sweep-orphaned-authorized",
+    singleton: { mode: "skip" },
     triggers: [{ cron: "*/15 * * * *" }],
   },
   async ({ step }) => {
@@ -117,6 +118,7 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
 export const reconcileStuckTransitional = inngest.createFunction(
   {
     id: "order/reconcile-stuck-transitional",
+    singleton: { mode: "skip" },
     triggers: [{ cron: "*/15 * * * *" }],
   },
   async ({ step }) => {

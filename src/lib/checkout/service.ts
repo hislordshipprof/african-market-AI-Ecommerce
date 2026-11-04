@@ -3,6 +3,7 @@ import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, sto
 import { getCartWithLines, type CartLineView, type CartWithLines } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { sendOrderAuthorized } from "../inngest/send";
+import { scheduleAfterResponse } from "../schedule-after-response";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
 import type {
   CheckoutQuote,
@@ -486,7 +487,10 @@ export async function placeOrder(
   });
 
   if (recorded.created) {
-    await sendOrderAuthorized(storeId, recorded.orderId);
+    scheduleAfterResponse(
+      () => sendOrderAuthorized(storeId, recorded.orderId),
+      "inngest_send_failed",
+    );
   }
 
   return { token: recorded.orderId, quote };
