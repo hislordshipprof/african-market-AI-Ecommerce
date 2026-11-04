@@ -145,4 +145,205 @@ describe("Fake Stripe state machine (K6)", () => {
     const ok = await fakeStripeProvider.capturePaymentIntent("pi_500", 500, "new-key");
     expect(ok.status).toBe("succeeded");
   });
+
+  it("replays a failed refund for the same idempotency key", async () => {
+    const { setNextRefundStatus } = await import("./fake");
+    setAuthorizedAmount("pi_re_fail", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_re_fail", 1000);
+    setNextRefundStatus("pi_re_fail", "failed");
+    const first = await fakeStripeProvider.refundPayment("pi_re_fail", 400, "refund-fail-key");
+    const replay = await fakeStripeProvider.refundPayment("pi_re_fail", 400, "refund-fail-key");
+    expect(first.status).toBe("failed");
+    expect(replay).toEqual(first);
+    expect(replay.status).toBe("failed");
+  });
+
+  it("replays a canceled refund for the same idempotency key", async () => {
+    const { setNextRefundStatus } = await import("./fake");
+    setAuthorizedAmount("pi_re_cancel", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_re_cancel", 1000);
+    setNextRefundStatus("pi_re_cancel", "canceled");
+    const first = await fakeStripeProvider.refundPayment("pi_re_cancel", 250, "refund-cancel-key");
+    const replay = await fakeStripeProvider.refundPayment("pi_re_cancel", 250, "refund-cancel-key");
+    expect(replay.status).toBe("canceled");
+    expect(replay.refundId).toBe(first.refundId);
+    expect(replay.amountRefunded).toBe(250);
+  });
+
+  it("rejects a reused capture key with a different amount as idempotency_error", async () => {
+    setAuthorizedAmount("pi_idem_cap", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_idem_cap", 600, "k1");
+    await expect(
+      fakeStripeProvider.capturePaymentIntent("pi_idem_cap", 700, "k1"),
+    ).rejects.toMatchObject({
+      type: "StripeIdempotencyError",
+      statusCode: 400,
+    });
+  });
+
+  it("rejects a reused cancel key with different params as idempotency_error", async () => {
+    setAuthorizedAmount("pi_idem_cancel_a", 1000);
+    setAuthorizedAmount("pi_idem_cancel_b", 1000);
+    await fakeStripeProvider.cancelPaymentIntent("pi_idem_cancel_a", "cancel-key");
+    await expect(
+      fakeStripeProvider.cancelPaymentIntent("pi_idem_cancel_b", "cancel-key"),
+    ).rejects.toMatchObject({
+      type: "StripeIdempotencyError",
+      statusCode: 400,
+    });
+  });
+
+  it("rejects a reused refund key with a different amount as idempotency_error", async () => {
+    setAuthorizedAmount("pi_idem_ref", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_idem_ref", 1000);
+    await fakeStripeProvider.refundPayment("pi_idem_ref", 200, "refund-key");
+    await expect(
+      fakeStripeProvider.refundPayment("pi_idem_ref", 300, "refund-key"),
+    ).rejects.toMatchObject({
+      type: "StripeIdempotencyError",
+      statusCode: 400,
+    });
+  });
+
+  it("two equal partial refunds with different keys both reduce the balance", async () => {
+    setAuthorizedAmount("pi_equal", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_equal", 1000);
+    const first = await fakeStripeProvider.refundPayment("pi_equal", 500, "r1");
+    const second = await fakeStripeProvider.refundPayment("pi_equal", 500, "r2");
+    expect(second.refundId).not.toBe(first.refundId);
+    const retrieved = await fakeStripeProvider.retrievePaymentIntent("pi_equal");
+    expect(retrieved.amountRefunded).toBe(1000);
+    const listed = await fakeStripeProvider.listRefunds("pi_equal");
+    expect(listed.map((refund) => refund.amountRefunded)).toEqual([500, 500]);
+    await expect(fakeStripeProvider.refundPayment("pi_equal", 1, "r3")).rejects.toMatchObject({
+      code: "charge_already_refunded",
+      statusCode: 400,
+      type: "StripeInvalidRequestError",
+    });
+  });
+
+  it("rejects a refund above the unrefunded balance as invalid_request_error 400", async () => {
+    setAuthorizedAmount("pi_over", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_over", 1000);
+    await fakeStripeProvider.refundPayment("pi_over", 400, "r1");
+    await expect(
+      fakeStripeProvider.refundPayment("pi_over", 601, "r2"),
+    ).rejects.toMatchObject({
+      type: "StripeInvalidRequestError",
+      statusCode: 400,
+      message: "Refund amount ($6.01) is greater than unrefunded amount on charge ($6.00)",
+    });
+    try {
+      await fakeStripeProvider.refundPayment("pi_over", 601, "r3");
+    } catch (err) {
+      expect((err as { code?: string }).code).toBeUndefined();
+    }
+  });
+
+  it("applies the configured pending status to a later partial refund", async () => {
+    const { setNextRefundStatus } = await import("./fake");
+    setAuthorizedAmount("pi_pending_later", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_pending_later", 1000);
+    setNextRefundStatus("pi_pending_later", "pending");
+    const first = await fakeStripeProvider.refundPayment("pi_pending_later", 400, "p1");
+    const second = await fakeStripeProvider.refundPayment("pi_pending_later", 250, "p2");
+    expect(first.status).toBe("pending");
+    expect(second.status).toBe("pending");
+  });
+
+  it("a failed refund changes amountRefunded as the sandbox does", async () => {
+    const { setRefundStatus } = await import("./fake");
+    setAuthorizedAmount("pi_fail_balance", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_fail_balance", 1000);
+    const refund = await fakeStripeProvider.refundPayment("pi_fail_balance", 1000, "full");
+    expect((await fakeStripeProvider.retrievePaymentIntent("pi_fail_balance")).amountRefunded).toBe(1000);
+    setRefundStatus(refund.refundId, "failed");
+    expect((await fakeStripeProvider.retrievePaymentIntent("pi_fail_balance")).amountRefunded).toBe(0);
+    const listed = await fakeStripeProvider.listRefunds("pi_fail_balance");
+    expect(listed).toEqual([
+      { refundId: refund.refundId, amountRefunded: 1000, status: "failed" },
+    ]);
+    setRefundStatus(refund.refundId, "canceled");
+    expect((await fakeStripeProvider.retrievePaymentIntent("pi_fail_balance")).amountRefunded).toBe(0);
+  });
+
+  it("partial application fee refunds add up and stop at the fee charged", async () => {
+    const { capturedFees, feeRefunded } = await import("./fake");
+    setAuthorizedAmount("pi_fee_sum", 100);
+    await fakeStripeProvider.capturePaymentIntent("pi_fee_sum", 100, "cap", 5);
+    expect(capturedFees.get("pi_fee_sum")).toBe(5);
+    await fakeStripeProvider.refundPayment("pi_fee_sum", 30, "f1", { refundApplicationFee: true });
+    await fakeStripeProvider.refundPayment("pi_fee_sum", 30, "f2", { refundApplicationFee: true });
+    expect(feeRefunded.get("pi_fee_sum")).toBe(4);
+    await fakeStripeProvider.refundPayment("pi_fee_sum", 30, "f3", { refundApplicationFee: true });
+    expect(feeRefunded.get("pi_fee_sum")).toBe(5);
+  });
+
+  it("unknown PaymentIntent errors carry code resource_missing and status 404", async () => {
+    const ops = [
+      () => fakeStripeProvider.capturePaymentIntent("pi_missing", 500),
+      () => fakeStripeProvider.cancelPaymentIntent("pi_missing"),
+      () => fakeStripeProvider.retrievePaymentIntent("pi_missing"),
+      () => fakeStripeProvider.refundPayment("pi_missing", 500),
+    ];
+    for (const op of ops) {
+      await expect(op()).rejects.toMatchObject({
+        code: "resource_missing",
+        statusCode: 404,
+        type: "StripeInvalidRequestError",
+      });
+    }
+  });
+
+  it("accepts a refund of the exact unrefunded balance", async () => {
+    setAuthorizedAmount("pi_exact", 800);
+    await fakeStripeProvider.capturePaymentIntent("pi_exact", 800);
+    await fakeStripeProvider.refundPayment("pi_exact", 300, "e1");
+    const rest = await fakeStripeProvider.refundPayment("pi_exact", 500, "e2");
+    expect(rest.status).toBe("succeeded");
+    expect((await fakeStripeProvider.retrievePaymentIntent("pi_exact")).amountRefunded).toBe(800);
+  });
+
+  it("rejects a refund of 0 cents", async () => {
+    setAuthorizedAmount("pi_zero", 800);
+    await fakeStripeProvider.capturePaymentIntent("pi_zero", 800);
+    await expect(fakeStripeProvider.refundPayment("pi_zero", 0, "zero")).rejects.toMatchObject({
+      code: "parameter_invalid_integer",
+      statusCode: 400,
+      type: "StripeInvalidRequestError",
+      message: "This value must be greater than or equal to 1.",
+    });
+  });
+
+  it("rejects a refund before capture", async () => {
+    const { feeRefunded } = await import("./fake");
+    setAuthorizedAmount("pi_uncaptured", 800);
+    await expect(fakeStripeProvider.refundPayment("pi_uncaptured", 100, "early")).rejects.toMatchObject({
+      statusCode: 400,
+      type: "StripeInvalidRequestError",
+      message: expect.stringContaining("uncaptured Charge"),
+    });
+    expect(feeRefunded.has("pi_uncaptured")).toBe(false);
+  });
+
+  it("rejects a refund after cancel", async () => {
+    setAuthorizedAmount("pi_after_cancel", 800);
+    await fakeStripeProvider.cancelPaymentIntent("pi_after_cancel");
+    await expect(
+      fakeStripeProvider.refundPayment("pi_after_cancel", 100, "late"),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      type: "StripeInvalidRequestError",
+      message: expect.stringContaining("uncaptured Charge"),
+    });
+  });
+
+  it("lists refunds newest first", async () => {
+    setAuthorizedAmount("pi_order", 1000);
+    await fakeStripeProvider.capturePaymentIntent("pi_order", 1000);
+    const older = await fakeStripeProvider.refundPayment("pi_order", 100, "old");
+    const newer = await fakeStripeProvider.refundPayment("pi_order", 200, "new");
+    const listed = await fakeStripeProvider.listRefunds("pi_order");
+    expect(listed.map((refund) => refund.refundId)).toEqual([newer.refundId, older.refundId]);
+  });
 });

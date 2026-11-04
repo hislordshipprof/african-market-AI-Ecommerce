@@ -1550,7 +1550,8 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(result.ok).toBe(false);
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLING");
-    expect(updated!.refundId).toBe(`re_fake_${pi}`);
+    // Stripe lists refunds newest first, so the open remainder refund is the one saved.
+    expect(updated!.refundId).toBe(`re_fake_${pi}_1000`);
   });
 
   it("reconcile stays CANCELLING when a saved refund succeeded and another is pending", async () => {
