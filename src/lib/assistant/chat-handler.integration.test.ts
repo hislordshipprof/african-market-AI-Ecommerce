@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { MockLanguageModelV4 } from "ai/test";
@@ -315,7 +315,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       errors.push(String(message));
     });
     vi.stubEnv("ASSISTANT_SPEND_CAP_USD", "0");
-    const clock = new Date(Date.UTC(2200, 0, 1) + randomUUID().charCodeAt(0) * 86_400_000);
+    const clock = new Date(Date.UTC(2500, 0, 1) + randomInt(20_000) * 86_400_000);
     const { model, calls } = strictModel(() => [
       { type: "stream-start", warnings: [] },
       { type: "text-start", id: "t" },

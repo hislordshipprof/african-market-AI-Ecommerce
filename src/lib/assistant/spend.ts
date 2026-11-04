@@ -3,6 +3,12 @@ import { claimAssistantCapDay, insertAssistantSpend, sumAssistantSpend } from ".
 const DEFAULT_CAP_MICROS = BigInt(10_000_000);
 let invalidCapLogged = false;
 let spendWriteFailures = 0;
+let spendClock: () => Date = () => new Date();
+
+/** Tests pin the ledger day. Production leaves this unset. */
+export function setSpendClock(clock: (() => Date) | null): void {
+  spendClock = clock ?? (() => new Date());
+}
 
 /** Test hook: the next n ledger writes throw, then recording works again. */
 export function failNextSpendWrites(count: number): void {
@@ -29,7 +35,7 @@ export function spendCapMicros(
   return { micros: BigInt(whole) * BigInt(1_000_000) + BigInt(padded), invalid: false };
 }
 
-export async function recordSpend(micros: bigint, at: Date = new Date()): Promise<void> {
+export async function recordSpend(micros: bigint, at: Date = spendClock()): Promise<void> {
   if (spendWriteFailures > 0) {
     spendWriteFailures -= 1;
     throw new Error("spend write failed");

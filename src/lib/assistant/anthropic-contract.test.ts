@@ -1,11 +1,12 @@
+import { randomInt } from "node:crypto";
 import { APICallError, generateText, stepCountIs, streamText, tool } from "ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { appUserQuery } from "../db";
 import { callCostMicros } from "./cost";
 import { createFakeAnthropicFetch } from "./messages-api-double";
 import { assistantProviderOptions, createAssistantModel } from "./model";
-import { failNextSpendWrites, utcDay } from "./spend";
+import { failNextSpendWrites, setSpendClock, utcDay } from "./spend";
 
 const hasDb = !!process.env.DATABASE_URL;
 const MODEL = "claude-haiku-5-5";
@@ -17,8 +18,10 @@ const ping = tool({
   execute: async () => ({ ok: true }),
 });
 
+const ledgerDay = new Date(Date.UTC(2400, 0, 1) + randomInt(20_000) * 86_400_000);
+
 async function todayTotal(): Promise<bigint> {
-  const day = utcDay(new Date());
+  const day = utcDay(ledgerDay);
   const rows = await appUserQuery((tx) =>
     tx.$queryRaw<Array<{ cost: bigint }>>`
       SELECT COALESCE(SUM(cost_micros), 0) AS cost
@@ -37,7 +40,12 @@ function usage(input: number, output: number, cacheWrite = 0, cacheRead = 0) {
 }
 
 describe.skipIf(!hasDb)("anthropic adapter contract", () => {
+  beforeEach(() => {
+    setSpendClock(() => ledgerDay);
+  });
+
   afterEach(() => {
+    setSpendClock(null);
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     failNextSpendWrites(0);

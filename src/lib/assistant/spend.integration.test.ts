@@ -97,7 +97,7 @@ describe.skipIf(!hasDb)("assistant spend ledger", () => {
     });
     expect(exact.resting).toBe(true);
     const under = await assistantSpendState({
-      ASSISTANT_SPEND_CAP_USD: formatCap(current.spentMicros + BigInt(1)),
+      ASSISTANT_SPEND_CAP_USD: formatCap(current.spentMicros + BigInt(1_000_000_000_000)),
     });
     expect(under.resting).toBe(false);
   });

@@ -47,10 +47,10 @@ async function recordCall(modelId: string, usage: TokenUsage | undefined) {
   }
   const { recordSpend } = await import("./spend");
   try {
-    await recordSpend(micros, new Date());
+    await recordSpend(micros);
   } catch (first) {
     try {
-      await recordSpend(micros, new Date());
+      await recordSpend(micros);
     } catch {
       console.error("[assistant] spend not recorded", {
         modelId,
