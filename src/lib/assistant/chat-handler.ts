@@ -371,7 +371,7 @@ function originAllowed(request: Request): boolean {
   const host = request.headers.get("host");
   if (!origin || !host) return false;
   try {
-    return new URL(origin).host === host;
+    return new URL(origin).host === host.toLowerCase();
   } catch {
     return false;
   }
@@ -395,11 +395,11 @@ function asMessages(value: unknown): UIMessage[] {
 
 async function readUserMessage(request: Request): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
   const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) {
+  if (!contentType.toLowerCase().includes("application/json")) {
     return { ok: false, message: "Send a JSON message." };
   }
   const raw = await request.text();
-  if (raw.length > BODY_LIMIT) return { ok: false, message: "That message is too large." };
+  if (Buffer.byteLength(raw, "utf8") > BODY_LIMIT) return { ok: false, message: "That message is too large." };
   let body: unknown;
   try {
     body = JSON.parse(raw);

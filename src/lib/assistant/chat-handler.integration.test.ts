@@ -292,6 +292,62 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(seen.calls()).toBe(0);
   });
 
+  it("accepts a mixed-case JSON type and host, and rejects a body over 16 KB of UTF-8", async () => {
+    const { model, calls } = strictModel(() => [
+      { type: "stream-start", warnings: [] },
+      { type: "text-start", id: "t" },
+      { type: "text-delta", id: "t", delta: "ok" },
+      { type: "text-end", id: "t" },
+      { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+    ]);
+    const handler = createChatHandler({ model });
+    const mixedType = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "Application/JSON; charset=utf-8",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.180",
+      },
+      body: userBody("hello"),
+    }));
+    expect(mixedType.status).toBe(200);
+    expect(await mixedType.text()).toContain("ok");
+    const mixedHost = host.toUpperCase();
+    const mixedCaseHost = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host: mixedHost,
+        origin: `http://${mixedHost}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.181",
+      },
+      body: userBody("hello"),
+    }));
+    expect(mixedCaseHost.status).toBe(200);
+    expect(await mixedCaseHost.text()).toContain("ok");
+    const text = "é".repeat(9000);
+    const raw = JSON.stringify({ message: { role: "user", parts: [{ type: "text", text }] } });
+    expect(raw.length).toBeLessThanOrEqual(16 * 1024);
+    expect(Buffer.byteLength(raw, "utf8")).toBeGreaterThan(16 * 1024);
+    const wide = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.182",
+      },
+      body: raw,
+    }));
+    expect(wide.status).toBe(400);
+    expect((await wide.json()).error.message).toBe("That message is too large.");
+    expect(calls()).toBe(2);
+  });
+
   it("limits by IP and by cart with Retry-After", async () => {
     const clock = new Date("2031-04-01T00:00:00Z");
     const token = randomUUID();
