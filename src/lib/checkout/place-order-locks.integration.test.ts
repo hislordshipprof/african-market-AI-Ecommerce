@@ -180,6 +180,75 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     return res.rows.map((row) => Number(row.pid));
   }
 
+  async function pidsBlockedBy(holderPid: number): Promise<number[]> {
+    const res = await monitor.query<{ pid: number }>(
+      `SELECT DISTINCT l.pid
+       FROM pg_locks l
+       WHERE NOT l.granted
+         AND $1 = ANY(pg_blocking_pids(l.pid))`,
+      [holderPid],
+    );
+    return res.rows.map((row) => Number(row.pid));
+  }
+
+  function asPids(value: unknown): number[] {
+    if (Array.isArray(value)) return value.map(Number).filter((pid) => pid > 0);
+    if (typeof value !== "string") return [];
+    return value.replace(/[{}]/g, "").split(",").map(Number).filter((pid) => pid > 0);
+  }
+
+  /** Pid that holds this row's update lock, or null when the row is free. Granted row locks are not listed in pg_locks, so a conflicting probe observes them. */
+  async function pidHoldingRowUpdate(
+    storeId: string,
+    table: "listings" | "stores",
+    id: string,
+  ): Promise<number | null> {
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    const sql = table === "listings"
+      ? "SELECT 1 FROM listings WHERE id = $1 FOR UPDATE"
+      : "SELECT 1 FROM stores WHERE id = $1 FOR UPDATE";
+    let probePid = 0;
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE app_user");
+      await client.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
+      await client.query("SET LOCAL lock_timeout = '500ms'");
+      const who = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      probePid = Number(who.rows[0]?.pid ?? 0);
+      let blocker: number | null = null;
+      let settled = false;
+      const attempt = client.query(sql, [id]).then(
+        () => {
+          settled = true;
+        },
+        (err: unknown) => {
+          settled = true;
+          const code = pgCode(err);
+          if (code !== "55P03" && code !== "57014") throw err;
+        },
+      );
+      const start = Date.now();
+      while (!settled && Date.now() - start < 600) {
+        const waiting = await monitor.query<{ blockers: unknown }>(
+          "SELECT pg_blocking_pids($1::int) AS blockers",
+          [probePid],
+        );
+        const found = asPids(waiting.rows[0]?.blockers)[0];
+        if (found) {
+          blocker = found;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await attempt;
+      return blocker;
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.end().catch(() => undefined);
+    }
+  }
+
   async function assertCartHeldBy(storeId: string, cartId: string, ownerPid: number) {
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
@@ -526,6 +595,8 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     const second = await makeCart(storeId, [variants[0]!.id], 3, secondPi);
     const replay = await recordAuthorizedOrder(storeId, input);
     expect(replay).toEqual({ orderId: created.orderId, created: false });
+    const secondReplay = await recordAuthorizedOrder(storeId, { ...input, cartId: second.cart.id });
+    expect(secondReplay).toEqual({ orderId: created.orderId, created: false });
     const refilled = await storeScoped(storeId).cart.findUnique({
       where: { id: cart.id },
       include: { lines: true },
@@ -747,16 +818,120 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     const { cart } = await makeCart(storeId, [v0.id], 2, paymentIntentId);
     const input = orderInput(cart.id, paymentIntentId, orderLines([v0.id], 2), `${entry}-${first}@t236.test`);
     const payload = keptRows(created, 750);
+    const removed = created.find((variant) => variant.label === "V2")!;
     const save = () =>
       entry === "listing"
         ? updateListing({ storeId, listingId: listing.id, variants: payload, actor })
         : updateVariants({ storeId, listingId: listing.id, variants: payload, actor });
     const checkout = () => recordAuthorizedOrder(storeId, input);
-    const saveP = first === "save" ? save() : null;
-    const checkoutP = first === "checkout" ? checkout() : null;
-    const [saved, recorded] = await Promise.all([saveP ?? save(), checkoutP ?? checkout()]);
+    // V2 is removed and is not in the order. KEY SHARE stops the save after it
+    // has locked the listing and before it writes, so the overlap stays put.
+    const variantHolder = hold(storeId, async (client) => {
+      const locked = await client.query("SELECT id FROM listing_variants WHERE id = $1 FOR KEY SHARE", [removed.id]);
+      if (locked.rowCount !== 1) throw new Error("holder missed the removed variant");
+    });
+    let pauseHolder: ReturnType<typeof hold> | null = null;
+    let saveRun: Promise<unknown> | null = null;
+    let checkoutRun: Promise<unknown> | null = null;
+    let saveFailure: unknown = null;
+    const variantPid = await variantHolder.ready();
+    let saved: unknown;
+    let recorded: { created: boolean; orderId: string } | undefined;
+    const watchSave = () => {
+      saveRun = save().catch((err: unknown) => {
+        saveFailure = err;
+        throw err;
+      });
+    };
+    const saveWaitingOnVariant = async () => {
+      if (saveFailure) throw saveFailure;
+      return pidsBlockedBy(variantPid);
+    };
+    try {
+      if (first === "save") {
+        // Checkout locks the store before the cart. Holding the cart keeps that
+        // store lock visible until the save's listing lock has been observed.
+        const cartHolder = hold(storeId, async (client) => {
+          const locked = await client.query("SELECT id FROM carts WHERE id = $1 FOR KEY SHARE", [cart.id]);
+          if (locked.rowCount !== 1) throw new Error("holder missed the cart");
+        });
+        pauseHolder = cartHolder;
+        const cartPid = await cartHolder.ready();
+        watchSave();
+        let savePid = 0;
+        await poll("save waits to lock the removed variant", async () => {
+          const waiting = await saveWaitingOnVariant();
+          const hit = waiting[0];
+          if (!hit) return false;
+          savePid = hit;
+          return true;
+        });
+        const listingHolder = await pidHoldingRowUpdate(storeId, "listings", listing.id);
+        if (listingHolder !== savePid) {
+          throw new Error(`listing lock held by ${listingHolder ?? "nobody"}, save waiter is ${savePid}`);
+        }
+        checkoutRun = checkout();
+        let checkoutPid = 0;
+        await poll("checkout waits on the cart after locking the store", async () => {
+          const waiting = await pidsBlockedBy(cartPid);
+          const hit = waiting[0];
+          if (!hit) return false;
+          checkoutPid = hit;
+          return true;
+        });
+        const storeLocker = await pidHoldingRowUpdate(storeId, "stores", storeId);
+        const saveStillWaiting = await saveWaitingOnVariant();
+        if (storeLocker !== checkoutPid || !saveStillWaiting.includes(savePid)) {
+          throw new Error(
+            `store lock held by ${storeLocker ?? "nobody"}, checkout waiter is ${checkoutPid}, save still waiting: ${saveStillWaiting.includes(savePid)}`,
+          );
+        }
+      } else {
+        pauseHolder = hold(storeId, async (client) => {
+          const locked = await client.query("SELECT 1 FROM stores WHERE id = $1 FOR KEY SHARE", [storeId]);
+          if (locked.rowCount !== 1) throw new Error("holder missed the store");
+        });
+        const storePid = await pauseHolder.ready();
+        checkoutRun = checkout();
+        let checkoutPid = 0;
+        await poll("checkout waits on the store before the save starts", async () => {
+          const waiting = await pidsBlockedBy(storePid);
+          const hit = waiting[0];
+          if (!hit) return false;
+          checkoutPid = hit;
+          return true;
+        });
+        watchSave();
+        let savePid = 0;
+        await poll("save waits to lock the removed variant", async () => {
+          const waiting = await saveWaitingOnVariant();
+          const hit = waiting[0];
+          if (!hit) return false;
+          savePid = hit;
+          return true;
+        });
+        const listingHolder = await pidHoldingRowUpdate(storeId, "listings", listing.id);
+        if (listingHolder !== savePid) {
+          throw new Error(`listing lock held by ${listingHolder ?? "nobody"}, save waiter is ${savePid}`);
+        }
+        const checkoutStillWaiting = await pidsBlockedBy(storePid);
+        if (!checkoutStillWaiting.includes(checkoutPid)) {
+          throw new Error("checkout left the store wait before the save held the listing");
+        }
+      }
+      pauseHolder?.release();
+      variantHolder.release();
+      [saved, recorded] = (await Promise.all([saveRun, checkoutRun])) as [
+        unknown,
+        { created: boolean; orderId: string },
+      ];
+    } finally {
+      pauseHolder?.release();
+      variantHolder.release();
+      await Promise.allSettled([variantHolder.done, pauseHolder?.done, saveRun, checkoutRun]);
+    }
     expect(saved).toBeTruthy();
-    expect(recorded.created).toBe(true);
+    expect(recorded?.created).toBe(true);
     const listingRow = await storeScoped(storeId).listing.findUnique({
       where: { id: listing.id },
       include: { variants: true },
@@ -764,7 +939,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     expect(listingRow?.variants.map((variant) => variant.label).sort()).toEqual(["V0", "V1"]);
     expect(listingRow?.variants.find((variant) => variant.label === "V0")?.price).toBe(750);
     const order = await storeScoped(storeId).order.findUnique({
-      where: { id: recorded.orderId },
+      where: { id: recorded!.orderId },
       include: { lines: true },
     });
     expect(order?.lines).toHaveLength(1);
@@ -776,14 +951,14 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
   it("checkout and a variant save on the same listing both commit", async () => {
     await raceSave("listing", "checkout");
     await raceSave("listing", "save");
-  }, 30_000);
+  }, 60_000);
 
   it("both variant-save entry points commit real changes with checkout in both orders", async () => {
     await raceSave("listing", "save");
     await raceSave("listing", "checkout");
     await raceSave("variants", "save");
     await raceSave("variants", "checkout");
-  }, 40_000);
+  }, 90_000);
 
   it("a failed order write after authorization leaves the cart and its PaymentIntent intact", async () => {
     const storeId = await makeStore("badline");
