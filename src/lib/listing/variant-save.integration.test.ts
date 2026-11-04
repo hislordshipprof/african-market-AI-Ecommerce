@@ -794,6 +794,39 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
     expect((await storeScoped(storeBId).cartLine.findUnique({ where: { id: hidden.id } }))?.variantId).toBe(variant.id);
   });
 
+  it("refuses removing a variant another store selected as a substitute", async () => {
+    for (const save of [updateListing, updateVariants] as const) {
+      const created = await listingWith(storeAId, `Hidden sub ${save.name}`, [
+        { label: "X", price: 800, weightG: 1000 },
+        { label: "Y", price: 700, weightG: 700 },
+      ]);
+      const x = created.variants.find((v) => v.label === "X")!;
+      const y = created.variants.find((v) => v.label === "Y")!;
+      await seedCartLine(storeAId, x.id);
+      const bListing = await listingWith(storeBId, `B pack ${save.name}`, [
+        { label: "B", price: 500, weightG: 500 },
+      ]);
+      const bVariant = bListing.variants[0]!;
+      const cartLine = await seedCartLine(storeBId, bVariant.id, y.id);
+      const orderLine = await seedOrderLine(storeBId, bVariant.id, 500, y.id);
+      expect(await storeScoped(storeAId).cartLine.findMany({ where: { substituteVariantId: y.id } })).toEqual([]);
+      expect(await storeScoped(storeAId).orderLine.findMany({ where: { substituteVariantId: y.id } })).toEqual([]);
+      expect((await storeScoped(storeBId).cartLine.findUnique({ where: { id: cartLine.id } }))?.substituteVariantId).toBe(y.id);
+      expect((await storeScoped(storeBId).orderLine.findUnique({ where: { id: orderLine.id } }))?.substituteVariantId).toBe(y.id);
+
+      await expect(save({
+        storeId: storeAId,
+        listingId: created.id,
+        variants: [row(x, 800, 1000, "X")],
+        actor,
+      })).rejects.toThrow(CANT_REMOVE("Y"));
+
+      expect((await readVariants(storeAId, created.id))!.variants.map((v) => v.id).sort()).toEqual([x.id, y.id].sort());
+      expect((await storeScoped(storeBId).cartLine.findUnique({ where: { id: cartLine.id } }))?.substituteVariantId).toBe(y.id);
+      expect((await storeScoped(storeBId).orderLine.findUnique({ where: { id: orderLine.id } }))?.substituteVariantId).toBe(y.id);
+    }
+  });
+
   it("mixed id-less replay follows the documented replacement contract", async () => {
     const created = await listingWith(storeAId, "Replay", [{ label: "X", price: 800, weightG: 1000 }]);
     const x = created.variants[0]!;

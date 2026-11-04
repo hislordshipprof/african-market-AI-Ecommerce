@@ -128,7 +128,7 @@ describe.skipIf(!hasDb)("listing save actions (real auth, lane DB)", () => {
   let storeAId = "";
   let storeBId = "";
   let ownerId = "";
-  let pendingCookies = "";
+  let ownerSecret = "";
   let ownerCookies = "";
   let staffCookies = "";
   let otherCookies = "";
@@ -157,14 +157,12 @@ describe.skipIf(!hasDb)("listing save actions (real auth, lane DB)", () => {
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeBId}, ${other.id}, 'owner', now())`;
     });
 
-    const ownerSecret = await enrollTotp(ownerEmail);
+    const ownerSecretEnrolled = await enrollTotp(ownerEmail);
+    ownerSecret = ownerSecretEnrolled;
     const staffSecret = await enrollTotp(staffEmail);
     const otherSecret = await enrollTotp(otherEmail);
     await waitForNextTotpWindow();
 
-    const ownerSession = await challengedSession(ownerEmail, ownerSecret);
-    pendingCookies = ownerSession.pending;
-    ownerCookies = ownerSession.verified;
     staffCookies = (await challengedSession(staffEmail, staffSecret)).verified;
     otherCookies = (await challengedSession(otherEmail, otherSecret)).verified;
 
@@ -225,15 +223,6 @@ describe.skipIf(!hasDb)("listing save actions (real auth, lane DB)", () => {
     expect(revalidated).toEqual([]);
   });
 
-  it("a password sign-in that has not passed the TOTP challenge is redirected before the listing changes", async () => {
-    asStore(storeASlug, pendingCookies);
-    await expect(updateListingAction(saveForm(listingId, listingName, [
-      { id: variantId, label: "1kg", price: 222, weightG: 1000 },
-    ]))).rejects.toThrow(`REDIRECT:/store-admin/sign-in?store=${storeASlug}`);
-    expect(await variantPrice()).toBe(800);
-    expect(revalidated).toEqual([]);
-  });
-
   it("a staff member is redirected before the listing changes", async () => {
     asStore(storeASlug, staffCookies);
     await expect(updateListingAction(saveForm(listingId, listingName, [
@@ -253,7 +242,39 @@ describe.skipIf(!hasDb)("listing save actions (real auth, lane DB)", () => {
     expect(revalidated).toEqual([]);
   });
 
-  it("an owner who just passed a fresh TOTP challenge updates the carted variant in place and revalidates after commit", async () => {
+  it("a live TOTP challenge is denied, then the same challenge saves the carted variant", async () => {
+    const signedIn = await authPost("/sign-in/email", { email: ownerEmail, password });
+    expect(signedIn.status, await signedIn.clone().text()).toBe(200);
+    const body = await signedIn.json();
+    expect(body.twoFactorRedirect).toBe(true);
+    const pending = collectCookies(signedIn);
+    const before = {
+      listing: await storeScoped(storeAId).listing.findUniqueOrThrow({
+        where: { id: listingId },
+        include: { variants: { orderBy: { id: "asc" } } },
+      }),
+      events: await storeScoped(storeAId).stockEvent.findMany({ where: { listingId }, orderBy: { id: "asc" } }),
+      audits: await storeScoped(storeAId).auditLog.findMany({ where: { entityId: listingId }, orderBy: { id: "asc" } }),
+    };
+    const revalidatedBefore = revalidated.length;
+    asStore(storeASlug, pending);
+    await expect(updateListingAction(saveForm(listingId, listingName, [
+      { id: variantId, label: "1kg", price: 222, weightG: 1000 },
+    ]))).rejects.toThrow(`REDIRECT:/store-admin/sign-in?store=${storeASlug}`);
+    const after = {
+      listing: await storeScoped(storeAId).listing.findUniqueOrThrow({
+        where: { id: listingId },
+        include: { variants: { orderBy: { id: "asc" } } },
+      }),
+      events: await storeScoped(storeAId).stockEvent.findMany({ where: { listingId }, orderBy: { id: "asc" } }),
+      audits: await storeScoped(storeAId).auditLog.findMany({ where: { entityId: listingId }, orderBy: { id: "asc" } }),
+    };
+    expect(after).toEqual(before);
+    expect(revalidated).toHaveLength(revalidatedBefore);
+
+    const verified = await authPost("/two-factor/verify-totp", { code: generateTOTP(ownerSecret) }, pending);
+    expect(verified.status, await verified.clone().text()).toBe(200);
+    ownerCookies = collectCookies(verified) || pending;
     asStore(storeASlug, ownerCookies);
     const result = await updateListingAction(saveForm(listingId, listingName, [
       { id: variantId, label: "1kg", price: 950, weightG: 1200 },

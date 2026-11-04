@@ -44,6 +44,25 @@ describe.skipIf(!connectionString)("cart_lines substitute variant index migratio
     expect(rows).toHaveLength(1);
     expect(rows[0]?.indexdef).toMatch(/\(substitute_variant_id\)/);
   });
+
+  it("restricts substitute deletes on an empty database", async () => {
+    const { rows } = await client.query<{ conname: string; confdeltype: string }>(
+      `SELECT c.conname, c.confdeltype
+       FROM pg_constraint c
+       JOIN pg_namespace n ON n.oid = c.connamespace
+       WHERE n.nspname = $1
+         AND c.conname IN (
+           'cart_lines_substitute_variant_id_fkey',
+           'order_lines_substitute_variant_id_fkey'
+         )
+       ORDER BY c.conname`,
+      [SCHEMA],
+    );
+    expect(rows).toEqual([
+      { conname: "cart_lines_substitute_variant_id_fkey", confdeltype: "r" },
+      { conname: "order_lines_substitute_variant_id_fkey", confdeltype: "r" },
+    ]);
+  });
 });
 
 describe.skipIf(!connectionString)("cart_lines substitute variant index on the lane", () => {
@@ -58,6 +77,21 @@ describe.skipIf(!connectionString)("cart_lines substitute variant index on the l
       );
       expect(rows).toHaveLength(1);
       expect(rows[0]?.indexdef).toMatch(/\(substitute_variant_id\)/);
+      const fks = await client.query<{ conname: string; confdeltype: string }>(
+        `SELECT c.conname, c.confdeltype
+         FROM pg_constraint c
+         JOIN pg_namespace n ON n.oid = c.connamespace
+         WHERE n.nspname = 'public'
+           AND c.conname IN (
+           'cart_lines_substitute_variant_id_fkey',
+           'order_lines_substitute_variant_id_fkey'
+         )
+         ORDER BY c.conname`,
+      );
+      expect(fks.rows).toEqual([
+        { conname: "cart_lines_substitute_variant_id_fkey", confdeltype: "r" },
+        { conname: "order_lines_substitute_variant_id_fkey", confdeltype: "r" },
+      ]);
     } finally {
       await client.end();
     }
