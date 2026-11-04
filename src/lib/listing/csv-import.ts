@@ -79,6 +79,8 @@ interface ParsedRow {
   stockMode?: string;
   qty?: number;
   status?: string;
+  /** Whole grams from a valid weight cell. Absent when the cell was empty. */
+  weightG?: number;
 }
 
 const KNOWN_HEADERS = new Set([
@@ -93,6 +95,86 @@ const KNOWN_HEADERS = new Set([
 
 function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/[\s_-]+/g, "_");
+}
+
+const MAX_WEIGHT_G = 453592;
+const MAX_WEIGHT_CELL_LENGTH = 32;
+const WEIGHT_UNITS = new Set(["g", "kg", "lb", "lbs", "oz"]);
+const UNIT_FACTOR: Record<string, { num: bigint; den: bigint }> = {
+  g: { num: BigInt(1), den: BigInt(1) },
+  kg: { num: BigInt(1000), den: BigInt(1) },
+  lb: { num: BigInt(45359237), den: BigInt(100000) },
+  lbs: { num: BigInt(45359237), den: BigInt(100000) },
+  oz: { num: BigInt("28349523125"), den: BigInt("1000000000") },
+};
+const WEIGHT_CELL_RE = /^(-)?(\d+(?:\.\d+)?|\.\d+)\s*([A-Za-z]*)$/;
+const WEIGHT_HEADER_RE = /^weight(?:_([a-z]+)|\(([a-z]+)\)|_\(([a-z]+)\))?$/;
+
+const INVALID_WEIGHT = "Invalid weight";
+const WEIGHT_NEEDS_UNIT = "Weight needs a unit: lb, oz, g or kg (for example 5 lb)";
+const WEIGHT_TOO_SMALL = "Weight must be greater than 0";
+const WEIGHT_TOO_LARGE = "Weight looks too large. Check the unit";
+
+export type ParsedWeight =
+  | { kind: "empty" }
+  | { kind: "grams"; grams: number }
+  | { kind: "error"; message: string };
+
+/** `null` is a bare `weight` header. `undefined` means the header is not a weight column. */
+function headerWeightUnit(normalized: string): string | null | undefined {
+  const match = WEIGHT_HEADER_RE.exec(normalized);
+  if (!match) return undefined;
+  const unit = match[1] ?? match[2] ?? match[3];
+  if (unit === undefined) return null;
+  if (!WEIGHT_UNITS.has(unit)) return undefined;
+  return unit;
+}
+
+function divHalfUp(numerator: bigint, denominator: bigint): bigint {
+  const quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  if (remainder * BigInt(2) >= denominator) return quotient + BigInt(1);
+  return quotient;
+}
+
+function gramsFromDecimal(numeric: string, unit: string): bigint {
+  const factor = UNIT_FACTOR[unit];
+  const dot = numeric.indexOf(".");
+  const whole = dot === -1 ? numeric : numeric.slice(0, dot);
+  const frac = dot === -1 ? "" : numeric.slice(dot + 1);
+  const scale = BigInt(10) ** BigInt(frac.length);
+  const mantissa = BigInt((whole === "" ? "0" : whole) + frac);
+  return divHalfUp(mantissa * factor.num, scale * factor.den);
+}
+
+export function parseWeightToGrams(cell: string, headerUnit: string | null): ParsedWeight {
+  const trimmed = cell.trim();
+  if (trimmed === "") return { kind: "empty" };
+  if (trimmed.length > MAX_WEIGHT_CELL_LENGTH) {
+    return { kind: "error", message: INVALID_WEIGHT };
+  }
+  const match = WEIGHT_CELL_RE.exec(trimmed);
+  if (!match) return { kind: "error", message: INVALID_WEIGHT };
+
+  const negative = match[1] === "-";
+  const numeric = match[2];
+  const letters = match[3].toLowerCase();
+  let unit: string | null;
+  if (letters === "") {
+    unit = headerUnit;
+    if (!unit) return { kind: "error", message: WEIGHT_NEEDS_UNIT };
+  } else if (WEIGHT_UNITS.has(letters)) {
+    unit = letters;
+  } else {
+    return { kind: "error", message: WEIGHT_NEEDS_UNIT };
+  }
+
+  if (negative) return { kind: "error", message: WEIGHT_TOO_SMALL };
+
+  const grams = gramsFromDecimal(numeric, unit);
+  if (grams <= BigInt(0)) return { kind: "error", message: WEIGHT_TOO_SMALL };
+  if (grams > BigInt(MAX_WEIGHT_G)) return { kind: "error", message: WEIGHT_TOO_LARGE };
+  return { kind: "grams", grams: Number(grams) };
 }
 
 function stripBom(text: string): string {
@@ -136,9 +218,13 @@ export function parseCsvText(raw: string): {
   const errors: CsvPreviewError[] = [];
 
   let records: Record<string, string>[];
+  let rawHeaders: string[] = [];
   try {
     records = parse(cleaned, {
-      columns: true,
+      columns: (headers: string[]) => {
+        rawHeaders = headers;
+        return headers;
+      },
       skip_empty_lines: true,
       trim: true,
       relax_column_count: true,
@@ -177,7 +263,7 @@ export function parseCsvText(raw: string): {
   for (const h of headers) {
     const norm = normalizeHeader(h);
     normalizedMap.set(h, norm);
-    if (!KNOWN_HEADERS.has(norm)) {
+    if (!KNOWN_HEADERS.has(norm) && headerWeightUnit(norm) === undefined) {
       unknownColumns.push(h);
     }
   }
@@ -208,6 +294,22 @@ export function parseCsvText(raw: string): {
       hasQtyColumn: false,
     };
   }
+
+  const weightHeaders = rawHeaders.filter(
+    (header) => headerWeightUnit(normalizeHeader(header)) !== undefined,
+  );
+  if (weightHeaders.length > 1) {
+    return {
+      rows: [],
+      errors: [{ row: 0, reason: "Use one weight column" }],
+      unknownColumns,
+      hasQtyColumn: false,
+    };
+  }
+
+  // A short first record omits trailing keys. The header row still names the column.
+  const weightCol = weightHeaders[0];
+  const headerUnit = weightCol ? headerWeightUnit(normalizeHeader(weightCol)) ?? null : null;
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
@@ -293,6 +395,16 @@ export function parseCsvText(raw: string): {
       continue;
     }
 
+    let weightG: number | undefined;
+    if (weightCol) {
+      const parsedWeight = parseWeightToGrams(record[weightCol] ?? "", headerUnit);
+      if (parsedWeight.kind === "error") {
+        errors.push({ row: rowNum, csvName: rawName, reason: parsedWeight.message });
+        continue;
+      }
+      if (parsedWeight.kind === "grams") weightG = parsedWeight.grams;
+    }
+
     let qty: number | undefined;
     if (qtyRaw !== undefined && qtyRaw !== "") {
       const parsed = parseInt(qtyRaw, 10);
@@ -314,6 +426,7 @@ export function parseCsvText(raw: string): {
       stockMode: stockModeRaw as "counted" | "status" | undefined,
       qty,
       status: statusRaw as "in_stock" | "low" | "out_of_stock" | undefined,
+      ...(weightG !== undefined ? { weightG } : {}),
     });
   }
 
@@ -424,6 +537,14 @@ function listingWeightG(weightG: number | null | undefined): number {
   return weightG && weightG > 0 ? weightG : DEFAULT_WEIGHT_G;
 }
 
+function resolveImportWeightG(
+  rowWeightG: number | undefined,
+  productWeightG: number | null | undefined,
+): number {
+  if (rowWeightG !== undefined && rowWeightG > 0) return rowWeightG;
+  return listingWeightG(productWeightG);
+}
+
 interface ListingToCreate {
   masterProductId: string | null;
   customName: string | null;
@@ -455,7 +576,7 @@ function buildListingData(
       ...stock,
       frozen: false,
       perishable: false,
-      weightG: DEFAULT_WEIGHT_G,
+      weightG: resolveImportWeightG(row.weightG, null),
     };
   }
   return {
@@ -465,7 +586,7 @@ function buildListingData(
     ...stock,
     frozen: product.frozen,
     perishable: product.perishable,
-    weightG: listingWeightG(product.weightG),
+    weightG: resolveImportWeightG(row.weightG, product.weightG),
   };
 }
 
