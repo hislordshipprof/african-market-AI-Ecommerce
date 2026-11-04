@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
-import { listingImage, storefrontPhoto } from "./images";
+import { catalogKeyFromUrl, listingImage, storefrontPhoto } from "./images";
 import catalog from "./catalog-media.json";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -37,5 +37,25 @@ describe("storefront image precedence", () => {
       const slug = entry.imageUrl.split("/").pop()!.replace(".webp", "");
       expect(report.results.find((item: { slug: string }) => item.slug === slug)?.visual_review).toBe("accepted");
     }
+  });
+});
+
+describe("catalog key extraction preserves raw storefront behavior", () => {
+  it("leaves whitespace, queries, fragments and retirement rules unchanged", () => {
+    expect(storefrontPhoto("   ")).toBe("   ");
+    expect(storefrontPhoto(" catalog/yam.jpg")).toBe(" catalog/yam.jpg");
+    expect(storefrontPhoto("catalog/logo.svg")).toBeUndefined();
+    expect(storefrontPhoto("catalog/logo.SVG")).toBe("catalog/logo.SVG");
+    expect(storefrontPhoto("catalog/logo.svg?retry=1")).toBe("catalog/logo.svg?retry=1");
+    expect(storefrontPhoto("https://upload.wikimedia.org/wikipedia/commons/a.jpg")).toBeUndefined();
+    expect(storefrontPhoto("https://cdn.example/Wikimedia.ORG/a.webp")).toBeUndefined();
+    expect(catalogKeyFromUrl("/api/catalog-image/catalog/yam.jpg?retry=1")).toBeUndefined();
+    expect(catalogKeyFromUrl("https://old.example.com/catalog/yam.webp?x=1")).toBeUndefined();
+    expect(catalogKeyFromUrl("https://old.example.com/catalog/yam.webp#frag")).toBeUndefined();
+    expect(catalogKeyFromUrl("catalog/yam%20white.webp")).toBeUndefined();
+    expect(catalogKeyFromUrl("https://old.example.com/catalog/yam.webp")).toBe("catalog/yam.webp");
+    expect(catalogKeyFromUrl("/api/catalog-image/catalog/yam.jpg")).toBe("catalog/yam.jpg");
+    expect(storefrontPhoto("/api/catalog-image/catalog/yam.jpg?retry=1")).toBe("/api/catalog-image/catalog/yam.jpg?retry=1");
+    expect(storefrontPhoto("https://old.example.com/catalog/yam.webp?x=1")).toBe("https://old.example.com/catalog/yam.webp?x=1");
   });
 });
