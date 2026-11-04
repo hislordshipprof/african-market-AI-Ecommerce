@@ -361,9 +361,11 @@ async function persistRefundFailure(
 async function settleCapturedRefund(
   storeId: string,
   orderId: string,
+  paymentIntentId: string,
   refund: RefundResult,
 ): Promise<{ outcome: "refunded" } | { outcome: "failed" | "pending"; error: string }> {
-  if (refund.status === "succeeded") {
+  const decision = await refundReadyToSettle(paymentIntentId, orderId, refund);
+  if (decision.status === "succeeded") {
     await storeScopedTransaction(storeId, async (tx) => {
       await lockStoreRow(tx, storeId);
       const current = await tx.order.findUnique({ where: { id: orderId } });
@@ -374,7 +376,7 @@ async function settleCapturedRefund(
           status: "CANCELLED",
           cancelledAt: new Date(),
           capturedAmountCents: null,
-          refundId: refund.refundId,
+          refundId: decision.refundId,
         },
       });
       await tx.auditLog.create({
@@ -385,23 +387,52 @@ async function settleCapturedRefund(
           action: "anomaly_refund",
           entityType: "order",
           entityId: orderId,
-          after: { refundId: refund.refundId, amountRefunded: refund.amountRefunded },
+          after: { refundId: decision.refundId, amountRefunded: decision.amountRefunded },
         },
       });
     });
     return { outcome: "refunded" };
   }
 
-  if (isTerminalRefundStatus(refund.status)) {
-    await persistRefundFailure(storeId, orderId, refund.refundId, refund.status);
-    return { outcome: "failed", error: `Refund ${refund.status} — customer is still charged` };
+  if (isTerminalRefundStatus(decision.status)) {
+    await persistRefundFailure(storeId, orderId, decision.refundId, decision.status);
+    return { outcome: "failed", error: `Refund ${decision.status} — customer is still charged` };
   }
 
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
-    await tx.order.update({ where: { id: orderId }, data: { refundId: refund.refundId } });
+    await tx.order.update({ where: { id: orderId }, data: { refundId: decision.refundId } });
   });
-  return { outcome: "pending", error: `Refund ${refund.status} — order stays in CANCELLING for retry` };
+  return { outcome: "pending", error: `Refund ${decision.status} — order stays in CANCELLING for retry` };
+}
+
+/** One succeeded slice is not coverage while another refund is still pending. */
+async function refundReadyToSettle(
+  paymentIntentId: string,
+  orderId: string,
+  refund: RefundResult,
+): Promise<RefundResult> {
+  if (refund.status !== "succeeded") return refund;
+  const stripe = getStripeProvider();
+  const open = (items: RefundResult[]) =>
+    items.find((item) => item.status === "pending" || item.status === "requires_action");
+  const succeededTotal = (items: RefundResult[]) =>
+    items.filter((item) => item.status === "succeeded").reduce((sum, item) => sum + item.amountRefunded, 0);
+
+  const listed = await stripe.listRefunds(paymentIntentId);
+  const pending = open(listed);
+  if (pending) return pending;
+  const captured = await stripe.retrievePaymentIntent(paymentIntentId);
+  if (succeededTotal(listed) >= captured.amountReceived) return refund;
+
+  const gap = await refundCapturedBalance(paymentIntentId, orderId);
+  if (gap.status !== "succeeded") return gap;
+  const again = await stripe.listRefunds(paymentIntentId);
+  const stillPending = open(again);
+  if (stillPending) return stillPending;
+  const after = await stripe.retrievePaymentIntent(paymentIntentId);
+  if (succeededTotal(again) >= after.amountReceived) return gap;
+  return { ...gap, status: "pending" };
 }
 
 export async function markTerminalRefundFailure(input: {
@@ -535,7 +566,7 @@ export async function markReady(
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
         const refund = await refundCapturedBalance(validation.paymentIntentId, orderId);
-        const settled = await settleCapturedRefund(storeId, orderId, refund);
+        const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true, capturedAmountCents: 0, voided: true };
       }
@@ -723,7 +754,7 @@ export async function autoCancelOrder(
         const refund = validation.refundId
           ? await stripe.retrieveRefund(validation.refundId)
           : await refundCapturedBalance(validation.paymentIntentId, orderId);
-        const settled = await settleCapturedRefund(storeId, orderId, refund);
+        const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true };
       }
@@ -799,7 +830,7 @@ export async function reconcileStuckOrder(
       } else {
         refund = await refundCapturedBalance(order.paymentIntentId, orderId);
       }
-      const settled = await settleCapturedRefund(storeId, orderId, refund);
+      const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
       if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
       return { ok: true, action: "anomaly_refund" };
     }
@@ -852,7 +883,7 @@ export async function reconcileStuckOrder(
             } else {
               refund = await refundCapturedBalance(order.paymentIntentId, orderId);
             }
-            const settled = await settleCapturedRefund(storeId, orderId, refund);
+            const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
             if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
             return { ok: true, action: "anomaly_refund" };
           }

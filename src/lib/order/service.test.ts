@@ -1539,6 +1539,55 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.refundId).toBe(saved!.refundId);
   });
 
+  it("autoCancel stays CANCELLING while a partial refund is still pending", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "external-capture");
+    setNextRefundStatus(pi, "pending");
+    await fakeStripeProvider.refundPayment(pi, 300, "external-partial");
+
+    const result = await autoCancelOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
+    expect(updated!.refundId).toBe(`re_fake_${pi}`);
+  });
+
+  it("reconcile stays CANCELLING when a saved refund succeeded and another is pending", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "external-capture");
+    setNextRefundStatus(pi, "pending");
+    const first = await fakeStripeProvider.refundPayment(pi, 300, "partial-a");
+    const second = await fakeStripeProvider.refundPayment(pi, 700, "partial-b");
+    setRefundStatus(second.refundId, "pending");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", refundId: null },
+      });
+    });
+
+    const listed = await reconcileStuckOrder(storeId, order.id);
+    expect(listed.ok).toBe(false);
+    const saved = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(saved!.status).toBe("CANCELLING");
+    const pendingLeft = saved!.refundId === first.refundId ? second.refundId : first.refundId;
+    setRefundStatus(saved!.refundId!, "succeeded");
+
+    const again = await reconcileStuckOrder(storeId, order.id);
+    expect(again.ok).toBe(false);
+    const midway = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(midway!.status).toBe("CANCELLING");
+    expect(midway!.refundId).toBe(pendingLeft);
+
+    setRefundStatus(pendingLeft, "succeeded");
+    const done = await reconcileStuckOrder(storeId, order.id);
+    expect(done.ok).toBe(true);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+  });
+
   it.skipIf(!process.env.STRIPE_SECRET_KEY)(
     "sandbox: a pending refund stays CANCELLING on a duplicate cancel and a lost refund id",
     async () => {
