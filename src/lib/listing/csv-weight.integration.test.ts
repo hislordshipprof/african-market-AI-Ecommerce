@@ -7,6 +7,7 @@ import { commitImport, generatePreview } from "./csv-import";
 import type { Actor } from "./service";
 import {
   OVERLAP_TEST_TIMEOUT_MS,
+  abandonHeldCommits,
   assertNoLockWaiters,
   commitPairBehindStoreLock,
   countLockWaiters,
@@ -564,8 +565,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
       })).rejects.toThrow("Import token is invalid, expired, or already used.");
       expect(Date.now() - started).toBeLessThan(1_000);
     } finally {
-      await hold.rollback();
-      await commit.catch(() => undefined);
+      await abandonHeldCommits(hold, [commit]);
     }
   }, 30_000);
 
@@ -586,8 +586,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
       })).rejects.toThrow("No rows selected for import.");
       expect(Date.now() - started).toBeLessThan(1_000);
     } finally {
-      await hold.rollback();
-      await commit.catch(() => undefined);
+      await abandonHeldCommits(hold, [commit]);
     }
     const pending = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
     expect(pending?.status).toBe("pending");
@@ -631,8 +630,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
         settled: [first, second],
       })).rejects.toThrow("timed out: third waiter");
     } finally {
-      await hold.rollback();
-      await Promise.allSettled([first, second].filter((job): job is Promise<unknown> => !!job));
+      await abandonHeldCommits(hold, [first, ...(second ? [second] : [])]);
     }
     const writeStarted = Date.now();
     await storeScoped(storeAId).listing.create({
@@ -687,8 +685,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
       expect(Date.now() - started).toBeLessThan(1_000);
       expect(firstSettled).toBe(false);
     } finally {
-      await hold.rollback();
-      await second?.catch(() => undefined);
+      await abandonHeldCommits(hold, second ? [first, second] : [first]);
     }
     const created = await first;
     expect(created.createdCount).toBe(1);
