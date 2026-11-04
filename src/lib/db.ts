@@ -144,6 +144,20 @@ export const platformAdmin = {
   listingImport: wrapPlatformAdminDelegate(prisma.listingImport),
 };
 
+/** A transaction as app_user, with the test session time zone applied when one is set. */
+export async function appUserQuery<T>(
+  fn: (tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    const zone = sessionTimeZone.getStore();
+    if (zone) {
+      await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
+    }
+    return fn(tx);
+  });
+}
+
 export async function platformAdminTransaction<T>(
   fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
 ): Promise<T> {
@@ -409,8 +423,8 @@ export async function rateLimitUpsert(
   key: string,
   now: bigint,
   windowStart: bigint,
-): Promise<{ count: number }> {
-  const rows = await prisma.$queryRaw<Array<{ count: number }>>`
+): Promise<{ count: number; lastRequest: bigint }> {
+  const rows = await prisma.$queryRaw<Array<{ count: number; last_request: bigint }>>`
     INSERT INTO rate_limits (id, key, count, last_request)
     VALUES (gen_random_uuid()::text, ${key}, 1, ${now})
     ON CONFLICT (key) DO UPDATE SET
@@ -424,9 +438,9 @@ export async function rateLimitUpsert(
         THEN ${now}
         ELSE rate_limits.last_request
       END
-    RETURNING count
+    RETURNING count, last_request
   `;
-  return { count: Number(rows[0].count) };
+  return { count: Number(rows[0].count), lastRequest: BigInt(rows[0].last_request) };
 }
 
 /**

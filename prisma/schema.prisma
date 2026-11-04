@@ -528,6 +528,16 @@ model AiAction {
   @@map("ai_actions")
 }
 
+/// Platform-wide shopper-assistant spend. No store id, and retention does not delete it.
+model AssistantSpendDay {
+  day          DateTime  @id @db.Date
+  costMicros   BigInt    @default(0) @map("cost_micros")
+  capAlertedAt DateTime? @map("cap_alerted_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("assistant_spend_days")
+}
+
 model Order {
   id                   String    @id @default(cuid())
   storeId              String    @map("store_id")

@@ -156,7 +156,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 
 ## 8. AI assistants
 
-Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant defaults to Haiku 5.5 and moves to Sonnet 5.5 only if Haiku fails the #146 eval; the model id is a config setting. Build-phase spend cap: $10 total ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)). All tools are server-side, tenant-scoped, and permission-checked; the model never sees other tenants' data.
+Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant defaults to Haiku 5.5 and moves to Sonnet 5.5 only if Haiku fails the #146 eval; the model id is a config setting. Build-phase spend cap: $10 total ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)). The cap is measured from a platform spend ledger, by UTC day, that retention never deletes. All tools are server-side, tenant-scoped, and permission-checked; the model never sees other tenants' data.
 
 ### 8.1 Shopper assistant
 **Tools**
@@ -346,6 +346,7 @@ Refund(id, order_id, amount, reason, lines, stripe_refund_id, initiated_by)
 Issue(id, order_id, type, photos, status, resolution)
 AiConversation(id, store_id, cart_id unique, customer_id?, model, tokens_in, tokens_out, cost_micros, messages, in_flight_until, created_at, last_message_at) — one shopper conversation per cart. Store copilot records stay in #142/#144.
 AiAction(id, store_id, conversation_id, tool, input, output, ok, created_at)
+AssistantSpendDay(day, cost_micros, cap_alerted_at) — platform ledger, no store id; retention never deletes it
 AuditLog(id, tenant_id, actor, action, entity, before, after, at)
 ```
 

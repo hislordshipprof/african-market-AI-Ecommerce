@@ -271,3 +271,146 @@ export function createMessagesApiDouble(expectedKey: string): MessagesApiDouble 
   };
   return { fetch: fetchImpl, requests };
 }
+
+export interface FakeAnthropicStep {
+  kind: "text" | "tool" | "error";
+  text?: string;
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  inputTokens?: number;
+  cacheWriteTokens?: number;
+  cacheReadTokens?: number;
+  outputTokens?: number;
+}
+
+export interface FakeAnthropic {
+  fetch: typeof fetch;
+  requests: RecordedMessagesRequest[];
+}
+
+function sse(events: unknown[]): string {
+  return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+}
+
+function usageOf(step: FakeAnthropicStep) {
+  return {
+    input_tokens: step.inputTokens ?? 12,
+    cache_creation_input_tokens: step.cacheWriteTokens ?? 0,
+    cache_read_input_tokens: step.cacheReadTokens ?? 0,
+    output_tokens: step.outputTokens ?? 4,
+  };
+}
+
+function eventsFor(step: FakeAnthropicStep, model: string): unknown[] {
+  const usage = usageOf(step);
+  const start = {
+    type: "message_start",
+    message: {
+      id: "msg_fake",
+      model,
+      role: "assistant",
+      usage: {
+        input_tokens: usage.input_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+      },
+    },
+  };
+  if (step.kind === "error") {
+    return [
+      start,
+      { type: "ping" },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } },
+      { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+    ];
+  }
+  if (step.kind === "tool") {
+    const name = step.toolName ?? "ping";
+    const input = JSON.stringify(step.toolInput ?? {});
+    return [
+      start,
+      { type: "ping" },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "tool_use", id: "toolu_fake", name },
+      },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: input } },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "tool_use", stop_sequence: null },
+        usage: { output_tokens: usage.output_tokens },
+      },
+      { type: "message_stop" },
+    ];
+  }
+  return [
+    start,
+    { type: "ping" },
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: step.text ?? "ok" } },
+    { type: "content_block_stop", index: 0 },
+    {
+      type: "message_delta",
+      delta: { stop_reason: "end_turn", stop_sequence: null },
+      usage: { output_tokens: usage.output_tokens },
+    },
+    { type: "message_stop" },
+  ];
+}
+
+/** Real-adapter stand-in. SSE when the request asks to stream, JSON otherwise. */
+export function createFakeAnthropicFetch(options?: {
+  expectedKey?: string;
+  steps?: FakeAnthropicStep[];
+}): FakeAnthropic {
+  const expectedKey = options?.expectedKey ?? "sk-ant-test";
+  const steps = options?.steps ?? [{ kind: "text" as const, text: "ok" }];
+  const requests: RecordedMessagesRequest[] = [];
+  let cursor = 0;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const headers = {
+      ...headerMap(input instanceof Request ? input.headers : undefined),
+      ...headerMap(init?.headers),
+    };
+    const text = await readBody(init, input);
+    let body: Record<string, unknown> | null = null;
+    if (text) {
+      try {
+        const parsed: unknown = JSON.parse(text);
+        body = isRecord(parsed) ? parsed : null;
+      } catch {
+        body = null;
+      }
+    }
+    requests.push({ url, method, headers, body });
+    const verdict = judgeMessagesRequest({ url, method, headers, body, expectedKey });
+    if (verdict) {
+      return Response.json(errorBody(verdict), { status: verdict.status });
+    }
+    const step = steps[Math.min(cursor, steps.length - 1)];
+    cursor += 1;
+    const model = String(body?.model ?? "");
+    if (body?.stream === true) {
+      return new Response(sse(eventsFor(step, model)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }
+    const usage = usageOf(step);
+    return Response.json({
+      ...messagesSuccessBody(model, step.text ?? "ok"),
+      usage,
+    });
+  };
+  return { fetch: fetchImpl, requests };
+}

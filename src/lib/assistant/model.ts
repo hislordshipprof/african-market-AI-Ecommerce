@@ -1,5 +1,9 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
-import type { LanguageModel } from "ai";
+import { wrapLanguageModel, type LanguageModel } from "ai";
+import { AssistantConfigError } from "./errors";
+import { spendMeteringMiddleware } from "./spend-middleware";
+
+export { AssistantConfigError };
 
 /** Messages API root. Pinned so ANTHROPIC_BASE_URL cannot redirect the key. */
 export const ANTHROPIC_MESSAGES_BASE_URL = "https://api.anthropic.com/v1";
@@ -8,13 +12,6 @@ export type AssistantModelId = "claude-haiku-5-5" | "claude-sonnet-5-5";
 
 const HAIKU: AssistantModelId = "claude-haiku-5-5";
 const SONNET: AssistantModelId = "claude-sonnet-5-5";
-
-export class AssistantConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AssistantConfigError";
-  }
-}
 
 /**
  * Reads ASSISTANT_MODEL on each call. Unset or "" is Haiku.
@@ -68,5 +65,8 @@ export function createAssistantModel(opts?: {
     baseURL: ANTHROPIC_MESSAGES_BASE_URL,
     fetch: opts?.fetch,
   });
-  return provider(id);
+  return wrapLanguageModel({
+    model: provider(id),
+    middleware: spendMeteringMiddleware(id),
+  });
 }
