@@ -204,6 +204,16 @@ test.describe("quick add limits and recovery", () => {
   test.afterAll(async () => {
     if (curryStock) await writeListingStock("mama-ngozi", "mn_curry", curryStock);
     if (thymeStock) await writeListingStock("mama-ngozi", "mn_thyme", thymeStock);
+    const store = await storeIdentity("mama-ngozi");
+    const port = process.env.E2E_PORT || "3000";
+    await fetch(`http://127.0.0.1:${port}/api/storefront/revalidate`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${process.env.STOREFRONT_REVALIDATION_SECRET ?? "e2e-storefront-revalidate"}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ stores: [{ id: store.id, slug: store.slug }] }),
+    }).catch(() => undefined);
   });
 
   test("a burst past the listing max ends at the max the server allows", async ({ page }) => {
@@ -703,6 +713,13 @@ test.describe("quick add limits and recovery", () => {
   });
 
   test("an unavailable quantity-three line decrements to two", async ({ page }) => {
+    await writeListingStock("mama-ngozi", "mn_thyme", {
+      ...thymeStock,
+      stockMode: "status",
+      status: "in_stock",
+      qty: null,
+    });
+    await revalidateMama(page);
     await page.goto(spices);
     await thyme(page).getByTestId("quick-add-btn").click();
     await expect(thyme(page).getByTestId("stepper-qty")).toHaveText("1");
