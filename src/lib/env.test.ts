@@ -138,6 +138,17 @@ describe("runtimeDatabaseUrl", () => {
     ).toThrow(/APP_RUNTIME_PASSWORD is required/);
   });
 
+  it("throws in NODE_ENV=production when VERCEL=1 and VERCEL_ENV=preview", () => {
+    expect(() =>
+      runtimeDatabaseUrl({
+        DATABASE_URL: BASE,
+        NODE_ENV: "production",
+        VERCEL: "1",
+        VERCEL_ENV: "preview",
+      }),
+    ).toThrow(/APP_RUNTIME_PASSWORD is required/);
+  });
+
   it("throws in NODE_ENV=production with VERCEL_ENV=production", () => {
     expect(() =>
       runtimeDatabaseUrl({
