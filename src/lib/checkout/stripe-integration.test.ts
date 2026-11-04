@@ -79,6 +79,15 @@ function createPartyBarrier() {
   };
 }
 
+async function drainParty<T>(
+  barrier: ReturnType<typeof createPartyBarrier>,
+  started: Promise<T>[],
+): Promise<PromiseSettledResult<T>[]> {
+  barrier.clear();
+  checkoutTestHooks.afterMissedOrderLookup = null;
+  return Promise.allSettled(started);
+}
+
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -545,13 +554,11 @@ describe.skipIf(!hasKey || !hasDb)(
         checkoutTestHooks.afterMissedOrderLookup = async () => {
           await barrier.arrive();
         };
-        let inFlight: Promise<Array<{ token: string }>> | undefined;
+        const started = prepared.map((row) =>
+          placeOrder(storeAId, 0, row.cartId, row.contact, "pickup", null, null, row.paymentIntentId),
+        );
+        const inFlight = Promise.all(started);
         try {
-          inFlight = Promise.all(
-            prepared.map((row) =>
-              placeOrder(storeAId, 0, row.cartId, row.contact, "pickup", null, null, row.paymentIntentId),
-            ),
-          );
           void inFlight.catch(() => undefined);
           await barrier.waitFor(5, 20_000);
           expect(barrier.arrived()).toBe(5);
@@ -570,9 +577,7 @@ describe.skipIf(!hasKey || !hasDb)(
             expect(savedOrder?.paymentIntentId).toBe(prepared[index]!.paymentIntentId);
           }
         } finally {
-          barrier.clear();
-          checkoutTestHooks.afterMissedOrderLookup = null;
-          if (inFlight) await Promise.allSettled([inFlight]);
+          await drainParty(barrier, started);
         }
       },
     );
@@ -667,23 +672,42 @@ describe("checkout concurrency barrier", () => {
       const task = (async () => {
         if (index === 4) throw new Error("worker failed before the barrier");
         await checkoutTestHooks.afterMissedOrderLookup?.();
+        await new Promise((resolve) => setTimeout(resolve, 40));
         return `settled-${index}`;
       })();
       void task.catch(() => undefined);
       started.push(task);
     }
+    const flags = started.map(() => "pending");
+    started.forEach((task, index) => {
+      void task.then(
+        () => {
+          flags[index] = "done";
+        },
+        () => {
+          flags[index] = "done";
+        },
+      );
+    });
+    const inFlight = Promise.all(started);
+    let failure: unknown;
+    let settled: PromiseSettledResult<string>[] = [];
     try {
+      void inFlight.catch(() => undefined);
       const start = Date.now();
       while (barrier.arrived() < 4 && Date.now() - start < 1_000) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       expect(barrier.arrived()).toBe(4);
       await expect(barrier.waitFor(5, 200)).rejects.toThrow(/timed out with 4 of 5/);
+    } catch (err) {
+      failure = err;
     } finally {
-      barrier.clear();
-      checkoutTestHooks.afterMissedOrderLookup = null;
+      settled = await drainParty(barrier, started);
+      await Promise.resolve();
+      expect(flags.filter((flag) => flag === "pending")).toHaveLength(0);
     }
-    const settled = await Promise.allSettled(started);
+    if (failure) throw failure;
     expect(checkoutTestHooks.afterMissedOrderLookup).toBeNull();
     expect(settled.filter((row) => row.status === "fulfilled")).toHaveLength(4);
     const rejected = settled.find((row) => row.status === "rejected");

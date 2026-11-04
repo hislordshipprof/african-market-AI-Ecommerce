@@ -1218,6 +1218,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, seeded.paymentIntentId),
     );
     const started = Date.now();
+    let outcome: Awaited<typeof loser.settled> | undefined;
     try {
       await pause.wait();
       await expect(
@@ -1236,11 +1237,11 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       expect(sendOrderAuthorized).not.toHaveBeenCalled();
     } finally {
       pause.release();
+      outcome = await loser.settled;
     }
-    const outcome = await loser.settled;
     expect(Date.now() - started).toBeLessThan(8_000);
-    expect(outcome.ok).toBe(true);
-    if (outcome.ok) {
+    expect(outcome?.ok).toBe(true);
+    if (outcome?.ok) {
       expect(await counts(seeded.store.id)).toEqual({ orders: 1, customers: 1 });
       expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
       expect(sendOrderAuthorized).toHaveBeenCalledWith(seeded.store.id, outcome.value.token);
