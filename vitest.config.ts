@@ -16,6 +16,9 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     setupFiles: ["src/lib/test-setup.ts"],
     testTimeout: 15_000,
+    // Eight or more workers stall the Vitest parent past its 60s onTaskUpdate
+    // timeout after the suite has already passed. Four matches hosted CI.
+    maxWorkers: 4,
   },
   resolve: {
     alias: {
