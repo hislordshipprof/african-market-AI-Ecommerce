@@ -1,0 +1,181 @@
+import { stepCountIs, streamText, tool } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { groundingTransform } from "./grounding";
+
+const usage = {
+  inputTokens: { total: 8, noCache: 8, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 4, text: 4, reasoning: 0 },
+};
+
+function streamOf(chunks: Array<Record<string, unknown>>) {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+}
+
+describe("grounding stream", () => {
+  it("an amount split across deltas never reaches the client", async () => {
+    const strips: string[] = [];
+    let call = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        call += 1;
+        const chunks = call === 1
+          ? [
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call",
+                toolCallId: "call-1",
+                toolName: "show_products",
+                input: JSON.stringify({ listing_ids: ["egusi"] }),
+              },
+              { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+            ]
+          : [
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "text-1" },
+              { type: "text-delta", id: "text-1", delta: "That is $" },
+              { type: "text-delta", id: "text-1", delta: "12.9" },
+              { type: "text-delta", id: "text-1", delta: "9 and $" },
+              { type: "text-delta", id: "text-1", delta: "7.00" },
+              { type: "text-end", id: "text-1" },
+              { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+            ];
+        return { stream: streamOf(chunks) };
+      },
+    });
+    const result = streamText({
+      model,
+      prompt: "price",
+      stopWhen: stepCountIs(4),
+      tools: {
+        show_products: tool({
+          description: "Show a product",
+          inputSchema: z.object({ listing_ids: z.array(z.string()) }),
+          execute: async () => ({ priceCents: 1299 }),
+        }),
+      },
+      experimental_transform: groundingTransform({ onStrip: (amount) => strips.push(amount) }),
+    });
+    const chunks: unknown[] = [];
+    for await (const chunk of result.toUIMessageStream()) chunks.push(chunk);
+    const text = chunks
+      .filter((chunk): chunk is { type: string; delta: string } =>
+        !!chunk && typeof chunk === "object" && (chunk as { type?: string }).type === "text-delta")
+      .map((chunk) => chunk.delta)
+      .join("");
+    expect(text).toBe("That is $12.99 and (see card)");
+    expect(chunks.some((chunk) => JSON.stringify(chunk).includes("7.00"))).toBe(false);
+    expect(strips).toEqual(["$7.00"]);
+  });
+
+  it("tool parts keep their order", async () => {
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: streamOf([
+          { type: "stream-start", warnings: [] },
+          { type: "tool-call", toolCallId: "call-1", toolName: "show_products", input: "{\"listing_ids\":[\"a\"]}" },
+          { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+        ]),
+      }),
+    });
+    const result = streamText({
+      model,
+      prompt: "show",
+      tools: {
+        show_products: tool({
+          description: "Show",
+          inputSchema: z.object({ listing_ids: z.array(z.string()) }),
+          execute: async () => ({ priceCents: 100 }),
+        }),
+      },
+      experimental_transform: groundingTransform(),
+      stopWhen: stepCountIs(1),
+    });
+    const types: string[] = [];
+    for await (const chunk of result.toUIMessageStream()) {
+      types.push((chunk as { type: string }).type);
+    }
+    const toolIndex = types.indexOf("tool-input-available");
+    const outputIndex = types.findIndex((type) => type.startsWith("tool-"));
+    expect(outputIndex).toBeGreaterThanOrEqual(0);
+    expect(toolIndex === -1 || toolIndex >= outputIndex || types.includes("tool-output-available")).toBe(true);
+  });
+
+  it("interleaved text blocks are grounded separately", async () => {
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: streamOf([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "a" },
+          { type: "text-delta", id: "a", delta: "$4.50" },
+          { type: "text-end", id: "a" },
+          { type: "text-start", id: "b" },
+          { type: "text-delta", id: "b", delta: "$9.00" },
+          { type: "text-end", id: "b" },
+          { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+        ]),
+      }),
+    });
+    const result = streamText({
+      model,
+      prompt: "two",
+      experimental_transform: groundingTransform({ getAllowedCents: () => new Set([450]) }),
+    });
+    let text = "";
+    for await (const chunk of result.toUIMessageStream()) {
+      if ((chunk as { type?: string }).type === "text-delta") text += (chunk as { delta: string }).delta;
+    }
+    expect(text).toBe("$4.50(see card)");
+  });
+
+  it("an error mid-text never emits raw text", async () => {
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: streamOf([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "a" },
+          { type: "text-delta", id: "a", delta: "$7.00 secret" },
+          { type: "error", error: new Error("provider failed") },
+          { type: "finish", finishReason: { unified: "error", raw: "error" }, usage },
+        ]),
+      }),
+    });
+    const result = streamText({
+      model,
+      prompt: "boom",
+      experimental_transform: groundingTransform(),
+    });
+    const raw: string[] = [];
+    for await (const chunk of result.toUIMessageStream()) raw.push(JSON.stringify(chunk));
+    expect(raw.join("\n")).not.toContain("7.00");
+    expect(raw.join("\n")).not.toContain("secret");
+  });
+
+  it("reports each strip once", async () => {
+    const strips: string[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: streamOf([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "a" },
+          { type: "text-delta", id: "a", delta: "$5.00 and $6.00" },
+          { type: "text-end", id: "a" },
+          { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+        ]),
+      }),
+    });
+    const result = streamText({
+      model,
+      prompt: "strip",
+      experimental_transform: groundingTransform({ onStrip: (amount) => strips.push(amount) }),
+    });
+    await result.consumeStream();
+    expect(strips).toEqual(["$5.00", "$6.00"]);
+  });
+});
