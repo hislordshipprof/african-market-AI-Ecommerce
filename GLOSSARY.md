@@ -120,6 +120,9 @@ The audit recorded when an unconfirmed card hold is released after capture does 
 **Refund failed**:
 The capture still stands because the refund did not cover it. Staff see that the platform is resolving the refund and do not refund the customer themselves. There is no Capture failed status.
 
+**Resolved manually**:
+A platform admin recorded how a failed refund was repaid outside the app. The order becomes Cancelled. The app moves no money.
+
 **Fulfillment option**:
 How a customer gets an order: store delivery, courier delivery, or pickup.
 

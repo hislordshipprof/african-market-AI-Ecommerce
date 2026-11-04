@@ -393,3 +393,46 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
     await expect(page.locator("h1")).toHaveText("Stores");
   });
 });
+
+test("the store form timezone control uses the input and destructive tokens", async ({ page }) => {
+  await page.goto("/admin/sign-in");
+  await page.getByLabel("Email").fill(ADMIN_EMAIL);
+  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+  await page.click("button[type='submit']");
+  await page.getByLabel("Verification code").fill(generateTotpCode());
+  await page.click("button[type='submit']");
+  await page.waitForURL("**/admin/stores");
+  await page.goto("/admin/stores/new");
+
+  const border = await page.locator("#timezone").evaluate((el) => {
+    const probe = document.createElement("div");
+    probe.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue("--input");
+    document.body.append(probe);
+    const expected = getComputedStyle(probe).borderTopColor;
+    probe.remove();
+    return { actual: getComputedStyle(el).borderTopColor, expected };
+  });
+  expect(border.actual).toBe(border.expected);
+
+  await page.locator("#timezone").evaluate((el: HTMLSelectElement) => {
+    const option = document.createElement("option");
+    option.value = "Not/AZone";
+    option.text = "Not/AZone";
+    el.append(option);
+    el.value = "Not/AZone";
+  });
+  await page.locator("#slug").fill(`token-${Date.now()}`);
+  await page.locator("#storeName").fill("Token Check");
+  await page.locator("button[type='submit']").click();
+  const error = page.locator("p", { hasText: "Invalid timezone" });
+  await expect(error).toBeVisible();
+  const destructive = await error.evaluate((el) => {
+    const probe = document.createElement("div");
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue("--destructive");
+    document.body.append(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    return { actual: getComputedStyle(el).color, expected };
+  });
+  expect(destructive.actual).toBe(destructive.expected);
+});

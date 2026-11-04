@@ -20,6 +20,7 @@ export async function insertInboxOrder(input: {
   number: number;
   status: string;
   capturedAmountCents: number | null;
+  refundId?: string;
 }): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
@@ -43,6 +44,7 @@ export async function insertInboxOrder(input: {
         totalAuthorizedCents: amount + 100,
         totalCents: amount,
         capturedAmountCents: input.capturedAmountCents,
+        refundId: input.refundId ?? null,
         paymentIntentId: `pi_e2e_${input.number}_${Date.now()}`,
         lines: {
           create: {

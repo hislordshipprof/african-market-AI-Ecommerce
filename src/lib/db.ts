@@ -143,12 +143,22 @@ export const platformAdmin = {
 };
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "$queryRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-    return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, masterProduct: tx.masterProduct, category: tx.category, productSynonym: tx.productSynonym, $queryRaw: tx.$queryRaw.bind(tx) });
+    return fn({
+      store: tx.store,
+      order: tx.order,
+      auditLog: tx.auditLog,
+      storeMembership: tx.storeMembership,
+      storeInvite: tx.storeInvite,
+      masterProduct: tx.masterProduct,
+      category: tx.category,
+      productSynonym: tx.productSynonym,
+      $queryRaw: tx.$queryRaw.bind(tx),
+    });
   });
 }
 
