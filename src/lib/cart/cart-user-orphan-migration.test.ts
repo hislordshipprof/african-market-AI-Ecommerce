@@ -67,6 +67,16 @@ type PolicyRow = {
   polcmd: string;
 };
 
+type CartUserFk = {
+  convalidated: boolean;
+  confdeltype: string;
+  confupdtype: string;
+  column_name: string;
+  referenced_schema: string;
+  referenced_table: string;
+  referenced_column: string;
+};
+
 const CARTS_BEFORE: CartRow[] = [
   {
     id: "cart-case",
@@ -129,6 +139,11 @@ const CARTS_BEFORE: CartRow[] = [
     updated_at: STAMP,
   },
 ];
+
+/** Orphan carts the cleanup UPDATE must change before a post-update failure. */
+const CLEARED_ORPHAN_COUNT = CARTS_BEFORE.filter(
+  (cart) => cart.user_id !== null && cart.user_id !== "u1",
+).length;
 
 const CARTS_AFTER: CartRow[] = [
   { ...CARTS_BEFORE[0]!, user_id: null },
@@ -561,26 +576,37 @@ describe.skipIf(!directUrl)("cart account orphan migration", () => {
       await client!.query(`
         CREATE FUNCTION ${quoted}.fail_orphan_clear() RETURNS trigger
         LANGUAGE plpgsql AS $fn$
+        DECLARE
+          updated_orphans integer;
         BEGIN
-          IF OLD.user_id IS NOT NULL AND NEW.user_id IS NULL THEN
-            RAISE EXCEPTION 'forced cleanup failure';
+          SELECT count(*)::integer INTO updated_orphans
+          FROM new_rows AS new_cart
+          JOIN old_rows AS old_cart ON old_cart.id = new_cart.id
+          WHERE old_cart.user_id IS NOT NULL
+            AND new_cart.user_id IS NULL;
+          IF updated_orphans IS DISTINCT FROM ${CLEARED_ORPHAN_COUNT} THEN
+            RAISE EXCEPTION 'cleanup wrote % orphan updates before the failure', updated_orphans;
           END IF;
-          RETURN NEW;
+          RAISE EXCEPTION 'forced cleanup failure after % orphan updates', updated_orphans;
         END
         $fn$
       `);
       await client!.query(`
         CREATE TRIGGER fail_orphan_clear
-        BEFORE UPDATE ON ${quoted}.carts
-        FOR EACH ROW EXECUTE FUNCTION ${quoted}.fail_orphan_clear()
+        AFTER UPDATE ON ${quoted}.carts
+        REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION ${quoted}.fail_orphan_clear()
       `);
-      let failed = false;
+      let detail = "";
       try {
         await client!.query(sql!);
       } catch (error) {
-        failed = /forced cleanup failure/.test(String(error));
+        detail = String(error);
       }
-      expect(failed).toBe(true);
+      expect(detail).toMatch(
+        new RegExp(`forced cleanup failure after ${CLEARED_ORPHAN_COUNT} orphan updates`),
+      );
     } finally {
       await rollbackQuietly(client!);
     }
@@ -749,6 +775,54 @@ describe.skipIf(!directUrl)("cart account orphan migration", () => {
     );
     expect(cartsPolicies.rows).toEqual(policiesBefore?.carts);
     expect(customerPolicies.rows).toEqual(policiesBefore?.customers);
+    const fk = await client!.query<CartUserFk>(
+      `SELECT c.convalidated,
+              c.confdeltype,
+              c.confupdtype,
+              src.attname AS column_name,
+              refn.nspname AS referenced_schema,
+              ref.relname AS referenced_table,
+              dst.attname AS referenced_column
+       FROM pg_constraint c
+       JOIN pg_class ref ON ref.oid = c.confrelid
+       JOIN pg_namespace refn ON refn.oid = ref.relnamespace
+       JOIN pg_attribute src ON src.attrelid = c.conrelid AND src.attnum = c.conkey[1]
+       JOIN pg_attribute dst ON dst.attrelid = c.confrelid AND dst.attnum = c.confkey[1]
+       WHERE c.contype = 'f'
+         AND c.conname = 'carts_user_id_fkey'
+         AND c.conrelid = to_regclass($1)`,
+      [`${schemaName}.carts`],
+    );
+    expect(fk.rows).toEqual([
+      {
+        convalidated: true,
+        confdeltype: "n",
+        confupdtype: "c",
+        column_name: "user_id",
+        referenced_schema: schemaName,
+        referenced_table: "users",
+        referenced_column: "id",
+      },
+    ]);
+    await client!.query("BEGIN");
+    try {
+      await client!.query("SELECT set_config('app.is_platform_admin', 'true', true)");
+      await client!.query(
+        `INSERT INTO ${quoted}.users (id, name, email, updated_at)
+         VALUES ('fk-probe', 'FK Probe', 'fk-probe@example.com', TIMESTAMP '${STAMP}')`,
+      );
+      await client!.query(
+        `INSERT INTO ${quoted}.carts (id, store_id, user_id, source, created_at, updated_at)
+         VALUES ('cart-fk-probe', 'store-a', 'fk-probe', 'manual', TIMESTAMP '${STAMP}', TIMESTAMP '${STAMP}')`,
+      );
+      await client!.query(`DELETE FROM ${quoted}.users WHERE id = 'fk-probe'`);
+      const nulled = await client!.query<{ user_id: string | null }>(
+        `SELECT user_id FROM ${quoted}.carts WHERE id = 'cart-fk-probe'`,
+      );
+      expect(nulled.rows).toEqual([{ user_id: null }]);
+    } finally {
+      await rollbackQuietly(client!);
+    }
   });
 
   it("re-running the cleanup migration is a no-op", async () => {
