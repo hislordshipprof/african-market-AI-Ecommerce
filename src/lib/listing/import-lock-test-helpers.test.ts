@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "fs";
+import { createServer, type AddressInfo, type Socket } from "net";
 import { join } from "path";
 import { Client } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -217,6 +218,53 @@ describe("import lock test helpers", () => {
     })).rejects.toBe(reason);
   });
 
+  it("a stalled postgres handshake returns the commit error without waiting out the connection", async () => {
+    const sockets = new Set<Socket>();
+    const server = createServer({ allowHalfOpen: true }, (socket) => {
+      sockets.add(socket);
+      socket.on("data", () => undefined);
+      socket.on("error", () => undefined);
+      socket.on("close", () => sockets.delete(socket));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    const previous = {
+      DATABASE_URL: process.env.DATABASE_URL,
+      DIRECT_URL: process.env.DIRECT_URL,
+      DATABASE_URL_UNPOOLED: process.env.DATABASE_URL_UNPOOLED,
+    };
+    const url = `postgres://review:review@127.0.0.1:${port}/review`;
+    process.env.DATABASE_URL = url;
+    process.env.DIRECT_URL = url;
+    delete process.env.DATABASE_URL_UNPOOLED;
+    const reason = new Error("original commit failure");
+    const started = Date.now();
+    try {
+      await expect(waitForLockWaiters(1, 1, {
+        label: "stalled handshake",
+        timeoutMs: 2_000,
+        settled: [new Promise((_, reject) => {
+          setTimeout(() => reject(reason), 20);
+        })],
+      })).rejects.toBe(reason);
+      expect(Date.now() - started).toBeLessThan(500);
+      const closedBy = Date.now() + 200;
+      while (sockets.size > 0 && Date.now() < closedBy) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(sockets.size).toBe(0);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (previous.DATABASE_URL === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previous.DATABASE_URL;
+      if (previous.DIRECT_URL === undefined) delete process.env.DIRECT_URL;
+      else process.env.DIRECT_URL = previous.DIRECT_URL;
+      if (previous.DATABASE_URL_UNPOOLED === undefined) delete process.env.DATABASE_URL_UNPOOLED;
+      else process.env.DATABASE_URL_UNPOOLED = previous.DATABASE_URL_UNPOOLED;
+    }
+  });
+
   it("observer query failure and idle errors close the observer", async () => {
     let ended = 0;
     await expect(waitForLockWaiters(3, 1, {
@@ -359,23 +407,38 @@ describe("import lock test helpers", () => {
 
   it("restore drains delayed work and restores query after an error", async () => {
     let calls = 0;
+    let rejectDriver: (err: Error) => void = () => undefined;
     const restoreProto = installQuery(function () {
       calls += 1;
+      if (calls === 1) {
+        return new Promise((_, reject) => {
+          rejectDriver = reject;
+        });
+      }
       return Promise.reject(new Error("driver down"));
     });
-    const delay = delayFirstQuery({ table: "listing_imports", value: "token-1", ms: 40 });
+    const delay = delayFirstQuery({ table: "listing_imports", value: "token-1", ms: 15 });
     try {
       const client = new Client({ connectionString: "postgres://127.0.0.1:9/none" });
       const config = {
         text: "SELECT id FROM listing_imports WHERE id = $1",
         values: ["token-1"],
-        rowMode: "array",
+        rowMode: "array" as const,
         types: { getTypeParser: () => null },
       };
       const pending = client.query(config);
       const restored = delay.restore();
+      let restoreDone = false;
+      void restored.then(() => {
+        restoreDone = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(calls).toBe(1);
+      expect(restoreDone).toBe(false);
+      rejectDriver(new Error("driver down"));
       await expect(pending).rejects.toThrow("driver down");
       await expect(restored).resolves.toBeUndefined();
+      expect(restoreDone).toBe(true);
       const started = Date.now();
       await expect(client.query(config)).rejects.toThrow("driver down");
       expect(Date.now() - started).toBeLessThan(30);
@@ -397,17 +460,32 @@ describe("import lock test helpers", () => {
         throw new Error("rollback failed");
       },
     };
-    const first = Promise.resolve("kept");
-    const second = Promise.reject(new Error("second failed"));
-    await expect((async () => {
-      try {
-        throw reason;
-      } catch (err) {
-        await abandonHeldCommits(hold, [first, second]);
-        throw err;
-      }
-    })()).rejects.toBe(reason);
+    let finishFirst: (value: string) => void = () => undefined;
+    let finishSecond: (err: Error) => void = () => undefined;
+    const first = new Promise<string>((resolve) => {
+      finishFirst = resolve;
+    });
+    const second = new Promise<never>((_, reject) => {
+      finishSecond = reject;
+    });
+    void second.catch(() => undefined);
+    let cleanupDone = false;
+    const cleanup = abandonHeldCommits(hold, [first, second]).then(() => {
+      cleanupDone = true;
+    });
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+    await flush();
     expect(rollbacks).toBe(1);
+    expect(cleanupDone).toBe(false);
+    finishFirst("kept");
+    await flush();
+    expect(cleanupDone).toBe(false);
+    finishSecond(new Error("second failed"));
+    await expect(cleanup.then(() => {
+      throw reason;
+    })).rejects.toBe(reason);
+    expect(cleanupDone).toBe(true);
+    await expect(first).resolves.toBe("kept");
     await expect(second).rejects.toThrow("second failed");
   });
 

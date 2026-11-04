@@ -411,6 +411,7 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
   const deadline = Date.now() + timeoutMs;
   const tracker = track(options.settled ?? []);
   let observer: LockObserver | null = null;
+  let connectSettled = false;
   let sleepTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.resolve();
@@ -432,7 +433,10 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
       if (state) return new Error(`commit settled before it queued on the store lock: ${label}`);
       return observerError;
     };
-    await withinDeadline(observer.connect(), deadline, label, errorOf);
+    const connecting = observer.connect().finally(() => {
+      connectSettled = true;
+    });
+    await withinDeadline(connecting, deadline, label, errorOf);
     failObserver();
     throwIfSettled(tracker, label);
     for (;;) {
@@ -452,8 +456,24 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
     }
   } finally {
     if (sleepTimer) clearTimeout(sleepTimer);
-    if (observer) await observer.end().catch(() => undefined);
+    if (observer) await endObserver(observer, connectSettled);
   }
+}
+
+function endObserver(observer: LockObserver, connectSettled: boolean): Promise<void> {
+  // A stalled handshake leaves pg waiting on a graceful Terminate. destroy()
+  // only half-closes that socket unless resetAndClosing is set, which is what
+  // Socket.resetAndDestroy() does before it calls destroy().
+  if (!connectSettled && observer instanceof Client) {
+    const real = observer as Client & {
+      _queryable: boolean;
+      connection?: { stream?: { resetAndClosing?: boolean } };
+    };
+    real._queryable = false;
+    const stream = real.connection?.stream;
+    if (stream) stream.resetAndClosing = true;
+  }
+  return observer.end().catch(() => undefined);
 }
 
 export async function abandonHeldCommits(hold: StoreRowHold, commits: Promise<unknown>[]): Promise<void> {
