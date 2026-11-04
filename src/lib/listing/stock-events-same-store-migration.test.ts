@@ -50,6 +50,30 @@ function databaseName(connectionStringValue: string): string {
   return endpoint(connectionStringValue).database;
 }
 
+/** Host and port that `pg` will actually use. Query `host` and `port` override the URL authority. */
+function effectiveEndpoint(connectionStringValue: string): DatabaseEndpoint {
+  const client = new Client({ connectionString: connectionStringValue });
+  return {
+    host: (client.host ?? "").toLowerCase().replace(/^\[|\]$/g, "").replace(/-pooler(?=\.)/g, ""),
+    port: String(client.port || "5432"),
+    database: client.database ?? "",
+  };
+}
+
+function assertEffectiveEndpoint(label: string, connectionStringValue: string) {
+  const authority = endpoint(connectionStringValue);
+  const effective = effectiveEndpoint(connectionStringValue);
+  if (
+    !sameHost(authority.host, effective.host)
+    || authority.port !== effective.port
+    || authority.database !== effective.database
+  ) {
+    throw new Error(
+      `${label} connects to ${effective.host}:${effective.port}/${effective.database} instead of ${authority.host}:${authority.port}/${authority.database}`,
+    );
+  }
+}
+
 function loginRole(connectionStringValue: string): string {
   return decodeURIComponent(new URL(connectionStringValue).username);
 }
@@ -74,11 +98,16 @@ export function assertSameDatabase(env: NodeJS.ProcessEnv): string {
   if (!pooled || !direct) {
     throw new Error("DATABASE_URL and DIRECT_URL are required");
   }
+  assertEffectiveEndpoint("DATABASE_URL", pooled);
+  assertEffectiveEndpoint("DIRECT_URL", direct);
   const pooledEndpoint = endpoint(pooled);
   const directEndpoint = endpoint(direct);
   assertSameEndpoint("DATABASE_URL", pooledEndpoint, directEndpoint);
   const unpooled = env.DATABASE_URL_UNPOOLED?.trim();
-  if (unpooled) assertSameEndpoint("DATABASE_URL_UNPOOLED", endpoint(unpooled), directEndpoint);
+  if (unpooled) {
+    assertEffectiveEndpoint("DATABASE_URL_UNPOOLED", unpooled);
+    assertSameEndpoint("DATABASE_URL_UNPOOLED", endpoint(unpooled), directEndpoint);
+  }
   if (!LOCAL_HOSTS.has(directEndpoint.host)) {
     throw new Error(`migrate target host ${directEndpoint.host} is not a local disposable database`);
   }
@@ -246,6 +275,25 @@ describe("stock_events same-store migration file", () => {
       DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5432/neondb",
       DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5432/neondb",
     })).toThrow(/neondb/);
+  });
+
+  it("refuses query options that select a different host or port", () => {
+    const override = "postgres://app_owner:pw@localhost:5434/lane_t235?host=remote.example&port=6543";
+    expect(() => assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: override,
+      DIRECT_URL: override,
+    })).toThrow(/remote\.example:6543/);
+    expect(() => assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@localhost:5434/lane_t235",
+      DIRECT_URL: override,
+    })).toThrow(/remote\.example:6543/);
+    expect(databaseName(assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@localhost:5432/test_db?sslmode=disable",
+      DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5432/test_db?host=localhost&port=5432",
+    }))).toBe("test_db");
   });
 });
 
@@ -630,17 +678,26 @@ describe.skipIf(!connectionString)("stock_events same-store migration on the lan
       const rows = await policies(client, "public");
       const isolation = rows.find((row) => row.policyname === "stock_events_isolation");
       const admin = rows.find((row) => row.policyname === "stock_events_platform_admin");
-      expect(isolation?.roles).toBe("{app_user}");
-      expect(isolation?.cmd).toBe("ALL");
-      expect(isolation?.permissive).toBe("PERMISSIVE");
-      for (const expression of [isolation?.qual, isolation?.with_check]) {
-        expect(expression ?? "").toMatch(/EXISTS/);
-        expect(expression ?? "").toMatch(/stock_events/);
-        expect(expression ?? "").toMatch(/listings/);
-        expect(expression ?? "").not.toBe("(store_id = current_setting('app.store_id'::text, true))");
-      }
-      expect(admin?.qual ?? "").toMatch(/is_platform_admin/);
-      expect(admin?.with_check ?? "").toMatch(/is_platform_admin/);
+      const isolationExpression = `((store_id = current_setting('app.store_id'::text, true)) AND (EXISTS ( SELECT 1
+   FROM listings
+  WHERE ((listings.id = stock_events.listing_id) AND (listings.store_id = current_setting('app.store_id'::text, true))))))`;
+      const adminExpression = "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)";
+      expect(isolation).toEqual({
+        policyname: "stock_events_isolation",
+        permissive: "PERMISSIVE",
+        roles: "{app_user}",
+        cmd: "ALL",
+        qual: isolationExpression,
+        with_check: isolationExpression,
+      });
+      expect(admin).toEqual({
+        policyname: "stock_events_platform_admin",
+        permissive: "PERMISSIVE",
+        roles: "{app_user}",
+        cmd: "ALL",
+        qual: adminExpression,
+        with_check: adminExpression,
+      });
       expect(await rlsFlags(client, "public")).toEqual([
         { relname: "listings", relrowsecurity: true, relforcerowsecurity: true },
         { relname: "stock_events", relrowsecurity: true, relforcerowsecurity: true },

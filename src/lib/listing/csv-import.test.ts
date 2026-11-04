@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import {
@@ -11,6 +11,36 @@ import {
   MAX_FILE_BYTES,
 } from "./csv-import";
 import { storeScoped, platformAdmin, claimImportRow, storeScopedTransaction, withSessionTimeZone, IMPORT_TOKEN_TTL_MS, healthQueryRaw } from "../db";
+
+const stockEventCalls = vi.hoisted(() => ({ createMany: null as unknown[] | null }));
+
+vi.mock("../db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../db")>();
+  return {
+    ...actual,
+    storeScopedTransaction: (
+      storeId: string,
+      fn: Parameters<typeof actual.storeScopedTransaction>[1],
+      opts?: Parameters<typeof actual.storeScopedTransaction>[2],
+    ) => actual.storeScopedTransaction(storeId, async (tx) => {
+      if (!stockEventCalls.createMany) return fn(tx);
+      const calls = stockEventCalls.createMany;
+      const stockEvent = new Proxy(tx.stockEvent, {
+        get(target, prop, receiver) {
+          if (prop === "createMany") {
+            return (args: unknown) => {
+              calls.push(args);
+              return target.createMany(args as never);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      return fn({ ...tx, stockEvent });
+    }, opts),
+  };
+});
 import { probeCrossStoreImportWrites } from "./cross-store-write";
 import { commitPairBehindStoreLock } from "./import-lock-test-helpers";
 import { createListing, resolveStockMode } from "./service";
@@ -2445,6 +2475,8 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("a commit with no counted rows writes no stock events", async () => {
+    stockEventCalls.createMany = [];
+    try {
     const statusName = `Status Commit ${RUN}`;
     const statusCsv = `name,price\n${statusName},2.00\n`;
     const statusPreview = await generatePreview(storeAId, statusCsv, testUserId);
@@ -2472,6 +2504,10 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(await storeScoped(storeAId).stockEvent.findMany({
       where: { listingId: zeroResult.listingIds[0] },
     })).toEqual([]);
+    expect(stockEventCalls.createMany).toEqual([]);
+    } finally {
+      stockEventCalls.createMany = null;
+    }
   });
 
   it("counted token retries record recount events exactly once", async () => {
