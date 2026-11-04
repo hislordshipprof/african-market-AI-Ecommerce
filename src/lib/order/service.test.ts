@@ -2069,13 +2069,80 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   async function expireCaptureBackoff(orderId: string) {
+    await backdateCaptureAttempt(orderId, 20 * 60_000);
+  }
+
+  async function backdateCaptureAttempt(orderId: string, ageMs: number) {
     await platformAdminTransaction(async (tx) => {
       await tx.auditLog.updateMany({
         where: { entityId: orderId, action: "capture_retry" },
-        data: { createdAt: new Date(Date.now() - 20 * 60_000) },
+        data: { createdAt: new Date(Date.now() - ageMs) },
       });
     });
   }
+
+  it("capture backoff refuses attempt 2 at 29 seconds and allows it at 30", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    setNextCaptureFailure(pi, 1);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    const first = await markReady(storeId, order.id);
+    expect(first.ok).toBe(false);
+    await backdateCaptureAttempt(order.id, 29_000);
+    const tooSoon = await markReady(storeId, order.id);
+    expect(tooSoon.ok).toBe(false);
+    if (!tooSoon.ok) expect(tooSoon.error).toMatch(/^Retrying in \d+ min$/);
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([
+      `capture:${order.id}:1`,
+    ]);
+
+    await backdateCaptureAttempt(order.id, 30_000);
+    const second = await markReady(storeId, order.id);
+    expect(second.ok).toBe(true);
+    expect(captureCalls.filter((key) => key === `capture:${order.id}:2`)).toEqual([
+      `capture:${order.id}:2`,
+    ]);
+  });
+
+  it("capture backoff is capped at 15 minutes", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: order.totalCents },
+      });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "capture_retry",
+          entityType: "order",
+          entityId: order.id,
+          after: { attempt: 10 },
+        },
+      });
+    });
+
+    await backdateCaptureAttempt(order.id, 14 * 60_000);
+    const tooSoon = await markReady(storeId, order.id);
+    expect(tooSoon.ok).toBe(false);
+    if (!tooSoon.ok) expect(tooSoon.error).toMatch(/^Retrying in \d+ min$/);
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([]);
+
+    await backdateCaptureAttempt(order.id, 15 * 60_000);
+    const allowed = await markReady(storeId, order.id);
+    expect(allowed.ok).toBe(true);
+    expect(captureCalls.filter((key) => key === `capture:${order.id}:2`)).toEqual([
+      `capture:${order.id}:2`,
+    ]);
+  });
 
   it("a capture 500 then a later attempt succeeds", async () => {
     const order = await createTestOrder();
