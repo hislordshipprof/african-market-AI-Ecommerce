@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { storeScoped } from "../db";
+import { healthQueryRaw, storeScoped, storeScopedTransaction } from "../db";
+import { customerRlsErrorText, isCustomerRlsRejection } from "../customer-rls-error";
 import { catalogFor } from "../storefront/catalog";
 import {
   getOrCreateCart,
@@ -16,6 +17,26 @@ import {
 } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
+const ci = typeof process.env.CI === "string" && process.env.CI.length > 0;
+const hasRuntimePassword = !!process.env.APP_RUNTIME_PASSWORD;
+
+it("CI requires DATABASE_URL and APP_RUNTIME_PASSWORD for Customer isolation", () => {
+  if (!ci) return;
+  expect(process.env.DATABASE_URL, "DATABASE_URL").toBeTruthy();
+  expect(process.env.APP_RUNTIME_PASSWORD, "APP_RUNTIME_PASSWORD").toBeTruthy();
+});
+
+async function expectCustomerRlsRejection(promise: Promise<unknown>): Promise<void> {
+  let caught: unknown;
+  try {
+    await promise;
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught, "expected a Customer row-level security rejection").toBeTruthy();
+  const text = customerRlsErrorText(caught);
+  expect(isCustomerRlsRejection(caught), text).toBe(true);
+}
 // Unique per run: lanes share one database and beforeEach wipes the store carts.
 const storeSlug = `cart-svc-test-${process.pid}-${Date.now()}`;
 // Orphans from a killed run are accepted: sweeping the prefix could delete a live lane's store.
@@ -254,18 +275,55 @@ describe.skipIf(!hasDb)("Cart service", () => {
       });
       expect(visibleToA).toHaveLength(1);
       expect(visibleToA[0].storeId).toBe(storeId);
-
-      await expect(
-        storeScoped(storeId).customer.create({
-          data: {
-            storeId: storeBId,
-            userId: buyerId,
-            name: "Cross store",
-            email: buyerEmail,
-          },
-        }),
-      ).rejects.toThrow();
     });
+
+    it("cross-store Account Customer fails for RLS and identical same-store row succeeds", async () => {
+      const row = {
+        storeId: storeBId,
+        userId: otherId,
+        name: "Other account",
+        email: otherEmail,
+      };
+      await expectCustomerRlsRejection(
+        storeScoped(storeId).customer.create({ data: row }),
+      );
+      const absent = await storeScoped(storeBId).customer.findMany({
+        where: { userId: otherId },
+      });
+      expect(absent).toHaveLength(0);
+      const created = await storeScoped(storeBId).customer.create({ data: row });
+      expect(created).toMatchObject({
+        storeId: storeBId,
+        userId: otherId,
+        email: otherEmail,
+        name: "Other account",
+      });
+    });
+
+    it.skipIf(!hasRuntimePassword && !ci)(
+      "store-scoped Customer writes run as app_runtime",
+      async () => {
+        if (!hasRuntimePassword) {
+          throw new Error("APP_RUNTIME_PASSWORD is required; this test must not skip");
+        }
+        const login = (await healthQueryRaw`
+          SELECT current_user::text AS current_user, session_user::text AS session_user
+        `) as Array<{ current_user: string; session_user: string }>;
+        expect(login[0]).toEqual({
+          current_user: "app_runtime",
+          session_user: "app_runtime",
+        });
+        const inside = await storeScopedTransaction(storeId, async (tx) => {
+          return tx.$queryRaw<Array<{ session_user: string; current_user: string }>>`
+            SELECT session_user::text AS session_user, current_user::text AS current_user
+          `;
+        });
+        expect(inside[0]).toEqual({
+          session_user: "app_runtime",
+          current_user: "app_user",
+        });
+      },
+    );
 
     it("does not create a cart when the account id is unknown", async () => {
       await expect(getOrCreateCart(storeId, null, "missing-account")).rejects.toMatchObject({
