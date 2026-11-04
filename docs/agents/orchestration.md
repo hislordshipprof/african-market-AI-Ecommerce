@@ -36,6 +36,12 @@ Keyless builds: when a ticket's provider keys aren't available yet, `NO_KEYS=1 s
 
 Anti-drip: one full review inside `implement`; follow-up reviews cover only the fix diff; **at most two fix rounds**. A third round means the ticket is too big: split it at triage. Any ticket with more than about 5 acceptance criteria, or more than one security-sensitive system, is split at triage.
 
+## Lane credentials
+
+`scripts/build-ticket.sh` does not copy `.env.local` into a lane. It writes the file through `scripts/lane-env.mjs` (`scripts/lane-env.sh`). The filter drops `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` unless that ticket's `scripts/ticket-env.txt` line lists one of them before the trailing `#` comment. It always drops `SEED_PRUNE_R2`, including for tickets that are allowed to write R2, and it drops `DATABASE_URL_UNPOOLED`. Those are the exceptions to byte-for-byte copying. Inherited copies of the same variables are unset in the builder shell before lane setup, the reviewer, or any other child starts. A filter failure removes the destination and stops the build before seeding. There is no raw-copy fallback.
+
+The reason is the shared dev bucket `african-markets-dev`. A catalog prune deletes objects permanently: R2 does not implement bucket versioning, and the production and preview environments use that same bucket. A lane database does not own those references. A reviewer read-only token stays in #224. `scripts/lane-db.sh` also removes `DATABASE_URL_UNPOOLED` and `SEED_PRUNE_R2` so `resolveDirectUrl()` cannot follow a copied Neon URL and the seed cannot prune.
+
 ## Concurrency (this PC)
 
 - Up to **three builder lanes** (a Codex run counts as one lane), plus one light planner, only when free RAM is above about 8 GB and the tickets touch disjoint areas. Each lane gets its own e2e port (`E2E_PORT=3000`, `3100`, `3200`; Playwright reads it). For example, a storefront UI round alongside a backend follow-up that adds no migrations. Tickets that both change the Prisma schema, auth or the same feature folder never run in parallel.
