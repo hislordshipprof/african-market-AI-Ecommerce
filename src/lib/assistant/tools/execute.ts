@@ -31,7 +31,7 @@ export interface AssistantContext {
   actorUserId: string | null;
 }
 
-type ToolFailure = { ok: false; code: string; message: string };
+type ToolFailure = { ok: false; code: string; message: string; [key: string]: unknown };
 type ToolSuccess = { ok: true; [key: string]: unknown };
 export type ToolResult = ToolSuccess | ToolFailure;
 
@@ -191,11 +191,15 @@ export async function checkAvailability(ctx: AssistantContext, input: unknown): 
     };
   });
   const firstFailure = items.find((item) => item.ok === false);
-  return recordRead(ctx, "check_availability", parsed, {
-    ok: !firstFailure,
-    ...(firstFailure ? { code: firstFailure.code, message: firstFailure.message } : {}),
-    items,
-  });
+  if (firstFailure) {
+    return recordRead(ctx, "check_availability", parsed, {
+      ok: false,
+      code: firstFailure.code,
+      message: firstFailure.message,
+      items,
+    });
+  }
+  return recordRead(ctx, "check_availability", parsed, { ok: true, items });
 }
 
 export async function suggestSubstitutes(ctx: AssistantContext, input: unknown): Promise<ToolResult> {

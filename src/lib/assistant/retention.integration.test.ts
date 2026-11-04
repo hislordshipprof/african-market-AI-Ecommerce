@@ -18,6 +18,7 @@ const NEWER = new Date("2001-03-04T00:00:00.000Z");
 
 interface FaithfulStep extends AssistantStep {
   calls: number;
+  loseFresh(nth: number): void;
   loseNextResult(): void;
   resetCounts(): void;
 }
@@ -34,6 +35,9 @@ function makeFaithfulStep(): FaithfulStep {
     },
     loseFresh(nth: number) {
       loseAtFresh = nth;
+    },
+    loseNextResult() {
+      loseAtFresh = fresh + 1;
     },
     resetCounts() {
       for (const id of seen.keys()) seen.set(id, 0);

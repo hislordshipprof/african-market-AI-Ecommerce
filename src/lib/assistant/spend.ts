@@ -17,7 +17,9 @@ export function utcDay(at: Date): string {
   return at.toISOString().slice(0, 10);
 }
 
-export function spendCapMicros(env: NodeJS.ProcessEnv = process.env): { micros: bigint; invalid: boolean } {
+export function spendCapMicros(
+  env: { ASSISTANT_SPEND_CAP_USD?: string } = { ASSISTANT_SPEND_CAP_USD: process.env.ASSISTANT_SPEND_CAP_USD },
+): { micros: bigint; invalid: boolean } {
   const raw = env.ASSISTANT_SPEND_CAP_USD;
   if (raw == null) return { micros: DEFAULT_CAP_MICROS, invalid: false };
   const trimmed = raw.trim();
@@ -45,7 +47,9 @@ export async function recordSpend(micros: bigint, at: Date = new Date()): Promis
   );
 }
 
-export async function assistantSpendState(env: NodeJS.ProcessEnv = process.env): Promise<{
+export async function assistantSpendState(env: { ASSISTANT_SPEND_CAP_USD?: string } = {
+  ASSISTANT_SPEND_CAP_USD: process.env.ASSISTANT_SPEND_CAP_USD,
+}): Promise<{
   spentMicros: bigint;
   capMicros: bigint;
   resting: boolean;

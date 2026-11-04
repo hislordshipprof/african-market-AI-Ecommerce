@@ -11,6 +11,10 @@ import { createMessagesApiDouble } from "./messages-api-double";
 const KEY_A = "sk-ant-test-key-a";
 const KEY_B = "sk-ant-test-key-b";
 
+function modelFields(model: unknown): { modelId: string; provider: string } {
+  return model as { modelId: string; provider: string };
+}
+
 function stubAssistant(env: {
   model?: string;
   key?: string;
@@ -67,8 +71,8 @@ describe("assistant model config", () => {
     const first = createAssistantModel();
     stubAssistant({ model: "claude-haiku-5-5", key: KEY_B });
     const second = createAssistantModel();
-    expect(first.modelId).toBe("claude-sonnet-5-5");
-    expect(second.modelId).toBe("claude-haiku-5-5");
+    expect(modelFields(first).modelId).toBe("claude-sonnet-5-5");
+    expect(modelFields(second).modelId).toBe("claude-haiku-5-5");
   });
 
   it("refuses to build without a usable ANTHROPIC_API_KEY and sends nothing", async () => {
@@ -87,8 +91,8 @@ describe("assistant model config", () => {
     const injected = vi.fn<typeof fetch>();
     const globalFetch = vi.spyOn(globalThis, "fetch");
     const model = createAssistantModel({ fetch: injected });
-    expect(model.modelId).toBe("claude-haiku-5-5");
-    expect(model.provider).toBe("anthropic.messages");
+    expect(modelFields(model).modelId).toBe("claude-haiku-5-5");
+    expect(modelFields(model).provider).toBe("anthropic.messages");
     expect(injected).not.toHaveBeenCalled();
     expect(globalFetch).not.toHaveBeenCalled();
   });
@@ -157,8 +161,8 @@ describe("assistant model config", () => {
     const double = createMessagesApiDouble(KEY_A);
     const globalFetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
     const model = createAssistantModel({ fetch: double.fetch });
-    expect(model.provider).toBe("anthropic.messages");
-    expect(model.modelId).toBe("claude-haiku-5-5");
+    expect(modelFields(model).provider).toBe("anthropic.messages");
+    expect(modelFields(model).modelId).toBe("claude-haiku-5-5");
     await generateText({
       model,
       prompt: "hello",

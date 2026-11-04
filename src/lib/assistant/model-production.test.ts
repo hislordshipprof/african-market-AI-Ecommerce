@@ -14,7 +14,11 @@ function runProbe(phase: string, env: NodeJS.ProcessEnv) {
   return result;
 }
 
-function baseEnv(extra: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function baseEnv(extra: {
+  ANTHROPIC_BASE_URL?: string;
+  ASSISTANT_MODEL?: string;
+  ANTHROPIC_API_KEY?: string;
+}): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH,
     SystemRoot: process.env.SystemRoot,

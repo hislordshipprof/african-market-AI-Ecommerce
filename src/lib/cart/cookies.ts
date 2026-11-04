@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 
-const CART_COOKIE = "cart_id";
-const MAX_AGE = 30 * 24 * 60 * 60; // 30 days
+export const CART_COOKIE = "cart_id";
+export const CART_COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days
 
 export async function getCartIdFromCookie(): Promise<string | null> {
   const jar = await cookies();
@@ -14,7 +14,13 @@ export async function setCartIdCookie(cartId: string): Promise<void> {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    maxAge: MAX_AGE,
+    maxAge: CART_COOKIE_MAX_AGE,
     path: "/",
   });
+}
+
+/** Same attributes as setCartIdCookie, for a response that is already streaming. */
+export function serializeCartCookie(id: string): string {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${CART_COOKIE}=${encodeURIComponent(id)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${CART_COOKIE_MAX_AGE}${secure}`;
 }

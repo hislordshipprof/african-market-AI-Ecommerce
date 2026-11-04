@@ -1,7 +1,7 @@
-import type { LanguageModelV4Middleware } from "ai";
+import type { LanguageModelMiddleware } from "ai";
 import { callCostMicros, type TokenUsage } from "./cost";
 
-export function spendMeteringMiddleware(modelId: string): LanguageModelV4Middleware {
+export function spendMeteringMiddleware(modelId: string): LanguageModelMiddleware {
   return {
     specificationVersion: "v4",
     wrapGenerate: async ({ doGenerate }) => {

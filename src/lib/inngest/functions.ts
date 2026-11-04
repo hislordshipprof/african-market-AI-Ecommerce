@@ -184,7 +184,10 @@ export const assistantRetention = inngest.createFunction(
     id: "assistant/retention",
     triggers: [{ cron: "TZ=UTC 17 3 * * *" }],
   },
-  async ({ step }) => runAssistantRetention(step),
+  async ({ step }) =>
+    runAssistantRetention({
+      run: (id, fn) => step.run(id, fn) as Promise<Awaited<ReturnType<typeof fn>>>,
+    }),
 );
 
 export const inngestFunctions = [
