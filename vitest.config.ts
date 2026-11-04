@@ -8,11 +8,11 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     setupFiles: ["src/lib/test-setup.ts"],
     testTimeout: 15_000,
-    // This machine has 24 cores. One worker per core starves the Vitest parent
-    // until "Timeout calling onTaskUpdate" fails the run after every test passed.
-    // Two workers still did that: all 2130 tests passed, then the parent missed
-    // the worker's result call for the whole 60s birpc timeout.
-    maxWorkers: 1,
+    // One worker per core (24 here) starves the Vitest parent until "Timeout calling
+    // onTaskUpdate" fails the run after every test passed. That happened when several
+    // lanes ran the full suite at once; scripts/ci-local.sh now runs one full suite at a
+    // time machine-wide, and 4 workers pass there. VITEST_MAX_WORKERS overrides it.
+    maxWorkers: Number(process.env.VITEST_MAX_WORKERS) || 4,
   },
   resolve: {
     alias: {
