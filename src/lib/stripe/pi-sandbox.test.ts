@@ -1,6 +1,7 @@
 import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import Stripe from "stripe";
 import { stripeProvider } from "./provider";
+import { OverRefundError } from "./errors";
 import { ProviderStateError } from "./types";
 
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
@@ -191,6 +192,123 @@ describe.skipIf(!hasKey)(
         stripeProvider.capturePaymentIntent(piId, 800, `cap-${piId}`),
       ).rejects.toThrow(/amount_too_large|greater than/i);
     });
+
+    it("a second full refund fails with code charge_already_refunded and the adapter recovers", async () => {
+      const piId = await createAuthorizedPI(500);
+      await stripeProvider.capturePaymentIntent(piId, 500, `cap-already-${piId}`);
+      const first = await stripeProvider.refundPayment(piId, 500, `refund-already-1-${piId}`);
+      const second = await stripeProvider.refundPayment(piId, 500, `refund-already-2-${piId}`);
+      expect(second.refundId).toBe(first.refundId);
+      expect(second.amountRefunded).toBe(first.amountRefunded);
+      expect(second.status).toBe(first.status);
+    });
+
+    it("a refund above the balance is reported as the typed over-refund error", async () => {
+      const piId = await createAuthorizedPI(800);
+      await stripeProvider.capturePaymentIntent(piId, 800, `cap-over-${piId}`);
+      await stripeProvider.refundPayment(piId, 100, `refund-over-1-${piId}`);
+      await expect(
+        stripeProvider.refundPayment(piId, 900, `refund-over-2-${piId}`),
+      ).rejects.toBeInstanceOf(OverRefundError);
+    });
+
+    it("listRefunds returns every refund past 100", async () => {
+      const piId = await createAuthorizedPI(200);
+      await stripeProvider.capturePaymentIntent(piId, 200, `cap-page-${piId}`);
+      for (let i = 0; i < 101; i += 1) {
+        await stripe.refunds.create(
+          { payment_intent: piId, amount: 1 },
+          { idempotencyKey: `page-${piId}-${i}` },
+        );
+      }
+      const listed = await stripeProvider.listRefunds(piId);
+      expect(listed).toHaveLength(101);
+      expect(listed.reduce((sum, refund) => sum + refund.amountRefunded, 0)).toBe(101);
+    }, 180_000);
+
+    it("retrieveRefund reports pending for pm_card_pendingRefund", async () => {
+      const created = await stripe.paymentIntents.create({
+        amount: 600,
+        currency: "usd",
+        capture_method: "automatic",
+        confirm: true,
+        payment_method: "pm_card_pendingRefund",
+        on_behalf_of: stripeAccountId,
+        transfer_data: { destination: stripeAccountId },
+        return_url: "https://example.com/return",
+      });
+      piToCleanup.push(created.id);
+      const refund = await stripe.refunds.create({ payment_intent: created.id });
+      const reported = await stripeProvider.retrieveRefund(refund.id);
+      expect(reported.status).toBe("pending");
+      expect(reported.amountRefunded).toBe(600);
+    });
+
+    it("a real refund.failed event payload parses into the refund id, status and PaymentIntent", async () => {
+      const created = await stripe.paymentIntents.create({
+        amount: 700,
+        currency: "usd",
+        capture_method: "automatic",
+        confirm: true,
+        payment_method: "pm_card_refundFail",
+        on_behalf_of: stripeAccountId,
+        transfer_data: { destination: stripeAccountId },
+        return_url: "https://example.com/return",
+      });
+      piToCleanup.push(created.id);
+      let refund = await stripe.refunds.create({ payment_intent: created.id });
+      for (let i = 0; i < 90 && refund.status !== "failed"; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        refund = await stripe.refunds.retrieve(refund.id);
+      }
+      expect(refund.status).toBe("failed");
+      const secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim();
+      expect(secret).toBeTruthy();
+      const events = await stripe.events.list({ type: "refund.failed", limit: 20 });
+      const match = events.data.find((event) => {
+        const object = event.data.object as { id?: string };
+        return object.id === refund.id;
+      });
+      expect(match?.id).toBeTruthy();
+      const payload = JSON.stringify(match);
+      const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: secret! });
+      const parsed = stripeProvider.verifyWebhookSignature({ payload, signature });
+      expect(parsed.type).toBe("refund.failed");
+      expect(parsed.refund).toEqual({
+        id: refund.id,
+        status: "failed",
+        paymentIntentId: created.id,
+      });
+    }, 200_000);
+
+    it("a failed destination-charge refund leaves its funds on the platform", async () => {
+      const created = await stripe.paymentIntents.create({
+        amount: 900,
+        currency: "usd",
+        capture_method: "automatic",
+        confirm: true,
+        payment_method: "pm_card_refundFail",
+        application_fee_amount: 50,
+        on_behalf_of: stripeAccountId,
+        transfer_data: { destination: stripeAccountId },
+        return_url: "https://example.com/return",
+      });
+      piToCleanup.push(created.id);
+      let refund = await stripe.refunds.create(
+        { payment_intent: created.id, reverse_transfer: true },
+      );
+      for (let i = 0; i < 90 && refund.status !== "failed"; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        refund = await stripe.refunds.retrieve(refund.id);
+      }
+      expect(refund.status).toBe("failed");
+      const pi = await stripe.paymentIntents.retrieve(created.id, { expand: ["latest_charge"] });
+      const charge = pi.latest_charge;
+      if (!charge || typeof charge === "string") throw new Error("expected expanded latest_charge");
+      expect(pi.amount_received).toBe(900);
+      expect(charge.amount_refunded).toBe(0);
+      expect(charge.refunded).toBe(false);
+    }, 200_000);
   },
   { timeout: 60_000 },
 );

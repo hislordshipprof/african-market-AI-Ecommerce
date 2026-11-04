@@ -11,8 +11,7 @@ export class OverRefundError extends Error {
 export function overRefundError(err: unknown): OverRefundError | null {
   if (!err || typeof err !== "object") return null;
   const candidate = err as { code?: string; message?: string; type?: string };
-  if (candidate.code) return null;
-  if (!candidate.message || !/greater than unrefunded amount on charge/i.test(candidate.message)) {
+  if (!candidate.message || !/greater than (?:unrefunded amount on charge|charge amount)/i.test(candidate.message)) {
     return null;
   }
   return new OverRefundError(candidate.message);
