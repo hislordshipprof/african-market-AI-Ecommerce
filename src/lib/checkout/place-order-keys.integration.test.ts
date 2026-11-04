@@ -288,11 +288,13 @@ describe.skipIf(!hasDb)("placeOrder keys and cold runtime", () => {
     const sandboxResults = sandbox?.assertionResults ?? [];
     const sandboxIntegration = sandboxResults.filter(
       (test) => test.title !== "a transfers-only sandbox account is not checkout concurrency evidence"
-        && test.title !== "five-party barrier releases and settles peers when a participant fails",
+        && test.title !== "five-party barrier releases and settles peers when a participant fails"
+        && test.title !== "a failed setup worker settles peer preparation before the failure propagates",
     );
     expect(sandboxIntegration.length).toBeGreaterThan(0);
     expect(sandboxIntegration.every((test) => test.status === "skipped")).toBe(true);
     expect(sandboxResults.find((test) => test.title === "five-party barrier releases and settles peers when a participant fails")?.status).toBe("passed");
+    expect(sandboxResults.find((test) => test.title === "a failed setup worker settles peer preparation before the failure propagates")?.status).toBe("passed");
     expect(report.numFailedTests ?? 0).toBe(0);
     expect(report.numPassedTests ?? 0).toBeGreaterThan(0);
     rmSync(dir, { recursive: true, force: true });

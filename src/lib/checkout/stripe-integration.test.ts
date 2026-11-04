@@ -88,6 +88,14 @@ async function drainParty<T>(
   return Promise.allSettled(started);
 }
 
+async function settleStarted<T>(started: Promise<T>[]): Promise<T[]> {
+  try {
+    return await Promise.all(started);
+  } finally {
+    await Promise.allSettled(started);
+  }
+}
+
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -479,7 +487,7 @@ describe.skipIf(!hasKey || !hasDb)(
       { timeout: 60_000 },
       async () => {
         const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-        const prepared = await Promise.all(
+        const prepared = await settleStarted(
           Array.from({ length: 5 }, async (_, index) => {
             const contact = {
               name: `Five ${index}`,
@@ -716,5 +724,54 @@ describe("checkout concurrency barrier", () => {
       const message = rejected.reason instanceof Error ? rejected.reason.message : String(rejected.reason);
       expect(message).toBe("worker failed before the barrier");
     }
+  });
+
+  it("a failed setup worker settles peer preparation before the failure propagates", async () => {
+    let releasePeers!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releasePeers = resolve;
+    });
+    const events: string[] = [];
+    const flags = ["pending", "pending", "pending", "pending", "pending"];
+    const started = Array.from({ length: 5 }, (_, index) => {
+      const task = (async () => {
+        if (index === 0) {
+          throw new Error("PaymentIntent create failed for worker 0: injected API setup failure");
+        }
+        await held;
+        events.push(`create succeeded after aggregate failed: worker ${index}`);
+        events.push("cart update");
+        events.push(`confirm pi_${index}`);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return index;
+      })();
+      void task.then(
+        () => {
+          flags[index] = "done";
+        },
+        () => {
+          flags[index] = "done";
+        },
+      );
+      return task;
+    });
+    void Promise.all(started).then(
+      () => undefined,
+      () => {
+        releasePeers();
+      },
+    );
+
+    let failure: unknown;
+    try {
+      await settleStarted(started);
+    } catch (err) {
+      failure = err;
+    }
+    await Promise.resolve();
+    expect(flags.filter((flag) => flag === "pending")).toHaveLength(0);
+    expect(events.filter((event) => event.startsWith("confirm"))).toHaveLength(4);
+    const message = failure instanceof Error ? failure.message : String(failure);
+    expect(message).toContain("injected API setup failure");
   });
 });
