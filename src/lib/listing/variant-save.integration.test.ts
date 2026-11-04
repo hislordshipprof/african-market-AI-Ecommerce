@@ -269,7 +269,6 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
         await client.query("SET LOCAL ROLE app_user");
         await client.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
       }
-      await client.query("SET LOCAL lock_timeout = '0'");
       await client.query("SAVEPOINT rowlock");
       try {
         await client.query("SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE NOWAIT", [variantId]);
@@ -279,6 +278,11 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
         await client.query("ROLLBACK TO SAVEPOINT rowlock").catch(() => undefined);
         if (pgCode(err) !== "55P03") throw err;
       }
+      // The lane role cannot pg_cancel_backend (42501). A waiting FOR UPDATE with
+      // lock_timeout 0 stays open until the holder releases, and an ALTER TABLE
+      // queued behind that probe blocks every later lock on the table. The
+      // statement ends itself; the lock type is read while it is still waiting.
+      await client.query("SET LOCAL lock_timeout = '800ms'");
       let settled = false;
       const rowLock = client.query("SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE", [variantId])
         .then(() => { settled = true; })
@@ -287,7 +291,7 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
           if (pgCode(err) !== "57014" && pgCode(err) !== "55P03") throw err;
         });
       const started = Date.now();
-      while (Date.now() - started < 1500 && !settled) {
+      while (!settled && Date.now() - started < 900) {
         const pending = await locks.query<{ locktype: string }>(
           "SELECT locktype FROM pg_locks WHERE pid = $1 AND NOT granted",
           [probePid],
@@ -313,9 +317,6 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
           }
         }
         await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      if (probePid && !settled) {
-        await locks.query("SELECT pg_cancel_backend($1::int)", [probePid]).catch(() => undefined);
       }
       await rowLock;
       return outcome;
