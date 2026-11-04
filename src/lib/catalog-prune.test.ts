@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import {
   CATALOG_PRUNE_MIN_AGE_MS,
   catalogPruneMode,
@@ -598,6 +598,22 @@ describe("catalog prune guard and planner", () => {
 });
 
 describe("lane env filter script", () => {
+  const inherited = ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "SEED_PRUNE_R2", "DATABASE_URL_UNPOOLED"] as const;
+  const saved = new Map<string, string | undefined>();
+  beforeAll(() => {
+    for (const key of inherited) {
+      saved.set(key, process.env[key]);
+      delete process.env[key];
+    }
+  });
+  afterAll(() => {
+    for (const key of inherited) {
+      const value = saved.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
   const ticketEnv = () => {
     const dir = mkdtempSync(path.join(tmpdir(), "t225-env-"));
     const file = path.join(dir, "ticket-env.txt");

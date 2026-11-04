@@ -65,7 +65,7 @@ describe.skipIf(!connectionString)("weight_placeholder column migration", () => 
   afterAll(async () => {
     await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
     await client.end();
-  });
+  }, 30_000);
 
   it("replaying migrations adds weight_placeholder NOT NULL DEFAULT false and existing rows read false", async () => {
     const { rows } = await client.query<{
