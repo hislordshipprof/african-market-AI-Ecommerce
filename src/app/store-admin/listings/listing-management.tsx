@@ -485,43 +485,49 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
             <Plus className="size-3.5" /> Add
           </Button>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="@container flex flex-col gap-2">
           {variants.map((v) => (
-            <div key={v.key} className="flex items-center gap-2">
+            <div key={v.key} className="flex flex-col gap-2 @[22rem]:flex-row @[22rem]:items-center">
               <Input
+                aria-label="Variant label"
                 placeholder="Label (e.g. 1kg)"
                 value={v.label}
                 onChange={(e) => updateVariantField(v.key, "label", e.target.value)}
-                className="flex-1"
+                className="min-w-0 @[22rem]:flex-1"
               />
-              <Input
-                placeholder="Price"
-                type="number"
-                min="0"
-                step="0.01"
-                value={v.price}
-                onChange={(e) => updateVariantField(v.key, "price", e.target.value)}
-                className="w-24"
-              />
-              <Input
-                placeholder="Weight (g)"
-                type="number"
-                min="1"
-                value={v.weightG}
-                onChange={(e) => updateVariantField(v.key, "weightG", e.target.value)}
-                className="w-24"
-              />
-              {variants.length > 1 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => removeVariantRow(v.key)}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                <Input
+                  aria-label="Variant price in dollars"
+                  placeholder="Price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={v.price}
+                  onChange={(e) => updateVariantField(v.key, "price", e.target.value)}
+                  className="w-24"
+                />
+                <Input
+                  aria-label="Variant weight in grams"
+                  placeholder="Weight (g)"
+                  type="number"
+                  min="1"
+                  value={v.weightG}
+                  onChange={(e) => updateVariantField(v.key, "weightG", e.target.value)}
+                  className="w-24"
+                />
+                {variants.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`Remove ${v.label || "variant"}`}
+                    onClick={() => removeVariantRow(v.key)}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                )}
+              </div>
             </div>
           ))}
         </div>
