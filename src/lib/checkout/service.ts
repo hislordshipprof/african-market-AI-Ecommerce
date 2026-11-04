@@ -311,7 +311,7 @@ export async function recordAuthorizedOrder(
         data: { paymentIntentId: null },
       });
       return { orderId: order.id, created: true };
-    }, { timeout: 20_000, maxWait: 8_000 });
+    }, { timeout: 40_000, maxWait: 8_000 });
   } catch (err) {
     if (paymentIntentTaken(err)) {
       throw new Error("PaymentIntent is already recorded");

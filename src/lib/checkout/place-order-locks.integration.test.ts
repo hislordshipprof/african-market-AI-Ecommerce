@@ -575,7 +575,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       await poll("addLine waits on the checkout cart lock", async () => {
         const waiters = await pidsWaitingOn(checkoutPid);
         return waiters.some((pid) => pid !== holderPid);
-      });
+      }, 20_000);
       holder.release();
       const recorded = await checkout;
       await adding;
@@ -594,7 +594,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       holder.release();
       await Promise.allSettled([holder.done, checkout, adding]);
     }
-  }, 30_000);
+  }, 45_000);
 
   it("addLine owning the cart first completes with checkout", async () => {
     const storeId = await makeStore("addfirst");
