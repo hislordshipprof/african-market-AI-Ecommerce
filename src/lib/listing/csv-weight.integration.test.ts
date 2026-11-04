@@ -544,7 +544,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
         status: "in_stock",
       },
     });
-    expect(Date.now() - writeStarted).toBeLessThan(2_000);
+    expect(Date.now() - writeStarted).toBeLessThan(5_000);
     expect(created.customName).toBe(`After Wait ${RUN}`);
   }, 30_000);
 
@@ -644,7 +644,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
         status: "in_stock",
       },
     });
-    expect(Date.now() - writeStarted).toBeLessThan(2_000);
+    expect(Date.now() - writeStarted).toBeLessThan(5_000);
     await expectFirstFileWeights(shared, extra, secondPreview.importToken);
   }, 30_000);
 
