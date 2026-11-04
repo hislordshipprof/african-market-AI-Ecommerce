@@ -843,11 +843,13 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "text-end", id: "t" },
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
-    const response = await createChatHandler({ model })(request("from a proxy", { ip: "1.1.1.1, 2.2.2.2" }));
+    const left = `203.0.113.${randomUUID().slice(0, 8)}`;
+    const right = `198.51.100.${randomUUID().slice(0, 8)}`;
+    const response = await createChatHandler({ model })(request("from a proxy", { ip: `${left}, ${right}` }));
     expect(response.status).toBe(200);
     await response.text();
-    const first = await raw.rateLimit.findUnique({ where: { key: "assistant:ip:1.1.1.1" } });
-    const second = await raw.rateLimit.findUnique({ where: { key: "assistant:ip:2.2.2.2" } });
+    const first = await raw.rateLimit.findUnique({ where: { key: `assistant:ip:${left}` } });
+    const second = await raw.rateLimit.findUnique({ where: { key: `assistant:ip:${right}` } });
     expect(first?.count).toBeGreaterThan(0);
     expect(second).toBeNull();
   });
