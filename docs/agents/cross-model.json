@@ -5,8 +5,8 @@
     "effort": "high"
   },
   "codex": {
-    "model": "gpt-6-astra",
-    "effort": "medium"
+    "model": "gpt-6.1-sol",
+    "effort": "high"
   },
   "cursor": {
     "model": null

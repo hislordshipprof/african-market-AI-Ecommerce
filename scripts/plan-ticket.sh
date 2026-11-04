@@ -36,7 +36,9 @@ if [ -z "${status:-}" ] && [ "${SKIP_BRIEF_REVIEW:-0}" != "1" ] && \
    [ -z "$(gh api "repos/$REPO/issues/$N/dependencies/blocked_by" --jq '[.[]|select(.state=="open")]|length|select(.>0)')" ]; then
   BLOG="$ROOT/.builder/logs/brief-review-$N-$(date +%Y%m%d-%H%M%S).json"
   BPROMPT="Brief review for issue #$N, before any code is written. Read the issue and its 'Agent brief' comment (gh issue view $N -R $REPO --comments), the code on origin/main it touches, CLAUDE.md, GLOSSARY.md, docs/adr/, docs/spec/platform-spec.md and docs/agents/builder.md. Act as the independent code reviewer who will review the finished PR: list everything that would make you return VERDICT: BLOCKING if the builder followed this brief exactly. Cover missed edge cases, wrong integration contracts (check the provider's official docs), production-only behaviour (NODE_ENV=production, VERCEL, missing keys, hosted CI env), cross-store isolation, concurrency, and required tests that would pass while the code is broken. Post one issue comment headed 'Brief review' with: corrections to the brief, extra edge cases as rows, and extra required tests (file, name, regression caught). Do not change code, labels or other comments."
-  agent_run review "$BLOG" "$BPROMPT" || true
+  # Runs on Cursor with a non-Opus model (the planner is Opus), so it costs no Codex usage.
+  REVIEW_ENGINE="${BRIEF_REVIEW_ENGINE:-cursor}" CURSOR_REVIEW_MODEL="${CURSOR_BRIEF_REVIEW_MODEL:-${CURSOR_BUILD_MODEL:-}}" \
+    agent_run review "$BLOG" "$BPROMPT" || true
   echo "Brief review finished. Log: $BLOG"
 fi
 gh issue view "$N" -R "$REPO" --json labels --jq '"labels: " + ([.labels[].name] | join(", "))'

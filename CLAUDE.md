@@ -30,4 +30,4 @@ Single-context: root `GLOSSARY.md`, ADRs in `docs/adr/`. See `docs/agents/domain
 
 ### External peers
 
-`host-only` — no external peer on every build; Claude effort high, Codex (gpt-6-astra) effort medium, run by the coordinator at milestones. See `docs/agents/cross-model.json`.
+`host-only` — no external peer on every build; Claude effort high, Codex (gpt-6.1-sol) effort high: main review on RISK tickets plus one final pass after a non-RISK Cursor review passes (see `scripts/agent-engine.env`). See `docs/agents/cross-model.json`.
