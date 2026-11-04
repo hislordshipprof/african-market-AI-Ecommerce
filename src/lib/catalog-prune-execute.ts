@@ -121,16 +121,17 @@ export async function deleteCatalogCandidates(input: {
     }
     for (const key of batchDeleted) input.log(`deleted ${key}`);
     confirmed.push(...batchDeleted);
+    for (const failure of batchFailed) input.log(`failed ${failure.key} ${failure.code}`);
+    const failedText = batchFailed.map((failure) => `${failure.key} (${failure.code})`).join(", ");
     if (unknown.length > 0 || batchDeleted.length + batchFailed.length + unknown.length !== batch.length) {
       for (const key of unknown) input.log(`unknown ${key}`);
       throw new CatalogPruneRefusal(
-        `Refusing catalog prune: delete response did not account for every requested key; deleted so far ${confirmed.length}`,
+        `Refusing catalog prune: delete response did not account for every requested key${failedText ? `; failed ${failedText}` : ""}; deleted so far ${confirmed.join(" ") || String(confirmed.length)}`,
       );
     }
     if (batchFailed.length > 0) {
-      for (const failure of batchFailed) input.log(`failed ${failure.key} ${failure.code}`);
       throw new CatalogPruneRefusal(
-        `Refusing catalog prune: failed ${batchFailed.map((failure) => `${failure.key} (${failure.code})`).join(", ")}; deleted so far ${confirmed.join(" ")}`,
+        `Refusing catalog prune: failed ${failedText}; deleted so far ${confirmed.join(" ")}`,
       );
     }
   }

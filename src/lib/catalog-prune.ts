@@ -49,6 +49,13 @@ export function catalogPruneMode(input: {
   observed?: DatabaseIdentity | null;
   ownership?: OwnershipBinding[];
   writersCoordinated?: boolean;
+  /**
+   * Addresses of each URL hostname, from a DNS lookup of the connection string.
+   * PostgreSQL reports inet_server_addr() as an IP, so a Neon hostname matches
+   * when that IP is one of these addresses. Failed lookups leave the list empty
+   * and the connection is refused.
+   */
+  resolvedHosts?: Readonly<Record<string, readonly string[]>>;
 }): PruneDecision {
   const raw = input.env.SEED_PRUNE_R2;
   if (raw === undefined || raw.trim() === "") return { mode: "off" };
@@ -72,7 +79,7 @@ export function catalogPruneMode(input: {
     };
   }
 
-  const target = databaseTarget(input.databaseUrl, input.observed);
+  const target = databaseTarget(input.databaseUrl, input.observed, input.resolvedHosts);
   if ("refused" in target) return target;
 
   if (mode === "dry-run") return { mode: "dry-run" };
@@ -96,7 +103,7 @@ export function catalogPruneMode(input: {
   }
   const only = owned.databases[0]!;
   if (
-    !hostsMatch(only.host, target.identity.host) ||
+    !hostsMatch(only.host, target.identity.host, input.resolvedHosts) ||
     only.database !== target.identity.database
   ) {
     return {
@@ -213,6 +220,7 @@ function environmentRefusal(env: Env): string | null {
 function databaseTarget(
   databaseUrl: string | null,
   observed: DatabaseIdentity | null | undefined,
+  resolvedHosts?: Readonly<Record<string, readonly string[]>>,
 ): { identity: DatabaseIdentity } | { refused: string } {
   if (!databaseUrl) {
     return { refused: "Refusing catalog prune: database URL is missing or malformed" };
@@ -229,7 +237,7 @@ function databaseTarget(
   const observedLocal = localRefusal(observed);
   if (observedLocal) return { refused: observedLocal };
   if (
-    !hostsMatch(fromUrl.host, observed.host) ||
+    !hostsMatch(fromUrl.host, observed.host, resolvedHosts) ||
     fromUrl.port !== observed.port ||
     fromUrl.database !== observed.database
   ) {
@@ -277,9 +285,20 @@ function isLoopback(host: string): boolean {
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
 
-function hostsMatch(left: string, right: string): boolean {
+function hostsMatch(
+  left: string,
+  right: string,
+  resolvedHosts?: Readonly<Record<string, readonly string[]>>,
+): boolean {
   if (isLoopback(left) && isLoopback(right)) return true;
-  return left.toLowerCase() === right.toLowerCase();
+  if (normalizeHost(left) === normalizeHost(right)) return true;
+  const observed = normalizeHost(right);
+  const addresses = resolvedHosts?.[left] ?? resolvedHosts?.[normalizeHost(left)] ?? [];
+  return addresses.some((address) => normalizeHost(address) === observed);
+}
+
+function normalizeHost(host: string): string {
+  return host.toLowerCase().replace(/^\[|\]$/g, "");
 }
 
 function nonEmpty(value: string | undefined): boolean {

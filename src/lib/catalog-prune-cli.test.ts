@@ -45,24 +45,88 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
     const before = await prisma.$queryRaw<Array<{ updated_at: Date }>>`
       SELECT updated_at FROM stores WHERE slug = 'mama-ngozi'
     `;
-    const contexts: Array<() => void> = [
-      () => { process.env.SEED_PRUNE_R2 = "dry-run"; process.env.CI = "true"; },
-      () => { process.env.SEED_PRUNE_R2 = "dry-run"; process.env.CI = "1"; },
-      () => { process.env.SEED_PRUNE_R2 = "dry-run"; process.env.VERCEL = "1"; },
-      () => { process.env.SEED_PRUNE_R2 = "lane-bucket"; assign("NODE_ENV", "production"); setR2("lane-bucket"); },
-      () => { process.env.SEED_PRUNE_R2 = "dry-run"; process.env.VERCEL_ENV = "production"; },
-      () => { process.env.SEED_PRUNE_R2 = "dry-run"; process.env.VERCEL_ENV = "preview"; },
-      () => { process.env.SEED_PRUNE_R2 = "dry-run"; process.env.E2E_STORE_OVERRIDE = "1"; },
-      () => { process.env.SEED_PRUNE_R2 = "1"; setR2("lane-bucket"); },
-      () => { process.env.SEED_PRUNE_R2 = "dry-run"; delete process.env.R2_SECRET_ACCESS_KEY; setR2("lane-bucket"); delete process.env.R2_SECRET_ACCESS_KEY; },
-      () => { process.env.SEED_PRUNE_R2 = "dry-run"; process.env.DATABASE_URL_UNPOOLED = "not a url"; },
+    const inheritedE2e = Object.keys(process.env).filter((key) => key.startsWith("E2E_"));
+    const savedE2e: Record<string, string | undefined> = {};
+    for (const key of inheritedE2e) savedE2e[key] = process.env[key];
+    const clearHosted = () => {
+      delete process.env.CI;
+      delete process.env.VERCEL;
+      delete process.env.VERCEL_ENV;
+      assign("NODE_ENV", "test");
+      delete process.env.DATABASE_URL_UNPOOLED;
+      for (const key of Object.keys(process.env)) {
+        if (key.startsWith("E2E_")) delete process.env[key];
+      }
+    };
+    const cases: Array<{ mode: "dry-run" | "bucket"; reason: string; apply?: () => void }> = [];
+    const hosted: Array<[string, string, string]> = [
+      ["CI", "true", "CI is set"],
+      ["CI", "1", "CI is set"],
+      ["VERCEL", "1", "VERCEL is set"],
+      ["NODE_ENV", "production", "NODE_ENV is production"],
+      ["VERCEL_ENV", "production", "VERCEL_ENV is production"],
+      ["VERCEL_ENV", "preview", "VERCEL_ENV is preview"],
+      ["E2E_STORE_OVERRIDE", "1", "E2E_STORE_OVERRIDE is set"],
     ];
+    for (const mode of ["dry-run", "bucket"] as const) {
+      for (const [key, value, reason] of hosted) {
+        cases.push({
+          mode,
+          reason,
+          apply: () => { assign(key, value); },
+        });
+      }
+      for (const key of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"]) {
+        cases.push({
+          mode,
+          reason: `missing ${key}`,
+          apply: () => { delete process.env[key]; },
+        });
+      }
+      cases.push({
+        mode,
+        reason: "database host is localhost",
+        apply: () => { process.env.DIRECT_URL = "postgresql://app_owner:app_owner@localhost:5434/app"; },
+      });
+      cases.push({
+        mode,
+        reason: "database host is 127.0.0.1",
+        apply: () => { process.env.DIRECT_URL = "postgresql://app_owner:app_owner@127.0.0.1:5432/app"; },
+      });
+      cases.push({
+        mode,
+        reason: "database host is [::1]",
+        apply: () => { process.env.DIRECT_URL = "postgresql://app_owner:app_owner@[::1]:5432/app"; },
+      });
+      cases.push({
+        mode,
+        reason: "database name starts with lane_",
+        apply: () => { process.env.DIRECT_URL = "postgresql://user:sentinel-secret-value@ep-test.neon.tech:5432/lane_demo"; },
+      });
+      cases.push({
+        mode,
+        reason: "missing or malformed",
+        apply: () => { process.env.DATABASE_URL_UNPOOLED = "not a url"; },
+      });
+      cases.push({
+        mode,
+        reason: "missing or malformed",
+        apply: () => {
+          delete process.env.DIRECT_URL;
+          delete process.env.DATABASE_URL_UNPOOLED;
+        },
+      });
+    }
+    cases.push({ mode: "dry-run", reason: "Accepted forms", apply: () => { process.env.SEED_PRUNE_R2 = "1"; } });
     try {
-      for (const apply of contexts) {
+      for (const entry of cases) {
         restore();
+        for (const key of inheritedE2e) delete process.env[key];
+        clearHosted();
         setR2("lane-bucket");
-        apply();
-        await expect(runSeed()).rejects.toThrow(/Refusing catalog prune/);
+        process.env.SEED_PRUNE_R2 = entry.mode === "dry-run" ? "dry-run" : "lane-bucket";
+        entry.apply?.();
+        await expect(runSeed(), entry.reason).rejects.toThrow(new RegExp(entry.reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
         const after = await prisma.$queryRaw<Array<{ updated_at: Date }>>`
           SELECT updated_at FROM stores WHERE slug = 'mama-ngozi'
         `;
@@ -71,9 +135,12 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
       }
     } finally {
       restore();
+      for (const key of inheritedE2e) {
+        if (process.env[key] === undefined && savedE2e[key] !== undefined) process.env[key] = savedE2e[key];
+      }
       await prisma.$disconnect();
     }
-  }, 60_000);
+  }, 90_000);
 
   it("off-mode hosted CI and preview keep their supported seed behaviour", async () => {
     const { seedMasterCatalog } = await import("../../prisma/seed-master-catalog");

@@ -39,9 +39,17 @@ function filterFile(ticket, src, dest, ticketEnv) {
     rmSync(dest, { force: true });
     fail("lane-env: source is missing");
   }
-  const allowWrite = ticketAllowsR2Write(readFileSync(ticketEnv, "utf8"), ticket);
+  let ticketText;
+  let text;
+  try {
+    ticketText = readFileSync(ticketEnv, "utf8");
+    text = readFileSync(src, "utf8");
+  } catch {
+    rmSync(dest, { force: true });
+    fail("lane-env: source is missing");
+  }
+  const allowWrite = ticketAllowsR2Write(ticketText, ticket);
   const drop = new Set(allowWrite ? ALWAYS_DROP : [...ALWAYS_DROP, ...WRITE_KEYS]);
-  let text = readFileSync(src, "utf8");
   let bom = "";
   if (text.startsWith("\uFEFF")) {
     bom = "\uFEFF";
@@ -96,7 +104,7 @@ function ticketKeys(ticketEnvText, ticket) {
 function assignmentKey(line) {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith("#")) return null;
-  const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=/);
+  const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
   return match ? match[1] : null;
 }
 

@@ -141,7 +141,8 @@ save_session
 if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
   cd "$ROOT"
   for round in 1 2 3; do
-    verdict=$(E2E_PORT="$LANE_PORT" bash scripts/review-ticket.sh "$N" | tail -1)
+    REVIEW_TICKET="${REVIEW_TICKET:-$ROOT/scripts/review-ticket.sh}"
+    verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
     echo "Independent review $round: $verdict"
     [ "$verdict" = "VERDICT: PASS" ] && break
     [ "$round" = "3" ] && { echo "Still blocking after 2 fix rounds; the coordinator decides. See .builder/review-$N.md"; break; }

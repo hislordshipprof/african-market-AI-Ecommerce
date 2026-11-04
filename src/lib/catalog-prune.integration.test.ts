@@ -561,6 +561,76 @@ describe.skipIf(!hasDb)("catalog prune on the lane database", () => {
     restoreEnv();
   });
 
+  it("the age cutoff is the clock at entry, before listing", async () => {
+    configureBucket();
+    const entry = Date.parse("2026-06-15T12:00:00.000Z");
+    let nowMs = entry;
+    const key = `catalog/${RUN}-young.jpg`;
+    const fake = createFakeR2({
+      bucket: BUCKET,
+      objects: [{ key, lastModified: new Date(entry - 24 * 60 * 60 * 1000 + 1000) }],
+    });
+    const send = fake.send.bind(fake);
+    fake.send = async (command: unknown) => {
+      const result = await send(command);
+      nowMs += 2000;
+      return result;
+    };
+    const logs: string[] = [];
+    await seedMasterCatalog(prisma, {
+      execution: { kind: "harness", mode: "dry-run" },
+      r2: fake,
+      csvPath: csv([]),
+      now: () => new Date(nowMs),
+      log: (line) => logs.push(line),
+    });
+    expect(logs.some((line) => line.includes(key))).toBe(false);
+    expect(fake.objects().some((object) => object.key === key)).toBe(true);
+    restoreEnv();
+  });
+
+  it("a successful upload followed by a failed upsert does not prune", async () => {
+    configureBucket();
+    const id = `${RUN}-upload-fail`;
+    masterIds.push(id);
+    const uploaded: string[] = [];
+    const fake = createFakeR2({ bucket: BUCKET, objects: [] });
+    const dir = csv([{ id, confidence: "high" }]);
+    const header = "id,english_name,local_names,search_synonyms,category,subcategory,origin_countries,product_type,common_brands,unit,common_pack_sizes,typical_weight_g,storage,perishable,description,image_url,image_source_page,image_license,image_author,sources,confidence,notes";
+    const cols = Array.from({ length: 22 }, () => "");
+    cols[0] = id;
+    cols[1] = id;
+    cols[15] = "https://example.test/a.jpg";
+    cols[20] = "high";
+    writeFileSync(dir, `${header}\n${cols.join(",")}\n`);
+    const original = prisma.$transaction.bind(prisma);
+    prisma.$transaction = (async () => {
+      throw new Error("upsert failed after upload");
+    }) as unknown as typeof prisma.$transaction;
+    try {
+      await expect(seedMasterCatalog(prisma, {
+        execution: { kind: "harness", mode: "delete" },
+        writerGate: { exclusive: () => true },
+        r2: fake,
+        csvPath: dir,
+        uploadImage: async (_source, productId) => {
+          const key = `catalog/${productId}.webp`;
+          uploaded.push(key);
+          return { ok: true, url: `/api/catalog-image/${key}`, bytes: 4 };
+        },
+        now: () => NOW,
+        log: () => undefined,
+      })).rejects.toThrow(/upsert failed after upload/);
+    } finally {
+      prisma.$transaction = original;
+    }
+    expect(uploaded).toEqual([`catalog/${id}.webp`]);
+    expect(fake.recorded.some((command) => command.name === "DeleteObjects")).toBe(false);
+    const row = await asAdmin(prisma, (tx) => tx.masterProduct.findUnique({ where: { id } }));
+    expect(row).toBeNull();
+    restoreEnv();
+  });
+
   async function seedAc2(mode: "dry-run" | "delete") {
     configureBucket();
     const stamp = `${RUN}-${mode}-${Math.random().toString(36).slice(2, 8)}`;

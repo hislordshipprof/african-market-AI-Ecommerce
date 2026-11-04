@@ -1,6 +1,6 @@
 import { DeleteObjectsCommand, S3Client } from "@aws-sdk/client-s3";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -109,6 +109,54 @@ describe("catalog prune guard and planner", () => {
     expect(destructive).toEqual({
       refused: expect.stringContaining("no authoritative ownership binding"),
     });
+  });
+
+  it("a remote dry-run accepts the connected server IP when DNS says it belongs to the URL host", async () => {
+    const observed = { host: "10.0.0.1", port: "5432", database: "neondb" };
+    const bare = catalogPruneMode({
+      env: { ...r2Env, SEED_PRUNE_R2: "dry-run" },
+      databaseUrl: neonUrl,
+      observed,
+    });
+    expect(bare).toEqual({ refused: expect.stringContaining("does not match the connected database") });
+    expect(catalogPruneMode({
+      env: { ...r2Env, SEED_PRUNE_R2: "dry-run" },
+      databaseUrl: neonUrl,
+      observed,
+      resolvedHosts: { "ep-test.neon.tech": ["10.0.0.1"] },
+    })).toEqual({ mode: "dry-run" });
+    expect(catalogPruneMode({
+      env: { ...r2Env, SEED_PRUNE_R2: "dry-run" },
+      databaseUrl: neonUrl,
+      observed,
+      resolvedHosts: { "ep-test.neon.tech": ["10.0.0.2"] },
+    })).toEqual({ refused: expect.stringContaining("does not match the connected database") });
+
+    const savedUnpooled = process.env.DATABASE_URL_UNPOOLED;
+    const savedDirect = process.env.DIRECT_URL;
+    delete process.env.DATABASE_URL_UNPOOLED;
+    process.env.DIRECT_URL = neonUrl;
+    try {
+      const { decideCliCatalogPrune } = await import("../../prisma/seed-master-catalog");
+      const matched = await decideCliCatalogPrune(
+        { ...r2Env, SEED_PRUNE_R2: "dry-run", NODE_ENV: "test" },
+        async () => observed,
+        async () => ["10.0.0.1"],
+      );
+      expect(matched).toEqual({ mode: "dry-run" });
+      const missed = await decideCliCatalogPrune(
+        { ...r2Env, SEED_PRUNE_R2: "dry-run", NODE_ENV: "test" },
+        async () => observed,
+        async () => ["10.9.9.9"],
+      );
+      expect(missed).toEqual({ refused: expect.stringContaining("does not match the connected database") });
+      expect(JSON.stringify(missed)).not.toContain(SECRET);
+    } finally {
+      if (savedUnpooled === undefined) delete process.env.DATABASE_URL_UNPOOLED;
+      else process.env.DATABASE_URL_UNPOOLED = savedUnpooled;
+      if (savedDirect === undefined) delete process.env.DIRECT_URL;
+      else process.env.DIRECT_URL = savedDirect;
+    }
   });
 
   it("refusal names missing key names and never prints values", () => {
@@ -309,7 +357,7 @@ describe("catalog prune guard and planner", () => {
   });
 
   it("lost response reports unknown outcomes and stops further batches", async () => {
-    const keys = ["catalog/gone.jpg", "catalog/later.jpg"];
+    const keys = Array.from({ length: 1001 }, (_, index) => `catalog/lost${index}.jpg`);
     const fake = createFakeR2({
       bucket: BUCKET,
       objects: keys.map((key) => ({ key, lastModified: age(30 * DAY) })),
@@ -323,9 +371,53 @@ describe("catalog prune guard and planner", () => {
       log: (line) => logs.push(line),
     })).rejects.toThrow(/outcome unknown/);
     expect(logs.some((line) => line.startsWith("deleted "))).toBe(false);
-    expect(logs).toContain("unknown catalog/gone.jpg");
-    expect(logs).toContain("unknown catalog/later.jpg");
+    expect(logs).toContain("unknown catalog/lost0.jpg");
+    expect(logs).toContain("unknown catalog/lost999.jpg");
+    expect(logs.some((line) => line.includes("catalog/lost1000.jpg"))).toBe(false);
     expect(fake.recorded.filter((command) => command.name === "DeleteObjects")).toHaveLength(1);
+    expect(fake.objects().some((object) => object.key === "catalog/lost0.jpg")).toBe(false);
+    expect(fake.objects().some((object) => object.key === "catalog/lost1000.jpg")).toBe(true);
+  });
+
+  it("a log failure after a successful delete leaves the provider object deleted", async () => {
+    const key = "catalog/logged-late.jpg";
+    const fake = createFakeR2({
+      bucket: BUCKET,
+      objects: [{ key, lastModified: age(30 * DAY) }],
+    });
+    await expect(deleteCatalogCandidates({
+      client: fake,
+      bucket: BUCKET,
+      keys: [key],
+      log: (line) => {
+        if (line.startsWith("deleted ")) throw new Error("log interrupted");
+      },
+    })).rejects.toThrow(/log interrupted/);
+    expect(fake.objects().some((object) => object.key === key)).toBe(false);
+    const listed = await listCatalogObjects(fake, BUCKET);
+    expect(listed.some((object) => object.key === key)).toBe(false);
+  });
+
+  it("a mixed unknown and failed delete names both outcomes", async () => {
+    const fake = createFakeR2({
+      bucket: BUCKET,
+      objects: [
+        { key: "catalog/denied.jpg", lastModified: age(30 * DAY) },
+        { key: "catalog/omitted.jpg", lastModified: age(30 * DAY) },
+      ],
+      errorKeys: new Set(["catalog/denied.jpg"]),
+      omitKeyFromResponse: "catalog/omitted.jpg",
+    });
+    const logs: string[] = [];
+    await expect(deleteCatalogCandidates({
+      client: fake,
+      bucket: BUCKET,
+      keys: ["catalog/denied.jpg", "catalog/omitted.jpg"],
+      log: (line) => logs.push(line),
+    })).rejects.toThrow(/catalog\/denied.jpg \(AccessDenied\)/);
+    expect(logs).toContain("failed catalog/denied.jpg AccessDenied");
+    expect(logs).toContain("unknown catalog/omitted.jpg");
+    expect(logs.some((line) => line.startsWith("deleted "))).toBe(false);
   });
 
   it("verbose result must account for every requested key", async () => {
@@ -363,7 +455,7 @@ describe("catalog prune guard and planner", () => {
     expect(errorLogs).toContain("deleted catalog/ok.jpg");
     expect(errorLogs).toContain("failed catalog/denied.jpg AccessDenied");
 
-    const keys = Array.from({ length: 1001 }, (_, index) => `catalog/b${index}.jpg`);
+    const keys = Array.from({ length: 2001 }, (_, index) => `catalog/b${index}.jpg`);
     const throwing = createFakeR2({
       bucket: BUCKET,
       objects: keys.map((key) => ({ key, lastModified: age(30 * DAY) })),
@@ -379,6 +471,9 @@ describe("catalog prune guard and planner", () => {
     expect(logs.filter((line) => line.startsWith("deleted "))).toHaveLength(1000);
     expect(logs).toContain("unknown catalog/b1000.jpg");
     expect(throwing.recorded.filter((command) => command.name === "DeleteObjects")).toHaveLength(2);
+    expect(throwing.objects().some((object) => object.key === "catalog/b1000.jpg")).toBe(true);
+    expect(throwing.objects().some((object) => object.key === "catalog/b2000.jpg")).toBe(true);
+    expect(throwing.objects().some((object) => object.key === "catalog/b0.jpg")).toBe(false);
   });
 
   it("fake R2 client rejects empty, oversized, wrong bucket, and unknown commands", async () => {
@@ -404,14 +499,17 @@ describe("catalog prune guard and planner", () => {
 
   it("real SDK serializes the supported delete request and parses mixed results", async () => {
     let body = "";
+    let capturedHeaders: string[] = [];
     const client = new S3Client({
       region: "auto",
       endpoint: "https://example.r2.cloudflarestorage.com",
       credentials: { accessKeyId: "AKIA_TEST", secretAccessKey: "test-secret" },
       requestHandler: {
-        handle: async (request: { body?: Uint8Array | string }) => {
+        handle: async (request: { body?: Uint8Array | string; headers?: Record<string, string> }) => {
           const raw = request.body;
           body = typeof raw === "string" ? raw : Buffer.from(raw ?? new Uint8Array()).toString("utf8");
+          const headerNames = Object.keys(request.headers ?? {}).map((name) => name.toLowerCase());
+          capturedHeaders = headerNames;
           const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <Deleted><Key>catalog/a.jpg</Key></Deleted>
@@ -439,6 +537,7 @@ describe("catalog prune guard and planner", () => {
     expect(body).not.toContain("<Quiet>true</Quiet>");
     expect(result.Deleted?.map((entry) => entry.Key)).toEqual(["catalog/a.jpg"]);
     expect(result.Errors?.map((entry) => entry.Code)).toEqual(["AccessDenied"]);
+    expect(capturedHeaders.some((name) => name === "content-md5" || name.startsWith("x-amz-checksum-"))).toBe(true);
   });
 
   it("the reference reader is not imported by an app route or server action", () => {
@@ -563,7 +662,7 @@ describe("lane env filter script", () => {
     const env = ticketEnv();
     const src = path.join(env.dir, "src");
     const dest = path.join(env.dir, "dest");
-    writeFileSync(src, `R2_SECRET_ACCESS_KEY=${SECRET}\nKEEP=yes\nR2_ACCESS_KEY_ID=${ACCESS}\n`);
+    writeFileSync(src, `R2_SECRET_ACCESS_KEY=${SECRET}\nKEEP=yes\nR2_ACCESS_KEY_ID=${ACCESS}\nR2_SECRET_ACCESS_KEY = ${SECRET}\n`);
     const stdout = execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "100", src, dest, env.file], { encoding: "utf8" });
     expect(readFileSync(dest, "utf8")).toBe("KEEP=yes\n");
     expect(stdout).not.toContain(SECRET);
@@ -613,7 +712,7 @@ describe("lane env filter script", () => {
     const src = path.join(env.dir, "src");
     const dest = path.join(env.dir, "dest");
     writeFileSync(src, `KEEP=1\nDATABASE_URL_UNPOOLED=postgresql://user:${SECRET}@ep-test.neon.tech/neondb\n`);
-    const bashPath = (file: string) => file.replace(/\\/g, "/");
+    const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
     const script = `
       set -euo pipefail
       cd "${bashPath(process.cwd())}"
@@ -659,6 +758,46 @@ describe("lane env filter script", () => {
     }
   });
 
+  it("spaced assignments cannot leak write keys or a remote unpooled URL", () => {
+    const env = ticketEnv();
+    const src = path.join(env.dir, "src");
+    const dest = path.join(env.dir, "dest");
+    writeFileSync(src, [
+      "KEEP=plain",
+      `R2_ACCESS_KEY_ID = ${ACCESS}`,
+      `R2_SECRET_ACCESS_KEY = ${SECRET}`,
+      "SEED_PRUNE_R2 = dry-run",
+      `DATABASE_URL_UNPOOLED = postgresql://user:${SECRET}@remote.example/db`,
+      "OTHER=1",
+      "",
+    ].join("\n"));
+    execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
+    expect(readFileSync(dest, "utf8")).toBe("KEEP=plain\nOTHER=1\n");
+    const probe = execFileSync(process.execPath, [
+      `--env-file=${dest}`,
+      "-e",
+      "const names=['R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','SEED_PRUNE_R2','DATABASE_URL_UNPOOLED']; const present=names.filter((name)=>process.env[name]); if (present.length) { console.log('PRESENT '+present.join(',')); process.exit(1);} console.log('ABSENT');",
+    ], { encoding: "utf8" });
+    expect(probe).toContain("ABSENT");
+    expect(probe).not.toContain(SECRET);
+    rmSync(env.dir, { recursive: true, force: true });
+  });
+
+  it("an unreadable filter source removes a stale destination", () => {
+    const env = ticketEnv();
+    const src = path.join(env.dir, "srcdir");
+    const dest = path.join(env.dir, "dest");
+    mkdirSync(src);
+    writeFileSync(dest, `R2_SECRET_ACCESS_KEY=${SECRET}\n`);
+    const result = spawnSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file], {
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(1);
+    expect(existsSync(dest)).toBe(false);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(SECRET);
+    rmSync(env.dir, { recursive: true, force: true });
+  });
+
   it("filter failure stops before seeding and cannot reuse stale unsafe env", () => {
     const env = ticketEnv();
     const dest = path.join(env.dir, "dest");
@@ -671,4 +810,149 @@ describe("lane env filter script", () => {
     expect(`${result.stdout}${result.stderr}`).not.toContain(SECRET);
     rmSync(env.dir, { recursive: true, force: true });
   });
+
+  it("lane-db drops spaced unpooled assignments and points children at localhost", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "t225-lanedb-"));
+    const bin = path.join(dir, "bin");
+    const data = path.join(dir, "pg");
+    mkdirSync(bin);
+    mkdirSync(data);
+    writeFileSync(path.join(data, "PG_VERSION"), "18\n");
+    const log = path.join(dir, "log");
+    writeFileSync(log, "");
+    const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
+    const stub = (name: string, body: string) => {
+      const file = path.join(bin, name);
+      writeFileSync(file, body);
+      chmodSync(file, 0o755);
+    };
+    stub("psql", "#!/bin/bash\ncat >/dev/null\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
+    stub("pg_ctl", "#!/bin/bash\nexit 0\n");
+    stub("pg_isready", "#!/bin/bash\nexit 0\n");
+    stub("npx", `#!/bin/bash
+host=$(node -e 'try{process.stdout.write(new URL(process.env.DATABASE_URL||"").hostname)}catch(e){process.stdout.write("missing")}')
+secret=\${R2_SECRET_ACCESS_KEY:+present}
+unpooled=\${DATABASE_URL_UNPOOLED:+present}
+prune=\${SEED_PRUNE_R2:+present}
+printf 'child npx host=%s secret=%s unpooled=%s prune=%s\\n' "$host" "$secret" "$unpooled" "$prune" >> "$HARNESS_LOG"
+exit 0
+`);
+    const envFile = path.join(dir, "env");
+    writeFileSync(envFile, [
+      "KEEP=1",
+      `DATABASE_URL_UNPOOLED = postgresql://user:${SECRET}@remote.example/db`,
+      `DATABASE_URL=postgresql://user:${SECRET}@remote.example/neondb`,
+      `R2_SECRET_ACCESS_KEY = ${SECRET}`,
+      "",
+    ].join("\n"));
+    execFileSync("bash", ["scripts/lane-db.sh", "zzorch", bashPath(envFile)], {
+      env: {
+        ...process.env,
+        PGBIN: bashPath(bin),
+        LANE_PG_DATA: bashPath(data),
+        HARNESS_LOG: bashPath(log),
+        PATH: `${bashPath(bin)}:${process.env.PATH ?? ""}`,
+      },
+    });
+    const written = readFileSync(envFile, "utf8");
+    expect(written).not.toContain("DATABASE_URL_UNPOOLED");
+    expect(written).not.toContain("remote.example");
+    expect(written).toContain("postgresql://app_owner:app_owner@localhost:");
+    expect(written).toContain("/lane_zzorch");
+    const child = readFileSync(log, "utf8");
+    expect(child).toContain("psql");
+    expect(child).toContain("child npx host=localhost");
+    expect(child).not.toContain("unpooled=present");
+    expect(child).not.toContain("secret=present");
+    expect(child).not.toContain(SECRET);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("build resume and continue run the real scripts and keep secrets out of every child", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "t225-orch-"));
+    const bin = path.join(dir, "bin");
+    const data = path.join(dir, "pg");
+    const wt = path.join(dir, "wt");
+    mkdirSync(bin);
+    mkdirSync(data);
+    mkdirSync(path.join(wt, "node_modules"), { recursive: true });
+    writeFileSync(path.join(data, "PG_VERSION"), "18\n");
+    const log = path.join(dir, "log");
+    writeFileSync(log, "");
+    const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
+    const stub = (name: string, body: string) => {
+      const file = path.join(bin, name);
+      writeFileSync(file, body);
+      chmodSync(file, 0o755);
+    };
+    const childLine = `#!/bin/bash
+host=$(node -e 'try{process.stdout.write(new URL(process.env.DATABASE_URL||"").hostname)}catch(e){process.stdout.write("missing")}')
+secret=\${R2_SECRET_ACCESS_KEY:+present}
+access=\${R2_ACCESS_KEY_ID:+present}
+unpooled=\${DATABASE_URL_UNPOOLED:+present}
+prune=\${SEED_PRUNE_R2:+present}
+printf 'child %s host=%s secret=%s access=%s unpooled=%s prune=%s\\n' "$1" "$host" "$secret" "$access" "$unpooled" "$prune" >> "$HARNESS_LOG"
+`;
+    stub("psql", "#!/bin/bash\ncat >/dev/null\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
+    stub("pg_ctl", "#!/bin/bash\nexit 0\n");
+    stub("pg_isready", "#!/bin/bash\nexit 0\n");
+    stub("npx", `${childLine}exit 0\n`.replace('"$1"', '"npx"'));
+    stub("claude", `${childLine}echo '{"session_id":"stub-session-0001"}'\nexit 0\n`.replace('"$1"', '"claude"'));
+    stub("gh", `#!/bin/bash
+case "$*" in
+  *blocked_by*) ;;
+  *comments*) echo "agent brief" ;;
+  *title*) echo "seed photos" ;;
+  *) echo OPEN ;;
+esac
+exit 0
+`);
+    const review = path.join(dir, "review.sh");
+    writeFileSync(review, `${childLine}echo "VERDICT: PASS"\nexit 0\n`.replace('"$1"', '"review"'));
+    chmodSync(review, 0o755);
+    const script = `
+      set -euo pipefail
+      export PATH="${bashPath(bin)}:$PATH"
+      export AGENT_ENGINE=claude
+      export REVIEW_ENGINE=claude
+      export PGBIN="${bashPath(bin)}"
+      export LANE_PG_DATA="${bashPath(data)}"
+      export WT="${bashPath(wt)}"
+      export HARNESS_LOG="${bashPath(log)}"
+      export REVIEW_TICKET="${bashPath(review)}"
+      export R2_SECRET_ACCESS_KEY='${SECRET}'
+      export R2_ACCESS_KEY_ID='${ACCESS}'
+      export SEED_PRUNE_R2='dry-run'
+      export DATABASE_URL_UNPOOLED='postgresql://user:${SECRET}@remote.example/db'
+      check() {
+        grep -q "child npx host=localhost" "$HARNESS_LOG"
+        grep -q "child claude" "$HARNESS_LOG"
+        grep -q "child review" "$HARNESS_LOG"
+        grep -q "psql" "$HARNESS_LOG"
+        if grep -Eq "secret=present|access=present|unpooled=present|prune=present" "$HARNESS_LOG"; then
+          echo "leaked child env"
+          exit 1
+        fi
+        if grep -q '${SECRET}' "$HARNESS_LOG"; then echo "secret in log"; exit 1; fi
+      }
+      : > "$HARNESS_LOG"
+      bash scripts/build-ticket.sh 225
+      check
+      : > "$HARNESS_LOG"
+      bash scripts/build-ticket.sh 225 --resume "findings"
+      check
+      : > "$HARNESS_LOG"
+      bash scripts/build-ticket.sh 225 --continue
+      check
+      echo modes-ok
+    `;
+    const stdout = execFileSync("bash", ["-c", script], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+      env: { ...process.env, AGENT_ENGINE: "claude" },
+    });
+    expect(stdout).toContain("modes-ok");
+    expect(stdout).not.toContain(SECRET);
+    rmSync(dir, { recursive: true, force: true });
+  }, 180_000);
 });

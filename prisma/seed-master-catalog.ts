@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import type { Client } from "pg";
+import { lookup } from "node:dns/promises";
 import { parse } from "csv-parse/sync";
 import * as fs from "fs";
 import * as path from "path";
@@ -10,6 +11,7 @@ import { upsertMasterProduct, type CsvRow } from "./master-catalog-upsert";
 import {
   catalogPruneMode,
   CatalogPruneRefusal,
+  databaseIdentityFromUrl,
   planCatalogPrune,
   type PruneDecision,
 } from "../src/lib/catalog-prune";
@@ -67,6 +69,14 @@ export type SeedMasterCatalogDeps = {
   priorReferences?: string[];
   writerGate?: WriterGate;
   afterReferenceSnapshot?: (client: Client) => Promise<void>;
+  /**
+   * Test seam for a successful object write that then fails to commit.
+   * The CLI does not set it. When set, it runs instead of the network uploader.
+   */
+  uploadImage?: (
+    sourceUrl: string,
+    productId: string,
+  ) => Promise<{ ok: true; url: string; bytes: number } | { ok: false; reason: string }>;
 };
 
 function hasAllR2Keys(env: NodeJS.ProcessEnv): boolean {
@@ -86,9 +96,24 @@ function getS3Client() {
   });
 }
 
+async function resolveDatabaseHost(host: string): Promise<readonly string[]> {
+  try {
+    const records = await lookup(host, { all: true, verbatim: true });
+    return records.map((record) => record.address);
+  } catch {
+    return [];
+  }
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
 export async function decideCliCatalogPrune(
   env: NodeJS.ProcessEnv = process.env,
   observe?: () => Promise<DatabaseIdentity>,
+  lookupHost: (host: string) => Promise<readonly string[]> = resolveDatabaseHost,
 ): Promise<PruneDecision> {
   const raw = env.SEED_PRUNE_R2;
   if (raw === undefined || raw.trim() === "") return { mode: "off" };
@@ -110,12 +135,18 @@ export async function decideCliCatalogPrune(
   }
   try {
     const observed = await observe();
+    const resolvedHosts: Record<string, readonly string[]> = {};
+    const fromUrl = databaseUrl ? databaseIdentityFromUrl(databaseUrl) : null;
+    if (fromUrl && !isLoopbackHost(fromUrl.host)) {
+      resolvedHosts[fromUrl.host] = await lookupHost(fromUrl.host);
+    }
     return catalogPruneMode({
       env,
       databaseUrl,
       observed,
       ownership: CATALOG_PRUNE_OWNERSHIP,
       writersCoordinated: false,
+      resolvedHosts,
     });
   } catch (error) {
     if (error instanceof CatalogPruneRefusal) return { refused: error.message };
@@ -139,6 +170,7 @@ async function observePrisma(prisma: PrismaClient): Promise<DatabaseIdentity> {
 }
 
 export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCatalogDeps = {}) {
+  const startedAt = (deps.now ?? (() => new Date()))();
   const log = deps.log ?? ((line: string) => console.log(line));
   const execution = deps.execution ?? { kind: "cli" as const };
 
@@ -197,7 +229,18 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
     const imageSourceUrl = row.image_url?.trim() || null;
     let imageUrl: string | null = null;
 
-    if (useRealR2 && imageSourceUrl) {
+    if (imageSourceUrl && (deps.uploadImage || useRealR2)) {
+      if (deps.uploadImage) {
+        const img = await deps.uploadImage(imageSourceUrl, row.id);
+        if (img.ok) {
+          imageUrl = img.url;
+          imageUploads++;
+          totalUploadBytes += img.bytes;
+        } else {
+          imageSkips++;
+          failures.push({ id: row.id, reason: img.reason });
+        }
+      } else if (useRealR2) {
       const webpKey = `catalog/${row.id}.webp`;
       if (existingR2Keys.has(webpKey)) {
         imageUrl = catalogImageUrl(webpKey);
@@ -228,6 +271,7 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
       processed++;
       if (processed % 10 === 0) {
         log(`  images: ${processed}/${withImages.length} (${imageUploads} new, ${imageExisting} cached, ${imageSkips} failed)`);
+      }
       }
     }
 
@@ -280,12 +324,11 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
     throw new CatalogPruneRefusal("Refusing catalog prune: missing R2_BUCKET");
   }
 
-  const now = (deps.now ?? (() => new Date()))();
   const objects = await listCatalogObjects(listClient, bucket);
   const read = await readCatalogImageReferences({ afterSnapshot: deps.afterReferenceSnapshot });
   assertUpsertsVisible(read.masterProductIds, upsertedIds);
   const references = [...read.references, ...(deps.priorReferences ?? [])];
-  const candidates = planCatalogPrune({ objects, references, now });
+  const candidates = planCatalogPrune({ objects, references, now: startedAt });
 
   if (mode === "dry-run") {
     for (const key of candidates) log(`candidate ${key}`);
