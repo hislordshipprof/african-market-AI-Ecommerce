@@ -246,8 +246,8 @@ describe("import lock test helpers", () => {
       const otherConfig = {
         text: "SELECT id FROM listing_imports WHERE id = $1",
         values: ["other-token"],
-        rowMode: "array",
-        types: { marker: true },
+        rowMode: "array" as const,
+        types: { getTypeParser: () => null },
       };
       const other = client.query(otherConfig);
       const update = client.query("UPDATE listing_imports SET status = $1 WHERE id = $2", ["pending", "token-1"]);
@@ -441,23 +441,27 @@ describe("import lock test helpers", () => {
 
   it("direct URL alternatives and isolated runtime env matrix retain their contracts", async () => {
     const lane = "postgres://app_owner:pw@127.0.0.1:5434/lane_t219";
-    expect(directUrlForLane({
+    const env = (values: Record<string, string | undefined>): NodeJS.ProcessEnv => ({
+      NODE_ENV: "test",
+      ...values,
+    });
+    expect(directUrlForLane(env({
       DATABASE_URL: lane,
       DATABASE_URL_UNPOOLED: lane,
-    })).toBe(lane);
-    expect(directUrlForLane({
+    }))).toBe(lane);
+    expect(directUrlForLane(env({
       DATABASE_URL: lane,
       DATABASE_URL_UNPOOLED: "  ",
       DIRECT_URL: lane,
-    })).toBe(lane);
-    expect(() => directUrlForLane({ DATABASE_URL: lane })).toThrow(
+    }))).toBe(lane);
+    expect(() => directUrlForLane(env({ DATABASE_URL: lane }))).toThrow(
       /Neither DATABASE_URL_UNPOOLED nor DIRECT_URL/,
     );
-    expect(() => directUrlForLane({
+    expect(() => directUrlForLane(env({
       DATABASE_URL: lane,
       DATABASE_URL_UNPOOLED: "postgres://app_owner:pw@203.0.113.5:5432/other",
       DIRECT_URL: lane,
-    })).toThrow("direct URL does not target the lane database");
+    }))).toThrow("direct URL does not target the lane database");
 
     const withPassword = runtimeDatabaseUrl({ DATABASE_URL: lane, APP_RUNTIME_PASSWORD: "one" });
     const withOther = runtimeDatabaseUrl({ DATABASE_URL: lane, APP_RUNTIME_PASSWORD: "two" });
