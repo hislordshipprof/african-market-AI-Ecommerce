@@ -1,7 +1,7 @@
 "use server";
 
 import { getStore } from "../get-store";
-import { getCartIdFromCookie } from "../cart/cookies";
+import { resolveShopperCart } from "../cart/actions";
 import { checkCheckoutReady } from "../stripe/checkout-gate";
 import { quoteCheckout, createPaymentIntent, placeOrder } from "./service";
 import type { CheckoutQuote, Contact, Fulfillment } from "../customer-flow/contracts";
@@ -12,8 +12,9 @@ export async function quoteCheckoutAction(
 ): Promise<{ ok: true; quote: CheckoutQuote } | { ok: false; error: string }> {
   try {
     const store = await getStore();
-    const cartId = await getCartIdFromCookie();
-    if (!cartId) return { ok: false, error: "No cart found" };
+    const resolved = await resolveShopperCart();
+    if (!resolved) return { ok: false, error: "No cart found" };
+    const cartId = resolved.cartId;
     const quote = await quoteCheckout(
       store.id,
       store.minimumOrderCents,
@@ -40,8 +41,9 @@ export async function createPaymentIntentAction(
     if (!gate.enabled) {
       return { ok: false, error: gate.message ?? "Checkout is not available" };
     }
-    const cartId = await getCartIdFromCookie();
-    if (!cartId) return { ok: false, error: "No cart found" };
+    const resolved = await resolveShopperCart();
+    if (!resolved) return { ok: false, error: "No cart found" };
+    const cartId = resolved.cartId;
     const quote = await quoteCheckout(
       store.id,
       store.minimumOrderCents,
@@ -74,8 +76,9 @@ export async function placeOrderAction(
 ): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   try {
     const store = await getStore();
-    const cartId = await getCartIdFromCookie();
-    if (!cartId) return { ok: false, error: "No cart found" };
+    const resolved = await resolveShopperCart();
+    if (!resolved) return { ok: false, error: "No cart found" };
+    const cartId = resolved.cartId;
     const result = await placeOrder(
       store.id,
       store.minimumOrderCents,

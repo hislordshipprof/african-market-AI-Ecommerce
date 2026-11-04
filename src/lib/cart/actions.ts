@@ -41,11 +41,21 @@ async function ensureCartId(): Promise<{ storeId: string; cartId: string }> {
   return { storeId: store.id, cartId };
 }
 
+/**
+ * The cart this browser may read or change. No cookie means no cart.
+ * A cookie that names an account cart the current session does not own is
+ * replaced, so a signed-out shopper neither sees nor clears that basket.
+ */
+export async function resolveShopperCart(): Promise<{ storeId: string; cartId: string } | null> {
+  const cookieCartId = await getCartIdFromCookie();
+  if (!cookieCartId) return null;
+  return ensureCartId();
+}
+
 export async function getServerCart(): Promise<CartWithLines | null> {
-  const store = await getStore();
-  const cartId = await getCartIdFromCookie();
-  if (!cartId) return null;
-  return getCartWithLines(store.id, cartId);
+  const resolved = await resolveShopperCart();
+  if (!resolved) return null;
+  return getCartWithLines(resolved.storeId, resolved.cartId);
 }
 
 export async function addToCart(
@@ -114,10 +124,9 @@ export async function removeCartLine(
 
 export async function clearCart(): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const store = await getStore();
-    const cartId = await getCartIdFromCookie();
-    if (!cartId) return { ok: true };
-    await clearAllLines(store.id, cartId);
+    const resolved = await resolveShopperCart();
+    if (!resolved) return { ok: true };
+    await clearAllLines(resolved.storeId, resolved.cartId);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
@@ -126,15 +135,15 @@ export async function clearCart(): Promise<{ ok: true } | { ok: false; error: st
 
 export async function getMinimumOrder(): Promise<MinimumOrderResult> {
   const store = await getStore();
-  const cartId = await getCartIdFromCookie();
-  if (!cartId) {
+  const resolved = await resolveShopperCart();
+  if (!resolved) {
     return {
       allowed: false,
       minimumCents: store.minimumOrderCents,
       currentCents: 0,
     };
   }
-  return checkMinimumOrder(store.id, cartId);
+  return checkMinimumOrder(resolved.storeId, resolved.cartId);
 }
 
 export async function migrateLocalCart(

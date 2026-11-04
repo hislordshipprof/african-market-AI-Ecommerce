@@ -35,7 +35,8 @@ vi.mock("next/navigation", () => ({
 
 import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
-import { addToCart } from "./actions";
+import { addToCart, clearCart, getServerCart } from "./actions";
+import { quoteCheckoutAction } from "../checkout/actions";
 
 const hasDb = !!process.env.DATABASE_URL;
 const BASE = "http://localhost:3000/api/auth";
@@ -305,5 +306,100 @@ describe.skipIf(!hasDb)("authenticated cart actions (real session, lane DB)", ()
     expect(guestLines[0].qty).toBe(1);
     const customers = await storeScoped(storeId).customer.findMany();
     expect(customers).toHaveLength(1);
+  });
+
+  it("shows an empty unlinked cart after sign-out and leaves the account lines", async () => {
+    await wipeCarts();
+    asStore(storeSlug, sessionCookies);
+    expect(await addToCart(variantId, 1)).toEqual({ ok: true });
+    const accountCartId = cartCookies.get("cart_id");
+    expect(accountCartId).toEqual(expect.any(String));
+
+    asStore(storeSlug);
+    const shown = await getServerCart();
+    expect(shown?.id).not.toBe(accountCartId);
+    expect(shown?.lines).toHaveLength(0);
+    expect(cartCookies.get("cart_id")).toBe(shown?.id);
+
+    const accountCart = await storeScoped(storeId).cart.findUnique({ where: { id: accountCartId } });
+    expect(accountCart?.userId).toBe(userId);
+    expect(accountCart?.customerId).toEqual(expect.any(String));
+    const accountLines = await storeScoped(storeId).cartLine.findMany({
+      where: { cartId: accountCartId },
+    });
+    expect(accountLines).toHaveLength(1);
+    expect(accountLines[0].qty).toBe(1);
+
+    const guest = await storeScoped(storeId).cart.findUnique({ where: { id: shown!.id } });
+    expect(guest?.userId).toBeNull();
+    expect(guest?.customerId).toBeNull();
+    const customers = await storeScoped(storeId).customer.findMany();
+    expect(customers).toHaveLength(1);
+  });
+
+  it("does not clear an account cart when a signed-out shopper clears the basket", async () => {
+    await wipeCarts();
+    asStore(storeSlug, sessionCookies);
+    expect(await addToCart(variantId, 1)).toEqual({ ok: true });
+    const accountCartId = cartCookies.get("cart_id");
+
+    asStore(storeSlug);
+    expect(await clearCart()).toEqual({ ok: true });
+
+    const accountLines = await storeScoped(storeId).cartLine.findMany({
+      where: { cartId: accountCartId },
+    });
+    expect(accountLines).toHaveLength(1);
+    expect(accountLines[0].qty).toBe(1);
+    expect(cartCookies.get("cart_id")).not.toBe(accountCartId);
+  });
+
+  it("quotes an empty cart after sign-out instead of the account basket", async () => {
+    await wipeCarts();
+    asStore(storeSlug, sessionCookies);
+    expect(await addToCart(variantId, 1)).toEqual({ ok: true });
+    const accountCartId = cartCookies.get("cart_id");
+
+    asStore(storeSlug);
+    const quote = await quoteCheckoutAction(
+      { name: "Ada Buyer", email, phone: "2025550100" },
+      "pickup",
+    );
+    expect(quote.ok).toBe(true);
+    if (quote.ok) expect(quote.quote.subtotalCents).toBe(0);
+
+    const accountLines = await storeScoped(storeId).cartLine.findMany({
+      where: { cartId: accountCartId },
+    });
+    expect(accountLines).toHaveLength(1);
+    expect(accountLines[0].qty).toBe(1);
+    expect(cartCookies.get("cart_id")).not.toBe(accountCartId);
+  });
+
+  it("does not show another account's lines to a signed-in shopper", async () => {
+    await wipeCarts();
+    const theirs = await storeScoped(storeId).cart.create({
+      data: { storeId, userId: otherId, source: "manual" },
+    });
+    await storeScoped(storeId).cartLine.create({
+      data: {
+        storeId,
+        cartId: theirs.id,
+        variantId,
+        qty: 1,
+        swapRule: "exact_only",
+      },
+    });
+    cartCookies.set("cart_id", theirs.id);
+    asStore(storeSlug, sessionCookies);
+
+    const shown = await getServerCart();
+    expect(shown?.id).not.toBe(theirs.id);
+    expect(shown?.lines ?? []).toHaveLength(0);
+    const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId: theirs.id } });
+    expect(lines).toHaveLength(1);
+    expect(lines[0].qty).toBe(1);
+    const otherCart = await storeScoped(storeId).cart.findUnique({ where: { id: theirs.id } });
+    expect(otherCart?.userId).toBe(otherId);
   });
 });
