@@ -219,4 +219,84 @@ describe.skipIf(!hasDb)("placeOrder keys and cold runtime", () => {
     expect(report.numPassedTests ?? 0).toBeGreaterThanOrEqual(19);
     rmSync(dir, { recursive: true, force: true });
   }, 180_000);
+
+  it("hosted CI executes orchestration without Stripe", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "t240-orch-"));
+    const output = join(dir, "report.json");
+    const env = childEnv({
+      STRIPE_SECRET_KEY: "",
+      E2E_FAKE_STRIPE: "1",
+      NODE_ENV: "test",
+    });
+    expect(env.STRIPE_SECRET_KEY).toBe("");
+    try {
+      await execFileAsync(
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "src/lib/checkout/place-order-orchestration.integration.test.ts",
+          "src/lib/checkout/stripe-integration.test.ts",
+          "--reporter=json",
+          "--outputFile",
+          output,
+        ],
+        { cwd: process.cwd(), env, shell: process.platform === "win32", timeout: 180_000 },
+      );
+    } catch (err) {
+      const failed = err as { stdout?: string; stderr?: string };
+      throw new Error(
+        `orchestration suite failed without Stripe\n${failed.stdout ?? ""}\n${failed.stderr ?? ""}`,
+      );
+    }
+    const report = JSON.parse(readFileSync(output, "utf8")) as {
+      numPassedTests?: number;
+      numFailedTests?: number;
+      testResults?: Array<{
+        name?: string;
+        assertionResults?: Array<{ title?: string; status?: string }>;
+      }>;
+    };
+    const results = report.testResults ?? [];
+    const orchestration = results.find((file) => file.name?.includes("place-order-orchestration"));
+    const sandbox = results.find((file) => file.name?.includes("stripe-integration"));
+    expect(orchestration?.assertionResults?.length ?? 0).toBeGreaterThan(0);
+    const orchestrationResults = orchestration?.assertionResults ?? [];
+    expect(orchestrationResults.every((test) => test.status === "passed")).toBe(true);
+    expect(orchestrationResults.some((test) => test.status === "skipped" || test.status === "pending")).toBe(false);
+    const passedTitles = new Set(orchestrationResults.map((test) => test.title));
+    for (const title of [
+      "duplicate checkout returns the winner's order whatever the refilled cart holds",
+      "winner commits while duplicate cart read is pending",
+      "duplicate checkout that read the cart before the winner committed returns the winner's order",
+      "a new order still checks the PaymentIntent amount against the hold",
+      "a replay is still rejected when the PaymentIntent is no longer requires_capture",
+      "recorded replay still validates each provenance field",
+      "store B never receives store A's order for a PaymentIntent A recorded",
+      "post-read lookup cannot reveal another store's newly committed order",
+      "replay ignores invalid contact and a lowered quantity limit",
+      "missing cart replays only when an order exists",
+      "replay preserves winner rows and the next checkout intent",
+      "a failed winner still releases the gate and the loser settles",
+      "gate cleanup survives arrival and winner failure and asserts loser outcome",
+      "all checkout hooks are ignored in production with and without Vercel",
+      "rejects an unknown id and any connected-account request",
+    ]) {
+      expect(passedTitles.has(title), title).toBe(true);
+    }
+    const sandboxResults = sandbox?.assertionResults ?? [];
+    const sandboxIntegration = sandboxResults.filter(
+      (test) => test.title !== "a transfers-only sandbox account is not checkout concurrency evidence"
+        && test.title !== "five-party barrier releases and settles peers when a participant fails"
+        && test.title !== "a failed setup worker settles peer preparation before the failure propagates",
+    );
+    expect(sandboxIntegration.length).toBeGreaterThan(0);
+    expect(sandboxIntegration.every((test) => test.status === "skipped")).toBe(true);
+    expect(sandboxResults.find((test) => test.title === "five-party barrier releases and settles peers when a participant fails")?.status).toBe("passed");
+    expect(sandboxResults.find((test) => test.title === "a failed setup worker settles peer preparation before the failure propagates")?.status).toBe("passed");
+    expect(report.numFailedTests ?? 0).toBe(0);
+    expect(report.numPassedTests ?? 0).toBeGreaterThan(0);
+    rmSync(dir, { recursive: true, force: true });
+  }, 180_000);
 });

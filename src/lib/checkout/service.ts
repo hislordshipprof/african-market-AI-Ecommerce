@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped } from "../db";
-import { getCartWithLines, type CartLineView } from "../cart/service";
+import { getCartWithLines, type CartLineView, type CartWithLines } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { sendOrderAuthorized } from "../inngest/send";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
@@ -172,13 +172,28 @@ export async function createPaymentIntent(
 }
 
 /**
- * Test-only pause after placeOrder's pre-transaction order lookup misses.
- * Production leaves this null. NODE_ENV=test is required before it runs,
- * so a leaked hook cannot stall a live checkout.
+ * Test-only pauses. Production leaves every hook null. Each hook runs only
+ * when NODE_ENV is test, so a leaked hook cannot stall a live checkout.
+ *
+ * afterMissedOrderLookup fires after the pre-cart lookup misses and before
+ * the cart read. aroundCartRead wraps that read and must call it. The
+ * post-read lookup runs only after the read returns. afterPostReadLookupMiss
+ * fires when that second lookup also misses, before cart validation.
  */
 export const checkoutTestHooks: {
   afterMissedOrderLookup: (() => Promise<void>) | null;
-} = { afterMissedOrderLookup: null };
+  aroundCartRead: ((read: () => Promise<CartWithLines | null>) => Promise<CartWithLines | null>) | null;
+  afterPostReadLookupMiss: (() => Promise<void>) | null;
+} = {
+  afterMissedOrderLookup: null,
+  aroundCartRead: null,
+  afterPostReadLookupMiss: null,
+};
+
+function runTestHook(hook: (() => Promise<void>) | null): Promise<void> {
+  if (process.env.NODE_ENV === "test" && hook) return hook();
+  return Promise.resolve();
+}
 
 export interface AuthorizedOrderLine {
   variantId: string;
@@ -392,19 +407,26 @@ export async function placeOrder(
     return { token: existingOrder.id, quote };
   }
 
-  if (process.env.NODE_ENV === "test" && checkoutTestHooks.afterMissedOrderLookup) {
-    await checkoutTestHooks.afterMissedOrderLookup();
+  await runTestHook(checkoutTestHooks.afterMissedOrderLookup);
+
+  const readCart = () => getCartWithLines(storeId, cartId);
+  const cart = process.env.NODE_ENV === "test" && checkoutTestHooks.aroundCartRead
+    ? await checkoutTestHooks.aroundCartRead(readCart)
+    : await readCart();
+
+  // After the cart read, under Read Committed, a committed winner is visible.
+  // A lookup before the read can miss an order the customer refills onto.
+  const replay = await storeScoped(storeId).order.findUnique({
+    where: { paymentIntentId },
+  });
+  if (replay) {
+    const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
+    return { token: replay.id, quote };
   }
 
-  const cart = await getCartWithLines(storeId, cartId);
+  await runTestHook(checkoutTestHooks.afterPostReadLookupMiss);
+
   if (!cart || !cart.lines.length) {
-    const raced = await storeScoped(storeId).order.findUnique({
-      where: { paymentIntentId },
-    });
-    if (raced) {
-      const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
-      return { token: raced.id, quote };
-    }
     throw new Error("Cart is empty");
   }
 

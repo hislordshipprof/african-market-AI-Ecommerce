@@ -3,7 +3,98 @@ import Stripe from "stripe";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped } from "../db";
-import { createPaymentIntent, placeOrder, computeQuote } from "./service";
+import { checkoutTestHooks, createPaymentIntent, placeOrder, computeQuote } from "./service";
+
+type ConnectedAccountCaps = {
+  id: string;
+  capabilities?: { transfers?: string; card_payments?: string } | null;
+};
+
+function selectCheckoutConnectedAccount<T extends ConnectedAccountCaps>(accounts: T[]): T {
+  const eligible = accounts.filter(
+    (account) =>
+      account.capabilities?.transfers === "active" &&
+      account.capabilities.card_payments === "active",
+  );
+  if (eligible.length > 0) return eligible[0]!;
+  if (accounts.some((account) => account.capabilities?.transfers === "active")) {
+    throw new Error(
+      "Sandbox connected account has transfers but lacks an active card_payments capability. Refusing to treat checkout concurrency as successful.",
+    );
+  }
+  throw new Error(
+    "No sandbox connected account has active transfers and card_payments capabilities; finish hosted onboarding for one store (see #64 step 1).",
+  );
+}
+
+function createPartyBarrier() {
+  let count = 0;
+  let releaseGate!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  let released = false;
+  const timers = new Set<ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>>();
+  return {
+    arrived: () => count,
+    arrive() {
+      count += 1;
+      return gate;
+    },
+    waitFor(expected: number, timeoutMs: number) {
+      return new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          clearInterval(interval);
+          timers.delete(timeout);
+          timers.delete(interval);
+          reject(new Error(`five-party barrier timed out with ${count} of ${expected}`));
+        }, timeoutMs);
+        const interval = setInterval(() => {
+          if (count >= expected) {
+            clearTimeout(timeout);
+            clearInterval(interval);
+            timers.delete(timeout);
+            timers.delete(interval);
+            resolve();
+          }
+        }, 15);
+        timers.add(timeout);
+        timers.add(interval);
+      });
+    },
+    releaseAll() {
+      if (!released) {
+        released = true;
+        releaseGate();
+      }
+    },
+    clear() {
+      for (const timer of timers) {
+        clearTimeout(timer);
+        clearInterval(timer);
+      }
+      timers.clear();
+      this.releaseAll();
+    },
+  };
+}
+
+async function drainParty<T>(
+  barrier: ReturnType<typeof createPartyBarrier>,
+  started: Promise<T>[],
+): Promise<PromiseSettledResult<T>[]> {
+  barrier.clear();
+  checkoutTestHooks.afterMissedOrderLookup = null;
+  return Promise.allSettled(started);
+}
+
+async function settleStarted<T>(started: Promise<T>[]): Promise<T[]> {
+  try {
+    return await Promise.all(started);
+  } finally {
+    await Promise.allSettled(started);
+  }
+}
 
 const hasKey = !!process.env.STRIPE_SECRET_KEY;
 const hasDb = !!process.env.DATABASE_URL;
@@ -43,17 +134,30 @@ describe.skipIf(!hasKey || !hasDb)(
       const ready: Stripe.Account[] = [];
       const others: Stripe.Account[] = [];
       for await (const acct of stripe.accounts.list({ limit: 100 })) {
-        (acct.capabilities?.transfers === "active" ? ready : others).push(acct);
+        let capabilities = acct.capabilities;
+        if (capabilities?.transfers === "active" && capabilities.card_payments !== "active") {
+          capabilities = (await stripe.accounts.retrieve(acct.id)).capabilities ?? capabilities;
+        }
+        const withCaps = { ...acct, capabilities } as Stripe.Account;
+        if (
+          capabilities?.transfers === "active" &&
+          capabilities.card_payments === "active"
+        ) {
+          ready.push(withCaps);
+        } else {
+          others.push(withCaps);
+        }
         if (ready.length >= 1 && others.length >= 1) break;
       }
       if (!ready.length) {
-        throw new Error(
-          "No sandbox connected account has the transfers capability; finish hosted onboarding for one store (see #64 step 1).",
+        selectCheckoutConnectedAccount(
+          others.map((account) => ({ id: account.id, capabilities: account.capabilities })),
         );
+        throw new Error("No eligible sandbox account");
       }
-      const accounts = { data: [ready[0], ...ready.slice(1), ...others] };
+      const accounts = { data: [ready[0]!, ...others] };
 
-      const acctA = accounts.data[0];
+      const acctA = accounts.data[0]!;
       let storeA = await rawPrisma.store.findFirst({
         where: { stripeAccountId: acctA.id },
       });
@@ -135,7 +239,7 @@ describe.skipIf(!hasKey || !hasDb)(
           swapRule: "exact_only",
         },
       });
-    }, 30_000);
+    }, 60_000);
 
     afterAll(async () => {
       if (!rawPrisma) return;
@@ -383,7 +487,7 @@ describe.skipIf(!hasKey || !hasDb)(
       { timeout: 60_000 },
       async () => {
         const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-        const orders = await Promise.all(
+        const prepared = await settleStarted(
           Array.from({ length: 5 }, async (_, index) => {
             const contact = {
               name: `Five ${index}`,
@@ -407,33 +511,82 @@ describe.skipIf(!hasKey || !hasDb)(
                 swapRule: "exact_only",
               },
             });
-            const pi = await stripe.paymentIntents.create({
-              amount: quote.holdCents,
-              currency: "usd",
-              capture_method: "manual",
-              on_behalf_of: stripeAccountAId,
-              transfer_data: { destination: stripeAccountAId },
-              metadata: { store_id: storeAId, cart_id: cart.id },
-            });
+            let pi: Stripe.PaymentIntent;
+            try {
+              pi = await stripe.paymentIntents.create({
+                amount: quote.holdCents,
+                currency: "usd",
+                capture_method: "manual",
+                on_behalf_of: stripeAccountAId,
+                transfer_data: { destination: stripeAccountAId },
+                metadata: { store_id: storeAId, cart_id: cart.id },
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              throw new Error(`PaymentIntent create failed for worker ${index}: ${message}`);
+            }
             piToCleanup.push(pi.id);
             await storeScoped(storeAId).cart.update({
               where: { id: cart.id },
               data: { paymentIntentId: pi.id },
             });
-            await stripe.paymentIntents.confirm(pi.id, {
-              payment_method: "pm_card_visa",
-              return_url: "https://example.com/return",
-            });
-            return placeOrder(storeAId, 0, cart.id, contact, "pickup", null, null, pi.id);
+            let confirmed: Stripe.PaymentIntent;
+            try {
+              confirmed = await stripe.paymentIntents.confirm(pi.id, {
+                payment_method: "pm_card_visa",
+                return_url: "https://example.com/return",
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              throw new Error(`PaymentIntent confirm failed for ${pi.id}: ${message}`);
+            }
+            if (confirmed.status !== "requires_capture") {
+              throw new Error(
+                `PaymentIntent ${pi.id} confirmed as ${confirmed.status}, expected requires_capture`,
+              );
+            }
+            return { cartId: cart.id, contact, paymentIntentId: pi.id, status: confirmed.status };
           }),
         );
-        const tokens = orders.map((order) => order.token);
-        expect(new Set(tokens).size).toBe(5);
-        const saved = await storeScoped(storeAId).order.findMany({
-          where: { id: { in: tokens } },
-        });
-        expect(saved).toHaveLength(5);
-        expect(saved.every((order) => order.status === "AUTHORIZED")).toBe(true);
+        expect(prepared).toHaveLength(5);
+        expect(prepared.map((row) => row.status)).toEqual([
+          "requires_capture",
+          "requires_capture",
+          "requires_capture",
+          "requires_capture",
+          "requires_capture",
+        ]);
+        expect(checkoutTestHooks.afterMissedOrderLookup).toBeNull();
+
+        const barrier = createPartyBarrier();
+        checkoutTestHooks.afterMissedOrderLookup = async () => {
+          await barrier.arrive();
+        };
+        const started = prepared.map((row) =>
+          placeOrder(storeAId, 0, row.cartId, row.contact, "pickup", null, null, row.paymentIntentId),
+        );
+        const inFlight = Promise.all(started);
+        try {
+          void inFlight.catch(() => undefined);
+          await barrier.waitFor(5, 20_000);
+          expect(barrier.arrived()).toBe(5);
+          barrier.releaseAll();
+          const orders = await inFlight;
+          const tokens = orders.map((order) => order.token);
+          expect(new Set(tokens).size).toBe(5);
+          const saved = await storeScoped(storeAId).order.findMany({
+            where: { id: { in: tokens } },
+          });
+          expect(saved).toHaveLength(5);
+          expect(saved.every((order) => order.status === "AUTHORIZED")).toBe(true);
+          expect(new Set(saved.map((order) => order.number)).size).toBe(5);
+          for (let index = 0; index < orders.length; index += 1) {
+            const savedOrder = saved.find((order) => order.id === orders[index]!.token);
+            expect(savedOrder?.paymentIntentId).toBe(prepared[index]!.paymentIntentId);
+          }
+        } finally {
+          await drainParty(barrier, started);
+        }
       },
     );
 
@@ -497,3 +650,128 @@ describe.skipIf(!hasKey || !hasDb)(
     });
   },
 );
+
+describe("checkout concurrency barrier", () => {
+  it("a transfers-only sandbox account is not checkout concurrency evidence", () => {
+    expect(() =>
+      selectCheckoutConnectedAccount([
+        { id: "acct_transfers_only", capabilities: { transfers: "active", card_payments: "inactive" } },
+      ]),
+    ).toThrow(/lacks an active card_payments capability/);
+    expect(() =>
+      selectCheckoutConnectedAccount([
+        { id: "acct_none", capabilities: { transfers: "inactive", card_payments: "inactive" } },
+      ]),
+    ).toThrow(/No sandbox connected account/);
+    const chosen = selectCheckoutConnectedAccount([
+      { id: "acct_transfers_only", capabilities: { transfers: "active", card_payments: "inactive" } },
+      { id: "acct_ready", capabilities: { transfers: "active", card_payments: "active" } },
+    ]);
+    expect(chosen.id).toBe("acct_ready");
+  });
+
+  it("five-party barrier releases and settles peers when a participant fails", async () => {
+    const barrier = createPartyBarrier();
+    checkoutTestHooks.afterMissedOrderLookup = async () => {
+      await barrier.arrive();
+    };
+    const started: Promise<string>[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const task = (async () => {
+        if (index === 4) throw new Error("worker failed before the barrier");
+        await checkoutTestHooks.afterMissedOrderLookup?.();
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return `settled-${index}`;
+      })();
+      void task.catch(() => undefined);
+      started.push(task);
+    }
+    const flags = started.map(() => "pending");
+    started.forEach((task, index) => {
+      void task.then(
+        () => {
+          flags[index] = "done";
+        },
+        () => {
+          flags[index] = "done";
+        },
+      );
+    });
+    const inFlight = Promise.all(started);
+    let failure: unknown;
+    let settled: PromiseSettledResult<string>[] = [];
+    try {
+      void inFlight.catch(() => undefined);
+      const start = Date.now();
+      while (barrier.arrived() < 4 && Date.now() - start < 1_000) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(barrier.arrived()).toBe(4);
+      await expect(barrier.waitFor(5, 200)).rejects.toThrow(/timed out with 4 of 5/);
+    } catch (err) {
+      failure = err;
+    } finally {
+      settled = await drainParty(barrier, started);
+      await Promise.resolve();
+      expect(flags.filter((flag) => flag === "pending")).toHaveLength(0);
+    }
+    if (failure) throw failure;
+    expect(checkoutTestHooks.afterMissedOrderLookup).toBeNull();
+    expect(settled.filter((row) => row.status === "fulfilled")).toHaveLength(4);
+    const rejected = settled.find((row) => row.status === "rejected");
+    expect(rejected?.status).toBe("rejected");
+    if (rejected?.status === "rejected") {
+      const message = rejected.reason instanceof Error ? rejected.reason.message : String(rejected.reason);
+      expect(message).toBe("worker failed before the barrier");
+    }
+  });
+
+  it("a failed setup worker settles peer preparation before the failure propagates", async () => {
+    let releasePeers!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releasePeers = resolve;
+    });
+    const events: string[] = [];
+    const flags = ["pending", "pending", "pending", "pending", "pending"];
+    const started = Array.from({ length: 5 }, (_, index) => {
+      const task = (async () => {
+        if (index === 0) {
+          throw new Error("PaymentIntent create failed for worker 0: injected API setup failure");
+        }
+        await held;
+        events.push(`create succeeded after aggregate failed: worker ${index}`);
+        events.push("cart update");
+        events.push(`confirm pi_${index}`);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return index;
+      })();
+      void task.then(
+        () => {
+          flags[index] = "done";
+        },
+        () => {
+          flags[index] = "done";
+        },
+      );
+      return task;
+    });
+    void Promise.all(started).then(
+      () => undefined,
+      () => {
+        releasePeers();
+      },
+    );
+
+    let failure: unknown;
+    try {
+      await settleStarted(started);
+    } catch (err) {
+      failure = err;
+    }
+    await Promise.resolve();
+    expect(flags.filter((flag) => flag === "pending")).toHaveLength(0);
+    expect(events.filter((event) => event.startsWith("confirm"))).toHaveLength(4);
+    const message = failure instanceof Error ? failure.message : String(failure);
+    expect(message).toContain("injected API setup failure");
+  });
+});
