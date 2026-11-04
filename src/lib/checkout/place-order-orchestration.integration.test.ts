@@ -4,7 +4,26 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 
-const retrieve = vi.hoisted(() => vi.fn());
+const { retrieve, paymentIntents } = vi.hoisted(() => {
+  const paymentIntents = new Map<string, Record<string, unknown>>();
+  function usesConnectedAccount(arg: unknown): boolean {
+    return Boolean(
+      arg &&
+      typeof arg === "object" &&
+      "stripeAccount" in arg &&
+      (arg as { stripeAccount?: unknown }).stripeAccount,
+    );
+  }
+  const retrieve = vi.fn(async (id: string, params?: unknown, options?: unknown) => {
+    if (usesConnectedAccount(params) || usesConnectedAccount(options)) {
+      throw new Error(`No such payment_intent: '${id}'`);
+    }
+    const fixture = paymentIntents.get(id);
+    if (!fixture) throw new Error(`No such payment_intent: '${id}'`);
+    return fixture;
+  });
+  return { retrieve, paymentIntents };
+});
 
 vi.mock("../stripe/provider", () => ({
   getStripeClient: () => ({ paymentIntents: { retrieve } }),
@@ -25,6 +44,25 @@ import {
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "ada@t236-orch.test" };
 
+describe("strict Stripe retrieve double", () => {
+  afterEach(() => {
+    retrieve.mockClear();
+    paymentIntents.clear();
+  });
+
+  it("rejects an unknown id and any connected-account request", async () => {
+    paymentIntents.set("pi_known", { id: "pi_known", status: "requires_capture" });
+    await expect(retrieve("pi_missing")).rejects.toThrow("No such payment_intent: 'pi_missing'");
+    await expect(retrieve("pi_known", {}, { stripeAccount: "acct_connected" })).rejects.toThrow(
+      "No such payment_intent: 'pi_known'",
+    );
+    await expect(retrieve("pi_known", { stripeAccount: "acct_connected" })).rejects.toThrow(
+      "No such payment_intent: 'pi_known'",
+    );
+    await expect(retrieve("pi_known")).resolves.toMatchObject({ id: "pi_known", status: "requires_capture" });
+  });
+});
+
 describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double)", () => {
   let raw: PrismaClient;
   const storeIds: string[] = [];
@@ -36,7 +74,8 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
 
   afterEach(() => {
     checkoutTestHooks.afterMissedOrderLookup = null;
-    retrieve.mockReset();
+    retrieve.mockClear();
+    paymentIntents.clear();
     vi.mocked(sendOrderAuthorized).mockClear();
   });
 
@@ -128,7 +167,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     await storeScoped(store.id).cartLine.create({
       data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    retrieve.mockResolvedValue(paymentIntent({
+    paymentIntents.set(paymentIntentId, paymentIntent({
       amount: holdFor(500, 1),
       destination: store.stripeAccountId!,
       onBehalfOf: store.stripeAccountId!,
@@ -204,7 +243,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       await storeScoped(store.id).cartLine.create({
         data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
       });
-      retrieve.mockResolvedValue(paymentIntent({
+      paymentIntents.set(paymentIntentId, paymentIntent({
         amount: holdFor(500, 1),
         destination: field.destination,
         onBehalfOf: field.onBehalfOf,
@@ -248,7 +287,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     await storeScoped(store.id).cartLine.create({
       data: { storeId: store.id, cartId: bidderCart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    retrieve.mockResolvedValue(paymentIntent({
+    paymentIntents.set(taken, paymentIntent({
       amount: holdFor(500, 1),
       destination: store.stripeAccountId!,
       onBehalfOf: store.stripeAccountId!,
@@ -279,7 +318,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
         substituteVariantId: foreign.id,
       },
     });
-    retrieve.mockResolvedValue(paymentIntent({
+    paymentIntents.set(paymentIntentId, paymentIntent({
       amount: holdFor(500, 1),
       destination: store.stripeAccountId!,
       onBehalfOf: store.stripeAccountId!,
@@ -334,7 +373,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       await storeScoped(store.id).cartLine.create({
         data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
       });
-      retrieve.mockResolvedValue(paymentIntent({
+      paymentIntents.set(paymentIntentId, paymentIntent({
         status: field.status,
         amount: field.amount,
         destination: store.stripeAccountId!,
