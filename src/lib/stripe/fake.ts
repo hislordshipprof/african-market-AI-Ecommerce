@@ -94,6 +94,7 @@ const refundRequests: Array<{
   refundApplicationFee: boolean;
 }> = [];
 const captureErrorBudget = new Map<string, number>();
+const cancelErrorBudget = new Map<string, number>();
 const idempotency = new Map<string, IdemRecord>();
 let refundSeq = 0;
 
@@ -111,6 +112,7 @@ function reset() {
   feeRefunded.clear();
   refundRequests.length = 0;
   captureErrorBudget.clear();
+  cancelErrorBudget.clear();
   idempotency.clear();
   refundSeq = 0;
 }
@@ -317,6 +319,11 @@ const fakeStripeProvider: StripeProvider = {
       if (!authorizedAmounts.has(paymentIntentId)) {
         throw resourceMissing("payment_intent", paymentIntentId);
       }
+      const failuresLeft = cancelErrorBudget.get(paymentIntentId) ?? 0;
+      if (failuresLeft > 0) {
+        cancelErrorBudget.set(paymentIntentId, failuresLeft - 1);
+        throw stripeApiError("Internal server error");
+      }
       cancelledPayments.add(paymentIntentId);
       if (idempotencyKey) cancelKeys.set(paymentIntentId, idempotencyKey);
       return {
@@ -454,10 +461,14 @@ function setNextCaptureFailure(paymentIntentId: string, times = 1) {
   captureErrorBudget.set(paymentIntentId, times);
 }
 
+function setNextCancelFailure(paymentIntentId: string, times = 1) {
+  cancelErrorBudget.set(paymentIntentId, times);
+}
+
 function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   if (!authorizedAmounts.has(paymentIntentId)) {
     authorizedAmounts.set(paymentIntentId, amount);
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCancelFailure, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };

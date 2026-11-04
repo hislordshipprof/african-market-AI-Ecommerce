@@ -88,6 +88,17 @@ function captureKey(orderId: string, attempt: number): string {
   return `capture:${orderId}:${attempt}`;
 }
 
+function cancelKey(orderId: string, attempt: number): string {
+  return `cancel:${orderId}:${attempt}`;
+}
+
+async function operationAttempt(storeId: string, orderId: string, action: string): Promise<number> {
+  const prior = await storeScopedTransaction(storeId, async (tx) => {
+    return tx.auditLog.count({ where: { entityId: orderId, action } });
+  });
+  return prior + 1;
+}
+
 function captureBackoffMs(attempt: number): number {
   return Math.min(15 * 60_000, 30_000 * 2 ** Math.max(0, attempt - 1));
 }
@@ -286,7 +297,8 @@ async function settleUnconfirmedCapture(
 
   if (pi.status === "requires_capture") {
     try {
-      await stripe.cancelPaymentIntent(order.paymentIntentId, `cancel:${orderId}:release-hold`);
+      const releaseAttempt = await operationAttempt(storeId, orderId, "cancel_retry");
+      await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, releaseAttempt));
     } catch (err) {
       if (err instanceof ProviderStateError) {
         const fresh = await stripe.retrievePaymentIntent(order.paymentIntentId);
@@ -636,9 +648,27 @@ export async function markReady(
     try {
       await stripe.cancelPaymentIntent(
         validation.paymentIntentId,
-        `cancel:${orderId}`,
+        cancelKey(orderId, await operationAttempt(storeId, orderId, "cancel_retry")),
       );
     } catch (err) {
+      if (isRetryableProviderError(err)) {
+        const attempt = await operationAttempt(storeId, orderId, "cancel_retry");
+        await storeScopedTransaction(storeId, async (tx) => {
+          await lockStoreRow(tx, storeId);
+          await tx.auditLog.create({
+            data: {
+              storeId,
+              actorId: SYSTEM_ACTOR_ID,
+              actorEmail: SYSTEM_ACTOR_EMAIL,
+              action: "cancel_retry",
+              entityType: "order",
+              entityId: orderId,
+              after: { attempt },
+            },
+          });
+        });
+        return { ok: false, error: "Cancellation is still confirming with the bank" };
+      }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
         const refund = await refundCapturedBalance(validation.paymentIntentId, orderId);
@@ -948,7 +978,29 @@ export async function reconcileStuckOrder(
       }
     } else {
       try {
-        await stripe.cancelPaymentIntent(order.paymentIntentId, `cancel:${orderId}`);
+        const cancelAttempt = await operationAttempt(storeId, orderId, "cancel_retry");
+        try {
+          await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, cancelAttempt));
+        } catch (err) {
+          if (isRetryableProviderError(err)) {
+            await storeScopedTransaction(storeId, async (tx) => {
+              await lockStoreRow(tx, storeId);
+              await tx.auditLog.create({
+                data: {
+                  storeId,
+                  actorId: SYSTEM_ACTOR_ID,
+                  actorEmail: SYSTEM_ACTOR_EMAIL,
+                  action: "cancel_retry",
+                  entityType: "order",
+                  entityId: orderId,
+                  after: { attempt: cancelAttempt },
+                },
+              });
+            });
+            return { ok: false, error: "Cancellation is still confirming with the bank" };
+          }
+          throw err;
+        }
       } catch (err) {
         if (err instanceof ProviderStateError) {
           const freshPi = await stripe.retrievePaymentIntent(order.paymentIntentId);

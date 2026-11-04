@@ -6,7 +6,7 @@ import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextCaptureFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, setAuthorizedAmount, setNextCaptureFailure, setNextCancelFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -2185,6 +2185,24 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const retried = await reconcileStuckOrder(storeId, order.id);
     expect(retried.ok).toBe(true);
     if (retried.ok) expect(retried.action).toBe("finalized_capture");
+  });
+
+  it("a stored 500 on the cancel key moves to the next attempt key after a retrieve", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    setNextCancelFailure(order.paymentIntentId!, 1);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+    });
+
+    const failed = await reconcileStuckOrder(storeId, order.id);
+    expect(failed.ok).toBe(false);
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(false);
+
+    const retried = await reconcileStuckOrder(storeId, order.id);
+    expect(retried.ok).toBe(true);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
   });
 
   it("webhook refund.failed moves CANCELLING to REFUND_FAILED", async () => {
