@@ -273,4 +273,37 @@ describe.skipIf(!hasDb)("authenticated cart actions (real session, lane DB)", ()
     expect(mine?.userId).toBe(userId);
     expect(mine?.customerId).toEqual(expect.any(String));
   });
+
+  it("opens a fresh unlinked cart after sign-out and leaves the account cart", async () => {
+    await wipeCarts();
+    asStore(storeSlug, sessionCookies);
+    expect(await addToCart(variantId, 1)).toEqual({ ok: true });
+    const accountCartId = cartCookies.get("cart_id");
+    expect(accountCartId).toEqual(expect.any(String));
+
+    asStore(storeSlug);
+    expect(await addToCart(variantId, 1)).toEqual({ ok: true });
+    const guestCartId = cartCookies.get("cart_id");
+    expect(guestCartId).not.toBe(accountCartId);
+
+    const accountCart = await storeScoped(storeId).cart.findUnique({ where: { id: accountCartId } });
+    expect(accountCart?.userId).toBe(userId);
+    expect(accountCart?.customerId).toEqual(expect.any(String));
+    const accountLines = await storeScoped(storeId).cartLine.findMany({
+      where: { cartId: accountCartId },
+    });
+    expect(accountLines).toHaveLength(1);
+    expect(accountLines[0].qty).toBe(1);
+
+    const guestCart = await storeScoped(storeId).cart.findUnique({ where: { id: guestCartId } });
+    expect(guestCart?.userId).toBeNull();
+    expect(guestCart?.customerId).toBeNull();
+    const guestLines = await storeScoped(storeId).cartLine.findMany({
+      where: { cartId: guestCartId },
+    });
+    expect(guestLines).toHaveLength(1);
+    expect(guestLines[0].qty).toBe(1);
+    const customers = await storeScoped(storeId).customer.findMany();
+    expect(customers).toHaveLength(1);
+  });
 });

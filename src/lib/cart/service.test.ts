@@ -311,13 +311,71 @@ describe.skipIf(!hasDb)("Cart service", () => {
       ]);
     });
 
-    it("leaves an account cart unchanged when no account is passed", async () => {
+    it("opens a fresh unlinked cart when no session holds an account cart", async () => {
       const cartId = await getOrCreateCart(storeId, null, buyerId);
-      const again = await getOrCreateCart(storeId, cartId, null);
-      expect(again).toBe(cartId);
-      const row = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
-      expect(row?.userId).toBe(buyerId);
-      expect(row?.customerId).toEqual(expect.any(String));
+      await addLine(storeId, cartId, variantId, 1);
+      const original = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
+      const guestId = await getOrCreateCart(storeId, cartId, null);
+      expect(guestId).not.toBe(cartId);
+      const guest = await storeScoped(storeId).cart.findUnique({ where: { id: guestId } });
+      expect(guest?.userId).toBeNull();
+      expect(guest?.customerId).toBeNull();
+      const kept = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
+      expect(kept?.userId).toBe(buyerId);
+      expect(kept?.customerId).toBe(original?.customerId);
+      const keptLines = await getCartWithLines(storeId, cartId);
+      expect(keptLines?.lines).toHaveLength(1);
+      expect(keptLines?.lines[0].qty).toBe(1);
+      const customers = await storeScoped(storeId).customer.findMany();
+      expect(customers).toHaveLength(1);
+    });
+
+    it("gives the losing account a new cart when two accounts claim one guest cart", async () => {
+      const guestId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, guestId, variantId, 2);
+
+      const prisma = (globalThis as unknown as { prisma: PrismaClient }).prisma;
+      const original = prisma.user.findUnique.bind(prisma.user);
+      let seen = 0;
+      let release!: () => void;
+      const open = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const bothRead = new Promise<void>((resolve) => {
+        prisma.user.findUnique = (async (args: { where: { id: string } }) => {
+          const row = await original(args);
+          seen += 1;
+          if (seen >= 2) resolve();
+          await open;
+          return row;
+        }) as typeof prisma.user.findUnique;
+      });
+
+      try {
+        const pending = Promise.all([
+          getOrCreateCart(storeId, guestId, buyerId),
+          getOrCreateCart(storeId, guestId, otherId),
+        ]);
+        await bothRead;
+        release();
+        const [first, second] = await pending;
+        expect(first).not.toBe(second);
+        expect([first, second]).toContain(guestId);
+        const guest = await storeScoped(storeId).cart.findUnique({ where: { id: guestId } });
+        const loserId = first === guestId ? second : first;
+        const loser = await storeScoped(storeId).cart.findUnique({ where: { id: loserId } });
+        expect([guest?.userId, loser?.userId].sort()).toEqual([buyerId, otherId].sort());
+        expect(guest?.customerId).toEqual(expect.any(String));
+        expect(loser?.customerId).toEqual(expect.any(String));
+        expect(loser?.customerId).not.toBe(guest?.customerId);
+        const kept = await getCartWithLines(storeId, guestId);
+        expect(kept?.lines).toHaveLength(1);
+        expect(kept?.lines[0].qty).toBe(2);
+        const fresh = await getCartWithLines(storeId, loserId);
+        expect(fresh?.lines).toHaveLength(0);
+      } finally {
+        prisma.user.findUnique = original as typeof prisma.user.findUnique;
+      }
     });
 
     it("fills customerId when the cart already names the account", async () => {

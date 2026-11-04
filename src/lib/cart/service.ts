@@ -73,31 +73,37 @@ export async function getOrCreateCart(
 ): Promise<string> {
   const scoped = storeScoped(storeId);
 
-  if (cartId) {
-    const existing = await scoped.cart.findUnique({ where: { id: cartId } });
-    const claimable =
-      existing &&
-      (!userId || existing.userId === null || existing.userId === userId);
-    if (existing && claimable) {
-      if (userId && (existing.userId !== userId || existing.customerId === null)) {
-        const customerId = await customerIdForCartUser(storeId, userId);
-        await scoped.cart.update({
-          where: { id: existing.id },
-          data: { userId, customerId },
-        });
-      }
-      return existing.id;
+  // A signed-out request must not keep writing an account cart that the
+  // cookie still names. Reuse only a cart that no account owns.
+  if (!userId) {
+    if (cartId) {
+      const existing = await scoped.cart.findUnique({ where: { id: cartId } });
+      if (existing && existing.userId === null) return existing.id;
     }
+    const cart = await scoped.cart.create({
+      data: { storeId, userId: null, customerId: null, source: "manual" },
+    });
+    return cart.id;
   }
 
-  const customerId = userId ? await customerIdForCartUser(storeId, userId) : null;
+  const customerId = await customerIdForCartUser(storeId, userId);
+
+  // One UPDATE with the ownership predicate. Postgres locks the row, so two
+  // accounts claiming the same guest cart cannot both match user_id IS NULL.
+  // The loser sees count 0 and opens a new cart; the winner keeps the lines.
+  if (cartId) {
+    const claimed = await scoped.cart.updateMany({
+      where: {
+        id: cartId,
+        OR: [{ userId: null }, { userId }],
+      },
+      data: { userId, customerId },
+    });
+    if (claimed.count === 1) return cartId;
+  }
+
   const cart = await scoped.cart.create({
-    data: {
-      storeId,
-      userId,
-      customerId,
-      source: "manual",
-    },
+    data: { storeId, userId, customerId, source: "manual" },
   });
   return cart.id;
 }
