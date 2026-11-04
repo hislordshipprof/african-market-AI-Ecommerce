@@ -154,6 +154,7 @@ describe("stock_events same-store migration file", () => {
 
   it("refuses a direct URL that names a different database than the app URL", () => {
     expect(() => assertSameDatabase({
+      NODE_ENV: "test",
       DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
       DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5434/other",
     })).toThrow(/DIRECT_URL database other does not match DATABASE_URL database lane_t235/);
@@ -161,6 +162,7 @@ describe("stock_events same-store migration file", () => {
 
   it("refuses an unpooled URL that names a different database", () => {
     expect(() => assertSameDatabase({
+      NODE_ENV: "test",
       DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
       DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
       DATABASE_URL_UNPOOLED: "postgres://app_owner:pw@127.0.0.1:5434/neon_db",
@@ -168,8 +170,10 @@ describe("stock_events same-store migration file", () => {
   });
 
   it("refuses to migrate when the direct URL is missing", () => {
-    expect(() => assertSameDatabase({ DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235" }))
-      .toThrow(/DATABASE_URL and DIRECT_URL are required/);
+    expect(() => assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
+    })).toThrow(/DATABASE_URL and DIRECT_URL are required/);
   });
 });
 
@@ -571,7 +575,7 @@ describe.skipIf(!connectionString)("stock_events same-store migration on the lan
 
   it("migrate diff from the lane database shows no stock_events drift", async () => {
     const direct = assertSameDatabase(process.env);
-    const env = { ...process.env, DATABASE_URL: direct, DIRECT_URL: direct };
+    const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: direct, DIRECT_URL: direct };
     delete env.DATABASE_URL_UNPOOLED;
     const { stdout } = await execFileAsync(
       process.execPath,
@@ -624,7 +628,7 @@ describe.skipIf(!connectionString)("stock_events migration deploy recovery", () 
     } finally {
       await client.end();
     }
-    const seedEnv = {
+    const seedEnv: NodeJS.ProcessEnv = {
       ...env,
       SEED_TEST_ADMIN: "1",
       SEED_ADMIN_PASSWORD: env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!",
