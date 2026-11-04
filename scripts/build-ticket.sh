@@ -144,8 +144,10 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
   cd "$ROOT"
   for round in 1 2 3; do
     CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
-    # Own e2e port and database, so it never collides with the reviewer testing on the lane's port and database.
-    (cd "$WT" && E2E_PORT="$((LANE_PORT + 50))" CI_DB=ci bash "$CI_LOCAL" > "$CI_LOG" 2>&1) &
+    # Own checkout, e2e port and database, so it never collides with the reviewer working in $WT on the lane's
+    # port and database. One runner checkout serves every lane: the machine-wide lock runs one suite at a time.
+    (cd "$WT" && E2E_PORT="$((LANE_PORT + 50))" CI_DB=ci CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" \
+      bash "$CI_LOCAL" > "$CI_LOG" 2>&1) &
     ci_pid=$!
     REVIEW_TICKET="${REVIEW_TICKET:-$ROOT/scripts/review-ticket.sh}"
     verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
@@ -161,7 +163,7 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
 
 ## local-ci failure (blocking; full log: $CI_LOG)
 
-The step already failed twice in a row when it is test, build or e2e, so it is not a one-off load flake.
+Test, build and e2e failures already failed twice in a row, so they are not one-off load flakes. If the log says 'local-ci SETUP', the pipeline itself failed (unpushed or uncommitted work, database setup): push your work if that is the cause, otherwise note it in the report and change no code for it.
 \`\`\`
 $(tail -80 "$CI_LOG")
 \`\`\`"

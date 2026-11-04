@@ -42,7 +42,7 @@ Write the question in your report and end the run. Do not invent product decisio
 Stop any other server on your lane port (`E2E_PORT`, default 3000) before running `pnpm test:e2e`. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
 
 ## Verify before you claim done
-Run and pass all of these, in the worktree:
+These five checks must pass on your pushed HEAD. You run 1 and 2 plus the affected parts of 3–5 (the pipeline's local-ci runs all five in full after each push; see below):
 1. `pnpm typecheck`
 2. `pnpm lint`
 3. `pnpm test` (unit + integration, including store-isolation tests)
