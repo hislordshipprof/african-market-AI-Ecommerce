@@ -316,6 +316,17 @@ export { Prisma };
 
 export { prisma as authPrisma };
 
+/** Login role of the shared client. `session_user` stays put across SET ROLE. */
+export async function platformSessionUser(): Promise<string> {
+  const rows = await prisma.$queryRaw<Array<{ session_user: string }>>`
+    SELECT session_user::text AS session_user`;
+  return rows[0]?.session_user ?? "";
+}
+
+export async function disconnectPlatformClient(): Promise<void> {
+  await prisma.$disconnect();
+}
+
 export async function findRecentMagicLinkVerifications(): Promise<
   Array<{ identifier: string; value: string }>
 > {
