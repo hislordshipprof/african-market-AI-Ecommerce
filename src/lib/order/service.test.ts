@@ -2218,4 +2218,102 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("REFUND_FAILED");
   });
+
+  it("saves the newest succeeded refund id and the summed amount when two refunds cover the capture", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "older");
+    const newer = await fakeStripeProvider.refundPayment(pi, 600, "newer");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING", capturedAmountCents: 1000 } });
+    });
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.refundId).toBe(newer.refundId);
+    expect(updated!.refundId).not.toBe(older.refundId);
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "anomaly_refund" },
+    });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].after).toMatchObject({ refundId: newer.refundId, amountRefunded: 1000 });
+  });
+
+  it("a refund.failed for an older refund leaves an order covered by a newer refund CANCELLED", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "older-fail");
+    setRefundStatus(older.refundId, "failed");
+    const newer = await fakeStripeProvider.refundPayment(pi, 1000, "newer-cover");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLED", capturedAmountCents: 1000, refundId: newer.refundId },
+      });
+    });
+
+    const result = await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: older.refundId,
+      refundStatus: "failed",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.action).toBe("covered");
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_failed_while_covered" },
+    });
+    expect(logs).toHaveLength(1);
+  });
+
+  it("a refund failure that leaves the capture uncovered moves CANCELLED to REFUND_FAILED", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "part-a");
+    await fakeStripeProvider.refundPayment(pi, 600, "part-b");
+    setRefundStatus(older.refundId, "failed");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLED", capturedAmountCents: 1000, refundId: older.refundId },
+      });
+    });
+
+    await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: older.refundId,
+      refundStatus: "failed",
+    });
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("REFUND_FAILED");
+  });
+
+  it("the same refund failure twice writes one audit row", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLED", capturedAmountCents: 1000 },
+      });
+    });
+    const event = { paymentIntentId: pi, refundId: "re_same_event", refundStatus: "failed" };
+    await markTerminalRefundFailure(event);
+    await markTerminalRefundFailure(event);
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_failed" },
+    });
+    expect(logs).toHaveLength(1);
+  });
 });

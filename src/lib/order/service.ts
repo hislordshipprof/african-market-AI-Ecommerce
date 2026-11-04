@@ -1,4 +1,4 @@
-import { storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
+import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider } from "../stripe";
 import { isRetryableProviderError } from "../stripe/errors";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
@@ -76,7 +76,8 @@ async function refundRecordedOnCharge(
   const succeeded = listed.filter((refund) => refund.status === "succeeded");
   const covered = succeeded.reduce((sum, refund) => sum + refund.amountRefunded, 0);
   if (covered >= amountReceived && succeeded.length > 0) {
-    return succeeded[succeeded.length - 1];
+    // listRefunds is newest first. The audit records the sum, and the order keeps the newest id.
+    return { ...succeeded[0], amountRefunded: covered };
   }
   const failed = listed.find((refund) => isTerminalRefundStatus(refund.status));
   if (failed) return failed;
@@ -435,6 +436,14 @@ async function refundReadyToSettle(
   return { ...gap, status: "pending" };
 }
 
+function refundStillCovers(refunds: RefundResult[], capturedCents: number): boolean {
+  if (capturedCents <= 0) return false;
+  const covering = refunds
+    .filter((refund) => refund.status === "succeeded" || refund.status === "pending" || refund.status === "requires_action")
+    .reduce((sum, refund) => sum + refund.amountRefunded, 0);
+  return covering >= capturedCents;
+}
+
 export async function markTerminalRefundFailure(input: {
   paymentIntentId: string;
   refundId: string;
@@ -442,13 +451,80 @@ export async function markTerminalRefundFailure(input: {
 }): Promise<{ ok: true; action: string } | { ok: false; error: string }> {
   if (!isTerminalRefundStatus(input.refundStatus)) return { ok: true, action: "ignored" };
   const order = await findOrderByPaymentIntent(input.paymentIntentId);
-  if (!order) return { ok: false, error: "Order not found" };
+  if (!order) {
+    console.warn(`refund.failed for unknown PaymentIntent ${input.paymentIntentId}`);
+    return { ok: false, error: "Order not found" };
+  }
   if (order.status === "REFUND_FAILED") return { ok: true, action: "already_recorded" };
   if (order.status !== "CANCELLING" && order.status !== "CANCELLED") {
+    console.warn(`refund.failed ignored for order ${order.id} in status ${order.status}`);
     return { ok: true, action: "ignored" };
   }
-  await persistRefundFailure(order.storeId, order.id, input.refundId, input.refundStatus);
-  return { ok: true, action: "refund_failed" };
+
+  const current = await storeScoped(order.storeId).order.findUnique({ where: { id: order.id } });
+  if (!current) return { ok: false, error: "Order not found" };
+  if (current.status === "CANCELLED" && (current.capturedAmountCents ?? 0) === 0) {
+    return { ok: true, action: "ignored" };
+  }
+
+  let listed: RefundResult[] = [];
+  let amountReceived = 0;
+  try {
+    const stripe = getStripeProvider();
+    const [refunds, pi] = await Promise.all([
+      stripe.listRefunds(input.paymentIntentId),
+      stripe.retrievePaymentIntent(input.paymentIntentId),
+    ]);
+    listed = refunds;
+    amountReceived = pi.amountReceived;
+  } catch (err) {
+    console.warn(`refund.failed could not read Stripe for ${input.paymentIntentId}`, err);
+  }
+  const captured = amountReceived > 0 ? amountReceived : (current.capturedAmountCents ?? 0);
+  const covered = refundStillCovers(listed, captured);
+  const action = covered ? "refund_failed_while_covered" : "refund_failed";
+
+  let wrote = false;
+  await storeScopedTransaction(order.storeId, async (tx) => {
+    await lockStoreRow(tx, order.storeId);
+    const row = await tx.order.findUnique({ where: { id: order.id } });
+    if (!row || (row.status !== "CANCELLING" && row.status !== "CANCELLED")) return;
+    const prior = await tx.auditLog.findMany({ where: { entityId: order.id, action } });
+    const duplicate = prior.some((log) => {
+      const after = log.after as { refundId?: string } | null;
+      return after?.refundId === input.refundId;
+    });
+    if (duplicate) return;
+    if (!covered) {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "REFUND_FAILED", refundId: input.refundId },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        storeId: order.storeId,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action,
+        entityType: "order",
+        entityId: order.id,
+        after: {
+          refundId: input.refundId,
+          refundStatus: input.refundStatus,
+          alert: covered ? "store" : "store_and_platform",
+        },
+      },
+    });
+    wrote = true;
+  });
+
+  if (!covered && wrote) {
+    console.error(
+      `Refund ${input.refundStatus} for order ${order.id} (${input.refundId}). Customer is still charged. Store and platform alerted.`,
+    );
+  }
+  return { ok: true, action: covered ? "covered" : "refund_failed" };
 }
 
 export async function markReady(
