@@ -232,18 +232,32 @@ function throwIfSettled(tracker: { current(): Settlement | null }, label: string
   throw new Error(`commit settled before it queued on the store lock: ${label}`);
 }
 
+function interruptReason(errorOf?: () => unknown): { active: boolean; reason: unknown } {
+  if (!errorOf) return { active: false, reason: undefined };
+  const value = errorOf();
+  if (value == null) return { active: false, reason: undefined };
+  if (typeof value === "object" && "reason" in value) {
+    return { active: true, reason: (value as { reason: unknown }).reason };
+  }
+  return { active: true, reason: value };
+}
+
 async function withinDeadline<T>(
   work: Promise<T>,
   deadline: number,
   label: string,
-  errorOf?: () => Error | null,
+  errorOf?: () => unknown,
 ): Promise<T> {
   void work.catch(() => undefined);
   const timedOut = () => new Error(`timed out: ${label}`);
   const left = deadline - Date.now();
-  if (left <= 0) throw timedOut();
-  const existing = errorOf?.();
-  if (existing) throw existing;
+  if (left <= 0) {
+    const expired = interruptReason(errorOf);
+    if (expired.active) throw expired.reason;
+    throw timedOut();
+  }
+  const existing = interruptReason(errorOf);
+  if (existing.active) throw existing.reason;
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const handles: {
@@ -257,21 +271,27 @@ async function withinDeadline<T>(
       if (handles.poll) clearInterval(handles.poll);
       run();
     };
-    handles.timer = setTimeout(() => finish(() => reject(timedOut())), left);
+    const rejectInterruptOrTimeout = () => {
+      const found = interruptReason(errorOf);
+      if (found.active) reject(found.reason);
+      else reject(timedOut());
+    };
+    handles.timer = setTimeout(() => finish(rejectInterruptOrTimeout), left);
     handles.poll = setInterval(() => {
-      const err = errorOf?.();
-      if (err) finish(() => reject(err));
+      const found = interruptReason(errorOf);
+      if (found.active) finish(() => reject(found.reason));
     }, 5);
     work.then(
       (value) => finish(() => {
-        const err = errorOf?.();
-        if (err) reject(err);
+        const found = interruptReason(errorOf);
+        if (found.active) reject(found.reason);
         else if (Date.now() >= deadline) reject(timedOut());
         else resolve(value);
       }),
       (err: unknown) => finish(() => {
-        if (Date.now() >= deadline) reject(timedOut());
-        else reject(errorOf?.() ?? err);
+        const found = interruptReason(errorOf);
+        if (Date.now() >= deadline) rejectInterruptOrTimeout();
+        else reject(found.active ? found.reason : err);
       }),
     );
   });
@@ -406,7 +426,12 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
     const failObserver = () => {
       if (observerError) throw observerError;
     };
-    const errorOf = () => observerError;
+    const errorOf = (): Error | { reason: unknown } | null => {
+      const state = tracker.current();
+      if (state?.status === "rejected") return { reason: state.reason };
+      if (state) return new Error(`commit settled before it queued on the store lock: ${label}`);
+      return observerError;
+    };
     await withinDeadline(observer.connect(), deadline, label, errorOf);
     failObserver();
     throwIfSettled(tracker, label);

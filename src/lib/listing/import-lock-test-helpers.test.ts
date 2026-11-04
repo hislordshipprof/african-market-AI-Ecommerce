@@ -165,6 +165,58 @@ describe("import lock test helpers", () => {
     );
   });
 
+  it("a stalled observer surfaces the commit outcome instead of a timeout", async () => {
+    const reason = new Error("original commit error");
+    const ended: string[] = [];
+    const stall = (): LockObserver => ({
+      connect: () => new Promise<void>(() => undefined),
+      query: () => new Promise(() => undefined),
+      end: async () => {
+        ended.push("end");
+      },
+      on: () => undefined,
+    });
+    const started = Date.now();
+    await expect(waitForLockWaiters(1, 1, {
+      label: "query-reject",
+      timeoutMs: 200,
+      settled: [new Promise((_, reject) => {
+        setTimeout(() => reject(reason), 20);
+      })],
+      openObserver: () => ({
+        ...stall(),
+        connect: async () => undefined,
+      }),
+    })).rejects.toBe(reason);
+    expect(Date.now() - started).toBeLessThan(150);
+    expect(ended).toEqual(["end"]);
+
+    const fulfilled = new Promise((resolve) => {
+      setTimeout(() => resolve("done"), 20);
+    });
+    await expect(waitForLockWaiters(1, 1, {
+      label: "query-fulfill",
+      timeoutMs: 200,
+      settled: [fulfilled],
+      openObserver: () => ({
+        ...stall(),
+        connect: async () => undefined,
+      }),
+    })).rejects.toThrow("commit settled before it queued on the store lock: query-fulfill");
+
+    await expect(waitForLockWaiters(1, 1, {
+      label: "connect-reject",
+      timeoutMs: 200,
+      settled: [new Promise((_, reject) => {
+        setTimeout(() => reject(reason), 20);
+      })],
+      openObserver: () => ({
+        ...stall(),
+        query: async () => ({ rows: [{ n: 1 }] }),
+      }),
+    })).rejects.toBe(reason);
+  });
+
   it("observer query failure and idle errors close the observer", async () => {
     let ended = 0;
     await expect(waitForLockWaiters(3, 1, {
