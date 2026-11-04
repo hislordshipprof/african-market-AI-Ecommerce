@@ -100,6 +100,10 @@ test.describe("Storefront redesign interactions", () => {
     await expect(page).toHaveURL(/frozen=1/);
     const cards = page.getByTestId("listing-card");
     await expect(cards.first()).toBeVisible();
+    await expect.poll(async () => {
+      const count = await cards.count();
+      return count > 0 && (await cards.locator(".sf-photo-tag").count()) === count;
+    }).toBe(true);
     for (const card of await cards.all())
       await expect(card.locator(".sf-photo-tag")).toHaveText("Frozen");
     const label = await cards
