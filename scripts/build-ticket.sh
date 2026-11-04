@@ -88,7 +88,7 @@ fi
 REVIEW_RULE="Do NOT run the code-review step on your own work: no agent reviews its own work. When implement reaches its review step, stop there. After you push, an independent reviewer in a separate fresh session reviews the PR (and Codex too for money, auth and external-provider tickets); its findings come back to you as a fix round. Still run the QA pass and every check in the Definition of done yourself."
 PORT_RULE="This lane's e2e port is $LANE_PORT: run Playwright with E2E_PORT=$LANE_PORT and never use another lane's port."
 
-RULES="Run headless: never ask the user. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI, its edge-case rules and its test-double rules) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Turn every edge case and required test in the agent brief and its 'Brief review' comment into a test, and meet the brief's Review checklist before you push. Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). While iterating, run only the affected e2e specs and unit tests. When the work is ready, push, then run scripts/ci-local.sh in the worktree: it runs the full CI suite locally and records the local-ci commit status that the merge gate needs. GitHub Actions does not run on your pushes; never add the run-ci label yourself. $REVIEW_RULE $PORT_RULE ${DB_RULE:-} Keep $REPORT updated with: the commit SHA you checked, the QA verdict line, every finding code with how it ended, and the PR URL."
+RULES="Run headless: never ask the user. Never end your turn while a subagent, background task or review is still running: wait for its result first, because ending the turn ends this headless run. For any finding or choice question, take the option you recommend and post the decision on issue #$N. Follow docs/agents/builder.md (including its mandatory design pass for any UI, its edge-case rules and its test-double rules) and the merge policy in docs/agents/orchestration.md (blocking findings are fixed; non-blocking ones become one follow-up issue). Turn every edge case and required test in the agent brief and its 'Brief review' comment into a test, and meet the brief's Review checklist before you push. Commit and push early so a killed run loses little. Before you report done, meet every item in the Definition of done in docs/agents/builder.md (rebased on origin/main, real integrations exercised with evidence, screenshots and images actually looked at, no unproven pre-existing-failure claims, migrations work on an empty database). Run only the affected e2e specs and unit tests, plus pnpm typecheck and pnpm lint before each push. Never run scripts/ci-local.sh or the whole test suite yourself: after you push, the pipeline runs local-ci once (machine-wide queue, automatic flake retry) in parallel with the independent review, and sends any real failure back to you as a finding. GitHub Actions does not run on your pushes; never add the run-ci label yourself. $REVIEW_RULE $PORT_RULE ${DB_RULE:-} Keep $REPORT updated with: the commit SHA you checked, the QA verdict line, every finding code with how it ended, and the PR URL."
 
 ROLE=build; [ "$TIER" = "light" ] && ROLE=light
 save_session() {
@@ -103,7 +103,7 @@ run_fix() {
   sid=$(cat "$SESSION_FILE" 2>/dev/null || true)
   LOG="$ROOT/.builder/logs/ticket-$N-fix-$(date +%Y%m%d-%H%M%S).json"
   local prompt="/supermatt:fix-findings $findings
-These findings come from an independent reviewer, not from you. Reproduce each one first (a failing test, or a command showing the failure). If one does not reproduce, say so with the evidence and leave that code alone. Fix the rest test-first. In a fix round run only the unit, integration and e2e specs affected by these findings; never re-run or re-triage the whole suite while iterating. Then commit, push to the same PR, and run scripts/ci-local.sh once at the end. Do not review your own fix; the independent reviewer re-reviews it. $RULES"
+These findings come from an independent reviewer or from local-ci, not from you. Reproduce each one first (a failing test, or a command showing the failure). If one does not reproduce, say so with the evidence and leave that code alone. Fix the rest test-first. In a fix round run only the unit, integration and e2e specs affected by these findings, plus typecheck and lint; never run the whole suite or scripts/ci-local.sh. Then commit and push to the same PR; the pipeline re-runs local-ci. Do not review your own fix; the independent reviewer re-reviews it. $RULES"
   [ -n "$sid" ] || prompt="$FRESH_CONTEXT
 $prompt"
   agent_run "$ROLE" "$LOG" "$prompt" "$sid" || status=$?
@@ -135,19 +135,39 @@ esac
 # Keep the session id for --resume / --continue.
 save_session
 
-# Independent review loop: a fresh session reviews the branch; blocking findings go back to the builder;
-# the fix is re-reviewed fresh. At most 2 fix rounds, then the coordinator decides.
+# Independent review loop: a fresh session reviews the branch while local-ci runs on the same pushed HEAD
+# (in parallel: the builder never runs the full suite). Blocking findings and real CI failures go back to the
+# builder; the fix is re-reviewed fresh. At most 2 fix rounds, then the coordinator decides.
 # SKIP_REVIEW=1 skips it (e.g. when the coordinator runs the review by hand).
+CI_LOCAL="${CI_LOCAL:-$ROOT/scripts/ci-local.sh}"
 if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
   cd "$ROOT"
   for round in 1 2 3; do
+    CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
+    # Own e2e port and database, so it never collides with the reviewer testing on the lane's port and database.
+    (cd "$WT" && E2E_PORT="$((LANE_PORT + 50))" CI_DB=ci bash "$CI_LOCAL" > "$CI_LOG" 2>&1) &
+    ci_pid=$!
     REVIEW_TICKET="${REVIEW_TICKET:-$ROOT/scripts/review-ticket.sh}"
     verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
     echo "Independent review $round: $verdict"
-    [ "$verdict" = "VERDICT: PASS" ] && break
-    [ "$round" = "3" ] && { echo "Still blocking after 2 fix rounds; the coordinator decides. See .builder/review-$N.md"; break; }
+    if wait "$ci_pid"; then ci=pass; else ci=fail; fi
+    echo "local-ci $round: $ci ($(tail -1 "$CI_LOG"))"
+    [ "$verdict" = "VERDICT: PASS" ] && [ "$ci" = pass ] && break
+    [ "$round" = "3" ] && { echo "Still blocking after 2 fix rounds; the coordinator decides. See .builder/review-$N.md and $CI_LOG"; break; }
+    findings=""
+    [ "$verdict" = "VERDICT: PASS" ] || findings="$(cat "$ROOT/.builder/review-$N.md")"
+    if [ "$ci" = fail ]; then
+      findings="$findings
+
+## local-ci failure (blocking; full log: $CI_LOG)
+
+The step already failed twice in a row when it is test, build or e2e, so it is not a one-off load flake.
+\`\`\`
+$(tail -80 "$CI_LOG")
+\`\`\`"
+    fi
     cd "$WT"
-    run_fix "$(cat "$ROOT/.builder/review-$N.md")"
+    run_fix "$findings"
     cd "$ROOT"
     [ -z "${status:-}" ] || break
   done

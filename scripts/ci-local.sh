@@ -5,6 +5,8 @@
 # "run-ci" label to a PR).
 # Usage (inside a ticket worktree, tracked changes committed, HEAD pushed):
 #   E2E_PORT=3100 scripts/ci-local.sh
+# scripts/build-ticket.sh runs this itself after each builder push, in parallel with the independent review;
+# builders do not run it.
 set -euo pipefail
 REPO="hislordshipprof/african-market-AI-Ecommerce"
 SHA=$(git rev-parse HEAD)
@@ -20,18 +22,59 @@ fi
 
 status() { gh api "repos/$REPO/statuses/$SHA" -f state="$1" -f context=local-ci -f description="$2" >/dev/null; }
 export E2E_WORKERS="${E2E_WORKERS:-4}"
-status pending "typecheck, lint, test, build, e2e (E2E_WORKERS=$E2E_WORKERS)"
+export VITEST_MAX_WORKERS="${VITEST_MAX_WORKERS:-4}"
 
+# One full suite at a time on this machine. Parallel full suites from several lanes starved the CPU, and the
+# resulting timeouts (Vitest onTaskUpdate, silent next build crashes) cost far more than waiting in line.
+# The lock lives in the shared git dir, so every worktree sees it; a lock whose owner is gone is taken over.
+LOCK="$(git rev-parse --git-common-dir)/ci-local.lock"
+status pending "queued for the machine-wide local-ci lock"
+while ! mkdir "$LOCK" 2>/dev/null; do
+  owner=$(cat "$LOCK/pid" 2>/dev/null || true)
+  if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$LOCK"; continue; fi
+  sleep 10
+done
+echo $$ > "$LOCK/pid"
+trap 'rm -rf "$LOCK"' EXIT
+
+# CI_DB=<name> (set by build-ticket.sh) runs on a fresh private database instead of the lane's, so the reviewer
+# can test against the lane database at the same time. Process env wins over .env.local in every loader here.
+# One database is enough because the lock above allows one run at a time.
+if [ -n "${CI_DB:-}" ]; then
+  PGBIN="${PGBIN:-/c/Program Files/PostgreSQL/18/bin}"; PGP="${LANE_PG_PORT:-5434}"
+  db="lane_$(echo "$CI_DB" | tr -c 'a-zA-Z0-9_\n' '_')"
+  bash "$(dirname "$0")/local-pg.sh" >/dev/null
+  PGPASSWORD=app_owner "$PGBIN/psql" -w -h localhost -p "$PGP" -U app_owner -d postgres -qtA -v ON_ERROR_STOP=1 \
+    -c "DROP DATABASE IF EXISTS $db WITH (FORCE)" -c "CREATE DATABASE $db"
+  PGPASSWORD=app_owner "$PGBIN/psql" -w -h localhost -p "$PGP" -U app_owner -d "$db" -qtA -v ON_ERROR_STOP=1 \
+    -c "CREATE EXTENSION IF NOT EXISTS pg_trgm"
+  export DATABASE_URL="postgresql://app_owner:app_owner@localhost:$PGP/$db" APP_RUNTIME_PASSWORD=app_runtime_ci
+  export DIRECT_URL="$DATABASE_URL"
+  unset DATABASE_URL_UNPOOLED SEED_PRUNE_R2
+  # No prisma generate here: the worktree's client is current, and regenerating could clash with a reviewer's run.
+  npx prisma migrate deploy >/dev/null
+  SEED_TEST_ADMIN=1 SEED_ADMIN_PASSWORD='CiTestPass99!' SEED_ADMIN_TOTP_SECRET=JBSWY3DPEHPK3PXP \
+    BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-ci-e2e-test-secret-do-not-use-in-prod}" npx tsx prisma/seed.ts >/dev/null
+  echo "== local-ci: fresh database $db (migrated + seeded)"
+fi
+status pending "typecheck, lint, test, build, e2e (E2E_WORKERS=$E2E_WORKERS, VITEST_MAX_WORKERS=$VITEST_MAX_WORKERS)"
+
+# Steps that can flake under load get one automatic retry, so a timeout never sends a builder on a hunt.
 run() {
-  local name="$1"; shift
+  local name="$1" retry="$2"; shift 2
   echo "== local-ci: $name"
-  if ! "$@"; then status failure "failed: $name"; echo "local-ci FAILED at $name on $SHA"; exit 1; fi
+  "$@" && return 0
+  if [ "$retry" = retry ]; then
+    echo "== local-ci: $name failed once; retrying to rule out a load flake"
+    "$@" && { echo "== local-ci: $name passed on retry (flaky; worth a follow-up)"; return 0; }
+  fi
+  status failure "failed: $name"; echo "local-ci FAILED at $name on $SHA"; exit 1
 }
-run typecheck pnpm typecheck
-run lint pnpm lint
-run test pnpm test
-run build pnpm build
-run e2e pnpm test:e2e
+run typecheck once pnpm typecheck
+run lint once pnpm lint
+run test retry pnpm test
+run build retry pnpm build
+run e2e retry pnpm test:e2e
 
 status success "typecheck, lint, test, build, e2e passed"
 echo "local-ci PASSED on $SHA"
