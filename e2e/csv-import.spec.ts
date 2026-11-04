@@ -14,6 +14,11 @@ const SEED_TOTP_SECRET =
   process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP";
 const IMPORT_URL = "/store-admin/listings/import?store=mama-ngozi";
 
+// Production host (override disabled): src/proxy.test.ts
+// "ignores ?store= param in production" and "still resolves slug from host".
+// E2E always sets E2E_STORE_OVERRIDE, so it cannot run that case.
+// The links above still carry ?store= from the session slug on every host.
+
 async function storeOwnerSignIn(page: Page) {
   await page.goto("/store-admin/sign-in?store=mama-ngozi");
   await page.getByLabel("Email").fill(OWNER_EMAIL);
@@ -84,14 +89,31 @@ test.describe("CSV import (authenticated)", () => {
 
   test("upload page renders with drop zone", async ({ page }) => {
     await page.goto(IMPORT_URL);
-    await expect(page.locator("h1")).toHaveText("Import Products");
+    // Proxy strips ?store= before render. Links still use the session slug.
+    await expect(page).not.toHaveURL(/[?&]store=/);
+    await expect(page.locator("h1")).toHaveText("Import listings");
+    await expect(
+      page.getByText(
+        "Upload a CSV file to add listings to Mama Ngozi African Market.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Products" })).toHaveAttribute(
+      "href",
+      "/store-admin/listings?store=mama-ngozi",
+    );
     await expect(page.getByText("Upload CSV")).toBeVisible();
     await expect(page.getByText("Upload & Preview")).toBeVisible();
+    const text = await page.locator("body").innerText();
+    expect(text).not.toMatch(/\(s\)/);
+    expect(text).not.toMatch(/Import Products/);
   });
 
   test("import link visible from listings page", async ({ page }) => {
     await page.goto("/store-admin/listings?store=mama-ngozi");
-    await expect(page.getByText("Import CSV")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Import CSV" })).toHaveAttribute(
+      "href",
+      "/store-admin/listings/import?store=mama-ngozi",
+    );
   });
 
   test("upload a valid CSV and see preview", async ({ page }) => {
@@ -108,7 +130,7 @@ test.describe("CSV import (authenticated)", () => {
 
     await page.click("text=Upload & Preview");
 
-    await expect(page.getByText("New Products")).toBeVisible({
+    await expect(page.getByText("New listings", { exact: true })).toBeVisible({
       timeout: 15000,
     });
     await expect(page.getByText("E2E Import Widget A")).toBeVisible();
@@ -129,22 +151,39 @@ test.describe("CSV import (authenticated)", () => {
     await page.locator("input[type='file']").setInputFiles(csvPath);
     await page.click("text=Upload & Preview");
 
-    await expect(page.getByText("New Products")).toBeVisible({
+    await expect(page.getByText("New listings", { exact: true })).toBeVisible({
       timeout: 15000,
     });
     await expect(page.getByText(nameA)).toBeVisible();
     await expect(page.getByText(nameB)).toBeVisible();
 
-    await page.click("text=Import 2 product(s)");
+    await page.getByRole("button", { name: "Import 2 listings" }).click();
 
     await expect(page.getByText("Import Complete")).toBeVisible({
       timeout: 15000,
     });
     await expect(page.getByText("Imported 2 listings successfully")).toBeVisible();
 
-    await page.click("text=Go to Products");
+    const pageErrors: string[] = [];
+    page.on("pageerror", (err) => pageErrors.push(err.message));
+    const nav = page.waitForRequest((req) => {
+      const url = new URL(req.url());
+      return (
+        url.pathname === "/store-admin/listings" &&
+        url.searchParams.get("store") === "mama-ngozi"
+      );
+    });
+    await page.getByRole("button", { name: "Go to Products" }).evaluate((el) => {
+      const button = el as HTMLButtonElement;
+      button.click();
+      button.click();
+    });
+    const request = await nav;
+    expect(new URL(request.url()).searchParams.get("store")).toBe("mama-ngozi");
+    await expect(page).toHaveURL(/\/store-admin\/listings$/);
     await expect(page.locator(`text=${nameA}`)).toBeVisible({ timeout: 10000 });
     await expect(page.locator(`text=${nameB}`)).toBeVisible();
+    expect(pageErrors).toEqual([]);
   });
 
   test("CSV with errors shows error section", async ({ page }) => {
@@ -159,6 +198,36 @@ test.describe("CSV import (authenticated)", () => {
 
     await expect(page.getByText("Missing required field: name")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Invalid price")).toBeVisible();
+
+    const errorsTitle = page.locator("[data-slot='card-title']").filter({ hasText: /^Errors$/ });
+    await expect(errorsTitle.locator("svg")).toHaveClass(/text-destructive/);
+
+    const errorsSummary = page.locator("div.flex.items-center").filter({
+      has: page.locator("p", { hasText: /^Errors$/ }),
+    });
+    await expect(errorsSummary.locator("svg")).toHaveClass(/text-destructive/);
+
+    const errorCard = page.locator("[data-slot='card']").filter({
+      has: page.locator("[data-slot='card-title']", { hasText: /^Errors$/ }),
+    });
+    const names = errorCard.locator("p.truncate");
+    expect(await names.count()).toBeGreaterThan(0);
+    for (let i = 0; i < (await names.count()); i++) {
+      await expect(names.nth(i)).toHaveClass(/text-destructive/);
+      await expect(names.nth(i)).not.toHaveText("");
+    }
+    const reasons = errorCard.locator("[data-slot='card-content'] p.text-xs");
+    expect(await reasons.count()).toBeGreaterThan(0);
+    for (let i = 0; i < (await reasons.count()); i++) {
+      await expect(reasons.nth(i)).toHaveClass(/text-destructive/);
+      await expect(reasons.nth(i).locator("svg")).toHaveClass(/text-destructive/);
+    }
+
+    await expect(page.locator("[class*='--color-deal']")).toHaveCount(1);
+    const ambiguousSummary = page.locator("div.flex.items-center").filter({
+      has: page.locator("p", { hasText: /^Ambiguous$/ }),
+    });
+    await expect(ambiguousSummary.locator("svg")).toHaveClass(/--color-deal/);
   });
 
   test("N14: a PNG upload tells the owner to save a UTF-8 CSV", async ({ page }) => {
@@ -184,6 +253,9 @@ test.describe("CSV import (authenticated)", () => {
     await expect(
       page.getByText(/select a CSV file|empty|Could not parse/i),
     ).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.locator("[data-slot='card-title']").filter({ hasText: /^Errors$/ }),
+    ).toHaveCount(0);
   });
 
   test("B4: ambiguous row resolution via radio buttons", async ({ page }) => {
@@ -227,11 +299,14 @@ test.describe("CSV import (authenticated)", () => {
 
     await expect(page.getByText("Ambiguous Matches")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(listingName)).toBeVisible();
+    await expect(
+      page.getByText("Matches 2 master products — select one:"),
+    ).toBeVisible();
 
     // Select the Beta candidate via its radio button label
     await page.locator(`label:has-text("E2E Ambig Beta ${ts}")`).click();
 
-    await page.click("text=Import 1 product(s)");
+    await page.getByRole("button", { name: "Import 1 listing" }).click();
 
     await expect(page.getByText("Import Complete")).toBeVisible({ timeout: 15000 });
 
@@ -279,5 +354,129 @@ test.describe("CSV import (authenticated)", () => {
     await expect(
       page.getByText("File exceeds the maximum size of 2 MB"),
     ).toBeVisible({ timeout: 10000 });
+  });
+
+  test("junk store param does not replace the session slug", async ({ page }) => {
+    await page.goto("/store-admin/listings/import?store=Not_Routable!");
+    await expect(page).toHaveURL(/Not_Routable/);
+    await expect(page.locator("h1")).toHaveText("Import listings");
+    await expect(page.getByRole("link", { name: "Products" })).toHaveAttribute(
+      "href",
+      "/store-admin/listings?store=mama-ngozi",
+    );
+  });
+
+  test("another store's import URL signs the owner out of this screen", async ({ page }) => {
+    const locations: string[] = [];
+    page.on("response", (response) => {
+      const location = response.headers()["location"];
+      if (location) locations.push(location);
+    });
+
+    await page.goto("/store-admin/listings/import?store=tante-marie");
+    await expect(page).toHaveURL(/\/store-admin\/sign-in/);
+    await expect(page.getByRole("heading", { name: "Import listings" })).toHaveCount(0);
+    await expect(page.locator("a[href*='mama-ngozi']")).toHaveCount(0);
+    expect(locations.some((location) => location.includes("store=tante-marie"))).toBe(true);
+    expect(locations.some((location) => location.includes("/store-admin/sign-in"))).toBe(true);
+  });
+
+  test("commit button pluralises and the toast drops the parenthetical", async ({ page }) => {
+    const ts = Date.now();
+    const nameA = `E2E Plural ${ts} A`;
+    const nameB = `E2E Plural ${ts} B`;
+    createdNames.push(nameA, nameB);
+    const csvPath = writeTempCsv(`name,price\n${nameA},4.00\n${nameB},5.00\n`);
+
+    await page.goto(IMPORT_URL);
+    await page.locator("input[type='file']").setInputFiles(csvPath);
+    await page.click("text=Upload & Preview");
+    await expect(page.getByRole("button", { name: "Import 2 listings" })).toBeEnabled({
+      timeout: 15000,
+    });
+
+    await page.getByRole("button", { name: "Deselect all" }).click();
+    const none = page.getByRole("button", { name: "Import 0 listings" });
+    await expect(none).toBeVisible();
+    await expect(none).toBeDisabled();
+
+    await page.getByRole("checkbox").first().check();
+    await page.getByRole("button", { name: "Import 1 listing" }).click();
+    await expect(page.locator("[data-sonner-toast]")).toContainText("Imported 1 listing.", {
+      timeout: 15000,
+    });
+    await expect(page.getByText("Imported 1 listing successfully")).toBeVisible();
+  });
+
+  test("matched, new and already-listed copy uses listing", async ({ page }) => {
+    const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    const ts = Date.now();
+    const matchName = `E2E Match Grain ${ts}`;
+    const newName = `E2E New Spice ${ts}`;
+    try {
+      await prisma.$transaction([
+        prisma.$executeRaw`SET LOCAL ROLE app_user`,
+        prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        prisma.masterProduct.create({
+          data: { name: matchName, frozen: false, perishable: false, status: "active" },
+        }),
+      ]);
+
+      const csvPath = writeTempCsv(
+        `name,price\nEgusi (Melon Seeds),4.50\n${matchName},3.25\n${newName},2.00\n`,
+      );
+      await page.goto(IMPORT_URL);
+      await page.locator("input[type='file']").setInputFiles(csvPath);
+      await page.click("text=Upload & Preview");
+
+      await expect(page.getByText("Matched listings", { exact: true })).toBeVisible({
+        timeout: 15000,
+      });
+      await expect(page.getByText("New listings", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText("Already listed in your store. These rows will be skipped."),
+      ).toBeVisible();
+      await expect(page.getByText("These CSV rows matched a master product.")).toBeVisible();
+      const text = await page.locator("body").innerText();
+      expect(text).not.toMatch(/\(s\)/);
+      expect(text).not.toMatch(/Import Products/);
+    } finally {
+      await prisma.$transaction([
+        prisma.$executeRaw`SET LOCAL ROLE app_user`,
+        prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        prisma.masterProduct.deleteMany({ where: { name: matchName } }),
+      ]);
+      await prisma.$disconnect();
+    }
+  });
+
+  test("every invalid row stays a toast and does not open the Errors section", async ({ page }) => {
+    const csvPath = writeTempCsv("name,price\n,3.00\nBad Price,abc\n");
+    await page.goto(IMPORT_URL);
+    await page.locator("input[type='file']").setInputFiles(csvPath);
+    await page.click("text=Upload & Preview");
+    await expect(page.getByText("Missing required field: name")).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.locator("[data-slot='card-title']").filter({ hasText: /^Errors$/ }),
+    ).toHaveCount(0);
+  });
+
+  test("five thousand selected listings fit a 360px viewport", async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width: 360, height: 800 });
+    const lines = ["name,price"];
+    for (let i = 1; i <= 5000; i++) lines.push(`E2E Max ${i},1.00`);
+    const csvPath = writeTempCsv(`${lines.join("\n")}\n`);
+
+    await page.goto(IMPORT_URL);
+    await page.locator("input[type='file']").setInputFiles(csvPath);
+    await page.click("text=Upload & Preview");
+    const commit = page.getByRole("button", { name: "Import 5000 listings" });
+    await expect(commit).toBeVisible({ timeout: 120_000 });
+    await commit.scrollIntoViewIfNeeded();
+    const fits = await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    );
+    expect(fits).toBe(true);
   });
 });
