@@ -102,7 +102,7 @@ export async function observeDatabaseIdentity(connectionString?: string): Promis
   await client.connect();
   try {
     const result = await client.query<{ database: string; host: string; port: string }>(
-      "SELECT current_database() AS database, COALESCE(inet_server_addr()::text, '127.0.0.1') AS host, inet_server_port()::text AS port",
+      "SELECT current_database() AS database, COALESCE(host(inet_server_addr()), '127.0.0.1') AS host, inet_server_port()::text AS port",
     );
     const row = result.rows[0];
     if (!row?.database || !row.host || !row.port) {

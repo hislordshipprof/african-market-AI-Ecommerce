@@ -131,6 +131,25 @@ describe("catalog prune guard and planner", () => {
       observed,
       resolvedHosts: { "ep-test.neon.tech": ["10.0.0.2"] },
     })).toEqual({ refused: expect.stringContaining("does not match the connected database") });
+    const masked = { host: "10.0.0.1/32", port: "5432", database: "neondb" };
+    expect(catalogPruneMode({
+      env: { ...r2Env, SEED_PRUNE_R2: "dry-run" },
+      databaseUrl: neonUrl,
+      observed: masked,
+      resolvedHosts: { "ep-test.neon.tech": ["10.0.0.1"] },
+    })).toEqual({ mode: "dry-run" });
+    expect(catalogPruneMode({
+      env: { ...r2Env, SEED_PRUNE_R2: "dry-run" },
+      databaseUrl: neonUrl,
+      observed: { host: "::1/128", port: "5432", database: "neondb" },
+      resolvedHosts: { "ep-test.neon.tech": ["::1"] },
+    })).toEqual({ refused: expect.stringContaining("database host is ::1/128") });
+    expect(catalogPruneMode({
+      env: { ...r2Env, SEED_PRUNE_R2: "dry-run" },
+      databaseUrl: neonUrl,
+      observed: { host: "127.0.0.1/32", port: "5432", database: "neondb" },
+      resolvedHosts: { "ep-test.neon.tech": ["127.0.0.1"] },
+    })).toEqual({ refused: expect.stringContaining("database host is 127.0.0.1/32") });
 
     const savedUnpooled = process.env.DATABASE_URL_UNPOOLED;
     const savedDirect = process.env.DIRECT_URL;

@@ -51,8 +51,9 @@ export function catalogPruneMode(input: {
   writersCoordinated?: boolean;
   /**
    * Addresses of each URL hostname, from a DNS lookup of the connection string.
-   * PostgreSQL reports inet_server_addr() as an IP, so a Neon hostname matches
-   * when that IP is one of these addresses. Failed lookups leave the list empty
+   * PostgreSQL reports inet_server_addr() as an IP. Its text form includes the
+   * mask (10.0.0.1/32); comparison uses the address. A Neon hostname matches
+   * when that address is one of these. Failed lookups leave the list empty
    * and the connection is refused.
    */
   resolvedHosts?: Readonly<Record<string, readonly string[]>>;
@@ -281,7 +282,7 @@ function referenceDecodes(reference: string): boolean {
 }
 
 function isLoopback(host: string): boolean {
-  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
+  const normalized = addressHost(host);
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
 
@@ -297,8 +298,12 @@ function hostsMatch(
   return addresses.some((address) => normalizeHost(address) === observed);
 }
 
+function addressHost(host: string): string {
+  return host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\/\d{1,3}$/, "");
+}
+
 function normalizeHost(host: string): string {
-  return host.toLowerCase().replace(/^\[|\]$/g, "");
+  return addressHost(host);
 }
 
 function nonEmpty(value: string | undefined): boolean {

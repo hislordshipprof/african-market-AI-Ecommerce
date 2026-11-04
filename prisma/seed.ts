@@ -776,7 +776,7 @@ async function seedDemoOrders() {
 async function observeSeedConnection(): Promise<DatabaseIdentity> {
   const rows = await prisma.$queryRaw<Array<{ database: string; host: string; port: string }>>`
     SELECT current_database() AS database,
-           COALESCE(inet_server_addr()::text, '127.0.0.1') AS host,
+           COALESCE(host(inet_server_addr()), '127.0.0.1') AS host,
            inet_server_port()::text AS port
   `;
   const row = rows[0];

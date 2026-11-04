@@ -106,7 +106,7 @@ async function resolveDatabaseHost(host: string): Promise<readonly string[]> {
 }
 
 function isLoopbackHost(host: string): boolean {
-  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
+  const normalized = host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\/\d{1,3}$/, "");
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
 
@@ -157,7 +157,7 @@ export async function decideCliCatalogPrune(
 async function observePrisma(prisma: PrismaClient): Promise<DatabaseIdentity> {
   const rows = await prisma.$queryRaw<Array<{ database: string; host: string; port: string }>>`
     SELECT current_database() AS database,
-           COALESCE(inet_server_addr()::text, '127.0.0.1') AS host,
+           COALESCE(host(inet_server_addr()), '127.0.0.1') AS host,
            inet_server_port()::text AS port
   `;
   const row = rows[0];
