@@ -53,6 +53,7 @@ vi.mock("@aws-sdk/client-s3", () => {
   };
 });
 
+import { CatalogAuditError, statusLabel } from "./catalog-photo-audit";
 import { createR2HeadObject } from "./catalog-photo-audit-r2";
 
 const credentials = {
@@ -218,5 +219,163 @@ describe("createR2HeadObject", () => {
 
     send.mockImplementationOnce(async () => ({ $metadata: { httpStatusCode: 301 } }));
     await expect(api.headObject("catalog/redirect.webp")).rejects.toThrow("HTTP 301");
+  });
+
+  it("both HEAD methods preserve existing CatalogAuditError identity and details", async () => {
+    const api = createR2HeadObject(credentials);
+    const send = state.clients[0]!.send;
+    const stored = new CatalogAuditError("kept object", {
+      key: "catalog/kept.webp",
+      bucket: "bucket-a",
+      statusLabel: "custom",
+    });
+    send.mockImplementationOnce(async () => {
+      throw stored;
+    });
+    await expect(api.headObject("catalog/kept.webp")).rejects.toBe(stored);
+    expect(stored.statusLabel).toBe("custom");
+    expect(stored.message).toBe("kept object");
+    expect(stored.key).toBe("catalog/kept.webp");
+    expect(stored.bucket).toBe("bucket-a");
+    expect(statusLabel(stored)).toBe("no status");
+
+    const withMeta = new CatalogAuditError("kept meta", {
+      key: "catalog/meta.webp",
+      statusLabel: "custom",
+    });
+    Object.assign(withMeta, { $metadata: { httpStatusCode: 403 } });
+    send.mockImplementationOnce(async () => {
+      throw withMeta;
+    });
+    await expect(api.headObject("catalog/meta.webp")).rejects.toBe(withMeta);
+    expect(withMeta.statusLabel).toBe("custom");
+    expect(withMeta.message).toBe("kept meta");
+    expect(withMeta.key).toBe("catalog/meta.webp");
+    expect(statusLabel(withMeta)).toBe("HTTP 403");
+
+    const bucketErr = new CatalogAuditError("kept bucket", {
+      bucket: "bucket-a",
+      statusLabel: "custom",
+    });
+    Object.assign(bucketErr, { $metadata: { httpStatusCode: 404 } });
+    send.mockImplementationOnce(async () => {
+      throw bucketErr;
+    });
+    await expect(api.headBucket()).rejects.toBe(bucketErr);
+    expect(bucketErr.statusLabel).toBe("custom");
+    expect(bucketErr.message).toBe("kept bucket");
+    expect(bucketErr.bucket).toBe("bucket-a");
+    expect(statusLabel(bucketErr)).toBe("HTTP 404");
+  });
+
+  it("both HEAD methods retain their operation-specific status outcomes", async () => {
+    const api = createR2HeadObject(credentials);
+    const send = state.clients[0]!.send;
+
+    send.mockImplementationOnce(async () => ({ $metadata: { httpStatusCode: 200 } }));
+    await expect(api.headBucket()).resolves.toBeUndefined();
+    send.mockImplementationOnce(async () => ({ $metadata: { httpStatusCode: 200 } }));
+    await expect(api.headObject("catalog/ok.webp")).resolves.toBe("present");
+
+    send.mockImplementationOnce(async () => {
+      throw statusError("NotFound", 404);
+    });
+    await expect(api.headObject("catalog/gone.webp")).resolves.toBe("missing");
+
+    send.mockImplementationOnce(async () => {
+      throw statusError("NotFound", 404);
+    });
+    await expect(api.headBucket()).rejects.toMatchObject({
+      name: "CatalogAuditError",
+      message: "HeadBucket failed for bucket-a: HTTP 404",
+      statusLabel: "HTTP 404",
+      bucket: "bucket-a",
+    });
+
+    for (const status of [304, 405, 412]) {
+      const key = `catalog/s${status}.webp`;
+      send.mockImplementationOnce(async () => {
+        throw statusError("Unknown", status);
+      });
+      await expect(api.headObject(key)).rejects.toMatchObject({
+        message: `HeadObject failed for ${key}: HTTP ${status}`,
+        statusLabel: `HTTP ${status}`,
+        key,
+      });
+      send.mockImplementationOnce(async () => {
+        throw statusError("Unknown", status);
+      });
+      await expect(api.headBucket()).rejects.toMatchObject({
+        message: `HeadBucket failed for bucket-a: HTTP ${status}`,
+        statusLabel: `HTTP ${status}`,
+        bucket: "bucket-a",
+      });
+    }
+
+    const malformed = { name: "NotFound", $metadata: { httpStatusCode: "404" } };
+    send.mockImplementationOnce(async () => {
+      throw malformed;
+    });
+    await expect(api.headObject("catalog/bad.webp")).rejects.toMatchObject({
+      message: "HeadObject failed for catalog/bad.webp: no status",
+      statusLabel: "no status",
+      key: "catalog/bad.webp",
+    });
+    expect(statusLabel(malformed)).toBe("no status");
+
+    send.mockImplementationOnce(async () => {
+      throw { name: "TimeoutError" };
+    });
+    await expect(api.headObject("catalog/slow.webp")).rejects.toMatchObject({
+      message: "HeadObject failed for catalog/slow.webp: timeout",
+      statusLabel: "timeout",
+      key: "catalog/slow.webp",
+    });
+
+    send.mockImplementationOnce(async () => {
+      throw { name: "AbortError", $metadata: null };
+    });
+    await expect(api.headBucket()).rejects.toMatchObject({
+      message: "HeadBucket failed for bucket-a: timeout",
+      statusLabel: "timeout",
+      bucket: "bucket-a",
+    });
+  });
+
+  it("adapter and core report the same status label for every error shape", async () => {
+    const shapes: Array<{ shape: unknown; label: string; key: string }> = [
+      { shape: { name: "Unknown", $metadata: { httpStatusCode: 403 } }, label: "HTTP 403", key: "catalog/s403.webp" },
+      { shape: { name: "Unknown", $metadata: { httpStatusCode: 503 } }, label: "HTTP 503", key: "catalog/s503.webp" },
+      { shape: { name: "NotFound", $metadata: { httpStatusCode: "404" } }, label: "no status", key: "catalog/str.webp" },
+      { shape: { name: "Error" }, label: "no status", key: "catalog/bare.webp" },
+      { shape: { name: "Error", $metadata: null }, label: "no status", key: "catalog/null-meta.webp" },
+      { shape: { name: "Error", $metadata: {} }, label: "no status", key: "catalog/empty-meta.webp" },
+      { shape: { $metadata: { httpStatusCode: Number.NaN } }, label: "HTTP NaN", key: "catalog/nan.webp" },
+      { shape: { name: "TimeoutError", $metadata: { httpStatusCode: 0 } }, label: "HTTP 0", key: "catalog/zero.webp" },
+      { shape: "nope", label: "no status", key: "catalog/string.webp" },
+      { shape: null, label: "no status", key: "catalog/null.webp" },
+      { shape: undefined, label: "no status", key: "catalog/undef.webp" },
+      { shape: 404, label: "no status", key: "catalog/number.webp" },
+      { shape: { name: "TimeoutError" }, label: "timeout", key: "catalog/timeout.webp" },
+      { shape: { name: "AbortError", $metadata: { httpStatusCode: "408" } }, label: "timeout", key: "catalog/abort.webp" },
+    ];
+    const api = createR2HeadObject(credentials);
+    const send = state.clients[0]!.send;
+    for (const { shape, label, key } of shapes) {
+      expect(statusLabel(shape)).toBe(label);
+      send.mockImplementationOnce(async () => {
+        throw shape;
+      });
+      await expect(api.headObject(key)).rejects.toMatchObject({
+        statusLabel: label,
+        key,
+        message: `HeadObject failed for ${key}: ${label}`,
+      });
+    }
+    send.mockImplementationOnce(async () => {
+      throw statusError("NotFound", 404);
+    });
+    await expect(api.headObject("catalog/missing-map.webp")).resolves.toBe("missing");
+    expect(statusLabel(statusError("NotFound", 404))).toBe("HTTP 404");
   });
 });

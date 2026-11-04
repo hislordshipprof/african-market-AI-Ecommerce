@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { auditCatalogPhotos, formatCatalogAuditReport, type AuditProduct, type HeadResult } from "./catalog-photo-audit";
+import { auditCatalogPhotos, formatCatalogAuditReport, httpStatusOf, statusLabel, type AuditProduct, type HeadResult } from "./catalog-photo-audit";
 
 function product(partial: Partial<AuditProduct> & Pick<AuditProduct, "id" | "name">): AuditProduct {
   return {
@@ -485,5 +485,37 @@ describe("auditCatalogPhotos", () => {
       headObject: async () => "present",
     });
     expect(Object.keys(rows[0]!).sort()).toEqual(["ext", "id", "key", "name", "productStatus", "reason", "status"]);
+  });
+});
+
+describe("httpStatusOf", () => {
+  it("reads the status only from a numeric $metadata.httpStatusCode", () => {
+    expect(httpStatusOf({ $metadata: { httpStatusCode: 404 } })).toBe(404);
+    expect(httpStatusOf({ $metadata: { httpStatusCode: 0 } })).toBe(0);
+    expect(httpStatusOf({ $metadata: { httpStatusCode: Number.NaN } })).toBeNaN();
+    expect(httpStatusOf({ $metadata: { httpStatusCode: "404" } })).toBeUndefined();
+    expect(httpStatusOf({ $metadata: null })).toBeUndefined();
+    expect(httpStatusOf({ $metadata: {} })).toBeUndefined();
+    expect(httpStatusOf(undefined)).toBeUndefined();
+    expect(httpStatusOf(null)).toBeUndefined();
+    expect(httpStatusOf("404")).toBeUndefined();
+    expect(httpStatusOf(404)).toBeUndefined();
+    expect(httpStatusOf(new Error("x"))).toBeUndefined();
+  });
+
+  it("numeric metadata wins over timeout names; absent metadata preserves timeout labels", () => {
+    expect(statusLabel({ name: "TimeoutError", $metadata: { httpStatusCode: 503 } })).toBe("HTTP 503");
+    expect(statusLabel({ name: "AbortError", $metadata: { httpStatusCode: 0 } })).toBe("HTTP 0");
+    expect(statusLabel({ name: "TimeoutError", $metadata: { httpStatusCode: Number.NaN } })).toBe("HTTP NaN");
+    expect(statusLabel({ name: "TimeoutError" })).toBe("timeout");
+    expect(statusLabel({ name: "AbortError" })).toBe("timeout");
+    expect(statusLabel({ name: "AbortError", $metadata: { httpStatusCode: "408" } })).toBe("timeout");
+    expect(statusLabel({ name: "AbortError", $metadata: null })).toBe("timeout");
+    expect(statusLabel({ name: "AbortError", $metadata: {} })).toBe("timeout");
+    expect(statusLabel("nope")).toBe("no status");
+    expect(statusLabel(null)).toBe("no status");
+    expect(statusLabel(undefined)).toBe("no status");
+    expect(statusLabel({ $metadata: { httpStatusCode: "404" } })).toBe("no status");
+    expect(statusLabel(new Error("plain"))).toBe("no status");
   });
 });

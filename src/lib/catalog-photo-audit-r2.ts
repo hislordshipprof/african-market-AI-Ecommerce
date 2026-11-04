@@ -1,7 +1,7 @@
 import { HeadBucketCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { r2ClientConfig, type R2Credentials } from "./r2";
-import { CatalogAuditError, statusLabel, type HeadResult } from "./catalog-photo-audit";
+import { CatalogAuditError, httpStatusOf, statusLabel, type HeadResult } from "./catalog-photo-audit";
 
 /** Default socket and request deadline. SDK default is 0 (no timeout). */
 export const CATALOG_HEAD_TIMEOUT_MS = 10_000;
@@ -39,12 +39,6 @@ export function catalogHeadClientConfig(config: R2HeadConfig) {
 
 type HeadResponse = { $metadata?: { httpStatusCode?: number } };
 
-function httpStatus(err: unknown): number | undefined {
-  if (!err || typeof err !== "object" || !("$metadata" in err)) return undefined;
-  const metadata = (err as { $metadata?: { httpStatusCode?: unknown } }).$metadata;
-  return typeof metadata?.httpStatusCode === "number" ? metadata.httpStatusCode : undefined;
-}
-
 async function sendForStatus(
   client: S3Client,
   command: HeadBucketCommand | HeadObjectCommand,
@@ -66,7 +60,7 @@ async function sendForStatus(
     return status;
   } catch (err) {
     if (err instanceof CatalogAuditError) throw err;
-    const status = httpStatus(err);
+    const status = httpStatusOf(err);
     if (typeof status === "number") return status;
     const label = statusLabel(err);
     throw new CatalogAuditError(`${what} failed for ${name}: ${label}`, {
