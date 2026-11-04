@@ -1,6 +1,6 @@
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider } from "../stripe";
-import { isRetryableProviderError, OverRefundError } from "../stripe/errors";
+import { isIdempotencyKeyInUse, isRetryableProviderError, OverRefundError } from "../stripe/errors";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
@@ -737,6 +737,9 @@ export async function markReady(
       validation.applicationFeeAmount,
     );
   } catch (err) {
+    if (isIdempotencyKeyInUse(err)) {
+      return { ok: false, error: "Card capture is still confirming with the bank" };
+    }
     if (isRetryableProviderError(err)) {
       const settled = await noteCaptureServerError(storeId, orderId, captureAttempt);
       if (settled.ok) return { ok: true, capturedAmountCents: settled.capturedAmountCents };
@@ -979,6 +982,9 @@ export async function reconcileStuckOrder(
         );
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {
+        if (isIdempotencyKeyInUse(err)) {
+          return { ok: false, error: "Card capture is still confirming with the bank", waiting: true };
+        }
         if (isRetryableProviderError(err)) {
           const settled = await noteCaptureServerError(storeId, orderId, attempt);
           if (settled.ok) return { ok: true, action: "finalized_capture" };

@@ -6,7 +6,7 @@ import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady
 import { setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -2142,6 +2142,47 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(captureCalls.filter((key) => key === `capture:${order.id}:2`)).toEqual([
       `capture:${order.id}:2`,
     ]);
+  });
+
+  it("idempotency_key_in_use returns pending without a reconcile_failed row", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: order.totalCents },
+      });
+    });
+    setNextIdempotencyConflict(pi);
+    const { recordReconcileResult } = await import("../inngest/functions");
+    await recordReconcileResult(storeId, order.id);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CAPTURING");
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([
+      `capture:${order.id}:1`,
+    ]);
+    expect(
+      await storeScoped(storeId).auditLog.count({
+        where: { entityId: order.id, action: "capture_retry" },
+      }),
+    ).toBe(1);
+    expect(
+      await storeScoped(storeId).auditLog.count({
+        where: { entityId: order.id, action: "reconcile_failed" },
+      }),
+    ).toBe(0);
+
+    await recordReconcileResult(storeId, order.id);
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([
+      `capture:${order.id}:1`,
+    ]);
+    expect(
+      await storeScoped(storeId).auditLog.count({
+        where: { entityId: order.id, action: "reconcile_failed" },
+      }),
+    ).toBe(0);
   });
 
   it("a capture 500 then a later attempt succeeds", async () => {

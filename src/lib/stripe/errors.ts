@@ -30,6 +30,13 @@ export class WebhookSecretMissingError extends Error {
   }
 }
 
+/** A 409 idempotency_key_in_use is another request still in flight. It is not stored. */
+export function isIdempotencyKeyInUse(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const candidate = err as { statusCode?: number; code?: string };
+  return candidate.statusCode === 409 && candidate.code === "idempotency_key_in_use";
+}
+
 /** Stripe 5xx and connection failures. Same-key retries replay a stored 5xx for ~24h. */
 export function isRetryableProviderError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;

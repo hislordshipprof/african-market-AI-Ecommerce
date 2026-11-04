@@ -94,6 +94,7 @@ const refundRequests: Array<{
   refundApplicationFee: boolean;
 }> = [];
 const captureErrorBudget = new Map<string, number>();
+const captureConflicts = new Set<string>();
 const captureAppliesBeforeError = new Set<string>();
 const cancelErrorBudget = new Map<string, number>();
 const cancelUnexpected = new Set<string>();
@@ -136,6 +137,7 @@ function reset() {
   feeRefunded.clear();
   refundRequests.length = 0;
   captureErrorBudget.clear();
+  captureConflicts.clear();
   captureAppliesBeforeError.clear();
   cancelErrorBudget.clear();
   cancelUnexpected.clear();
@@ -290,6 +292,13 @@ const fakeStripeProvider: StripeProvider = {
 
   async capturePaymentIntent(paymentIntentId, amountCents, idempotencyKey, applicationFeeAmount) {
     captureCalls.push(idempotencyKey ?? "");
+    if (captureConflicts.delete(paymentIntentId)) {
+      throw new FakeStripeError(
+        "idempotency_key_in_use",
+        "There is currently another in-progress request using this Idempotent Key",
+        409,
+      );
+    }
     if (captureHold) {
       const notify = notifyCaptureEntered;
       notifyCaptureEntered = null;
@@ -528,6 +537,10 @@ function setNextCaptureFailure(paymentIntentId: string, times = 1) {
   captureErrorBudget.set(paymentIntentId, times);
 }
 
+function setNextIdempotencyConflict(paymentIntentId: string) {
+  captureConflicts.add(paymentIntentId);
+}
+
 /** Stripe applied the capture, then the response was a 500. */
 function setNextCaptureAppliedFailure(paymentIntentId: string, times = 1) {
   captureAppliesBeforeError.add(paymentIntentId);
@@ -556,4 +569,4 @@ function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };

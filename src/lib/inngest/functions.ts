@@ -8,6 +8,55 @@ import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
+export async function recordReconcileResult(storeId: string, orderId: string): Promise<void> {
+  let failReason: string | undefined;
+  try {
+    const result = await reconcileStuckOrder(storeId, orderId);
+    if (!result.ok && !result.waiting) {
+      failReason = result.error;
+    } else if (result.ok && result.action === "unknown_stripe_status") {
+      failReason = "unknown_stripe_status";
+    }
+  } catch (err) {
+    failReason = err instanceof Error ? err.message : String(err);
+    console.error(`reconcileStuckOrder failed for order ${orderId}:`, err);
+  }
+  if (failReason) {
+    const recent = await storeScopedTransaction(storeId, async (tx) => {
+      return tx.auditLog.findFirst({
+        where: {
+          entityId: orderId,
+          action: "reconcile_failed",
+          createdAt: { gte: new Date(Date.now() - RECONCILE_FAILED_COOLDOWN_MS) },
+        },
+      });
+    });
+    if (!recent) {
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.auditLog.create({
+          data: {
+            storeId,
+            actorId: SYSTEM_ACTOR_ID,
+            actorEmail: SYSTEM_ACTOR_EMAIL,
+            action: "reconcile_failed",
+            entityType: "order",
+            entityId: orderId,
+            after: { error: failReason },
+          },
+        });
+      });
+    }
+  }
+  try {
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: orderId },
+        data: { updatedAt: new Date() },
+      });
+    });
+  } catch { /* best effort — order may have been resolved */ }
+}
+
 function remainingSleep(authorizedAt: string | undefined, totalMs: number): string {
   if (!authorizedAt) return `${totalMs / 1000}s`;
   const elapsed = Date.now() - new Date(authorizedAt).getTime();
@@ -128,53 +177,7 @@ export const reconcileStuckTransitional = inngest.createFunction(
 
     for (const row of stuck) {
       await step.run(`reconcile-${row.id}`, async () => {
-        let failReason: string | undefined;
-        try {
-          const result = await reconcileStuckOrder(row.storeId, row.id);
-          if (!result.ok && !result.waiting) {
-            failReason = result.error;
-          } else if (result.ok && result.action === "unknown_stripe_status") {
-            failReason = "unknown_stripe_status";
-          }
-        } catch (err) {
-          failReason = err instanceof Error ? err.message : String(err);
-          console.error(`reconcileStuckOrder failed for order ${row.id}:`, err);
-        }
-        if (failReason) {
-          const recent = await storeScopedTransaction(row.storeId, async (tx) => {
-            return tx.auditLog.findFirst({
-              where: {
-                entityId: row.id,
-                action: "reconcile_failed",
-                createdAt: { gte: new Date(Date.now() - RECONCILE_FAILED_COOLDOWN_MS) },
-              },
-            });
-          });
-          if (!recent) {
-            await storeScopedTransaction(row.storeId, async (tx) => {
-              await tx.auditLog.create({
-                data: {
-                  storeId: row.storeId,
-                  actorId: SYSTEM_ACTOR_ID,
-                  actorEmail: SYSTEM_ACTOR_EMAIL,
-                  action: "reconcile_failed",
-                  entityType: "order",
-                  entityId: row.id,
-                  after: { error: failReason },
-                },
-              });
-            });
-          }
-        }
-        // Bump updated_at so persistently failing orders rotate to the back of the sweep queue
-        try {
-          await storeScopedTransaction(row.storeId, async (tx) => {
-            await tx.order.update({
-              where: { id: row.id },
-              data: { updatedAt: new Date() },
-            });
-          });
-        } catch { /* best effort — order may have been resolved */ }
+        await recordReconcileResult(row.storeId, row.id);
       });
     }
   },
