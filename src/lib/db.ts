@@ -186,6 +186,26 @@ export async function storeScopedTransaction<T>(
   }, { timeout: opts?.timeout, maxWait: opts?.maxWait });
 }
 
+/**
+ * Explicit row-lock order. A transaction that takes more than one of these
+ * locks takes them in this order:
+ *
+ *   store row → cart row → cart lines → listing row → listing variants (id order)
+ *
+ * Upgrade rule: a transaction that will lock a row FOR UPDATE must lock it
+ * before it inserts any row that references that row. A foreign-key insert
+ * takes FOR KEY SHARE on the parent, and upgrading that key-share to
+ * FOR UPDATE deadlocks when another transaction holds the same key-share
+ * (two checkouts inserting a customer, then both locking the store).
+ *
+ * This is the order of explicit competing locks, not every lock Postgres
+ * takes. Order-line inserts take an implicit key-share on listing variants
+ * after the cart lock. A listing save may take an implicit key-share on the
+ * store row (audit-log foreign key) after the listing lock. Those implicit
+ * locks are not upgraded to FOR UPDATE in the same transaction, so they are
+ * not part of this order. Checkout does not lock variants FOR UPDATE, and
+ * cart or listing writes do not take a store lock just to match this list.
+ */
 export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
   await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
 }
