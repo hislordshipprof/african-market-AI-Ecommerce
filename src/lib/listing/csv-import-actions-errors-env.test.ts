@@ -37,8 +37,11 @@ async function clearAuthRateLimits(): Promise<void> {
   await authPrisma.rateLimit.deleteMany({});
 }
 
-async function runProductionMode(overrides: Record<string, string | undefined>, extraArgs: string[]) {
-  let result = { status: 1, output: "" };
+async function runProductionMode(
+  overrides: Record<string, string | undefined>,
+  extraArgs: string[],
+): Promise<{ status: number | null; output: string }> {
+  let result: { status: number | null; output: string } = { status: 1, output: "" };
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await clearAuthRateLimits();
     result = runSuite(overrides, extraArgs);
