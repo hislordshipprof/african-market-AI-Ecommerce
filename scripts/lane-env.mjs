@@ -29,7 +29,7 @@ try {
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : "failed";
-  if (message.startsWith("lane-env:")) process.stderr.write(`${message}\n`);
+  if (message.startsWith("lane-env:") || message.startsWith("usage:")) process.stderr.write(`${message}\n`);
   else process.stderr.write("lane-env: filter failed\n");
   process.exit(1);
 }

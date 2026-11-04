@@ -642,6 +642,23 @@ describe("lane env filter script", () => {
     expect(text).toContain("env -u DATABASE_URL_UNPOOLED -u SEED_PRUNE_R2");
   });
 
+  it("usage errors name the accepted command instead of a generic filter failure", () => {
+    const cases = [
+      { args: [] as string[], stderr: "usage: lane-env.mjs filter|child-env|keys ..." },
+      { args: ["nope"], stderr: "usage: lane-env.mjs filter|child-env|keys ..." },
+      { args: ["filter"], stderr: "usage: filter <ticket> <src> <dest> <ticket-env>" },
+      { args: ["keys"], stderr: "usage: keys <ticket> <ticket-env>" },
+      { args: ["child-env"], stderr: "usage: child-env <ticket> <ticket-env>" },
+      { args: ["filter", "225", "only-one"], stderr: "usage: filter <ticket> <src> <dest> <ticket-env>" },
+    ];
+    for (const entry of cases) {
+      const result = spawnSync(process.execPath, ["scripts/lane-env.mjs", ...entry.args], { encoding: "utf8" });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr.trim()).toBe(entry.stderr);
+    }
+  });
+
   it("filter failure stops before seeding and cannot reuse stale unsafe env", () => {
     const env = ticketEnv();
     const dest = path.join(env.dir, "dest");
