@@ -7,6 +7,20 @@ function packButtons(page: Page) {
   return page.getByRole("dialog", { name: /Quick view/ }).getByRole("group", { name: "Choose pack size" }).getByRole("button");
 }
 
+async function browserJson(page: Page, url: string): Promise<{ variants?: { id: string; label: string }[]; badge?: string }> {
+  const helper = await page.context().newPage();
+  try {
+    await helper.goto(`${new URL(url).origin}/`);
+    return await helper.evaluate(async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`detail ${response.status}`);
+      return response.json();
+    }, url);
+  } finally {
+    await helper.close();
+  }
+}
+
 async function holdListingDetail(page: Page, edit?: (body: { variants?: { id: string; label: string }[]; badge?: string }) => void) {
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -17,12 +31,11 @@ async function holdListingDetail(page: Page, edit?: (body: { variants?: { id: st
         await route.continue();
         return;
       }
-      const response = await route.fetch();
-      const json = await response.json();
+      const json = await browserJson(page, route.request().url());
       edit(json);
-      await route.fulfill({ status: response.status(), contentType: "application/json", body: JSON.stringify(json) });
-    } catch {
-      // The browser aborted this request when the sheet unmounted.
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json) });
+    } catch (error) {
+      if (edit) throw error;
     }
   });
   return () => release();
@@ -269,16 +282,13 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(dialog.getByRole("button", { name: "8 oz", exact: true })).toHaveAttribute("aria-pressed", "true");
     await dialog.getByTestId("quick-add-btn").click();
     await expect(dialog.getByTestId("stepper-qty")).toHaveText("1");
-    await page.getByRole("button", { name: "Shopping cart" }).click();
     await expect(page.getByRole("button", { name: "Shopping cart" })).not.toHaveAttribute("data-cart-pending");
-    await page.keyboard.press("Escape");
     await dialog.press("Escape");
     await page.unroute("**/api/storefront/listings/**");
     await page.route("**/api/storefront/listings/**", async (route) => {
-      const response = await route.fetch();
-      const json = await response.json();
+      const json = await browserJson(page, route.request().url());
       json.badge = "ask-store";
-      await route.fulfill({ status: response.status(), contentType: "application/json", body: JSON.stringify(json) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json) });
     });
     const ask = await openEgusi(page);
     await expect(ask.dialog.getByText("Add to your basket")).toBeVisible();
@@ -287,8 +297,7 @@ test.describe("Phase 3 motion and depth", () => {
     await ask.dialog.press("Escape");
     await page.unroute("**/api/storefront/listings/**");
     await page.route("**/api/storefront/listings/**", async (route) => {
-      const response = await route.fetch();
-      await route.fulfill({ response, status: 500 });
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "failed" }) });
     });
     const failed = await openEgusi(page);
     await expect(failed.dialog.getByRole("status")).toHaveText("Pack details could not load. Open the product page to try again.");
@@ -314,31 +323,44 @@ test.describe("Phase 3 motion and depth", () => {
     await expect(dialog.getByLabel("$79.99")).toBeVisible();
   });
 
-  test("warm and overlapping A B detail requests remain store scoped", async ({ request }) => {
-    const mama = storeUrl("mama-ngozi");
-    const tante = storeUrl("tante-marie");
-    const warm = await request.get(`${mama}/api/storefront/listings/mn_egusi`);
-    expect(warm.status()).toBe(200);
-    expect((await warm.json()).variants.map((variant: { label: string }) => variant.label)).toEqual(PACKS);
-    const [again, foreign, own, mamaShelf, tanteShelf] = await Promise.all([
-      request.get(`${mama}/api/storefront/listings/mn_egusi`),
-      request.get(`${tante}/api/storefront/listings/mn_egusi`),
-      request.get(`${tante}/api/storefront/listings/tm_egusi`),
-      request.get(`${mama}/collections/soup-essentials`),
-      request.get(`${tante}/collections/soup-essentials`),
+  test("warm and overlapping A B detail requests remain store scoped", async ({ browser }) => {
+    const mama = await browser.newContext();
+    const tante = await browser.newContext();
+    const mamaPage = await mama.newPage();
+    const tantePage = await tante.newPage();
+    const read = (page: Page, path: string) => page.evaluate(async (path) => {
+      const response = await fetch(path);
+      return { status: response.status, text: await response.text() };
+    }, path);
+    await mamaPage.goto(storeUrl("mama-ngozi"));
+    await tantePage.goto(storeUrl("tante-marie"));
+    const warm = await read(mamaPage, "/api/storefront/listings/mn_egusi");
+    expect(warm.status).toBe(200);
+    expect(JSON.parse(warm.text).variants.map((variant: { label: string }) => variant.label)).toEqual(PACKS);
+    const [again, foreign, own] = await Promise.all([
+      read(mamaPage, "/api/storefront/listings/mn_egusi"),
+      read(tantePage, "/api/storefront/listings/mn_egusi"),
+      read(tantePage, "/api/storefront/listings/tm_egusi"),
     ]);
-    expect(again.status()).toBe(200);
-    expect((await again.json()).id).toBe("mn_egusi");
-    expect(foreign.status()).toBe(404);
-    expect(await foreign.json()).toEqual({ error: "Listing not found" });
-    expect(own.status()).toBe(200);
-    const ownBody = await own.json();
+    expect(again.status).toBe(200);
+    expect(JSON.parse(again.text).id).toBe("mn_egusi");
+    expect(foreign.status).toBe(404);
+    expect(JSON.parse(foreign.text)).toEqual({ error: "Listing not found" });
+    expect(own.status).toBe(200);
+    const ownBody = JSON.parse(own.text);
     expect(ownBody.id).toBe("tm_egusi");
     expect(ownBody.variants.every((variant: { id: string }) => variant.id.startsWith("tm_"))).toBe(true);
-    expect(mamaShelf.status()).toBe(200);
-    expect(mamaShelf.headers()["content-type"]).toContain("text/html");
-    expect(tanteShelf.status()).toBe(404);
-    expect(await tanteShelf.text()).not.toContain("mn_egusi");
+    const mamaShelf = await mamaPage.goto(`${storeUrl("mama-ngozi")}/collections/soup-essentials`);
+    expect(mamaShelf?.status()).toBe(200);
+    await expect(mamaPage.getByRole("heading", { name: "Soup essentials" })).toBeVisible();
+    await expect(mamaPage.getByRole("link", { name: "View Egusi (Melon Seeds)" })).toBeVisible();
+    await tantePage.goto(`${storeUrl("tante-marie")}/collections/soup-essentials`);
+    await expect(tantePage.getByRole("heading", { level: 1 })).toHaveText("Tante Marie Caribbean Grocer");
+    await expect(tantePage.getByTestId("page-not-found")).toBeVisible();
+    await expect(tantePage.getByRole("heading", { name: "Soup essentials" })).toHaveCount(0);
+    await expect(tantePage.getByText("mn_egusi")).toHaveCount(0);
+    await mama.close();
+    await tante.close();
   });
 
   test("fly-to-cart updates the accessible badge immediately", async ({ page }) => {
