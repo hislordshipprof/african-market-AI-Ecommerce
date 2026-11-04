@@ -1362,6 +1362,125 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(audit).toBeTruthy();
   });
 
+  it("autoCancel refunds only the amount still unrefunded after an external partial refund", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    const captured = order.totalAuthorizedCents;
+    await fakeStripeProvider.capturePaymentIntent(pi, captured, "external-capture");
+    await fakeStripeProvider.refundPayment(pi, 200, "external-partial");
+
+    const result = await autoCancelOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(refundedPayments.get(pi)).toBe(captured);
+    expect(refundRequests.at(-1)).toMatchObject({
+      paymentIntentId: pi,
+      amountCents: captured - 200,
+      refundApplicationFee: true,
+    });
+  });
+
+  it("reconcile refunds only the amount still unrefunded after an external partial refund", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    const captured = order.totalAuthorizedCents;
+    await fakeStripeProvider.capturePaymentIntent(pi, captured, "external-capture");
+    await fakeStripeProvider.refundPayment(pi, 200, "external-partial");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+    });
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(refundedPayments.get(pi)).toBe(captured);
+    expect(refundRequests.at(-1)).toMatchObject({
+      paymentIntentId: pi,
+      amountCents: captured - 200,
+      refundApplicationFee: true,
+    });
+  });
+
+  it.skipIf(!process.env.STRIPE_SECRET_KEY)(
+    "sandbox: autoCancel refunds the remainder after an external partial refund",
+    async () => {
+      const Stripe = (await import("stripe")).default;
+      const { stripeProvider } = await import("../stripe/provider");
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+      let accountId = "";
+      for await (const acct of stripe.accounts.list({ limit: 100 })) {
+        if (acct.capabilities?.transfers === "active") {
+          accountId = acct.id;
+          break;
+        }
+      }
+      expect(accountId).toBeTruthy();
+
+      const created = await stripe.paymentIntents.create({
+        amount: 1000,
+        currency: "usd",
+        capture_method: "manual",
+        on_behalf_of: accountId,
+        transfer_data: { destination: accountId },
+      });
+      const confirmed = await stripe.paymentIntents.confirm(created.id, {
+        payment_method: "pm_card_visa",
+        return_url: "https://example.com/return",
+      });
+      expect(confirmed.status).toBe("requires_capture");
+      await stripe.paymentIntents.capture(created.id, {
+        amount_to_capture: 1000,
+        application_fee_amount: 100,
+      });
+      await stripe.refunds.create({
+        payment_intent: created.id,
+        amount: 200,
+        reverse_transfer: true,
+        refund_application_fee: true,
+      });
+
+      const order = await createTestOrder();
+      await storeScoped(storeId).order.update({
+        where: { id: order.id },
+        data: { paymentIntentId: created.id },
+      });
+      setStripeProvider(stripeProvider);
+      try {
+        const result = await autoCancelOrder(storeId, order.id);
+        expect(result.ok).toBe(true);
+        const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+        expect(updated!.status).toBe("CANCELLED");
+        const after = await stripe.paymentIntents.retrieve(created.id, { expand: ["latest_charge"] });
+        const charge = after.latest_charge;
+        expect(charge && typeof charge !== "string").toBe(true);
+        if (charge && typeof charge !== "string") {
+          expect(charge.amount).toBe(1000);
+          expect(charge.amount_refunded).toBe(1000);
+        }
+      } finally {
+        setStripeProvider(fakeStripeProvider);
+        const leftover = await stripe.paymentIntents.retrieve(created.id, { expand: ["latest_charge"] });
+        const charge = leftover.latest_charge;
+        if (charge && typeof charge !== "string") {
+          const rest = (charge.amount ?? 0) - (charge.amount_refunded ?? 0);
+          if (rest > 0) {
+            await stripe.refunds.create({
+              payment_intent: created.id,
+              amount: rest,
+              reverse_transfer: true,
+              refund_application_fee: true,
+            });
+          }
+        }
+      }
+    },
+    60_000,
+  );
+
   it("P1: sweep retry capture on canceled PI → CANCELLED", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);

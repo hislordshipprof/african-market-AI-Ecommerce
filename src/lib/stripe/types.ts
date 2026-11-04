@@ -44,6 +44,8 @@ export interface RetrieveResult {
   status: string;
   amountCapturable: number;
   amountReceived: number;
+  /** Already refunded on the charge. Absent means the caller has not been told. */
+  amountRefunded?: number;
 }
 
 export interface RefundResult {

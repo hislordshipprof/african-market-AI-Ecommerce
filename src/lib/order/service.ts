@@ -26,6 +26,49 @@ const STRIPE_USD_MINIMUM_CENTS = 50;
 const MAX_CAPTURE_ATTEMPTS = 5;
 const REFUND_APPLICATION_FEE = { refundApplicationFee: true } as const;
 
+function greaterThanUnrefunded(err: unknown): boolean {
+  return err instanceof Error && /greater than unrefunded amount/i.test(err.message);
+}
+
+/** Refund whatever of a captured charge is still unrefunded. A concurrent refund is re-read once. */
+async function refundCapturedBalance(paymentIntentId: string, orderId: string): Promise<RefundResult> {
+  const stripe = getStripeProvider();
+  let pi = await stripe.retrievePaymentIntent(paymentIntentId);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const already = pi.amountRefunded ?? 0;
+    const remaining = Math.max(0, pi.amountReceived - already);
+    if (remaining === 0) {
+      return {
+        refundId: `re_external_${paymentIntentId}`,
+        amountRefunded: pi.amountReceived,
+        status: "succeeded",
+      };
+    }
+    try {
+      const refund = await stripe.refundPayment(
+        paymentIntentId,
+        remaining,
+        `refund:${orderId}:${already}`,
+        REFUND_APPLICATION_FEE,
+      );
+      const after = await stripe.retrievePaymentIntent(paymentIntentId);
+      const covered = after.amountRefunded ?? already + refund.amountRefunded;
+      if (refund.status === "succeeded" && covered < after.amountReceived) {
+        pi = after;
+        continue;
+      }
+      return refund;
+    } catch (err) {
+      if (attempt === 0 && greaterThanUnrefunded(err)) {
+        pi = await stripe.retrievePaymentIntent(paymentIntentId);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Refund did not cover the captured amount");
+}
+
 function captureKey(orderId: string, attempt: number): string {
   return `capture:${orderId}:${attempt}`;
 }
@@ -477,13 +520,7 @@ export async function markReady(
     } catch (err) {
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
-        const pi = await stripe.retrievePaymentIntent(validation.paymentIntentId);
-        const refund = await stripe.refundPayment(
-          validation.paymentIntentId,
-          pi.amountReceived,
-          `refund:${orderId}`,
-          REFUND_APPLICATION_FEE,
-        );
+        const refund = await refundCapturedBalance(validation.paymentIntentId, orderId);
         const settled = await settleCapturedRefund(storeId, orderId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true, capturedAmountCents: 0, voided: true };
@@ -659,13 +696,7 @@ export async function autoCancelOrder(
     } catch (err) {
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
-        const pi = await stripe.retrievePaymentIntent(validation.paymentIntentId);
-        const refund = await stripe.refundPayment(
-          validation.paymentIntentId,
-          pi.amountReceived,
-          `refund:${orderId}`,
-          REFUND_APPLICATION_FEE,
-        );
+        const refund = await refundCapturedBalance(validation.paymentIntentId, orderId);
         const settled = await settleCapturedRefund(storeId, orderId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true };
@@ -740,12 +771,7 @@ export async function reconcileStuckOrder(
       if (order.refundId) {
         refund = await stripe.retrieveRefund(order.refundId);
       } else {
-        refund = await stripe.refundPayment(
-          order.paymentIntentId,
-          pi.amountReceived,
-          `refund:${orderId}`,
-          REFUND_APPLICATION_FEE,
-        );
+        refund = await refundCapturedBalance(order.paymentIntentId, orderId);
       }
       const settled = await settleCapturedRefund(storeId, orderId, refund);
       if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
@@ -798,12 +824,7 @@ export async function reconcileStuckOrder(
             if (order.refundId) {
               refund = await stripe.retrieveRefund(order.refundId);
             } else {
-              refund = await stripe.refundPayment(
-                order.paymentIntentId,
-                freshPi.amountReceived,
-                `refund:${orderId}`,
-                REFUND_APPLICATION_FEE,
-              );
+              refund = await refundCapturedBalance(order.paymentIntentId, orderId);
             }
             const settled = await settleCapturedRefund(storeId, orderId, refund);
             if (settled.outcome !== "refunded") return { ok: false, error: settled.error };

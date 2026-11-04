@@ -234,11 +234,30 @@ const fakeStripeProvider: StripeProvider = {
       );
     }
     if (refundedPayments.has(paymentIntentId)) {
+      const already = refundedPayments.get(paymentIntentId)!;
+      const captured = capturedPayments.get(paymentIntentId) ?? 0;
+      const remaining = captured - already;
+      if (amountCents > remaining) {
+        throw new Error(
+          `Refund amount ($${(amountCents / 100).toFixed(2)}) is greater than unrefunded amount on charge ($${(remaining / 100).toFixed(2)})`,
+        );
+      }
+      if (amountCents !== already) {
+        const next = already + amountCents;
+        const refundId = `re_fake_${paymentIntentId}_${next}`;
+        refundedPayments.set(paymentIntentId, next);
+        refunds.set(refundId, { paymentIntentId, amountRefunded: amountCents, status: "succeeded" });
+        return {
+          refundId,
+          amountRefunded: amountCents,
+          status: "succeeded",
+        } satisfies RefundResult;
+      }
       const refundId = `re_fake_${paymentIntentId}`;
       const existing = refunds.get(refundId);
       return {
         refundId,
-        amountRefunded: refundedPayments.get(paymentIntentId)!,
+        amountRefunded: already,
         status: existing?.status === "pending" ? "pending" : "succeeded",
       } satisfies RefundResult;
     }
@@ -279,6 +298,7 @@ const fakeStripeProvider: StripeProvider = {
         status: "succeeded",
         amountCapturable: 0,
         amountReceived: capturedPayments.get(paymentIntentId)!,
+        amountRefunded: refundedPayments.get(paymentIntentId) ?? 0,
       } satisfies RetrieveResult;
     }
     if (cancelledPayments.has(paymentIntentId)) {

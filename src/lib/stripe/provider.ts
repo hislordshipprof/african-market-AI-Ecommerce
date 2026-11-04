@@ -216,12 +216,18 @@ export const stripeProvider: StripeProvider = {
 
   async retrievePaymentIntent(paymentIntentId) {
     const stripe = getStripeClient();
-    const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["latest_charge"],
+    });
+    const charge = pi.latest_charge;
+    const amountRefunded =
+      charge && typeof charge !== "string" ? (charge.amount_refunded ?? 0) : 0;
     return {
       paymentIntentId: pi.id,
       status: pi.status,
       amountCapturable: pi.amount_capturable ?? 0,
       amountReceived: pi.amount_received ?? 0,
+      amountRefunded,
     } satisfies RetrieveResult;
   },
 
