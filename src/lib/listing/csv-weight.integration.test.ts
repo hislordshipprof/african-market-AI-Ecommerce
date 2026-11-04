@@ -23,7 +23,6 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
   let userId = "";
   let actor: Actor;
   const masterIds: string[] = [];
-  let weightedId = "";
   let ambigId = "";
 
   beforeAll(async () => {
@@ -53,7 +52,6 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     const weighted = await platformAdmin.masterProduct.create({
       data: { name: `Weighted Flour ${RUN}`, weightG: 11340, status: "active" },
     });
-    weightedId = weighted.id;
     masterIds.push(weighted.id);
 
     const bare = await platformAdmin.masterProduct.create({
