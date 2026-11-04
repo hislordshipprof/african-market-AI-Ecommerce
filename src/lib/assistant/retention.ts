@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { deleteExpiredAssistantActions, deleteExpiredAssistantConversations } from "../db";
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
@@ -22,11 +23,15 @@ export async function runAssistantRetention(
 ): Promise<RetentionResult> {
   const batchSize = options?.batchSize ?? 1000;
   const maxBatches = options?.maxBatches ?? 400;
+  if (1 + maxBatches * 2 > 1000) {
+    throw new Error("assistant retention step ceiling");
+  }
   const bounds = await step.run("cutoff", async () => {
     const now = new Date(Date.now());
     return {
       now: now.toISOString(),
       cutoff: new Date(now.getTime() - NINETY_DAYS_MS).toISOString(),
+      runId: randomUUID(),
     };
   });
   const now = naiveTimestamp(bounds.now);
@@ -37,7 +42,7 @@ export async function runAssistantRetention(
     "ai_actions",
     batchSize,
     maxBatches,
-    () => deleteExpiredAssistantActions(cutoff, batchSize),
+    (batch) => deleteExpiredAssistantActions(cutoff, batchSize, `${bounds.runId}:actions:${batch}`),
   );
   const conversationsDeleted = await deleteInBatches(
     step,
@@ -45,7 +50,7 @@ export async function runAssistantRetention(
     "ai_conversations",
     batchSize,
     maxBatches,
-    () => deleteExpiredAssistantConversations(cutoff, now, batchSize),
+    (batch) => deleteExpiredAssistantConversations(cutoff, now, batchSize, `${bounds.runId}:conversations:${batch}`),
   );
   return { actionsDeleted, conversationsDeleted };
 }
@@ -61,11 +66,11 @@ async function deleteInBatches(
   table: string,
   batchSize: number,
   maxBatches: number,
-  deleteBatch: () => Promise<number>,
+  deleteBatch: (batch: number) => Promise<number>,
 ): Promise<number> {
   let total = 0;
   for (let batch = 0; batch < maxBatches; batch += 1) {
-    const count = await step.run(stepId, async () => deleteBatch());
+    const count = await step.run(`${stepId}:${batch}`, async () => deleteBatch(batch));
     total += count;
     if (count < batchSize) return total;
   }

@@ -23,9 +23,6 @@ describe.skipIf(!connectionString)("assistant records migration", () => {
         await client.query(fs.readFileSync(path.join(MIGRATIONS, dir, "migration.sql"), "utf8"));
       }
       await client.query(`GRANT USAGE ON SCHEMA ${SCHEMA} TO app_user`);
-      await client.query(
-        `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${SCHEMA} TO app_user`,
-      );
       await client.query(`SET search_path = ${SCHEMA}`);
       await seed(client);
     } finally {
@@ -53,17 +50,22 @@ describe.skipIf(!connectionString)("assistant records migration", () => {
       `SELECT policyname, qual, with_check
        FROM pg_policies
        WHERE schemaname = $1
-         AND tablename IN ('ai_conversations', 'ai_actions')
-         AND policyname LIKE '%_isolation'`,
+         AND tablename IN ('ai_conversations', 'ai_actions')`,
       [SCHEMA],
     );
     expect(policies.rows.map((row) => row.policyname).sort()).toEqual([
       "ai_actions_isolation",
+      "ai_actions_platform_admin",
       "ai_conversations_isolation",
+      "ai_conversations_platform_admin",
     ]);
-    for (const policy of policies.rows) {
+    for (const policy of policies.rows.filter((row) => row.policyname.endsWith("_isolation"))) {
       expect(policy.qual.toLowerCase()).toContain("exists");
       expect(policy.with_check.toLowerCase()).toContain("exists");
+    }
+    for (const policy of policies.rows.filter((row) => row.policyname.endsWith("_platform_admin"))) {
+      expect(policy.qual).toContain("app.is_platform_admin");
+      expect(policy.with_check).toContain("app.is_platform_admin");
     }
   });
 
@@ -84,6 +86,79 @@ describe.skipIf(!connectionString)("assistant records migration", () => {
     );
     expect(table.rows).toHaveLength(1);
     expect(table.rows[0]?.relrowsecurity).toBe(false);
+    const grants = await client.query<{ table_name: string; privilege_type: string }>(
+      `SELECT table_name, privilege_type
+       FROM information_schema.table_privileges
+       WHERE table_schema = $1
+         AND grantee = 'app_user'
+         AND table_name IN ('assistant_spend_days', 'assistant_spend_calls', 'assistant_retention_batches')`,
+      [SCHEMA],
+    );
+    const byTable = new Map<string, Set<string>>();
+    for (const row of grants.rows) {
+      const set = byTable.get(row.table_name) ?? new Set<string>();
+      set.add(row.privilege_type);
+      byTable.set(row.table_name, set);
+    }
+    expect([...(byTable.get("assistant_spend_days") ?? [])].sort()).toEqual(["INSERT", "SELECT", "UPDATE"]);
+    expect([...(byTable.get("assistant_spend_calls") ?? [])].sort()).toEqual(["INSERT", "SELECT"]);
+    expect([...(byTable.get("assistant_retention_batches") ?? [])].sort()).toEqual(["INSERT", "SELECT"]);
+    for (const name of ["assistant_spend_days", "assistant_spend_calls", "assistant_retention_batches"]) {
+      expect(byTable.get(name)?.has("DELETE")).toBe(false);
+    }
+  });
+
+  it("records the unique cart index, foreign-key actions, and app_user cascade behavior", async () => {
+    const unique = await client.query(
+      `SELECT indexname FROM pg_indexes
+       WHERE schemaname = $1 AND indexname = 'ai_conversations_store_id_cart_id_key'`,
+      [SCHEMA],
+    );
+    expect(unique.rows).toHaveLength(1);
+    const keys = await client.query<{ conname: string; confdeltype: string }>(
+      `SELECT con.conname, con.confdeltype
+       FROM pg_constraint con
+       JOIN pg_class rel ON rel.oid = con.conrelid
+       JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+       WHERE nsp.nspname = $1
+         AND con.contype = 'f'
+         AND con.conname IN (
+           'ai_conversations_cart_id_fkey',
+           'ai_conversations_customer_id_fkey',
+           'ai_actions_conversation_id_fkey'
+         )`,
+      [SCHEMA],
+    );
+    const action = new Map(keys.rows.map((row) => [row.conname, row.confdeltype]));
+    expect(action.get("ai_conversations_cart_id_fkey")).toBe("c");
+    expect(action.get("ai_conversations_customer_id_fkey")).toBe("n");
+    expect(action.get("ai_actions_conversation_id_fkey")).toBe("c");
+
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.is_platform_admin', 'true', true)");
+    await client.query(`
+      INSERT INTO customers (id, store_id, name, updated_at)
+      VALUES ('custA', 'sA', 'Ada', now())
+    `);
+    await client.query(`
+      INSERT INTO carts (id, store_id, source, created_at, updated_at)
+      VALUES ('cartC', 'sA', 'manual', now(), now())
+    `);
+    await client.query(`
+      INSERT INTO ai_conversations (id, store_id, cart_id, customer_id, model, messages, created_at, last_message_at)
+      VALUES ('convC', 'sA', 'cartC', 'custA', 'claude-haiku-5-5', '[]'::jsonb, now(), now())
+    `);
+    await client.query(`
+      INSERT INTO ai_actions (id, store_id, conversation_id, tool, input, output, ok)
+      VALUES ('actC', 'sA', 'convC', 'search_catalog', '{}'::jsonb, '{}'::jsonb, true)
+    `);
+    await client.query("COMMIT");
+    await asAppUser(`DELETE FROM customers WHERE id = 'custA'`);
+    const nulled = await asPlatformAdmin(client, `SELECT customer_id FROM ai_conversations WHERE id = 'convC'`);
+    expect(nulled.rows[0]?.customer_id).toBeNull();
+    await asAppUser(`DELETE FROM carts WHERE id = 'cartC'`);
+    expect((await asPlatformAdmin(client, `SELECT id FROM ai_conversations WHERE id = 'convC'`)).rows).toEqual([]);
+    expect((await asPlatformAdmin(client, `SELECT id FROM ai_actions WHERE id = 'actC'`)).rows).toEqual([]);
   });
 
   it("adds cart_lines.source with a manual default and no backfill", async () => {
@@ -117,6 +192,37 @@ describe.skipIf(!connectionString)("assistant records migration", () => {
     expect(left.rows).toEqual([]);
   });
 });
+
+async function asPlatformAdmin(client: Client, sql: string) {
+  await client.query("BEGIN");
+  try {
+    await client.query("SELECT set_config('app.is_platform_admin', 'true', true)");
+    const result = await client.query(sql);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
+async function asAppUser(sql: string) {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SET search_path = ${SCHEMA}`);
+    await client.query("SET LOCAL ROLE app_user");
+    await client.query("SELECT set_config('app.is_platform_admin', 'true', true)");
+    await client.query(sql);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
 
 async function seed(client: Client) {
   await client.query("BEGIN");

@@ -538,6 +538,24 @@ model AssistantSpendDay {
   @@map("assistant_spend_days")
 }
 
+/// One row per provider call so a lost acknowledgement cannot increment the day twice.
+model AssistantSpendCall {
+  id         String   @id
+  day        DateTime @db.Date
+  costMicros BigInt   @map("cost_micros")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("assistant_spend_calls")
+}
+
+/// Committed retention batch. A replay of the same key returns this count.
+model AssistantRetentionBatch {
+  id      String @id
+  deleted Int
+
+  @@map("assistant_retention_batches")
+}
+
 model Order {
   id                   String    @id @default(cuid())
   storeId              String    @map("store_id")

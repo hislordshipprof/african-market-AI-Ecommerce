@@ -1,6 +1,9 @@
-import { randomInt } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appUserQuery, platformSessionUser, withSessionTimeZone } from "../db";
+import { appUserQuery, loseNextSpendAcks, platformSessionUser, storeScoped, withSessionTimeZone } from "../db";
+import { runAssistantRetention, type AssistantStep } from "./retention";
 import { assistantSpendState, claimCapAlert, recordSpend, resetInvalidCapLog } from "./spend";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -52,12 +55,64 @@ describe.skipIf(!hasDb)("assistant spend ledger", () => {
 
   it("deleting conversations does not lower spend", async () => {
     const day = freshDay();
+    const before = await assistantSpendState({ ASSISTANT_SPEND_CAP_USD: "1000000" });
+    const dayBefore = await dayTotal(day);
     await recordSpend(BigInt(15), atNoon(day));
+    const raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    const suffix = randomUUID().slice(0, 8);
+    const store = await raw.store.create({
+      data: { slug: `ai-spend-ret-${suffix}`, name: "Spend Retention", themePreset: "palm-and-shea" },
+    });
+    try {
+      vi.spyOn(Date, "now").mockReturnValue(Date.parse("1990-06-01T00:00:00.000Z"));
+      const createdAt = new Date("1980-01-01T00:00:00.000Z");
+      const cart = await storeScoped(store.id).cart.create({ data: { storeId: store.id, source: "manual" } });
+      const conversation = await storeScoped(store.id).aiConversation.create({
+        data: {
+          storeId: store.id,
+          cartId: cart.id,
+          model: "claude-haiku-5-5",
+          messages: [],
+          createdAt,
+          lastMessageAt: createdAt,
+        },
+      });
+      await storeScoped(store.id).aiAction.create({
+        data: {
+          storeId: store.id,
+          conversationId: conversation.id,
+          tool: "search_catalog",
+          input: {},
+          output: {},
+          ok: true,
+          createdAt,
+        },
+      });
+      const step: AssistantStep = { async run(_id, fn) { return fn(); } };
+      const swept = await runAssistantRetention(step);
+      expect(swept.conversationsDeleted).toBeGreaterThanOrEqual(1);
+      expect(swept.actionsDeleted).toBeGreaterThanOrEqual(1);
+      expect(await storeScoped(store.id).aiConversation.findUnique({ where: { id: conversation.id } })).toBeNull();
+      expect(await storeScoped(store.id).aiAction.count({ where: { conversationId: conversation.id } })).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      await storeScoped(store.id).cart.deleteMany({});
+      await raw.store.delete({ where: { id: store.id } });
+      await raw.$disconnect();
+    }
+    const after = await assistantSpendState({ ASSISTANT_SPEND_CAP_USD: "1000000" });
+    expect(await dayTotal(day)).toBe(dayBefore + BigInt(15));
+    expect(after.spentMicros).toBeGreaterThanOrEqual(before.spentMicros + BigInt(15));
+  });
+
+  it("a lost acknowledgement does not book the same call twice", async () => {
+    const day = freshDay();
     const before = await dayTotal(day);
-    await appUserQuery((tx) =>
-      tx.$executeRaw`DELETE FROM ai_conversations WHERE created_at < CAST('1990-01-01' AS timestamp)`,
-    );
-    expect(await dayTotal(day)).toBe(before);
+    const callId = randomUUID();
+    loseNextSpendAcks(1);
+    await expect(recordSpend(BigInt(2), atNoon(day), callId)).rejects.toThrow("ack lost");
+    await recordSpend(BigInt(2), atNoon(day), callId);
+    expect(await dayTotal(day)).toBe(before + BigInt(2));
   });
 
   it("concurrent records lose no increment", async () => {

@@ -263,7 +263,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
 
   it("limits by IP and by cart with Retry-After", async () => {
     const clock = new Date("2031-04-01T00:00:00Z");
-    const { model } = strictModel(() => [
+    const token = randomUUID();
+    const { model, calls } = strictModel(() => [
       { type: "stream-start", warnings: [] },
       { type: "text-start", id: "t" },
       { type: "text-delta", id: "t", delta: "ok" },
@@ -271,30 +272,36 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     const handler = createChatHandler({ model, now: () => clock });
-    let last: Response | undefined;
-    for (let i = 0; i < 61; i += 1) {
-      last = await handler(request(`ip ${i}`, { ip: "198.51.100.8" }));
-      if (last.status !== 200) break;
-      await last.text();
+    const ip = `quota-ip-${token}`;
+    for (let i = 0; i < 60; i += 1) {
+      const ok = await handler(request(`ip ${i}`, { ip }));
+      expect(ok.status).toBe(200);
+      await ok.text();
     }
-    expect(last?.status).toBe(429);
-    expect(Number(last?.headers.get("retry-after"))).toBeGreaterThan(0);
-    const body = await last!.json();
-    expect(body.error.code).toBe("rate_limited");
+    expect(calls()).toBe(60);
+    const blocked = await handler(request("ip over", { ip }));
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect((await blocked.json()).error.code).toBe("rate_limited");
+    const blockedAgain = await handler(request("ip over again", { ip }));
+    expect(blockedAgain.status).toBe(429);
+    expect(calls()).toBe(60);
 
-    const opened = await handler(request("cart open", { ip: "198.51.100.31" }));
+    const opened = await handler(request("cart open", { ip: `quota-cart-${token}` }));
     const cookie = (opened.headers.get("set-cookie") ?? "").split(";")[0];
     expect(opened.status).toBe(200);
     await opened.text();
-    let cartLast: Response | undefined;
-    for (let i = 0; i < 31; i += 1) {
-      cartLast = await handler(request(`cart ${i}`, { ip: `198.51.100.${100 + i}`, cookie }));
-      if (cartLast.status !== 200) break;
-      await cartLast.text();
+    for (let i = 0; i < 29; i += 1) {
+      const ok = await handler(request(`cart ${i}`, { ip: `quota-cart-${token}-${i}`, cookie }));
+      expect(ok.status).toBe(200);
+      await ok.text();
     }
-    expect(cartLast?.status).toBe(429);
-    expect((await cartLast!.json()).error.code).toBe("rate_limited");
-  });
+    const callsAtCartCap = calls();
+    const cartBlocked = await handler(request("cart over", { ip: `quota-cart-${token}-over`, cookie }));
+    expect(cartBlocked.status).toBe(429);
+    expect((await cartBlocked.json()).error.code).toBe("rate_limited");
+    expect(calls()).toBe(callsAtCartCap);
+  }, 60_000);
 
   it("returns assistant_unavailable without a key or with an unknown model", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "");
@@ -307,6 +314,33 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const unknown = await createChatHandler()(request("hello", { ip: "203.0.113.41" }));
     expect(unknown.status).toBe(503);
     expect((await unknown.json()).error.code).toBe("assistant_unavailable");
+  });
+
+  it("keeps the model captured before session resolution", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
+    const fake = createFakeAnthropicFetch({
+      expectedKey: "sk-ant-test",
+      steps: [{ kind: "text", text: "ok", inputTokens: 10, outputTokens: 1 }],
+    });
+    const model = createAssistantModel({ fetch: fake.fetch });
+    vi.spyOn(auth.api, "getSession").mockImplementation(async () => {
+      vi.stubEnv("ASSISTANT_MODEL", "claude-sonnet-5-5");
+      return null;
+    });
+    const handler = createChatHandler({ model });
+    const response = await handler(request("which model", { ip: `model-${randomUUID()}` }));
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(fake.requests[0]?.body?.model).toBe("claude-haiku-5-5");
+    const rows = await storeScoped(storeId).aiConversation.findMany({
+      where: { storeId },
+      orderBy: { createdAt: "desc" },
+      take: 1,
+    });
+    expect(rows[0]?.model).toBe("claude-haiku-5-5");
+    const sent = JSON.stringify(fake.requests[0]?.body ?? {});
+    expect(sent).toContain("disabled");
   });
 
   it("returns assistant_resting at the cap and alerts once", async () => {
@@ -507,6 +541,40 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(n).toBe(8);
     expect(body).toContain("data-step-limit");
     expect(body).toContain("I've done as much as I can in one go");
+  });
+
+  it("a 30-item gather is capped at 20 ids per call and then the step limit", async () => {
+    const ids = Array.from({ length: 20 }, (_, index) => `listing-${index}`);
+    let n = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        n += 1;
+        return {
+          stream: streamOf([
+            { type: "stream-start", warnings: [] },
+            {
+              type: "tool-call",
+              toolCallId: `call-${n}`,
+              toolName: "check_availability",
+              input: JSON.stringify({ listing_ids: ids }),
+            },
+            { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+          ]),
+        };
+      },
+    });
+    const handler = createChatHandler({ model });
+    const response = await handler(request("show me 30 items", { ip: `203.0.113.${randomInt(1, 200)}.${randomInt(1, 200)}` }));
+    const body = await response.text();
+    expect(n).toBe(8);
+    expect(body).toContain("data-step-limit");
+    expect(body).toContain("I've done as much as I can in one go");
+    const actions = await storeScoped(storeId).aiAction.findMany({
+      where: { tool: "check_availability" },
+      orderBy: { createdAt: "desc" },
+      take: 1,
+    });
+    expect(actions[0]?.input).toMatchObject({ listing_ids: ids });
   });
 
   it("finishes and saves the turn after the client aborts", async () => {

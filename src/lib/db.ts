@@ -477,52 +477,117 @@ export async function claimConversationLease(
   return rows[0] ?? null;
 }
 
-/** Deletes one batch of actions older than the naive timestamp. Returns the row count. */
-export function deleteExpiredAssistantActions(cutoff: string, batchSize: number): Promise<number> {
-  return platformAdminTransaction((tx) =>
-    tx.$executeRaw`
-      DELETE FROM ai_actions
-      WHERE id IN (
+/**
+ * Deletes one batch of actions older than the naive timestamp.
+ * The batch key is written in the same transaction, so a replay returns the
+ * committed count instead of deleting the next batch.
+ */
+export function deleteExpiredAssistantActions(
+  cutoff: string,
+  batchSize: number,
+  batchKey: string,
+): Promise<number> {
+  return deleteExpiredBatch(batchKey, (tx) =>
+    tx.$queryRaw<Array<{ deleted: number }>>`
+      WITH doomed AS (
         SELECT id FROM ai_actions
         WHERE created_at < ${cutoff}
         ORDER BY created_at, id
         LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      ),
+      removed AS (
+        DELETE FROM ai_actions
+        WHERE id IN (SELECT id FROM doomed)
+        RETURNING id
       )
+      SELECT count(*)::int AS deleted FROM removed
     `,
   );
 }
 
-/** Deletes one batch of idle conversations older than the naive timestamp. */
+/**
+ * Deletes one batch of idle conversations older than the naive timestamp.
+ * A row locked by a live lease is skipped, and the lease is checked again
+ * on the row being deleted.
+ */
 export function deleteExpiredAssistantConversations(
   cutoff: string,
   now: string,
   batchSize: number,
+  batchKey: string,
 ): Promise<number> {
-  return platformAdminTransaction((tx) =>
-    tx.$executeRaw`
-      DELETE FROM ai_conversations
-      WHERE id IN (
+  return deleteExpiredBatch(batchKey, (tx) =>
+    tx.$queryRaw<Array<{ deleted: number }>>`
+      WITH doomed AS (
         SELECT id FROM ai_conversations
         WHERE created_at < ${cutoff}
           AND (in_flight_until IS NULL OR in_flight_until <= ${now})
         ORDER BY created_at, id
         LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      ),
+      removed AS (
+        DELETE FROM ai_conversations
+        WHERE id IN (SELECT id FROM doomed)
+          AND (in_flight_until IS NULL OR in_flight_until <= ${now})
+        RETURNING id
       )
+      SELECT count(*)::int AS deleted FROM removed
     `,
   );
 }
 
+async function deleteExpiredBatch(
+  batchKey: string,
+  remove: (tx: Pick<PrismaClient, "$queryRaw" | "$executeRaw">) => Promise<Array<{ deleted: number }>>,
+): Promise<number> {
+  return platformAdminTransaction(async (tx) => {
+    const existing = await tx.$queryRaw<Array<{ deleted: number }>>`
+      SELECT deleted FROM assistant_retention_batches WHERE id = ${batchKey}
+    `;
+    const prior = existing[0];
+    if (prior) return Number(prior.deleted);
+    const rows = await remove(tx);
+    const deleted = Number(rows[0]?.deleted ?? 0);
+    await tx.$executeRaw`
+      INSERT INTO assistant_retention_batches (id, deleted)
+      VALUES (${batchKey}, ${deleted})
+      ON CONFLICT (id) DO NOTHING
+    `;
+    return deleted;
+  });
+}
+
+let spendAckLosses = 0;
+
+/** Test hook: the next n committed ledger writes throw after commit. */
+export function loseNextSpendAcks(count: number): void {
+  spendAckLosses = count;
+}
+
 /** Adds the call cost to the UTC day. The day is a YYYY-MM-DD string, cast in SQL. */
-export async function insertAssistantSpend(day: string, amount: bigint): Promise<void> {
+export async function insertAssistantSpend(day: string, amount: bigint, callId: string): Promise<void> {
   await appUserQuery((tx) =>
     tx.$executeRaw`
+      WITH claimed AS (
+        INSERT INTO assistant_spend_calls (id, day, cost_micros)
+        VALUES (${callId}, CAST(${day} AS date), ${amount})
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id
+      )
       INSERT INTO assistant_spend_days (day, cost_micros, updated_at)
-      VALUES (CAST(${day} AS date), ${amount}, now())
+      SELECT CAST(${day} AS date), ${amount}, now()
+      FROM claimed
       ON CONFLICT (day) DO UPDATE
       SET cost_micros = assistant_spend_days.cost_micros + EXCLUDED.cost_micros,
           updated_at = now()
     `,
   );
+  if (spendAckLosses > 0) {
+    spendAckLosses -= 1;
+    throw new Error("ack lost");
+  }
 }
 
 export async function sumAssistantSpend(): Promise<bigint> {

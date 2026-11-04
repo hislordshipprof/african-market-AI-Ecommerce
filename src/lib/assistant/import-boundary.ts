@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-
-const IMPORT_RE = /(?:from\s+|import\s*\(\s*|require\(\s*)["']([^"']+)["']/g;
+import ts from "typescript";
 
 const FORBIDDEN_PACKAGES = new Set(["stripe"]);
 
@@ -14,10 +13,8 @@ export function findForbiddenImports(roots: string[], srcRoot: string): string[]
     if (!file || seen.has(file)) continue;
     seen.add(file);
     const text = fs.readFileSync(file, "utf8");
-    for (const match of text.matchAll(IMPORT_RE)) {
-      const spec = match[1];
-      if (!spec) continue;
-      if (spec === "stripe" || spec.startsWith("@stripe/") || FORBIDDEN_PACKAGES.has(spec)) {
+    for (const spec of importSpecifiers(text, file)) {
+      if (forbiddenSpecifier(spec)) {
         hits.push(`${path.relative(srcRoot, file)} -> ${spec}`);
         continue;
       }
@@ -31,6 +28,40 @@ export function findForbiddenImports(roots: string[], srcRoot: string): string[]
     }
   }
   return hits;
+}
+
+function forbiddenSpecifier(spec: string): boolean {
+  return spec === "stripe"
+    || spec.startsWith("@stripe/")
+    || FORBIDDEN_PACKAGES.has(spec)
+    || spec === "@/lib/checkout/service"
+    || spec === "@/lib/stripe/provider"
+    || spec.endsWith("/lib/checkout/service")
+    || spec.endsWith("/lib/stripe/provider");
+}
+
+/** Import, re-export, import(), and require() specifiers, including side-effect imports. */
+function importSpecifiers(text: string, fileName: string): string[] {
+  const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const specs: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      && node.moduleSpecifier
+      && ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      specs.push(node.moduleSpecifier.text);
+    }
+    if (ts.isCallExpression(node)) {
+      const imported = node.expression.kind === ts.SyntaxKind.ImportKeyword
+        || (ts.isIdentifier(node.expression) && node.expression.text === "require");
+      const arg = node.arguments[0];
+      if (imported && arg && ts.isStringLiteral(arg)) specs.push(arg.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return specs;
 }
 
 function listModules(root: string): string[] {

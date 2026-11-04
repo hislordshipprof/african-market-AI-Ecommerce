@@ -33,4 +33,19 @@ describe("assistant import boundary", () => {
     expect(hits.length).toBeGreaterThan(0);
     expect(hits.join("\n")).toContain("stripe");
   });
+
+  it("fails on a side-effect stripe import and a checkout service import", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-boundary-"));
+    temps.push(root);
+    const src = path.join(root, "src");
+    fs.mkdirSync(path.join(src, "lib/assistant"), { recursive: true });
+    fs.writeFileSync(path.join(src, "lib/assistant/side-effect.ts"), 'import "stripe";\nexport const side = 1;\n');
+    fs.writeFileSync(
+      path.join(src, "lib/assistant/checkout-leak.ts"),
+      'import "@/lib/checkout/service";\nexport const checkout = 1;\n',
+    );
+    const hits = findForbiddenImports([path.join(src, "lib/assistant")], src);
+    expect(hits.join("\n")).toContain("stripe");
+    expect(hits.join("\n")).toContain("checkout/service");
+  });
 });

@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  deleteExpiredAssistantConversations,
   platformAdminTransaction,
   storeScoped,
   storeScopedTransaction,
   withSessionTimeZone,
 } from "../db";
+import { assistantRetention } from "../inngest/functions";
 import { runAssistantRetention, type AssistantStep } from "./retention";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -44,6 +47,7 @@ function makeFaithfulStep(): FaithfulStep {
     },
     async run<T>(id: string, fn: () => Promise<T> | T): Promise<T> {
       calls += 1;
+      if (calls > 1000) throw new Error("step ceiling");
       const history = memos.get(id) ?? [];
       const index = seen.get(id) ?? 0;
       if (index < history.length) {
@@ -202,6 +206,80 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: recent.conversationId } })).not.toBeNull();
   });
 
+  it("deletes exactly 2000 old actions as 1000, 1000, and 0", async () => {
+    pinClock();
+    const old = await conversation(storeA, OLD);
+    await bulkActions(storeA, old.conversationId, 2000, OLD);
+    const counts: number[] = [];
+    const step = makeFaithfulStep();
+    const wrapped: AssistantStep = {
+      async run(id, fn) {
+        const value = await step.run(id, fn);
+        if (id.startsWith("delete-actions")) counts.push(value as number);
+        return value;
+      },
+    };
+    const result = await runAssistantRetention(wrapped);
+    expect(result.actionsDeleted).toBe(2000);
+    expect(counts).toEqual([1000, 1000, 0]);
+  }, 60_000);
+
+  it("the registered retention function deletes an old conversation", async () => {
+    pinClock();
+    const old = await conversation(storeA, OLD);
+    const handler = (assistantRetention as unknown as {
+      fn: (ctx: { step: AssistantStep }) => Promise<{ actionsDeleted: number; conversationsDeleted: number }>;
+    }).fn;
+    const result = await handler({ step: makeFaithfulStep() });
+    expect(result.conversationsDeleted).toBeGreaterThanOrEqual(1);
+    expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: old.conversationId } })).toBeNull();
+  });
+
+  it("refuses a sweep that would exceed the step ceiling", async () => {
+    const step = makeFaithfulStep();
+    await expect(runAssistantRetention(step, { maxBatches: 500 })).rejects.toThrow(/step ceiling/);
+    expect(step.calls).toBe(0);
+  });
+
+  it("the step seam rejects the 1001st call", async () => {
+    const step = makeFaithfulStep();
+    for (let i = 0; i < 1000; i += 1) {
+      await step.run(`ceiling-${i}`, async () => i);
+    }
+    await expect(step.run("ceiling-overflow", async () => 0)).rejects.toThrow(/step ceiling/);
+  });
+
+  it("does not delete a conversation whose lease commits while the sweep waits", async () => {
+    const held = await conversation(storeA, new Date("1900-01-01T00:00:00.000Z"));
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE app_user");
+      await client.query("SELECT set_config('app.is_platform_admin', 'true', true)");
+      const locked = await client.query("UPDATE ai_conversations SET in_flight_until = NULL WHERE id = $1", [
+        held.conversationId,
+      ]);
+      expect(locked.rowCount).toBe(1);
+      const pending = deleteExpiredAssistantConversations(
+        "1900-01-02 00:00:00.000",
+        "1900-01-02 00:00:00.000",
+        100,
+        `lease-${randomUUID()}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await client.query("UPDATE ai_conversations SET in_flight_until = TIMESTAMP '2900-01-01 00:00:00' WHERE id = $1", [
+        held.conversationId,
+      ]);
+      await client.query("COMMIT");
+      await pending;
+      expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: held.conversationId } })).not.toBeNull();
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.end();
+    }
+  });
+
   it("deletes 2500 old rows in three batches and leaves a newer row", async () => {
     pinClock();
     const old = await conversation(storeA, OLD);
@@ -268,7 +346,8 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     await expect(runAssistantRetention(step, { batchSize: 1000 })).rejects.toThrow("step result lost");
     expect(await storeScoped(storeA).aiAction.count({ where: { conversationId: old.conversationId } })).toBe(500);
     step.resetCounts();
-    await runAssistantRetention(step, { batchSize: 1000 });
+    const retried = await runAssistantRetention(step, { batchSize: 1000 });
+    expect(retried.actionsDeleted).toBe(1500);
     expect(await storeScoped(storeA).aiAction.count({ where: { conversationId: old.conversationId } })).toBe(0);
     expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: old.conversationId } })).toBeNull();
   }, 60_000);

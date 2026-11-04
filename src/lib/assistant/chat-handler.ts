@@ -76,6 +76,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         throw error;
       }
     }
+    const modelId = configuredModelId();
 
     const session = await auth.api.getSession({
       headers: request.headers,
@@ -94,7 +95,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     const cartLimit = await takeLimit(`assistant:cart:${cartId}`, CART_LIMIT, at);
     if (!cartLimit.ok) return rateLimited(cartLimit.retryAfter);
 
-    const turn = await takeTurn(store.id, cartId, userId, at);
+    const turn = await takeTurn(store.id, cartId, userId, at, modelId);
     if (!turn) return jsonError(409, "assistant_busy", "The helper is still working on the previous message.");
 
     const scrubbed = scrubCardNumbers(parsed.text).text;
@@ -124,7 +125,6 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     });
     const history = (await usableHistory(withUser, tools)).slice(-30);
     const modelMessages = await convertToModelMessages(history);
-    const modelId = configuredModelId();
     const headers = new Headers();
     if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId));
 
@@ -300,7 +300,13 @@ async function usableHistory(messages: UIMessage[], tools: ReturnType<typeof ass
   return second.success ? second.data : textOnly;
 }
 
-async function takeTurn(storeId: string, cartId: string, userId: string | null, at: Date) {
+async function takeTurn(
+  storeId: string,
+  cartId: string,
+  userId: string | null,
+  at: Date,
+  modelId: ReturnType<typeof assistantModelId>,
+) {
   const until = new Date(at.getTime() + LEASE_MS);
   const cart = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
   return storeScopedTransaction(storeId, async (tx) => {
@@ -310,7 +316,7 @@ async function takeTurn(storeId: string, cartId: string, userId: string | null, 
         storeId,
         cartId,
         customerId: cart?.customerId ?? null,
-        model: configuredModelId(),
+        model: modelId,
         messages: [],
       },
       update: userId ? { customerId: cart?.customerId ?? undefined } : {},

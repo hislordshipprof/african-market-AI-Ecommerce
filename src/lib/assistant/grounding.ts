@@ -52,42 +52,38 @@ export interface GroundingTransformOptions {
 export function groundingTransform(options: GroundingTransformOptions = {}) {
   return () => {
     let allowed = new Set<number>(options.getAllowedCents?.() ?? []);
-    let buffering = false;
-    let buffer = "";
-    let blockId = "";
+    const buffers = new Map<string, string>();
     return new TransformStream({
       transform(part, controller) {
         if (part && typeof part === "object" && "type" in part) {
           const type = (part as { type: string }).type;
+          const id = String((part as { id?: string }).id ?? "");
           if (type === "tool-result" || type === "tool-call") {
             allowed = new Set([...allowed, ...collectAllowedCents(part)]);
           }
           if (type === "text-start") {
-            buffering = true;
-            buffer = "";
-            blockId = String((part as { id?: string }).id ?? "");
+            buffers.set(id, "");
             controller.enqueue(part);
             return;
           }
-          if (type === "text-delta" && buffering) {
+          if (type === "text-delta" && buffers.has(id)) {
             const piece = part as { text?: string; delta?: string };
-            buffer += piece.text ?? piece.delta ?? "";
+            buffers.set(id, `${buffers.get(id) ?? ""}${piece.text ?? piece.delta ?? ""}`);
             return;
           }
-          if (type === "text-end" && buffering) {
-            const grounded = groundAmounts(buffer, allowed);
+          if (type === "text-end" && buffers.has(id)) {
+            const grounded = groundAmounts(buffers.get(id) ?? "", allowed);
+            buffers.delete(id);
             for (const amount of grounded.stripped) options.onStrip?.(amount);
             if (grounded.text) {
-              controller.enqueue({ type: "text-delta", id: blockId, text: grounded.text });
+              controller.enqueue({ type: "text-delta", id, text: grounded.text });
             }
-            buffering = false;
-            buffer = "";
             controller.enqueue(part);
             return;
           }
-          if (type === "error" && buffering) {
-            buffering = false;
-            buffer = "";
+          if (type === "error") {
+            if (id && buffers.has(id)) buffers.delete(id);
+            else buffers.clear();
             controller.enqueue(part);
             return;
           }

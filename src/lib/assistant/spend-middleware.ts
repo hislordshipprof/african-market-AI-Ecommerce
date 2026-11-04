@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { LanguageModelMiddleware } from "ai";
 import { callCostMicros, type TokenUsage } from "./cost";
 
@@ -46,11 +47,12 @@ async function recordCall(modelId: string, usage: TokenUsage | undefined) {
     return;
   }
   const { recordSpend } = await import("./spend");
+  const callId = randomUUID();
   try {
-    await recordSpend(micros);
+    await recordSpend(micros, undefined, callId);
   } catch (first) {
     try {
-      await recordSpend(micros);
+      await recordSpend(micros, undefined, callId);
     } catch {
       console.error("[assistant] spend not recorded", {
         modelId,

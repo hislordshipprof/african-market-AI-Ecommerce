@@ -134,6 +134,43 @@ describe("grounding stream", () => {
     expect(text).toBe("$4.50(see card)");
   });
 
+  it("overlapping text blocks keep each block's own buffer", async () => {
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: streamOf([
+          { type: "stream-start", warnings: [] },
+          { type: "tool-result", toolCallId: "call-1", toolName: "show_products", output: { priceCents: 300 } },
+          { type: "text-start", id: "a" },
+          { type: "text-delta", id: "a", delta: "$3.00" },
+          { type: "text-start", id: "b" },
+          { type: "text-delta", id: "b", delta: "$4.00" },
+          { type: "text-end", id: "a" },
+          { type: "text-delta", id: "b", delta: " and $999.00" },
+          { type: "text-end", id: "b" },
+          { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+        ]),
+      }),
+    });
+    const result = streamText({
+      model,
+      prompt: "overlap",
+      experimental_transform: groundingTransform({ getAllowedCents: () => new Set([300]) }),
+    });
+    const chunks: Array<{ type: string; delta?: string }> = [];
+    for await (const chunk of result.toUIMessageStream()) {
+      const part = chunk as { type?: string; delta?: string };
+      if (part.type) chunks.push({ type: part.type, delta: part.delta });
+    }
+    const text = chunks.filter((chunk) => chunk.type === "text-delta").map((chunk) => chunk.delta ?? "").join("");
+    const toolAt = chunks.findIndex((chunk) => chunk.type.startsWith("tool-"));
+    const textAt = chunks.findIndex((chunk) => chunk.type === "text-delta");
+    expect(toolAt).toBeGreaterThanOrEqual(0);
+    expect(textAt).toBeGreaterThan(toolAt);
+    expect(text).toBe("$3.00(see card) and (see card)");
+    expect(chunks.map((chunk) => JSON.stringify(chunk)).join("\n")).not.toContain("999");
+    expect(chunks.map((chunk) => JSON.stringify(chunk)).join("\n")).not.toContain("$4.00");
+  });
+
   it("an error mid-text never emits raw text", async () => {
     const model = new MockLanguageModelV4({
       doStream: async () => ({

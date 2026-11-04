@@ -28,6 +28,17 @@ describe("price grounding", () => {
     expect(groundAmounts("$4.505", allowed).text).toBe("(see card)");
   });
 
+  it("strips a zero price unless a tool returned zero cents", () => {
+    expect(groundAmounts("$0", new Set()).text).toBe("(see card)");
+    expect(groundAmounts("$0.00", new Set()).text).toBe("(see card)");
+    expect(groundAmounts("$0 and $0.00", new Set([0])).text).toBe("$0 and $0.00");
+  });
+
+  it("leaves empty text and text without a dollar unchanged", () => {
+    expect(groundAmounts("", allowed)).toEqual({ text: "", stripped: [] });
+    expect(groundAmounts("no price here", allowed)).toEqual({ text: "no price here", stripped: [] });
+  });
+
   it("ignores amounts from earlier turns", () => {
     const thisTurn = collectAllowedCents({ priceCents: 450 });
     expect(groundAmounts("was $5.00 now $4.50", thisTurn).text).toBe("was (see card) now $4.50");

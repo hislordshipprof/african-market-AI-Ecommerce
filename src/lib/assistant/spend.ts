@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { claimAssistantCapDay, insertAssistantSpend, sumAssistantSpend } from "../db";
 
 const DEFAULT_CAP_MICROS = BigInt(10_000_000);
@@ -35,14 +36,18 @@ export function spendCapMicros(
   return { micros: BigInt(whole) * BigInt(1_000_000) + BigInt(padded), invalid: false };
 }
 
-export async function recordSpend(micros: bigint, at: Date = spendClock()): Promise<void> {
+export async function recordSpend(
+  micros: bigint,
+  at: Date = spendClock(),
+  callId: string = randomUUID(),
+): Promise<void> {
   if (spendWriteFailures > 0) {
     spendWriteFailures -= 1;
     throw new Error("spend write failed");
   }
   const day = utcDay(at);
   const amount = micros < BigInt(0) ? BigInt(0) : micros;
-  await insertAssistantSpend(day, amount);
+  await insertAssistantSpend(day, amount, callId);
 }
 
 export async function assistantSpendState(env: { ASSISTANT_SPEND_CAP_USD?: string } = {

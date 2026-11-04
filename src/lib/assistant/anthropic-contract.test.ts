@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { APICallError, generateText, stepCountIs, streamText, tool } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { appUserQuery } from "../db";
+import { appUserQuery, loseNextSpendAcks } from "../db";
 import { callCostMicros } from "./cost";
 import { createFakeAnthropicFetch } from "./messages-api-double";
 import { assistantProviderOptions, createAssistantModel } from "./model";
@@ -49,6 +49,7 @@ describe.skipIf(!hasDb)("anthropic adapter contract", () => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     failNextSpendWrites(0);
+    loseNextSpendAcks(0);
   });
 
   it("records every step of a multi-step turn through the real Anthropic adapter", async () => {
@@ -168,6 +169,26 @@ describe.skipIf(!hasDb)("anthropic adapter contract", () => {
     });
     expect(result.text).toBe("once");
     expect((await todayTotal()) - before).toBe(callCostMicros(MODEL, usage(10, 1)));
+  });
+
+  it("does not double-book when the committed write's acknowledgement is lost", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", KEY);
+    vi.stubEnv("ASSISTANT_MODEL", MODEL);
+    loseNextSpendAcks(1);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: KEY,
+      steps: [{ kind: "text", text: "once", inputTokens: 10, outputTokens: 1 }],
+    });
+    const before = await todayTotal();
+    const result = await generateText({
+      model: createAssistantModel({ fetch: fake.fetch }),
+      prompt: "hi",
+      maxOutputTokens: 8,
+      providerOptions: assistantProviderOptions(MODEL),
+    });
+    expect(result.text).toBe("once");
+    expect(fake.requests).toHaveLength(1);
+    expect((await todayTotal()) - before).toBe(BigInt(2));
   });
 
   it("logs and continues when the ledger write fails twice", async () => {
