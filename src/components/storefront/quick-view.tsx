@@ -101,12 +101,12 @@ export function QuickView({ listing, onClose }: { listing: StorefrontListing; on
             ))}
           </fieldset>
         )}
-        <p>{detail?.description ?? "A familiar favorite from your neighborhood shelves."}</p>
         {selection.statusMessage && (
           <p className="sf-quick-status" role="status">
             {selection.statusMessage}
           </p>
         )}
+        <p>{detail?.description ?? "A familiar favorite from your neighborhood shelves."}</p>
         <div className="sf-quick-view-add">
           <span>{selection.heading}</span>
           <QuickAddStepper disabled={selection.addDisabled} item={selection.cartItem} />
