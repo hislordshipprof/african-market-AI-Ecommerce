@@ -5,6 +5,8 @@ vi.hoisted(() => {
 });
 
 const { headerState, headerAls } = vi.hoisted(() => {
+  // vi.hoisted runs before ESM imports, so AsyncLocalStorage is loaded here.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { AsyncLocalStorage } = require("node:async_hooks") as {
     AsyncLocalStorage: typeof import("node:async_hooks").AsyncLocalStorage;
   };
@@ -124,9 +126,17 @@ class CookieJar {
   }
 }
 
-function redirectTo(url: string) {
+// Vitest honors asymmetricMatch at runtime. Its toThrow parameter type only lists Error.
+function asExpectedError(matcher: {
+  asymmetricMatch(received: unknown): boolean;
+  toString(): string;
+}): Error {
+  return matcher as unknown as Error;
+}
+
+function redirectTo(url: string): Error {
   let actual = "no redirect";
-  return {
+  return asExpectedError({
     asymmetricMatch(received: unknown) {
       if (!isRedirectError(received)) {
         actual = received instanceof Error ? `${received.name}: ${received.message}` : String(received);
@@ -138,17 +148,17 @@ function redirectTo(url: string) {
     toString() {
       return `redirect to ${url} (saw ${actual})`;
     },
-  };
+  });
 }
 
-const notFoundError = {
+const notFoundError = asExpectedError({
   asymmetricMatch(received: unknown) {
     return isHTTPAccessFallbackError(received) && getAccessFallbackHTTPStatus(received) === 404;
   },
   toString() {
     return "Next not-found 404";
   },
-};
+});
 
 function signIn(slug: string): string {
   return `/store-admin/sign-in?store=${slug}`;
@@ -925,7 +935,7 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     return { token, ownerOutcome, staffOutcome };
   }
 
-  function expectOwnerWon(outcome: PromiseSettledResult<Awaited<ReturnType<typeof csvCommitAction>>>, token: string) {
+  function expectOwnerWon(outcome: PromiseSettledResult<Awaited<ReturnType<typeof csvCommitAction>>>) {
     expect(outcome.status).toBe("fulfilled");
     if (outcome.status !== "fulfilled") return;
     expect(outcome.value.error).toBeUndefined();
@@ -937,7 +947,7 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
   it("staff and owner commit the same token concurrently", async () => {
     const name = `Race ${RUN}`;
     const { token, ownerOutcome, staffOutcome } = await raceOwnerStaff(name);
-    expectOwnerWon(ownerOutcome, token);
+    expectOwnerWon(ownerOutcome);
     expect(staffOutcome.status).toBe("rejected");
     if (staffOutcome.status === "rejected") expect(staffOutcome.reason).toEqual(redirectTo(staffHome(storeASlug)));
     const listings = await storeScoped(storeAId).listing.findMany({ where: { customName: name } });
@@ -949,7 +959,7 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
   it("concurrent owner and staff commit attributes every effect to the owner", async () => {
     const name = `Race actor ${RUN}`;
     const { token, ownerOutcome, staffOutcome } = await raceOwnerStaff(name);
-    const listingId = expectOwnerWon(ownerOutcome, token);
+    const listingId = expectOwnerWon(ownerOutcome);
     expect(staffOutcome.status).toBe("rejected");
     if (staffOutcome.status === "rejected") expect(staffOutcome.reason).toEqual(redirectTo(staffHome(storeASlug)));
     const imported = await storeScoped(storeAId).listingImport.findUnique({ where: { id: token } });
