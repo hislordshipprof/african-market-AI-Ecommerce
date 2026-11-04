@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { generateTOTP } from "./totp";
+import { deleteInboxOrder, insertInboxOrder, setInboxOrderStatus } from "./order-fixture";
 
 const OWNER_EMAIL = "owner@mama-ngozi.test";
 const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
@@ -146,6 +147,40 @@ test.describe("Order inbox", () => {
     expect(totalText).toMatch(/^\$\d+\.\d{2}$/);
     expect(totalText).not.toBe("$0.00");
     await expect(page.getByTestId("order-captured")).toHaveText(totalText);
+  });
+
+  test("the Captured line appears only after the order is ready", async ({ page }) => {
+    const number = 18601;
+    await insertInboxOrder({ number, status: "PICKING", capturedAmountCents: 2500 });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.locator(`text=Order #${number}`)).toBeVisible();
+      await expect(page.getByTestId("order-captured")).toHaveCount(0);
+
+      await setInboxOrderStatus(number, "AWAITING_PICKUP");
+      await page.reload();
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByTestId("order-captured")).toHaveText("$25.00");
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("a refund-failed order tells staff the platform is resolving it", async ({ page }) => {
+    const number = 18602;
+    await insertInboxOrder({ number, status: "REFUND_FAILED", capturedAmountCents: 1800 });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByText("The platform team is resolving this refund. Do not refund the customer yourself.")).toBeVisible();
+      await expect(page.getByTestId("order-captured")).toHaveText("$18.00");
+      await expect(page.getByText("refund them another way")).toHaveCount(0);
+    } finally {
+      await deleteInboxOrder(number);
+    }
   });
 
   test("no horizontal overflow at 390px mobile", async ({ page }) => {

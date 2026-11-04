@@ -2102,7 +2102,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("AWAITING_PICKUP");
   });
 
-  it("repeated capture 500s release the hold instead of CAPTURE_FAILED", async () => {
+  it("repeated capture 500s release the hold", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
     setNextCaptureFailure(order.paymentIntentId!, 10);

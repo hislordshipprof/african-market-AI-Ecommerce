@@ -230,6 +230,8 @@ Transitional statuses `CAPTURING` and `CANCELLING` are set inside a DB transacti
 
 Pickup orders skip the `READY` status entirely: once all lines are resolved and the Stripe capture succeeds, pickup orders move directly to `AWAITING_PICKUP`. Delivery orders move to `READY`, which triggers the courier dispatch flow. This avoids an ambiguous `READY` state for pickup where the customer would need to be separately notified that the order is ready for collection — `AWAITING_PICKUP` already carries that meaning.
 
+Staff see those statuses plus `REFUND_FAILED`. There is no `CAPTURE_FAILED` status. On `REFUND_FAILED`, the inbox tells staff the platform is resolving the refund and that they must not refund the customer themselves. Staff actions return an allow-listed message, or "Something went wrong. Try again, or contact support if it keeps happening." Raw provider text is written only to the server log, with email and phone redacted.
+
 Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_STORE` → redeliver or refund, `ISSUE_REPORTED` → `PARTIALLY_REFUNDED` / `REFUNDED`.
 
 | Transition | Trigger | Side effects |

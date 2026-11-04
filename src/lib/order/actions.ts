@@ -49,13 +49,24 @@ function staffFailure(action: string, orderId: string, err: unknown): { ok: fals
   return { ok: false, error: STAFF_GENERIC_ERROR };
 }
 
+function presented<T extends { ok: boolean }>(
+  action: string,
+  orderId: string,
+  result: T,
+): T | { ok: false; error: string } {
+  if (result.ok !== false || !("error" in result)) return result;
+  const error = (result as { error?: unknown }).error;
+  if (typeof error === "string" && isAllowListed(error)) return result;
+  return staffFailure(action, orderId, error);
+}
+
 async function runStaffAction<T extends { ok: boolean }>(
   action: string,
   orderId: string,
   fn: () => Promise<T>,
 ): Promise<T | { ok: false; error: string }> {
   try {
-    return await fn();
+    return presented(action, orderId, await fn());
   } catch (err) {
     return staffFailure(action, orderId, err);
   }
