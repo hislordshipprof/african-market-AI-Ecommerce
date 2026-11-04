@@ -239,6 +239,24 @@ describe("auditCatalogPhotos", () => {
     }
   });
 
+  it("does not start a new key after an already-settled HeadObject failure (E4, E7)", async () => {
+    const keys = Array.from({ length: 20 }, (_, index) => `catalog/k${String(index).padStart(2, "0")}.webp`);
+    for (const failing of ["catalog/k03.webp", "catalog/k07.webp"]) {
+      const calls: string[] = [];
+      await expect(auditCatalogPhotos({
+        products: keys.map((key, index) => product({ id: `${failing}-${index}`, name: key, imageUrl: key })),
+        headObject: async (key) => {
+          calls.push(key);
+          if (key === failing) {
+            throw Object.assign(new Error("denied"), { name: "Unknown", $metadata: { httpStatusCode: 403 } });
+          }
+          return "missing";
+        },
+      })).rejects.toThrow(`HeadObject failed for ${failing}: HTTP 403`);
+      expect(calls).toEqual(keys.slice(0, 8));
+    }
+  });
+
   it("stops scheduling after failure and consumes late rejections (E29)", async () => {
     const keys = ["catalog/a.webp", "catalog/b.webp", "catalog/c.webp"];
     const deferred = new Map<string, { resolve: (value: HeadResult) => void; reject: (err: unknown) => void }>();

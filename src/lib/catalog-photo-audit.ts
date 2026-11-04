@@ -136,34 +136,29 @@ async function checkKeys(
   headObject: (key: string) => Promise<HeadResult>,
 ): Promise<Map<string, HeadResult>> {
   const results = new Map<string, HeadResult>();
-  let next = 0;
   let firstError: CatalogAuditError | null = null;
 
-  async function worker(): Promise<void> {
-    for (;;) {
-      const index = next;
-      if (index >= keys.length) return;
-      next = index + 1;
-      const key = keys[index]!;
-      try {
-        const result = await headObject(key);
-        if (firstError) return;
-        if (result !== "present" && result !== "missing") {
-          throw new CatalogAuditError(`HeadObject failed for ${key}: unexpected result`, {
-            key,
-            statusLabel: "unexpected",
-          });
-        }
-        results.set(key, result);
-      } catch (err) {
-        if (!firstError) firstError = failureFor(key, err);
-        return;
+  async function one(key: string): Promise<void> {
+    try {
+      const result = await headObject(key);
+      if (result !== "present" && result !== "missing") {
+        throw new CatalogAuditError(`HeadObject failed for ${key}: unexpected result`, {
+          key,
+          statusLabel: "unexpected",
+        });
       }
+      if (!firstError) results.set(key, result);
+    } catch (err) {
+      if (!firstError) firstError = failureFor(key, err);
     }
   }
 
-  const workers = Array.from({ length: Math.min(limit, keys.length) }, () => worker());
-  await Promise.all(workers);
+  // Finish the keys already started before taking another. A worker that
+  // returns first must not dequeue while a sibling rejection is still queued.
+  for (let index = 0; index < keys.length && !firstError; index += limit) {
+    const batch = keys.slice(index, index + limit);
+    await Promise.all(batch.map((key) => one(key)));
+  }
   if (firstError) throw firstError;
   return results;
 }
