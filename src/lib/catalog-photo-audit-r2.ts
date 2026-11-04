@@ -48,29 +48,13 @@ function httpStatus(err: unknown): number | undefined {
 async function sendForStatus(
   client: S3Client,
   command: HeadBucketCommand | HeadObjectCommand,
-  timeoutMs: number,
   what: "HeadBucket" | "HeadObject",
   name: string,
 ): Promise<number> {
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const sent = client.send(command as unknown as HeadBucketCommand, { abortSignal: controller.signal }) as Promise<HeadResponse>;
-  // The SDK's default request timeout is 0. Race our own deadline so a stalled
-  // socket cannot hang the process, and abort the request when it fires.
-  const timedOut = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(Object.assign(new Error("request timed out"), { name: "TimeoutError" }));
-    }, timeoutMs);
-  });
-  const settled = sent.then(
-    (response) => response,
-    (err: unknown) => Promise.reject(err),
-  );
-  void sent.catch(() => undefined);
-  void settled.catch(() => undefined);
+  // NodeHttpHandler's requestTimeout is the deadline. The SDK default is 0,
+  // which would leave a stalled socket open, so every client is built with one.
   try {
-    const response = await Promise.race([settled, timedOut]);
+    const response = (await client.send(command as unknown as HeadBucketCommand)) as HeadResponse;
     const status = response?.$metadata?.httpStatusCode;
     if (typeof status !== "number") {
       throw new CatalogAuditError(`${what} failed for ${name}: no status`, {
@@ -90,8 +74,6 @@ async function sendForStatus(
       bucket: what === "HeadBucket" ? name : undefined,
       statusLabel: label,
     });
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 
@@ -111,7 +93,6 @@ export function createR2HeadObject(config: R2HeadConfig, deps?: { client?: S3Cli
       const status = await sendForStatus(
         client,
         new HeadBucketCommand({ Bucket: config.bucket }),
-        timeoutMs,
         "HeadBucket",
         config.bucket,
       );
@@ -126,7 +107,6 @@ export function createR2HeadObject(config: R2HeadConfig, deps?: { client?: S3Cli
       const status = await sendForStatus(
         client,
         new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
-        timeoutMs,
         "HeadObject",
         key,
       );

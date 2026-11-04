@@ -141,7 +141,6 @@ async function checkKeys(
 
   async function worker(): Promise<void> {
     for (;;) {
-      if (firstError) return;
       const index = next;
       if (index >= keys.length) return;
       next = index + 1;
