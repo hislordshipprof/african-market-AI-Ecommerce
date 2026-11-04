@@ -981,13 +981,15 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
       while (Date.now() - start < 15_000 && !held) {
         await owner.query("BEGIN");
         try {
-          await owner.query("SET LOCAL lock_timeout = '200ms'");
+          // 50ms, then a gap with no request queued. A waiting ACCESS EXCLUSIVE
+          // blocks later locks on the table even before it is granted.
+          await owner.query("SET LOCAL lock_timeout = '50ms'");
           await owner.query("LOCK TABLE listing_variants IN ACCESS EXCLUSIVE MODE");
           held = true;
         } catch (err) {
           await owner.query("ROLLBACK");
           if (pgCode(err) !== "55P03") throw err;
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          await new Promise((resolve) => setTimeout(resolve, 400));
         }
       }
       expect(held).toBe(true);
