@@ -25,6 +25,7 @@ vi.mock("next/cache", () => ({
   revalidateTag: vi.fn(),
 }));
 
+import { Prisma } from "@prisma/client";
 import { headers } from "next/headers";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { getURLFromRedirectError } from "next/dist/client/components/redirect";
@@ -661,12 +662,29 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
       await tx.$executeRaw`DELETE FROM listings WHERE store_id IN (${storeIds[0]}, ${storeIds[1]}, ${storeIds[2]}, ${storeIds[3]})`;
       await tx.$executeRaw`DELETE FROM listing_imports WHERE store_id IN (${storeIds[0]}, ${storeIds[1]}, ${storeIds[2]}, ${storeIds[3]})`;
       await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id IN (${storeIds[0]}, ${storeIds[1]}, ${storeIds[2]}, ${storeIds[3]})`;
-      const emailLike = "%t222-%@example.com";
-      await tx.$executeRaw`DELETE FROM two_factors WHERE user_id IN (SELECT id FROM users WHERE email LIKE ${emailLike})`;
-      await tx.$executeRaw`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email LIKE ${emailLike})`;
-      await tx.$executeRaw`DELETE FROM accounts WHERE user_id IN (SELECT id FROM users WHERE email LIKE ${emailLike})`;
-      await tx.$executeRaw`DELETE FROM verifications WHERE value LIKE ${emailLike} OR value IN (SELECT id FROM users WHERE email LIKE ${emailLike})`;
-      await tx.$executeRaw`DELETE FROM users WHERE email LIKE ${emailLike}`;
+      const runEmails = Object.values(emails);
+      const found = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM users WHERE email IN (${Prisma.join(runEmails)})
+      `;
+      const userIds = [
+        ...new Set([
+          ...Object.values(ids).filter((id): id is string => typeof id === "string" && id.length > 0),
+          ...found.map((row) => row.id),
+        ]),
+      ];
+      if (userIds.length > 0) {
+        await tx.$executeRaw`DELETE FROM two_factors WHERE user_id IN (${Prisma.join(userIds)})`;
+        await tx.$executeRaw`DELETE FROM sessions WHERE user_id IN (${Prisma.join(userIds)})`;
+        await tx.$executeRaw`DELETE FROM accounts WHERE user_id IN (${Prisma.join(userIds)})`;
+        await tx.$executeRaw`DELETE FROM users WHERE id IN (${Prisma.join(userIds)})`;
+      }
+      const verificationMatch = [
+        ...runEmails.map((email) => Prisma.sql`value LIKE ${`%${email}%`} OR identifier LIKE ${`%${email}%`}`),
+        ...userIds.map((id) => Prisma.sql`value = ${id} OR identifier = ${id}`),
+      ];
+      if (verificationMatch.length > 0) {
+        await tx.$executeRaw`DELETE FROM verifications WHERE ${Prisma.join(verificationMatch, " OR ")}`;
+      }
       await tx.$executeRaw`DELETE FROM stores WHERE id IN (${storeIds[0]}, ${storeIds[1]}, ${storeIds[2]}, ${storeIds[3]})`;
     }, { timeout: 60_000 });
   }, 120_000);
@@ -881,6 +899,7 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
   });
 
   it("staff double submit leaves the token pending; owner commits once", async () => {
+    const fixture = await importCounted(storeASlug, cookies.ownerA, `Fixture ${RUN}`);
     const name = `Double ${RUN}`;
     asStore(storeASlug, cookies.ownerA);
     const ownerBefore = await actorCounts(ids.ownerA);
@@ -892,8 +911,14 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     expect(pending?.status).toBe("pending");
     asStore(storeASlug, cookies.staff);
     const staffBefore = await actorCounts(ids.staff);
+    const beforeFirst = await catalogSnapshot(storeAId);
+    expect(beforeFirst.listings.some((row) => (row as { id: string }).id === fixture.listingId)).toBe(true);
     await expect(csvCommitAction(token, selection)).rejects.toThrow(redirectTo(staffHome(storeASlug)));
+    expect(await catalogSnapshot(storeAId)).toEqual(beforeFirst);
+    expect(await tokenView(storeAId, token)).toEqual(pending);
+    const beforeSecond = await catalogSnapshot(storeAId);
     await expect(csvCommitAction(token, selection)).rejects.toThrow(redirectTo(staffHome(storeASlug)));
+    expect(await catalogSnapshot(storeAId)).toEqual(beforeSecond);
     expect(await tokenView(storeAId, token)).toEqual(pending);
     expect(await actorCounts(ids.staff)).toEqual(staffBefore);
     asStore(storeASlug, cookies.ownerA);
