@@ -1,0 +1,33 @@
+diff --git a/dist/index.js b/dist/index.js
+index 52290d72d5d7f5d80dbd35cde7ec42174246eb20..f3ccec393342491e47e1e7f1c9a6c58d43afcd21 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -7453,8 +7453,27 @@ function createAnthropic(options = {}) {
+ }
+ /**
+ * Default Anthropic provider instance.
++* Created on first use so importing `createAnthropic` does not read
++* ANTHROPIC_BASE_URL. An empty base URL would throw at module load.
+ */
+-const anthropic = createAnthropic();
++function lazyDefaultAnthropic() {
++	let instance;
++	const load = () => instance ??= createAnthropic();
++	return new Proxy(function anthropic() {}, {
++		apply(_target, thisArg, args) {
++			return Reflect.apply(load(), thisArg, args);
++		},
++		get(_target, prop, receiver) {
++			if (prop === "then") return;
++			const value = Reflect.get(load(), prop, receiver);
++			return typeof value === "function" ? value.bind(load()) : value;
++		},
++		has(_target, prop) {
++			return Reflect.has(load(), prop);
++		}
++	});
++}
++const anthropic = lazyDefaultAnthropic();
+ //#endregion
+ //#region src/forward-anthropic-container-id-from-last-step.ts
+ /**
