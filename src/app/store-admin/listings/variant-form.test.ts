@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { serializeVariants } from "./variant-form";
+import { loadedVariantRow, serializeVariants } from "./variant-form";
+
+describe("loadedVariantRow", () => {
+  it("keeps the variant id on the row the form will save", () => {
+    expect(loadedVariantRow({
+      id: "var_loaded",
+      label: "1kg",
+      price: 800,
+      weightG: 1000,
+      sku: "SKU-1",
+      barcode: null,
+    })).toEqual({
+      key: "var_loaded",
+      id: "var_loaded",
+      label: "1kg",
+      price: "8.00",
+      weightG: "1000",
+      sku: "SKU-1",
+      barcode: null,
+    });
+  });
+});
 
 describe("serializeVariants", () => {
   it("loaded rows carry their id, new rows carry none, and blank-label rows are dropped", () => {

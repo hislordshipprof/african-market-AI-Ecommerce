@@ -46,7 +46,7 @@ import {
   reactivateListingAction,
   listMasterProductsAction,
 } from "@/lib/listing/actions";
-import { serializeVariants } from "./variant-form";
+import { loadedVariantRow, serializeVariants } from "./variant-form";
 import {
   ArrowLeft,
   Plus,
@@ -252,17 +252,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     setPerishable(listing.perishable);
     setMaxPerOrder(listing.maxPerOrder ? String(listing.maxPerOrder) : "");
     setMasterProductId(listing.masterProductId);
-    setVariants(
-      listing.variants.map((v) => ({
-        key: v.id,
-        id: v.id,
-        label: v.label,
-        price: (v.price / 100).toFixed(2),
-        weightG: String(v.weightG),
-        sku: v.sku,
-        barcode: v.barcode,
-      })),
-    );
+    setVariants(listing.variants.map(loadedVariantRow));
     searchMasterProducts("");
     const currentMaster =
       listing.masterProductId && listing.masterProductName

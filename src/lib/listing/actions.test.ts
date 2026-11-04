@@ -273,6 +273,7 @@ describe("updateListingAction", () => {
     mockUpdateListing.mockRejectedValueOnce(new Error("Not found"));
     const result = await updateListingAction(formData({ listingId: "x" }));
     expect(result.error).toBe("Not found");
+    expect(revalidateStorefront).not.toHaveBeenCalled();
   });
 });
 

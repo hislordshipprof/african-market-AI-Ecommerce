@@ -11,6 +11,26 @@ export interface VariantFormSnapshot {
   barcode?: string | null;
 }
 
+/** A variant loaded from the listing. The React key is the id, and the id is sent back on save. */
+export function loadedVariantRow(variant: {
+  id: string;
+  label: string;
+  price: number;
+  weightG: number;
+  sku: string | null;
+  barcode: string | null;
+}): VariantFormSnapshot {
+  return {
+    key: variant.id,
+    id: variant.id,
+    label: variant.label,
+    price: (variant.price / 100).toFixed(2),
+    weightG: String(variant.weightG),
+    sku: variant.sku,
+    barcode: variant.barcode,
+  };
+}
+
 /** Serialises variant rows for the listing form. Blank labels are omitted. */
 export function serializeVariants(variants: VariantFormSnapshot[]): string {
   return JSON.stringify(
