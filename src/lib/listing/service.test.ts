@@ -848,4 +848,85 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       await rawPrisma.store.deleteMany({ where: { slug: "svc-listing-test-b" } });
     }
   });
+
+  it("same-store stock writes still record one event each", async () => {
+    const created = await createListing({
+      storeId,
+      customName: "Counted Yam",
+      price: 700,
+      stockMode: "counted",
+      qty: 7,
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1kg", price: 700, weightG: 1000 }],
+      actor,
+    });
+    const recounts = await storeScoped(storeId).stockEvent.findMany({
+      where: { listingId: created.id, type: "recount" },
+    });
+    expect(recounts).toHaveLength(1);
+    expect(recounts[0].delta).toBe(7);
+    expect(recounts[0].storeId).toBe(storeId);
+    expect(recounts[0].actorId).toBe(actor.id);
+
+    await updateListing({ storeId, listingId: created.id, qty: 4, actor });
+    const adjusts = await storeScoped(storeId).stockEvent.findMany({
+      where: { listingId: created.id, type: "adjust" },
+    });
+    expect(adjusts).toHaveLength(1);
+    expect(adjusts[0].delta).toBe(-3);
+    expect(adjusts[0].actorId).toBe(actor.id);
+
+    const statusListing = await createListing({
+      storeId,
+      customName: "Status Pepper",
+      price: 300,
+      stockMode: "status",
+      status: "in_stock",
+      frozen: false,
+      perishable: true,
+      variants: [{ label: "1 bunch", price: 300, weightG: 200 }],
+      actor,
+    });
+    await updateListing({
+      storeId,
+      listingId: statusListing.id,
+      status: "out_of_stock",
+      actor,
+    });
+    const statusEvents = await storeScoped(storeId).stockEvent.findMany({
+      where: { listingId: statusListing.id },
+    });
+    expect(statusEvents).toHaveLength(1);
+    expect(statusEvents[0].type).toBe("adjust");
+    expect(statusEvents[0].delta).toBe(0);
+    expect(statusEvents[0].storeId).toBe(storeId);
+  });
+
+  it("a qty-0 or status-mode listing creates no stock event", async () => {
+    const zero = await createListing({
+      storeId,
+      customName: "Empty Crate",
+      price: 100,
+      stockMode: "counted",
+      qty: 0,
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1", price: 100, weightG: 100 }],
+      actor,
+    });
+    const status = await createListing({
+      storeId,
+      customName: "Status Only Crate",
+      price: 100,
+      stockMode: "status",
+      status: "in_stock",
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1", price: 100, weightG: 100 }],
+      actor,
+    });
+    expect(await storeScoped(storeId).stockEvent.findMany({ where: { listingId: zero.id } })).toEqual([]);
+    expect(await storeScoped(storeId).stockEvent.findMany({ where: { listingId: status.id } })).toEqual([]);
+  });
 });

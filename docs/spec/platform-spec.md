@@ -40,10 +40,10 @@ A multi-tenant e-commerce platform for independent African grocery markets in th
 | D9 | Customer accounts | One account across all stores + guest checkout ([ADR-0002](../adr/0002-platform-wide-customer-account-with-guest-checkout.md)) |
 | D10 | Branding | Store's brand only; small "Powered by" footer ([ADR-0003](../adr/0003-store-branded-storefronts.md)) |
 | D11 | System shape | One shared system for all stores ([ADR-0005](../adr/0005-one-shared-system-for-all-stores.md)) |
-| D12 | Phase 1 order | Core loop first; Store delivery (simple) in Phase 1; AI shopper is the last Phase 1 slice |
+| D12 | Phase 1 order | Core loop first; Store delivery (simple) in Phase 1; AI shopper is built in parallel and launched last ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)) |
 | D13 | Stock & POS | No POS sync in v1: online sales auto-deduct, proactive Store copilot + owner reports, pick-time check ([ADR-0009](../adr/0009-stock-without-pos-sync.md)) |
 | D14 | AI channels | Shopper assistant: storefront (Phase 1), store's own WhatsApp number (Phase 2). Store copilot: admin app + platform WhatsApp number (Phase 1) ([ADR-0010](../adr/0010-whatsapp-channels.md)) |
-| D15 | Shopper assistant scope | Builds carts and answers order status, hours, delivery area and policies from real data; complaints and refunds go to the store |
+| D15 | Shopper assistant scope | Agentic shopper: searches with the shopper (incl. product photos and photo uploads), builds the cart, confirms the summary, takes the shopper through checkout with saved details; the order is placed only when the shopper taps a server-drawn confirm card, with a 10-minute cancel window. Answers order status, hours, delivery area and policies from real data; complaints and refunds go to the store ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)) |
 | D16 | Promotions | None in Phase 1 (no coupons, points, store credit) |
 
 ---
@@ -156,7 +156,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 
 ## 8. AI assistants
 
-Model: Claude (latest Sonnet-class for chat, Haiku-class for cheap classification/matching) via tool use. All tools are server-side, tenant-scoped, and permission-checked; the model never sees other tenants' data.
+Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant defaults to Haiku 5.5 and moves to Sonnet 5.5 only if Haiku fails the #146 eval; the model id is a config setting. Build-phase spend cap: $10 total ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)). All tools are server-side, tenant-scoped, and permission-checked; the model never sees other tenants' data.
 
 ### 8.1 Shopper assistant
 **Tools**
@@ -168,7 +168,11 @@ Model: Claude (latest Sonnet-class for chat, Haiku-class for cheap classificatio
 | `suggest_substitutes(listing_id)` | Ranked culturally valid swaps |
 | `add_to_cart / update_cart / remove_from_cart` | Cart edits, visible to user in real time |
 | `set_swap_rule(line_id, rule)` | Records customer's preference |
-| `prepare_checkout()` | Navigates user to checkout with summary; **cannot submit payment** |
+| `show_products(listing_ids)` | Product cards with catalog photo, price and stock, drawn from data |
+| `get_cart_summary()` | Item summary card for the shopper to confirm |
+| `get_fulfillment_options() / set_fulfillment(option)` | Only options this store and cart allow, with real fees and times |
+| `get_checkout_profile()` | Masked facts only ("card on file: Visa 4242"); raw contact, address and card data never reach the model |
+| `prepare_checkout()` | Saves an immutable checkout snapshot and shows the confirm card; **cannot place the order** — only the shopper's tap on the card does, via a single-use token that bypasses the model ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)) |
 | `get_order_status(order_id)` | Own orders only |
 
 **Rules**
@@ -176,6 +180,8 @@ Model: Claude (latest Sonnet-class for chat, Haiku-class for cheap classificatio
 - Always show what it added and what it couldn't find, with alternatives.
 - Ask before assuming quantities when servings are unclear; default to recipe scaling.
 - Never claims a price/stock it didn't get from a tool. No medical/nutrition claims beyond product data.
+- Shows product photos on request; accepts shopper photos of an item or a list and matches them through `search_catalog`; may ask for a photo when it can't match a name.
+- Never places an order or touches card data. Payment happens only on the shopper's tap on the confirm card; the shopper can cancel for 10 minutes after placing (hold voided).
 - Languages: English first; understands Nigerian Pidgin and common Yoruba/Igbo/Hausa/Twi/Amharic/Swahili/Somali food terms via the synonym base.
 
 ### 8.2 Store copilot

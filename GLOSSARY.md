@@ -73,8 +73,14 @@ A stock change the store owner tells the Store copilot about (a restock, counter
 ## Assistants
 
 **Shopper assistant**:
-The AI that helps a customer build a cart and answers their questions about a store, on the storefront and later on the store's WhatsApp. It never pays.
+The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: only the customer's tap on a **Confirm card** places the order.
 _Avoid_: AI shopper, chatbot
+
+**Confirm card**:
+The final card in the Shopper assistant's checkout, drawn by the server from a saved checkout snapshot: items, fulfillment, fees, hold amount and card. Tapping its Place order button is the only way an assistant order is placed.
+
+**Cancel window**:
+The 10 minutes after an assistant order is placed during which the customer can cancel it and the card hold is voided. The store is alerted when it ends.
 
 **Store copilot**:
 The proactive AI that keeps a store's stock current and tells the owner what needs attention, in the store admin and on WhatsApp.
