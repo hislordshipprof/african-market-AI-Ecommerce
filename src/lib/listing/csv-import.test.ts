@@ -488,12 +488,57 @@ describe("validateFileSize", () => {
 });
 
 const hasDb = !!process.env.DATABASE_URL;
+const RUN = `t203-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+async function auditsForImport(storeId: string, importId: string) {
+  const logs = await storeScoped(storeId).auditLog.findMany({
+    where: { action: "catalog.csv_import" },
+  });
+  return logs.filter((entry) => {
+    const after = entry.after as { importId?: string } | null;
+    return after?.importId === importId;
+  });
+}
+
+async function expectForeignKey(run: () => Promise<unknown>, constraint: string) {
+  let caught: unknown;
+  try {
+    await run();
+  } catch (error) {
+    caught = error;
+  }
+  const code = typeof caught === "object" && caught !== null && "code" in caught
+    ? (caught as { code: unknown }).code
+    : "";
+  const message = caught instanceof Error ? caught.message : "";
+  expect(code).toBe("P2003");
+  expect(message).toContain(constraint);
+}
+
+async function expectRlsRejection(run: () => Promise<unknown>) {
+  let caught: unknown;
+  try {
+    await run();
+  } catch (error) {
+    caught = error;
+  }
+  const message = caught instanceof Error ? caught.message : "";
+  expect(message).toMatch(/42501|row-level security/i);
+}
+
+async function expectPendingImport(storeId: string, importId: string) {
+  const token = await storeScoped(storeId).listingImport.findUnique({ where: { id: importId } });
+  expect(token?.status).toBe("pending");
+  expect(token?.committedAt).toBeNull();
+  expect(await auditsForImport(storeId, importId)).toEqual([]);
+}
 
 describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
   let rawPrisma: PrismaClient;
   let storeAId: string;
   let storeBId: string;
   let testUserId: string;
+  let testUserEmail: string;
   const mpIds: string[] = [];
 
   beforeAll(async () => {
@@ -501,42 +546,37 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
     rawPrisma = new PrismaClient({ adapter });
     await rawPrisma.$connect();
 
-    const storeA = await rawPrisma.store.upsert({
-      where: { slug: "csv-import-test-a" },
-      update: {},
-      create: { slug: "csv-import-test-a", name: "CSV Import Store A", themePreset: "palm-and-shea" },
+    const storeA = await rawPrisma.store.create({
+      data: { slug: `csv-import-a-${RUN}`, name: `CSV Import Store A ${RUN}`, themePreset: "palm-and-shea" },
     });
     storeAId = storeA.id;
 
-    const storeB = await rawPrisma.store.upsert({
-      where: { slug: "csv-import-test-b" },
-      update: {},
-      create: { slug: "csv-import-test-b", name: "CSV Import Store B", themePreset: "lagoon-and-coral" },
+    const storeB = await rawPrisma.store.create({
+      data: { slug: `csv-import-b-${RUN}`, name: `CSV Import Store B ${RUN}`, themePreset: "lagoon-and-coral" },
     });
     storeBId = storeB.id;
 
-    const user = await rawPrisma.user.upsert({
-      where: { email: "csv-import-test@example.com" },
-      update: {},
-      create: { id: "csv-import-user", email: "csv-import-test@example.com", name: "CSV Test User", emailVerified: true },
+    testUserEmail = `csv-import-${RUN}@example.com`;
+    const user = await rawPrisma.user.create({
+      data: { id: `csv-import-user-${RUN}`, email: testUserEmail, name: "CSV Test User", emailVerified: true },
     });
     testUserId = user.id;
 
     const mp1 = await platformAdmin.masterProduct.create({
-      data: { name: "Zola Citrus Oil T63", frozen: false, perishable: false, status: "active" },
+      data: { name: `Zola Citrus Oil T63 ${RUN}`, frozen: false, perishable: false, status: "active" },
     });
     mpIds.push(mp1.id);
 
     const mp2 = await platformAdmin.masterProduct.create({
-      data: { name: "Bimba Seed Flour T63", frozen: false, perishable: false, status: "active" },
+      data: { name: `Bimba Seed Flour T63 ${RUN}`, frozen: false, perishable: false, status: "active" },
     });
     mpIds.push(mp2.id);
 
     await platformAdmin.productSynonym.create({
-      data: { productId: mp2.id, term: "Bimba Seeds T63" },
+      data: { productId: mp2.id, term: `Bimba Seeds T63 ${RUN}` },
     });
     await platformAdmin.productSynonym.create({
-      data: { productId: mp2.id, term: "bimba ground t63" },
+      data: { productId: mp2.id, term: `bimba ground t63 ${RUN}` },
     });
 
     const scopedA = storeScoped(storeAId);
@@ -563,24 +603,25 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
       rawPrisma.productSynonym.deleteMany({ where: { productId: { in: mpIds } } }),
       rawPrisma.masterProduct.deleteMany({ where: { id: { in: mpIds } } }),
     ]);
-    await rawPrisma.user.deleteMany({ where: { email: "csv-import-test@example.com" } });
-    await rawPrisma.store.deleteMany({ where: { slug: { in: ["csv-import-test-a", "csv-import-test-b"] } } });
+    await rawPrisma.user.delete({ where: { id: testUserId } });
+    await rawPrisma.store.delete({ where: { id: storeAId } });
+    await rawPrisma.store.delete({ where: { id: storeBId } });
     await rawPrisma.$disconnect();
   });
 
   it("AC2: matches exact name (Zola Citrus Oil T63)", async () => {
-    const csv = "name,price\nZola Citrus Oil T63,8.99\n";
+    const csv = `name,price\nZola Citrus Oil T63 ${RUN},8.99\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.alreadyListed).toHaveLength(1);
-    expect(preview.alreadyListed[0].masterProductName).toBe("Zola Citrus Oil T63");
+    expect(preview.alreadyListed[0].masterProductName).toBe(`Zola Citrus Oil T63 ${RUN}`);
   });
 
   it("AC2: matches via synonym (Bimba Seeds T63)", async () => {
-    const csv = "name,price\nBimba Seeds T63,12.50\n";
+    const csv = `name,price\nBimba Seeds T63 ${RUN},12.50\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.matches).toHaveLength(1);
     expect(preview.matches[0].matchType).toBe("synonym");
-    expect(preview.matches[0].masterProductName).toBe("Bimba Seed Flour T63");
+    expect(preview.matches[0].masterProductName).toBe(`Bimba Seed Flour T63 ${RUN}`);
   });
 
   it("AC2: no match creates new item", async () => {
@@ -591,45 +632,45 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
   });
 
   it("E7: already listed product shown as 'already listed'", async () => {
-    const csv = "name,price\nZola Citrus Oil T63,10.99\n";
+    const csv = `name,price\nZola Citrus Oil T63 ${RUN},10.99\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.alreadyListed).toHaveLength(1);
-    expect(preview.alreadyListed[0].csvName).toBe("Zola Citrus Oil T63");
+    expect(preview.alreadyListed[0].csvName).toBe(`Zola Citrus Oil T63 ${RUN}`);
   });
 
   it("E6: duplicate rows flagged", async () => {
-    const csv = "name,price\nBimba Seeds T63,12.50\nBimba Seeds T63,15.00\n";
+    const csv = `name,price\nBimba Seeds T63 ${RUN},12.50\nBimba Seeds T63 ${RUN},15.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.duplicates).toHaveLength(1);
-    expect(preview.duplicates[0].csvName).toBe("Bimba Seeds T63");
+    expect(preview.duplicates[0].csvName).toBe(`Bimba Seeds T63 ${RUN}`);
     expect(preview.duplicates[0].firstRow).toBe(2);
   });
 
   it("N3: duplicate rows flagged by masterProductId, not only by name", async () => {
-    const csv = "name,price\nBimba Seeds T63,12.50\nbimba ground t63,15.00\n";
+    const csv = `name,price\nBimba Seeds T63 ${RUN},12.50\nbimba ground t63 ${RUN},15.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.duplicates).toHaveLength(1);
-    expect(preview.duplicates[0].csvName).toBe("bimba ground t63");
+    expect(preview.duplicates[0].csvName).toBe(`bimba ground t63 ${RUN}`);
     expect(preview.duplicates[0].firstRow).toBe(2);
     expect(preview.matches).toHaveLength(1);
-    expect(preview.matches[0].csvName).toBe("Bimba Seeds T63");
+    expect(preview.matches[0].csvName).toBe(`Bimba Seeds T63 ${RUN}`);
   });
 
   it("E9: unicode and accented names (Bimba vs Bîmba)", async () => {
-    const csv = "name,price\nBîmba Seeds T63,12.50\n";
+    const csv = `name,price\nBîmba Seeds T63 ${RUN},12.50\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.matches).toHaveLength(1);
     expect(preview.matches[0].matchType).toBe("synonym");
   });
 
   it("E9: leading/trailing spaces trimmed for matching", async () => {
-    const csv = "name,price\n  Bimba Seeds T63  ,12.50\n";
+    const csv = `name,price\n  Bimba Seeds T63 ${RUN}  ,12.50\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.matches).toHaveLength(1);
   });
 
   it("D1: returns DB-backed import token", async () => {
-    const csv = "name,price\nBimba Seeds T63,12.50\n";
+    const csv = `name,price\nBimba Seeds T63 ${RUN},12.50\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.importToken).toBeTruthy();
 
@@ -662,23 +703,23 @@ describe.skipIf(!hasDb)("generatePreview (DB integration)", () => {
   });
 
   it("D4: preview returned when only alreadyListed is non-empty", async () => {
-    const csv = "name,price\nZola Citrus Oil T63,10.99\n";
+    const csv = `name,price\nZola Citrus Oil T63 ${RUN},10.99\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.alreadyListed.length).toBeGreaterThan(0);
     expect(preview.importToken).toBeTruthy();
   });
 
   it("E13: commit with zero selected rows", async () => {
-    const csv = "name,price\nBimba Seeds T63,12.50\n";
+    const csv = `name,price\nBimba Seeds T63 ${RUN},12.50\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
-    const actor: Actor = { id: testUserId, email: "csv-import-test@example.com" };
+    const actor: Actor = { id: testUserId, email: testUserEmail };
     await expect(
       commitImport(storeAId, preview.importToken, {
         matchedRows: [],
         newItemRows: [],
         ambiguousResolutions: [],
       }, actor),
-    ).rejects.toThrow(/No rows selected/);
+    ).rejects.toThrow("No rows selected for import.");
   });
 
   it("N14: a non-CSV preview creates no import token", async () => {
@@ -713,54 +754,48 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     rawPrisma = new PrismaClient({ adapter });
     await rawPrisma.$connect();
 
-    const storeA = await rawPrisma.store.upsert({
-      where: { slug: "csv-commit-test-a" },
-      update: {},
-      create: { slug: "csv-commit-test-a", name: "CSV Commit A", themePreset: "palm-and-shea" },
+    const storeA = await rawPrisma.store.create({
+      data: { slug: `csv-commit-a-${RUN}`, name: `CSV Commit A ${RUN}`, themePreset: "palm-and-shea" },
     });
     storeAId = storeA.id;
 
-    const storeB = await rawPrisma.store.upsert({
-      where: { slug: "csv-commit-test-b" },
-      update: {},
-      create: { slug: "csv-commit-test-b", name: "CSV Commit B", themePreset: "lagoon-and-coral" },
+    const storeB = await rawPrisma.store.create({
+      data: { slug: `csv-commit-b-${RUN}`, name: `CSV Commit B ${RUN}`, themePreset: "lagoon-and-coral" },
     });
     storeBId = storeB.id;
 
-    const user = await rawPrisma.user.upsert({
-      where: { email: "csv-commit-test@example.com" },
-      update: {},
-      create: { id: "csv-commit-user", email: "csv-commit-test@example.com", name: "CSV Commit User", emailVerified: true },
+    const user = await rawPrisma.user.create({
+      data: { id: `csv-commit-user-${RUN}`, email: `csv-commit-${RUN}@example.com`, name: "CSV Commit User", emailVerified: true },
     });
     testUserId = user.id;
     actor = { id: user.id, email: user.email };
 
     const mp = await platformAdmin.masterProduct.create({
-      data: { name: "Kundi Flour T63", frozen: false, perishable: true, weightG: 11340, status: "active" },
+      data: { name: `Kundi Flour T63 ${RUN}`, frozen: false, perishable: true, weightG: 11340, status: "active" },
     });
     mpIds.push(mp.id);
 
     await platformAdmin.productSynonym.create({
-      data: { productId: mp.id, term: "kundi t63" },
+      data: { productId: mp.id, term: `kundi t63 ${RUN}` },
     });
 
     const ambig1 = await platformAdmin.masterProduct.create({
-      data: { name: "Ambig Spice T63", frozen: false, perishable: false, status: "active" },
+      data: { name: `Ambig Spice T63 ${RUN}`, frozen: false, perishable: false, status: "active" },
     });
     ambigMp1Id = ambig1.id;
     mpIds.push(ambig1.id);
 
     const ambig2 = await platformAdmin.masterProduct.create({
-      data: { name: "Ambig Herb T63", frozen: false, perishable: false, status: "active" },
+      data: { name: `Ambig Herb T63 ${RUN}`, frozen: false, perishable: false, status: "active" },
     });
     ambigMp2Id = ambig2.id;
     mpIds.push(ambig2.id);
 
     await platformAdmin.productSynonym.create({
-      data: { productId: ambig1.id, term: "Ambig T63" },
+      data: { productId: ambig1.id, term: `Ambig T63 ${RUN}` },
     });
     await platformAdmin.productSynonym.create({
-      data: { productId: ambig2.id, term: "Ambig T63" },
+      data: { productId: ambig2.id, term: `Ambig T63 ${RUN}` },
     });
   });
 
@@ -776,13 +811,14 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
       rawPrisma.productSynonym.deleteMany({ where: { productId: { in: mpIds } } }),
       rawPrisma.masterProduct.deleteMany({ where: { id: { in: mpIds } } }),
     ]);
-    await rawPrisma.user.deleteMany({ where: { email: "csv-commit-test@example.com" } });
-    await rawPrisma.store.deleteMany({ where: { slug: { in: ["csv-commit-test-a", "csv-commit-test-b"] } } });
+    await rawPrisma.user.delete({ where: { id: testUserId } });
+    await rawPrisma.store.delete({ where: { id: storeAId } });
+    await rawPrisma.store.delete({ where: { id: storeBId } });
     await rawPrisma.$disconnect();
   });
 
   it("AC3: creates matched listing in the correct store", async () => {
-    const csv = "name,price\nKundi T63,6.99\n";
+    const csv = `name,price\nKundi T63 ${RUN},6.99\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.matches).toHaveLength(1);
 
@@ -841,7 +877,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("B3: name,price,qty CSV → counted mode with qty stored", async () => {
-    const csv = "name,price,qty\nB3 Counted Item T63,5.00,42\n";
+    const csv = `name,price,qty\nB3 Counted Item T63 ${RUN},5.00,42\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.newItems).toHaveLength(1);
 
@@ -861,7 +897,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("B3: name,price,status CSV with out_of_stock → status mode preserving out_of_stock", async () => {
-    const csv = "name,price,status\nB3 OOS Item T63,3.00,out_of_stock\n";
+    const csv = `name,price,status\nB3 OOS Item T63 ${RUN},3.00,out_of_stock\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.newItems).toHaveLength(1);
 
@@ -881,7 +917,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("B3: name,price only CSV → status mode with default in_stock", async () => {
-    const csv = "name,price\nB3 Default Item T63,4.00\n";
+    const csv = `name,price\nB3 Default Item T63 ${RUN},4.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.newItems).toHaveLength(1);
 
@@ -901,7 +937,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("B3: explicit stock_mode=status overrides qty column presence", async () => {
-    const csv = "name,price,stock_mode,qty,status\nB3 Explicit Status T63,6.00,status,,low\n";
+    const csv = `name,price,stock_mode,qty,status\nB3 Explicit Status T63 ${RUN},6.00,status,,low\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.newItems).toHaveLength(1);
 
@@ -921,7 +957,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("B2: bulk commit of 1000 rows via createMany", async () => {
-    const rows = Array.from({ length: 1000 }, (_, i) => `B2 Bulk ${i} T63,${(i + 1)}.00`);
+    const rows = Array.from({ length: 1000 }, (_, i) => `B2 Bulk ${i} T63 ${RUN},${(i + 1)}.00`);
     const csv = "name,price\n" + rows.join("\n") + "\n";
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.newItems.length).toBe(1000);
@@ -946,7 +982,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   }, 60_000);
 
   it("D6: store isolation — store B cannot see store A listings", async () => {
-    const csv = "name,price\nStore A Only Item T63,7.50\n";
+    const csv = `name,price\nStore A Only Item T63 ${RUN},7.50\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     const result = await commitImport(
       storeAId,
@@ -963,15 +999,49 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("D6: store isolation — audit log isolated", async () => {
-    const scopedB = storeScoped(storeBId);
-    const logs = await scopedB.auditLog.findMany({
-      where: { action: "catalog.csv_import" },
-    });
-    expect(logs.every((l) => l.storeId === storeBId)).toBe(true);
+    const csv = `name,price\nAudit Isolate ${RUN},3.00\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    const entries = await auditsForImport(storeAId, preview.importToken);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].storeId).toBe(storeAId);
+    expect(entries[0].action).toBe("catalog.csv_import");
+    expect(await storeScoped(storeBId).auditLog.findUnique({ where: { id: entries[0].id } })).toBeNull();
+  });
+
+  it("audit entries are append-only for both stores", async () => {
+    const csv = `name,price\nAudit Append ${RUN},3.50\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    const entries = await auditsForImport(storeAId, preview.importToken);
+    expect(entries).toHaveLength(1);
+    const before = entries[0];
+    expect((await storeScoped(storeAId).auditLog.updateMany({
+      where: { id: before.id },
+      data: { actorEmail: `changed-${RUN}@example.com` },
+    })).count).toBe(0);
+    expect((await storeScoped(storeAId).auditLog.deleteMany({ where: { id: before.id } })).count).toBe(0);
+    expect((await storeScoped(storeBId).auditLog.updateMany({
+      where: { id: before.id },
+      data: { actorEmail: `stolen-${RUN}@example.com` },
+    })).count).toBe(0);
+    expect((await storeScoped(storeBId).auditLog.deleteMany({ where: { id: before.id } })).count).toBe(0);
+    const after = await storeScoped(storeAId).auditLog.findUnique({ where: { id: before.id } });
+    expect(after).toEqual(before);
   });
 
   it("D6: store isolation — listing_variants isolated", async () => {
-    const csv = "name,price\nVariant Isolation T63,4.00\n";
+    const csv = `name,price\nVariant Isolation T63 ${RUN},4.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     const result = await commitImport(
       storeAId, preview.importToken,
@@ -988,7 +1058,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("D6: store isolation — stock_events isolated", async () => {
-    const csv = "name,price,stock_mode,qty\nStock Isolation T63,5.00,counted,10\n";
+    const csv = `name,price,stock_mode,qty\nStock Isolation T63 ${RUN},5.00,counted,10\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     const result = await commitImport(
       storeAId, preview.importToken,
@@ -1006,7 +1076,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("D6: store isolation — listing_imports isolated", async () => {
-    const csv = "name,price\nImport Isolation T63,3.00\n";
+    const csv = `name,price\nImport Isolation T63 ${RUN},3.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.importToken).toBeTruthy();
 
@@ -1020,7 +1090,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("E11: double submit with same token fails", async () => {
-    const csv = "name,price\nDouble Submit T63,5.00\n";
+    const csv = `name,price\nDouble Submit T63 ${RUN},5.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
 
     await commitImport(
@@ -1041,7 +1111,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("D1: concurrent double-submit — one succeeds, one fails", async () => {
-    const csv = "name,price\nConcurrent Double T63,8.00\n";
+    const csv = `name,price\nConcurrent Double T63 ${RUN},8.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
 
     const results = await Promise.allSettled([
@@ -1065,40 +1135,68 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(rejected).toHaveLength(1);
   });
 
-  it("E14: DB failure mid-commit rolls back entire transaction", async () => {
-    const csv = "name,price\nRollback Test T63,999.99\n";
+  it("E14: a failed last write rolls back the whole commit (status mode)", async () => {
+    const name = `Rollback Status ${RUN}`;
+    const csv = `name,price\n${name},9.99\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1);
+    const selection = { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] };
+    const missingActor: Actor = { id: `missing-actor-${RUN}`, email: `missing-${RUN}@example.com` };
 
-    await rawPrisma.$executeRaw`ALTER TABLE listings ADD CONSTRAINT test_reject_rollback CHECK (price != 99999)`;
+    await expectForeignKey(
+      () => commitImport(storeAId, preview.importToken, selection, missingActor),
+      "audit_logs_actor_id_fkey",
+    );
 
-    try {
-      await expect(
-        commitImport(
-          storeAId,
-          preview.importToken,
-          { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-          actor,
-        ),
-      ).rejects.toThrow();
+    const scoped = storeScoped(storeAId);
+    expect(await scoped.listing.findMany({ where: { customName: name } })).toEqual([]);
+    expect(await scoped.listingVariant.findMany({ where: { listing: { customName: name } } })).toEqual([]);
+    expect(await scoped.stockEvent.findMany({ where: { listing: { customName: name } } })).toEqual([]);
+    await expectPendingImport(storeAId, preview.importToken);
 
-      const scopedA = storeScoped(storeAId);
-      const orphans = await scopedA.listing.findMany({
-        where: { customName: { contains: "Rollback Test T63" } },
-      });
-      expect(orphans).toHaveLength(0);
+    const result = await commitImport(storeAId, preview.importToken, selection, actor);
+    expect(result.createdCount).toBe(1);
+    expect(await scoped.listing.findMany({ where: { customName: name } })).toHaveLength(1);
+    expect(await scoped.stockEvent.findMany({ where: { listing: { customName: name } } })).toEqual([]);
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.count).toBe(1);
+    const token = await scoped.listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(token?.status).toBe("committed");
+  });
 
-      const importRecord = await scopedA.listingImport.findUnique({
-        where: { id: preview.importToken },
-      });
-      expect(importRecord!.status).toBe("pending");
-    } finally {
-      await rawPrisma.$executeRaw`ALTER TABLE listings DROP CONSTRAINT IF EXISTS test_reject_rollback`;
-    }
+  it("E14: a failed stock event write rolls back the whole commit (counted)", async () => {
+    const name = `Rollback Counted ${RUN}`;
+    const csv = `name,price,qty\n${name},3.00,3\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1);
+    const selection = { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] };
+    const missingActor: Actor = { id: `missing-actor-qty-${RUN}`, email: `missing-qty-${RUN}@example.com` };
+
+    await expectForeignKey(
+      () => commitImport(storeAId, preview.importToken, selection, missingActor),
+      "stock_events_actor_id_fkey",
+    );
+
+    const scoped = storeScoped(storeAId);
+    expect(await scoped.listing.findMany({ where: { customName: name } })).toEqual([]);
+    expect(await scoped.listingVariant.findMany({ where: { listing: { customName: name } } })).toEqual([]);
+    expect(await scoped.stockEvent.findMany({ where: { listing: { customName: name } } })).toEqual([]);
+    await expectPendingImport(storeAId, preview.importToken);
+
+    const result = await commitImport(storeAId, preview.importToken, selection, actor);
+    expect(result.createdCount).toBe(1);
+    const events = await scoped.stockEvent.findMany({ where: { listing: { customName: name } } });
+    expect(events).toHaveLength(1);
+    expect(events[0].delta).toBe(3);
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.count).toBe(1);
+    const token = await scoped.listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(token?.status).toBe("committed");
   });
 
   it("concurrent imports with separate tokens both succeed", async () => {
-    const csvA = "name,price\nConcurrent Item A T63,3.00\n";
-    const csvB = "name,price\nConcurrent Item B T63,4.00\n";
+    const csvA = `name,price\nConcurrent Item A T63 ${RUN},3.00\n`;
+    const csvB = `name,price\nConcurrent Item B T63 ${RUN},4.00\n`;
 
     const previewA = await generatePreview(storeAId, csvA, testUserId);
     const previewB = await generatePreview(storeAId, csvB, testUserId);
@@ -1125,7 +1223,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("E7/D2-reversed: concurrent commits of same new item — exactly one listing created", async () => {
-    const csv = "name,price\nRace Item D2 T63,7.00\n";
+    const csv = `name,price\nRace Item D2 T63 ${RUN},7.00\n`;
 
     const previewA = await generatePreview(storeAId, csv, testUserId);
     const previewB = await generatePreview(storeAId, csv, testUserId);
@@ -1154,13 +1252,13 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
 
     const scopedA = storeScoped(storeAId);
     const listings = await scopedA.listing.findMany({
-      where: { customName: "Race Item D2 T63" },
+      where: { customName: `Race Item D2 T63 ${RUN}` },
     });
     expect(listings).toHaveLength(1);
   }, 15_000);
 
   it("A3: crafted duplicateRows in selection are ignored (field removed)", async () => {
-    const csv = "name,price\nDupe Bypass A T63,5.00\nDupe Bypass A T63,6.00\n";
+    const csv = `name,price\nDupe Bypass A T63 ${RUN},5.00\nDupe Bypass A T63 ${RUN},6.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.duplicates).toHaveLength(1);
 
@@ -1174,7 +1272,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("F1: crafted matchedRows with duplicate names creates only one listing per masterProduct", async () => {
-    const csv = "name,price\nKundi T63,6.99\nKundi T63,7.99\n";
+    const csv = `name,price\nKundi T63 ${RUN},6.99\nKundi T63 ${RUN},7.99\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
 
     const result = await commitImport(
@@ -1194,7 +1292,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("F1: crafted newItemRows with duplicate custom names creates only one listing", async () => {
-    const csv = "name,price\nUnique Custom F1 T63,6.99\nUnique Custom F1 T63,7.99\n";
+    const csv = `name,price\nUnique Custom F1 T63 ${RUN},6.99\nUnique Custom F1 T63 ${RUN},7.99\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
 
     const result = await commitImport(
@@ -1225,7 +1323,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("A1: formula-prefixed custom name detected as already-listed on re-import", async () => {
-    const csv = 'name,price\n=Special Sauce T63,7.00\n';
+    const csv = `name,price\n=Special Sauce T63 ${RUN},7.00\n`;
     const preview1 = await generatePreview(storeBId, csv, testUserId);
     expect(preview1.newItems).toHaveLength(1);
 
@@ -1252,7 +1350,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("D1: import token from store A rejected when committing to store B", async () => {
-    const csv = "name,price\nCross Store Token T63,5.00\n";
+    const csv = `name,price\nCross Store Token T63 ${RUN},5.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
 
     await expect(
@@ -1292,21 +1390,35 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("D3: custom-name already-listed blocked at commit", async () => {
+    const name = `Unique Custom D3 T63 ${RUN}`;
     const scopedA = storeScoped(storeAId);
-    await scopedA.listing.create({
-      data: { storeId: storeAId, customName: "Unique Custom D3 T63", price: 500, stockMode: "status", status: "in_stock" },
+    const existing = await scopedA.listing.create({
+      data: { storeId: storeAId, customName: name, price: 500, stockMode: "status", status: "in_stock" },
     });
 
-    const csv = "name,price\nUnique Custom D3 T63,6.00\n";
+    const csv = `name,price\n${name},6.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.alreadyListed).toHaveLength(1);
+    expect(preview.newItems).toHaveLength(0);
+
+    await expect(
+      commitImport(
+        storeAId,
+        preview.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      ),
+    ).rejects.toThrow("All selected listings are already listed in this store.");
+
+    expect((await scopedA.listing.findMany({ where: { customName: name } })).map((row) => row.id)).toEqual([existing.id]);
+    await expectPendingImport(storeAId, preview.importToken);
   });
 
-  it("D7: ambiguousResolutions — valid resolution creates listing", async () => {
-    const csv = "name,price\nAmbig T63,10.00\n";
+  it("E8/D7: two master products sharing a synonym are ambiguous with 2 candidates, then a resolution creates the listing", async () => {
+    const csv = `name,price\nAmbig T63 ${RUN},10.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.ambiguous).toHaveLength(1);
-    expect(preview.ambiguous[0].candidates.length).toBeGreaterThanOrEqual(2);
+    expect(preview.ambiguous[0].candidates).toHaveLength(2);
 
     const result = await commitImport(
       storeAId, preview.importToken,
@@ -1324,10 +1436,11 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(listing!.masterProductId).toBe(ambigMp1Id);
   });
 
-  it("D7: ambiguousResolutions — product not in match list is rejected", async () => {
-    const csv = "name,price\nAmbig T63,10.00\n";
+  it("E8/D7: two master products sharing a synonym are ambiguous with 2 candidates, and a product outside the match list is rejected", async () => {
+    const csv = `name,price\nAmbig T63 ${RUN},10.00\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.ambiguous).toHaveLength(1);
+    expect(preview.ambiguous[0].candidates).toHaveLength(2);
 
     await expect(
       commitImport(
@@ -1342,7 +1455,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     ).rejects.toThrow(/not in the match list/i);
   });
 
-  it("D7: ambiguousResolutions — resolution to already-listed product skipped gracefully", async () => {
+  it("E8/D7: two master products sharing a synonym are ambiguous with 2 candidates, and an already-listed resolution is skipped", async () => {
     const scopedA = storeScoped(storeAId);
     const existingForAmbig = await scopedA.listing.findFirst({ where: { masterProductId: ambigMp2Id } });
     if (!existingForAmbig) {
@@ -1351,9 +1464,10 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
       });
     }
 
-    const csv = "name,price\nAmbig T63,10.00\n";
+    const csv = `name,price\nAmbig T63 ${RUN},10.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.ambiguous).toHaveLength(1);
+    expect(preview.ambiguous[0].candidates).toHaveLength(2);
 
     await expect(
       commitImport(
@@ -1370,14 +1484,14 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
 
   it("B1: matched import variant uses master product weightG", async () => {
     const weightMp = await platformAdmin.masterProduct.create({
-      data: { name: "B1 Weight Rice T63", frozen: false, perishable: false, weightG: 11340, status: "active" },
+      data: { name: `B1 Weight Rice T63 ${RUN}`, frozen: false, perishable: false, weightG: 11340, status: "active" },
     });
     mpIds.push(weightMp.id);
     await platformAdmin.productSynonym.create({
-      data: { productId: weightMp.id, term: "b1 weight rice t63" },
+      data: { productId: weightMp.id, term: `b1 weight rice t63 ${RUN}` },
     });
 
-    const csv = "name,price\nB1 Weight Rice T63,24.99\n";
+    const csv = `name,price\nB1 Weight Rice T63 ${RUN},24.99\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.matches).toHaveLength(1);
 
@@ -1398,7 +1512,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("B1: ambiguous-resolved import variant uses master product weightG", async () => {
-    const csv = "name,price\nAmbig T63,10.00\n";
+    const csv = `name,price\nAmbig T63 ${RUN},10.00\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.ambiguous).toHaveLength(1);
 
@@ -1424,7 +1538,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("B1: new custom item uses fallback weightG of 100", async () => {
-    const csv = "name,price\nB1 Custom Widget T63,5.50\n";
+    const csv = `name,price\nB1 Custom Widget T63 ${RUN},5.50\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.newItems).toHaveLength(1);
 
@@ -1445,7 +1559,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("D1: committed import token marked in DB", async () => {
-    const csv = "name,price\nToken Status T63,3.00\n";
+    const csv = `name,price\nToken Status T63 ${RUN},3.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
 
     await commitImport(
@@ -1476,7 +1590,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
       tokenIds.push(rec.id);
     }
 
-    const preview = await generatePreview(storeBId, "name,price\nCap Evict T63,1.00\n", testUserId);
+    const preview = await generatePreview(storeBId, `name,price\nCap Evict T63 ${RUN},1.00\n`, testUserId);
     expect(preview.importToken).toBeTruthy();
 
     const oldest = await scopedB.listingImport.findUnique({ where: { id: tokenIds[0] } });
@@ -1499,14 +1613,14 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
       rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${pastDate} WHERE id = ${rec.id}`,
     ]);
 
-    await generatePreview(storeBId, "name,price\nNew T63,5.00\n", testUserId);
+    await generatePreview(storeBId, `name,price\nNew T63 ${RUN},5.00\n`, testUserId);
 
     const expired = await scopedB.listingImport.findUnique({ where: { id: rec.id } });
     expect(expired).toBeNull();
   });
 
   it("S1: expired import token rejected at commit", async () => {
-    const csv = "name,price\nExpiry Test T63,5.00\n";
+    const csv = `name,price\nExpiry Test T63 ${RUN},5.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
 
     const pastDate = new Date(Date.now() - 31 * 60 * 1000);
@@ -1526,23 +1640,23 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     ).rejects.toThrow(/expired/i);
   });
 
-  it("B4: ambiguous resolution creates listing for chosen candidate", async () => {
+  it("E8/B4: two master products sharing a synonym are ambiguous with 2 candidates, then the chosen candidate is created", async () => {
     const ambMp1 = await platformAdmin.masterProduct.create({
-      data: { name: "Ambig Product Alpha T63", frozen: true, perishable: false, status: "active" },
+      data: { name: `Ambig Product Alpha T63 ${RUN}`, frozen: true, perishable: false, status: "active" },
     });
     mpIds.push(ambMp1.id);
     const ambMp2 = await platformAdmin.masterProduct.create({
-      data: { name: "Ambig Product Beta T63", frozen: false, perishable: true, status: "active" },
+      data: { name: `Ambig Product Beta T63 ${RUN}`, frozen: false, perishable: true, status: "active" },
     });
     mpIds.push(ambMp2.id);
     await platformAdmin.productSynonym.create({
-      data: { productId: ambMp1.id, term: "ambig thing t63" },
+      data: { productId: ambMp1.id, term: `ambig thing t63 ${RUN}` },
     });
     await platformAdmin.productSynonym.create({
-      data: { productId: ambMp2.id, term: "ambig thing t63" },
+      data: { productId: ambMp2.id, term: `ambig thing t63 ${RUN}` },
     });
 
-    const csv = "name,price\nAmbig Thing T63,7.50\n";
+    const csv = `name,price\nAmbig Thing T63 ${RUN},7.50\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.ambiguous).toHaveLength(1);
     expect(preview.ambiguous[0].candidates).toHaveLength(2);
@@ -1568,26 +1682,26 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(listing!.perishable).toBe(true);
   });
 
-  it("A2/E8: row whose match count increases between preview and commit is rejected (no silent pick)", async () => {
+  it("A2: preview-to-commit match-count drift rejects the row (no silent pick)", async () => {
     const soloMp = await platformAdmin.masterProduct.create({
-      data: { name: "Solo Match A2 T63", frozen: false, perishable: false, status: "active" },
+      data: { name: `Solo Match A2 T63 ${RUN}`, frozen: false, perishable: false, status: "active" },
     });
     mpIds.push(soloMp.id);
     await platformAdmin.productSynonym.create({
-      data: { productId: soloMp.id, term: "solo a2 t63" },
+      data: { productId: soloMp.id, term: `solo a2 t63 ${RUN}` },
     });
 
-    const csv = "name,price\nSolo A2 T63,8.00\n";
+    const csv = `name,price\nSolo A2 T63 ${RUN},8.00\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.matches).toHaveLength(1);
     expect(preview.ambiguous).toHaveLength(0);
 
     const altMp = await platformAdmin.masterProduct.create({
-      data: { name: "Solo Alt A2 T63", frozen: false, perishable: false, status: "active" },
+      data: { name: `Solo Alt A2 T63 ${RUN}`, frozen: false, perishable: false, status: "active" },
     });
     mpIds.push(altMp.id);
     await platformAdmin.productSynonym.create({
-      data: { productId: altMp.id, term: "solo a2 t63" },
+      data: { productId: altMp.id, term: `solo a2 t63 ${RUN}` },
     });
 
     await expect(
@@ -1601,13 +1715,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   async function auditFor(storeId: string, importId: string) {
-    const logs = await storeScoped(storeId).auditLog.findMany({
-      where: { action: "catalog.csv_import" },
-    });
-    const matches = logs.filter((entry) => {
-      const after = entry.after as { importId?: string } | null;
-      return after?.importId === importId;
-    });
+    const matches = await auditsForImport(storeId, importId);
     expect(matches).toHaveLength(1);
     return matches[0].after as {
       count: number;
@@ -1621,7 +1729,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
 
   it("S1: one context carries parsed rows, master matches, and existing listings", async () => {
     const product = await platformAdmin.masterProduct.create({
-      data: { name: "Context Yam T199", status: "active", frozen: false, perishable: false },
+      data: { name: `Context Yam T199 ${RUN}`, status: "active", frozen: false, perishable: false },
     });
     mpIds.push(product.id);
     const listing = await storeScoped(storeAId).listing.create({
@@ -1634,46 +1742,46 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
       },
     });
 
-    const csv = "name,price\nContext Yam T199,2.00\nContext Loose T199,3.00\n";
+    const csv = `name,price\nContext Yam T199 ${RUN},2.00\nContext Loose T199 ${RUN},3.00\n`;
     const context = await buildMatchContext(csv);
     expect(context.rows.map((row) => row.name)).toEqual([
-      "Context Yam T199",
-      "Context Loose T199",
+      `Context Yam T199 ${RUN}`,
+      `Context Loose T199 ${RUN}`,
     ]);
-    expect(context.matchMap.get("Context Yam T199")?.[0]?.matchType).toBe("exact");
-    expect(context.matchMap.get("Context Loose T199")).toEqual([]);
+    expect(context.matchMap.get(`Context Yam T199 ${RUN}`)?.[0]?.matchType).toBe("exact");
+    expect(context.matchMap.get(`Context Loose T199 ${RUN}`)).toEqual([]);
 
     const ready = await context.bindExistingListings(storeScoped(storeAId));
     expect(ready.rows).toBe(context.rows);
     expect(ready.matchMap).toBe(context.matchMap);
     expect(ready.existing.byMasterId.get(product.id)).toBe(listing.id);
-    const looseKey = "Context Loose T199".normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+    const looseKey = `Context Loose T199 ${RUN}`.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
     expect(ready.existing.byCustomName.has(looseKey)).toBe(false);
   });
 
   it("N13: audit records duplicates, already listed, and the row left out", async () => {
     const beta = await platformAdmin.masterProduct.create({
-      data: { name: "Audit Beta T199", status: "active", frozen: false, perishable: false },
+      data: { name: `Audit Beta T199 ${RUN}`, status: "active", frozen: false, perishable: false },
     });
     const gamma = await platformAdmin.masterProduct.create({
-      data: { name: "Audit Gamma T199", status: "active", frozen: false, perishable: false },
+      data: { name: `Audit Gamma T199 ${RUN}`, status: "active", frozen: false, perishable: false },
     });
     mpIds.push(beta.id, gamma.id);
     await platformAdmin.productSynonym.create({
-      data: { productId: beta.id, term: "Audit Beta Syn T199" },
+      data: { productId: beta.id, term: `Audit Beta Syn T199 ${RUN}` },
     });
 
     const csv = [
       "name,price",
-      "Audit Alpha T199,1.00",
-      "Audit Beta T199,2.00",
-      "Audit Beta Syn T199,2.50",
-      "Audit Gamma T199,3.00",
-      "Audit Delta T199,4.00",
+      `Audit Alpha T199 ${RUN},1.00`,
+      `Audit Beta T199 ${RUN},2.00`,
+      `Audit Beta Syn T199 ${RUN},2.50`,
+      `Audit Gamma T199 ${RUN},3.00`,
+      `Audit Delta T199 ${RUN},4.00`,
     ].join("\n");
     const preview = await generatePreview(storeBId, csv, testUserId);
-    expect(preview.duplicates.map((row) => row.csvName)).toEqual(["Audit Beta Syn T199"]);
-    expect(preview.matches.map((row) => row.csvName)).toEqual(["Audit Beta T199", "Audit Gamma T199"]);
+    expect(preview.duplicates.map((row) => row.csvName)).toEqual([`Audit Beta Syn T199 ${RUN}`]);
+    expect(preview.matches.map((row) => row.csvName)).toEqual([`Audit Beta T199 ${RUN}`, `Audit Gamma T199 ${RUN}`]);
 
     await storeScoped(storeBId).listing.create({
       data: {
@@ -1707,27 +1815,27 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     const created = await storeScoped(storeBId).listing.findMany({
       where: { id: { in: result.listingIds } },
     });
-    expect(created.filter((row) => row.customName === "Audit Alpha T199")).toHaveLength(1);
+    expect(created.filter((row) => row.customName === `Audit Alpha T199 ${RUN}`)).toHaveLength(1);
     expect(created.filter((row) => row.masterProductId === beta.id)).toHaveLength(1);
     expect(created.some((row) => row.masterProductId === gamma.id)).toBe(false);
   });
 
   it("duplicate through an ambiguous resolution skips the second master product", async () => {
     const exact = await platformAdmin.masterProduct.create({
-      data: { name: "Palm Oil Exact T199", status: "active", frozen: false, perishable: false },
+      data: { name: `Palm Oil Exact T199 ${RUN}`, status: "active", frozen: false, perishable: false },
     });
     const other = await platformAdmin.masterProduct.create({
-      data: { name: "Palm Oil Other T199", status: "active", frozen: false, perishable: false },
+      data: { name: `Palm Oil Other T199 ${RUN}`, status: "active", frozen: false, perishable: false },
     });
     mpIds.push(exact.id, other.id);
     await platformAdmin.productSynonym.create({
-      data: { productId: exact.id, term: "palm oil ambig t199" },
+      data: { productId: exact.id, term: `palm oil ambig t199 ${RUN}` },
     });
     await platformAdmin.productSynonym.create({
-      data: { productId: other.id, term: "palm oil ambig t199" },
+      data: { productId: other.id, term: `palm oil ambig t199 ${RUN}` },
     });
 
-    const csv = "name,price\nPalm Oil Exact T199,5.00\npalm oil ambig t199,6.00\n";
+    const csv = `name,price\nPalm Oil Exact T199 ${RUN},5.00\npalm oil ambig t199 ${RUN},6.00\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.matches).toHaveLength(1);
     expect(preview.ambiguous).toHaveLength(1);
@@ -1750,7 +1858,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("same custom name twice records duplicatesSkipped", async () => {
-    const csv = "name,price\nSuya Mix T199,5.00\nsuya mix t199,6.00\n";
+    const csv = `name,price\nSuya Mix T199 ${RUN},5.00\nsuya mix t199 ${RUN},6.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     const result = await commitImport(
       storeAId,
@@ -1768,13 +1876,13 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     await storeScoped(storeAId).listing.create({
       data: {
         storeId: storeAId,
-        customName: "Already Sitting T199",
+        customName: `Already Sitting T199 ${RUN}`,
         price: 200,
         stockMode: "status",
         status: "in_stock",
       },
     });
-    const csv = "name,price\nAlready Sitting T199,2.00\nFresh Pick T199,3.00\n";
+    const csv = `name,price\nAlready Sitting T199 ${RUN},2.00\nFresh Pick T199 ${RUN},3.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.alreadyListed).toHaveLength(1);
     const result = await commitImport(
@@ -1790,13 +1898,13 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("listed between preview and commit sets alreadyListedSkipped", async () => {
-    const csv = "name,price\nLate List T199,4.00\nKept List T199,5.00\n";
+    const csv = `name,price\nLate List T199 ${RUN},4.00\nKept List T199 ${RUN},5.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.newItems).toHaveLength(2);
     await storeScoped(storeAId).listing.create({
       data: {
         storeId: storeAId,
-        customName: "Late List T199",
+        customName: `Late List T199 ${RUN}`,
         price: 400,
         stockMode: "status",
         status: "in_stock",
@@ -1813,58 +1921,137 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(after.alreadyListedSkipped).toBe(1);
     expect(after.count).toBe(1);
     const kept = await storeScoped(storeAId).listing.findFirst({
-      where: { customName: "Kept List T199" },
+      where: { customName: `Kept List T199 ${RUN}` },
     });
-    expect(kept).toBeTruthy();
+    expect(kept?.customName).toBe(`Kept List T199 ${RUN}`);
+  });
+
+  it("D3: custom-name listed between preview and commit is skipped at commit (case, accents, spaces)", async () => {
+    const pepper = `Pepper Soup Mix ${RUN}`;
+    const suya = `Suya Spice ${RUN}`;
+    const csv = `name,price\n${pepper},4.00\n${suya},5.00\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems.map((row) => row.csvName)).toEqual([pepper, suya]);
+    const manualName = `  PEPPER SOUP MÏX ${RUN}  `;
+    const manual = await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        customName: manualName,
+        price: 400,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    const created = await storeScoped(storeAId).listing.findMany({ where: { id: { in: result.listingIds } } });
+    expect(created.map((row) => row.customName)).toEqual([suya]);
+    const soup = await storeScoped(storeAId).listing.findMany({
+      where: { customName: { contains: "soup", mode: "insensitive" } },
+    });
+    expect(soup.map((row) => row.id)).toEqual([manual.id]);
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.alreadyListedSkipped).toBe(1);
+    expect(after.count).toBe(1);
+  });
+
+  it("master product listed between preview and commit is skipped at commit", async () => {
+    const master = await platformAdmin.masterProduct.create({
+      data: { name: `Listed Master ${RUN}`, status: "active", frozen: false, perishable: false },
+    });
+    mpIds.push(master.id);
+    const kept = `Kept Beside Master ${RUN}`;
+    const csv = `name,price\n${master.name},4.00\n${kept},5.00\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.matches).toHaveLength(1);
+    expect(preview.matches[0].masterProductId).toBe(master.id);
+    expect(preview.newItems.map((row) => row.csvName)).toEqual([kept]);
+    const manual = await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        masterProductId: master.id,
+        price: 400,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [2], newItemRows: [3], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(1);
+    const created = await storeScoped(storeAId).listing.findMany({ where: { id: { in: result.listingIds } } });
+    expect(created).toHaveLength(1);
+    expect(created[0].customName).toBe(kept);
+    const masters = await storeScoped(storeAId).listing.findMany({ where: { masterProductId: master.id } });
+    expect(masters.map((row) => row.id)).toEqual([manual.id]);
+    const after = await auditFor(storeAId, preview.importToken);
+    expect(after.alreadyListedSkipped).toBe(1);
+    expect(after.count).toBe(1);
+  });
+
+  it("commit of only already-listed rows rejects and writes no audit", async () => {
+    const name = `Only Listed ${RUN}`;
+    const csv = `name,price\n${name},2.00\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.newItems).toHaveLength(1);
+    const manual = await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: name, price: 200, stockMode: "status", status: "in_stock" },
+    });
+    await expect(
+      commitImport(
+        storeAId,
+        preview.importToken,
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      ),
+    ).rejects.toThrow("All selected listings are already listed in this store.");
+    expect((await storeScoped(storeAId).listing.findMany({ where: { customName: name } })).map((row) => row.id)).toEqual([manual.id]);
+    await expectPendingImport(storeAId, preview.importToken);
   });
 
   it("retry after a failed commit writes nothing, then one audit", async () => {
     const product = await platformAdmin.masterProduct.create({
-      data: { name: "Retry After Fail T199", status: "active", frozen: false, perishable: false },
+      data: { name: `Retry After Fail T199 ${RUN}`, status: "active", frozen: false, perishable: false },
     });
     mpIds.push(product.id);
-    const csv = "name,price\nRetry After Fail T199,777.77\n";
+    const csv = `name,price\nRetry After Fail T199 ${RUN},7.77\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     expect(preview.matches).toHaveLength(1);
+    const selection = { matchedRows: [2], newItemRows: [], ambiguousResolutions: [] };
+    const missingActor: Actor = { id: `missing-actor-retry-${RUN}`, email: `missing-retry-${RUN}@example.com` };
 
-    await rawPrisma.$executeRaw`ALTER TABLE listings ADD CONSTRAINT test_reject_retry_199 CHECK (price <> 77777)`;
-    try {
-      await expect(
-        commitImport(
-          storeAId,
-          preview.importToken,
-          { matchedRows: [2], newItemRows: [], ambiguousResolutions: [] },
-          actor,
-        ),
-      ).rejects.toThrow();
-
-      const scoped = storeScoped(storeAId);
-      expect(await scoped.listing.findMany({ where: { masterProductId: product.id } })).toEqual([]);
-      expect(await scoped.listingVariant.findMany({ where: { listing: { masterProductId: product.id } } })).toEqual([]);
-      expect(await scoped.stockEvent.findMany({ where: { listing: { masterProductId: product.id } } })).toEqual([]);
-      const token = await scoped.listingImport.findUnique({ where: { id: preview.importToken } });
-      expect(token?.status).toBe("pending");
-      const logs = await scoped.auditLog.findMany({ where: { action: "catalog.csv_import" } });
-      expect(logs.some((entry) => (entry.after as { importId?: string } | null)?.importId === preview.importToken)).toBe(false);
-    } finally {
-      await rawPrisma.$executeRaw`ALTER TABLE listings DROP CONSTRAINT IF EXISTS test_reject_retry_199`;
-    }
-
-    const result = await commitImport(
-      storeAId,
-      preview.importToken,
-      { matchedRows: [2], newItemRows: [], ambiguousResolutions: [] },
-      actor,
+    await expectForeignKey(
+      () => commitImport(storeAId, preview.importToken, selection, missingActor),
+      "audit_logs_actor_id_fkey",
     );
+
+    const scoped = storeScoped(storeAId);
+    expect(await scoped.listing.findMany({ where: { masterProductId: product.id } })).toEqual([]);
+    expect(await scoped.listingVariant.findMany({ where: { listing: { masterProductId: product.id } } })).toEqual([]);
+    expect(await scoped.stockEvent.findMany({ where: { listing: { masterProductId: product.id } } })).toEqual([]);
+    await expectPendingImport(storeAId, preview.importToken);
+
+    const result = await commitImport(storeAId, preview.importToken, selection, actor);
     expect(result.createdCount).toBe(1);
+    expect(await scoped.listing.findMany({ where: { masterProductId: product.id } })).toHaveLength(1);
     const after = await auditFor(storeAId, preview.importToken);
     expect(after.count).toBe(1);
     expect(after.duplicatesSkipped).toBe(0);
     expect(after.alreadyListedSkipped).toBe(0);
+    const token = await scoped.listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(token?.status).toBe("committed");
   });
 
   it("two commits of one token: one audit and the already-committed message", async () => {
-    const csv = "name,price\nDouble Commit T199,8.00\n";
+    const csv = `name,price\nDouble Commit T199 ${RUN},8.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     const selection = { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] };
     const results = await Promise.allSettled([
@@ -1923,9 +2110,9 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("cross-store commit leaves the token pending and writes nothing", async () => {
-    const csv = "name,price\nCross Store Commit T199,4.00\n";
+    const csv = `name,price\nCross Store Commit T199 ${RUN},4.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
-    const before = await storeScoped(storeBId).listing.count({ where: { customName: "Cross Store Commit T199" } });
+    const before = await storeScoped(storeBId).listing.count({ where: { customName: `Cross Store Commit T199 ${RUN}` } });
     await expect(
       commitImport(
         storeBId,
@@ -1934,13 +2121,13 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
         actor,
       ),
     ).rejects.toThrow("Import token is invalid, expired, or already used.");
-    expect(await storeScoped(storeBId).listing.count({ where: { customName: "Cross Store Commit T199" } })).toBe(before);
+    expect(await storeScoped(storeBId).listing.count({ where: { customName: `Cross Store Commit T199 ${RUN}` } })).toBe(before);
     const token = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
     expect(token?.status).toBe("pending");
   });
 
   it("cross-store write of audit_logs and listing_imports is rejected", async () => {
-    const csvText = "name,price\nKeep Me T199,1.00\n";
+    const csvText = `name,price\nKeep Me T199 ${RUN},1.00\n`;
     const row = await storeScoped(storeAId).listingImport.create({
       data: {
         storeId: storeAId,
@@ -1966,6 +2153,101 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
       deleteCount: 0,
       rowUnchanged: true,
     });
+  });
+
+  it("store B cannot change, delete or create store A's import-created listings, variants and stock events", async () => {
+    const nameA = `Probe Listing A ${RUN}`;
+    const nameB = `Probe Listing B ${RUN}`;
+    const previewA = await generatePreview(storeAId, `name,price,qty\n${nameA},5.00,4\n`, testUserId);
+    const previewB = await generatePreview(storeBId, `name,price,qty\n${nameB},6.00,2\n`, testUserId);
+    const committedA = await commitImport(
+      storeAId,
+      previewA.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    const committedB = await commitImport(
+      storeBId,
+      previewB.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(committedA.createdCount).toBe(1);
+    expect(committedB.createdCount).toBe(1);
+
+    const listingA = await storeScoped(storeAId).listing.findUnique({
+      where: { id: committedA.listingIds[0] },
+      include: { variants: true },
+    });
+    const listingB = await storeScoped(storeBId).listing.findUnique({
+      where: { id: committedB.listingIds[0] },
+      include: { variants: true },
+    });
+    expect(listingA?.storeId).toBe(storeAId);
+    expect(listingA?.customName).toBe(nameA);
+    expect(listingA?.variants).toHaveLength(1);
+    expect(listingB?.storeId).toBe(storeBId);
+    expect(listingB?.variants).toHaveLength(1);
+    const variantA = listingA!.variants[0];
+    const variantB = listingB!.variants[0];
+    const eventsA = await storeScoped(storeAId).stockEvent.findMany({ where: { listingId: listingA!.id } });
+    expect(eventsA).toHaveLength(1);
+    expect(eventsA[0].delta).toBe(4);
+    expect(eventsA[0].storeId).toBe(storeAId);
+
+    expect(await storeScoped(storeBId).listing.findUnique({ where: { id: listingA!.id } })).toBeNull();
+    expect(await storeScoped(storeBId).listingVariant.findUnique({ where: { id: variantA.id } })).toBeNull();
+    expect(await storeScoped(storeBId).stockEvent.findUnique({ where: { id: eventsA[0].id } })).toBeNull();
+
+    expect((await storeScoped(storeBId).listing.updateMany({ where: { id: listingA!.id }, data: { price: 1 } })).count).toBe(0);
+    expect((await storeScoped(storeBId).listing.deleteMany({ where: { id: listingA!.id } })).count).toBe(0);
+    expect((await storeScoped(storeBId).listingVariant.updateMany({ where: { id: variantA.id }, data: { price: 1 } })).count).toBe(0);
+    expect((await storeScoped(storeBId).listingVariant.deleteMany({ where: { id: variantA.id } })).count).toBe(0);
+    expect((await storeScoped(storeBId).stockEvent.updateMany({ where: { id: eventsA[0].id }, data: { delta: 99 } })).count).toBe(0);
+    expect((await storeScoped(storeBId).stockEvent.deleteMany({ where: { id: eventsA[0].id } })).count).toBe(0);
+
+    await expectRlsRejection(() => storeScoped(storeBId).listing.create({
+      data: {
+        storeId: storeAId,
+        customName: `Stolen Listing ${RUN}`,
+        price: 1,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    }));
+    await expectRlsRejection(() => storeScoped(storeBId).listing.update({
+      where: { id: listingB!.id },
+      data: { storeId: storeAId },
+    }));
+    await expectRlsRejection(() => storeScoped(storeBId).listingVariant.create({
+      data: { listingId: listingA!.id, label: "Stolen", price: 1, weightG: 100 },
+    }));
+    await expectRlsRejection(() => storeScoped(storeBId).listingVariant.update({
+      where: { id: variantB.id },
+      data: { listingId: listingA!.id },
+    }));
+    await expectRlsRejection(() => storeScoped(storeBId).stockEvent.create({
+      data: {
+        storeId: storeAId,
+        listingId: listingB!.id,
+        type: "recount",
+        delta: 1,
+        actorId: testUserId,
+      },
+    }));
+
+    const listingAAfter = await storeScoped(storeAId).listing.findUnique({
+      where: { id: listingA!.id },
+      include: { variants: true },
+    });
+    expect(listingAAfter).toEqual(listingA);
+    expect(await storeScoped(storeAId).stockEvent.findMany({ where: { listingId: listingA!.id } })).toEqual(eventsA);
+    const listingBAfter = await storeScoped(storeBId).listing.findUnique({
+      where: { id: listingB!.id },
+      include: { variants: true },
+    });
+    expect(listingBAfter).toEqual(listingB);
+    expect(await storeScoped(storeBId).listing.findMany({ where: { customName: `Stolen Listing ${RUN}` } })).toEqual([]);
   });
 
   it("T1: a 29-minute token is claimed and a 31-minute token is not, in every zone", async () => {
@@ -2017,7 +2299,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     for (const zone of ["UTC", "America/Denver", "Europe/Berlin"]) {
       const preview = await generatePreview(
         storeAId,
-        `name,price\nExpired ${zone} T199,5.00\n`,
+        `name,price\nExpired ${zone} T199 ${RUN},5.00\n`,
         testUserId,
       );
       const past = new Date(Date.now() - 31 * 60 * 1000);
@@ -2047,7 +2329,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     for (const zone of ["UTC", "America/Denver", "Europe/Berlin"]) {
       const preview = await generatePreview(
         storeAId,
-        `name,price\nStamp ${zone} T199,3.00\n`,
+        `name,price\nStamp ${zone} T199 ${RUN},3.00\n`,
         testUserId,
       );
       await withSessionTimeZone(zone, () =>
@@ -2067,7 +2349,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("expired versus committed: pending claim failure and committed token use different messages", async () => {
-    const preview = await generatePreview(storeAId, "name,price\nMessage Split T199,5.00\n", testUserId);
+    const preview = await generatePreview(storeAId, `name,price\nMessage Split T199 ${RUN},5.00\n`, testUserId);
     await commitImport(
       storeAId,
       preview.importToken,
@@ -2087,7 +2369,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     );
     expect(claimedAgain).toBe(false);
 
-    const expired = await generatePreview(storeAId, "name,price\nMessage Expired T199,5.00\n", testUserId);
+    const expired = await generatePreview(storeAId, `name,price\nMessage Expired T199 ${RUN},5.00\n`, testUserId);
     const past = new Date(Date.now() - 31 * 60 * 1000);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
@@ -2109,7 +2391,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("overnight hours: a commit does not consult store opening hours", async () => {
-    const preview = await generatePreview(storeAId, "name,price\nNight Owl T199,2.50\n", testUserId);
+    const preview = await generatePreview(storeAId, `name,price\nNight Owl T199 ${RUN},2.50\n`, testUserId);
     const result = await commitImport(
       storeAId,
       preview.importToken,
@@ -2122,7 +2404,7 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("maximum input: 5000 selected rows record one audit", async () => {
-    const lines = Array.from({ length: 5000 }, (_, i) => `Max5000 T199 ${i},1.00`);
+    const lines = Array.from({ length: 5000 }, (_, i) => `Max5000 T199 ${RUN} ${i},1.00`);
     const csv = `name,price\n${lines.join("\n")}\n`;
     const preview = await generatePreview(storeBId, csv, testUserId);
     expect(preview.newItems).toHaveLength(5000);
@@ -2140,55 +2422,55 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(after.notSelected).toBe(0);
   }, 120_000);
 
-  it("keys missing at runtime: DATABASE_URL is the DB suite gate", () => {
-    expect(hasDb).toBe(Boolean(process.env.DATABASE_URL));
-    expect(hasDb).toBe(true);
+});
+
+describe("csv import database gate", () => {
+  it("DB suites run in CI", () => {
+    const ciSet = typeof process.env.CI === "string" && process.env.CI.length > 0;
+    const hasDatabaseUrl = typeof process.env.DATABASE_URL === "string" && process.env.DATABASE_URL.length > 0;
+    expect(ciSet && !hasDatabaseUrl).toBe(false);
   });
 });
 
-describe.skipIf(!hasDb)("D5: auth path assertions", () => {
+describe.skipIf(!hasDb)("D5: service-level cross-store actor check", () => {
   let rawPrisma: PrismaClient;
   let storeAId: string;
   let storeBId: string;
   let ownerAId: string;
+  let ownerEmail: string;
+  let staffId: string;
+  let customerId: string;
 
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
     rawPrisma = new PrismaClient({ adapter });
     await rawPrisma.$connect();
 
-    const storeA = await rawPrisma.store.upsert({
-      where: { slug: "csv-auth-test-a" },
-      update: {},
-      create: { slug: "csv-auth-test-a", name: "Auth Store A", themePreset: "palm-and-shea" },
+    const storeA = await rawPrisma.store.create({
+      data: { slug: `csv-auth-a-${RUN}`, name: `Auth Store A ${RUN}`, themePreset: "palm-and-shea" },
     });
     storeAId = storeA.id;
 
-    const storeB = await rawPrisma.store.upsert({
-      where: { slug: "csv-auth-test-b" },
-      update: {},
-      create: { slug: "csv-auth-test-b", name: "Auth Store B", themePreset: "lagoon-and-coral" },
+    const storeB = await rawPrisma.store.create({
+      data: { slug: `csv-auth-b-${RUN}`, name: `Auth Store B ${RUN}`, themePreset: "lagoon-and-coral" },
     });
     storeBId = storeB.id;
 
-    const ownerA = await rawPrisma.user.upsert({
-      where: { email: "csv-auth-owner-a@example.com" },
-      update: {},
-      create: { id: "csv-auth-owner-a", email: "csv-auth-owner-a@example.com", name: "Owner A", emailVerified: true },
+    ownerEmail = `csv-auth-owner-${RUN}@example.com`;
+    const ownerA = await rawPrisma.user.create({
+      data: { id: `csv-auth-owner-${RUN}`, email: ownerEmail, name: "Owner A", emailVerified: true },
     });
     ownerAId = ownerA.id;
 
-    await rawPrisma.user.upsert({
-      where: { email: "csv-auth-staff@example.com" },
-      update: {},
-      create: { id: "csv-auth-staff", email: "csv-auth-staff@example.com", name: "Staff User", emailVerified: true },
+    const staff = await rawPrisma.user.create({
+      data: { id: `csv-auth-staff-${RUN}`, email: `csv-auth-staff-${RUN}@example.com`, name: "Staff User", emailVerified: true },
     });
+    staffId = staff.id;
 
-    await rawPrisma.user.upsert({
-      where: { email: "csv-auth-customer@example.com" },
-      update: {},
-      create: { id: "csv-auth-customer", email: "csv-auth-customer@example.com", name: "Customer User", emailVerified: true },
+    const customer = await rawPrisma.user.create({
+      data: { id: `csv-auth-customer-${RUN}`, email: `csv-auth-customer-${RUN}@example.com`, name: "Customer User", emailVerified: true },
     });
+    customerId = customer.id;
   });
 
   afterAll(async () => {
@@ -2201,37 +2483,44 @@ describe.skipIf(!hasDb)("D5: auth path assertions", () => {
       rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } }),
       rawPrisma.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
     ]);
-    await rawPrisma.user.deleteMany({
-      where: { email: { in: ["csv-auth-owner-a@example.com", "csv-auth-staff@example.com", "csv-auth-customer@example.com"] } },
-    });
-    await rawPrisma.store.deleteMany({ where: { slug: { in: ["csv-auth-test-a", "csv-auth-test-b"] } } });
+    await rawPrisma.user.delete({ where: { id: ownerAId } });
+    await rawPrisma.user.delete({ where: { id: staffId } });
+    await rawPrisma.user.delete({ where: { id: customerId } });
+    await rawPrisma.store.delete({ where: { id: storeAId } });
+    await rawPrisma.store.delete({ where: { id: storeBId } });
     await rawPrisma.$disconnect();
   });
 
   it("D5/E12: store A owner preview on store B — RLS blocks cross-store read", async () => {
-    const csv = "name,price\nAuth Cross Store T63,5.00\n";
+    const csv = `name,price\nAuth Cross Store T63 ${RUN},5.00\n`;
     const preview = await generatePreview(storeBId, csv, ownerAId);
-    expect(preview.importToken).toBeTruthy();
+    const recordB = await storeScoped(storeBId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(recordB?.status).toBe("pending");
+    expect(recordB?.storeId).toBe(storeBId);
 
-    const scopedA = storeScoped(storeAId);
-    const record = await scopedA.listingImport.findUnique({ where: { id: preview.importToken } });
+    const record = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
     expect(record).toBeNull();
   });
 
-  it("D5/E12: store A owner commit on store B — token not visible via RLS", async () => {
-    const csv = "name,price\nAuth Cross Commit T63,5.00\n";
+  it("D5/E12: store A owner commit on store B writes nothing under this test's names", async () => {
+    const name = `Auth Cross Commit T63 ${RUN}`;
+    const csv = `name,price\n${name},5.00\n`;
     const preview = await generatePreview(storeAId, csv, ownerAId);
+    const tokenBefore = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(tokenBefore?.status).toBe("pending");
 
     await expect(
       commitImport(
         storeBId, preview.importToken,
         { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-        { id: ownerAId, email: "csv-auth-owner-a@example.com" },
+        { id: ownerAId, email: ownerEmail },
       ),
-    ).rejects.toThrow(/invalid|expired|already used/i);
+    ).rejects.toThrow("Import token is invalid, expired, or already used.");
 
-    const scopedB = storeScoped(storeBId);
-    const bListings = await scopedB.listing.findMany();
-    expect(bListings).toHaveLength(0);
+    const tokenAfter = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(tokenAfter?.status).toBe("pending");
+    expect(tokenAfter?.committedAt).toBeNull();
+    expect(await storeScoped(storeBId).listing.findMany({ where: { customName: name } })).toEqual([]);
+    expect(await storeScoped(storeBId).listingImport.findUnique({ where: { id: preview.importToken } })).toBeNull();
   });
 });
