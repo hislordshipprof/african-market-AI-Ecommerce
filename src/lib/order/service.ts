@@ -317,26 +317,58 @@ async function settleUnconfirmedCapture(
   }
 
   if (pi.status === "requires_capture") {
+    const releaseAttempt = await operationAttempt(storeId, orderId, "cancel_retry");
     try {
-      const releaseAttempt = await operationAttempt(storeId, orderId, "cancel_retry");
       await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, releaseAttempt));
     } catch (err) {
+      if (isRetryableProviderError(err)) {
+        await storeScopedTransaction(storeId, async (tx) => {
+          await lockStoreRow(tx, storeId);
+          await tx.auditLog.create({
+            data: {
+              storeId,
+              actorId: SYSTEM_ACTOR_ID,
+              actorEmail: SYSTEM_ACTOR_EMAIL,
+              action: "cancel_retry",
+              entityType: "order",
+              entityId: orderId,
+              after: { attempt: releaseAttempt, releaseHold: true },
+            },
+          });
+        });
+        return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+      }
       if (err instanceof ProviderStateError) {
-        const fresh = await stripe.retrievePaymentIntent(order.paymentIntentId);
+        let fresh;
+        try {
+          fresh = await stripe.retrievePaymentIntent(order.paymentIntentId);
+        } catch (retrieveErr) {
+          if (isRetryableProviderError(retrieveErr)) {
+            return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+          }
+          throw retrieveErr;
+        }
         if (fresh.status === "succeeded") {
           await finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, fresh.amountReceived);
           return { ok: true, capturedAmountCents: fresh.amountReceived };
         }
-      } else if (isRetryableProviderError(err)) {
-        return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+        if (fresh.status !== "canceled") {
+          return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+        }
       } else {
         throw err;
       }
     }
+    await finalizeCancelFromSweep(storeId, orderId, "capture_released");
+    return {
+      ok: false,
+      error: "Payment authorization was released — order cancelled; contact the customer",
+      resolved: "cancelled",
+    };
   }
 
-  if (pi.status === "canceled" || pi.status === "requires_capture") {
-    await finalizeCancelFromSweep(storeId, orderId);
+  if (pi.status === "canceled") {
+    await finalizeCancelFromSweep(storeId, orderId, "reconcile_cancel");
     return {
       ok: false,
       error: "Payment authorization was released — order cancelled; contact the customer",
@@ -948,7 +980,7 @@ export async function autoCancelOrder(
 export async function reconcileStuckOrder(
   storeId: string,
   orderId: string,
-): Promise<{ ok: true; action: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; action: string } | { ok: false; error: string; waiting?: boolean }> {
   const order = await storeScopedTransaction(storeId, async (tx) => {
     return tx.order.findUnique({
       where: { id: orderId },
@@ -976,7 +1008,9 @@ export async function reconcileStuckOrder(
         refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
       }
       const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
-      if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
+      if (settled.outcome !== "refunded") {
+        return { ok: false, error: settled.error, waiting: settled.outcome === "pending" };
+      }
       return { ok: true, action: "anomaly_refund" };
     }
     return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
@@ -989,7 +1023,7 @@ export async function reconcileStuckOrder(
   if (pi.status === "requires_capture") {
     if (order.status === "CAPTURING") {
       if ((await captureRetryWaitMs(storeId, orderId)) > 0) {
-        return { ok: false, error: "capture_backoff" };
+        return { ok: false, error: "capture_backoff", waiting: true };
       }
       const attempt = await captureAttemptNumber(storeId, orderId);
       const amount = order.capturedAmountCents ?? 0;
@@ -1008,7 +1042,7 @@ export async function reconcileStuckOrder(
           const settled = await noteCaptureServerError(storeId, orderId, attempt);
           if (settled.ok) return { ok: true, action: "finalized_capture" };
           if (settled.resolved === "cancelled") return { ok: true, action: "finalized_cancel" };
-          return { ok: false, error: settled.error };
+          return { ok: false, error: settled.error, waiting: true };
         }
         if (err instanceof ProviderStateError) {
           return finalizeCancelFromSweep(storeId, orderId);
@@ -1036,7 +1070,7 @@ export async function reconcileStuckOrder(
                 },
               });
             });
-            return { ok: false, error: "Cancellation is still confirming with the bank" };
+            return { ok: false, error: "Cancellation is still confirming with the bank", waiting: true };
           }
           throw err;
         }
@@ -1051,7 +1085,9 @@ export async function reconcileStuckOrder(
               refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
             }
             const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
-            if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
+            if (settled.outcome !== "refunded") {
+        return { ok: false, error: settled.error, waiting: settled.outcome === "pending" };
+      }
             return { ok: true, action: "anomaly_refund" };
           }
         }
@@ -1104,28 +1140,28 @@ async function finalizeCaptureFromSweep(
 async function finalizeCancelFromSweep(
   storeId: string,
   orderId: string,
+  action: "reconcile_cancel" | "capture_released" = "reconcile_cancel",
 ): Promise<{ ok: true; action: string }> {
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || (current.status !== "CAPTURING" && current.status !== "CANCELLING")) return;
 
-    await tx.order.update({
-      where: { id: orderId },
-      data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
-    });
-
-    // Stock restore deferred to #141 (order-triggered reservation as a matched pair)
-
     await tx.auditLog.create({
       data: {
         storeId,
         actorId: SYSTEM_ACTOR_ID,
         actorEmail: SYSTEM_ACTOR_EMAIL,
-        action: "reconcile_cancel",
+        action,
         entityType: "order",
         entityId: orderId,
+        after: action === "capture_released" ? { alert: "store_and_platform" } : {},
       },
+    });
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
     });
   });
 

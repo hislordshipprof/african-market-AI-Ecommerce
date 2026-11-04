@@ -131,9 +131,9 @@ export const reconcileStuckTransitional = inngest.createFunction(
         let failReason: string | undefined;
         try {
           const result = await reconcileStuckOrder(row.storeId, row.id);
-          if (!result.ok) {
+          if (!result.ok && !result.waiting) {
             failReason = result.error;
-          } else if (result.action === "unknown_stripe_status") {
+          } else if (result.ok && result.action === "unknown_stripe_status") {
             failReason = "unknown_stripe_status";
           }
         } catch (err) {
