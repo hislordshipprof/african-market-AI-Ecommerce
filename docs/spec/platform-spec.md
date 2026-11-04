@@ -326,7 +326,7 @@ Substitution(product_id, substitute_id, rank, note)
 
 Listing(id, tenant_id, master_product_id?, custom_name, price, stock_mode, qty, status,
         confidence, confidence_updated_at, max_per_order, active)
-ListingVariant(id, listing_id, label, price, weight_g, sku, barcode)
+ListingVariant(id, listing_id, label, price, weight_g, weight_placeholder, sku, barcode)
 StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|short|adjust], delta, actor, at)
 
 Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id)

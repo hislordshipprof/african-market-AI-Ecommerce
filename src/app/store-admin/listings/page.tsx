@@ -28,6 +28,7 @@ export default async function ListingsPage() {
           label: v.label,
           price: v.price,
           weightG: v.weightG,
+          weightPlaceholder: v.weightPlaceholder,
           sku: v.sku,
           barcode: v.barcode,
         })),

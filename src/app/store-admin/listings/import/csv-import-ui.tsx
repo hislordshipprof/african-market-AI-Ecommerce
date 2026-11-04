@@ -19,6 +19,7 @@ import {
   csvCommitAction,
   type PreviewActionResult,
 } from "@/lib/listing/csv-import-actions";
+import { needsWeightSentence } from "../needs-weight";
 import type {
   CsvPreviewResult,
   CsvPreviewMatch,
@@ -58,6 +59,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
   const [isPending, startTransition] = useTransition();
   const [preview, setPreview] = useState<CsvPreviewResult | null>(null);
   const [createdCount, setCreatedCount] = useState(0);
+  const [needsWeightCount, setNeedsWeightCount] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -137,6 +139,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
 
       if (res.result) {
         setCreatedCount(res.result.createdCount);
+        setNeedsWeightCount(res.result.needsWeightCount);
         setStep("success");
         toast.success(
           `Imported ${countPhrase(res.result.createdCount, "listing", "listings")}.`,
@@ -272,6 +275,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
             >
               <SuccessStep
                 createdCount={createdCount}
+                needsWeightCount={needsWeightCount}
                 onGoToProducts={() =>
                   router.push(`/store-admin/listings?store=${storeSlug}`)
                 }
@@ -280,6 +284,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
                   setPreview(null);
                   setSelectedFile(null);
                   setCreatedCount(0);
+                  setNeedsWeightCount(0);
                 }}
               />
             </motion.div>
@@ -588,13 +593,16 @@ function PreviewStep({
 
 function SuccessStep({
   createdCount,
+  needsWeightCount,
   onGoToProducts,
   onImportMore,
 }: {
   createdCount: number;
+  needsWeightCount: number;
   onGoToProducts: () => void;
   onImportMore: () => void;
 }) {
+  const needsWeight = needsWeightSentence(needsWeightCount);
   return (
     <Card>
       <CardContent className="flex flex-col items-center py-12 text-center">
@@ -608,9 +616,14 @@ function SuccessStep({
         <h2 className="text-xl font-bold font-[family-name:var(--font-display)] mb-2">
           Import Complete
         </h2>
-        <p className="mb-6 text-[var(--color-muted)]">
+        <p className={needsWeight ? "mb-2 text-[var(--color-muted)]" : "mb-6 text-[var(--color-muted)]"}>
           Imported {createdCount} listing{createdCount !== 1 ? "s" : ""} successfully.
         </p>
+        {needsWeight ? (
+          <p className="mb-6 text-base font-medium text-foreground" data-needs-weight-count="">
+            {needsWeight}
+          </p>
+        ) : null}
         <div className="flex gap-3">
           <Button variant="outline" onClick={onImportMore}>
             Import More

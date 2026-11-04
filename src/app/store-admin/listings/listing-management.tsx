@@ -46,6 +46,7 @@ import {
   reactivateListingAction,
   listMasterProductsAction,
 } from "@/lib/listing/actions";
+import { listingNeedsWeight } from "./needs-weight";
 import { loadedVariantRow, serializeVariants } from "./variant-form";
 import {
   ArrowLeft,
@@ -63,6 +64,7 @@ interface Variant {
   label: string;
   price: number;
   weightG: number;
+  weightPlaceholder: boolean;
   sku: string | null;
   barcode: string | null;
 }
@@ -126,6 +128,7 @@ interface VariantFormRow {
   label: string;
   price: string;
   weightG: string;
+  weightPlaceholder?: boolean;
   /** Carried through edits so saving never erases existing values; no input UI. */
   sku?: string | null;
   barcode?: string | null;
@@ -517,7 +520,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
                 <div className="relative">
                   <Input
                     aria-label="Variant weight in grams"
-                    placeholder="Weight (g)"
+                    placeholder={v.weightPlaceholder ? "Needs weight" : "Weight (g)"}
                     type="number"
                     min="1"
                     value={v.weightG}
@@ -689,12 +692,17 @@ function ListingRow({
   const displayName = listing.customName ?? listing.masterProductName ?? "Unnamed";
 
   return (
-    <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+    <div className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-foreground truncate">
             {displayName}
           </span>
+          {listingNeedsWeight(listing) ? (
+            <Badge variant="outline" className="shrink-0" data-needs-weight="">
+              Needs weight
+            </Badge>
+          ) : null}
           {listing.frozen && (
             <Snowflake className="size-3.5 shrink-0 text-blue-500" aria-label="Frozen" />
           )}
