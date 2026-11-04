@@ -1,25 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { reconcileStuckTransitional, sweepOrphanedAuthorized } from "./functions";
+import { assistantRetention, reconcileStuckTransitional, sweepOrphanedAuthorized } from "./functions";
 
 function cronOf(fn: { opts: { triggers?: Array<{ cron?: string }> } }): string | undefined {
   return fn.opts.triggers?.find((trigger) => trigger.cron)?.cron;
 }
 
-/** Idle runs of a star-slash-N cron across a 30-day month. */
+/** Idle runs across a 30-day month. Daily crons are UTC so DST cannot double them. */
 function monthlyRuns(cron: string): number {
-  const match = cron.match(/^\*\/(\d+) \* \* \* \*$/);
-  if (!match) throw new Error(`unsupported cron ${cron}`);
-  return Math.floor((30 * 24 * 60) / Number(match[1]));
+  const interval = cron.match(/^\*\/(\d+) \* \* \* \*$/);
+  if (interval) return Math.floor((30 * 24 * 60) / Number(interval[1]));
+  if (/^TZ=UTC \d+ \d+ \* \* \*$/.test(cron)) return 30;
+  throw new Error(`unsupported cron ${cron}`);
 }
 
 describe("Inngest cron budget (ADR-0016)", () => {
-  it("keeps the two idle sweeps at 5,760 runs per month", () => {
+  it("keeps idle crons under the free tier", () => {
     const orphan = cronOf(sweepOrphanedAuthorized);
     const reconcile = cronOf(reconcileStuckTransitional);
+    const retention = cronOf(assistantRetention);
     expect(orphan).toBe("*/15 * * * *");
     expect(reconcile).toBe("*/15 * * * *");
-    const total = monthlyRuns(orphan!) + monthlyRuns(reconcile!);
-    expect(total).toBe(5_760);
+    expect(retention).toBe("TZ=UTC 17 3 * * *");
+    const total = monthlyRuns(orphan!) + monthlyRuns(reconcile!) + monthlyRuns(retention!);
+    expect(total).toBe(5_790);
     expect(total).toBeLessThan(35_000);
   });
 });

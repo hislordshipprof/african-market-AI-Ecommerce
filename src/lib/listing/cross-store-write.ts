@@ -76,7 +76,7 @@ export async function probeCrossStoreImportWrites(args: {
   };
 }
 
-function isRlsRejection(error: unknown): boolean {
+export function isRlsRejection(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /row-level security|42501/i.test(message);
 }

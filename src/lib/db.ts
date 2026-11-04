@@ -104,6 +104,8 @@ export function storeScoped(storeId: string) {
     customer: wrapDelegate(storeId, prisma.customer),
     order: wrapDelegate(storeId, prisma.order),
     orderLine: wrapDelegate(storeId, prisma.orderLine),
+    aiConversation: wrapDelegate(storeId, prisma.aiConversation),
+    aiAction: wrapDelegate(storeId, prisma.aiAction),
   };
 }
 
@@ -143,12 +145,28 @@ export const platformAdmin = {
 };
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-    return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, masterProduct: tx.masterProduct, category: tx.category, productSynonym: tx.productSynonym, $queryRaw: tx.$queryRaw.bind(tx) });
+    const zone = sessionTimeZone.getStore();
+    if (zone) {
+      await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
+    }
+    return fn({
+      store: tx.store,
+      auditLog: tx.auditLog,
+      storeMembership: tx.storeMembership,
+      storeInvite: tx.storeInvite,
+      masterProduct: tx.masterProduct,
+      category: tx.category,
+      productSynonym: tx.productSynonym,
+      aiConversation: tx.aiConversation,
+      aiAction: tx.aiAction,
+      $queryRaw: tx.$queryRaw.bind(tx),
+      $executeRaw: tx.$executeRaw.bind(tx),
+    });
   });
 }
 
@@ -159,7 +177,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -180,6 +198,8 @@ export async function storeScopedTransaction<T>(
       customer: tx.customer,
       order: tx.order,
       orderLine: tx.orderLine,
+      aiConversation: tx.aiConversation,
+      aiAction: tx.aiAction,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });

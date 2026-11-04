@@ -344,7 +344,8 @@ Delivery(id, order_id, provider, external_id, status, quote_fee, actual_fee, tra
 DeliveryEvent(id, delivery_id, type, payload, at)
 Refund(id, order_id, amount, reason, lines, stripe_refund_id, initiated_by)
 Issue(id, order_id, type, photos, status, resolution)
-AiConversation(id, tenant_id, user_id, side[shopper|store], messages_ref) / AiAction(id, conversation_id, tool, input, proposed, confirmed_by, at)
+AiConversation(id, store_id, cart_id unique, customer_id?, model, tokens_in, tokens_out, cost_micros, messages, in_flight_until, created_at, last_message_at) — one shopper conversation per cart. Store copilot records stay in #142/#144.
+AiAction(id, store_id, conversation_id, tool, input, output, ok, created_at)
 AuditLog(id, tenant_id, actor, action, entity, before, after, at)
 ```
 
