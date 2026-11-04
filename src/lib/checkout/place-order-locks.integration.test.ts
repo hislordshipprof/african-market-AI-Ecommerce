@@ -197,12 +197,16 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     return value.replace(/[{}]/g, "").split(",").map(Number).filter((pid) => pid > 0);
   }
 
-  /** Pid that holds this row's update lock, or null when the row is free. Granted row locks are not listed in pg_locks, so a conflicting probe observes them. */
-  async function pidHoldingRowUpdate(
+  /**
+   * Pids holding this row's update lock. Null when the row is free or the probe
+   * is only queued on a table lock, so a parallel DDL wait is not mistaken for
+   * the row holder. Granted row locks are not listed in pg_locks.
+   */
+  async function pidsHoldingRowUpdate(
     storeId: string,
     table: "listings" | "stores",
     id: string,
-  ): Promise<number | null> {
+  ): Promise<number[] | null> {
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
     const sql = table === "listings"
@@ -213,10 +217,11 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       await client.query("BEGIN");
       await client.query("SET LOCAL ROLE app_user");
       await client.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
-      await client.query("SET LOCAL lock_timeout = '500ms'");
+      await client.query("SET LOCAL lock_timeout = '250ms'");
       const who = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
       probePid = Number(who.rows[0]?.pid ?? 0);
-      let blocker: number | null = null;
+      let holders: number[] | null = null;
+      let sawRelation = false;
       let settled = false;
       const attempt = client.query(sql, [id]).then(
         () => {
@@ -229,20 +234,28 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
         },
       );
       const start = Date.now();
-      while (!settled && Date.now() - start < 600) {
+      while (!settled && Date.now() - start < 300) {
+        const pending = await monitor.query<{ locktype: string }>(
+          "SELECT locktype FROM pg_locks WHERE pid = $1 AND NOT granted",
+          [probePid],
+        );
+        if (pending.rows.some((row) => row.locktype === "relation")) {
+          sawRelation = true;
+          break;
+        }
         const waiting = await monitor.query<{ blockers: unknown }>(
           "SELECT pg_blocking_pids($1::int) AS blockers",
           [probePid],
         );
-        const found = asPids(waiting.rows[0]?.blockers)[0];
-        if (found) {
-          blocker = found;
+        const found = asPids(waiting.rows[0]?.blockers);
+        if (found.length > 0) {
+          holders = found;
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       await attempt;
-      return blocker;
+      return sawRelation ? null : holders;
     } finally {
       await client.query("ROLLBACK").catch(() => undefined);
       await client.end().catch(() => undefined);
@@ -859,17 +872,15 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
         const cartPid = await cartHolder.ready();
         watchSave();
         let savePid = 0;
-        await poll("save waits to lock the removed variant", async () => {
+        await poll("save holds the listing while it waits on the removed variant", async () => {
           const waiting = await saveWaitingOnVariant();
-          const hit = waiting[0];
+          if (waiting.length === 0) return false;
+          const holders = await pidsHoldingRowUpdate(storeId, "listings", listing.id);
+          const hit = holders ? waiting.find((pid) => holders.includes(pid)) : undefined;
           if (!hit) return false;
           savePid = hit;
           return true;
-        });
-        const listingHolder = await pidHoldingRowUpdate(storeId, "listings", listing.id);
-        if (listingHolder !== savePid) {
-          throw new Error(`listing lock held by ${listingHolder ?? "nobody"}, save waiter is ${savePid}`);
-        }
+        }, 8_000);
         checkoutRun = checkout();
         let checkoutPid = 0;
         await poll("checkout waits on the cart after locking the store", async () => {
@@ -879,13 +890,12 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
           checkoutPid = hit;
           return true;
         });
-        const storeLocker = await pidHoldingRowUpdate(storeId, "stores", storeId);
-        const saveStillWaiting = await saveWaitingOnVariant();
-        if (storeLocker !== checkoutPid || !saveStillWaiting.includes(savePid)) {
-          throw new Error(
-            `store lock held by ${storeLocker ?? "nobody"}, checkout waiter is ${checkoutPid}, save still waiting: ${saveStillWaiting.includes(savePid)}`,
-          );
-        }
+        await poll("that checkout holds the store while the save is still waiting", async () => {
+          const waiting = await saveWaitingOnVariant();
+          if (!waiting.includes(savePid)) return false;
+          const holders = await pidsHoldingRowUpdate(storeId, "stores", storeId);
+          return holders?.includes(checkoutPid) ?? false;
+        }, 8_000);
       } else {
         pauseHolder = hold(storeId, async (client) => {
           const locked = await client.query("SELECT 1 FROM stores WHERE id = $1 FOR KEY SHARE", [storeId]);
@@ -902,22 +912,14 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
           return true;
         });
         watchSave();
-        let savePid = 0;
-        await poll("save waits to lock the removed variant", async () => {
+        await poll("save holds the listing while checkout is still waiting on the store", async () => {
+          const checkoutStillWaiting = await pidsBlockedBy(storePid);
+          if (!checkoutStillWaiting.includes(checkoutPid)) return false;
           const waiting = await saveWaitingOnVariant();
-          const hit = waiting[0];
-          if (!hit) return false;
-          savePid = hit;
-          return true;
-        });
-        const listingHolder = await pidHoldingRowUpdate(storeId, "listings", listing.id);
-        if (listingHolder !== savePid) {
-          throw new Error(`listing lock held by ${listingHolder ?? "nobody"}, save waiter is ${savePid}`);
-        }
-        const checkoutStillWaiting = await pidsBlockedBy(storePid);
-        if (!checkoutStillWaiting.includes(checkoutPid)) {
-          throw new Error("checkout left the store wait before the save held the listing");
-        }
+          if (waiting.length === 0) return false;
+          const holders = await pidsHoldingRowUpdate(storeId, "listings", listing.id);
+          return holders ? waiting.some((pid) => holders.includes(pid)) : false;
+        }, 8_000);
       }
       pauseHolder?.release();
       variantHolder.release();
