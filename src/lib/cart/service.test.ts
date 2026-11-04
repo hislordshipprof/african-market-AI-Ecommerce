@@ -335,20 +335,21 @@ describe.skipIf(!hasDb)("Cart service", () => {
       await addLine(storeId, guestId, variantId, 2);
 
       const prisma = (globalThis as unknown as { prisma: PrismaClient }).prisma;
-      const original = prisma.user.findUnique.bind(prisma.user);
+      type FindUser = typeof prisma.user.findUnique;
+      const original: FindUser = prisma.user.findUnique.bind(prisma.user);
       let seen = 0;
       let release!: () => void;
       const open = new Promise<void>((resolve) => {
         release = resolve;
       });
       const bothRead = new Promise<void>((resolve) => {
-        prisma.user.findUnique = (async (args: { where: { id: string } }) => {
+        prisma.user.findUnique = (async (args: Parameters<FindUser>[0]) => {
           const row = await original(args);
           seen += 1;
           if (seen >= 2) resolve();
           await open;
           return row;
-        }) as typeof prisma.user.findUnique;
+        }) as unknown as FindUser;
       });
 
       try {
@@ -374,7 +375,7 @@ describe.skipIf(!hasDb)("Cart service", () => {
         const fresh = await getCartWithLines(storeId, loserId);
         expect(fresh?.lines).toHaveLength(0);
       } finally {
-        prisma.user.findUnique = original as typeof prisma.user.findUnique;
+        prisma.user.findUnique = original;
       }
     });
 
