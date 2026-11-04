@@ -20,6 +20,7 @@ function childEnv(overrides: Record<string, string | undefined>): NodeJS.Process
     HOME: process.env.HOME,
     APPDATA: process.env.APPDATA,
     LOCALAPPDATA: process.env.LOCALAPPDATA,
+    NODE_ENV: "test",
   };
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) delete env[key];

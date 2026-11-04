@@ -13,7 +13,7 @@ http.request = blocked("http") as typeof http.request;
 https.request = blocked("https") as typeof https.request;
 
 async function main(): Promise<void> {
-  const { httpStatusOf, statusLabel } = await import("./catalog-photo-audit.ts");
+  const { httpStatusOf, statusLabel } = await import("./catalog-photo-audit");
 
   if (
     process.env.R2_ACCOUNT_ID

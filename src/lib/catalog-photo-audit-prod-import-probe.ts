@@ -1,5 +1,5 @@
 async function main(): Promise<void> {
-  await import("./db.ts");
+  await import("./db");
   process.stdout.write("imported-without-throw\n");
 }
 
