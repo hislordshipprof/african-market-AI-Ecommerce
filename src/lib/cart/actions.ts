@@ -1,5 +1,7 @@
 "use server";
 
+import { headers } from "next/headers";
+import { auth } from "../auth";
 import { getStore } from "../get-store";
 import { getCartIdFromCookie, setCartIdCookie } from "./cookies";
 import {
@@ -17,10 +19,22 @@ import {
   type MinimumOrderResult,
 } from "./service";
 
+async function sessionUserId(): Promise<string | null> {
+  const reqHeaders = await headers();
+  const session = await auth.api.getSession({
+    headers: reqHeaders,
+    query: { disableCookieCache: true },
+  });
+  return session?.user.id ?? null;
+}
+
 async function ensureCartId(): Promise<{ storeId: string; cartId: string }> {
-  const store = await getStore();
-  const cookieCartId = await getCartIdFromCookie();
-  const cartId = await getOrCreateCart(store.id, cookieCartId, null);
+  const [store, cookieCartId, userId] = await Promise.all([
+    getStore(),
+    getCartIdFromCookie(),
+    sessionUserId(),
+  ]);
+  const cartId = await getOrCreateCart(store.id, cookieCartId, userId);
   if (cartId !== cookieCartId) {
     await setCartIdCookie(cartId);
   }
