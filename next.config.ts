@@ -13,6 +13,12 @@ const nextConfig: NextConfig = {
   },
   images: {
     // SVG logos are rendered with a plain <img> (StoreLogo), never via the optimizer (#60).
+    // search is exact. Omitting it would allow any query string (#208).
+    localPatterns: [
+      { pathname: "/**", search: "" },
+      { pathname: "/api/catalog-image/**", search: "?retry=1" },
+      { pathname: "/images/products/**", search: "?retry=1" },
+    ],
     dangerouslyAllowSVG: false,
     contentDispositionType: "attachment",
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
