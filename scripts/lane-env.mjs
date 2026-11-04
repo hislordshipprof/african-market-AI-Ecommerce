@@ -95,26 +95,54 @@ function ticketKeys(ticketEnvText, ticket) {
 }
 
 function stripAssignments(text, drop) {
-  // Installed dotenv LINE grammar, including a colon whose value is on the next line.
+  // dotenv rewrites \r\n and lone \r to \n before LINE. Match that text, then
+  // delete the same span in the original so a continuation value is removed.
+  const { norm, toOrig } = normalizeNewlines(text);
   const line = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/dmg;
   let out = "";
   let cursor = 0;
   const withheld = new Set();
-  for (const match of text.matchAll(line)) {
+  for (const match of norm.matchAll(line)) {
     const key = match[1];
     if (!key || !drop.has(key)) continue;
     withheld.add(key);
-    let start = match.index;
-    while (text[start] === "\r" || text[start] === "\n") start += 1;
+    const normStart = match.index ?? 0;
+    const start = toOrig[normStart] ?? text.length;
+    const end = toOrig[assignmentEnd(norm, match)] ?? text.length;
+    if (start < cursor) continue;
     out += text.slice(cursor, start);
-    const valueEnd = match.indices?.[2]?.[1] ?? start + match[0].length;
-    let end = valueEnd;
-    if (text[end] === "\r") end += 1;
-    if (text[end] === "\n") end += 1;
     cursor = end;
   }
   out += text.slice(cursor);
   return { text: out, withheld };
+}
+
+function normalizeNewlines(text) {
+  let norm = "";
+  const toOrig = [];
+  for (let i = 0; i < text.length; i++) {
+    toOrig.push(i);
+    if (text[i] === "\r") {
+      norm += "\n";
+      if (text[i + 1] === "\n") i += 1;
+    } else {
+      norm += text[i];
+    }
+  }
+  return { norm, toOrig };
+}
+
+function assignmentEnd(norm, match) {
+  const valueEnd = match.indices?.[2]?.[1];
+  let end = valueEnd ?? (match.index ?? 0) + match[0].length;
+  if (valueEnd != null) {
+    while (norm[end] === " " || norm[end] === "\t") end += 1;
+    if (norm[end] === "#") {
+      while (end < norm.length && norm[end] !== "\n") end += 1;
+    }
+  }
+  if (norm[end] === "\n") end += 1;
+  return end;
 }
 
 function fail(message) {

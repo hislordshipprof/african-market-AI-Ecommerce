@@ -858,13 +858,37 @@ describe("lane env filter script", () => {
     expect(written).not.toContain("dry-run");
     expect(written).not.toContain("remote.example");
     const bashDest = dest.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-    const probe = execFileSync("bash", ["-c", `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`], {
-      encoding: "utf8",
-      cwd: process.cwd(),
-    });
+    const loadProbe = `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`;
+    const probe = execFileSync("bash", ["-c", loadProbe], { encoding: "utf8", cwd: process.cwd() });
     expect(probe).toContain("host:localhost");
     expect(probe).not.toContain("PRESENT");
     expect(probe).not.toContain(SECRET);
+    writeFileSync(src, [
+      "KEEP=plain",
+      "R2_SECRET_ACCESS_KEY:",
+      SECRET,
+      "R2_ACCESS_KEY_ID:",
+      ACCESS,
+      "SEED_PRUNE_R2:",
+      "dry-run",
+      "DATABASE_URL_UNPOOLED:",
+      `postgresql://user:${SECRET}@remote.example/db`,
+      "DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225",
+      "",
+    ].join("\r\n"));
+    execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
+    const crlf = readFileSync(dest, "utf8");
+    expect(crlf).toContain("KEEP=plain");
+    expect(crlf).toContain("localhost");
+    expect(crlf).not.toContain(SECRET);
+    expect(crlf).not.toContain("dry-run");
+    expect(crlf).not.toContain("remote.example");
+    expect(crlf).not.toContain("R2_SECRET_ACCESS_KEY");
+    expect(crlf).not.toContain("R2_ACCESS_KEY_ID");
+    const crlfProbe = execFileSync("bash", ["-c", loadProbe], { encoding: "utf8", cwd: process.cwd() });
+    expect(crlfProbe).toContain("host:localhost");
+    expect(crlfProbe).not.toContain("PRESENT");
+    expect(crlfProbe).not.toContain(SECRET);
     rmSync(env.dir, { recursive: true, force: true });
   });
 
@@ -931,7 +955,13 @@ exit 0
       `DATABASE_URL=postgresql://user:${SECRET}@remote.example/neondb`,
       `R2_SECRET_ACCESS_KEY = ${SECRET}`,
       "",
-    ].join("\n"));
+    ].join("\n") + [
+      "DATABASE_URL_UNPOOLED:",
+      `postgresql://user:${SECRET}@crlf.example/db`,
+      "SEED_PRUNE_R2:",
+      "dry-run",
+      "",
+    ].join("\r\n"));
     execFileSync("bash", ["scripts/lane-db.sh", "zzorch", bashPath(envFile)], {
       env: {
         ...process.env,
@@ -946,6 +976,8 @@ exit 0
     expect(written).not.toContain("SEED_PRUNE_R2");
     expect(written).not.toContain("remote.example");
     expect(written).not.toContain("other.example");
+    expect(written).not.toContain("crlf.example");
+    expect(written).not.toContain("dry-run");
     expect(written).toContain("postgresql://app_owner:app_owner@localhost:");
     expect(written).toContain("/lane_zzorch");
     const child = readFileSync(log, "utf8");
