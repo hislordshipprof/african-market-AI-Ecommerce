@@ -27,37 +27,63 @@ const RLS_MESSAGE = 'new row violates row-level security policy for table "stock
 // The scratch schema is dropped afterwards. Do not point this file at Neon.
 
 const connectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+let validatedDirect = "";
+
+type DatabaseEndpoint = { host: string; port: string; database: string };
+
+function endpoint(connectionStringValue: string): DatabaseEndpoint {
+  const url = new URL(connectionStringValue);
+  return {
+    host: url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/-pooler(?=\.)/g, ""),
+    port: url.port || "5432",
+    database: decodeURIComponent(url.pathname.replace(/^\//, "")),
+  };
+}
+
+function sameHost(left: string, right: string): boolean {
+  const local = (host: string) => (LOCAL_HOSTS.has(host) ? "127.0.0.1" : host);
+  return local(left) === local(right);
+}
 
 function databaseName(connectionStringValue: string): string {
-  return decodeURIComponent(new URL(connectionStringValue).pathname.replace(/^\//, ""));
+  return endpoint(connectionStringValue).database;
 }
 
 function loginRole(connectionStringValue: string): string {
   return decodeURIComponent(new URL(connectionStringValue).username);
 }
 
-/** Refuse a migrate target whose direct, pooled and unpooled URLs name different databases. */
+function assertSameEndpoint(label: string, left: DatabaseEndpoint, right: DatabaseEndpoint) {
+  if (!sameHost(left.host, right.host) || left.port !== right.port) {
+    throw new Error(
+      `${label} endpoint ${left.host}:${left.port} does not match DIRECT_URL endpoint ${right.host}:${right.port}`,
+    );
+  }
+  if (left.database !== right.database) {
+    throw new Error(
+      `${label} database ${left.database} does not match DIRECT_URL database ${right.database}`,
+    );
+  }
+}
+
+/** Refuse a migrate target whose URLs differ, or that is not a local lane or the hosted CI database. */
 export function assertSameDatabase(env: NodeJS.ProcessEnv): string {
   const pooled = env.DATABASE_URL?.trim();
   const direct = env.DIRECT_URL?.trim();
   if (!pooled || !direct) {
     throw new Error("DATABASE_URL and DIRECT_URL are required");
   }
-  const pooledName = databaseName(pooled);
-  const directName = databaseName(direct);
-  if (pooledName !== directName) {
-    throw new Error(
-      `DIRECT_URL database ${directName} does not match DATABASE_URL database ${pooledName}`,
-    );
-  }
+  const pooledEndpoint = endpoint(pooled);
+  const directEndpoint = endpoint(direct);
+  assertSameEndpoint("DATABASE_URL", pooledEndpoint, directEndpoint);
   const unpooled = env.DATABASE_URL_UNPOOLED?.trim();
-  if (unpooled) {
-    const unpooledName = databaseName(unpooled);
-    if (unpooledName !== directName) {
-      throw new Error(
-        `DATABASE_URL_UNPOOLED database ${unpooledName} does not match DIRECT_URL database ${directName}`,
-      );
-    }
+  if (unpooled) assertSameEndpoint("DATABASE_URL_UNPOOLED", endpoint(unpooled), directEndpoint);
+  if (!LOCAL_HOSTS.has(directEndpoint.host)) {
+    throw new Error(`migrate target host ${directEndpoint.host} is not a local disposable database`);
+  }
+  if (directEndpoint.database !== "test_db" && !/^lane_[a-z0-9_]+$/.test(directEndpoint.database)) {
+    throw new Error(`migrate target database ${directEndpoint.database} is not a disposable local database`);
   }
   return direct;
 }
@@ -157,7 +183,7 @@ describe("stock_events same-store migration file", () => {
       NODE_ENV: "test",
       DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
       DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5434/other",
-    })).toThrow(/DIRECT_URL database other does not match DATABASE_URL database lane_t235/);
+    })).toThrow(/DATABASE_URL database lane_t235 does not match DIRECT_URL database other/);
   });
 
   it("refuses an unpooled URL that names a different database", () => {
@@ -175,13 +201,63 @@ describe("stock_events same-store migration file", () => {
       DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
     })).toThrow(/DATABASE_URL and DIRECT_URL are required/);
   });
+
+  it("refuses the same database name on a different host or port", () => {
+    expect(() => assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@localhost:5434/lane_t235",
+      DIRECT_URL: "postgres://app_owner:pw@other-host:5432/lane_t235",
+    })).toThrow(/other-host:5432/);
+    expect(() => assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
+      DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5432/lane_t235",
+    })).toThrow(/:5432/);
+    expect(() => assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
+      DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5434/lane_t235",
+      DATABASE_URL_UNPOOLED: "postgres://app_owner:pw@other-host:5434/lane_t235",
+    })).toThrow(/other-host:5434/);
+  });
+
+  it("accepts the hosted CI database and local host aliases", () => {
+    const direct = assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@localhost:5432/test_db",
+      DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5432/test_db",
+    });
+    expect(databaseName(direct)).toBe("test_db");
+    expect(databaseName(assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@localhost:5434/lane_t235",
+      DIRECT_URL: "postgres://app_owner:pw@[::1]:5434/lane_t235",
+    }))).toBe("lane_t235");
+  });
+
+  it("treats a pooler hostname as the same endpoint and still refuses a remote target", () => {
+    expect(() => assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@ep-abc-pooler.region.aws.neon.tech:5432/lane_t235",
+      DIRECT_URL: "postgres://app_owner:pw@ep-abc.region.aws.neon.tech:5432/lane_t235",
+    })).toThrow(/not a local disposable database/);
+    expect(() => assertSameDatabase({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgres://app_owner:pw@127.0.0.1:5432/neondb",
+      DIRECT_URL: "postgres://app_owner:pw@127.0.0.1:5432/neondb",
+    })).toThrow(/neondb/);
+  });
 });
 
 describe.skipIf(!connectionString)("stock_events same-store migration replay", () => {
-  const client = new Client({ connectionString });
-  const role = loginRole(connectionString!);
+  let client!: Client;
+  let role = "";
 
   beforeAll(async () => {
+    const direct = assertSameDatabase(process.env);
+    role = loginRole(direct);
+    validatedDirect = direct;
+    client = new Client({ connectionString: direct });
     await client.connect();
     await client.query("SELECT pg_advisory_lock($1)", [REPLAY_LOCK]);
     try {
@@ -197,6 +273,7 @@ describe.skipIf(!connectionString)("stock_events same-store migration replay", (
   }, 300_000);
 
   afterAll(async () => {
+    if (!client) return;
     await client.query("ROLLBACK").catch(() => undefined);
     await client.query("RESET ROLE").catch(() => undefined);
     for (const schema of [ABORT_SCHEMA, APPLY_SCHEMA, HOLD_SCHEMA]) {
@@ -535,9 +612,8 @@ describe.skipIf(!connectionString)("stock_events same-store migration replay", (
 });
 
 describe.skipIf(!connectionString)("stock_events same-store migration on the lane", () => {
-  it("live migrated lane has the complete expected RLS policy", async () => {
+  it("live migrated database has the complete expected RLS policy", async () => {
     const direct = assertSameDatabase(process.env);
-    expect(databaseName(direct).startsWith("lane_")).toBe(true);
     const client = new Client({ connectionString: direct });
     await client.connect();
     try {
@@ -545,6 +621,7 @@ describe.skipIf(!connectionString)("stock_events same-store migration on the lan
         "SELECT current_database() AS db, current_user AS usr",
       );
       expect(identity.rows[0].db).toBe(databaseName(direct));
+      expect(identity.rows[0].db === "test_db" || /^lane_[a-z0-9_]+$/.test(identity.rows[0].db)).toBe(true);
       expect(identity.rows[0].usr).toBe(loginRole(direct));
       const role = await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
         "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user",
@@ -590,9 +667,14 @@ describe.skipIf(!connectionString)("stock_events migration deploy recovery", () 
   const created: string[] = [];
 
   afterAll(async () => {
-    const direct = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
-    if (!direct) return;
-    const maintenance = new Client({ connectionString: withDatabase(direct, "postgres") });
+    if (created.length === 0) return;
+    let direct = "";
+    try {
+      direct = assertSameDatabase(process.env);
+    } catch {
+      return;
+    }
+    const maintenance = new Client({ connectionString: setupConnectionString(direct) });
     await maintenance.connect();
     try {
       for (const name of created) {
@@ -752,6 +834,38 @@ describe.skipIf(!connectionString)("stock_events migration deploy recovery", () 
       await client.end();
     }
   }, 180_000);
+
+  it("provisions a disposable database when the owner cannot create databases", async () => {
+    const direct = assertSameDatabase(process.env);
+    const role = `t235_nocdb_${Date.now().toString(36)}`;
+    const name = `t235_db_${Date.now().toString(36)}`;
+    created.push(name);
+    const setup = new Client({ connectionString: setupConnectionString(direct) });
+    await setup.connect();
+    try {
+      await setup.query(
+        `CREATE ROLE ${role} LOGIN PASSWORD 'pw' CREATEROLE NOCREATEDB NOSUPERUSER NOBYPASSRLS`,
+      );
+      const owner = new URL(direct);
+      owner.username = role;
+      owner.password = "pw";
+      await createDatabase(owner.toString(), name);
+      const check = new Client({ connectionString: withDatabase(owner.toString(), name) });
+      await check.connect();
+      try {
+        const row = await check.query<{ usr: string; rolcreatedb: boolean }>(
+          "SELECT current_user AS usr, rolcreatedb FROM pg_roles WHERE rolname = current_user",
+        );
+        expect(row.rows[0]).toEqual({ usr: role, rolcreatedb: false });
+      } finally {
+        await check.end();
+      }
+    } finally {
+      await setup.query(`DROP DATABASE IF EXISTS ${name}`).catch(() => undefined);
+      await setup.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
+      await setup.end();
+    }
+  }, 30_000);
 });
 
 async function replay(client: Client, schema: string, throughTarget: boolean) {
@@ -872,7 +986,8 @@ async function expectForcedOwner(client: Client, schema: string, role: string) {
 
 async function connectSchema(schema: string): Promise<Client> {
   assertSchema(schema);
-  const extra = new Client({ connectionString });
+  if (!validatedDirect) throw new Error("migrate target was not validated");
+  const extra = new Client({ connectionString: validatedDirect });
   await extra.connect();
   await extra.query(`SET search_path = ${schema}`);
   return extra;
@@ -896,11 +1011,28 @@ async function waitForLockWait(observer: Client, pid: number) {
   throw new Error("the overlapping statement never waited on a lock");
 }
 
+function setupConnectionString(direct: string): string {
+  const target = endpoint(direct);
+  if (!LOCAL_HOSTS.has(target.host)) {
+    throw new Error(`migrate target host ${target.host} is not a local disposable database`);
+  }
+  const url = new URL(direct);
+  url.username = "postgres";
+  url.password = "postgres";
+  url.pathname = "/postgres";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
 async function createDatabase(direct: string, name: string) {
-  const maintenance = new Client({ connectionString: withDatabase(direct, "postgres") });
+  if (!/^[a-z0-9_]+$/.test(name)) throw new Error("unexpected database name");
+  const owner = loginRole(direct);
+  if (!/^[a-z_][a-z0-9_]*$/.test(owner)) throw new Error("unexpected database owner");
+  const maintenance = new Client({ connectionString: setupConnectionString(direct) });
   await maintenance.connect();
   try {
-    await maintenance.query(`CREATE DATABASE ${name}`);
+    await maintenance.query(`CREATE DATABASE ${name} OWNER ${owner}`);
   } finally {
     await maintenance.end();
   }
