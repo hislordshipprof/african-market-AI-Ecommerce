@@ -569,7 +569,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
         if (waiters.length !== 1) return false;
         checkoutPid = waiters[0]!;
         return true;
-      });
+      }, 20_000);
       await assertCartHeldBy(storeId, cart.id, checkoutPid);
       adding = addLine(storeId, cart.id, variantId, 2);
       await poll("addLine waits on the checkout cart lock", async () => {

@@ -749,6 +749,36 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   let ambigMp1Id: string;
   let ambigMp2Id: string;
 
+  function lockTimeout(err: unknown): boolean {
+    if (!err || typeof err !== "object") return false;
+    const meta = (err as { meta?: { code?: unknown } }).meta;
+    if (meta?.code === "55P03") return true;
+    const code = "code" in err ? String((err as { code: unknown }).code) : "";
+    if (code === "P2028") return true;
+    return String((err as { message?: unknown }).message ?? "").includes("55P03");
+  }
+
+  // A waiting ACCESS EXCLUSIVE blocks later locks on listings even before it is
+  // granted. Take the constraint lock only when the table is free, and give up
+  // within 200ms so a checkout or variant-save row lock is not stuck behind it.
+  async function alterListingsWhenFree(
+    run: (execute: PrismaClient["$executeRaw"]) => Promise<unknown>,
+  ) {
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      try {
+        await rawPrisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SET LOCAL lock_timeout = '200ms'`;
+          await run(tx.$executeRaw.bind(tx));
+        }, { timeout: 15_000, maxWait: 8_000 });
+        return;
+      } catch (err) {
+        if (!lockTimeout(err) || Date.now() >= deadline) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+  }
+
   beforeAll(async () => {
     const adapter = new PrismaPg(process.env.DATABASE_URL!);
     rawPrisma = new PrismaClient({ adapter });
