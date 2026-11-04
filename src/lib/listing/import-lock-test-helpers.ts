@@ -424,7 +424,8 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
     observer.on("error", (err) => {
       observerError = err;
     });
-    armHandshakeReset(observer, true);
+    const active = observer;
+    armHandshakeReset(active, true);
     const failObserver = () => {
       if (observerError) throw observerError;
     };
@@ -434,9 +435,9 @@ export async function waitForLockWaiters(holderPid: number, atLeast: number, opt
       if (state) return new Error(`commit settled before it queued on the store lock: ${label}`);
       return observerError;
     };
-    const connecting = observer.connect().then(() => {
+    const connecting = active.connect().then(() => {
       connectSettled = true;
-      armHandshakeReset(observer, false);
+      armHandshakeReset(active, false);
     });
     await withinDeadline(connecting, deadline, label, errorOf);
     failObserver();
@@ -479,9 +480,8 @@ function endObserver(observer: LockObserver, connectSettled: boolean): Promise<v
   // only half-closes that socket unless resetAndClosing is set, which is what
   // Socket.resetAndDestroy() does before it calls destroy(). Arm it before
   // connect as well, so Postgres's own connection timeout resets the peer.
-  if (!connectSettled) {
-    const real = observer as Client & { _queryable?: boolean };
-    if (observer instanceof Client) real._queryable = false;
+  if (!connectSettled && observer instanceof Client) {
+    (observer as unknown as { _queryable: boolean })._queryable = false;
     armHandshakeReset(observer, true);
   }
   return observer.end().catch(() => undefined);
