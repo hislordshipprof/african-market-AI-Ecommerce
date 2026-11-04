@@ -479,4 +479,37 @@ test.describe("CSV import (authenticated)", () => {
     );
     expect(fits).toBe(true);
   });
+
+  test("exactly 2 MB CSV previews through the production Server Action", async ({ page }) => {
+    test.setTimeout(90_000);
+    const name = `E2E Exact ${Date.now()}`;
+    const target = 2_097_152;
+    const header = "name,price,notes\n";
+    const prefix = `${name},9.99,`;
+    const suffix = "\n";
+    const pad = target - Buffer.byteLength(`${header}${prefix}${suffix}`);
+    const csv = Buffer.from(`${header}${prefix}${"n".repeat(pad)}${suffix}`);
+    expect(csv.length).toBe(target);
+    const csvPath = writeTempBytes("exact-2mb.csv", csv);
+    const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    try {
+      await page.goto(IMPORT_URL);
+      await page.locator("input[type='file']").setInputFiles(csvPath);
+      await page.click("text=Upload & Preview");
+      await expect(page.getByText("File exceeds the maximum size of 2 MB")).toHaveCount(0);
+      await expect(page.getByText(/Body exceeded|Request Entity Too Large/)).toHaveCount(0);
+      await expect(page.getByText("New listings", { exact: true })).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(page.getByText(name)).toBeVisible();
+      await expect(page.getByText(/Unknown columns ignored:\s*notes/)).toBeVisible();
+    } finally {
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.listingImport.deleteMany({ where: { csvText: { contains: name } } });
+      });
+      await prisma.$disconnect();
+    }
+  });
 });
