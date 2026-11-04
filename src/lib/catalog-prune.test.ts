@@ -762,8 +762,8 @@ describe("lane env filter script", () => {
 
   it("usage errors name the accepted command instead of a generic filter failure", () => {
     const cases = [
-      { args: [] as string[], stderr: "usage: lane-env.mjs filter|child-env|keys ..." },
-      { args: ["nope"], stderr: "usage: lane-env.mjs filter|child-env|keys ..." },
+      { args: [] as string[], stderr: "usage: lane-env.mjs filter|child-env|keys|strip ..." },
+      { args: ["nope"], stderr: "usage: lane-env.mjs filter|child-env|keys|strip ..." },
       { args: ["filter"], stderr: "usage: filter <ticket> <src> <dest> <ticket-env>" },
       { args: ["keys"], stderr: "usage: keys <ticket> <ticket-env>" },
       { args: ["child-env"], stderr: "usage: child-env <ticket> <ticket-env>" },
@@ -821,6 +821,41 @@ describe("lane env filter script", () => {
     expect(written).toContain("DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225");
     expect(written).not.toContain(SECRET);
     expect(written).not.toContain("SEED_PRUNE_R2");
+    expect(written).not.toContain("remote.example");
+    const bashDest = dest.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
+    const probe = execFileSync("bash", ["-c", `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`], {
+      encoding: "utf8",
+      cwd: process.cwd(),
+    });
+    expect(probe).toContain("host:localhost");
+    expect(probe).not.toContain("PRESENT");
+    expect(probe).not.toContain(SECRET);
+    rmSync(env.dir, { recursive: true, force: true });
+  });
+
+  it("a dotenv value on the line after a colon cannot leak", () => {
+    const env = ticketEnv();
+    const src = path.join(env.dir, "src");
+    const dest = path.join(env.dir, "dest");
+    writeFileSync(src, [
+      "KEEP=plain",
+      "R2_SECRET_ACCESS_KEY:",
+      SECRET,
+      "R2_ACCESS_KEY_ID:",
+      ACCESS,
+      "SEED_PRUNE_R2:",
+      "dry-run",
+      "DATABASE_URL_UNPOOLED:",
+      `postgresql://user:${SECRET}@remote.example/db`,
+      "DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225",
+      "",
+    ].join("\n"));
+    execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
+    const written = readFileSync(dest, "utf8");
+    expect(written).toContain("KEEP=plain");
+    expect(written).toContain("localhost");
+    expect(written).not.toContain(SECRET);
+    expect(written).not.toContain("dry-run");
     expect(written).not.toContain("remote.example");
     const bashDest = dest.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
     const probe = execFileSync("bash", ["-c", `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`], {

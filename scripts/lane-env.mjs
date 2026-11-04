@@ -18,6 +18,12 @@ try {
     const allowWrite = ticketAllowsR2Write(readFileSync(ticketEnv, "utf8"), ticket);
     const names = [...ALWAYS_DROP, ...(allowWrite ? [] : WRITE_KEYS)];
     for (const name of names) process.stdout.write(`unset ${name}\n`);
+  } else if (command === "strip") {
+    const [file, ...keys] = args;
+    if (!file || keys.length === 0) fail("usage: strip <file> <key>...");
+    const original = readFileSync(file, "utf8");
+    const { text } = stripAssignments(original, new Set(keys));
+    writeFileSync(file, text);
   } else if (command === "keys") {
     const [ticket, ticketEnv] = args;
     if (!ticket || !ticketEnv) fail("usage: keys <ticket> <ticket-env>");
@@ -25,7 +31,7 @@ try {
       process.stdout.write(`${key}\n`);
     }
   } else {
-    fail("usage: lane-env.mjs filter|child-env|keys ...");
+    fail("usage: lane-env.mjs filter|child-env|keys|strip ...");
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : "failed";
@@ -55,25 +61,12 @@ function filterFile(ticket, src, dest, ticketEnv) {
     bom = "\uFEFF";
     text = text.slice(1);
   }
-  const parts = text.split("\n");
-  const kept = [];
-  const withheld = new Set();
-  let first = true;
-  for (const part of parts) {
-    const key = assignmentKey(part.replace(/\r$/, ""));
-    if (key && drop.has(key)) {
-      withheld.add(key);
-      first = false;
-      continue;
-    }
-    kept.push(first && bom ? bom + part : part);
-    first = false;
-  }
+  const { text: kept, withheld } = stripAssignments(text, drop);
   const tmp = `${dest}.lane-env.tmp`;
   try {
-    writeFileSync(tmp, kept.join("\n"));
+    writeFileSync(tmp, bom + kept);
     rmSync(dest, { force: true });
-    writeFileSync(dest, kept.join("\n"));
+    writeFileSync(dest, bom + kept);
     rmSync(tmp, { force: true });
   } catch {
     rmSync(tmp, { force: true });
@@ -101,12 +94,27 @@ function ticketKeys(ticketEnvText, ticket) {
   return keys;
 }
 
-function assignmentKey(line) {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith("#")) return null;
-  // Same separators as the installed dotenv LINE grammar: KEY=value and KEY: value.
-  const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)(?:\s*=|:\s+)/);
-  return match ? match[1] : null;
+function stripAssignments(text, drop) {
+  // Installed dotenv LINE grammar, including a colon whose value is on the next line.
+  const line = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/dmg;
+  let out = "";
+  let cursor = 0;
+  const withheld = new Set();
+  for (const match of text.matchAll(line)) {
+    const key = match[1];
+    if (!key || !drop.has(key)) continue;
+    withheld.add(key);
+    let start = match.index;
+    while (text[start] === "\r" || text[start] === "\n") start += 1;
+    out += text.slice(cursor, start);
+    const valueEnd = match.indices?.[2]?.[1] ?? start + match[0].length;
+    let end = valueEnd;
+    if (text[end] === "\r") end += 1;
+    if (text[end] === "\n") end += 1;
+    cursor = end;
+  }
+  out += text.slice(cursor);
+  return { text: out, withheld };
 }
 
 function fail(message) {
