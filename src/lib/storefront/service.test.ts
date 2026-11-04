@@ -299,11 +299,14 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
     await rawPrisma.$disconnect();
   });
 
-  // Seam 7: category seed migration
+  // Seam 7: category seed migration. Seed rows use cat_ ids. A parallel
+  // catalog-prune test inserts its own category and deletes it afterwards, so
+  // a raw count of the table flaps between 17 and 18 under file parallelism.
   it("has exactly 17 categories after seed", async () => {
     const categories = await listCategories();
-    expect(categories.length).toBe(17);
-    const slugs = categories.map((c) => c.slug);
+    const seeded = categories.filter((category) => category.id.startsWith("cat_"));
+    expect(seeded).toHaveLength(17);
+    const slugs = seeded.map((c) => c.slug);
     expect(slugs).toContain("tubers-and-roots");
     expect(slugs).toContain("vegetables");
     expect(slugs).toContain("spices-and-seasonings");
