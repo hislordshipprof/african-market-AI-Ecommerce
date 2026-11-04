@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
+import { customerRlsErrorText, isCustomerRlsRejection } from "../customer-rls-error";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -202,18 +203,32 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
     expect(customers.find((c) => c.id === customerAId)).toBeUndefined();
   });
 
-  it("cross-store customer insert is rejected by RLS", async () => {
-    const scoped = storeScoped(storeAId);
-    await expect(
-      scoped.customer.create({
-        data: {
-          storeId: storeBId,
-          name: "Cross-store",
-          email: "cross@test.example",
-          phone: "+15550000000",
-        },
-      }),
-    ).rejects.toThrow();
+  it("cross-store Guest Customer fails for RLS and identical same-store row succeeds", async () => {
+    const guest = {
+      storeId: storeBId,
+      name: "Cross-store guest",
+      email: `cross-guest-${process.pid}@test.example`,
+      phone: "+15550000099",
+    };
+    let caught: unknown;
+    try {
+      await storeScoped(storeAId).customer.create({ data: guest });
+    } catch (error) {
+      caught = error;
+    }
+    const text = customerRlsErrorText(caught);
+    expect(isCustomerRlsRejection(caught), text).toBe(true);
+    const absent = await storeScoped(storeBId).customer.findMany({
+      where: { email: guest.email },
+    });
+    expect(absent).toHaveLength(0);
+    const created = await storeScoped(storeBId).customer.create({ data: guest });
+    expect(created).toMatchObject({
+      storeId: storeBId,
+      userId: null,
+      name: guest.name,
+      email: guest.email,
+    });
   });
 
   // --- Order isolation ---
