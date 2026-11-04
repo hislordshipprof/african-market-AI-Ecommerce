@@ -10,10 +10,9 @@ import {
   validateFileSize,
   MAX_FILE_BYTES,
 } from "./csv-import";
-import { storeScoped, platformAdmin, claimImportRow, storeScopedTransaction, withSessionTimeZone, IMPORT_TOKEN_TTL_MS } from "../db";
+import { storeScoped, platformAdmin, claimImportRow, storeScopedTransaction, withSessionTimeZone, IMPORT_TOKEN_TTL_MS, healthQueryRaw } from "../db";
 import { probeCrossStoreImportWrites } from "./cross-store-write";
-import { Client } from "pg";
-import { resolveDirectUrl } from "../env";
+import { commitPairBehindStoreLock } from "./import-lock-test-helpers";
 import { createListing, resolveStockMode } from "./service";
 import type { Actor } from "./service";
 
@@ -1884,41 +1883,32 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
   });
 
   it("two tokens at once: the losing commit keeps its second item", async () => {
-    const shared = "Race Shared Lock T199";
-    const extra = "Race Extra Lock T199";
+    const stamp = crypto.randomUUID();
+    const shared = `Race Shared Lock ${stamp}`;
+    const extra = `Race Extra Lock ${stamp}`;
     const previewA = await generatePreview(storeAId, `name,price\n${shared},7.00\n`, testUserId);
     const previewB = await generatePreview(
       storeAId,
       `name,price\n${shared},7.00\n${extra},8.00\n`,
       testUserId,
     );
-    const client = new Client({ connectionString: resolveDirectUrl() });
-    await client.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SELECT 1 FROM stores WHERE id = $1 FOR UPDATE", [storeAId]);
-      const first = commitImport(
+    const { first, second } = await commitPairBehindStoreLock({
+      storeId: storeAId,
+      first: () => commitImport(
         storeAId,
         previewA.importToken,
         { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
         actor,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      const second = commitImport(
+      ),
+      second: () => commitImport(
         storeAId,
         previewB.importToken,
         { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
         actor,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      await client.query("COMMIT");
-      const [createdA, createdB] = await Promise.all([first, second]);
-      expect(createdA.createdCount).toBe(1);
-      expect(createdB.createdCount).toBe(1);
-    } finally {
-      await client.query("ROLLBACK").catch(() => undefined);
-      await client.end();
-    }
+      ),
+    });
+    expect(first.createdCount).toBe(1);
+    expect(second.createdCount).toBe(1);
 
     const sharedRows = await storeScoped(storeAId).listing.findMany({ where: { customName: shared } });
     expect(sharedRows).toHaveLength(1);
@@ -1926,6 +1916,11 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(afterB.alreadyListedSkipped).toBe(1);
     expect(afterB.count).toBe(1);
   }, 30_000);
+
+  it("the suite connects as app_runtime", async () => {
+    const rows = (await healthQueryRaw`SELECT current_user`) as { current_user: string }[];
+    expect(rows[0]?.current_user).toBe("app_runtime");
+  });
 
   it("cross-store commit leaves the token pending and writes nothing", async () => {
     const csv = "name,price\nCross Store Commit T199,4.00\n";

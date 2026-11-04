@@ -3,9 +3,19 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Client } from "pg";
 import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
-import { resolveDirectUrl } from "../env";
 import { commitImport, generatePreview } from "./csv-import";
 import type { Actor } from "./service";
+import {
+  OVERLAP_TEST_TIMEOUT_MS,
+  abandonHeldCommits,
+  assertNoLockWaiters,
+  commitPairBehindStoreLock,
+  countLockWaiters,
+  delayFirstQuery,
+  directUrlForLane,
+  holdStoreRow,
+  waitForLockWaiters,
+} from "./import-lock-test-helpers";
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `w215-${Date.now()}`;
@@ -282,9 +292,29 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     expect(retries[0]!.variants[0]!.weightG).toBe(500);
   });
 
-  it("concurrent commits of overlapping files keep the first file's weights", async () => {
-    const shared = `Overlap Bag ${RUN}`;
-    const extra = `Overlap Extra ${RUN}`;
+  async function importAudit(storeId: string, importId: string) {
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { action: "catalog.csv_import" },
+    });
+    const matches = logs.filter((entry) => {
+      const after = entry.after as { importId?: string } | null;
+      return after?.importId === importId;
+    });
+    expect(matches).toHaveLength(1);
+    const match = matches[0]!;
+    return {
+      entityType: match.entityType,
+      entityId: match.entityId,
+      after: match.after as {
+        count: number;
+        listingIds: string[];
+        importId: string;
+        alreadyListedSkipped: number;
+      },
+    };
+  }
+
+  async function overlapPair(shared: string, extra: string, delayMs?: number) {
     const firstPreview = await generatePreview(
       storeAId,
       `name,price,weight\n${shared},7.00,2 lb\n`,
@@ -295,34 +325,33 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
       `name,price,weight\n${shared},7.00,500 g\n${extra},4.00,1 kg\n`,
       userId,
     );
-    const client = new Client({ connectionString: resolveDirectUrl() });
-    await client.connect();
+    const delay = delayMs === undefined
+      ? null
+      : delayFirstQuery({ table: "listing_imports", value: firstPreview.importToken, ms: delayMs });
     try {
-      await client.query("BEGIN");
-      await client.query("SELECT 1 FROM stores WHERE id = $1 FOR UPDATE", [storeAId]);
-      const first = commitImport(
-        storeAId,
-        firstPreview.importToken,
-        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-        actor,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      const second = commitImport(
-        storeAId,
-        secondPreview.importToken,
-        { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
-        actor,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      await client.query("COMMIT");
-      const [createdFirst, createdSecond] = await Promise.all([first, second]);
-      expect(createdFirst.createdCount).toBe(1);
-      expect(createdSecond.createdCount).toBe(1);
-    } finally {
-      await client.query("ROLLBACK").catch(() => undefined);
-      await client.end();
+      const committed = await commitPairBehindStoreLock({
+        storeId: storeAId,
+        first: () => commitImport(
+          storeAId,
+          firstPreview.importToken,
+          { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+          actor,
+        ),
+        second: () => commitImport(
+          storeAId,
+          secondPreview.importToken,
+          { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
+          actor,
+        ),
+      });
+      return { ...committed, firstPreview, secondPreview, delay };
+    } catch (err) {
+      if (delay) await delay.restore();
+      throw err;
     }
+  }
 
+  async function expectFirstFileWeights(shared: string, extra: string, secondToken: string) {
     const sharedRows = await storeScoped(storeAId).listing.findMany({
       where: { customName: shared },
       include: { variants: true },
@@ -332,10 +361,45 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
       include: { variants: true },
     });
     expect(sharedRows).toHaveLength(1);
+    expect(sharedRows[0]!.variants).toHaveLength(1);
     expect(sharedRows[0]!.variants[0]!.weightG).toBe(907);
+    expect(sharedRows[0]!.price).toBe(700);
     expect(extraRows).toHaveLength(1);
     expect(extraRows[0]!.variants[0]!.weightG).toBe(1000);
-  });
+    expect(extraRows[0]!.price).toBe(400);
+    const audit = await importAudit(storeAId, secondToken);
+    expect(audit.after.alreadyListedSkipped).toBe(1);
+    expect(audit.after.count).toBe(1);
+    expect(audit.after.importId).toBe(secondToken);
+    return {
+      sharedVariantId: sharedRows[0]!.variants[0]!.id,
+      extraVariantId: extraRows[0]!.variants[0]!.id,
+    };
+  }
+
+  it("concurrent commits of overlapping files keep the first file's weights", async () => {
+    const shared = `Overlap Bag ${RUN}`;
+    const extra = `Overlap Extra ${RUN}`;
+    const { first, second, secondPreview, delay } = await overlapPair(shared, extra);
+    expect(delay).toBeNull();
+    expect(first.createdCount).toBe(1);
+    expect(second.createdCount).toBe(1);
+    await expectFirstFileWeights(shared, extra, secondPreview.importToken);
+  }, 30_000);
+
+  it("overlapping commits keep the first file's weights when the first commit's pre-lock read takes 1.5 s", async () => {
+    const shared = `Slow Overlap Bag ${RUN}`;
+    const extra = `Slow Overlap Extra ${RUN}`;
+    const { first, second, secondPreview, delay } = await overlapPair(shared, extra, 1_500);
+    try {
+      expect(delay?.fired()).toBe(true);
+      expect(first.createdCount).toBe(1);
+      expect(second.createdCount).toBe(1);
+      await expectFirstFileWeights(shared, extra, secondPreview.importToken);
+    } finally {
+      await delay?.restore();
+    }
+  }, OVERLAP_TEST_TIMEOUT_MS);
 
   it("a commit that fails on its last write leaves no variant and the retry stores the CSV weight", async () => {
     const name = `Rollback Bag ${RUN}`;
@@ -438,6 +502,344 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     expect(byName.get(heavy)?.price).toBe(4500);
     expect(byName.has(invalid)).toBe(false);
   });
+
+  async function holderSessions(applicationName: string): Promise<number> {
+    const client = new Client({
+      connectionString: directUrlForLane(),
+      application_name: "import-lock-counter",
+    });
+    await client.connect();
+    try {
+      const result = await client.query<{ n: number }>(
+        "SELECT COUNT(*)::int AS n FROM pg_stat_activity WHERE application_name = $1",
+        [applicationName],
+      );
+      return Number(result.rows[0]?.n ?? 0);
+    } finally {
+      await client.end();
+    }
+  }
+
+  it("waiting on the store lock names the step when nothing queues", async () => {
+    const applicationName = `import-lock-holder-quiet-${RUN}`;
+    const before = await holderSessions(applicationName);
+    const hold = await holdStoreRow(storeAId, { applicationName });
+    const started = Date.now();
+    try {
+      await expect(waitForLockWaiters(hold.pid, 1, {
+        label: "nothing queued",
+        timeoutMs: 500,
+      })).rejects.toThrow("timed out: nothing queued");
+      expect(Date.now() - started).toBeLessThan(2_000);
+    } finally {
+      await hold.rollback();
+    }
+    expect(await holderSessions(applicationName)).toBe(before);
+    const writeStarted = Date.now();
+    const created = await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        customName: `After Wait ${RUN}`,
+        price: 100,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+    expect(Date.now() - writeStarted).toBeLessThan(5_000);
+    expect(created.customName).toBe(`After Wait ${RUN}`);
+  }, 30_000);
+
+  it("waiting on the store lock fails fast with the commit's own error", async () => {
+    const hold = await holdStoreRow(storeAId);
+    const started = Date.now();
+    const commit = commitImport(
+      storeAId,
+      "not-a-real-token",
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    try {
+      await expect(waitForLockWaiters(hold.pid, 1, {
+        label: "bad token",
+        settled: [commit],
+      })).rejects.toThrow("Import token is invalid, expired, or already used.");
+      expect(Date.now() - started).toBeLessThan(1_000);
+    } finally {
+      await abandonHeldCommits(hold, [commit]);
+    }
+  }, 30_000);
+
+  it("an empty selection fails the wait with the commit error", async () => {
+    const preview = await generatePreview(storeAId, `name,price,weight\nEmpty Sel ${RUN},1.00,500 g\n`, userId);
+    const hold = await holdStoreRow(storeAId);
+    const started = Date.now();
+    const commit = commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [], ambiguousResolutions: [] },
+      actor,
+    );
+    try {
+      await expect(waitForLockWaiters(hold.pid, 1, {
+        label: "empty selection",
+        settled: [commit],
+      })).rejects.toThrow("No rows selected for import.");
+      expect(Date.now() - started).toBeLessThan(1_000);
+    } finally {
+      await abandonHeldCommits(hold, [commit]);
+    }
+    const pending = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(pending?.status).toBe("pending");
+  }, 30_000);
+
+  it("wait failure with two queued commits releases the holder and drains both", async () => {
+    const shared = `Drain Shared ${RUN}`;
+    const extra = `Drain Extra ${RUN}`;
+    const firstPreview = await generatePreview(storeAId, `name,price,weight\n${shared},7.00,2 lb\n`, userId);
+    const secondPreview = await generatePreview(
+      storeAId,
+      `name,price,weight\n${shared},7.00,500 g\n${extra},4.00,1 kg\n`,
+      userId,
+    );
+    const hold = await holdStoreRow(storeAId);
+    const first = commitImport(
+      storeAId,
+      firstPreview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    let second: Promise<unknown> | undefined;
+    try {
+      await waitForLockWaiters(hold.pid, 1, {
+        label: "first commit queued on store lock",
+        settled: [first],
+      });
+      second = commitImport(
+        storeAId,
+        secondPreview.importToken,
+        { matchedRows: [], newItemRows: [2, 3], ambiguousResolutions: [] },
+        actor,
+      );
+      await waitForLockWaiters(hold.pid, 2, {
+        label: "second commit queued on store lock",
+        settled: [first, second],
+      });
+      await expect(waitForLockWaiters(hold.pid, 3, {
+        label: "third waiter",
+        timeoutMs: 400,
+        settled: [first, second],
+      })).rejects.toThrow("timed out: third waiter");
+    } finally {
+      await abandonHeldCommits(hold, [first, ...(second ? [second] : [])]);
+    }
+    const writeStarted = Date.now();
+    await storeScoped(storeAId).listing.create({
+      data: {
+        storeId: storeAId,
+        customName: `After Drain ${RUN}`,
+        price: 125,
+        stockMode: "status",
+        status: "in_stock",
+      },
+    });
+    expect(Date.now() - writeStarted).toBeLessThan(5_000);
+    await expectFirstFileWeights(shared, extra, secondPreview.importToken);
+  }, 30_000);
+
+  it("second commit fails before locking while first remains queued", async () => {
+    const name = `Queued First ${RUN}`;
+    const preview = await generatePreview(storeAId, `name,price,weight\n${name},3.00,2 lb\n`, userId);
+    const hold = await holdStoreRow(storeAId);
+    let firstSettled = false;
+    const first = commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    void first.then(
+      () => {
+        firstSettled = true;
+      },
+      () => {
+        firstSettled = true;
+      },
+    );
+    let second: Promise<unknown> | undefined;
+    try {
+      await waitForLockWaiters(hold.pid, 1, {
+        label: "first commit queued on store lock",
+        settled: [first],
+      });
+      second = commitImport(
+        storeAId,
+        "not-a-real-token",
+        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+        actor,
+      );
+      const started = Date.now();
+      await expect(waitForLockWaiters(hold.pid, 2, {
+        label: "second commit queued on store lock",
+        settled: [first, second],
+      })).rejects.toThrow("Import token is invalid, expired, or already used.");
+      expect(Date.now() - started).toBeLessThan(1_000);
+      expect(firstSettled).toBe(false);
+    } finally {
+      await abandonHeldCommits(hold, second ? [first, second] : [first]);
+    }
+    const created = await first;
+    expect(created.createdCount).toBe(1);
+    const stored = await storedVariant(storeAId, created.listingIds[0]!);
+    expect(stored.variant.weightG).toBe(907);
+  }, 30_000);
+
+  it("holding a store row that does not exist throws store row not locked", async () => {
+    await expect(holdStoreRow(crypto.randomUUID())).rejects.toThrow("store row not locked");
+  }, 30_000);
+
+  it("missing-store holder and repeated cleanup leave no connection behind", async () => {
+    const applicationName = `import-lock-holder-leak-${RUN}`;
+    expect(await holderSessions(applicationName)).toBe(0);
+    await expect(holdStoreRow(crypto.randomUUID(), { applicationName })).rejects.toThrow("store row not locked");
+    expect(await holderSessions(applicationName)).toBe(0);
+    const hold = await holdStoreRow(storeAId, { applicationName });
+    expect(await holderSessions(applicationName)).toBe(1);
+    await hold.rollback();
+    await hold.rollback();
+    await hold.commit();
+    expect(await holderSessions(applicationName)).toBe(0);
+  }, 30_000);
+
+  it("waiter count excludes another store and rejects a nonzero baseline", async () => {
+    const storeC = await raw.store.create({
+      data: { slug: `csv-weight-c-${RUN}`, name: `CSV Weight C ${RUN}`, themePreset: "palm-and-shea" },
+    });
+    const holdA = await holdStoreRow(storeAId);
+    const holdB = await holdStoreRow(storeBId);
+    const holdC = await holdStoreRow(storeC.id);
+    const waiters: Array<{ client: Client; pid: number }> = [];
+    const terminate = async (pid: number) => {
+      const control = new Client({ connectionString: directUrlForLane(), application_name: "import-lock-counter" });
+      await control.connect();
+      try {
+        await control.query("SELECT pg_terminate_backend($1)", [pid]);
+      } finally {
+        await control.end();
+      }
+    };
+    const blockOn = async (ids: string[]) => {
+      const client = new Client({ connectionString: directUrlForLane(), application_name: "import-lock-waiter" });
+      client.on("error", () => undefined);
+      await client.connect();
+      await client.query("BEGIN");
+      const who = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      const pid = Number(who.rows[0]?.pid ?? 0);
+      const blocked = ids.length === 1
+        ? client.query("SELECT 1 FROM stores WHERE id = $1 FOR UPDATE", ids)
+        : client.query("SELECT 1 FROM stores WHERE id = $1 OR id = $2 FOR UPDATE", ids);
+      void blocked.catch(() => undefined);
+      waiters.push({ client, pid });
+      return pid;
+    };
+    const releaseWaiter = async (pid: number, holderPid: number) => {
+      await terminate(pid);
+      const quiet = Date.now() + 2_000;
+      while ((await countLockWaiters(holderPid)) !== 0) {
+        if (Date.now() > quiet) throw new Error("timed out: waiter cleared");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    };
+    try {
+      const onB = await blockOn([storeBId]);
+      await waitForLockWaiters(holdB.pid, 1, { label: "store B waiter" });
+      expect(await countLockWaiters(holdA.pid)).toBe(0);
+      expect(await countLockWaiters(holdC.pid)).toBe(0);
+      await releaseWaiter(onB, holdB.pid);
+
+      const onBoth = await blockOn([storeAId, storeBId]);
+      await waitForLockWaiters(holdA.pid, 1, { label: "shared waiter" });
+      expect(await countLockWaiters(holdA.pid)).toBe(1);
+      expect(await countLockWaiters(holdC.pid)).toBe(0);
+      await releaseWaiter(onBoth, holdA.pid);
+
+      await assertNoLockWaiters(holdA.pid);
+      const onA = await blockOn([storeAId]);
+      await waitForLockWaiters(holdA.pid, 1, { label: "baseline waiter" });
+      await expect(assertNoLockWaiters(holdA.pid)).rejects.toThrow(/nonzero lock-waiter baseline: 1/);
+      await releaseWaiter(onA, holdA.pid);
+    } finally {
+      for (const waiter of waiters) {
+        await terminate(waiter.pid).catch(() => undefined);
+        await waiter.client.end().catch(() => undefined);
+      }
+      await holdA.rollback().catch(() => undefined);
+      await holdB.rollback().catch(() => undefined);
+      await holdC.rollback().catch(() => undefined);
+      await raw.store.delete({ where: { id: storeC.id } }).catch(() => undefined);
+    }
+  }, 30_000);
+
+  it("store B cannot read, change or delete the overlapping import's rows", async () => {
+    const shared = `Iso Shared ${RUN}`;
+    const extra = `Iso Extra ${RUN}`;
+    const { firstPreview, secondPreview, delay } = await overlapPair(shared, extra);
+    expect(delay).toBeNull();
+    const tokens = [firstPreview.importToken, secondPreview.importToken];
+    const imports = await storeScoped(storeAId).listingImport.findMany({ where: { id: { in: tokens } } });
+    expect(imports.map((row) => row.id).sort()).toEqual([...tokens].sort());
+    expect(imports.every((row) => row.status === "committed")).toBe(true);
+    const firstAudit = await importAudit(storeAId, firstPreview.importToken);
+    const secondAudit = await importAudit(storeAId, secondPreview.importToken);
+    expect(firstAudit.entityType).toBe("listing");
+    expect(secondAudit.entityType).toBe("listing");
+    expect(firstAudit.entityId).not.toBe(firstPreview.importToken);
+    expect(secondAudit.after.importId).toBe(secondPreview.importToken);
+    const ids = await expectFirstFileWeights(shared, extra, secondPreview.importToken);
+    const variantIds = [ids.sharedVariantId, ids.extraVariantId];
+    expect(variantIds.every((id) => id.length > 0)).toBe(true);
+
+    expect(await storeScoped(storeBId).listing.findMany({
+      where: { customName: { in: [shared, extra] } },
+    })).toEqual([]);
+    expect(await storeScoped(storeBId).listingImport.findMany({ where: { id: { in: tokens } } })).toEqual([]);
+    expect(await storeScoped(storeBId).listingVariant.findMany({ where: { id: { in: variantIds } } })).toEqual([]);
+    const foreignAudits = await storeScoped(storeBId).auditLog.findMany({ where: { action: "catalog.csv_import" } });
+    expect(foreignAudits.filter((entry) => tokens.includes((entry.after as { importId?: string } | null)?.importId ?? ""))).toEqual([]);
+    expect(await storeScoped(storeBId).listingVariant.updateMany({
+      where: { id: { in: variantIds } },
+      data: { weightG: 1 },
+    })).toEqual({ count: 0 });
+    expect(await storeScoped(storeBId).listingVariant.deleteMany({
+      where: { id: { in: variantIds } },
+    })).toEqual({ count: 0 });
+
+    const reread = await expectFirstFileWeights(shared, extra, secondPreview.importToken);
+    expect(reread.sharedVariantId).toBe(ids.sharedVariantId);
+    expect(reread.extraVariantId).toBe(ids.extraVariantId);
+  }, 30_000);
+
+  it("overlap isolation has positive A controls and runs independently", async () => {
+    const shared = `Solo Iso Shared ${RUN}`;
+    const extra = `Solo Iso Extra ${RUN}`;
+    const { first, second, firstPreview, secondPreview } = await overlapPair(shared, extra);
+    expect(first.createdCount).toBe(1);
+    expect(second.createdCount).toBe(1);
+    const tokens = [firstPreview.importToken, secondPreview.importToken];
+    const imports = await storeScoped(storeAId).listingImport.findMany({ where: { id: { in: tokens } } });
+    expect(imports).toHaveLength(2);
+    const audits = await Promise.all(tokens.map((token) => importAudit(storeAId, token)));
+    expect(audits.every((audit) => audit.entityType === "listing" && audit.after.importId && audit.entityId !== audit.after.importId)).toBe(true);
+    const ids = await expectFirstFileWeights(shared, extra, secondPreview.importToken);
+    expect([ids.sharedVariantId, ids.extraVariantId].filter(Boolean)).toHaveLength(2);
+    expect(await storeScoped(storeBId).listingVariant.updateMany({
+      where: { id: { in: [ids.sharedVariantId, ids.extraVariantId] } },
+      data: { weightG: 1 },
+    })).toEqual({ count: 0 });
+    const still = await storeScoped(storeAId).listingVariant.findMany({
+      where: { id: { in: [ids.sharedVariantId, ids.extraVariantId] } },
+    });
+    expect(still.map((row) => row.weightG).sort((a, b) => a - b)).toEqual([907, 1000]);
+  }, 30_000);
 
   it("the suite connects as app_runtime", async () => {
     const rows = (await healthQueryRaw`SELECT current_user`) as { current_user: string }[];
