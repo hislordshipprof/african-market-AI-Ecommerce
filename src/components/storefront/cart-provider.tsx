@@ -29,6 +29,7 @@ import {
 import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { Sheet } from "./sheet";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { toast } from "sonner";
 import { money } from "@/lib/format";
 import styles from "./cart.module.css";
@@ -56,8 +57,15 @@ function serverLineToClient(sl: CartLineView): CartLine {
 }
 
 function isStaleAction(error: unknown) {
+  if (unstable_isUnrecognizedActionError(error)) return true;
   const message = error instanceof Error ? error.message : String(error);
-  return /Failed to find Server Action/i.test(message);
+  // Next 16 throws UnrecognizedActionError: 'Server Action "…" was not found on the server'
+  // and links to /docs/messages/failed-to-find-server-action. The older wording is kept.
+  return (
+    /was not found on the server/i.test(message) ||
+    /failed-to-find-server-action/i.test(message) ||
+    /Failed to find Server Action/i.test(message)
+  );
 }
 
 interface CartContextValue {
@@ -181,16 +189,23 @@ export function CartProvider({
       const local = linesRef.current.find((line) => cartItemKey(line) === key);
       const moved = (revs.current.get(key) ?? 0) > (stamp.revs.get(key) ?? 0);
       const identityMoved = (identity.current.get(key) ?? 0) > (stamp.identity.get(key) ?? 0);
+      const acked = confirmed.current.get(key)?.qty ?? 0;
+      // A click that landed before this read was stamped is still outstanding.
+      // Decreases count: a higher server quantity must not erase them.
+      const outstanding = !!local && local.quantity !== acked;
       confirmed.current.set(key, { lineId: server.serverLineId, qty: server.quantity });
       if (!local) {
-        if (moved || pendingDelete.current.has(key)) {
+        if (moved || pendingDelete.current.has(key) || dropAfterAdd.current.has(key)) {
           if (server.serverLineId) pendingDelete.current.set(key, server.serverLineId);
+          dropAfterAdd.current.delete(key);
           continue;
         }
         next.push(server);
         continue;
       }
-      const keepQty = moved || (mode === "keep-intent" && local.quantity > server.quantity);
+      const keepQty =
+        moved ||
+        (mode === "keep-intent" && (outstanding || local.quantity > server.quantity));
       next.push({
         ...server,
         quantity: keepQty ? local.quantity : server.quantity,
@@ -203,8 +218,9 @@ export function CartProvider({
       if (seen.has(key)) continue;
       const moved = (revs.current.get(key) ?? 0) > (stamp.revs.get(key) ?? 0);
       const known = confirmed.current.get(key);
+      const outstanding = local.quantity !== (known?.qty ?? 0);
       const optimistic = !known?.lineId && local.quantity > 0;
-      if (moved || (mode === "keep-intent" && optimistic)) {
+      if (moved || outstanding || (mode === "keep-intent" && optimistic)) {
         next.push(local);
         continue;
       }
@@ -262,10 +278,10 @@ export function CartProvider({
       setAttention(true);
     }
     if (uncertainAdd) addAccepted.current.add(key);
-    let pulled = await pullServer("server-wins");
+    let pulled = await pullServer("keep-intent");
     if (pulled === "failed" && !staleDeployment.current && readFailures.current < 1) {
       readFailures.current = 1;
-      pulled = await pullServer("server-wins");
+      pulled = await pullServer("keep-intent");
     }
     if (!mounted.current) return;
     const newer = (revs.current.get(key) ?? 0) > revAtFailure;
@@ -328,31 +344,33 @@ export function CartProvider({
       return;
     }
     const target = intentQty(key);
-    const known = confirmed.current.get(key) ?? { qty: 0 };
+    let known = confirmed.current.get(key) ?? { qty: 0 };
     if (target === 0) {
       if (known.lineId) pendingDelete.current.set(key, known.lineId);
       else confirmed.current.set(key, { qty: 0 });
       return;
     }
-    const item = linesRef.current.find((line) => cartItemKey(line) === key);
-    if (!known.lineId) {
-      if (addAccepted.current.has(key)) {
-        const pulled = await pullServer("server-wins");
-        if (confirmed.current.get(key)?.lineId) {
-          addAccepted.current.delete(key);
-          paused.current.delete(key);
-          return;
+    let item = linesRef.current.find((line) => cartItemKey(line) === key);
+    if (!known.lineId && addAccepted.current.has(key)) {
+      const pulled = await pullServer("keep-intent");
+      const recovered = confirmed.current.get(key);
+      if (recovered?.lineId) {
+        addAccepted.current.delete(key);
+        paused.current.delete(key);
+        known = recovered;
+      } else if (pulled === "failed") {
+        if (mounted.current && !staleDeployment.current) {
+          toast.error(OFFLINE);
+          setAttention(true);
         }
-        if (pulled === "failed") {
-          if (mounted.current && !staleDeployment.current) {
-            toast.error(OFFLINE);
-            setAttention(true);
-          }
-          paused.current.add(key);
-          return;
-        }
+        paused.current.add(key);
+        return;
+      } else {
         addAccepted.current.delete(key);
       }
+    }
+    if (!known.lineId) {
+      item = linesRef.current.find((line) => cartItemKey(line) === key);
       if (!item?.variantId) {
         paused.current.add(key);
         return;
@@ -403,7 +421,9 @@ export function CartProvider({
       return;
     }
     const lineId = known.lineId;
-    if (target > known.qty) {
+    const liveTarget = intentQty(key);
+    if (liveTarget === known.qty) return;
+    if (liveTarget > known.qty) {
       let result: { ok: true } | { ok: false; error: string; code: string };
       try {
         result = await serverSetLineQty(lineId, known.qty + 1);
@@ -428,7 +448,7 @@ export function CartProvider({
     }
     let result: { ok: true } | { ok: false; error: string; code: string };
     try {
-      result = await serverSetLineQty(lineId, target);
+      result = await serverSetLineQty(lineId, liveTarget);
     } catch (error) {
       await onThrown(error, key, false);
       return;
@@ -441,7 +461,7 @@ export function CartProvider({
       await pullServer("server-wins");
       return;
     }
-    confirmed.current.set(key, { lineId, qty: target });
+    confirmed.current.set(key, { lineId, qty: liveTarget });
   }
   async function drain() {
     for (let i = 0; i < 200; i += 1) {
@@ -571,6 +591,7 @@ export function CartProvider({
       bump(key, true);
       const id = current?.serverLineId ?? confirmed.current.get(key)?.lineId;
       if (id) pendingDelete.current.set(key, id);
+      else dropAfterAdd.current.add(key);
       publish(linesRef.current.filter((line) => cartItemKey(line) !== key));
       void enqueue(drain, true);
     },
