@@ -1,5 +1,4 @@
 import { storeScoped } from "./db";
-import type { Session } from "./auth";
 import { Prisma } from "@prisma/client";
 
 export interface CustomerProfile {
@@ -11,7 +10,7 @@ export interface CustomerProfile {
 
 export async function findOrCreateCustomer(
   storeId: string,
-  user: Session["user"],
+  user: { id: string; name: string; email: string },
 ): Promise<CustomerProfile> {
   const db = storeScoped(storeId);
 

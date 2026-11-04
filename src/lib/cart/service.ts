@@ -1,4 +1,7 @@
+import type { PrismaClient } from "@prisma/client";
+import { findOrCreateCustomer } from "../customer-auth";
 import {
+  authPrisma,
   storeScoped,
   storeScopedTransaction,
   lockCart,
@@ -56,7 +59,8 @@ export class CartError extends Error {
       | "VARIANT_STORE_MISMATCH"
       | "INVALID_SWAP_RULE"
       | "INVALID_SUBSTITUTE"
-      | "CART_NOT_FOUND",
+      | "CART_NOT_FOUND"
+      | "USER_NOT_FOUND",
   ) {
     super(message);
     this.name = "CartError";
@@ -70,19 +74,65 @@ export async function getOrCreateCart(
 ): Promise<string> {
   const scoped = storeScoped(storeId);
 
+  // A signed-out request must not keep writing an account cart that the
+  // cookie still names. Reuse only a cart that no account owns.
+  if (!userId) {
+    if (cartId) {
+      const existing = await scoped.cart.findUnique({ where: { id: cartId } });
+      if (existing && existing.userId === null) return existing.id;
+    }
+    const cart = await scoped.cart.create({
+      data: { storeId, userId: null, customerId: null, source: "manual" },
+    });
+    return cart.id;
+  }
+
+  const customerId = await customerIdForCartUser(storeId, userId);
+
+  // Claim under the same cart-row lock as line mutations. A guest clear that
+  // already holds the lock finishes first; a claim that already committed is
+  // visible when that clear rechecks ownership.
   if (cartId) {
-    const existing = await scoped.cart.findUnique({ where: { id: cartId } });
-    if (existing) return existing.id;
+    const claimed = await storeScopedTransaction(storeId, async (tx) => {
+      await lockCart(tx, cartId);
+      const existing = await tx.cart.findUnique({ where: { id: cartId } });
+      if (!existing || (existing.userId !== null && existing.userId !== userId)) {
+        return false;
+      }
+      await tx.cart.update({
+        where: { id: existing.id },
+        data: { userId, customerId },
+      });
+      return true;
+    });
+    if (claimed) return cartId;
   }
 
   const cart = await scoped.cart.create({
-    data: {
-      storeId,
-      userId,
-      source: "manual",
-    },
+    data: { storeId, userId, customerId, source: "manual" },
   });
   return cart.id;
+}
+
+async function requireCartActor(
+  tx: Pick<PrismaClient, "cart" | "$queryRaw">,
+  cartId: string,
+  actorUserId: string | null,
+): Promise<void> {
+  await lockCart(tx, cartId);
+  const cart = await tx.cart.findUnique({ where: { id: cartId } });
+  if (!cart || cart.userId !== actorUserId) {
+    throw new CartError("Cart not found", "CART_NOT_FOUND");
+  }
+}
+
+async function customerIdForCartUser(storeId: string, userId: string): Promise<string> {
+  const user = await authPrisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw new CartError("Signed-in account was not found", "USER_NOT_FOUND");
+  }
+  const customer = await findOrCreateCustomer(storeId, user);
+  return customer.id;
 }
 
 export async function addLine(
@@ -90,8 +140,10 @@ export async function addLine(
   cartId: string,
   variantId: string,
   qty: number,
+  actorUserId: string | null = null,
 ): Promise<void> {
   await storeScopedTransaction(storeId, async (tx) => {
+    await requireCartActor(tx, cartId, actorUserId);
     const variant = await tx.listingVariant.findUnique({
       where: { id: variantId },
       include: { listing: true },
@@ -105,12 +157,9 @@ export async function addLine(
 
     const maxPerOrder = variant.listing.maxPerOrder ?? 99;
 
-    // FOR UPDATE on cart_lines cannot lock a row that does not exist yet, so
-    // concurrent first-adds of a variant would both INSERT and one would hit
-    // the (cart_id, variant_id) unique index. Serialize adds per cart on the
-    // cart row, which always exists.
-    await lockCart(tx, cartId);
-
+    // requireCartActor already holds the cart row. FOR UPDATE on cart_lines
+    // cannot lock a line that does not exist yet, so concurrent first-adds
+    // serialize on that cart lock.
     const existing = await lockCartLineByVariant(tx, cartId, variantId);
     const totalQty = (existing?.qty ?? 0) + qty;
 
@@ -145,13 +194,15 @@ export async function updateLineQty(
   cartId: string,
   lineId: string,
   qty: number,
+  actorUserId: string | null = null,
 ): Promise<void> {
   if (qty <= 0) {
-    await removeLine(storeId, cartId, lineId);
+    await removeLine(storeId, cartId, lineId, actorUserId);
     return;
   }
 
   await storeScopedTransaction(storeId, async (tx) => {
+    await requireCartActor(tx, cartId, actorUserId);
     const line = await tx.cartLine.findUnique({
       where: { id: lineId },
       include: { variant: { include: { listing: true } } },
@@ -181,6 +232,7 @@ export async function updateLineSwapRule(
   lineId: string,
   swapRule: SwapRuleValue,
   substituteVariantId: string | null,
+  actorUserId: string | null = null,
 ): Promise<void> {
   if (!VALID_SWAP_RULES.includes(swapRule)) {
     throw new CartError("Invalid swap rule", "INVALID_SWAP_RULE");
@@ -194,6 +246,7 @@ export async function updateLineSwapRule(
       );
     }
     await storeScopedTransaction(storeId, async (tx) => {
+      await requireCartActor(tx, cartId, actorUserId);
       const line = await tx.cartLine.findUnique({ where: { id: lineId } });
       if (!line || line.cartId !== cartId) {
         throw new CartError("Cart line not found", "CART_NOT_FOUND");
@@ -214,14 +267,16 @@ export async function updateLineSwapRule(
       });
     });
   } else {
-    const scoped = storeScoped(storeId);
-    const line = await scoped.cartLine.findUnique({ where: { id: lineId } });
-    if (!line || line.cartId !== cartId) {
-      throw new CartError("Cart line not found", "CART_NOT_FOUND");
-    }
-    await scoped.cartLine.update({
-      where: { id: lineId },
-      data: { swapRule, substituteVariantId: null },
+    await storeScopedTransaction(storeId, async (tx) => {
+      await requireCartActor(tx, cartId, actorUserId);
+      const line = await tx.cartLine.findUnique({ where: { id: lineId } });
+      if (!line || line.cartId !== cartId) {
+        throw new CartError("Cart line not found", "CART_NOT_FOUND");
+      }
+      await tx.cartLine.update({
+        where: { id: lineId },
+        data: { swapRule, substituteVariantId: null },
+      });
     });
   }
 }
@@ -230,17 +285,23 @@ export async function removeLine(
   storeId: string,
   cartId: string,
   lineId: string,
+  actorUserId: string | null = null,
 ): Promise<void> {
-  const scoped = storeScoped(storeId);
-  await scoped.cartLine.deleteMany({ where: { id: lineId, cartId } });
+  await storeScopedTransaction(storeId, async (tx) => {
+    await requireCartActor(tx, cartId, actorUserId);
+    await tx.cartLine.deleteMany({ where: { id: lineId, cartId } });
+  });
 }
 
 export async function clearAllLines(
   storeId: string,
   cartId: string,
+  actorUserId: string | null = null,
 ): Promise<void> {
-  const scoped = storeScoped(storeId);
-  await scoped.cartLine.deleteMany({ where: { cartId } });
+  await storeScopedTransaction(storeId, async (tx) => {
+    await requireCartActor(tx, cartId, actorUserId);
+    await tx.cartLine.deleteMany({ where: { cartId } });
+  });
 }
 
 export async function getCartWithLines(
