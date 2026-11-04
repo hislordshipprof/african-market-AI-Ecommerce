@@ -104,7 +104,8 @@ function ticketKeys(ticketEnvText, ticket) {
 function assignmentKey(line) {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith("#")) return null;
-  const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+  // Same separators as the installed dotenv LINE grammar: KEY=value and KEY: value.
+  const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)(?:\s*=|:\s+)/);
   return match ? match[1] : null;
 }
 

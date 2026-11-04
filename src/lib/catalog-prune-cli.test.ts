@@ -143,53 +143,83 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
   }, 90_000);
 
   it("off-mode hosted CI and preview keep their supported seed behaviour", async () => {
-    const { seedMasterCatalog } = await import("../../prisma/seed-master-catalog");
+    const { runSeed } = await import("../../prisma/seed");
     const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
     const previewId = `t225-preview-${Date.now().toString(36)}`;
     const productionId = `t225-prod-${Date.now().toString(36)}`;
+    const savedAdmin = {
+      flag: process.env.SEED_TEST_ADMIN,
+      password: process.env.SEED_ADMIN_PASSWORD,
+      totp: process.env.SEED_ADMIN_TOTP_SECRET,
+      auth: process.env.BETTER_AUTH_SECRET,
+    };
     restore();
     delete process.env.SEED_PRUNE_R2;
     delete process.env.R2_ACCESS_KEY_ID;
     delete process.env.R2_SECRET_ACCESS_KEY;
     process.env.CI = "true";
-    process.env.SEED_TEST_ADMIN = process.env.SEED_TEST_ADMIN;
+    process.env.SEED_TEST_ADMIN = "1";
+    process.env.SEED_ADMIN_PASSWORD = "CiTestPass99!";
+    process.env.SEED_ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXP";
+    if (!process.env.BETTER_AUTH_SECRET) {
+      process.env.BETTER_AUTH_SECRET = "ci-e2e-test-secret-do-not-use-in-prod";
+    }
     process.env.VERCEL_ENV = "preview";
     const logs: string[] = [];
     try {
-      await seedMasterCatalog(prisma, {
+      await runSeed({
         csvPath: csv(previewId, "high"),
         log: (line) => logs.push(line),
       });
       const preview = await asAdmin(prisma, (tx) => tx.masterProduct.findUnique({ where: { id: previewId } }));
       expect(preview?.id).toBe(previewId);
+      expect(logs.join("\n")).toContain("Catalog prune skipped");
+      const admin = await prisma.user.findUnique({ where: { email: "admin@platform.test" } });
+      expect(admin?.email).toBe("admin@platform.test");
       process.env.VERCEL_ENV = "production";
       delete process.env.SEED_PRUNE_R2;
+      delete process.env.SEED_TEST_ADMIN;
       const skipped: string[] = [];
-      await seedMasterCatalog(prisma, {
+      await runSeed({
         csvPath: csv(productionId, "high"),
         log: (line) => skipped.push(line),
       });
       const production = await asAdmin(prisma, (tx) => tx.masterProduct.findUnique({ where: { id: productionId } }));
       expect(production).toBeNull();
       expect(skipped.join("\n")).toContain("Skipping master catalog seed in production");
+      const beforeRefusal = await prisma.$queryRaw<Array<{ updated_at: Date }>>`
+        SELECT updated_at FROM stores WHERE slug = 'mama-ngozi'
+      `;
       process.env.VERCEL_ENV = "production";
       process.env.SEED_PRUNE_R2 = "dry-run";
       setR2("lane-bucket");
-      await expect(seedMasterCatalog(prisma, {
+      await expect(runSeed({
         csvPath: csv(`${productionId}-opt`, "high"),
         log: () => undefined,
       })).rejects.toThrow(/VERCEL_ENV is production|CI is set|database host/);
+      const afterRefusal = await prisma.$queryRaw<Array<{ updated_at: Date }>>`
+        SELECT updated_at FROM stores WHERE slug = 'mama-ngozi'
+      `;
+      expect(new Date(afterRefusal[0]!.updated_at).getTime()).toBe(new Date(beforeRefusal[0]!.updated_at).getTime());
     } finally {
       await asAdmin(prisma, (tx) => tx.masterProduct.deleteMany({ where: { id: { in: [previewId] } } }));
       await prisma.$disconnect();
+      assign("SEED_TEST_ADMIN", savedAdmin.flag);
+      assign("SEED_ADMIN_PASSWORD", savedAdmin.password);
+      assign("SEED_ADMIN_TOTP_SECRET", savedAdmin.totp);
+      assign("BETTER_AUTH_SECRET", savedAdmin.auth);
       restore();
     }
-  }, 60_000);
+  }, 120_000);
 
   it("pre-seed references survive demo reseeding with prune requested", async () => {
     const { runSeed } = await import("../../prisma/seed");
     const { createFakeR2 } = await import("./catalog-prune-fake-r2");
     const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    const prior = await prisma.store.findUnique({
+      where: { slug: "mama-ngozi" },
+      select: { ownerPhotoUrl: true },
+    });
     const key = `catalog/t225-preseed-${Date.now().toString(36)}.jpg`;
     const orphan = `catalog/t225-preseed-orphan-${Date.now().toString(36)}.jpg`;
     const now = new Date("2026-06-15T12:00:00.000Z");
@@ -227,8 +257,16 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
       await asAdmin(prisma, async (tx) => {
         await tx.productSynonym.deleteMany({ where: { productId: seededId } });
         await tx.masterProduct.deleteMany({ where: { id: seededId } });
-        await tx.store.update({ where: { slug: "mama-ngozi" }, data: { ownerPhotoUrl: null } });
+        await tx.store.update({
+          where: { slug: "mama-ngozi" },
+          data: { ownerPhotoUrl: prior?.ownerPhotoUrl ?? null },
+        });
       });
+      const restored = await prisma.store.findUnique({
+        where: { slug: "mama-ngozi" },
+        select: { ownerPhotoUrl: true },
+      });
+      expect(restored?.ownerPhotoUrl ?? null).toBe(prior?.ownerPhotoUrl ?? null);
       await prisma.$disconnect();
       restore();
     }

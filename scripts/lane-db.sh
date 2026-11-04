@@ -20,7 +20,7 @@ PGPASSWORD=app_owner "$PGBIN/psql" -w -h localhost -p "$LANE_PG_PORT" -U app_own
 
 URL="postgresql://app_owner:app_owner@localhost:$LANE_PG_PORT/$DB"
 tmp="$(mktemp)"
-grep -Ev '^(export[[:space:]]+)?(DATABASE_URL|DIRECT_URL|APP_RUNTIME_PASSWORD|DATABASE_URL_UNPOOLED|SEED_PRUNE_R2)[[:space:]]*=' "$ENV_FILE" > "$tmp" || true
+grep -Ev '^[[:space:]]*(export[[:space:]]+)?(DATABASE_URL|DIRECT_URL|APP_RUNTIME_PASSWORD|DATABASE_URL_UNPOOLED|SEED_PRUNE_R2)([[:space:]]*=|[[:space:]]*:[[:space:]]+)' "$ENV_FILE" > "$tmp" || true
 { cat "$tmp"; echo "DATABASE_URL=$URL"; echo "DIRECT_URL=$URL"; echo "APP_RUNTIME_PASSWORD=app_runtime_ci"; } > "$ENV_FILE"
 rm -f "$tmp"
 unset DATABASE_URL_UNPOOLED SEED_PRUNE_R2
