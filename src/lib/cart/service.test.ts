@@ -368,6 +368,44 @@ describe.skipIf(!hasDb)("Cart service", () => {
       expect(row?.customerId).toBe(accountCustomers[0].id);
     });
 
+    it("clears the cart account when that user is removed and no Customer holds them", async () => {
+      const goneId = `gone-${storeSlug}`;
+      const goneEmail = `gone-${storeSlug}@example.com`;
+      await rawPrisma.user.create({ data: { id: goneId, name: "Gone Buyer", email: goneEmail } });
+      try {
+        const cart = await storeScoped(storeId).cart.create({
+          data: { storeId, userId: goneId, source: "manual" },
+        });
+        await rawPrisma.user.delete({ where: { id: goneId } });
+        const row = await storeScoped(storeId).cart.findUnique({ where: { id: cart.id } });
+        expect(row).not.toBeNull();
+        expect(row?.userId).toBeNull();
+      } finally {
+        await rawPrisma.user.deleteMany({ where: { id: goneId } });
+      }
+    });
+
+    it("rejects a cart whose account id is not a user", async () => {
+      await expect(
+        storeScoped(storeId).cart.create({
+          data: { storeId, userId: "not-a-user", source: "manual" },
+        }),
+      ).rejects.toThrow(/carts_user_id_fkey/);
+    });
+
+    it("stores a note on the Customer", async () => {
+      const created = await storeScoped(storeId).customer.create({
+        data: {
+          storeId,
+          name: "Noted Shopper",
+          email: "noted-shopper@example.com",
+          notes: "Prefers pickup after 5",
+        },
+      });
+      const row = await storeScoped(storeId).customer.findUnique({ where: { id: created.id } });
+      expect(row?.notes).toBe("Prefers pickup after 5");
+    });
+
     it("allows more than one guest Customer with no account in the same store", async () => {
       const scoped = storeScoped(storeId);
       const first = await scoped.customer.create({

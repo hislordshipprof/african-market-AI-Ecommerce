@@ -83,6 +83,7 @@ model User {
   invitesSent StoreInvite[]
 stockEvents    StockEvent[]
   customers      Customer[]
+  carts          Cart[]
   listingImports ListingImport[]
 
   @@map("users")
@@ -418,11 +419,13 @@ model Cart {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   store    Store     @relation(fields: [storeId], references: [id])
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   customer Customer? @relation(fields: [customerId], references: [id])
   lines    CartLine[]
 
   @@index([storeId])
   @@index([storeId, userId])
+  @@index([userId])
   @@index([customerId])
   @@map("carts")
 }
@@ -458,6 +461,7 @@ model Customer {
   email            String?
   phone            String?
   marketingConsent Boolean  @default(false) @map("marketing_consent")
+  notes            String?
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
