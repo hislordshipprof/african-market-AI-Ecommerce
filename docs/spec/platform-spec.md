@@ -335,7 +335,7 @@ Listing(id, tenant_id, master_product_id?, custom_name, price, stock_mode, qty, 
 ListingVariant(id, listing_id, label, price, weight_g, weight_placeholder, sku, barcode)
 StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|short|adjust], delta, actor, at)
 
-Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id)
+Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id, source[manual|ai])
 Order(id, tenant_id, number, customer_id, status, fulfillment[delivery|pickup], address, totals..., 
       payment_intent_id, captured_amount, tip, platform_fee, delivery_fee, notes)
 OrderLine(id, order_id, variant_id, qty_ordered, qty_picked, unit_price, swap_rule, status, substituted_variant_id)

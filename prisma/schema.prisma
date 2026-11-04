@@ -439,6 +439,7 @@ model CartLine {
   cartId              String   @map("cart_id")
   variantId           String   @map("variant_id")
   qty                 Int
+  source              String   @default("manual")
   swapRule            String   @default("exact_only") @map("swap_rule")
   substituteVariantId String?  @map("substitute_variant_id")
   createdAt           DateTime @default(now()) @map("created_at")

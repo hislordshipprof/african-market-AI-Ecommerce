@@ -67,6 +67,22 @@ describe.skipIf(!connectionString)("assistant records migration", () => {
     }
   });
 
+  it("adds cart_lines.source with a manual default and no backfill", async () => {
+    const sql = fs.readFileSync(
+      path.join(MIGRATIONS, "20261104220000_cart_line_source", "migration.sql"),
+      "utf8",
+    );
+    expect(sql.toLowerCase()).not.toContain("update ");
+    const column = await client.query<{ column_default: string; is_nullable: string }>(
+      `SELECT column_default, is_nullable
+       FROM information_schema.columns
+       WHERE table_schema = $1 AND table_name = 'cart_lines' AND column_name = 'source'`,
+      [SCHEMA],
+    );
+    expect(column.rows[0]?.is_nullable).toBe("NO");
+    expect(column.rows[0]?.column_default).toContain("manual");
+  });
+
   it("rejects store B writing a conversation onto store A's cart as app_user", async () => {
     await expect(client.query(`
       BEGIN;

@@ -135,56 +135,168 @@ async function customerIdForCartUser(storeId: string, userId: string): Promise<s
   return customer.id;
 }
 
+export interface AddLineOptions {
+  source?: "manual" | "ai";
+  /** Add up to the max and report the clamp. Storefront callers omit this and still throw. */
+  clampToMax?: boolean;
+  requireActive?: boolean;
+}
+
+export type CartWriteTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
+
+export interface AppliedAddLine {
+  ok: true;
+  lineId: string;
+  qty: number;
+  added: number;
+  created: boolean;
+  swapRule: SwapRuleValue;
+  limitedTo?: number;
+  listing: {
+    id: string;
+    active: boolean;
+    confidence: number;
+    stockMode: string;
+    qty: number | null;
+    status: string | null;
+    customName: string | null;
+    maxPerOrder: number | null;
+  };
+  variant: { id: string; label: string; price: number };
+}
+
+export type ApplyAddLineResult =
+  | AppliedAddLine
+  | { ok: false; code: "variant_not_found" | "unavailable" | "max_per_order"; maxPerOrder?: number };
+
+/** Lock the cart, then run the write. Callers that need one audit row share this transaction. */
+export async function runCartMutation<T>(
+  storeId: string,
+  cartId: string,
+  actorUserId: string | null,
+  fn: (tx: CartWriteTx) => Promise<T>,
+): Promise<T> {
+  return storeScopedTransaction(storeId, async (tx) => {
+    await requireCartActor(tx, cartId, actorUserId);
+    return fn(tx);
+  });
+}
+
+export async function applyAddLine(
+  tx: CartWriteTx,
+  storeId: string,
+  cartId: string,
+  variantId: string,
+  qty: number,
+  options?: AddLineOptions,
+): Promise<ApplyAddLineResult> {
+  const variant = await tx.listingVariant.findUnique({
+    where: { id: variantId },
+    include: { listing: true },
+  });
+  if (!variant || variant.listing.storeId !== storeId) {
+    return { ok: false, code: "variant_not_found" };
+  }
+  if (options?.requireActive && !variant.listing.active) {
+    return { ok: false, code: "unavailable" };
+  }
+
+  const maxPerOrder = variant.listing.maxPerOrder ?? 99;
+  // The cart row is already locked. FOR UPDATE cannot lock a missing line, so
+  // concurrent first-adds serialize on that cart lock.
+  const existing = await lockCartLineByVariant(tx, cartId, variantId);
+  const totalQty = (existing?.qty ?? 0) + qty;
+  let nextQty = totalQty;
+  let added = qty;
+  let limitedTo: number | undefined;
+  if (totalQty > maxPerOrder) {
+    if (!options?.clampToMax) return { ok: false, code: "max_per_order", maxPerOrder };
+    const room = maxPerOrder - (existing?.qty ?? 0);
+    if (room <= 0) return { ok: false, code: "max_per_order", maxPerOrder };
+    nextQty = maxPerOrder;
+    added = room;
+    limitedTo = maxPerOrder;
+  }
+
+  const listing = {
+    id: variant.listing.id,
+    active: variant.listing.active,
+    confidence: variant.listing.confidence,
+    stockMode: variant.listing.stockMode,
+    qty: variant.listing.qty,
+    status: variant.listing.status,
+    customName: variant.listing.customName,
+    maxPerOrder: variant.listing.maxPerOrder,
+  };
+  const variantView = { id: variant.id, label: variant.label, price: variant.price };
+
+  if (existing) {
+    const current = await tx.cartLine.findUnique({ where: { id: existing.id } });
+    await tx.cartLine.update({
+      where: { id: existing.id },
+      data: { qty: nextQty },
+    });
+    return {
+      ok: true,
+      lineId: existing.id,
+      qty: nextQty,
+      added,
+      created: false,
+      swapRule: (current?.swapRule ?? "exact_only") as SwapRuleValue,
+      limitedTo,
+      listing,
+      variant: variantView,
+    };
+  }
+
+  const created = await tx.cartLine.create({
+    data: {
+      storeId,
+      cartId,
+      variantId,
+      qty: nextQty,
+      source: options?.source ?? "manual",
+      swapRule: "exact_only",
+    },
+  });
+  return {
+    ok: true,
+    lineId: created.id,
+    qty: nextQty,
+    added,
+    created: true,
+    swapRule: "exact_only",
+    limitedTo,
+    listing,
+    variant: variantView,
+  };
+}
+
 export async function addLine(
   storeId: string,
   cartId: string,
   variantId: string,
   qty: number,
   actorUserId: string | null = null,
+  options?: AddLineOptions,
 ): Promise<void> {
-  await storeScopedTransaction(storeId, async (tx) => {
-    await requireCartActor(tx, cartId, actorUserId);
-    const variant = await tx.listingVariant.findUnique({
-      where: { id: variantId },
-      include: { listing: true },
+  await runCartMutation(storeId, cartId, actorUserId, async (tx) => {
+    const result = await applyAddLine(tx, storeId, cartId, variantId, qty, {
+      source: options?.source ?? "manual",
+      clampToMax: options?.clampToMax ?? false,
+      requireActive: options?.requireActive ?? false,
     });
-    if (!variant || variant.listing.storeId !== storeId) {
-      throw new CartError(
-        "Variant does not belong to this store",
-        "VARIANT_STORE_MISMATCH",
-      );
+    if (!result.ok && result.code === "variant_not_found") {
+      throw new CartError("Variant does not belong to this store", "VARIANT_STORE_MISMATCH");
     }
-
-    const maxPerOrder = variant.listing.maxPerOrder ?? 99;
-
-    // requireCartActor already holds the cart row. FOR UPDATE on cart_lines
-    // cannot lock a line that does not exist yet, so concurrent first-adds
-    // serialize on that cart lock.
-    const existing = await lockCartLineByVariant(tx, cartId, variantId);
-    const totalQty = (existing?.qty ?? 0) + qty;
-
-    if (totalQty > maxPerOrder) {
+    if (!result.ok && result.code === "unavailable") {
+      throw new CartError("Listing is unavailable", "VARIANT_STORE_MISMATCH");
+    }
+    if (!result.ok) {
       throw new CartError(
-        `Maximum ${maxPerOrder} per order for this item`,
+        `Maximum ${result.maxPerOrder ?? 99} per order for this item`,
         "MAX_PER_ORDER",
       );
-    }
-
-    if (existing) {
-      await tx.cartLine.update({
-        where: { id: existing.id },
-        data: { qty: totalQty },
-      });
-    } else {
-      await tx.cartLine.create({
-        data: {
-          storeId,
-          cartId,
-          variantId,
-          qty: Math.min(qty, maxPerOrder),
-          swapRule: "exact_only",
-        },
-      });
     }
   });
 }
