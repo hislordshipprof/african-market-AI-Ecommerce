@@ -19,7 +19,7 @@ export function loadedVariantRow(variant: {
   weightG: number;
   sku: string | null;
   barcode: string | null;
-}): VariantFormSnapshot {
+}): VariantFormSnapshot & { key: string } {
   return {
     key: variant.id,
     id: variant.id,
