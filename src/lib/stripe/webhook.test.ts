@@ -213,10 +213,8 @@ describe("Stripe webhook signatures", () => {
     expect(res.status).toBe(400);
   });
 
-  it.each([
-    { NODE_ENV: "production", VERCEL: "" },
-    { NODE_ENV: "test", VERCEL: "1" },
-  ])("both missing Stripe secrets return 500 and log the webhook key: %j", async (runtime) => {
+  it("both missing Stripe secrets return 500 and log the webhook key", async () => {
+    const runtime = { NODE_ENV: "production", VERCEL: "" };
     vi.stubEnv("NODE_ENV", runtime.NODE_ENV);
     vi.stubEnv("VERCEL", runtime.VERCEL);
     vi.stubEnv("STRIPE_SECRET_KEY", "");

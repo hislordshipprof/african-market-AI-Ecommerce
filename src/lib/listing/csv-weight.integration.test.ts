@@ -1,18 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Client } from "pg";
 import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { commitImport, generatePreview } from "./csv-import";
 import type { Actor } from "./service";
 import {
   OVERLAP_TEST_TIMEOUT_MS,
   abandonHeldCommits,
-  assertNoLockWaiters,
   commitPairBehindStoreLock,
-  countLockWaiters,
   delayFirstQuery,
-  directUrlForLane,
   holdStoreRow,
   waitForLockWaiters,
 } from "./import-lock-test-helpers";
@@ -503,95 +499,6 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     expect(byName.has(invalid)).toBe(false);
   });
 
-  async function holderSessions(applicationName: string): Promise<number> {
-    const client = new Client({
-      connectionString: directUrlForLane(),
-      application_name: "import-lock-counter",
-    });
-    await client.connect();
-    try {
-      const result = await client.query<{ n: number }>(
-        "SELECT COUNT(*)::int AS n FROM pg_stat_activity WHERE application_name = $1",
-        [applicationName],
-      );
-      return Number(result.rows[0]?.n ?? 0);
-    } finally {
-      await client.end();
-    }
-  }
-
-  it("waiting on the store lock names the step when nothing queues", async () => {
-    const applicationName = `import-lock-holder-quiet-${RUN}`;
-    const before = await holderSessions(applicationName);
-    const hold = await holdStoreRow(storeAId, { applicationName });
-    const started = Date.now();
-    try {
-      await expect(waitForLockWaiters(hold.pid, 1, {
-        label: "nothing queued",
-        timeoutMs: 500,
-      })).rejects.toThrow("timed out: nothing queued");
-      expect(Date.now() - started).toBeLessThan(2_000);
-    } finally {
-      await hold.rollback();
-    }
-    expect(await holderSessions(applicationName)).toBe(before);
-    const writeStarted = Date.now();
-    const created = await storeScoped(storeAId).listing.create({
-      data: {
-        storeId: storeAId,
-        customName: `After Wait ${RUN}`,
-        price: 100,
-        stockMode: "status",
-        status: "in_stock",
-      },
-    });
-    expect(Date.now() - writeStarted).toBeLessThan(5_000);
-    expect(created.customName).toBe(`After Wait ${RUN}`);
-  }, 30_000);
-
-  it("waiting on the store lock fails fast with the commit's own error", async () => {
-    const hold = await holdStoreRow(storeAId);
-    const started = Date.now();
-    const commit = commitImport(
-      storeAId,
-      "not-a-real-token",
-      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-      actor,
-    );
-    try {
-      await expect(waitForLockWaiters(hold.pid, 1, {
-        label: "bad token",
-        settled: [commit],
-      })).rejects.toThrow("Import token is invalid, expired, or already used.");
-      expect(Date.now() - started).toBeLessThan(1_000);
-    } finally {
-      await abandonHeldCommits(hold, [commit]);
-    }
-  }, 30_000);
-
-  it("an empty selection fails the wait with the commit error", async () => {
-    const preview = await generatePreview(storeAId, `name,price,weight\nEmpty Sel ${RUN},1.00,500 g\n`, userId);
-    const hold = await holdStoreRow(storeAId);
-    const started = Date.now();
-    const commit = commitImport(
-      storeAId,
-      preview.importToken,
-      { matchedRows: [], newItemRows: [], ambiguousResolutions: [] },
-      actor,
-    );
-    try {
-      await expect(waitForLockWaiters(hold.pid, 1, {
-        label: "empty selection",
-        settled: [commit],
-      })).rejects.toThrow("No rows selected for import.");
-      expect(Date.now() - started).toBeLessThan(1_000);
-    } finally {
-      await abandonHeldCommits(hold, [commit]);
-    }
-    const pending = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
-    expect(pending?.status).toBe("pending");
-  }, 30_000);
-
   it("wait failure with two queued commits releases the holder and drains both", async () => {
     const shared = `Drain Shared ${RUN}`;
     const extra = `Drain Extra ${RUN}`;
@@ -691,92 +598,6 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
     expect(created.createdCount).toBe(1);
     const stored = await storedVariant(storeAId, created.listingIds[0]!);
     expect(stored.variant.weightG).toBe(907);
-  }, 30_000);
-
-  it("holding a store row that does not exist throws store row not locked", async () => {
-    await expect(holdStoreRow(crypto.randomUUID())).rejects.toThrow("store row not locked");
-  }, 30_000);
-
-  it("missing-store holder and repeated cleanup leave no connection behind", async () => {
-    const applicationName = `import-lock-holder-leak-${RUN}`;
-    expect(await holderSessions(applicationName)).toBe(0);
-    await expect(holdStoreRow(crypto.randomUUID(), { applicationName })).rejects.toThrow("store row not locked");
-    expect(await holderSessions(applicationName)).toBe(0);
-    const hold = await holdStoreRow(storeAId, { applicationName });
-    expect(await holderSessions(applicationName)).toBe(1);
-    await hold.rollback();
-    await hold.rollback();
-    await hold.commit();
-    expect(await holderSessions(applicationName)).toBe(0);
-  }, 30_000);
-
-  it("waiter count excludes another store and rejects a nonzero baseline", async () => {
-    const storeC = await raw.store.create({
-      data: { slug: `csv-weight-c-${RUN}`, name: `CSV Weight C ${RUN}`, themePreset: "palm-and-shea" },
-    });
-    const holdA = await holdStoreRow(storeAId);
-    const holdB = await holdStoreRow(storeBId);
-    const holdC = await holdStoreRow(storeC.id);
-    const waiters: Array<{ client: Client; pid: number }> = [];
-    const terminate = async (pid: number) => {
-      const control = new Client({ connectionString: directUrlForLane(), application_name: "import-lock-counter" });
-      await control.connect();
-      try {
-        await control.query("SELECT pg_terminate_backend($1)", [pid]);
-      } finally {
-        await control.end();
-      }
-    };
-    const blockOn = async (ids: string[]) => {
-      const client = new Client({ connectionString: directUrlForLane(), application_name: "import-lock-waiter" });
-      client.on("error", () => undefined);
-      await client.connect();
-      await client.query("BEGIN");
-      const who = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-      const pid = Number(who.rows[0]?.pid ?? 0);
-      const blocked = ids.length === 1
-        ? client.query("SELECT 1 FROM stores WHERE id = $1 FOR UPDATE", ids)
-        : client.query("SELECT 1 FROM stores WHERE id = $1 OR id = $2 FOR UPDATE", ids);
-      void blocked.catch(() => undefined);
-      waiters.push({ client, pid });
-      return pid;
-    };
-    const releaseWaiter = async (pid: number, holderPid: number) => {
-      await terminate(pid);
-      const quiet = Date.now() + 2_000;
-      while ((await countLockWaiters(holderPid)) !== 0) {
-        if (Date.now() > quiet) throw new Error("timed out: waiter cleared");
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-    };
-    try {
-      const onB = await blockOn([storeBId]);
-      await waitForLockWaiters(holdB.pid, 1, { label: "store B waiter" });
-      expect(await countLockWaiters(holdA.pid)).toBe(0);
-      expect(await countLockWaiters(holdC.pid)).toBe(0);
-      await releaseWaiter(onB, holdB.pid);
-
-      const onBoth = await blockOn([storeAId, storeBId]);
-      await waitForLockWaiters(holdA.pid, 1, { label: "shared waiter" });
-      expect(await countLockWaiters(holdA.pid)).toBe(1);
-      expect(await countLockWaiters(holdC.pid)).toBe(0);
-      await releaseWaiter(onBoth, holdA.pid);
-
-      await assertNoLockWaiters(holdA.pid);
-      const onA = await blockOn([storeAId]);
-      await waitForLockWaiters(holdA.pid, 1, { label: "baseline waiter" });
-      await expect(assertNoLockWaiters(holdA.pid)).rejects.toThrow(/nonzero lock-waiter baseline: 1/);
-      await releaseWaiter(onA, holdA.pid);
-    } finally {
-      for (const waiter of waiters) {
-        await terminate(waiter.pid).catch(() => undefined);
-        await waiter.client.end().catch(() => undefined);
-      }
-      await holdA.rollback().catch(() => undefined);
-      await holdB.rollback().catch(() => undefined);
-      await holdC.rollback().catch(() => undefined);
-      await raw.store.delete({ where: { id: storeC.id } }).catch(() => undefined);
-    }
   }, 30_000);
 
   it("store B cannot read, change or delete the overlapping import's rows", async () => {

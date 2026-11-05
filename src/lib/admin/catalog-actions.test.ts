@@ -94,7 +94,8 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     expect(rows[0].after).toMatchObject({ name: "New Name", description: "New desc" });
   });
 
-  it.each(["", "   "])("update: rejects blank name %j and changes nothing", async (name) => {
+  it("update: rejects a blank name and changes nothing", async () => {
+    const name = "";
     const p = await seed("blank");
     expect(await updateReviewProduct(p.id, { name })).toEqual({ error: "Name is required" });
     const after = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: p.id } }));

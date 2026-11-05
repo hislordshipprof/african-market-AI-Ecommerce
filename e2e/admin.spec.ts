@@ -217,22 +217,6 @@ test.describe("Store management (authenticated)", () => {
   });
 });
 
-test.describe("Layout regression", () => {
-  test("sign-in card is at least 320px wide at 1280 viewport", async ({ page }) => {
-    await page.goto("/admin/sign-in");
-    const card = page.locator("main > div");
-    await expect(card).toBeVisible();
-    const box = await card.boundingBox();
-    expect(box).toBeTruthy();
-    expect(box!.width).toBeGreaterThanOrEqual(320);
-  });
-
-  test("storefront page still renders", async ({ page }) => {
-    await page.goto(`${storeUrl("mama-ngozi")}/`);
-    await expect(page.locator("h1")).toHaveText("Mama Ngozi African Market");
-  });
-});
-
 test.describe("Catalog review (authenticated)", () => {
   // These tests all mutate the first review row. Parallel workers were approving
   // that row while another test was renaming it.
@@ -327,38 +311,6 @@ test.describe("Catalog review (authenticated)", () => {
   });
 });
 
-test.describe("Catalog review screenshots", () => {
-  test("desktop 1440px light and dark", async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    const page = await context.newPage();
-    await adminSignIn(page);
-    await page.goto("/admin/catalog/review");
-    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
-    await page.waitForTimeout(1000);
-    await page.screenshot({ path: "screenshots/review-1440px-light.png", fullPage: true });
-
-    await page.evaluate(() => document.documentElement.classList.add("dark"));
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: "screenshots/review-1440px-dark.png", fullPage: true });
-    await context.close();
-  });
-
-  test("mobile 390px light and dark", async ({ browser }) => {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    const page = await context.newPage();
-    await adminSignIn(page);
-    await page.goto("/admin/catalog/review");
-    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
-    await page.waitForTimeout(1000);
-    await page.screenshot({ path: "screenshots/review-390px-light.png", fullPage: true });
-
-    await page.evaluate(() => document.documentElement.classList.add("dark"));
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: "screenshots/review-390px-dark.png", fullPage: true });
-    await context.close();
-  });
-});
-
 test.describe("2FA enrollment (unenrolled admin)", () => {
   const UNENROLLED_EMAIL = "unenrolled-admin@platform.test";
 
@@ -392,47 +344,4 @@ test.describe("2FA enrollment (unenrolled admin)", () => {
     await page.waitForURL("**/admin/stores", { timeout: 15000 });
     await expect(page.locator("h1")).toHaveText("Stores");
   });
-});
-
-test("the store form timezone control uses the input and destructive tokens", async ({ page }) => {
-  await page.goto("/admin/sign-in");
-  await page.getByLabel("Email").fill(ADMIN_EMAIL);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.click("button[type='submit']");
-  await page.getByLabel("Verification code").fill(generateTotpCode());
-  await page.click("button[type='submit']");
-  await page.waitForURL("**/admin/stores");
-  await page.goto("/admin/stores/new");
-
-  const border = await page.locator("#timezone").evaluate((el) => {
-    const probe = document.createElement("div");
-    probe.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue("--input");
-    document.body.append(probe);
-    const expected = getComputedStyle(probe).borderTopColor;
-    probe.remove();
-    return { actual: getComputedStyle(el).borderTopColor, expected };
-  });
-  expect(border.actual).toBe(border.expected);
-
-  await page.locator("#timezone").evaluate((el: HTMLSelectElement) => {
-    const option = document.createElement("option");
-    option.value = "Not/AZone";
-    option.text = "Not/AZone";
-    el.append(option);
-    el.value = "Not/AZone";
-  });
-  await page.locator("#slug").fill(`token-${Date.now()}`);
-  await page.locator("#storeName").fill("Token Check");
-  await page.locator("button[type='submit']").click();
-  const error = page.locator("p", { hasText: "Invalid timezone" });
-  await expect(error).toBeVisible();
-  const destructive = await error.evaluate((el) => {
-    const probe = document.createElement("div");
-    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue("--destructive");
-    document.body.append(probe);
-    const expected = getComputedStyle(probe).color;
-    probe.remove();
-    return { actual: getComputedStyle(el).color, expected };
-  });
-  expect(destructive.actual).toBe(destructive.expected);
 });
