@@ -183,6 +183,20 @@ export async function lockCustomerAccount(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('customer-account'), hashtext(${userId}))`;
 }
 
+/** Advisory lock, insert-if-missing, then row lock. Caller is already inside customerScopedTransaction. */
+export async function lockCustomerProfileRow(
+  tx: Pick<PrismaClient, "$executeRaw" | "$queryRaw">,
+  userId: string,
+): Promise<void> {
+  await lockCustomerAccount(tx, userId);
+  await tx.$executeRaw`
+    INSERT INTO platform_customer_profiles (user_id, updated_at)
+    VALUES (${userId}, CURRENT_TIMESTAMP)
+    ON CONFLICT (user_id) DO NOTHING
+  `;
+  await tx.$queryRaw`SELECT user_id FROM platform_customer_profiles WHERE user_id = ${userId} FOR UPDATE`;
+}
+
 function wrapPlatformAdminDelegate<D extends object>(delegate: D): D {
   return new Proxy(delegate as Record<string, unknown>, {
     get(target, prop: string) {

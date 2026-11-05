@@ -40,6 +40,14 @@ A customer's single login, which works at every store on the platform.
 **Guest**:
 A customer who checks out with name, email and phone but no account.
 
+**Address book**:
+The addresses a customer saves on their account and can reuse at any store. A store sees an address only when that customer uses it on an order.
+_Avoid_: Wallet
+
+**Saved card**:
+A card the customer agreed to keep on their account, shown as brand and last four, and reusable at any store while they are signed in.
+_Avoid_: Wallet, payment profile
+
 **Store directory**:
 The public site listing stores by state and location, linking each to its storefront.
 _Avoid_: Marketplace, combined app

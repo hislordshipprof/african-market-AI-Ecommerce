@@ -1,4 +1,4 @@
-import { customerScopedTransaction, lockCustomerAccount } from "../db";
+import { customerScopedTransaction, lockCustomerProfileRow } from "../db";
 import {
   ADDRESS_CAP,
   ADDRESS_CAP_MESSAGE,
@@ -18,13 +18,7 @@ type AddressClient = Parameters<Parameters<typeof customerScopedTransaction>[1]>
 
 async function withAccount<T>(userId: string, fn: (tx: AddressClient) => Promise<T>): Promise<T> {
   return customerScopedTransaction(userId, async (tx) => {
-    await lockCustomerAccount(tx, userId);
-    await tx.$executeRaw`
-      INSERT INTO platform_customer_profiles (user_id, updated_at)
-      VALUES (${userId}, CURRENT_TIMESTAMP)
-      ON CONFLICT (user_id) DO NOTHING
-    `;
-    await tx.$queryRaw`SELECT user_id FROM platform_customer_profiles WHERE user_id = ${userId} FOR UPDATE`;
+    await lockCustomerProfileRow(tx, userId);
     return fn(tx);
   });
 }

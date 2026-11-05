@@ -21,13 +21,25 @@ export function findForbiddenImports(roots: string[], srcRoot: string): string[]
       const resolved = resolveSpecifier(file, spec, srcRoot);
       if (!resolved) continue;
       const normalized = resolved.replace(/\\/g, "/");
-      if (normalized.endsWith("/lib/stripe/provider.ts") || normalized.endsWith("/lib/checkout/service.ts")) {
+      if (forbiddenResolved(normalized)) {
         hits.push(`${path.relative(srcRoot, file)} -> ${path.relative(srcRoot, resolved)}`);
       }
       if (resolved.startsWith(srcRoot) && !seen.has(resolved)) queue.push(resolved);
     }
   }
   return hits;
+}
+
+const ACCOUNT_LOADERS = [
+  "customer-account/checkout-profile",
+  "customer-account/saved-cards",
+  "customer-account/address-book",
+];
+
+function forbiddenResolved(normalized: string): boolean {
+  return normalized.endsWith("/lib/stripe/provider.ts")
+    || normalized.endsWith("/lib/checkout/service.ts")
+    || ACCOUNT_LOADERS.some((loader) => normalized.endsWith(`/lib/${loader}.ts`));
 }
 
 function forbiddenSpecifier(spec: string): boolean {
@@ -37,7 +49,8 @@ function forbiddenSpecifier(spec: string): boolean {
     || spec === "@/lib/checkout/service"
     || spec === "@/lib/stripe/provider"
     || spec.endsWith("/lib/checkout/service")
-    || spec.endsWith("/lib/stripe/provider");
+    || spec.endsWith("/lib/stripe/provider")
+    || ACCOUNT_LOADERS.some((loader) => spec === `@/lib/${loader}` || spec.endsWith(`/lib/${loader}`));
 }
 
 /** Import, re-export, import(), and require() specifiers, including side-effect imports. */

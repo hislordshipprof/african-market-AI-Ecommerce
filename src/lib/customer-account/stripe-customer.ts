@@ -1,4 +1,4 @@
-import { customerScoped, customerScopedTransaction, lockCustomerAccount } from "../db";
+import { customerScoped, customerScopedTransaction, lockCustomerProfileRow } from "../db";
 import {
   CARDS_UNAVAILABLE,
   CUSTOMER_AMBIGUOUS,
@@ -48,13 +48,7 @@ function isAmbiguous(error: unknown): boolean {
 
 async function lockProfile(userId: string) {
   return customerScopedTransaction(userId, async (tx) => {
-    await lockCustomerAccount(tx, userId);
-    await tx.$executeRaw`
-      INSERT INTO platform_customer_profiles (user_id, updated_at)
-      VALUES (${userId}, CURRENT_TIMESTAMP)
-      ON CONFLICT (user_id) DO NOTHING
-    `;
-    await tx.$queryRaw`SELECT user_id FROM platform_customer_profiles WHERE user_id = ${userId} FOR UPDATE`;
+    await lockCustomerProfileRow(tx, userId);
     return tx.platformCustomerProfile.findUnique({ where: { userId } });
   });
 }

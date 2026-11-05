@@ -1,12 +1,12 @@
 import { Prisma } from "@prisma/client";
 import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped } from "../db";
-import { getCartWithLines, type CartLineView, type CartWithLines } from "../cart/service";
+import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { sendOrderAuthorized } from "../inngest/send";
 import { checkoutTestHooks } from "./test-hooks";
 import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams } from "./payment-intent-params";
-import { bindSavedCardConsent, prepareSignedInPaymentIntent, SavedCardUnavailableError } from "./saved-card-payment";
+import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
 import { validPhone } from "../customer-account/phone";
 import type {

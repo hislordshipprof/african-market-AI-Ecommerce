@@ -26,12 +26,16 @@ import {
 } from "./common";
 import { OrderFlow, statusLabel } from "./order-flow";
 import { FlowToast } from "./feedback";
+import { RealAccountBook } from "./account-book";
+import { savePhoneAction } from "@/lib/customer-account/actions";
+import type { AccountBookSnapshot } from "@/lib/customer-account/checkout-profile";
 import "./account.css";
 type Props = {
   settings: FlowStore;
   catalog: FlowCatalogItem[];
   enabled: boolean;
   customer?: RealCustomerProfile | null;
+  accountBook?: AccountBookSnapshot | null;
 };
 const message = (e: unknown) =>
   e instanceof Error ? e.message : "Something went wrong. Please try again.";
@@ -177,13 +181,13 @@ export function AccountSignIn(props: Props) {
 export function AccountFlow(props: Props) {
   const router = useRouter();
   const services = useServices(props);
-  const { customer } = props;
+  const { customer, accountBook } = props;
   const realProfile: CustomerProfile | null = customer
     ? {
         id: customer.id,
-        name: customer.name,
-        phone: customer.phone ?? "",
-        email: customer.email ?? "",
+        name: accountBook?.name || customer.name,
+        phone: accountBook?.phone ?? "",
+        email: accountBook?.email || customer.email || "",
         addresses: [],
       }
     : null;
@@ -273,7 +277,17 @@ export function AccountFlow(props: Props) {
                   className="sf-account-form"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    if (!customer) void save(profile);
+                    if (customer) {
+                      setBusy(true);
+                      setError("");
+                      void savePhoneAction(profile.phone).then((result) => {
+                        if (result.ok) setSaved("Phone saved.");
+                        else setError(result.error);
+                        setBusy(false);
+                      });
+                      return;
+                    }
+                    void save(profile);
                   }}
                 >
                   <label>
@@ -294,7 +308,6 @@ export function AccountFlow(props: Props) {
                       type="tel"
                       autoComplete="tel"
                       value={profile.phone}
-                      readOnly={!!customer}
                       onChange={(e) =>
                         setProfile({ ...profile, phone: e.target.value })
                       }
@@ -312,7 +325,7 @@ export function AccountFlow(props: Props) {
                       }
                     />
                   </label>
-                  {!customer && <Button disabled={busy}>Save details</Button>}
+                  <Button disabled={busy}>{customer ? "Save phone" : "Save details"}</Button>
                   <button
                     type="button"
                     className="sf-text-link"
@@ -331,6 +344,9 @@ export function AccountFlow(props: Props) {
                   </button>
                 </form>
               </FlowCard>
+              {customer && accountBook ? (
+                <RealAccountBook initial={accountBook} />
+              ) : (
               <FlowCard title="Saved addresses">
                 <div className="sf-account-list">
                   {profile.addresses.map((a) => (
@@ -413,6 +429,7 @@ export function AccountFlow(props: Props) {
                   </button>
                 ))}
               </FlowCard>
+              )}
             </div>
           )}
           <FlowCard title={`Orders from ${props.settings.name}`}>
