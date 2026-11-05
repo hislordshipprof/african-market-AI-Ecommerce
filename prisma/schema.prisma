@@ -48,6 +48,8 @@ model Store {
   listingImports  ListingImport[]
   aiConversations AiConversation[]
   aiActions       AiAction[]
+  assistantUndoReceipts AssistantUndoReceipt[]
+  guestBrowserCarts GuestBrowserCart[]
 
   @@map("stores")
 }
@@ -426,6 +428,8 @@ model Cart {
   customer Customer? @relation(fields: [customerId], references: [id])
   lines    CartLine[]
   aiConversations AiConversation[]
+  assistantUndoReceipts AssistantUndoReceipt[]
+  guestBrowserCarts GuestBrowserCart[]
 
   @@index([storeId])
   @@index([storeId, userId])
@@ -527,6 +531,41 @@ model AiAction {
   @@index([storeId])
   @@index([createdAt])
   @@map("ai_actions")
+}
+
+/// One row per assistant addition the customer undoes. A retry sees the row and does not subtract again.
+model AssistantUndoReceipt {
+  id         String   @id @default(cuid())
+  storeId    String   @map("store_id")
+  cartId     String   @map("cart_id")
+  lineId     String   @map("line_id")
+  additionId String   @map("addition_id")
+  subtracted Int
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, cartId, additionId])
+  @@index([storeId])
+  @@index([cartId])
+  @@map("assistant_undo_receipts")
+}
+
+/// The cart a browser opened before its cart cookie was stored. One browser, one guest cart.
+model GuestBrowserCart {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  browserId String   @map("browser_id")
+  cartId    String   @map("cart_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, browserId])
+  @@index([cartId])
+  @@map("guest_browser_carts")
 }
 
 /// Platform-wide shopper-assistant spend. No store id, and retention does not delete it.

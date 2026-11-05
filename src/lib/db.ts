@@ -107,6 +107,8 @@ export function storeScoped(storeId: string) {
     refundRequest: wrapDelegate(storeId, prisma.refundRequest),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
+    assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
+    guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
   };
 }
 
@@ -193,7 +195,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "refundRequest" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -217,6 +219,8 @@ export async function storeScopedTransaction<T>(
       refundRequest: tx.refundRequest,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
+      assistantUndoReceipt: tx.assistantUndoReceipt,
+      guestBrowserCart: tx.guestBrowserCart,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -243,6 +247,10 @@ export async function storeScopedTransaction<T>(
  * not part of this order. Checkout does not lock variants FOR UPDATE, and
  * cart or listing writes do not take a store lock just to match this list.
  */
+export async function lockConversationRow(tx: Pick<PrismaClient, "$queryRaw">, conversationId: string) {
+  await tx.$queryRaw`SELECT id FROM ai_conversations WHERE id = ${conversationId} FOR UPDATE`;
+}
+
 export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
   await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
 }

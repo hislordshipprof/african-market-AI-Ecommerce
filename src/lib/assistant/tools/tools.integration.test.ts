@@ -9,6 +9,7 @@ import {
   addToCart,
   checkAvailability,
   getCartSummary,
+  offerChoices,
   removeFromCart,
   searchCatalog,
   setSwapRule,
@@ -17,7 +18,7 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
-import { addToCartInput, searchCatalogInput, toolInputSchemas } from "./schemas";
+import { addToCartInput, offerChoicesInput, searchCatalogInput, toolInputSchemas } from "./schemas";
 
 const { headerState, cartCookies } = vi.hoisted(() => ({
   headerState: new Headers(),
@@ -621,5 +622,118 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(rows.find((row) => row.name === "Exact Money")?.lineTotalCents).toBe(597);
     const subtotal = summary.subtotalCents as number;
     expect(Number.isInteger(subtotal)).toBe(true);
+  });
+
+  it("add_to_cart output carries this store's variant, name, pack, price and photo", async () => {
+    const item = await makeListing(storeA, { name: "Enriched Egusi", price: 640 });
+    const result = await addToCart(ctx(), { items: [{ variant_id: item.variantId, qty: 2 }] });
+    expect(result).toMatchObject({
+      ok: true,
+      items: [{
+        ok: true,
+        added: 2,
+        variantId: item.variantId,
+        listingId: item.listingId,
+        name: "Enriched Egusi",
+        packLabel: "Each",
+        unitPriceCents: 640,
+        created: true,
+      }],
+    });
+    const foreign = await addToCart(ctx(), { items: [{ variant_id: variantB, qty: 1 }] });
+    expect(foreign).toMatchObject({ ok: false, code: "variant_not_found" });
+    expect(await storeScoped(storeB).cartLine.count()).toBe(0);
+  });
+
+  it("offer_choices returns only this store's active listings and records one action in this store", async () => {
+    const first = await makeListing(storeA, { name: "Choice Yam", price: 300 });
+    const second = await makeListing(storeA, { name: "Choice Rice", price: 200 });
+    const inactive = await makeListing(storeA, { name: "Hidden", price: 10, active: false });
+    const foreign = await makeListing(storeB, { name: "Foreign Choice", price: 10 });
+    const result = await offerChoices(ctx(), {
+      options: [
+        { listing_id: first.listingId },
+        { listing_id: second.listingId },
+        { listing_id: inactive.listingId },
+        { listing_id: foreign.listingId },
+      ],
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      options: [
+        { listingId: first.listingId, name: "Choice Yam", packLabel: "Each", priceCents: 300 },
+        { listingId: second.listingId, name: "Choice Rice", packLabel: "Each", priceCents: 200 },
+      ],
+    });
+    const notFound = (result as unknown as { notFound?: string[] }).notFound ?? [];
+    expect(notFound).toEqual(expect.arrayContaining([inactive.listingId, foreign.listingId]));
+    const actions = await storeScoped(storeA).aiAction.findMany({
+      where: { conversationId: conversation, tool: "offer_choices" },
+    });
+    expect(actions).toHaveLength(1);
+    expect(await storeScoped(storeB).aiAction.count({ where: { tool: "offer_choices" } })).toBe(0);
+  });
+
+  it("offer_choices rejects 1 and 7 options and fails with fewer than two valid", async () => {
+    expect(() => offerChoicesInput.parse({ options: [{ listing_id: "only-one" }] })).toThrow();
+    expect(() => offerChoicesInput.parse({
+      options: Array.from({ length: 7 }, (_, index) => ({ listing_id: `id-${index}` })),
+    })).toThrow();
+    const only = await makeListing(storeA, { name: "Lonely", price: 50 });
+    const result = await offerChoices(ctx(), {
+      options: [{ listing_id: only.listingId }, { listing_id: "missing-listing" }],
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      code: "not_enough_choices",
+      message: "There are not enough choices to pick from.",
+    });
+  });
+
+  it("offer_choices validates listing-variant ownership and distinct deterministic choices", async () => {
+    const listing = await storeScoped(storeA).listing.create({
+      data: {
+        storeId: storeA,
+        customName: "Tied Price",
+        price: 100,
+        stockMode: "unlimited",
+        confidence: 1,
+        active: true,
+        frozen: false,
+        perishable: false,
+      },
+    });
+    const expensive = await storeScoped(storeA).listingVariant.create({
+      data: { listingId: listing.id, label: "Big", price: 500, weightG: 100 },
+    });
+    const cheapB = await storeScoped(storeA).listingVariant.create({
+      data: { listingId: listing.id, label: "B", price: 100, weightG: 100 },
+    });
+    const cheapA = await storeScoped(storeA).listingVariant.create({
+      data: { listingId: listing.id, label: "A", price: 100, weightG: 100 },
+    });
+    const other = await makeListing(storeA, { name: "Other Bowl", price: 80 });
+    const mismatched = await offerChoices(ctx(), {
+      options: [
+        { listing_id: listing.id, variant_id: other.variantId },
+        { listing_id: other.listingId },
+      ],
+    });
+    expect(mismatched).toMatchObject({ ok: false, code: "not_enough_choices" });
+    const omitted = await offerChoices(ctx({ conversationId: conversation }), {
+      options: [
+        { listing_id: listing.id },
+        { listing_id: listing.id },
+        { listing_id: other.listingId },
+      ],
+    });
+    expect(omitted).toMatchObject({
+      ok: true,
+      options: [
+        { variantId: cheapA.id < cheapB.id ? cheapA.id : cheapB.id, packLabel: cheapA.id < cheapB.id ? "A" : "B" },
+        { listingId: other.listingId },
+      ],
+    });
+    expect(JSON.stringify(omitted)).not.toContain(expensive.id);
   });
 });

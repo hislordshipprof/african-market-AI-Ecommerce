@@ -32,6 +32,8 @@ process.env.STOREFRONT_REVALIDATION_SECRET ??= "e2e-storefront-revalidate";
 
 loadEnvFile(resolve(__dirname, ".env.e2e"));
 loadEnvFile(resolve(__dirname, ".env.local"));
+process.env.E2E_FAKE_ASSISTANT = "1";
+process.env.ASSISTANT_LIVE_TESTS = "0";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -71,6 +73,9 @@ export default defineConfig({
           // the in-memory email sender. VERCEL must stay unset. An empty key stops
           // .env.local from hiding a missing-secret failure.
           CI: "true",
+          ASSISTANT_CHAT_ENABLED: "1",
+          E2E_FAKE_ASSISTANT: "1",
+          ANTHROPIC_API_KEY: "e2e-fake-anthropic-key",
           STRIPE_SECRET_KEY: "",
           VERCEL_ENV: "preview",
           STOREFRONT_REVALIDATION_SECRET: "e2e-storefront-revalidate",

@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
+import { AssistantHost } from "./assistant/assistant-host";
 import type { ValidatedStore } from "@/lib/get-store";
 import { CartProvider } from "./cart-provider";
 import { MobileNav } from "./mobile-nav";
@@ -28,7 +29,11 @@ export function StorefrontShell({
         <StorefrontHeader store={store} />
         <main id="main-content">{children}</main>
         <StorefrontFooter store={store} />
-        <MobileNav /></QuickViewProvider>
+        <MobileNav />
+        <Suspense fallback={null}>
+          <AssistantHost store={store} />
+        </Suspense>
+        </QuickViewProvider>
       </CartProvider></StorefrontMotion>
     </div>
   );

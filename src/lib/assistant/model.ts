@@ -1,6 +1,8 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { wrapLanguageModel, type LanguageModel } from "ai";
+import { assistantFakeAllowed } from "./contract";
 import { AssistantConfigError } from "./errors";
+import { scriptedAssistantFetch } from "./fake-model";
 import { spendMeteringMiddleware } from "./spend-middleware";
 
 export { AssistantConfigError };
@@ -63,7 +65,7 @@ export function createAssistantModel(opts?: {
   const provider = createAnthropic({
     apiKey: key,
     baseURL: ANTHROPIC_MESSAGES_BASE_URL,
-    fetch: opts?.fetch,
+    fetch: opts?.fetch ?? (assistantFakeAllowed() ? scriptedAssistantFetch : undefined),
   });
   return wrapLanguageModel({
     model: provider(id),

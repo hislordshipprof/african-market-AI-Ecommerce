@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { storeUrl } from "./urls";
 
 test("chat returns assistant_unavailable JSON when no Anthropic key is set", async ({ page }) => {
+  test.skip(process.env.E2E_FAKE_ASSISTANT === "1", "the scripted assistant replaces the keyless check");
   test.skip(
     !!process.env.ANTHROPIC_API_KEY,
     "ANTHROPIC_API_KEY is set; this check is the keyless build",

@@ -9,6 +9,7 @@ import {
 } from "../db";
 import { catalogFor } from "../storefront/catalog";
 import type { SwapRuleValue } from "../storefront/cart-store";
+import { shareFirstCart } from "./bootstrap";
 
 export type { SwapRuleValue };
 const VALID_SWAP_RULES: readonly SwapRuleValue[] = [
@@ -67,10 +68,46 @@ export class CartError extends Error {
   }
 }
 
+async function claimGuestCart(storeId: string, browserId: string): Promise<string> {
+  const scoped = storeScoped(storeId);
+  const claim = await scoped.guestBrowserCart.findUnique({
+    where: { storeId_browserId: { storeId, browserId } },
+  });
+  if (claim) {
+    const cart = await scoped.cart.findUnique({ where: { id: claim.cartId } });
+    if (cart && cart.userId === null) return cart.id;
+  }
+  const cart = await scoped.cart.create({
+    data: { storeId, userId: null, customerId: null, source: "manual" },
+  });
+  try {
+    if (claim) {
+      await scoped.guestBrowserCart.update({
+        where: { storeId_browserId: { storeId, browserId } },
+        data: { cartId: cart.id },
+      });
+    } else {
+      await scoped.guestBrowserCart.create({
+        data: { storeId, browserId, cartId: cart.id },
+      });
+    }
+  } catch {
+    const winner = await scoped.guestBrowserCart.findUnique({
+      where: { storeId_browserId: { storeId, browserId } },
+    });
+    if (winner) {
+      const won = await scoped.cart.findUnique({ where: { id: winner.cartId } });
+      if (won && won.userId === null) return won.id;
+    }
+  }
+  return cart.id;
+}
+
 export async function getOrCreateCart(
   storeId: string,
   cartId: string | null,
   userId: string | null,
+  browserId: string | null = null,
 ): Promise<string> {
   const scoped = storeScoped(storeId);
 
@@ -81,10 +118,13 @@ export async function getOrCreateCart(
       const existing = await scoped.cart.findUnique({ where: { id: cartId } });
       if (existing && existing.userId === null) return existing.id;
     }
-    const cart = await scoped.cart.create({
-      data: { storeId, userId: null, customerId: null, source: "manual" },
-    });
-    return cart.id;
+    if (!browserId) {
+      const cart = await scoped.cart.create({
+        data: { storeId, userId: null, customerId: null, source: "manual" },
+      });
+      return cart.id;
+    }
+    return shareFirstCart(`guest:${storeId}:${browserId}`, () => claimGuestCart(storeId, browserId));
   }
 
   const customerId = await customerIdForCartUser(storeId, userId);
@@ -103,15 +143,18 @@ export async function getOrCreateCart(
         where: { id: existing.id },
         data: { userId, customerId },
       });
+      await tx.guestBrowserCart.deleteMany({ where: { storeId, cartId } });
       return true;
     });
     if (claimed) return cartId;
   }
 
-  const cart = await scoped.cart.create({
-    data: { storeId, userId, customerId, source: "manual" },
+  return shareFirstCart(`user:${storeId}:${userId}`, async () => {
+    const cart = await scoped.cart.create({
+      data: { storeId, userId, customerId, source: "manual" },
+    });
+    return cart.id;
   });
-  return cart.id;
 }
 
 async function requireCartActor(
@@ -402,6 +445,56 @@ export async function removeLine(
   await storeScopedTransaction(storeId, async (tx) => {
     await requireCartActor(tx, cartId, actorUserId);
     await tx.cartLine.deleteMany({ where: { id: lineId, cartId } });
+  });
+}
+
+export type UndoAdditionResult =
+  | { status: "confirmed"; qty: number; removed: boolean }
+  | { status: "already_consumed"; subtracted: number }
+  | { status: "already_removed" };
+
+/**
+ * Subtract one assistant addition under the cart lock. The receipt is the
+ * retry token: a second call for the same addition does not subtract again,
+ * and a line id that no longer exists does not touch a later line for the
+ * same variant.
+ */
+export async function undoAssistantAddition(
+  storeId: string,
+  cartId: string,
+  lineId: string,
+  added: number,
+  additionId: string,
+  actorUserId: string | null = null,
+): Promise<UndoAdditionResult> {
+  if (!Number.isInteger(added) || added < 1 || added > 99) {
+    throw new CartError("Invalid quantity", "MAX_PER_ORDER");
+  }
+  if (!/^[A-Za-z0-9_:-]{1,120}$/.test(additionId)) {
+    throw new CartError("Cart line not found", "CART_NOT_FOUND");
+  }
+  return runCartMutation(storeId, cartId, actorUserId, async (tx) => {
+    const prior = await tx.assistantUndoReceipt.findUnique({
+      where: { storeId_cartId_additionId: { storeId, cartId, additionId } },
+    });
+    if (prior) return { status: "already_consumed", subtracted: prior.subtracted };
+    const line = await tx.cartLine.findUnique({ where: { id: lineId } });
+    if (line && (line.cartId !== cartId || line.storeId !== storeId)) {
+      throw new CartError("Cart line not found", "CART_NOT_FOUND");
+    }
+    if (!line) {
+      await tx.assistantUndoReceipt.create({
+        data: { storeId, cartId, lineId, additionId, subtracted: 0 },
+      });
+      return { status: "already_removed" };
+    }
+    const next = line.qty - added;
+    if (next <= 0) await tx.cartLine.delete({ where: { id: line.id } });
+    else await tx.cartLine.update({ where: { id: line.id }, data: { qty: next } });
+    await tx.assistantUndoReceipt.create({
+      data: { storeId, cartId, lineId: line.id, additionId, subtracted: added },
+    });
+    return { status: "confirmed", qty: Math.max(0, next), removed: next <= 0 };
   });
 }
 

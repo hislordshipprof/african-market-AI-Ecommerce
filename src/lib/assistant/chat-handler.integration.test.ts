@@ -21,9 +21,13 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { createChatHandler } from "./chat-handler";
+import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
+import { scriptedAssistantFetch } from "./fake-model";
 import { createAssistantModel } from "./model";
 import { createFakeAnthropicFetch } from "./messages-api-double";
 import * as spend from "./spend";
+
+process.env.ASSISTANT_CHAT_ENABLED = "1";
 
 const hasDb = !!process.env.DATABASE_URL;
 const usage = {
@@ -1208,5 +1212,119 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const talk = await storeScoped(storeId).aiConversation.findMany({ where: { cartId: cart.id } });
     expect(talk).toHaveLength(0);
     expect(seen.calls()).toBe(0);
+  });
+
+  it("B11 a disabled flag rejects the POST before any model, cart, or conversation write", async () => {
+    const before = await storeScoped(storeId).aiConversation.count();
+    const seen = strictModel(() => [
+      { type: "stream-start", warnings: [] },
+      { type: "text-start", id: "t" },
+      { type: "text-delta", id: "t", delta: "no" },
+      { type: "text-end", id: "t" },
+      { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+    ]);
+    vi.stubEnv("ASSISTANT_CHAT_ENABLED", "");
+    const response = await createChatHandler({ model: seen.model })(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+      },
+      body: "{not-json",
+    }));
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { code: "assistant_disabled", message: "The helper is not available." },
+    });
+    expect(seen.calls()).toBe(0);
+    expect(await storeScoped(storeId).aiConversation.count()).toBe(before);
+  });
+
+  it("B6 a retry after a committed add and a lost stream does not add again", async () => {
+    const seen = strictModel((call) => {
+      if (call === 1) {
+        return [
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "call-retry-add",
+            toolName: "add_to_cart",
+            input: JSON.stringify({ items: [{ variant_id: variantId, qty: 1 }] }),
+          },
+          { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+        ];
+      }
+      return [
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "text-1" },
+        { type: "text-delta", id: "text-1", delta: "Added one." },
+        { type: "text-end", id: "text-1" },
+        { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+      ];
+    });
+    const handler = createChatHandler({ model: seen.model });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      "x-forwarded-for": "203.0.113.150",
+    };
+    const body = JSON.stringify({
+      message: { id: "retry-b6-turn", role: "user", parts: [{ type: "text", text: "add one yam" }] },
+    });
+    const first = await handler(new Request(`http://${host}/api/assistant/chat`, { method: "POST", headers, body }));
+    expect(first.status).toBe(200);
+    await first.text();
+    const cookie = first.headers.get("set-cookie") ?? "";
+    const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
+    const before = await storeScoped(storeId).cartLine.findFirst({ where: { cartId, variantId } });
+    expect(before?.qty).toBe(1);
+    const again = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, cookie: `cart_id=${encodeURIComponent(cartId)}` },
+      body,
+    }));
+    expect(again.status).toBe(200);
+    expect(await again.text()).toContain("Added one.");
+    expect(seen.calls()).toBe(2);
+    expect((await storeScoped(storeId).cartLine.findFirst({ where: { cartId, variantId } }))?.qty).toBe(1);
+  });
+
+  it("a mid-stream retry reaches the script with the failed attempt in history", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const seen: unknown[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const raw = init?.body;
+      const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder().decode(raw) : "";
+      seen.push(text ? JSON.parse(text).messages : null);
+      return scriptedAssistantFetch(input, init);
+    };
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fetchImpl }) });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      "x-forwarded-for": "203.0.113.151",
+    };
+    const body = JSON.stringify({
+      message: { id: "midstream1", role: "user", parts: [{ type: "text", text: "mid-stream" }] },
+    });
+    const first = await handler(new Request(`http://${host}/api/assistant/chat`, { method: "POST", headers, body }));
+    expect(first.status).toBe(200);
+    await first.text();
+    const cookie = first.headers.get("set-cookie") ?? "";
+    const again = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, cookie },
+      body,
+    }));
+    const second = await again.text();
+    expect(again.status).toBe(200);
+    expect(JSON.stringify(seen[1])).toContain("partial");
+    expect(second).toContain("Recovered after the interruption.");
   });
 });
