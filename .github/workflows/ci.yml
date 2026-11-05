@@ -48,6 +48,9 @@ jobs:
       AUTH_RATE_LIMIT_RELAXED: "1"
       E2E_STORE_OVERRIDE: "1"
       E2E_FAKE_STRIPE: "1"
+      ASSISTANT_CHAT_ENABLED: "1"
+      E2E_FAKE_ASSISTANT: "1"
+      ANTHROPIC_API_KEY: e2e-fake-anthropic-key
       NEXT_PUBLIC_DEMO_FLOWS: "1"
       STOREFRONT_REVALIDATION_SECRET: e2e-storefront-revalidate
 

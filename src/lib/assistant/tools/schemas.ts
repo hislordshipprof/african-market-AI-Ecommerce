@@ -46,6 +46,13 @@ export const setSwapRuleInput = z.object({
   { message: "named_substitute requires substitute_variant_id" },
 );
 
+export const offerChoicesInput = z.object({
+  options: z.array(z.object({
+    listing_id: z.string().min(1),
+    variant_id: z.string().min(1).optional(),
+  })).min(2).max(6),
+});
+
 export const cartSummaryInput = z.object({});
 
 export const toolInputSchemas = {
@@ -58,6 +65,7 @@ export const toolInputSchemas = {
   remove_from_cart: removeFromCartInput,
   set_swap_rule: setSwapRuleInput,
   get_cart_summary: cartSummaryInput,
+  offer_choices: offerChoicesInput,
 } as const;
 
 export function parseToolInput<T>(schema: z.ZodType<T>, input: unknown): T {

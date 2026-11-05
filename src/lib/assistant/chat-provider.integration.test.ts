@@ -9,6 +9,8 @@ import { ASSISTANT_STATIC_PROMPT } from "./system-prompt";
 import { createChatHandler } from "./chat-handler";
 import { assistantSpendState } from "./spend";
 
+process.env.ASSISTANT_CHAT_ENABLED = "1";
+
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => fn,
   revalidateTag: () => {},

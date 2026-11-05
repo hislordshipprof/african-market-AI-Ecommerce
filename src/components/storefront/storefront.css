@@ -167,6 +167,8 @@
   line-height: 1.1;
   letter-spacing: -0.4px;
   max-width: 215px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .sf-header-window {
   flex-shrink: 0;
@@ -619,6 +621,7 @@
 .sf-product-image {
   position: relative;
   aspect-ratio: 1;
+  max-width: 100%;
   border-radius: 12px;
   overflow: hidden;
   background: var(--color-soft);

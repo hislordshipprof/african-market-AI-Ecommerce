@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { mkdirSync } from "node:fs";
 import { addItemToCart } from "./checkout-helpers";
 import { storeUrl } from "./urls";
 
@@ -59,6 +60,14 @@ test.describe("Cart sticky checkout bar at 390px", () => {
 
     // Cart line controls are tappable (top element at their centre) when the
     // last line is scrolled to the lower part of the viewport.
+    const shots = "C:/E-commerce-project/.builder/screenshots-246";
+    mkdirSync(shots, { recursive: true });
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.screenshot({ path: `${shots}/cart-390-light.png` });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.screenshot({ path: `${shots}/cart-390-dark.png` });
+    await page.emulateMedia({ colorScheme: "light" });
+
     const lastActions = page.locator('[class*="lineActions"]:visible').last();
     await lastActions.evaluate((el) => {
       const r = el.getBoundingClientRect();
@@ -88,5 +97,6 @@ test.describe("Cart sticky checkout bar at 390px", () => {
       body: await page.screenshot(),
       contentType: "image/png",
     });
+    await page.screenshot({ path: `${shots}/cart-390-scrolled-light.png` });
   });
 });

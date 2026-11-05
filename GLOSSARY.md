@@ -76,6 +76,9 @@ A stock change the store owner tells the Store copilot about (a restock, counter
 The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: only the customer's tap on a **Confirm card** places the order.
 _Avoid_: AI shopper, chatbot
 
+**Choice chips**:
+The tappable product options the Shopper assistant shows when more than one item fits. Tapping a chip sends that product's name and pack back as the customer's pick.
+
 **Confirm card**:
 The final card in the Shopper assistant's checkout, drawn by the server from a saved checkout snapshot: items, fulfillment, fees, hold amount and card. Tapping its Place order button is the only way an assistant order is placed.
 

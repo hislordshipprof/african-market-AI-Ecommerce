@@ -12,11 +12,19 @@ import {
 } from "ai";
 import { Prisma } from "@prisma/client";
 import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
+import { readBrowserId } from "../cart/browser";
 import { CartError, getOrCreateCart } from "../cart/service";
-import { claimConversationLease, rateLimitUpsert, storeScoped, storeScopedTransaction } from "../db";
+import { claimConversationLease, lockConversationRow, rateLimitUpsert, storeScoped, storeScopedTransaction } from "../db";
 import { findStore } from "../get-store";
 import { auth } from "../auth";
 import { scrubCardNumbers } from "./card-scrub";
+import {
+  ASSISTANT_DISABLED_CODE,
+  ASSISTANT_DISABLED_MESSAGE,
+  ASSISTANT_DISABLED_STATUS,
+  assistantChatEnabled,
+} from "./contract";
+import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { clientIp } from "./client-ip";
 import { callCostMicros, type TokenUsage } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
@@ -42,6 +50,9 @@ export interface ChatHandlerOptions {
 export function createChatHandler(options: ChatHandlerOptions = {}) {
   const now = options.now ?? (() => new Date());
   return async function POST(request: Request): Promise<Response> {
+    if (!assistantChatEnabled()) {
+      return jsonError(ASSISTANT_DISABLED_STATUS, ASSISTANT_DISABLED_CODE, ASSISTANT_DISABLED_MESSAGE);
+    }
     const parsed = await readUserMessage(request);
     if (!parsed.ok) return jsonError(400, "invalid_request", parsed.message);
     if (!originAllowed(request)) return jsonError(403, "forbidden_origin", "This request was not sent from the store.");
@@ -86,7 +97,12 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     const cookieCart = readCookie(request.headers.get("cookie"), CART_COOKIE);
     let cartId: string;
     try {
-      cartId = await getOrCreateCart(store.id, cookieCart, userId);
+      cartId = await getOrCreateCart(
+        store.id,
+        cookieCart,
+        userId,
+        readBrowserId(request.headers.get("x-shop-browser"), request.headers.get("cookie")),
+      );
     } catch (error) {
       if (error instanceof CartError) return jsonError(400, "invalid_request", "The cart could not be opened.");
       throw error;
@@ -95,17 +111,23 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     const cartLimit = await takeLimit(`assistant:cart:${cartId}`, CART_LIMIT, at);
     if (!cartLimit.ok) return rateLimited(cartLimit.retryAfter);
 
+    const headers = new Headers();
+    if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId));
+    const replay = await replayCompletedTurn(store.id, cartId, parsed.id, headers, at);
+    if (replay) return replay;
+
     const turn = await takeTurn(store.id, cartId, userId, at, modelId);
     if (!turn) return jsonError(409, "assistant_busy", "The helper is still working on the previous message.");
 
     const scrubbed = scrubCardNumbers(parsed.text).text;
     const userMessage: UIMessage = {
-      id: generateId(),
+      id: parsed.id,
       role: "user",
       parts: [{ type: "text", text: scrubbed }],
     };
     const prior = asMessages(turn.messages);
-    const withUser = [...prior, userMessage];
+    const alreadyThere = prior.some((message) => message.role === "user" && message.id === parsed.id);
+    const withUser = alreadyThere ? prior : [...prior, userMessage];
     try {
       await storeScoped(store.id).aiConversation.update({
         where: { id: turn.id },
@@ -122,11 +144,10 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       cartId,
       conversationId: turn.id,
       actorUserId: userId,
+      turnMessageId: parsed.id,
     });
     const history = (await usableHistory(withUser, tools)).slice(-30);
-    const modelMessages = await convertToModelMessages(history);
-    const headers = new Headers();
-    if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId));
+    const modelMessages = await convertToModelMessages(retryVisible(history, parsed.id, alreadyThere));
 
     const result = streamText({
       model,
@@ -172,10 +193,17 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       onError: () => FIXED_ERROR,
       onFinish: async (event) => {
         const keptIds = new Set(event.messages.map((message) => message.id));
-        const messages = [
+        let status: "complete" | "failed" = "complete";
+        try {
+          const reason = await result.finishReason;
+          if (reason === "error" || reason === "other") status = "failed";
+        } catch {
+          status = "failed";
+        }
+        const messages = stampAssistant([
           ...withUser.filter((message) => !keptIds.has(message.id)),
           ...event.messages,
-        ];
+        ], status);
         await persistTurn({
           storeId: store.id,
           conversationId: turn.id,
@@ -288,6 +316,24 @@ function normalizeUsage(usage: unknown): TokenUsage {
   };
 }
 
+function retryVisible(messages: UIMessage[], clientId: string, alreadyThere: boolean): UIMessage[] {
+  if (!alreadyThere) return messages;
+  const index = messages.findIndex((message) => message.role === "user" && message.id === clientId);
+  if (index < 0) return messages;
+  const rest = messages.slice(index + 1);
+  const nextUser = rest.findIndex((message) => message.role === "user");
+  const span = nextUser === -1 ? rest : rest.slice(0, nextUser);
+  const visible = span.some((message) => message.role === "assistant" && message.parts.some((part) => part.type === "text" && part.text.trim() !== ""));
+  if (visible) return messages;
+  const marker: UIMessage = {
+    id: `${clientId}-failed`,
+    role: "assistant",
+    metadata: { status: "failed" },
+    parts: [{ type: "text", text: "partial" }],
+  };
+  return [...messages.slice(0, index + 1), marker, ...rest];
+}
+
 async function usableHistory(messages: UIMessage[], tools: ReturnType<typeof assistantTools>): Promise<UIMessage[]> {
   const first = await safeValidateUIMessages({ messages, tools });
   if (first.success) return first.data;
@@ -393,7 +439,58 @@ function asMessages(value: unknown): UIMessage[] {
   });
 }
 
-async function readUserMessage(request: Request): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+async function replayCompletedTurn(
+  storeId: string,
+  cartId: string,
+  clientId: string,
+  headers: Headers,
+  at: Date,
+): Promise<Response | null> {
+  const existing = await storeScoped(storeId).aiConversation.findUnique({
+    where: { storeId_cartId: { storeId, cartId } },
+  });
+  if (!existing) return null;
+  const prior = asMessages(existing.messages);
+  const index = prior.findIndex((message) => message.role === "user" && message.id === clientId);
+  if (index < 0) return null;
+  const rest = prior.slice(index + 1);
+  const nextUser = rest.findIndex((message) => message.role === "user");
+  const span = nextUser === -1 ? rest : rest.slice(0, nextUser);
+  const assistant = span.find((message) => message.role === "assistant");
+  if (assistant && replyStatus(assistant) === "complete") return replayAssistantMessage(assistant, headers);
+  const recovered = await storeScopedTransaction(storeId, async (tx) => {
+    await lockConversationRow(tx, existing.id);
+    const fresh = await tx.aiConversation.findUnique({ where: { id: existing.id } });
+    if (!fresh) return null;
+    if (fresh.inFlightUntil && fresh.inFlightUntil.getTime() > at.getTime()) return null;
+    const actions = await tx.aiAction.findMany({
+      where: { conversationId: fresh.id },
+      orderBy: { createdAt: "asc" },
+    });
+    const mine = actions.filter((action) => {
+      const input = action.input;
+      return !!input && typeof input === "object" && !Array.isArray(input)
+        && (input as { _turn?: unknown })._turn === clientId;
+    });
+    if (mine.length === 0) return null;
+    const synthetic = assistantMessageFromActions(mine.map((action) => ({
+      id: action.id,
+      tool: action.tool,
+      input: action.input,
+      output: action.output,
+    })));
+    const next = replaceRecoveredTurn(asMessages(fresh.messages), clientId, synthetic);
+    if (!next) return null;
+    await tx.aiConversation.update({
+      where: { id: fresh.id },
+      data: { messages: next as unknown as Prisma.InputJsonValue, inFlightUntil: null },
+    });
+    return synthetic;
+  });
+  return recovered ? replayAssistantMessage(recovered, headers) : null;
+}
+
+async function readUserMessage(request: Request): Promise<{ ok: true; text: string; id: string } | { ok: false; message: string }> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) {
     return { ok: false, message: "Send a JSON message." };
@@ -421,5 +518,7 @@ async function readUserMessage(request: Request): Promise<{ ok: true; text: stri
   }
   const text = record.parts.map((part) => (part as { text: string }).text).join("").trim();
   if (text.length < 1 || text.length > 2000) return { ok: false, message: "Write between 1 and 2000 characters." };
-  return { ok: true, text };
+  const rawId = typeof (record as { id?: unknown }).id === "string" ? (record as { id: string }).id : "";
+  const id = /^[A-Za-z0-9_-]{8,80}$/.test(rawId) ? rawId : generateId();
+  return { ok: true, text, id };
 }
