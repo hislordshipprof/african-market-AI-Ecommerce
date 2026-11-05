@@ -33,5 +33,11 @@ codex_review_run() {
     -c model="${CODEX_REVIEW_MODEL:-gpt-6.1-sol}" -c model_reasoning_effort="${CODEX_REVIEW_EFFORT:-high}" \
     -o "$OUT" "$PROMPT" > "$OUT.log" 2>&1
 }
-watch_run "$OUT.never" codex_review_run || true
+rc=0; watch_run "$OUT.never" codex_review_run || rc=$?
+# No report (stopped by the cap, or Codex failed) must never read as a pass: write a blocking note. It lacks
+# "NO BLOCKING FINDINGS", so review-ticket.sh turns the verdict BLOCKING.
+if [ ! -s "$OUT" ]; then
+  printf 'BLOCKING: the Codex review wrote no result (exit %s%s). See %s.\n' "$rc" \
+    "$([ "$rc" = 124 ] && echo ', stopped by the review watchdog')" "$OUT.log" > "$OUT"
+fi
 echo "Codex review written to $OUT"

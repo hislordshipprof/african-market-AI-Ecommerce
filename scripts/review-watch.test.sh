@@ -78,4 +78,28 @@ if command -v powershell >/dev/null 2>&1; then
   kill "$p275" "$fwd" "$srv" 2>/dev/null; wait 2>/dev/null
 fi
 
+# 9. A reviewer still revising its report is not stopped: each change restarts the grace.
+revising() {
+  for i in 1 2 3 4 5; do printf 'VERDICT: PASS\nrevision %s\n' "$i" > "$T/r9.md"; sleep 1; done
+}
+REVIEW_EXIT_GRACE_SEC=2 REVIEW_TIMEOUT_MIN=5 watch_run "$T/r9.md" revising; rc=$?
+[ "$rc" = 0 ] && grep -q 'revision 5' "$T/r9.md" && ok "revising reviewer runs to completion" || bad "revising reviewer stopped (rc=$rc)"
+
+# 10. A non-numeric cap falls back to the default instead of stopping at once.
+brief() { sleep 3; }
+REVIEW_TIMEOUT_MIN=abc watch_run "$T/none10.md" brief; rc=$?
+[ "$rc" = 0 ] && ok "non-numeric REVIEW_TIMEOUT_MIN falls back to the default" || bad "bad cap stopped the reviewer (rc=$rc)"
+
+# 11. codex-review.sh: a Codex run stopped by the cap leaves a blocking note, never an empty report.
+P="$T/cx/proj"; W="$T/cx/E-commerce-worktrees/ticket-1"
+mkdir -p "$P/scripts" "$P/.builder" "$T/cx/bin"
+cp "$ROOT/scripts/codex-review.sh" "$ROOT/scripts/review-watch.sh" "$P/scripts/"
+( cd "$P" && git init -q -b main && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init )
+git clone -q "$P" "$W"
+printf '#!/bin/sh\nsleep 600\n' > "$T/cx/bin/codex"; printf '#!/bin/sh\necho issue\n' > "$T/cx/bin/gh"
+chmod +x "$T/cx/bin/codex" "$T/cx/bin/gh"
+( cd "$P" && PATH="$T/cx/bin:$PATH" REVIEW_TIMEOUT_MIN=0 bash scripts/codex-review.sh 1 >/dev/null 2>&1 )
+grep -q '^BLOCKING: the Codex review wrote no result (exit 124, stopped by the review watchdog)' "$P/.builder/codex-review-1.md" 2>/dev/null \
+  && ok "capped Codex review writes a blocking note" || bad "capped Codex review left no blocking note"
+
 exit "$fail"

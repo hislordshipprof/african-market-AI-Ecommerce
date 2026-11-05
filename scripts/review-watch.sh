@@ -46,15 +46,24 @@ kill_tree() {
 # as "verdict written". Returns the command's exit status, or 124 when the watchdog stopped it.
 watch_run() {
   local result="$1"; shift
-  local grace="${REVIEW_EXIT_GRACE_SEC:-300}" cap=$(( ${REVIEW_TIMEOUT_MIN:-120} * 60 ))
-  local poll="${REVIEW_WATCH_POLL_SEC:-15}" start=$SECONDS done_at="" stopped=0 rc=0
+  # Non-numeric settings fall back to the defaults, so a typo never stops every reviewer at once.
+  local grace="${REVIEW_EXIT_GRACE_SEC:-300}" mins="${REVIEW_TIMEOUT_MIN:-120}" poll="${REVIEW_WATCH_POLL_SEC:-15}"
+  [[ "$grace" =~ ^[0-9]+$ ]] || grace=300
+  [[ "$mins" =~ ^[0-9]+$ ]] || mins=120
+  [[ "$poll" =~ ^[1-9][0-9]*$ ]] || poll=15
+  local cap=$(( mins * 60 )) start=$SECONDS done_at="" seen="" now stopped=0 rc=0
   "$@" &
   local pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
+  # The job table, not kill -0, decides whether the reviewer is alive: a reaped pid reused by another
+  # process must never be stopped.
+  _alive() { jobs -rp | grep -qx "$pid"; }
+  while _alive; do
     sleep "$poll"
-    kill -0 "$pid" 2>/dev/null || break
-    if [ -z "$done_at" ] && [ -s "$result" ] && head -1 "$result" | grep -qE '^\**VERDICT: '; then
-      done_at=$SECONDS
+    _alive || break
+    if [ -s "$result" ] && head -1 "$result" | grep -qE '^\**VERDICT: '; then
+      # The grace restarts whenever the file changes, so a reviewer still revising its report is left alone.
+      now=$(stat -c '%Y:%s' "$result" 2>/dev/null || echo x)
+      if [ "$now" != "$seen" ]; then seen="$now"; done_at=$SECONDS; fi
     fi
     if [ -n "$done_at" ] && [ $((SECONDS - done_at)) -ge "$grace" ]; then
       echo "review watchdog: verdict written ${grace}s ago but the reviewer has not exited; stopping it" >&2
@@ -76,7 +85,7 @@ watch_run() {
 stop_worktree_servers() {
   local wt="$1" wtwin
   command -v powershell >/dev/null 2>&1 || {
-    pkill -f "$wt.*next.*(start|dev)" 2>/dev/null || true
+    pkill -f "$wt/.*next.*(start|dev)" 2>/dev/null || true
     return 0
   }
   wtwin=$(cygpath -w "$wt" 2>/dev/null || echo "$wt")
