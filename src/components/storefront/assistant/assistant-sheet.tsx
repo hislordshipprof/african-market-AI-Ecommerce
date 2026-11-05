@@ -79,6 +79,7 @@ export function AssistantSheet({
         lines={lines}
         onCartFailure={onCartFailure}
         onTerminal={onTerminal}
+        onClose={onClose}
         open={open}
       />
     </Sheet>
@@ -92,6 +93,7 @@ function Thread({
   lines,
   onCartFailure,
   onTerminal,
+  onClose,
   open,
 }: {
   chat: ReturnType<typeof retainSession>;
@@ -100,6 +102,7 @@ function Thread({
   lines: readonly CartLine[];
   onCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
   onTerminal: () => void;
+  onClose: () => void;
   open: boolean;
 }) {
   const { messages, sendMessage, status, error, clearError } = useChat({ chat });
@@ -199,6 +202,7 @@ function Thread({
               void undoCard(card, lines, storeId, undoState, rememberUndoState, onCartFailure);
             }}
             onChange={() => composer.current?.focus()}
+            onClose={onClose}
           />
         ))}
         {busy ? (
@@ -293,6 +297,7 @@ function MessageView({
   onChoice,
   onUndo,
   onChange,
+  onClose,
 }: {
   message: UIMessage;
   undoState: Record<string, "undone" | "already_removed">;
@@ -301,6 +306,7 @@ function MessageView({
   onChoice: (text: string) => void;
   onUndo: (card: Extract<AssistantCard, { kind: "added" }>) => void;
   onChange: () => void;
+  onClose: () => void;
 }) {
   if (message.role === "user") {
     return <p className={`${styles.bubble} ${styles.user}`}>{textOf(message)}</p>;
@@ -324,6 +330,7 @@ function MessageView({
                 onChoice={onChoice}
                 onUndo={onUndo}
                 onChange={onChange}
+                onClose={onClose}
               />
             ))}
           </div>
@@ -340,6 +347,7 @@ function CardView({
   onChoice,
   onUndo,
   onChange,
+  onClose,
 }: {
   card: AssistantCard;
   undoLabel?: "undone" | "already_removed";
@@ -347,6 +355,7 @@ function CardView({
   onChoice: (text: string) => void;
   onUndo: (card: Extract<AssistantCard, { kind: "added" }>) => void;
   onChange: () => void;
+  onClose: () => void;
 }) {
   if (card.kind === "skeleton") return <div className={styles.skeleton} />;
   if (card.kind === "tool-error" || card.kind === "missing") {
@@ -416,7 +425,7 @@ function CardView({
       <p className={styles.price}>{card.subtotalLabel}</p>
       {card.gapLabel ? <p className={styles.meta}>{card.gapLabel}</p> : null}
       <div className={styles.actions}>
-        <Link className={styles.primary} href="/cart">Looks good</Link>
+        <Link className={styles.primary} href="/cart" onClick={onClose}>Looks good</Link>
         <button type="button" className={styles.ghost} onClick={onChange}>Change something</button>
       </div>
     </section>

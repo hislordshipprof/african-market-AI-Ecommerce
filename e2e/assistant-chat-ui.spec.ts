@@ -126,9 +126,32 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await expect(page.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/to reach the .+ minimum order/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
+  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
   await page.getByRole("link", { name: "Looks good" }).click();
   await expect(page).toHaveURL(/\/cart$/);
+  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
+});
+
+test("Looks good closes the sheet when the summary starts on the cart", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${origin}/cart?from=sheet`);
+  await page.getByTestId("assistant-launcher").click();
+  await send(page, "show my basket");
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const link = dialog.getByRole("link", { name: "Looks good" });
+  await expect(link).toBeVisible({ timeout: 20_000 });
+  await link.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/cart$/);
+  await expect(dialog).toBeHidden();
+  const launcher = page.getByTestId("assistant-launcher");
+  await expect(launcher).toBeVisible();
+  await page.screenshot({ path: "test-results/looks-good-cart-390.png" });
+  await launcher.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 });
 
 test("a fake mid-stream failure recovers when the shopper retries", async ({ page }) => {
