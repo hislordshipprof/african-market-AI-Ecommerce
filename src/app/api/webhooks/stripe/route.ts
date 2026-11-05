@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
 import { markTerminalRefundFailure } from "@/lib/order/service";
-import { WebhookSecretMissingError } from "@/lib/stripe/errors";
+import { applyProviderRefund } from "@/lib/order/refund-requests";
+import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
+import type { RefundResult } from "@/lib/stripe/types";
 
 export const dynamic = "force-dynamic";
 
@@ -59,17 +61,36 @@ export async function POST(req: NextRequest) {
     await updateStoreOnboardingStatus(event.accountId);
   }
 
-  if (
-    event.refund &&
-    (event.refund.status === "failed" || event.refund.status === "canceled")
-  ) {
-    const settled = await markTerminalRefundFailure({
-      paymentIntentId: event.refund.paymentIntentId,
-      refundId: event.refund.id,
-      refundStatus: event.refund.status,
-    });
-    if (!settled.ok && settled.retry) {
-      return NextResponse.json({ error: settled.error }, { status: 500 });
+  if (event.refund) {
+    const provider = getStripeProvider();
+    let refund: RefundResult;
+    try {
+      refund = await provider.retrieveRefund(event.refund.id);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "resource_missing") {
+        refund = {
+          refundId: event.refund.id,
+          amountRefunded: 0,
+          status: event.refund.status,
+          ...(event.refund.reservationKey ? { reservationKey: event.refund.reservationKey } : {}),
+        };
+      } else if (isRetryableProviderError(err)) {
+        return NextResponse.json({ error: "Refund could not be read" }, { status: 500 });
+      } else {
+        throw err;
+      }
+    }
+    await applyProviderRefund({ ...refund, paymentIntentId: event.refund.paymentIntentId });
+    if (refund.status === "failed" || refund.status === "canceled") {
+      const settled = await markTerminalRefundFailure({
+        paymentIntentId: event.refund.paymentIntentId,
+        refundId: refund.refundId,
+        refundStatus: refund.status,
+      });
+      if (!settled.ok && settled.retry) {
+        return NextResponse.json({ error: settled.error }, { status: 500 });
+      }
     }
   }
 

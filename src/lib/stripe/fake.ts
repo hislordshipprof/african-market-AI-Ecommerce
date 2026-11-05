@@ -11,6 +11,8 @@ import type {
 import { ProviderStateError } from "./types";
 import { OverRefundError } from "./errors";
 
+const lateRefundKeys = new Set<string>();
+
 const VALID_WEBHOOK_SIGNATURE = "fake_valid_sig";
 const STRIPE_USD_MINIMUM_CAPTURE_CENTS = 50;
 
@@ -39,6 +41,7 @@ type RefundEntry = {
   feePortion: number;
   seq: number;
   reservationKey?: string;
+  orderId?: string;
 };
 
 type IdemRecord = {
@@ -145,6 +148,7 @@ function reset() {
   refundErrorBudget.clear();
   retrieveScript.clear();
   idempotency.clear();
+  lateRefundKeys.clear();
   captureCalls.length = 0;
   captureHold = null;
   releaseCaptureHold = null;
@@ -175,6 +179,7 @@ function refundView(refundId: string): RefundResult {
     amountRefunded: entry.amountRefunded,
     status: entry.status,
     ...(entry.reservationKey ? { reservationKey: entry.reservationKey } : {}),
+    ...(entry.orderId ? { orderId: entry.orderId } : {}),
   };
 }
 
@@ -191,9 +196,14 @@ async function withIdempotency<T>(
     const existing = idempotency.get(key);
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw idempotencyMismatch(key);
-      if (existing.error) throw existing.error;
-      if (existing.refundId) return refundView(existing.refundId) as T;
-      return existing.value as T;
+      if (existing.error && lateRefundKeys.has(key)) {
+        idempotency.delete(key);
+        lateRefundKeys.delete(key);
+      } else {
+        if (existing.error) throw existing.error;
+        if (existing.refundId) return refundView(existing.refundId) as T;
+        return existing.value as T;
+      }
     }
   }
   try {
@@ -207,7 +217,8 @@ async function withIdempotency<T>(
     }
     return value;
   } catch (error) {
-    if (key && (error instanceof FakeStripeError || error instanceof ProviderStateError)) {
+    const statusCode = (error as { statusCode?: number }).statusCode;
+    if (key && statusCode !== 409 && (error instanceof FakeStripeError || error instanceof ProviderStateError)) {
       idempotency.set(key, { fingerprint, error });
     }
     throw error;
@@ -275,15 +286,22 @@ const fakeStripeProvider: StripeProvider = {
           object?: string;
           status?: string;
           payment_intent?: string | { id?: string };
+          metadata?: { reservation?: string };
         };
       };
     };
     const obj = parsed.data?.object;
     const paymentIntentId =
       typeof obj?.payment_intent === "string" ? obj.payment_intent : obj?.payment_intent?.id;
+    const reservationKey = typeof obj?.metadata?.reservation === "string" ? obj.metadata.reservation : undefined;
     const refund =
       obj?.object === "refund" && obj.id && obj.status && paymentIntentId
-        ? { id: obj.id, status: obj.status, paymentIntentId }
+        ? {
+            id: obj.id,
+            status: obj.status,
+            paymentIntentId,
+            ...(reservationKey ? { reservationKey } : {}),
+          }
         : undefined;
     return {
       type: parsed.type as string,
@@ -456,12 +474,15 @@ const fakeStripeProvider: StripeProvider = {
         feePortion,
         seq: refundSeq,
         ...(options?.reservationKey ? { reservationKey: options.reservationKey } : {}),
+        ...(options?.orderId ? { orderId: options.orderId } : {}),
       });
       syncRefundBalance(paymentIntentId);
       return {
         refundId,
         amountRefunded: amountCents,
         status,
+        ...(options?.reservationKey ? { reservationKey: options.reservationKey } : {}),
+        ...(options?.orderId ? { orderId: options.orderId } : {}),
       } satisfies RefundResult;
     });
   },
@@ -568,10 +589,15 @@ function setNextRefundFailure(paymentIntentId: string, times = 1) {
   refundErrorBudget.set(paymentIntentId, times);
 }
 
+/** The next replay of this key creates the refund instead of repeating a stored error. */
+function setRefundCreatedLate(key: string) {
+  lateRefundKeys.add(key);
+}
+
 function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   if (!authorizedAmounts.has(paymentIntentId)) {
     authorizedAmounts.set(paymentIntentId, amount);
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };

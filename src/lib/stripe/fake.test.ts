@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "./fake";
+import { fakeStripeProvider, reset, setAuthorizedAmount, setNextRefundFailure, setRefundCreatedLate, setRefundStatus } from "./fake";
 import { ProviderStateError } from "./types";
 
 describe("Fake Stripe state machine (K6)", () => {
@@ -368,5 +368,24 @@ describe("Fake Stripe state machine (K6)", () => {
     const newer = await fakeStripeProvider.refundPayment("pi_order", 200, "new");
     const listed = await fakeStripeProvider.listRefunds("pi_order");
     expect(listed.map((refund) => refund.refundId)).toEqual([newer.refundId, older.refundId]);
+  });
+
+  it("a late-executed unknown request appears with its metadata", async () => {
+    const pi = "pi_late_meta";
+    const key = "refund:order_late:1";
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-late");
+    setNextRefundFailure(pi, 1);
+    await expect(
+      fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: "order_late" }),
+    ).rejects.toMatchObject({ statusCode: 500 });
+    await expect(fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: "order_late" })).rejects.toMatchObject({
+      statusCode: 500,
+    });
+    setRefundCreatedLate(key);
+    const created = await fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: "order_late" });
+    expect(created).toMatchObject({ reservationKey: key, orderId: "order_late", amountRefunded: 600, status: "succeeded" });
+    const listed = await fakeStripeProvider.listRefunds(pi);
+    expect(listed[0]).toMatchObject({ reservationKey: key, orderId: "order_late" });
   });
 });

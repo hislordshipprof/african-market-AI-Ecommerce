@@ -2534,12 +2534,11 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(stuck!.status).toBe("CANCELLING");
 
     const retried = await autoCancelOrder(storeId, order.id);
-    expect(retried.ok).toBe(true);
+    expect(retried.ok).toBe(false);
     const keys = refundRequests
       .filter((request) => request.paymentIntentId === pi)
       .map((request) => request.idempotencyKey);
-    expect(keys[0]).toBe(`refund:${order.id}:0:1`);
-    expect(keys[1]).toBe(`refund:${order.id}:0:2`);
+    expect(keys).toEqual([`refund:${order.id}:1`]);
   });
 
   it("a stored 500 on the cancel key moves to the next attempt key after a retrieve", async () => {
@@ -2727,7 +2726,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     try {
       await recordReconcileResult(storeId, order.id);
       await recordReconcileResult(storeId, order.id);
-      expect(keys[0]).toBe(`refund:${order.id}:0:1`);
+      expect(keys[0]).toBe(`refund:${order.id}:1`);
       expect(keys[1]).toBe(keys[0]);
       expect(
         await storeScoped(storeId).auditLog.count({
@@ -2768,9 +2767,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
           expect(err).toBeInstanceOf(Error);
         }
       }
-      expect(keys).toContain(`refund:${order.id}:0:2`);
+      expect(keys.every((key) => key === `refund:${order.id}:1`)).toBe(true);
       const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-      expect(updated!.status).toBe("CANCELLED");
+      expect(updated!.status).toBe("CANCELLING");
     } finally {
       spy.mockRestore();
     }

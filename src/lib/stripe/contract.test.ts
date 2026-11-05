@@ -253,6 +253,49 @@ describe("Stripe contract: fake and sandbox", () => {
     });
   }, 60_000);
 
+  it("refund metadata carries the reservation key and order id", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(500);
+      await world.provider.capturePaymentIntent(pi, 500, `cap-meta-${pi}`);
+      const orderId = `order_meta_${pi}`;
+      const key = `refund:${orderId}:1`;
+      await world.provider.refundPayment(pi, 200, key, { reservationKey: key, orderId });
+      const listed = await world.provider.listRefunds(pi);
+      return {
+        reservationMatches: listed[0]?.reservationKey === key,
+        orderMatches: listed[0]?.orderId === orderId,
+      };
+    });
+    expect(observed).toEqual({ reservationMatches: true, orderMatches: true });
+  }, 60_000);
+
+  it("charge_already_refunded is reported as not created", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(500);
+      await world.provider.capturePaymentIntent(pi, 500, `cap-already-${pi}`);
+      await world.provider.refundPayment(pi, 500, `refund-already-1-${pi}`);
+      const error = await errorOf(() => world.provider.refundPayment(pi, 500, `refund-already-2-${pi}`));
+      return { type: error.type, code: error.code, statusCode: error.statusCode };
+    });
+    expect(observed).toEqual({
+      type: "StripeInvalidRequestError",
+      code: "charge_already_refunded",
+      statusCode: 400,
+    });
+  }, 60_000);
+
+  it("same key with a different refund amount is an idempotency error", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(500);
+      await world.provider.capturePaymentIntent(pi, 500, `cap-idem-${pi}`);
+      const key = `refund-idem-${pi}`;
+      await world.provider.refundPayment(pi, 100, key);
+      const error = await errorOf(() => world.provider.refundPayment(pi, 200, key));
+      return { type: error.type, statusCode: error.statusCode };
+    });
+    expect(observed).toEqual({ type: "StripeIdempotencyError", statusCode: 400 });
+  }, 60_000);
+
   it("listing refunds for an unknown PaymentIntent is resource_missing on the fake and the sandbox", async () => {
     const observed = await compare(async (world) => {
       const missing = await errorOf(() => world.provider.listRefunds("pi_missing_review186"));

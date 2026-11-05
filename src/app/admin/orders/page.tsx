@@ -44,7 +44,7 @@ export default async function RefundFailedOrdersPage() {
                   <td className="px-4 py-3 tabular-nums">{formatRefundCents(row.capturedCents)}</td>
                   <td className="px-4 py-3 tabular-nums">{formatRefundCents(row.refundedCents)}</td>
                   <td className="px-4 py-3 tabular-nums" data-testid="amount-owed">
-                    {formatRefundCents(row.owedCents)}
+                    {row.bankRefundPending ? "Confirming" : formatRefundCents(row.owedCents)}
                     {row.bankRefundPending ? (
                       <span className="mt-1 block text-xs text-muted-foreground">Bank refund still open</span>
                     ) : null}

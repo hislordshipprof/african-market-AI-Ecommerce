@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import Stripe from "stripe";
 import { NextRequest } from "next/server";
 import { storeScoped, storeScopedTransaction } from "../db";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { setStripeProvider } from "../stripe";
 import { stripeProvider } from "./provider";
 import { fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "./fake";
@@ -148,5 +149,163 @@ describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
     expect(updatedB?.status).toBe("CANCELLING");
     expect(updatedB?.capturedAmountCents).toBe(800);
     expect(updatedB?.notes).toBeNull();
+  });
+
+  async function postRefund(type: string, refundId: string, paymentIntentId: string, status: string, reservation?: string) {
+    const payload = JSON.stringify({
+      id: `evt_${type}_${refundId}`,
+      object: "event",
+      api_version: "2024-06-20",
+      created: Math.floor(Date.now() / 1000),
+      type,
+      livemode: false,
+      pending_webhooks: 1,
+      request: { id: null, idempotency_key: null },
+      data: {
+        object: {
+          id: refundId,
+          object: "refund",
+          status,
+          payment_intent: paymentIntentId,
+          ...(reservation ? { metadata: { reservation } } : {}),
+        },
+      },
+    });
+    const signature = Stripe.webhooks.generateTestHeaderString({ payload, secret });
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    return POST(new NextRequest("http://localhost:3000/api/webhooks/stripe", {
+      method: "POST",
+      body: payload,
+      headers: { "stripe-signature": signature, "content-type": "application/json" },
+    }));
+  }
+
+  it("refund.created for an app key marks the request created", async () => {
+    const customer = await storeScoped(storeA).customer.create({
+      data: { storeId: storeA, name: "Created webhook" },
+    });
+    const pi = `pi_created_${run}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-created");
+    const order = await storeScoped(storeA).order.create({
+      data: {
+        storeId: storeA,
+        number: 18611,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const key = `refund:${order.id}:1`;
+    await storeScoped(storeA).refundRequest.create({
+      data: {
+        storeId: storeA,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "RESERVED",
+      },
+    });
+    const refund = await fakeStripeProvider.refundPayment(pi, 1000, key, { reservationKey: key, orderId: order.id });
+    const response = await postRefund("refund.created", refund.refundId, pi, "pending", key);
+    expect(response.status).toBe(200);
+    const row = await storeScoped(storeA).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(row.state).toBe("CREATED");
+    expect(row.providerRefundId).toBe(refund.refundId);
+    expect(row.providerStatus).toBe("succeeded");
+  });
+
+  it("refund.updated succeeded on a resolved order alerts overpayment", async () => {
+    const customer = await storeScoped(storeA).customer.create({
+      data: { storeId: storeA, name: "Overpay webhook" },
+    });
+    const pi = `pi_overpay_${run}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-overpay");
+    const order = await storeScoped(storeA).order.create({
+      data: {
+        storeId: storeA,
+        number: 18612,
+        customerId: customer.id,
+        status: "CANCELLED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    await storeScoped(storeA).auditLog.create({
+      data: {
+        storeId: storeA,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action: "refund_resolved_manually",
+        entityType: "order",
+        entityId: order.id,
+        after: { note: "Paid by Zelle", alert: "store", repaidCents: 1000 },
+      },
+    });
+    const refund = await fakeStripeProvider.refundPayment(pi, 600, "overpay-wh");
+    const response = await postRefund("refund.updated", refund.refundId, pi, "succeeded");
+    expect(response.status).toBe(200);
+    const stored = await storeScoped(storeA).order.findUnique({ where: { id: order.id } });
+    expect(stored?.status).toBe("CANCELLED");
+    const alert = await storeScoped(storeA).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    });
+    expect(alert?.after).toMatchObject({ overpaidCents: 600, refundId: refund.refundId });
+  });
+
+  it("out-of-order refund events are applied from a re-fetched refund", async () => {
+    const customer = await storeScoped(storeA).customer.create({
+      data: { storeId: storeA, name: "Out of order" },
+    });
+    const pi = `pi_ooo_${run}`;
+    setAuthorizedAmount(pi, 800);
+    await fakeStripeProvider.capturePaymentIntent(pi, 800, "cap-ooo");
+    const order = await storeScoped(storeA).order.create({
+      data: {
+        storeId: storeA,
+        number: 18613,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 800,
+        bufferCents: 0,
+        totalAuthorizedCents: 800,
+        totalCents: 800,
+        capturedAmountCents: 800,
+        paymentIntentId: pi,
+      },
+    });
+    const key = `refund:${order.id}:1`;
+    await storeScoped(storeA).refundRequest.create({
+      data: {
+        storeId: storeA,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 800,
+        refundApplicationFee: true,
+        state: "UNKNOWN",
+      },
+    });
+    const refund = await fakeStripeProvider.refundPayment(pi, 800, key, { reservationKey: key, orderId: order.id });
+    const response = await postRefund("refund.updated", refund.refundId, pi, "pending", key);
+    expect(response.status).toBe(200);
+    const row = await storeScoped(storeA).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(row.providerStatus).toBe("succeeded");
+    expect(row.state).toBe("CREATED");
   });
 });

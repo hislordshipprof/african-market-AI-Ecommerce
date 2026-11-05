@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { lockStoreRow, platformAdminTransaction, storeScopedTransaction } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { getStripeProvider } from "../stripe";
-import { refundReservationStillOpen } from "../order/service";
+import { findOpenRefundRequest, openRefundRequest, reconcileOpenRefundRequests } from "../order/refund-requests";
 
 export type RefundFailedRow = {
   orderId: string;
@@ -51,8 +51,12 @@ function refundStillOpen(status: string): boolean {
   return status === "pending" || status === "requires_action";
 }
 
-async function refundBalance(paymentIntentId: string | null): Promise<{ refundedCents: number; bankRefundPending: boolean }> {
-  if (!paymentIntentId) return { refundedCents: 0, bankRefundPending: false };
+async function refundBalance(paymentIntentId: string | null): Promise<{
+  refundedCents: number;
+  bankRefundPending: boolean;
+  listed: { refundId: string; status: string }[];
+}> {
+  if (!paymentIntentId) return { refundedCents: 0, bankRefundPending: false, listed: [] };
   try {
     const listed = await getStripeProvider().listRefunds(paymentIntentId);
     return {
@@ -60,11 +64,12 @@ async function refundBalance(paymentIntentId: string | null): Promise<{ refunded
         .filter((refund) => refund.status === "succeeded")
         .reduce((sum, refund) => sum + refund.amountRefunded, 0),
       bankRefundPending: listed.some((refund) => refundStillOpen(refund.status)),
+      listed,
     };
   } catch (err) {
     const code = (err as { code?: string }).code;
-    if (code === "resource_missing") return { refundedCents: 0, bankRefundPending: false };
-    return { refundedCents: 0, bankRefundPending: true };
+    if (code === "resource_missing") return { refundedCents: 0, bankRefundPending: false, listed: [] };
+    return { refundedCents: 0, bankRefundPending: true, listed: [] };
   }
 }
 
@@ -94,7 +99,11 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
     const failure = failureByOrder.get(order.id);
     const capturedCents = await capturedCentsFor(order);
     const balance = await refundBalance(order.paymentIntentId);
-    const reservationOpen = await refundReservationStillOpen(order.storeId, order.id, order.paymentIntentId);
+    const reservation = await findOpenRefundRequest(order.storeId, order.id);
+    const matched = reservation?.providerRefundId
+      ? balance.listed.find((refund) => refund.refundId === reservation.providerRefundId)
+      : undefined;
+    const reservationOpen = !!reservation && (reservation.state !== "CREATED" || !matched || refundStillOpen(matched.status));
     rows.push({
       orderId: order.id,
       storeName: order.store.name,
@@ -125,7 +134,11 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
   if (!order || order.status !== "REFUND_FAILED") {
     return { ok: false, error: "already resolved" };
   }
-  const reservationOpen = await refundReservationStillOpen(order.storeId, order.id, order.paymentIntentId);
+  if (order.paymentIntentId) await reconcileOpenRefundRequests(order.storeId, order.id);
+  const balance = await refundBalance(order.paymentIntentId);
+  const capturedCents = order.paymentIntentId
+    ? await capturedCentsFor(order)
+    : (order.capturedAmountCents ?? 0);
 
   return storeScopedTransaction(order.storeId, async (tx) => {
     await lockStoreRow(tx, order.storeId);
@@ -133,19 +146,8 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
     if (!current || current.status !== "REFUND_FAILED") {
       return { ok: false as const, error: "already resolved" };
     }
-    const balance = await refundBalance(current.paymentIntentId);
-    if (balance.bankRefundPending || reservationOpen) {
+    if (balance.bankRefundPending || await openRefundRequest(tx, orderId)) {
       return { ok: false as const, error: "A refund is still confirming with the bank" };
-    }
-    if (!current.paymentIntentId) {
-      const openRefund = await tx.auditLog.findFirst({
-        where: { entityId: orderId, action: "refund_retry" },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      });
-      const openAfter = openRefund?.after as { inFlight?: boolean } | null;
-      if (openAfter?.inFlight === true) {
-        return { ok: false as const, error: "A refund is still confirming with the bank" };
-      }
     }
     const existing = current.notes?.trim();
     const notes = existing ? `${existing}\n${trimmed}` : trimmed;
@@ -154,6 +156,7 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
       data: { status: "CANCELLED", cancelledAt: new Date(), notes },
     });
     if (updated.count !== 1) return { ok: false as const, error: "already resolved" };
+    const repaidCents = Math.max(0, capturedCents - balance.refundedCents);
     await tx.auditLog.create({
       data: {
         storeId: order.storeId,
@@ -162,7 +165,14 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
         action: "refund_resolved_manually",
         entityType: "order",
         entityId: orderId,
-        after: { note: trimmed, refundId: order.refundId, alert: "store" },
+        after: {
+          note: trimmed,
+          refundId: order.refundId,
+          alert: "store",
+          repaidCents,
+          refundedCents: balance.refundedCents,
+          capturedCents,
+        },
       },
     });
     return { ok: true as const };

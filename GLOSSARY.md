@@ -121,7 +121,16 @@ The audit recorded when an unconfirmed card hold is released after capture does 
 The capture still stands because the refund did not cover it. Staff see that the platform is resolving the refund and do not refund the customer themselves. There is no Capture failed status.
 
 **Resolved manually**:
-A platform admin recorded how a failed refund was repaid outside the app. The order becomes Cancelled. The app moves no money.
+A platform admin recorded how a failed refund was repaid outside the app. The order becomes Cancelled. The app moves no money. The record includes the repaid, refunded and captured cents.
+
+**RefundRequest**:
+One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
+
+**Open request**:
+A RefundRequest that is still unanswered: reserved, unknown, or created at the provider but not yet succeeded, failed or canceled. Manual repayment waits until no request is open.
+
+**ABANDONED**:
+An open refund request that was still unknown 23 hours after it was created. The platform is alerted. A refund that shows up later is still recorded. This window is a coordinator default, pending owner confirmation.
 
 **Fulfillment option**:
 How a customer gets an order: store delivery, courier delivery, or pickup.

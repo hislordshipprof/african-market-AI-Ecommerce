@@ -11,6 +11,10 @@ vi.mock("./update-store-status", () => ({
   }),
 }));
 
+vi.mock("@/lib/order/refund-requests", () => ({
+  applyProviderRefund: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { updateStoreOnboardingStatus } from "./update-store-status";
 import * as orderService from "@/lib/order/service";
 

@@ -104,6 +104,7 @@ export function storeScoped(storeId: string) {
     customer: wrapDelegate(storeId, prisma.customer),
     order: wrapDelegate(storeId, prisma.order),
     orderLine: wrapDelegate(storeId, prisma.orderLine),
+    refundRequest: wrapDelegate(storeId, prisma.refundRequest),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
   };
@@ -192,7 +193,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "refundRequest" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -213,6 +214,7 @@ export async function storeScopedTransaction<T>(
       customer: tx.customer,
       order: tx.order,
       orderLine: tx.orderLine,
+      refundRequest: tx.refundRequest,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
       $queryRaw: tx.$queryRaw.bind(tx),
@@ -308,8 +310,18 @@ export async function findStuckTransitionalOrders(): Promise<Array<{ id: string;
   return platformAdminTransaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
       SELECT id, store_id FROM orders
-      WHERE status IN ('CAPTURING', 'CANCELLING')
-        AND updated_at < ${cutoff}
+      WHERE (
+          status IN ('CAPTURING', 'CANCELLING')
+          AND updated_at < ${cutoff}
+        )
+        OR id IN (
+          SELECT order_id FROM refund_requests
+          WHERE state IN ('RESERVED', 'UNKNOWN')
+            OR (
+              state = 'CREATED'
+              AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
+            )
+        )
       ORDER BY updated_at ASC
       LIMIT 50
     `;

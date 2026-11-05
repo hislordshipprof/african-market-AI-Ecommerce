@@ -24,7 +24,9 @@ import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
 import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, reset, setAuthorizedAmount, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundCreatedLate, setRefundStatus } from "../stripe/fake";
+import { RefundNotCreatedError } from "../stripe/errors";
+import { applyProviderRefund } from "../order/refund-requests";
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { listRefundFailedOrders, resolveRefundFailed } from "./refund-resolution";
 
@@ -859,7 +861,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       });
       const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
       const manual = await resolveRefundFailed(order.id, "Paid displayed 600 cents by Zelle");
-      expect(swept).toEqual({ ok: true, action: "anomaly_refund" });
+      expect(swept).toEqual({ ok: false, error: "Refund is still confirming with the bank", waiting: true });
       expect(webhook).toEqual({ ok: true, action: "refund_failed" });
       expect(queue?.owedCents).toBe(600);
       expect(queue?.bankRefundPending).toBe(true);
@@ -913,5 +915,320 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(result).toEqual({ ok: true });
     expect(stored?.status).toBe("CANCELLED");
+  });
+
+  it("an unknown refund request blocks repayment until Stripe executes it late", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Late unknown refund" },
+    });
+    const pi = `pi_late_unknown_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "late-cap");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "late-older");
+    setNextRefundFailure(pi, 1);
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26501,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    await expect(autoCancelOrder(storeAId, order.id)).rejects.toThrow(/internal server error/i);
+    setRefundStatus(older.refundId, "failed");
+    await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: older.refundId,
+      refundStatus: "failed",
+    });
+    const refused = await resolveRefundFailed(order.id, "too soon");
+    expect(refused.ok).toBe(false);
+    const request = await storeScoped(storeAId).refundRequest.findFirst({ where: { orderId: order.id } });
+    expect(request?.state).toBe("UNKNOWN");
+    setRefundCreatedLate(request!.key);
+    await reconcileStuckOrder(storeAId, order.id);
+    const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
+    expect(queue?.owedCents).toBe(400);
+    expect(queue?.bankRefundPending).toBe(false);
+    const manual = await resolveRefundFailed(order.id, "Paid the remaining 400 by Zelle");
+    expect(manual).toEqual({ ok: true });
+    const audit = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(audit?.after).toMatchObject({ repaidCents: 400, refundedCents: 600, capturedCents: 1000 });
+  });
+
+  it("a request that never reached Stripe becomes resolvable once the key replay proves it was not created", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Never created" },
+    });
+    const pi = `pi_never_created_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "never-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26502,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async () => {
+      throw Object.assign(new Error("connection"), { type: "StripeConnectionError" });
+    });
+    await expect(autoCancelOrder(storeAId, order.id)).rejects.toThrow(/connection/);
+    await storeScoped(storeAId).order.update({ where: { id: order.id }, data: { status: "REFUND_FAILED" } });
+    spy.mockImplementation(async () => {
+      throw new RefundNotCreatedError("charge_already_refunded", "Charge has already been refunded.");
+    });
+    try {
+      await reconcileStuckOrder(storeAId, order.id);
+    } finally {
+      spy.mockRestore();
+      setStripeProvider(fakeStripeProvider);
+    }
+    const request = await storeScoped(storeAId).refundRequest.findFirst({ where: { orderId: order.id } });
+    expect(request?.state).toBe("NOT_CREATED");
+    const manual = await resolveRefundFailed(order.id, "Paid the full 1000 by Zelle");
+    expect(manual).toEqual({ ok: true });
+    const audit = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(audit?.after).toMatchObject({ repaidCents: 1000 });
+  });
+
+  it("a cached 500 followed by a failed dashboard refund is resolvable after 23 hours", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Cached 500" },
+    });
+    const pi = `pi_cached_500_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cached-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26503,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    setNextRefundFailure(pi, 1);
+    await expect(autoCancelOrder(storeAId, order.id)).rejects.toThrow(/internal server error/i);
+    const dashboard = await fakeStripeProvider.refundPayment(pi, 1000, "cached-dashboard");
+    setRefundStatus(dashboard.refundId, "failed");
+    await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: dashboard.refundId,
+      refundStatus: "failed",
+    });
+    const refused = await resolveRefundFailed(order.id, "still unknown");
+    expect(refused.ok).toBe(false);
+    const request = await storeScoped(storeAId).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
+    await storeScoped(storeAId).refundRequest.update({
+      where: { id: request.id },
+      data: { createdAt: new Date(Date.now() - 23 * 60 * 60 * 1000 - 1000) },
+    });
+    await reconcileStuckOrder(storeAId, order.id);
+    const abandoned = await storeScoped(storeAId).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(abandoned.state).toBe("ABANDONED");
+    const alert = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_request_unknown" },
+    });
+    expect(alert?.after).toMatchObject({ alert: "platform" });
+    const manual = await resolveRefundFailed(order.id, "Paid 1000 by Zelle after the bank never answered");
+    expect(manual).toEqual({ ok: true });
+    const audit = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(audit?.after).toMatchObject({ repaidCents: 1000 });
+  });
+
+  it("an older failure with an unknown request never executed resolves after 23 hours", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Older failure" },
+    });
+    const pi = `pi_older_unknown_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "older-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26504,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async () => {
+      throw Object.assign(new Error("connection"), { type: "StripeConnectionError" });
+    });
+    await expect(autoCancelOrder(storeAId, order.id)).rejects.toThrow(/connection/);
+    const failed = await original(pi, 1000, "older-failed");
+    setRefundStatus(failed.refundId, "failed");
+    await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: failed.refundId,
+      refundStatus: "failed",
+    });
+    expect((await resolveRefundFailed(order.id, "before the window")).ok).toBe(false);
+    spy.mockRestore();
+    setStripeProvider(fakeStripeProvider);
+    const request = await storeScoped(storeAId).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
+    await storeScoped(storeAId).refundRequest.update({
+      where: { id: request.id },
+      data: { createdAt: new Date(Date.now() - 23 * 60 * 60 * 1000 - 1000) },
+    });
+    await reconcileStuckOrder(storeAId, order.id);
+    const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
+    expect(queue?.owedCents).toBe(1000);
+    expect(queue?.bankRefundPending).toBe(false);
+    const manual = await resolveRefundFailed(order.id, "Paid 1000 by Zelle");
+    expect(manual).toEqual({ ok: true });
+  });
+
+  it("manual resolution records the repaid amount", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Repaid amount" },
+    });
+    const pi = `pi_repaid_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "repaid-cap");
+    await fakeStripeProvider.refundPayment(pi, 400, "repaid-ok");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26505,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const manual = await resolveRefundFailed(order.id, "Paid 600 by Zelle");
+    expect(manual).toEqual({ ok: true });
+    const audit = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(audit?.after).toMatchObject({
+      note: "Paid 600 by Zelle",
+      alert: "store",
+      repaidCents: 600,
+      refundedCents: 400,
+      capturedCents: 1000,
+    });
+  });
+
+  it("a counted refund failing after manual resolution alerts without reopening", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Underpaid later" },
+    });
+    const pi = `pi_underpaid_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "under-cap");
+    const counted = await fakeStripeProvider.refundPayment(pi, 400, "under-counted");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26506,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: counted.refundId,
+      },
+    });
+    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle")).toEqual({ ok: true });
+    setRefundStatus(counted.refundId, "failed");
+    const webhook = await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: counted.refundId,
+      refundStatus: "failed",
+    });
+    expect(webhook).toEqual({ ok: true, action: "already_resolved" });
+    const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(stored?.status).toBe("CANCELLED");
+    const alert = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_reversed_after_resolution" },
+    });
+    expect(alert?.after).toMatchObject({ underpaidCents: 400, refundId: counted.refundId, alert: "store_and_platform" });
+  });
+
+  it("a refund succeeding after manual resolution raises an overpayment alert", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Overpaid later" },
+    });
+    const pi = `pi_overpaid_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "over-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26507,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    const late = await fakeStripeProvider.refundPayment(pi, 600, "over-late");
+    await applyProviderRefund({ ...late, paymentIntentId: pi });
+    const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(stored?.status).toBe("CANCELLED");
+    const alert = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    });
+    expect(alert?.after).toMatchObject({ overpaidCents: 600, refundId: late.refundId, alert: "store_and_platform" });
+    expect(refundRequests.filter((request) => request.paymentIntentId === pi)).toHaveLength(1);
   });
 });

@@ -10,7 +10,7 @@ import type {
   RefundResult,
 } from "./types";
 import { ProviderStateError } from "./types";
-import { WebhookSecretMissingError, mapRefundStatus, overRefundError } from "./errors";
+import { RefundNotCreatedError, WebhookSecretMissingError, mapRefundStatus, overRefundError } from "./errors";
 
 let _stripeClient: Stripe | null = null;
 
@@ -126,12 +126,19 @@ export const stripeProvider: StripeProvider = {
           object?: string;
           status?: string | null;
           payment_intent?: string | { id?: string };
+          metadata?: { reservation?: string };
         } | undefined;
         const paymentIntentId =
           typeof obj?.payment_intent === "string" ? obj.payment_intent : obj?.payment_intent?.id;
+        const reservationKey = typeof obj?.metadata?.reservation === "string" ? obj.metadata.reservation : undefined;
         const refund =
           obj?.object === "refund" && obj.id && paymentIntentId
-            ? { id: obj.id, status: mapRefundStatus(obj.status), paymentIntentId }
+            ? {
+                id: obj.id,
+                status: mapRefundStatus(obj.status),
+                paymentIntentId,
+                ...(reservationKey ? { reservationKey } : {}),
+              }
             : undefined;
         return {
           type: event.type,
@@ -242,6 +249,9 @@ export const stripeProvider: StripeProvider = {
       ...(typeof refund.metadata?.reservation === "string"
         ? { reservationKey: refund.metadata.reservation }
         : {}),
+      ...(typeof refund.metadata?.order_id === "string"
+        ? { orderId: refund.metadata.order_id }
+        : {}),
     })) satisfies RefundResult[];
   },
 
@@ -255,6 +265,9 @@ export const stripeProvider: StripeProvider = {
       ...(typeof refund.metadata?.reservation === "string"
         ? { reservationKey: refund.metadata.reservation }
         : {}),
+      ...(typeof refund.metadata?.order_id === "string"
+        ? { orderId: refund.metadata.order_id }
+        : {}),
     } satisfies RefundResult;
   },
 
@@ -267,7 +280,14 @@ export const stripeProvider: StripeProvider = {
           amount: amountCents,
           reverse_transfer: true,
           ...(options?.refundApplicationFee ? { refund_application_fee: true } : {}),
-          ...(options?.reservationKey ? { metadata: { reservation: options.reservationKey } } : {}),
+          ...(options?.reservationKey || options?.orderId
+            ? {
+                metadata: {
+                  ...(options.reservationKey ? { reservation: options.reservationKey } : {}),
+                  ...(options.orderId ? { order_id: options.orderId } : {}),
+                },
+              }
+            : {}),
         },
         idempotencyKey ? { idempotencyKey } : undefined,
       );
@@ -275,19 +295,13 @@ export const stripeProvider: StripeProvider = {
         refundId: refund.id,
         amountRefunded: refund.amount,
         status: mapRefundStatus(refund.status),
+        ...(options?.reservationKey ? { reservationKey: options.reservationKey } : {}),
+        ...(options?.orderId ? { orderId: options.orderId } : {}),
       } satisfies RefundResult;
     } catch (err: unknown) {
       if (err instanceof Stripe.errors.StripeInvalidRequestError
         && err.code === "charge_already_refunded") {
-        const refunds = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 1 });
-        const existing = refunds.data[0];
-        if (existing) {
-          return {
-            refundId: existing.id,
-            amountRefunded: existing.amount,
-            status: mapRefundStatus(existing.status),
-          } satisfies RefundResult;
-        }
+        throw new RefundNotCreatedError("charge_already_refunded", err.message);
       }
       const over = overRefundError(err);
       if (over) throw over;

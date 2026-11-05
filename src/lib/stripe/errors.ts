@@ -1,3 +1,15 @@
+/** The provider refused to create a refund. The request was not created. */
+export class RefundNotCreatedError extends Error {
+  readonly type = "StripeInvalidRequestError";
+  readonly statusCode = 400;
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "RefundNotCreatedError";
+    this.code = code;
+  }
+}
+
 /** Stripe sends no code for this. The message is pinned by the sandbox contract. */
 export class OverRefundError extends Error {
   readonly type = "StripeInvalidRequestError";

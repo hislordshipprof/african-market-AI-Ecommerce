@@ -216,14 +216,38 @@ describe.skipIf(!hasKey)(
       ).rejects.toThrow(/amount_too_large|greater than/i);
     });
 
-    it("a second full refund fails with code charge_already_refunded and the adapter recovers", async () => {
+    it("charge_already_refunded is reported as not created", async () => {
       const piId = await createAuthorizedPI(500);
       await stripeProvider.capturePaymentIntent(piId, 500, `cap-already-${piId}`);
-      const first = await stripeProvider.refundPayment(piId, 500, `refund-already-1-${piId}`);
-      const second = await stripeProvider.refundPayment(piId, 500, `refund-already-2-${piId}`);
-      expect(second.refundId).toBe(first.refundId);
-      expect(second.amountRefunded).toBe(first.amountRefunded);
-      expect(second.status).toBe(first.status);
+      await stripeProvider.refundPayment(piId, 500, `refund-already-1-${piId}`);
+      await expect(
+        stripeProvider.refundPayment(piId, 500, `refund-already-2-${piId}`),
+      ).rejects.toMatchObject({
+        code: "charge_already_refunded",
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      });
+    });
+
+    it("refund metadata carries the reservation key and order id", async () => {
+      const piId = await createAuthorizedPI(500);
+      await stripeProvider.capturePaymentIntent(piId, 500, `cap-meta-${piId}`);
+      const orderId = `order_meta_${piId}`;
+      const key = `refund:${orderId}:1`;
+      await stripeProvider.refundPayment(piId, 200, key, { reservationKey: key, orderId });
+      const listed = await stripeProvider.listRefunds(piId);
+      expect(listed[0]).toMatchObject({ reservationKey: key, orderId });
+    });
+
+    it("same key with a different refund amount is an idempotency error", async () => {
+      const piId = await createAuthorizedPI(500);
+      await stripeProvider.capturePaymentIntent(piId, 500, `cap-idem-${piId}`);
+      const key = `refund-idem-${piId}`;
+      await stripeProvider.refundPayment(piId, 100, key);
+      await expect(stripeProvider.refundPayment(piId, 200, key)).rejects.toMatchObject({
+        type: "StripeIdempotencyError",
+        statusCode: 400,
+      });
     });
 
     it("a refund above the balance is reported as the typed over-refund error", async () => {
