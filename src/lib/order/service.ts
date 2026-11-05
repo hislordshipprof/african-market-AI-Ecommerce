@@ -103,7 +103,7 @@ async function refundCapturedBalance(
     if (remaining === 0) {
       const recorded = await refundRecordedOnCharge(paymentIntentId, pi.amountReceived);
       if (recorded.status !== "pending" && recorded.status !== "requires_action") {
-        await releaseSettledRefundAttempt(storeId, orderId);
+        await releaseSettledRefundAttempt(storeId, orderId, paymentIntentId);
       }
       return recorded;
     }

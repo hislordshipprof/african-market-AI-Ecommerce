@@ -807,6 +807,73 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     }
   });
 
+  it("a covering dashboard refund does not release the reserved request", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Covering dashboard refund" },
+    });
+    const pi = `pi_covering_dashboard_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "covering-cap");
+    await fakeStripeProvider.refundPayment(pi, 400, "covering-old");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26495,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const enteredGate = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (...args) => {
+      entered();
+      await gate;
+      return original(...args);
+    });
+    const cancel = autoCancelOrder(storeAId, order.id);
+    try {
+      await enteredGate;
+      const dashboard = await original(pi, 600, "review10-dashboard");
+      expect(dashboard.status).toBe("succeeded");
+      const swept = await reconcileStuckOrder(storeAId, order.id);
+      setRefundStatus(dashboard.refundId, "failed");
+      const webhook = await markTerminalRefundFailure({
+        paymentIntentId: pi,
+        refundId: dashboard.refundId,
+        refundStatus: "failed",
+      });
+      const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
+      const manual = await resolveRefundFailed(order.id, "Paid displayed 600 cents by Zelle");
+      expect(swept).toEqual({ ok: true, action: "anomaly_refund" });
+      expect(webhook).toEqual({ ok: true, action: "refund_failed" });
+      expect(queue?.owedCents).toBe(600);
+      expect(queue?.bankRefundPending).toBe(true);
+      expect(manual.ok).toBe(false);
+      const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+      expect(stored?.status).toBe("REFUND_FAILED");
+    } finally {
+      release();
+      await cancel.catch(() => {});
+      spy.mockRestore();
+      setStripeProvider(fakeStripeProvider);
+    }
+  });
+
   it("a failed refund found by the sweep can be repaid", async () => {
     asAdmin(cookiesAdmin);
     const customer = await storeScoped(storeAId).customer.create({
