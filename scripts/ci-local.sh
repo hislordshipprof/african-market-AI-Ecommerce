@@ -34,9 +34,9 @@ status() { gh api "repos/$REPO/statuses/$SHA" -f state="$1" -f context=local-ci 
 # that commit already passed, and this one is it replayed on a newer main, so only the tests it reaches rerun.
 . "$SCRIPTS/review-watch.sh"
 . "$SCRIPTS/ci-scope.sh"
-CHANGED=$(git diff --name-only "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
+CHANGED=$(changed_paths "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
 # The paths handed to a test runner: a deleted file has nothing to run, and a runner fails on a path it can't find.
-PRESENT=$(git diff --name-only --diff-filter=d "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
+PRESENT=$(changed_paths --diff-filter=d "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
 SCOPE="${CI_SCOPE:-$(printf '%s\n' "$CHANGED" | ci_scope)}"
 if [ -z "${CI_SCOPE:-}" ] && [ -n "${CI_REBASE_OF:-}" ] && [ "$SCOPE" = full ] \
   && [ "$(gh api "repos/$REPO/commits/$CI_REBASE_OF/status" --jq '[.statuses[] | select(.context == "local-ci")][0].state // "missing"')" = success ] \

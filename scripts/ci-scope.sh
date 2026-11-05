@@ -3,6 +3,10 @@
 # Owner-requested 2026-11-05: a full run took 20-35 minutes whatever the change.
 # Anything not recognised is "full", so a new kind of file can only cost time, never skip a check.
 
+# changed_paths <git diff args...>: every path a diff touches. A rename lists both sides, because git's default
+# shows only the new name, and moving src/x.ts to docs/x.md would then look like a docs change.
+changed_paths() { git diff --name-only --no-renames "$@"; }
+
 # ci_scope: reads changed paths on stdin, prints one tier.
 #   docs     - documentation only: nothing runs.
 #   pipeline - pipeline shell scripts and documentation: the scripts' own tests run.
@@ -38,8 +42,8 @@ rebase_is_safe() {
   b=$(git diff "$new_base" "$new" | git patch-id --stable | cut -d' ' -f1)
   [ -n "$a" ] && [ "$a" = "$b" ] || return 1
   # The rebase tier reruns tests related to source files, so a change touching anything else needs a full run.
-  git diff --name-only "$new_base" "$new" | grep -qvE '^(src/.*\.tsx?|e2e/.*|docs/.*|screenshots/.*|.*\.md)$' && return 1
-  ! git diff --name-only "$old_base" "$new_base" \
+  changed_paths "$new_base" "$new" | grep -qvE '^(src/.*\.tsx?|e2e/.*|docs/.*|screenshots/.*|.*\.md)$' && return 1
+  ! changed_paths "$old_base" "$new_base" \
     | grep -qE '^(prisma/|package\.json$|pnpm-lock\.yaml$|patches/|next\.config\.|playwright\.config\.|vitest\.config\.|tsconfig|\.github/|src/proxy\.ts$|src/app/layout\.tsx$|src/lib/test-setup\.ts$|e2e/global-(setup|teardown)\.ts$)'
 }
 

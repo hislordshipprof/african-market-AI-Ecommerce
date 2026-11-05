@@ -39,6 +39,10 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 cd "$T" || exit 1
 rebase_is_safe t1 t1r && echo "ok   a clean rebase is safe" || { echo "FAIL clean rebase refused"; fail=1; }
 
+git checkout -q -b t1move t1r; mkdir docs; git mv src/app.ts docs/app.md; git commit -qm move
+got=$(changed_paths HEAD~1 HEAD | ci_scope)
+if [ "$got" = full ]; then echo "ok   moving source into docs is a full run"; else echo "FAIL a move into docs gave $got"; fail=1; fi
+
 git checkout -q -b t1edit t1r; sed -i 's/^h$/H/' src/app.ts; git commit -qam extra
 rebase_is_safe t1 t1edit && { echo "FAIL a changed patch passed"; fail=1; } || echo "ok   a changed patch needs a full run"
 
