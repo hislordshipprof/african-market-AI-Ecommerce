@@ -2426,6 +2426,171 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     }
   });
 
+  it("review186 fifth-error COMPLETED without stored capture is refused", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: 5500 },
+      });
+    });
+    await seedFifthCapture(order.id);
+    setNextCaptureAppliedFailure(pi, 1);
+    const original = fakeStripeProvider.capturePaymentIntent.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "capturePaymentIntent").mockImplementation(async (...args) => {
+      try {
+        return await original(...args);
+      } catch (err) {
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: {
+              status: "COMPLETED",
+              capturedAmountCents: null,
+              completedAt: new Date(),
+            },
+          });
+        });
+        throw err;
+      }
+    });
+    try {
+      expect(await markReady(storeId, order.id)).toEqual({
+        ok: false,
+        error: "Order status changed during capture",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a fifth applied failure keeps a completed order's stored partial amount", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: 5500 },
+      });
+    });
+    await seedFifthCapture(order.id);
+    setNextCaptureAppliedFailure(pi, 1);
+    const original = fakeStripeProvider.capturePaymentIntent.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "capturePaymentIntent").mockImplementation(async (...args) => {
+      try {
+        return await original(...args);
+      } catch (err) {
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { status: "COMPLETED", capturedAmountCents: 400, completedAt: new Date() },
+          });
+        });
+        throw err;
+      }
+    });
+    try {
+      expect(await markReady(storeId, order.id)).toEqual({ ok: true, capturedAmountCents: 400 });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a fifth applied failure returns the stored amount when pickup is already awaiting collection", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: 5500 },
+      });
+    });
+    await seedFifthCapture(order.id);
+    setNextCaptureAppliedFailure(pi, 1);
+    const original = fakeStripeProvider.capturePaymentIntent.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "capturePaymentIntent").mockImplementation(async (...args) => {
+      try {
+        return await original(...args);
+      } catch (err) {
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { status: "AWAITING_PICKUP", capturedAmountCents: 5500 },
+          });
+        });
+        throw err;
+      }
+    });
+    try {
+      expect(await markReady(storeId, order.id)).toEqual({ ok: true, capturedAmountCents: 5500 });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a fifth applied failure refuses a ready delivery with no stored amount", async () => {
+    const order = await createTestOrder("CAPTURING", { fulfillment: "delivery" });
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: 5500 },
+      });
+    });
+    await seedFifthCapture(order.id);
+    setNextCaptureAppliedFailure(pi, 1);
+    const original = fakeStripeProvider.capturePaymentIntent.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "capturePaymentIntent").mockImplementation(async (...args) => {
+      try {
+        return await original(...args);
+      } catch (err) {
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { status: "READY", capturedAmountCents: null },
+          });
+        });
+        throw err;
+      }
+    });
+    try {
+      expect(await markReady(storeId, order.id)).toEqual({
+        ok: false,
+        error: "Order status changed during capture",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("markReady does not capture zero when a capturing order has no stored amount", async () => {
+    const order = await createTestOrder("CAPTURING");
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    const result = await markReady(storeId, order.id);
+    expect(result).toEqual({ ok: false, error: "Order status changed during capture" });
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([]);
+  });
+
+  it("a sweep does not capture zero when a capturing order has no stored amount", async () => {
+    const order = await createTestOrder("CAPTURING");
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result).toEqual({
+      ok: false,
+      error: "Order status changed during capture",
+      waiting: true,
+    });
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([]);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CAPTURING");
+    expect(updated!.capturedAmountCents).toBeNull();
+  });
+
   async function seedFifthCapture(orderId: string) {
     await storeScopedTransaction(storeId, async (tx) => {
       for (let attempt = 1; attempt <= 4; attempt++) {

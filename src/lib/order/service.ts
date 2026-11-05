@@ -28,6 +28,16 @@ const MAX_CAPTURE_ATTEMPTS = 5;
 
 type TransitionalStatus = "CAPTURING" | "CANCELLING";
 
+const CAPTURE_STATUS_CHANGED = "Order status changed during capture";
+
+/** A capture result may report this amount only when the order row already stored it. */
+function storedCaptureAmount(
+  capturedAmountCents: number | null,
+): { ok: true; capturedAmountCents: number } | { ok: false; error: typeof CAPTURE_STATUS_CHANGED } {
+  if (capturedAmountCents == null) return { ok: false, error: CAPTURE_STATUS_CHANGED };
+  return { ok: true, capturedAmountCents };
+}
+
 export function fulfilledStatus(fulfillment: string): "AWAITING_PICKUP" | "READY" {
   return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
 }
@@ -356,7 +366,9 @@ async function settleUnconfirmedCapture(
     };
   }
   if (order.status === fulfilledStatus(order.fulfillment) || order.status === "COMPLETED") {
-    return { ok: true, capturedAmountCents: order.capturedAmountCents ?? 0 };
+    const stored = storedCaptureAmount(order.capturedAmountCents);
+    if (!stored.ok) return { ...stored, resolved: "waiting" };
+    return stored;
   }
   if (order.status !== "CAPTURING") {
     return { ok: false, error: "Order status changed during capture", resolved: "waiting" };
@@ -767,7 +779,9 @@ export async function markReady(
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false as const, error: "Order not found" };
     if (order.status === "CAPTURING") {
-      const amount = order.capturedAmountCents ?? 0;
+      const stored = storedCaptureAmount(order.capturedAmountCents);
+      if (!stored.ok) return stored;
+      const amount = stored.capturedAmountCents;
       const fee = applicationFeeForCapture(amount, order.deliveryFeeCents);
       return {
         ok: true as const,
@@ -958,12 +972,9 @@ export async function markReady(
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order || order.status !== "CAPTURING") {
-      if (
-        order
-        && order.capturedAmountCents != null
-        && (order.status === validation.newStatus || order.status === "COMPLETED")
-      ) {
-        return { ok: true as const, capturedAmountCents: order.capturedAmountCents };
+      if (order && (order.status === validation.newStatus || order.status === "COMPLETED")) {
+        const stored = storedCaptureAmount(order.capturedAmountCents);
+        if (stored.ok) return stored;
       }
       if (order?.status === "CANCELLED") {
         return {
@@ -971,7 +982,7 @@ export async function markReady(
           error: "Payment authorization was released — order cancelled; contact the customer",
         };
       }
-      return { ok: false as const, error: "Order status changed during capture" };
+      return { ok: false as const, error: CAPTURE_STATUS_CHANGED };
     }
     await tx.order.update({
       where: { id: orderId },
@@ -1157,6 +1168,9 @@ export async function reconcileStuckOrder(
 
   if (pi.status === "requires_capture") {
     if (order.status === "CAPTURING") {
+      const stored = storedCaptureAmount(order.capturedAmountCents);
+      if (!stored.ok) return { ...stored, waiting: true };
+      const amount = stored.capturedAmountCents;
       const reservedCapture = await reserveAttempt(storeId, orderId, "capture_retry", {
         alert: "store_and_platform",
       });
@@ -1170,7 +1184,6 @@ export async function reconcileStuckOrder(
         return { ok: false, error: "capture_backoff", waiting: true };
       }
       const attempt = reservedCapture.attempt;
-      const amount = order.capturedAmountCents ?? 0;
       const sweepFee = applicationFeeForCapture(amount, order.deliveryFeeCents);
       try {
         await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
