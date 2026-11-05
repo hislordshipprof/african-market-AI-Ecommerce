@@ -589,4 +589,54 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const updated = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(updated?.status).toBe("CANCELLED");
   });
+
+  it("a lost refund response does not block repayment after the refund fails", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Lost Response Customer" },
+    });
+    const pi = `pi_lost_response_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-lost-response");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26408,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    let savedRefundId = "";
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (...args) => {
+      const refund = await original(...args);
+      savedRefundId = refund.refundId;
+      throw Object.assign(new Error("response lost after provider commit"), { type: "StripeConnectionError" });
+    });
+    await expect(autoCancelOrder(storeAId, order.id)).rejects.toThrow(/response lost after provider commit/);
+    spy.mockRestore();
+    setStripeProvider(fakeStripeProvider);
+
+    const settled = await reconcileStuckOrder(storeAId, order.id);
+    expect(settled.ok).toBe(true);
+    setRefundStatus(savedRefundId, "failed");
+    expect(
+      await markTerminalRefundFailure({
+        paymentIntentId: pi,
+        refundId: savedRefundId,
+        refundStatus: "failed",
+      }),
+    ).toEqual({ ok: true, action: "refund_failed" });
+
+    expect(await resolveRefundFailed(order.id, "Paid customer by Zelle")).toEqual({ ok: true });
+    const updated = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(updated?.status).toBe("CANCELLED");
+  });
 });

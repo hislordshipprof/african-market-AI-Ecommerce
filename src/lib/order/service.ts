@@ -101,7 +101,11 @@ async function refundCapturedBalance(
     const already = pi.amountRefunded ?? 0;
     const remaining = Math.max(0, pi.amountReceived - already);
     if (remaining === 0) {
-      return refundRecordedOnCharge(paymentIntentId, pi.amountReceived);
+      const recorded = await refundRecordedOnCharge(paymentIntentId, pi.amountReceived);
+      if (recorded.status !== "pending" && recorded.status !== "requires_action") {
+        await releaseSettledRefundAttempt(storeId, orderId);
+      }
+      return recorded;
     }
     const uncovered = await failedRefundLeavingCaptureUncovered(paymentIntentId, pi.amountReceived);
     if (uncovered) return uncovered;
@@ -277,6 +281,22 @@ async function noteAttemptReleased(
         data: systemAuditData(storeId, orderId, action, { attempt, inFlight: false }),
       });
     }
+  });
+}
+
+/** The provider has a finished refund, so the in-flight reservation no longer blocks repayment. */
+async function releaseSettledRefundAttempt(storeId: string, orderId: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const prior = await tx.auditLog.findFirst({
+      where: { entityId: orderId, action: "refund_retry" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    const after = prior?.after as { attempt?: number; inFlight?: boolean } | null;
+    if (after?.inFlight !== true || typeof after.attempt !== "number") return;
+    await tx.auditLog.create({
+      data: systemAuditData(storeId, orderId, "refund_retry", { attempt: after.attempt, inFlight: false }),
+    });
   });
 }
 
@@ -687,7 +707,10 @@ export async function markTerminalRefundFailure(input: {
     console.warn(`refund.failed for unknown PaymentIntent ${input.paymentIntentId}`);
     return { ok: false, error: "Order not found" };
   }
-  if (order.status === "REFUND_FAILED") return { ok: true, action: "already_recorded" };
+  if (order.status === "REFUND_FAILED") {
+    await releaseSettledRefundAttempt(order.storeId, order.id);
+    return { ok: true, action: "already_recorded" };
+  }
   if (order.status !== "CANCELLING" && order.status !== "CANCELLED") {
     console.warn(`refund.failed ignored for order ${order.id} in status ${order.status}`);
     return { ok: true, action: "ignored" };
@@ -755,6 +778,7 @@ export async function markTerminalRefundFailure(input: {
     wrote = true;
   });
 
+  if (wrote || alreadyResolved) await releaseSettledRefundAttempt(order.storeId, order.id);
   if (alreadyResolved) return { ok: true, action: "already_resolved" };
   if (!covered && wrote) {
     console.error(
