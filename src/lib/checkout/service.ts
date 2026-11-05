@@ -3,7 +3,12 @@ import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, sto
 import { getCartWithLines, type CartLineView, type CartWithLines } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { sendOrderAuthorized } from "../inngest/send";
+import { checkoutTestHooks } from "./test-hooks";
+import { cartPaymentIdempotencyKey } from "../customer-account/consent";
+import { guestPaymentIntentParams } from "./payment-intent-params";
+import { bindSavedCardConsent, prepareSignedInPaymentIntent, SavedCardUnavailableError } from "./saved-card-payment";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
+import { validPhone } from "../customer-account/phone";
 import type {
   CheckoutQuote,
   Contact,
@@ -17,11 +22,6 @@ async function getStripeStore(storeId: string) {
     throw new Error("Store is not connected to Stripe");
   }
   return store as typeof store & { stripeAccountId: string };
-}
-
-const PHONE_RE = /^\+?[\d\s().-]{10,20}$/;
-function validPhone(phone: string): boolean {
-  return PHONE_RE.test(phone) && phone.replace(/\D/g, "").length >= 10;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -120,13 +120,32 @@ export async function quoteCheckout(
   return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
 }
 
+export { checkoutTestHooks } from "./test-hooks";
+export { SavedCardUnavailableError } from "./saved-card-payment";
+
+export interface CreatePaymentIntentOptions {
+  actorUserId?: string | null;
+  saveCard?: boolean;
+  savedCardId?: string | null;
+  attemptToken?: string | null;
+}
+
 export async function createPaymentIntent(
   storeId: string,
   cartId: string,
   holdCents: number,
-): Promise<{ clientSecret: string; paymentIntentId: string }> {
-  const scoped = storeScoped(storeId);
+  options?: CreatePaymentIntentOptions,
+): Promise<{ clientSecret: string; paymentIntentId: string; attemptToken?: string }> {
   const store = await getStripeStore(storeId);
+  if (options?.actorUserId) {
+    return prepareSignedInPaymentIntent(storeId, cartId, holdCents, {
+      actorUserId: options.actorUserId,
+      saveCard: options.saveCard === true,
+      savedCardId: options.savedCardId ?? null,
+      attemptToken: options.attemptToken ?? null,
+    }, store.stripeAccountId);
+  }
+  const scoped = storeScoped(storeId);
 
   const stripe = getStripeClient();
 
@@ -150,14 +169,20 @@ export async function createPaymentIntent(
     }
   }
 
-  const pi = await stripe.paymentIntents.create({
-    amount: holdCents,
-    currency: "usd",
-    capture_method: "manual",
-    on_behalf_of: store.stripeAccountId,
-    transfer_data: { destination: store.stripeAccountId },
-    metadata: { store_id: storeId, cart_id: cartId },
+  const guestParams = guestPaymentIntentParams({
+    holdCents,
+    storeAccountId: store.stripeAccountId,
+    storeId,
+    cartId,
   });
+  const pi = await stripe.paymentIntents.create(
+    guestParams,
+    { idempotencyKey: cartPaymentIdempotencyKey(cartId, `guest:${holdCents}`) },
+  );
+
+  if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforePersistCartPaymentIntent) {
+    await checkoutTestHooks.beforePersistCartPaymentIntent();
+  }
 
   await scoped.cart.update({
     where: { id: cartId },
@@ -170,25 +195,6 @@ export async function createPaymentIntent(
 
   return { clientSecret: pi.client_secret, paymentIntentId: pi.id };
 }
-
-/**
- * Test-only pauses. Production leaves every hook null. Each hook runs only
- * when NODE_ENV is test, so a leaked hook cannot stall a live checkout.
- *
- * afterMissedOrderLookup fires after the pre-cart lookup misses and before
- * the cart read. aroundCartRead wraps that read and must call it. The
- * post-read lookup runs only after the read returns. afterPostReadLookupMiss
- * fires when that second lookup also misses, before cart validation.
- */
-export const checkoutTestHooks: {
-  afterMissedOrderLookup: (() => Promise<void>) | null;
-  aroundCartRead: ((read: () => Promise<CartWithLines | null>) => Promise<CartWithLines | null>) | null;
-  afterPostReadLookupMiss: (() => Promise<void>) | null;
-} = {
-  afterMissedOrderLookup: null,
-  aroundCartRead: null,
-  afterPostReadLookupMiss: null,
-};
 
 function runTestHook(hook: (() => Promise<void>) | null): Promise<void> {
   if (process.env.NODE_ENV === "test" && hook) return hook();
@@ -243,6 +249,15 @@ export async function recordAuthorizedOrder(
         where: { paymentIntentId: input.paymentIntentId },
       });
       if (existing) {
+        if (existing.sourceCartId && existing.sourceCartId !== input.cartId) {
+          throw new Error("PaymentIntent is already recorded");
+        }
+        if (input.actorUserId !== undefined) {
+          const ownerCart = await tx.cart.findUnique({ where: { id: input.cartId } });
+          if (!ownerCart || ownerCart.userId !== input.actorUserId) {
+            throw new Error("Cart not found");
+          }
+        }
         return { orderId: existing.id, created: false };
       }
 
@@ -310,6 +325,7 @@ export async function recordAuthorizedOrder(
           bufferCents: input.quote.bufferCents,
           totalAuthorizedCents: input.quote.holdCents,
           paymentIntentId: input.paymentIntentId,
+          sourceCartId: input.cartId,
           platformFeeCents: platformFeeCentsForCapture(input.quote.totalCents),
           notes: input.notes || null,
         },
@@ -397,11 +413,31 @@ export async function placeOrder(
   if (pi.metadata?.store_id !== storeId) {
     throw new Error("PaymentIntent store_id metadata does not match");
   }
+  if (pi.currency && pi.currency !== "usd") {
+    throw new Error("PaymentIntent currency does not match");
+  }
+  if (pi.customer) {
+    const customerId = typeof pi.customer === "string" ? pi.customer : pi.customer.id;
+    if (!actorUserId || pi.metadata?.user_id !== actorUserId) {
+      throw new Error("PaymentIntent customer does not match this account");
+    }
+    if (pi.metadata?.cart_id !== cartId) {
+      throw new Error("PaymentIntent does not belong to this cart");
+    }
+    if (!customerId) {
+      throw new Error("PaymentIntent customer does not match this account");
+    }
+  } else if (pi.metadata?.cart_id && pi.metadata.cart_id !== cartId) {
+    throw new Error("PaymentIntent does not belong to this cart");
+  }
 
   const existingOrder = await storeScoped(storeId).order.findUnique({
     where: { paymentIntentId },
   });
   if (existingOrder) {
+    if (existingOrder.sourceCartId && existingOrder.sourceCartId !== cartId) {
+      throw new Error("PaymentIntent is already recorded");
+    }
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
     // Idempotent replay — don't re-send the Inngest event or touch the cart.
     return { token: existingOrder.id, quote };
@@ -420,6 +456,9 @@ export async function placeOrder(
     where: { paymentIntentId },
   });
   if (replay) {
+    if (replay.sourceCartId && replay.sourceCartId !== cartId) {
+      throw new Error("PaymentIntent is already recorded");
+    }
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
     return { token: replay.id, quote };
   }
@@ -486,6 +525,12 @@ export async function placeOrder(
   });
 
   if (recorded.created) {
+    if (actorUserId) {
+      const method = typeof pi.payment_method === "string"
+        ? pi.payment_method
+        : pi.payment_method?.id ?? null;
+      await bindSavedCardConsent(actorUserId, paymentIntentId, method);
+    }
     await sendOrderAuthorized(storeId, recorded.orderId);
   }
 

@@ -113,6 +113,76 @@ export function storeScoped(storeId: string) {
 
 export type StoreScopedClient = ReturnType<typeof storeScoped>;
 
+function assertCustomerUserId(userId: string): string {
+  if (typeof userId !== "string" || userId.trim() === "") {
+    throw new Error("A customer id is required");
+  }
+  return userId;
+}
+
+function wrapCustomerDelegate<D extends object>(userId: string, delegate: D): D {
+  return new Proxy(delegate as Record<string, unknown>, {
+    get(target, prop: string) {
+      const val = target[prop];
+      if (typeof val !== "function") return val;
+      return (...args: unknown[]) => {
+        const prismaPromise = (val as (...a: unknown[]) => unknown).apply(target, args);
+        return prisma
+          .$transaction([
+            prisma.$executeRaw`SET LOCAL ROLE app_user`,
+            prisma.$executeRaw`SELECT set_config('app.user_id', ${userId}, true)`,
+            prismaPromise as ReturnType<typeof prisma.$queryRaw>,
+          ])
+          .then(([, , result]) => result);
+      };
+    },
+  }) as unknown as D;
+}
+
+/** Customer-owned rows only. An empty id throws before any query. */
+export function customerScoped(userId: string) {
+  const id = assertCustomerUserId(userId);
+  return {
+    platformCustomerProfile: wrapCustomerDelegate(id, prisma.platformCustomerProfile),
+    customerAddress: wrapCustomerDelegate(id, prisma.customerAddress),
+    cardSaveConsent: wrapCustomerDelegate(id, prisma.cardSaveConsent),
+  };
+}
+
+export type CustomerScopedClient = ReturnType<typeof customerScoped>;
+
+export async function customerScopedTransaction<T>(
+  userId: string,
+  fn: (
+    tx: Pick<
+      PrismaClient,
+      "platformCustomerProfile" | "customerAddress" | "cardSaveConsent" | "$queryRaw" | "$executeRaw"
+    >,
+  ) => Promise<T>,
+  opts?: TransactionOptions,
+): Promise<T> {
+  const id = assertCustomerUserId(userId);
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.user_id', ${id}, true)`;
+    return fn({
+      platformCustomerProfile: tx.platformCustomerProfile,
+      customerAddress: tx.customerAddress,
+      cardSaveConsent: tx.cardSaveConsent,
+      $queryRaw: tx.$queryRaw.bind(tx),
+      $executeRaw: tx.$executeRaw.bind(tx),
+    });
+  }, { timeout: opts?.timeout ?? 8_000, maxWait: opts?.maxWait ?? 4_000 });
+}
+
+/** Serializes profile, address and Stripe-customer writes for one account. */
+export async function lockCustomerAccount(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  userId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('customer-account'), hashtext(${userId}))`;
+}
+
 function wrapPlatformAdminDelegate<D extends object>(delegate: D): D {
   return new Proxy(delegate as Record<string, unknown>, {
     get(target, prop: string) {
@@ -229,6 +299,10 @@ export async function storeScopedTransaction<T>(
  * locks takes them in this order:
  *
  *   store row → cart row → cart lines → listing row → listing variants (id order)
+ *
+ * A platform-customer profile lock is taken in its own transaction and
+ * released before this order starts. Checkout does not lock the profile
+ * while it holds the cart.
  *
  * Upgrade rule: a transaction that will lock a row FOR UPDATE must lock it
  * before it inserts any row that references that row. A foreign-key insert

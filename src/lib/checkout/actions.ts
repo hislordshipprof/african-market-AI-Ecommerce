@@ -1,10 +1,20 @@
 "use server";
 
+import { headers } from "next/headers";
+import { auth } from "../auth";
 import { getStore } from "../get-store";
 import { resolveShopperCart } from "../cart/actions";
 import { checkCheckoutReady } from "../stripe/checkout-gate";
-import { quoteCheckout, createPaymentIntent, placeOrder } from "./service";
+import { quoteCheckout, createPaymentIntent, placeOrder, SavedCardUnavailableError } from "./service";
 import type { CheckoutQuote, Contact, Fulfillment } from "../customer-flow/contracts";
+
+async function signedInUserId(): Promise<string | null> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+    query: { disableCookieCache: true },
+  });
+  return session?.user?.id ?? null;
+}
 
 export async function quoteCheckoutAction(
   contact: Contact,
@@ -31,9 +41,10 @@ export async function quoteCheckoutAction(
 export async function createPaymentIntentAction(
   contact: Contact,
   fulfillment: Fulfillment,
+  selection?: { saveCard?: boolean; savedCardId?: string | null; attemptToken?: string | null },
 ): Promise<
-  | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number }
-  | { ok: false; error: string }
+  | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number; attemptToken?: string }
+  | { ok: false; error: string; code?: "saved_card_unavailable" }
 > {
   try {
     const store = await getStore();
@@ -57,9 +68,20 @@ export async function createPaymentIntentAction(
     if (quote.holdCents < 50) {
       return { ok: false, error: "Order total is too low" };
     }
-    const result = await createPaymentIntent(store.id, cartId, quote.holdCents);
+    const actorUserId = await signedInUserId();
+    const result = await createPaymentIntent(store.id, cartId, quote.holdCents, actorUserId
+      ? {
+          actorUserId,
+          saveCard: selection?.saveCard === true,
+          savedCardId: selection?.savedCardId ?? null,
+          attemptToken: selection?.attemptToken ?? null,
+        }
+      : undefined);
     return { ok: true, ...result, holdCents: quote.holdCents };
   } catch (e) {
+    if (e instanceof SavedCardUnavailableError) {
+      return { ok: false, error: e.message, code: "saved_card_unavailable" };
+    }
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Payment setup failed",

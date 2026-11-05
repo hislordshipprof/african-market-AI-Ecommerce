@@ -608,8 +608,9 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     const second = await makeCart(storeId, [variants[0]!.id], 3, secondPi);
     const replay = await recordAuthorizedOrder(storeId, input);
     expect(replay).toEqual({ orderId: created.orderId, created: false });
-    const secondReplay = await recordAuthorizedOrder(storeId, { ...input, cartId: second.cart.id });
-    expect(secondReplay).toEqual({ orderId: created.orderId, created: false });
+    await expect(
+      recordAuthorizedOrder(storeId, { ...input, cartId: second.cart.id }),
+    ).rejects.toThrow("PaymentIntent is already recorded");
     const refilled = await storeScoped(storeId).cart.findUnique({
       where: { id: cart.id },
       include: { lines: true },
