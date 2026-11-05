@@ -1069,6 +1069,11 @@ exit 0
     const review = path.join(dir, "review.sh");
     writeFileSync(review, `${childLine}echo "VERDICT: PASS"\nexit 0\n`.replace('"$1"', '"review"'));
     chmodSync(review, 0o755);
+    // build-ticket.sh runs local-ci beside each review. Without a stub it would call a missing ci-local.sh,
+    // count that as a CI failure and loop through every fix round.
+    const ciLocal = path.join(dir, "ci-local.sh");
+    writeFileSync(ciLocal, `${childLine}echo "local-ci PASSED on stub"\nexit 0\n`.replace('"$1"', '"ci"'));
+    chmodSync(ciLocal, 0o755);
     const script = `
       set -euo pipefail
       export PATH="${bashPath(bin)}:$PATH"
@@ -1079,6 +1084,7 @@ exit 0
       export WT="${bashPath(wt)}"
       export HARNESS_LOG="${bashPath(log)}"
       export REVIEW_TICKET="${bashPath(review)}"
+      export CI_LOCAL="${bashPath(ciLocal)}"
       export R2_SECRET_ACCESS_KEY='${SECRET}'
       export R2_ACCESS_KEY_ID='${ACCESS}'
       export SEED_PRUNE_R2='dry-run'
@@ -1106,12 +1112,15 @@ exit 0
       check
       echo modes-ok
     `;
+    // This synchronous exec blocks the Vitest worker for the whole run. A block past 60 s fails the suite with
+    // "Timeout calling onTaskUpdate" even though every test passed, so keep this run short (the CI stub above).
     const stdout = execFileSync("bash", ["-c", script], {
       encoding: "utf8",
       cwd: root,
       env: { ...process.env, AGENT_ENGINE: "claude" },
     });
     expect(stdout).toContain("modes-ok");
+    expect(stdout).not.toContain("Still blocking");
     expect(stdout).not.toContain(SECRET);
     expect(readFileSync(path.join(root, ".builder", "session-225.txt"), "utf8")).toBe("stub-session-0001");
     const sessionAfter = existsSync(checkoutSession) ? readFileSync(checkoutSession) : null;
