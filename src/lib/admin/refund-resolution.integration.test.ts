@@ -24,7 +24,7 @@ import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
 import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, reset, setAuthorizedAmount, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { listRefundFailedOrders, resolveRefundFailed } from "./refund-resolution";
 
@@ -638,5 +638,102 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await resolveRefundFailed(order.id, "Paid customer by Zelle")).toEqual({ ok: true });
     const updated = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(updated?.status).toBe("CANCELLED");
+  });
+
+  it.each([false, true])("a pending remainder blocks repayment after an older refund fails (lost response %s)", async (lost) => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: `Review pending ${lost}` },
+    });
+    const pi = `pi_review_pending_${lost}_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, `review-cap-${lost}`);
+    const older = await fakeStripeProvider.refundPayment(pi, 400, `review-old-${lost}`);
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: lost ? 26491 : 26490,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    setNextRefundStatus(pi, "pending");
+    if (lost) {
+      const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+      const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (...args) => {
+        await original(...args);
+        throw Object.assign(new Error("review response lost"), { type: "StripeConnectionError" });
+      });
+      await expect(autoCancelOrder(storeAId, order.id)).rejects.toThrow("review response lost");
+      spy.mockRestore();
+      setStripeProvider(fakeStripeProvider);
+    } else {
+      expect((await autoCancelOrder(storeAId, order.id)).ok).toBe(false);
+    }
+    const pending = (await fakeStripeProvider.listRefunds(pi)).find((refund) => refund.status === "pending");
+    expect(pending?.amountRefunded).toBe(600);
+    setRefundStatus(older.refundId, "failed");
+    expect(
+      await markTerminalRefundFailure({
+        paymentIntentId: pi,
+        refundId: older.refundId,
+        refundStatus: "failed",
+      }),
+    ).toEqual({ ok: true, action: "refund_failed" });
+    const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
+    expect(queue?.owedCents).toBe(1000);
+    expect(queue?.bankRefundPending).toBe(true);
+    const result = await resolveRefundFailed(order.id, "Paid displayed 1000 cents by Zelle");
+    const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(result.ok).toBe(false);
+    expect(stored?.status).toBe("REFUND_FAILED");
+  });
+
+  it("a failed refund found by the sweep can be repaid", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Review lost then failed" },
+    });
+    const pi = `pi_review_failed_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "review-failed-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26492,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    let refundId = "";
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (...args) => {
+      const refund = await original(...args);
+      refundId = refund.refundId;
+      throw Object.assign(new Error("review response lost"), { type: "StripeConnectionError" });
+    });
+    await expect(autoCancelOrder(storeAId, order.id)).rejects.toThrow("review response lost");
+    spy.mockRestore();
+    setStripeProvider(fakeStripeProvider);
+    setRefundStatus(refundId, "failed");
+    await reconcileStuckOrder(storeAId, order.id);
+    const result = await resolveRefundFailed(order.id, "Customer repaid outside app");
+    const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(result).toEqual({ ok: true });
+    expect(stored?.status).toBe("CANCELLED");
   });
 });

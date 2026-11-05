@@ -14,6 +14,7 @@ export type RefundFailedRow = {
   owedCents: number;
   failedRefundId: string;
   failedAtLabel: string;
+  bankRefundPending: boolean;
 };
 
 function failedAtLabel(at: Date, timeZone: string): string {
@@ -45,17 +46,24 @@ async function capturedCentsFor(order: {
   }
 }
 
-async function succeededRefundCents(paymentIntentId: string | null): Promise<number> {
-  if (!paymentIntentId) return 0;
+function refundStillOpen(status: string): boolean {
+  return status === "pending" || status === "requires_action";
+}
+
+async function refundBalance(paymentIntentId: string | null): Promise<{ refundedCents: number; bankRefundPending: boolean }> {
+  if (!paymentIntentId) return { refundedCents: 0, bankRefundPending: false };
   try {
     const listed = await getStripeProvider().listRefunds(paymentIntentId);
-    return listed
-      .filter((refund) => refund.status === "succeeded")
-      .reduce((sum, refund) => sum + refund.amountRefunded, 0);
+    return {
+      refundedCents: listed
+        .filter((refund) => refund.status === "succeeded")
+        .reduce((sum, refund) => sum + refund.amountRefunded, 0),
+      bankRefundPending: listed.some((refund) => refundStillOpen(refund.status)),
+    };
   } catch (err) {
     const code = (err as { code?: string }).code;
-    if (code === "resource_missing") return 0;
-    throw err;
+    if (code === "resource_missing") return { refundedCents: 0, bankRefundPending: false };
+    return { refundedCents: 0, bankRefundPending: true };
   }
 }
 
@@ -84,16 +92,17 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
   for (const order of orders) {
     const failure = failureByOrder.get(order.id);
     const capturedCents = await capturedCentsFor(order);
-    const refundedCents = await succeededRefundCents(order.paymentIntentId);
+    const balance = await refundBalance(order.paymentIntentId);
     rows.push({
       orderId: order.id,
       storeName: order.store.name,
       orderNumber: order.number,
       capturedCents,
-      refundedCents,
-      owedCents: capturedCents - refundedCents,
+      refundedCents: balance.refundedCents,
+      owedCents: capturedCents - balance.refundedCents,
       failedRefundId: order.refundId ?? "",
       failedAtLabel: failedAtLabel(failure?.createdAt ?? order.updatedAt, order.store.timezone),
+      bankRefundPending: balance.bankRefundPending,
     });
   }
   return rows;
@@ -120,6 +129,9 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status !== "REFUND_FAILED") {
       return { ok: false as const, error: "already resolved" };
+    }
+    if (await refundBalance(current.paymentIntentId).then((balance) => balance.bankRefundPending)) {
+      return { ok: false as const, error: "A refund is still confirming with the bank" };
     }
     const openRefund = await tx.auditLog.findFirst({
       where: { entityId: orderId, action: "refund_retry" },

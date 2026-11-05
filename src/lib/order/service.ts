@@ -131,7 +131,9 @@ async function refundCapturedBalance(
         pi = after;
         continue;
       }
-      await noteAttemptReleased(storeId, orderId, "refund_retry", refundAttempt);
+      if (refund.status !== "pending" && refund.status !== "requires_action") {
+        await noteAttemptReleased(storeId, orderId, "refund_retry", refundAttempt);
+      }
       return refund;
     } catch (err) {
       if (isIdempotencyKeyInUse(err)) {
@@ -284,8 +286,25 @@ async function noteAttemptReleased(
   });
 }
 
+function refundStillOpen(status: string): boolean {
+  return status === "pending" || status === "requires_action";
+}
+
 /** The provider has a finished refund, so the in-flight reservation no longer blocks repayment. */
-async function releaseSettledRefundAttempt(storeId: string, orderId: string): Promise<void> {
+async function releaseSettledRefundAttempt(
+  storeId: string,
+  orderId: string,
+  paymentIntentId?: string,
+): Promise<void> {
+  if (paymentIntentId) {
+    try {
+      const listed = await getStripeProvider().listRefunds(paymentIntentId);
+      if (listed.some((refund) => refundStillOpen(refund.status))) return;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code !== "resource_missing") return;
+    }
+  }
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findFirst({
@@ -563,6 +582,7 @@ async function persistRefundFailure(
     if (pi.amountReceived > 0) restoredCapture = pi.amountReceived;
   }
   let alreadyResolved = false;
+  let wrote = false;
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
@@ -574,6 +594,7 @@ async function persistRefundFailure(
       alreadyResolved = true;
       return;
     }
+    wrote = true;
     await tx.order.update({
       where: { id: orderId },
       data: {
@@ -596,6 +617,9 @@ async function persistRefundFailure(
       }),
     });
   });
+  if (wrote && preview?.paymentIntentId) {
+    await releaseSettledRefundAttempt(storeId, orderId, preview.paymentIntentId);
+  }
   if (alreadyResolved) return;
   console.error(
     `Refund ${refundStatus} for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,
@@ -708,7 +732,7 @@ export async function markTerminalRefundFailure(input: {
     return { ok: false, error: "Order not found" };
   }
   if (order.status === "REFUND_FAILED") {
-    await releaseSettledRefundAttempt(order.storeId, order.id);
+    await releaseSettledRefundAttempt(order.storeId, order.id, input.paymentIntentId);
     return { ok: true, action: "already_recorded" };
   }
   if (order.status !== "CANCELLING" && order.status !== "CANCELLED") {
@@ -778,7 +802,9 @@ export async function markTerminalRefundFailure(input: {
     wrote = true;
   });
 
-  if (wrote || alreadyResolved) await releaseSettledRefundAttempt(order.storeId, order.id);
+  if (wrote || alreadyResolved) {
+    await releaseSettledRefundAttempt(order.storeId, order.id, input.paymentIntentId);
+  }
   if (alreadyResolved) return { ok: true, action: "already_resolved" };
   if (!covered && wrote) {
     console.error(

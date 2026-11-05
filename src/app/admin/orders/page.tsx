@@ -43,7 +43,12 @@ export default async function RefundFailedOrdersPage() {
                   <td className="px-4 py-3 text-foreground">#{row.orderNumber}</td>
                   <td className="px-4 py-3 tabular-nums">{formatRefundCents(row.capturedCents)}</td>
                   <td className="px-4 py-3 tabular-nums">{formatRefundCents(row.refundedCents)}</td>
-                  <td className="px-4 py-3 tabular-nums" data-testid="amount-owed">{formatRefundCents(row.owedCents)}</td>
+                  <td className="px-4 py-3 tabular-nums" data-testid="amount-owed">
+                    {formatRefundCents(row.owedCents)}
+                    {row.bankRefundPending ? (
+                      <span className="mt-1 block text-xs text-muted-foreground">Bank refund still pending</span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs">{row.failedRefundId}</td>
                   <td className="px-4 py-3 text-muted-foreground">{row.failedAtLabel}</td>
                 </tr>
@@ -54,8 +59,16 @@ export default async function RefundFailedOrdersPage() {
           <div className="space-y-6 border-t border-input p-4">
             {rows.map((row) => (
               <div key={row.orderId}>
-                <p className="mb-2 text-sm text-foreground">Resolve #{row.orderNumber}</p>
-                <ResolveForm orderId={row.orderId} />
+                {row.bankRefundPending ? (
+                  <p className="text-sm text-foreground" data-testid="bank-refund-pending">
+                    A refund of order #{row.orderNumber} is still pending with the bank. Do not repay this order until it finishes.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mb-2 text-sm text-foreground">Resolve #{row.orderNumber}</p>
+                    <ResolveForm orderId={row.orderId} />
+                  </>
+                )}
               </div>
             ))}
           </div>
