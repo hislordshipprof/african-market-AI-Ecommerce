@@ -378,8 +378,13 @@ test.describe("Phase 3 motion and depth", () => {
   test("category pack filter reaches the actual quick view default", async ({ page }) => {
     const release = await holdListingDetail(page);
     await page.goto(`${BASE}/categories/grains-and-flours?sizes=1`);
-    await page.getByTestId("filter-pack-option").filter({ hasText: "5 lb bag" }).click();
+    const fivePound = page.getByTestId("filter-pack-option").filter({ hasText: "5 lb bag" });
+    await fivePound.click();
+    // The chip is a navigation. Opening quick view before it commits uses the
+    // unfiltered pack, so aria-pressed on "5 lb bag" is false under load.
+    await expect(fivePound).toHaveAttribute("aria-current", "page");
     const card = page.getByTestId("listing-card").filter({ hasText: "Egusi" }).first();
+    await expect(card).toContainText("5 lb bag");
     await card.hover();
     await card.getByRole("button", { name: /Quick view/ }).click();
     const dialog = page.getByRole("dialog", { name: /Quick view/ });
