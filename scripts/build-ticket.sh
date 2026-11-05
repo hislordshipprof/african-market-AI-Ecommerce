@@ -103,7 +103,7 @@ FAST="${FAST:-0}"
 REPLAN="$WT/.builder/replan-$N"
 mkdir -p "$WT/.builder"; rm -f "$REPLAN"
 FAST_RULE=""
-[ "$FAST" = "1" ] && FAST_RULE="FAST PATH. This overrides the rules above where they differ. The coordinator judged this ticket small and low-risk, so there is no planner brief and no Brief review. (1) Before writing code, read the issue, check its claims against origin/main, and post one short issue comment whose first line is '## Fast-path brief' (never call it an agent brief): scope and exclusions, each acceptance criterion as a scenario, the edge cases, and the tests you will write. Where the rules above mention the agent brief, its 'Brief review' or its Review checklist, use this Fast-path brief. The independent reviewer reviews against it. (2) QA is proportionate, replacing the qa pass in /supermatt:implement and docs/agents/builder.md: prove every acceptance criterion and edge case with an automated test; no separate qa pass, no mutation runs, no manual scenario walkthroughs. Only if the ticket changes something a user sees in the running app, check that one behaviour there (and the UI design pass still applies). Write the QA verdict line as 'QA: proportionate (fast path), <n> criteria covered by tests'. (3) If the work turns out to touch money, auth, RLS/data isolation, migrations, order state or an external provider: stop, post that on the issue, write the reason to $REPLAN, and end without committing or pushing. The coordinator replans it in full."
+[ "$FAST" = "1" ] && FAST_RULE="FAST PATH. This overrides the rules above where they differ. The coordinator judged this ticket small and low-risk, so there is no planner brief and no Brief review. (1) Before writing code, read the issue, check its claims against origin/main, and, unless the issue already has one, post one short issue comment whose first line is '## Fast-path brief' (never call it an agent brief): scope and exclusions, each acceptance criterion as a scenario, the edge cases, and the tests you will write. Where the rules above mention the agent brief, its 'Brief review' or its Review checklist, use this Fast-path brief. The independent reviewer reviews against it. (2) QA is proportionate, replacing the qa pass in /supermatt:implement and docs/agents/builder.md: prove every acceptance criterion and edge case with an automated test; no separate qa pass, no mutation runs, no manual scenario walkthroughs. Only if the ticket changes something a user sees in the running app, check that one behaviour there (and the UI design pass still applies). Write the QA verdict line as 'QA: proportionate (fast path), <n> criteria covered by tests'. (3) If the work turns out to touch money, auth, RLS/data isolation, migrations, order state or an external provider: stop, post that on the issue, write the reason to $REPLAN, and end without committing or pushing. The coordinator replans it in full."
 LANE_PORT="${E2E_PORT:-3000}"
 # Cap local Playwright browsers per lane (several lanes share this machine).
 export E2E_WORKERS="${E2E_WORKERS:-4}"
@@ -130,7 +130,14 @@ run_fix() {
   sid=$(cat "$SESSION_FILE" 2>/dev/null || true)
   LOG="$ROOT/.builder/logs/ticket-$N-fix-$(date +%Y%m%d-%H%M%S).json"
   local prompt="/supermatt:fix-findings $findings
-These findings come from an independent reviewer or from local-ci, not from you. Reproduce each one first (a failing test, or a command showing the failure). If one does not reproduce, say so with the evidence and leave that code alone. Fix the rest test-first. In a fix round run only the unit, integration and e2e specs affected by these findings, plus typecheck and lint; never run the whole suite or scripts/ci-local.sh. Then commit and push to the same PR; the pipeline re-runs local-ci. Do not review your own fix; the independent reviewer re-reviews it. $RULES${FAST_RULE:+
+These findings come from an independent reviewer or from local-ci, not from you. Reproduce each one first (a failing test, or a command showing the failure). If one does not reproduce, say so with the evidence and leave that code alone.
+ANALYSE BEFORE YOU FIX (owner rule 2026-11-05: no blind fix-and-refix rounds). For every reproduced code finding (not a pure CI or infrastructure failure), before changing code:
+(1) Model the whole behaviour the finding lives in: the state machine or data flow, and every actor, event, retry and concurrent path that touches it, not only the reported sequence.
+(2) Research how it really works: the provider's official docs (cite the URLs), how established products handle the same case, and the repo's spec, ADRs and GLOSSARY.
+(3) Write the scenario matrix: the reported case plus every sibling case your model implies (failures, retries, duplicates, out-of-order events, concurrency, partial and full amounts), each with the expected outcome and the invariant it protects.
+(4) Fix the class of bug so every row holds, and turn every row into a test.
+Post the model, the sources and the matrix as one comment on issue #$N before you push, and put the matrix in $REPORT. A fix that only patches the reported sequence will be sent back.
+Fix test-first. In a fix round run only the unit, integration and e2e specs affected by these findings, plus typecheck and lint; never run the whole suite or scripts/ci-local.sh. Then commit and push to the same PR; the pipeline re-runs local-ci. Do not review your own fix; the independent reviewer re-reviews it. $RULES${FAST_RULE:+
 $FAST_RULE}"
   [ -n "$sid" ] || prompt="$FRESH_CONTEXT
 $prompt"
@@ -221,6 +228,10 @@ $(tail -80 "$CI_LOG")
     run_fix "$findings"
     cd "$ROOT"
     [ -z "${status:-}" ] || break
+    # A fast-path builder that stopped for a replan inside a fix round: do not re-review the same HEAD.
+    if [ "$FAST" = "1" ] && [ -f "$REPLAN" ]; then
+      echo "Fast path stopped: replan required for #$N. $(cat "$REPLAN")"; exit 4
+    fi
   done
 fi
 
