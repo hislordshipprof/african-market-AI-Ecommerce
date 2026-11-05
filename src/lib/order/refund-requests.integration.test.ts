@@ -314,4 +314,88 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     expect(saved.state).toBe("ABANDONED");
     expect(refundRequests.filter((call) => call.paymentIntentId === pi)).toHaveLength(0);
   });
+
+  it("a stale snapshot does not abandon a replay another server just reserved", async () => {
+    const { order, pi } = await cancellingOrder(400);
+    const key = `refund:${order.id}:1`;
+    const stale = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 400,
+        refundApplicationFee: true,
+        state: "UNKNOWN",
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+    });
+    await storeScoped(storeId).refundRequest.update({
+      where: { id: stale.id },
+      data: { state: "REPLAYING", lastCheckedAt: new Date() },
+    });
+    const saved = await reconcileRefundRequest(stale);
+    expect(saved.state).toBe("REPLAYING");
+    expect((await storeScoped(storeId).refundRequest.findUnique({ where: { id: stale.id } }))?.state).toBe("REPLAYING");
+    expect(refundRequests.filter((call) => call.paymentIntentId === pi)).toHaveLength(0);
+    expect(await storeScoped(storeId).auditLog.count({
+      where: { entityId: order.id, action: "refund_request_unknown" },
+    })).toBe(0);
+  });
+
+  it("a stale snapshot does not abandon a request the provider already answered", async () => {
+    const { order, pi } = await cancellingOrder();
+    const key = `refund:${order.id}:1`;
+    const stale = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "UNKNOWN",
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+    });
+    await storeScoped(storeId).refundRequest.update({
+      where: { id: stale.id },
+      data: { state: "CREATED", providerStatus: "succeeded", providerRefundId: "re_done" },
+    });
+    const saved = await reconcileRefundRequest(stale);
+    expect(saved.state).toBe("CREATED");
+    const notCreated = await storeScoped(storeId).refundRequest.update({
+      where: { id: stale.id },
+      data: { state: "NOT_CREATED", providerStatus: null, providerRefundId: null },
+    });
+    const rejected = await reconcileRefundRequest({ ...stale, state: "UNKNOWN" });
+    expect(rejected.state).toBe("NOT_CREATED");
+    expect(notCreated.state).toBe("NOT_CREATED");
+  });
+
+  it("a stale expired lease does not overwrite a lease that was just refreshed", async () => {
+    const { order, pi } = await cancellingOrder();
+    const key = `refund:${order.id}:1`;
+    const current = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "REPLAYING",
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        lastCheckedAt: new Date(),
+      },
+    });
+    const stale = {
+      ...current,
+      state: "REPLAYING",
+      lastCheckedAt: new Date(Date.now() - REPLAY_LEASE_MS - 1_000),
+    };
+    const saved = await reconcileRefundRequest(stale);
+    expect(saved.state).toBe("REPLAYING");
+    expect(refundRequests.filter((call) => call.paymentIntentId === pi)).toHaveLength(0);
+  });
 });

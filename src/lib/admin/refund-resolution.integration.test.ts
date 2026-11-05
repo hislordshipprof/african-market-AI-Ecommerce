@@ -27,7 +27,7 @@ import { recordReconcileResult } from "../inngest/functions";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundCreatedLate, setRefundStatus } from "../stripe/fake";
 import { RefundNotCreatedError } from "../stripe/errors";
-import { applyProviderRefund, evaluateOrderRefundState, reconcileRefundRequest, REFUND_REQUEST_ABANDON_MS } from "../order/refund-requests";
+import { applyProviderRefund, clearReplayCallsForTests, evaluateOrderRefundState, reconcileRefundRequest, REFUND_REQUEST_ABANDON_MS } from "../order/refund-requests";
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { failedAtLabel } from "./failed-at";
 import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction } from "./refund-resolution";
@@ -2212,5 +2212,110 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await storeScoped(storeAId).auditLog.count({
       where: { entityId: order.id, action: "refund_resolved_manually" },
     })).toBe(0);
+  });
+
+  it("review186 stale reader must not abandon a newly reserved live replay", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Race repayment" },
+    });
+    const pi = `pi_stale_replay_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "race-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26630,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const key = `refund:${order.id}:1`;
+    const stale = await storeScoped(storeAId).refundRequest.create({
+      data: {
+        storeId: storeAId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "UNKNOWN",
+        createdAt: new Date(now - REFUND_REQUEST_ABANDON_MS + 5000),
+      },
+    });
+    let releaseList!: () => void;
+    let listEntered!: () => void;
+    const listGate = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    const listStarted = new Promise<void>((resolve) => {
+      listEntered = resolve;
+    });
+    let releaseRefund!: () => void;
+    let refundEntered!: () => void;
+    const refundGate = new Promise<void>((resolve) => {
+      releaseRefund = resolve;
+    });
+    const refundStarted = new Promise<void>((resolve) => {
+      refundEntered = resolve;
+    });
+    const originalList = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    const originalRefund = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    let lists = 0;
+    const listSpy = vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id) => {
+      if (id === pi && ++lists === 1) {
+        listEntered();
+        await listGate;
+        return [];
+      }
+      return originalList(id);
+    });
+    const refundSpy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (...args) => {
+      refundEntered();
+      await refundGate;
+      return originalRefund(...args);
+    });
+    const staleReader = reconcileRefundRequest(stale);
+    try {
+      await listStarted;
+      const replay = reconcileRefundRequest(stale);
+      await refundStarted;
+      const leased = await storeScoped(storeAId).refundRequest.findUniqueOrThrow({ where: { id: stale.id } });
+      expect(leased.state).toBe("REPLAYING");
+      clearReplayCallsForTests();
+      clock.mockReturnValue(now + 10000);
+      releaseList();
+      await staleReader;
+      const abandoned = await storeScoped(storeAId).refundRequest.findUniqueOrThrow({ where: { id: stale.id } });
+      expect(abandoned.state).toBe("REPLAYING");
+      const result = await resolveRefundFailed(order.id, "Paid 1000 outside app while replay live", 1000, 1000);
+      releaseRefund();
+      await replay;
+      expect(result.ok, "Manual repayment must be refused while another server has a live refund call").toBe(false);
+      expect(await storeScoped(storeAId).auditLog.count({
+        where: { entityId: order.id, action: "refund_resolved_manually" },
+      })).toBe(0);
+      const refunds = await originalList(pi);
+      expect(refunds.filter((refund) => refund.status === "succeeded")).toEqual([
+        expect.objectContaining({ amountRefunded: 1000 }),
+      ]);
+    } finally {
+      releaseList();
+      releaseRefund();
+      await staleReader.catch(() => {});
+      listSpy.mockRestore();
+      refundSpy.mockRestore();
+      clock.mockRestore();
+      setStripeProvider(fakeStripeProvider);
+    }
   });
 });

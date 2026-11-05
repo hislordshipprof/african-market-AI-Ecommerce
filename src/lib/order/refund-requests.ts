@@ -19,6 +19,11 @@ export const REPLAY_LEASE_MS = 2 * 60 * 1000;
 /** Keys whose refundPayment call has not returned in this process. A sweep must not replay them. */
 const callsInFlight = new Set<string>();
 
+/** Another server does not share this process's set. Tests use this to stand in for that server. */
+export function clearReplayCallsForTests(): void {
+  callsInFlight.clear();
+}
+
 const TERMINAL_PROVIDER_STATUSES = new Set(["succeeded", "failed", "canceled"]);
 
 export type RefundRequestRow = RefundRequest;
@@ -145,6 +150,38 @@ function replayLeaseFresh(row: { state: string; lastCheckedAt: Date }, now = Dat
   return row.state === "REPLAYING" && now - row.lastCheckedAt.getTime() < REPLAY_LEASE_MS;
 }
 
+/**
+ * Abandonment decides from the current row, under the store lock.
+ * A stale snapshot must not overwrite a live replay or a finished request.
+ */
+async function abandonIfIdle(row: RefundRequestRow): Promise<{ row: RefundRequestRow; changed: boolean }> {
+  return storeScopedTransaction(row.storeId, async (tx) => {
+    await lockStoreRow(tx, row.storeId);
+    const current = await tx.refundRequest.findUnique({ where: { id: row.id } });
+    if (!current) return { row, changed: false };
+    if (
+      current.state === "CREATED"
+      || current.state === "ABANDONED"
+      || current.state === "NOT_CREATED"
+      || replayLeaseFresh(current)
+    ) {
+      return { row: current, changed: false };
+    }
+    const age = Date.now() - current.createdAt.getTime();
+    if (age < REFUND_REQUEST_ABANDON_MS) return { row: current, changed: false };
+    const updated = await tx.refundRequest.updateMany({
+      where: { id: current.id, state: current.state, lastCheckedAt: current.lastCheckedAt },
+      data: { state: "ABANDONED", lastCheckedAt: new Date(Date.now()) },
+    });
+    if (updated.count !== 1) {
+      const again = await tx.refundRequest.findUnique({ where: { id: current.id } });
+      return { row: again ?? current, changed: false };
+    }
+    const abandoned = await tx.refundRequest.findUnique({ where: { id: current.id } });
+    return { row: abandoned ?? current, changed: true };
+  });
+}
+
 /** One server reserves the replay. Another server sees the reservation and does not send it again. */
 async function claimReplay(row: RefundRequestRow): Promise<RefundRequestRow | null> {
   return storeScopedTransaction(row.storeId, async (tx) => {
@@ -211,11 +248,11 @@ export async function reconcileRefundRequest(row: RefundRequestRow): Promise<Ref
     }
   }
   if (row.state === "ABANDONED" || row.state === "NOT_CREATED" || row.state === "CREATED") return row;
-  if (replayLeaseFresh(row)) return row;
-  const abandoned = await saveRequest(row.storeId, row.id, { state: "ABANDONED" });
+  const decision = await abandonIfIdle(row);
+  if (!decision.changed) return decision.row;
   await alertAbandoned(row.storeId, row.orderId, row.key);
   await evaluateOrderRefundState(row.orderId);
-  return abandoned;
+  return decision.row;
 }
 
 export async function reconcileOpenRefundRequests(storeId: string, orderId: string): Promise<void> {
