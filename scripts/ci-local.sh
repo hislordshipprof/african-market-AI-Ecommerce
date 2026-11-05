@@ -48,9 +48,11 @@ echo $$ > "$LOCK/pid"
 # build-ticket.sh greps for this line: a run that has not printed it is still queued and is safe to cancel.
 echo "== local-ci: lock acquired"
 FAILED_AT=""
+TEST_OUT=""
 cleanup() {
   local rc=$?
   if [ "$rc" -ne 0 ] && [ -z "$FAILED_AT" ]; then status failure "failed: setup (see log)"; echo "local-ci SETUP failed on $SHA"; fi
+  [ -z "$TEST_OUT" ] || rm -f "$TEST_OUT"
   rm -rf "$LOCK"
 }
 trap cleanup EXIT
@@ -102,14 +104,16 @@ if ! step test pnpm test --retry=1 2>&1 | tee "$TEST_OUT"; then
   # Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during the slow Stripe sandbox tests even
   # when every test passed. That is the runner, not the code, so it gets one whole rerun. A real test failure
   # does not, because --retry already retried each failed test.
-  if grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" && ! grep -Eq 'Tests +[0-9]+ failed' "$TEST_OUT"; then
+  # Vitest colours its summary even through a pipe on Windows, so strip ANSI codes before reading the counts.
+  # Either a failed test or a test file that failed to load means a real failure.
+  if grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
+    && ! sed 's/\x1b\[[0-9;]*m//g' "$TEST_OUT" | grep -Eq '(Tests|Test Files) +[0-9]+ failed'; then
     echo "== local-ci: every test passed but Vitest's worker RPC timed out; rerunning the unit tests once"
     step test pnpm test --retry=1 || fail test "failed again on the rerun after a Vitest RPC timeout"
   else
     fail test "each failed test already retried once, so not a one-off flake"
   fi
 fi
-rm -f "$TEST_OUT"
 step build pnpm build || { echo "== local-ci: build failed once; rerunning to rule out a load crash"
   step build pnpm build || fail build "failed twice in a row"; }
 if ! step e2e pnpm test:e2e --retries=1; then
