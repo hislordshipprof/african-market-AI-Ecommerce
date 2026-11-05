@@ -5,6 +5,25 @@ import path from "node:path";
 import { expect, it } from "vitest";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True once `pid` is gone. A live process stays false for the whole wait. */
+async function waitUntilDead(pid: number, ms = 2_000): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (!processAlive(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !processAlive(pid);
+}
+
 function killTree(pid: number): Promise<void> {
   return new Promise((resolve) => {
     const killer = process.platform === "win32"
@@ -92,28 +111,39 @@ it("does not treat a stranger health response as this child", async () => {
   const stranger = await httpOn(0, 503, "stranger");
   const script = `
     const net = require("node:net");
+    process.stdout.write("PID=" + process.pid + "\\n");
     const server = net.createServer();
     server.on("error", (error) => {
       process.stdout.write(String(error.code) + "\\n");
-      process.exit(1);
+      setInterval(() => {}, 1000);
     });
     server.listen(${stranger.port}, "127.0.0.1");
   `;
+  let childPid = 0;
   try {
-    await expect(
-      startSpawnedServer({
+    let message = "";
+    try {
+      await startSpawnedServer({
         command: process.execPath,
         args: ["-e", script],
         port: stranger.port,
         healthUrl: `http://127.0.0.1:${stranger.port}/api/health`,
         healthOk: (status) => status === 200 || status === 503,
         timeoutMs: 5_000,
-      }),
-    ).rejects.toThrow(/taken|EADDRINUSE|exited/i);
+      });
+      message = "resolved";
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/taken|EADDRINUSE/i);
+    childPid = Number(message.match(/PID=(\d+)/)?.[1]);
+    expect(childPid).toBeGreaterThan(0);
+    expect(await waitUntilDead(childPid)).toBe(true);
     const still = await fetch(`http://127.0.0.1:${stranger.port}/api/health`);
     expect(still.status).toBe(503);
     expect(await still.text()).toBe("stranger");
   } finally {
+    if (childPid > 0 && processAlive(childPid)) await killTree(childPid);
     await stranger.close();
   }
 });
@@ -171,6 +201,35 @@ it("stop kills the listener pnpm exec leaves after the launcher is gone", async 
     await running.stop();
   }
 }, 40_000);
+
+it("a start that never becomes ready kills the child that stays up", async () => {
+  const port = await reservePort();
+  const script = `
+    process.stdout.write("PID=" + process.pid + "\\n");
+    setInterval(() => {}, 1000);
+  `;
+  let childPid = 0;
+  try {
+    let message = "";
+    try {
+      await startSpawnedServer({
+        command: process.execPath,
+        args: ["-e", script],
+        port,
+        timeoutMs: 400,
+      });
+      message = "resolved";
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/not ready/i);
+    childPid = Number(message.match(/PID=(\d+)/)?.[1]);
+    expect(childPid).toBeGreaterThan(0);
+    expect(await waitUntilDead(childPid)).toBe(true);
+  } finally {
+    if (childPid > 0 && processAlive(childPid)) await killTree(childPid);
+  }
+});
 
 it("fails when the child exits before it is ready", async () => {
   const port = await reservePort();
