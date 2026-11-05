@@ -169,8 +169,15 @@ step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
 # Either a failed test or a test file that failed to load means a real failure.
 run_unit() {
   TEST_OUT="$(mktemp)"
-  if ! step test "$@" 2>&1 | tee "$TEST_OUT"; then
-    if bash "$SCRIPTS/vitest-rpc-only.sh" "$TEST_OUT"; then
+  local rc=0 codes
+  step test "$@" 2>&1 | tee "$TEST_OUT" || {
+    codes=("${PIPESTATUS[@]}")
+    rc="${codes[0]}"
+    # A failed tee means the output cannot be trusted, so it is never exit code 1.
+    if [ "$rc" = 0 ]; then rc=2; fi
+  }
+  if [ "$rc" != 0 ]; then
+    if bash "$SCRIPTS/vitest-rpc-only.sh" "$TEST_OUT" "$rc"; then
       echo "== local-ci: every test is accounted for and the only error is Vitest's worker RPC timeout; not rerunning"
     elif grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
       && ! sed 's/\x1b\[[0-9;]*m//g' "$TEST_OUT" | grep -Eq '(Tests|Test Files) +[0-9]+ failed'; then
