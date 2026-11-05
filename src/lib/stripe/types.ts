@@ -52,6 +52,8 @@ export interface RefundResult {
   refundId: string;
   amountRefunded: number;
   status: string;
+  /** Set when this refund was created for a reserved application request. */
+  reservationKey?: string;
 }
 
 export interface StripeProvider {
@@ -94,7 +96,7 @@ export interface StripeProvider {
     paymentIntentId: string,
     amountCents: number,
     idempotencyKey?: string,
-    options?: { refundApplicationFee?: boolean },
+    options?: { refundApplicationFee?: boolean; reservationKey?: string },
   ): Promise<RefundResult>;
 
   /** Refunds on this PaymentIntent. Pending refunds stay pending. */

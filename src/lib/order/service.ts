@@ -124,22 +124,24 @@ async function refundCapturedBalance(
       throw new Error("Refund attempt is still in backoff");
     }
     const refundAttempt = reservedRefund.attempt;
+    const refundKey = reservedRefund.refundKey ?? refundAttemptKey(orderId, already, refundAttempt);
     try {
       const refund = await stripe.refundPayment(
         paymentIntentId,
         remaining,
-        `refund:${orderId}:${already}:${refundAttempt}`,
-        REFUND_APPLICATION_FEE,
+        refundKey,
+        { ...REFUND_APPLICATION_FEE, reservationKey: refundKey },
       );
+      await noteRefundObserved(storeId, orderId, refundAttempt, refund.refundId, refundKey);
       const after = await stripe.retrievePaymentIntent(paymentIntentId);
       const covered = after.amountRefunded ?? already + refund.amountRefunded;
-      if (refund.status === "succeeded" && covered < after.amountReceived) {
+      const settled = refund.status !== "pending" && refund.status !== "requires_action";
+      if (settled) {
         await noteAttemptReleased(storeId, orderId, "refund_retry", refundAttempt);
+      }
+      if (refund.status === "succeeded" && covered < after.amountReceived) {
         pi = after;
         continue;
-      }
-      if (refund.status !== "pending" && refund.status !== "requires_action") {
-        await noteAttemptReleased(storeId, orderId, "refund_retry", refundAttempt);
       }
       return refund;
     } catch (err) {
@@ -183,6 +185,10 @@ async function refundRecordedOnCharge(
   throw new Error("Captured amount is marked refunded but no refund covers it");
 }
 
+function refundAttemptKey(orderId: string, alreadyRefundedCents: number, attempt: number): string {
+  return `refund:${orderId}:${alreadyRefundedCents}:${attempt}`;
+}
+
 function captureKey(orderId: string, attempt: number): string {
   return `capture:${orderId}:${attempt}`;
 }
@@ -196,7 +202,7 @@ async function reserveAttempt(
   orderId: string,
   action: "capture_retry" | "cancel_retry" | "refund_retry",
   extra: Record<string, unknown> = {},
-): Promise<{ ok: true; attempt: number } | { ok: false; waitMs: number; exhausted?: boolean; blocked?: boolean }> {
+): Promise<{ ok: true; attempt: number; refundKey?: string } | { ok: false; waitMs: number; exhausted?: boolean; blocked?: boolean }> {
   return storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     if (action === "refund_retry") {
@@ -218,7 +224,13 @@ async function reserveAttempt(
         const waitMs = captureBackoffMs(newestAfter.attempt) - (Date.now() - prior[0].createdAt.getTime());
         if (waitMs > 0) return { ok: false, waitMs };
       }
-      return { ok: true, attempt: newestAfter.attempt };
+      return {
+        ok: true,
+        attempt: newestAfter.attempt,
+        ...(action === "refund_retry"
+          ? { refundKey: storedRefundKey(orderId, prior, newestAfter.attempt) }
+          : {}),
+      };
     }
     const reservations = prior.filter((row) => {
       const after = row.after as { inFlight?: boolean } | null;
@@ -235,16 +247,46 @@ async function reserveAttempt(
       if (waitMs > 0) return { ok: false, waitMs };
     }
     const attempt = reservations.length + 1;
+    const refundKey = action === "refund_retry"
+      ? refundAttemptKey(orderId, Number(extra.alreadyRefundedCents ?? 0), attempt)
+      : undefined;
     await tx.auditLog.create({
-      data: systemAuditData(storeId, orderId, action, { attempt, ...extra } as Prisma.InputJsonValue),
+      data: systemAuditData(
+        storeId,
+        orderId,
+        action,
+        { attempt, ...extra, ...(refundKey ? { refundKey } : {}) } as Prisma.InputJsonValue,
+      ),
     });
     if (action === "refund_retry" || action === "cancel_retry") {
       await tx.auditLog.create({
-        data: systemAuditData(storeId, orderId, action, { attempt, inFlight: true }),
+        data: systemAuditData(storeId, orderId, action, {
+          attempt,
+          inFlight: true,
+          ...(refundKey ? { refundKey } : {}),
+        }),
       });
     }
-    return { ok: true, attempt };
+    return { ok: true, attempt, ...(refundKey ? { refundKey } : {}) };
   });
+}
+
+function storedRefundKey(
+  orderId: string,
+  prior: { after: unknown }[],
+  attempt: number,
+): string {
+  for (const row of prior) {
+    const after = row.after as { attempt?: number; refundKey?: string } | null;
+    if (after?.attempt === attempt && typeof after.refundKey === "string") return after.refundKey;
+  }
+  for (const row of prior) {
+    const after = row.after as { attempt?: number; inFlight?: boolean; alreadyRefundedCents?: number } | null;
+    if (after?.attempt === attempt && typeof after.inFlight !== "boolean") {
+      return refundAttemptKey(orderId, after.alreadyRefundedCents ?? 0, attempt);
+    }
+  }
+  return refundAttemptKey(orderId, 0, attempt);
 }
 
 /** The same key stays in use until Stripe finishes the request that owns it. */
@@ -268,6 +310,27 @@ function refundInFlight(value: RefundResult | { inFlight: true } | { blocked: tr
 
 function refundBlocked(value: RefundResult | { inFlight: true } | { blocked: true }): value is { blocked: true } {
   return "blocked" in value;
+}
+
+/** The provider returned a refund id for this reserved request. It stays in flight until that refund finishes. */
+async function noteRefundObserved(
+  storeId: string,
+  orderId: string,
+  attempt: number,
+  refundId: string,
+  refundKey: string,
+): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await tx.auditLog.create({
+      data: systemAuditData(storeId, orderId, "refund_retry", {
+        attempt,
+        inFlight: true,
+        refundId,
+        refundKey,
+      }),
+    });
+  });
 }
 
 /** A stored 500 is pinned to its key. The next attempt has to be a new number. */
@@ -298,8 +361,8 @@ function refundStillOpen(status: string): boolean {
 }
 
 /**
- * An in-flight refund request is still reserved until a refund it created is finished.
- * An older refund failing, or an empty pending list, does not prove this request finished.
+ * An in-flight refund request stays reserved until the refund with its id or reservation key is finished.
+ * An unrelated refund does not settle it.
  */
 export async function refundReservationStillOpen(
   storeId: string,
@@ -312,17 +375,23 @@ export async function refundReservationStillOpen(
   });
   const newest = prior[0]?.after as { attempt?: number; inFlight?: boolean } | null;
   if (newest?.inFlight !== true || typeof newest.attempt !== "number") return false;
-  const reservation = prior.find((row) => {
-    const after = row.after as { attempt?: number; inFlight?: boolean } | null;
-    return after?.attempt === newest.attempt && typeof after?.inFlight !== "boolean";
-  });
-  const known = (reservation?.after as { knownRefundIds?: string[] } | null)?.knownRefundIds;
-  if (!paymentIntentId || !known) return true;
+  const attempt = newest.attempt;
+  let refundKey: string | undefined;
+  let refundId: string | undefined;
+  for (const row of prior) {
+    const after = row.after as { attempt?: number; refundKey?: string; refundId?: string } | null;
+    if (after?.attempt !== attempt) continue;
+    if (!refundKey && typeof after.refundKey === "string") refundKey = after.refundKey;
+    if (!refundId && typeof after.refundId === "string") refundId = after.refundId;
+  }
+  if (!paymentIntentId || (!refundKey && !refundId)) return true;
   try {
     const listed = await getStripeProvider().listRefunds(paymentIntentId);
-    const created = listed.filter((refund) => !known.includes(refund.refundId));
-    if (created.length === 0) return true;
-    return created.some((refund) => refundStillOpen(refund.status));
+    const ours = listed.find((refund) =>
+      (refundId !== undefined && refund.refundId === refundId)
+      || (refundKey !== undefined && refund.reservationKey === refundKey));
+    if (!ours) return true;
+    return refundStillOpen(ours.status);
   } catch {
     return true;
   }

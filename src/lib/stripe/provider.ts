@@ -239,6 +239,9 @@ export const stripeProvider: StripeProvider = {
       refundId: refund.id,
       amountRefunded: refund.amount,
       status: mapRefundStatus(refund.status),
+      ...(typeof refund.metadata?.reservation === "string"
+        ? { reservationKey: refund.metadata.reservation }
+        : {}),
     })) satisfies RefundResult[];
   },
 
@@ -249,6 +252,9 @@ export const stripeProvider: StripeProvider = {
       refundId: refund.id,
       amountRefunded: refund.amount,
       status: mapRefundStatus(refund.status),
+      ...(typeof refund.metadata?.reservation === "string"
+        ? { reservationKey: refund.metadata.reservation }
+        : {}),
     } satisfies RefundResult;
   },
 
@@ -261,6 +267,7 @@ export const stripeProvider: StripeProvider = {
           amount: amountCents,
           reverse_transfer: true,
           ...(options?.refundApplicationFee ? { refund_application_fee: true } : {}),
+          ...(options?.reservationKey ? { metadata: { reservation: options.reservationKey } } : {}),
         },
         idempotencyKey ? { idempotencyKey } : undefined,
       );

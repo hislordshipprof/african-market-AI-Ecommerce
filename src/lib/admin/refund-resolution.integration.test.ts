@@ -783,6 +783,8 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const cancel = autoCancelOrder(storeAId, order.id);
     try {
       await enteredGate;
+      const dashboard = await original(pi, 100, "review9-dashboard");
+      expect(dashboard.status).toBe("succeeded");
       setRefundStatus(older.refundId, "failed");
       const webhook = await markTerminalRefundFailure({
         paymentIntentId: pi,
@@ -790,9 +792,9 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         refundStatus: "failed",
       });
       const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
-      const manual = await resolveRefundFailed(order.id, "Paid displayed 1000 cents by Zelle");
+      const manual = await resolveRefundFailed(order.id, "Paid displayed 900 cents by Zelle");
       expect(webhook).toEqual({ ok: true, action: "refund_failed" });
-      expect(queue?.owedCents).toBe(1000);
+      expect(queue?.owedCents).toBe(900);
       expect(queue?.bankRefundPending).toBe(true);
       expect(manual.ok).toBe(false);
       const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });

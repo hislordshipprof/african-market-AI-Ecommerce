@@ -38,6 +38,7 @@ type RefundEntry = {
   status: string;
   feePortion: number;
   seq: number;
+  reservationKey?: string;
 };
 
 type IdemRecord = {
@@ -173,6 +174,7 @@ function refundView(refundId: string): RefundResult {
     refundId,
     amountRefunded: entry.amountRefunded,
     status: entry.status,
+    ...(entry.reservationKey ? { reservationKey: entry.reservationKey } : {}),
   };
 }
 
@@ -453,6 +455,7 @@ const fakeStripeProvider: StripeProvider = {
         status,
         feePortion,
         seq: refundSeq,
+        ...(options?.reservationKey ? { reservationKey: options.reservationKey } : {}),
       });
       syncRefundBalance(paymentIntentId);
       return {
@@ -473,11 +476,7 @@ const fakeStripeProvider: StripeProvider = {
     return [...refunds.entries()]
       .filter(([, entry]) => entry.paymentIntentId === paymentIntentId)
       .sort((left, right) => right[1].seq - left[1].seq)
-      .map(([refundId, entry]) => ({
-        refundId,
-        amountRefunded: entry.amountRefunded,
-        status: entry.status,
-      })) satisfies RefundResult[];
+      .map(([refundId]) => refundView(refundId)) satisfies RefundResult[];
   },
 
   async retrieveRefund(refundId) {
