@@ -6,10 +6,12 @@ import { sendOrderAuthorized } from "./send";
 
 const enabled = process.env.INNGEST_DEV_SMOKE === "1";
 const devUrl = process.env.INNGEST_DEV_URL ?? "http://127.0.0.1:8288";
+const SWEEP_SLUG = "african-markets-order/sweep-orphaned-authorized";
 
 /**
  * Opt-in: start the app with INNGEST_DEV=1, then
  * `pnpm dlx inngest-cli@latest dev --no-discovery --host 127.0.0.1 --port 8288 -u http://localhost:3100/api/inngest`.
+ * CLI 1.49 answers runs through POST /v0/gql. GET /v1/runs is 404.
  * Run with INNGEST_DEV=1 INNGEST_DEV_SMOKE=1.
  */
 describe.skipIf(!enabled)("Inngest Dev Server smoke", () => {
@@ -33,7 +35,7 @@ describe.skipIf(!enabled)("Inngest Dev Server smoke", () => {
     const order = await storeScoped(store.id).order.create({
       data: {
         storeId: store.id,
-        number: 18600 + Math.floor(Math.random() * 1000),
+        number: 800000 + (Date.now() % 100000),
         customerId: customer.id,
         status: "AUTHORIZED",
         fulfillment: "pickup",
@@ -51,62 +53,109 @@ describe.skipIf(!enabled)("Inngest Dev Server smoke", () => {
     expect(sent?.inngestEventSentAt).toBeTruthy();
     const eventId = `order-authorized-${order.id}`;
     const runs = await waitForRuns(eventId);
-    const functionIds = runs.map((run) => run.function_id);
-    expect(functionIds).toEqual(expect.arrayContaining(["order/acceptance-alert", "order/auto-cancel"]));
+    const slugs = runs.map((run) => run.slug);
+    expect(slugs).toEqual(
+      expect.arrayContaining([
+        "african-markets-order/acceptance-alert",
+        "african-markets-order/auto-cancel",
+      ]),
+    );
+    await Promise.all(runs.map((run) => cancelRun(run.id)));
   }, 40_000);
 
   it("an overlapping sweep is skipped", async () => {
-    const first = await invokeFunction("order/sweep-orphaned-authorized");
-    const second = await invokeFunction("order/sweep-orphaned-authorized");
-    const bodies = `${JSON.stringify(first)} ${JSON.stringify(second)}`;
-    expect(bodies.toLowerCase()).toMatch(/skip/);
+    const before = new Date().toISOString();
+    await Promise.all([invokeSweep(), invokeSweep()]);
+    const runs = await waitForSweepRuns(before);
+    expect(runs).toHaveLength(1);
   }, 20_000);
 });
 
-type DevRun = { function_id: string; event_id?: string; eventId?: string; status?: string };
+type DevRun = { id: string; slug: string; status: string };
 
 async function waitForRuns(eventId: string): Promise<DevRun[]> {
   const deadline = Date.now() + 25_000;
-  const tried: string[] = [];
+  let internalId = "";
   while (Date.now() < deadline) {
-    const listed = await fetch(`${devUrl}/v1/events`);
-    const eventsBody = await listed.text();
-    if (listed.ok && eventsBody.includes(eventId)) {
-      for (const path of [
-        `/v1/events/${encodeURIComponent(eventId)}/runs`,
-        `/v1/events/${encodeURIComponent(eventId)}`,
-      ]) {
-        const response = await fetch(`${devUrl}${path}`);
-        const body = await response.text();
-        tried.push(`${path} ${response.status}`);
-        if (!response.ok) continue;
-        const runs = runsFrom(body).filter((run) => JSON.stringify(run).includes(eventId) || body.includes(eventId));
-        const functionIds = new Set(runs.map((run) => run.function_id).filter(Boolean));
-        if (functionIds.has("order/acceptance-alert") && functionIds.has("order/auto-cancel")) return runs;
-        if (body.includes("order/acceptance-alert") && body.includes("order/auto-cancel") && body.includes(eventId)) {
-          return [
-            { function_id: "order/acceptance-alert", event_id: eventId },
-            { function_id: "order/auto-cancel", event_id: eventId },
-          ];
-        }
+    internalId = internalId || (await eventInternalId(eventId));
+    if (internalId) {
+      const runs = (await listRuns("2026-01-01T00:00:00Z")).filter((run) => run.triggerIDs.includes(internalId));
+      const slugs = new Set(runs.map((run) => run.slug));
+      if (slugs.has("african-markets-order/acceptance-alert") && slugs.has("african-markets-order/auto-cancel")) {
+        return runs.map(({ id, slug, status }) => ({ id, slug, status }));
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error(`Dev Server did not start both runs for ${eventId}. Tried ${tried.join(", ")}`);
+  throw new Error(`Dev Server did not start both runs for ${eventId} (internal ${internalId || "missing"})`);
 }
 
-function runsFrom(body: string): DevRun[] {
-  const parsed = JSON.parse(body) as { data?: DevRun[]; runs?: DevRun[] } | DevRun[];
-  if (Array.isArray(parsed)) return parsed;
-  return parsed.data ?? parsed.runs ?? [];
+async function waitForSweepRuns(from: string): Promise<DevRun[]> {
+  const deadline = Date.now() + 15_000;
+  let seen: DevRun[] = [];
+  while (Date.now() < deadline) {
+    seen = (await listRuns(from))
+      .filter((run) => run.slug === SWEEP_SLUG)
+      .map(({ id, slug, status }) => ({ id, slug, status }));
+    if (seen.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return (await listRuns(from))
+        .filter((run) => run.slug === SWEEP_SLUG)
+        .map(({ id, slug, status }) => ({ id, slug, status }));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return seen;
 }
 
-async function invokeFunction(functionId: string): Promise<{ status: number; body: string }> {
-  const response = await fetch(`${devUrl}/v1/fn/invoke`, {
-    method: "PUT",
+type ListedRun = DevRun & { triggerIDs: string[] };
+
+async function listRuns(from: string): Promise<ListedRun[]> {
+  const body = await gql<{
+    runs: { edges: { node: { id: string; status: string; triggerIDs: string[]; function: { slug: string } } }[] };
+  }>(
+    `query ($from: Time!) {
+      runs(first: 50, orderBy: [{ field: QUEUED_AT, direction: DESC }], filter: { from: $from }) {
+        edges { node { id status triggerIDs function { slug } } }
+      }
+    }`,
+    { from },
+  );
+  return body.runs.edges.map((edge) => ({
+    id: edge.node.id,
+    status: edge.node.status,
+    slug: edge.node.function.slug,
+    triggerIDs: edge.node.triggerIDs,
+  }));
+}
+
+async function eventInternalId(eventId: string): Promise<string> {
+  const response = await fetch(`${devUrl}/v1/events`);
+  if (!response.ok) return "";
+  const body = (await response.json()) as { data?: { id?: string; internal_id?: string }[] };
+  return body.data?.find((event) => event.id === eventId)?.internal_id ?? "";
+}
+
+async function invokeSweep(): Promise<void> {
+  const body = await gql<{ invokeFunction: boolean }>(
+    `mutation { invokeFunction(functionSlug: "${SWEEP_SLUG}", data: {}) }`,
+  );
+  expect(body.invokeFunction).toBe(true);
+}
+
+async function cancelRun(runId: string): Promise<void> {
+  await gql(`mutation ($runID: ULID!) { cancelRun(runID: $runID) { id } }`, { runID: runId });
+}
+
+async function gql<T>(query: string, variables?: Record<string, string>): Promise<T> {
+  const response = await fetch(`${devUrl}/v0/gql`, {
+    method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ function_id: functionId }),
+    body: JSON.stringify({ query, variables }),
   });
-  return { status: response.status, body: await response.text() };
+  const body = (await response.json()) as { data?: T; errors?: { message: string }[] };
+  if (!response.ok || body.errors?.length) {
+    throw new Error(body.errors?.map((error) => error.message).join("; ") || `GraphQL ${response.status}`);
+  }
+  return body.data as T;
 }
