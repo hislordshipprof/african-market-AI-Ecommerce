@@ -104,6 +104,33 @@ function listingConfig(values: string[], extra?: Record<string, unknown>) {
   return { text: LISTING_SQL, values, ...extra };
 }
 
+function submitGetterConfig(firstRead: () => unknown) {
+  let reads = 0;
+  const config = {
+    text: LISTING_SQL,
+    values: ["token"],
+    get submit() {
+      if (++reads === 2) throw new Error("second read");
+      return firstRead();
+    },
+  };
+  return { config, reads: () => reads };
+}
+
+function submittableWithSubmitGetter() {
+  const query = new Query(LISTING_SQL, ["token"]);
+  const submit = query.submit.bind(query);
+  let reads = 0;
+  Object.defineProperty(query, "submit", {
+    configurable: true,
+    get() {
+      if (++reads === 2) throw new Error("second read");
+      return submit;
+    },
+  });
+  return { query, reads: () => reads };
+}
+
 function receiverCallbackConfig(kind: "own" | "inherited") {
   let observations = 0;
   const receivers: unknown[] = [];
@@ -990,6 +1017,125 @@ describe("import lock test helpers", () => {
         expect(err.message).toBe(CLOSED_CLIENT);
         await new Promise((resolve) => setTimeout(resolve, 20));
         expect(errors).toHaveLength(1);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("positional callback with a submit getter matches an unpatched client", async () => {
+      const client = await endedClient();
+      const native = submitGetterConfig(() => undefined);
+      const nativeCallback = trackedCallback("native-submit");
+      const nativeResult = queryAs(client, native.config, nativeCallback.fn);
+      expect(nativeResult).toBeUndefined();
+      expect(nativeResult).not.toBeInstanceOf(Promise);
+      expect(native.reads()).toBe(1);
+      expectDriverError(await awaitCallback(nativeCallback.done, "native-submit"));
+
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const patched = submitGetterConfig(() => undefined);
+      const callback = trackedCallback("patched-submit");
+      try {
+        const started = Date.now();
+        let thrown: unknown = null;
+        let result: unknown;
+        try {
+          result = queryAs(client, patched.config, callback.fn);
+        } catch (err) {
+          thrown = err;
+        }
+        expect(thrown).toBeNull();
+        expect(result).toBeUndefined();
+        expect(result).not.toBeInstanceOf(Promise);
+        expect(patched.reads()).toBe(1);
+        expect(delay.fired()).toBe(false);
+        expect(spy.seen).toHaveLength(1);
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]?.args[0]).toBe(patched.config);
+        expect(spy.seen[0]?.args[1]).toBe(callback.fn);
+        expectDriverError(await awaitCallback(callback.done, "patched-submit"));
+        expect(Date.now() - started).toBeLessThan(150);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("three-argument positional callback with a submit getter matches an unpatched client", async () => {
+      const client = await endedClient();
+      const values = ["token"];
+      const native = submitGetterConfig(() => undefined);
+      const nativeCallback = trackedCallback("native-3");
+      const nativeResult = queryAs(client, native.config, values, nativeCallback.fn);
+      expect(nativeResult).toBeUndefined();
+      expect(native.reads()).toBe(1);
+      expectDriverError(await awaitCallback(nativeCallback.done, "native-3"));
+
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const patched = submitGetterConfig(() => undefined);
+      const callback = trackedCallback("patched-3");
+      try {
+        let thrown: unknown = null;
+        let result: unknown;
+        try {
+          result = queryAs(client, patched.config, values, callback.fn);
+        } catch (err) {
+          thrown = err;
+        }
+        expect(thrown).toBeNull();
+        expect(result).toBeUndefined();
+        expect(result).not.toBeInstanceOf(Promise);
+        expect(patched.reads()).toBe(1);
+        expect(delay.fired()).toBe(false);
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]?.args).toEqual([patched.config, values, callback.fn]);
+        expectDriverError(await awaitCallback(callback.done, "patched-3"));
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("positional callback on a Submittable keeps native return when submit throws on a second read", async () => {
+      const client = await endedClient();
+      const native = submittableWithSubmitGetter();
+      const nativeCallback = trackedCallback("native-submittable");
+      const nativeResult = queryAs(client, native.query, nativeCallback.fn);
+      expect(nativeResult).toBe(native.query);
+      expect(nativeResult).not.toBeInstanceOf(Promise);
+      expect(native.reads()).toBe(1);
+      expectDriverError(await awaitCallback(nativeCallback.done, "native-submittable"));
+
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const patched = submittableWithSubmitGetter();
+      const callback = trackedCallback("patched-submittable");
+      try {
+        let thrown: unknown = null;
+        let result: unknown;
+        try {
+          result = queryAs(client, patched.query, callback.fn);
+        } catch (err) {
+          thrown = err;
+        }
+        expect(thrown).toBeNull();
+        expect(result).toBe(patched.query);
+        expect(result).not.toBeInstanceOf(Promise);
+        expect(patched.reads()).toBe(1);
+        expect(delay.fired()).toBe(false);
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]?.args[0]).toBe(patched.query);
+        expect(spy.seen[0]?.args[1]).toBe(callback.fn);
+        expectDriverError(await awaitCallback(callback.done, "patched-submittable"));
         expect(delay.fired()).toBe(false);
       } finally {
         await delay.restore();
