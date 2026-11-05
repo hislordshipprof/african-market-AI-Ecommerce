@@ -162,14 +162,17 @@ fail() { FAILED_AT="$1"; status failure "failed: $1"; echo "local-ci FAILED at $
 step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
 # run_unit <vitest command...>: every tier's unit tests.
 # Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during slow tests even when every test passed.
-# That is the runner, not the code, so it gets one whole rerun. A real test failure does not, because --retry
-# already retried each failed test.
+# It hit about half of the runs on 2026-11-05 and a rerun often hit it again, so a run that accounts for every test
+# (scripts/vitest-rpc-only.sh) passes as it stands. A timeout with results unproved gets one whole rerun. A real test
+# failure does not, because --retry already retried each failed test.
 # Vitest colours its summary even through a pipe on Windows, so strip ANSI codes before reading the counts.
 # Either a failed test or a test file that failed to load means a real failure.
 run_unit() {
   TEST_OUT="$(mktemp)"
   if ! step test "$@" 2>&1 | tee "$TEST_OUT"; then
-    if grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
+    if bash "$SCRIPTS/vitest-rpc-only.sh" "$TEST_OUT"; then
+      echo "== local-ci: every test is accounted for and the only error is Vitest's worker RPC timeout; not rerunning"
+    elif grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
       && ! sed 's/\x1b\[[0-9;]*m//g' "$TEST_OUT" | grep -Eq '(Tests|Test Files) +[0-9]+ failed'; then
       echo "== local-ci: every test passed but Vitest's worker RPC timed out; rerunning the unit tests once"
       step test "$@" || fail test "failed again on the rerun after a Vitest RPC timeout"
