@@ -22,8 +22,9 @@ export default async function RefundFailedOrdersPage() {
           No refunds need resolving.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-input bg-card">
-          <table className="w-full text-left text-sm">
+        <div className="rounded-lg border border-input bg-card">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[48rem] text-left text-sm">
             <thead className="border-b border-input bg-muted">
               <tr>
                 <th className="px-4 py-3 font-medium text-muted-foreground">Store</th>
@@ -48,7 +49,8 @@ export default async function RefundFailedOrdersPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
           <div className="space-y-6 border-t border-input p-4">
             {rows.map((row) => (
               <div key={row.orderId}>

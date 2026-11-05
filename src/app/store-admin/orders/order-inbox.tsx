@@ -304,7 +304,7 @@ export function OrderInbox({
                   {selectedOrder.customer.phone}
                 </div>
                 {selectedOrder.notes && (
-                  <p className="mt-1 text-sm italic text-muted-foreground">
+                  <p className="mt-1 whitespace-pre-line text-sm italic text-muted-foreground">
                     {selectedOrder.notes}
                   </p>
                 )}
