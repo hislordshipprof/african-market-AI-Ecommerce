@@ -9,6 +9,9 @@
 # builders do not run it. CI_DB=<name> runs on a fresh private database, and CI_RUNNER=<dir> runs in a separate
 # checkout of HEAD, so the reviewer working in the ticket worktree at the same time is never disturbed.
 set -euo pipefail
+# The whole script sits in one { } block, so bash parses all of it before running any of it. A run then cannot
+# break when this file changes underneath it (a git pull on main, or an edit) while a lane's suite is running.
+{
 REPO="hislordshipprof/african-market-AI-Ecommerce"
 SHA=$(git rev-parse HEAD)
 SRC="$(git rev-parse --show-toplevel)"
@@ -48,9 +51,11 @@ echo $$ > "$LOCK/pid"
 # build-ticket.sh greps for this line: a run that has not printed it is still queued and is safe to cancel.
 echo "== local-ci: lock acquired"
 FAILED_AT=""
+TEST_OUT=""
 cleanup() {
   local rc=$?
   if [ "$rc" -ne 0 ] && [ -z "$FAILED_AT" ]; then status failure "failed: setup (see log)"; echo "local-ci SETUP failed on $SHA"; fi
+  [ -z "$TEST_OUT" ] || rm -f "$TEST_OUT"
   rm -rf "$LOCK"
 }
 trap cleanup EXIT
@@ -97,7 +102,21 @@ fail() { FAILED_AT="$1"; status failure "failed: $1"; echo "local-ci FAILED at $
 step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
 step typecheck pnpm typecheck || fail typecheck "no retry"
 step lint pnpm lint || fail lint "no retry"
-step test pnpm test --retry=1 || fail test "each failed test already retried once, so not a one-off flake"
+TEST_OUT="$(mktemp)"
+if ! step test pnpm test --retry=1 2>&1 | tee "$TEST_OUT"; then
+  # Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during the slow Stripe sandbox tests even
+  # when every test passed. That is the runner, not the code, so it gets one whole rerun. A real test failure
+  # does not, because --retry already retried each failed test.
+  # Vitest colours its summary even through a pipe on Windows, so strip ANSI codes before reading the counts.
+  # Either a failed test or a test file that failed to load means a real failure.
+  if grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
+    && ! sed 's/\x1b\[[0-9;]*m//g' "$TEST_OUT" | grep -Eq '(Tests|Test Files) +[0-9]+ failed'; then
+    echo "== local-ci: every test passed but Vitest's worker RPC timed out; rerunning the unit tests once"
+    step test pnpm test --retry=1 || fail test "failed again on the rerun after a Vitest RPC timeout"
+  else
+    fail test "each failed test already retried once, so not a one-off flake"
+  fi
+fi
 step build pnpm build || { echo "== local-ci: build failed once; rerunning to rule out a load crash"
   step build pnpm build || fail build "failed twice in a row"; }
 if ! step e2e pnpm test:e2e --retries=1; then
@@ -113,3 +132,5 @@ fi
 
 status success "typecheck, lint, test, build, e2e passed"
 echo "local-ci PASSED on $SHA"
+exit 0
+}
