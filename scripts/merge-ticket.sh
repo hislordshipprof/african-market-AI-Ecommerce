@@ -47,7 +47,8 @@ if [ "$CMP" != "0" ] && [ "$PENDING_OR_FAILED" = "0" ]; then
 fi
 if { [ "$CMP" = "0" ] || [ "$DISJOINT" = "yes" ]; } && [ "$PENDING_OR_FAILED" = "0" ]; then
   gh pr comment "$PR" -R "$REPO" --body "Coordinator QA verdict: $VERDICT" >/dev/null
-  gh pr merge "$PR" -R "$REPO" --squash --delete-branch
+  # Pinned to the commit the checks above read: a later push fails the merge instead of landing untested.
+  gh pr merge "$PR" -R "$REPO" --squash --delete-branch --match-head-commit "$HEAD_SHA"
   echo "Merged PR #$PR (fast path: $([ "$CMP" = "0" ] && echo "up to date with main" || echo "behind main by $CMP commit(s), no overlapping files"), all checks green)."
   start_main_run_if_due
 else
@@ -61,7 +62,9 @@ else
     git -C "$WT" checkout -q -- screenshots 2>/dev/null || true
     git -C "$WT" fetch -q origin main
     if git -C "$WT" rebase -q origin/main; then
-      git -C "$WT" push -q --force-with-lease
+      # The lease names the commit that passed. A bare lease would accept whatever the fetch above just saw.
+      git -C "$WT" push -q --force-with-lease="refs/heads/$HEAD_REF:$HEAD_SHA" origin "HEAD:refs/heads/$HEAD_REF" \
+        || { echo "PR #$PR moved while rebasing; not overwriting it. Rerun the merge."; exit 1; }
       echo "PR #$PR rebased cleanly onto main; rerunning local-ci for what the rebase can affect."
       CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
       if (cd "$WT" && CI_REBASE_OF="$HEAD_SHA" E2E_PORT="${E2E_PORT:-3950}" CI_DB=ci \

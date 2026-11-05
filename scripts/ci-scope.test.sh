@@ -47,4 +47,9 @@ git update-ref refs/remotes/origin/main main
 git checkout -q -b t1p t1; git rebase -q main
 rebase_is_safe t1 t1p && { echo "FAIL a schema change on main passed"; fail=1; } || echo "ok   a schema change on main needs a full run"
 
+git checkout -q main; mkdir -p e2e; echo x > e2e/global-setup.ts; git add .; git commit -qm setup
+git update-ref refs/remotes/origin/main main
+git checkout -q -b t1s t1p; git rebase -q main
+rebase_is_safe t1p t1s && { echo "FAIL a test setup change on main passed"; fail=1; } || echo "ok   a test setup change on main needs a full run"
+
 exit "$fail"

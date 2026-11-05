@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# What local-ci must run for a change, sourced by ci-local.sh and merge-ticket.sh.
+# What local-ci must run for a change, sourced by ci-local.sh.
 # Owner-requested 2026-11-05: a full run took 20-35 minutes whatever the change.
 # Anything not recognised is "full", so a new kind of file can only cost time, never skip a check.
 
@@ -38,8 +38,11 @@ rebase_is_safe() {
   b=$(git diff "$new_base" "$new" | git patch-id --stable | cut -d' ' -f1)
   [ -n "$a" ] && [ "$a" = "$b" ] || return 1
   ! git diff --name-only "$old_base" "$new_base" \
-    | grep -qE '^(prisma/|package\.json$|pnpm-lock\.yaml$|patches/|next\.config\.|playwright\.config\.|vitest\.config\.|tsconfig|\.github/|src/proxy\.ts$|src/app/layout\.tsx$)'
+    | grep -qE '^(prisma/|package\.json$|pnpm-lock\.yaml$|patches/|next\.config\.|playwright\.config\.|vitest\.config\.|tsconfig|\.github/|src/proxy\.ts$|src/app/layout\.tsx$|src/lib/test-setup\.ts$|e2e/global-(setup|teardown)\.ts$)'
 }
+
+# CI_SUPERSEDED: the exit code of a run stopped by a newer push. It is neither a pass nor a test failure.
+CI_SUPERSEDED=3
 
 # stop_all_children_but <pid...>: stops each child of this shell's script and its tree, sparing the given pids.
 # Needs kill_tree from review-watch.sh.

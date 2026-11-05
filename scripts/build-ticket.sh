@@ -210,6 +210,11 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
       ci=skipped
     elif wait "$ci_pid"; then ci=pass; else ci=fail; fi
     echo "local-ci $round: $ci ($(tail -1 "$CI_LOG"))"
+    # A newer push stopped this run, so neither the review nor CI describes the branch now. The coordinator pushed
+    # it (builders are idle here) and decides what runs next. Grep, because the stop can come as a kill (exit 137).
+    if grep -q "local-ci SUPERSEDED" "$CI_LOG"; then
+      echo "A newer push superseded this run of #$N; the coordinator decides. See $CI_LOG"; break
+    fi
     [ "$verdict" = "VERDICT: PASS" ] && [ "$ci" = pass ] && break
     [ "$round" = "3" ] && { echo "Still blocking after 2 fix rounds; the coordinator decides. See .builder/review-$N.md and $CI_LOG"; break; }
     findings=""

@@ -35,6 +35,8 @@ status() { gh api "repos/$REPO/statuses/$SHA" -f state="$1" -f context=local-ci 
 . "$SCRIPTS/review-watch.sh"
 . "$SCRIPTS/ci-scope.sh"
 CHANGED=$(git diff --name-only "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
+# The paths handed to a test runner: a deleted file has nothing to run, and a runner fails on a path it can't find.
+PRESENT=$(git diff --name-only --diff-filter=d "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
 SCOPE="${CI_SCOPE:-$(printf '%s\n' "$CHANGED" | ci_scope)}"
 if [ -z "${CI_SCOPE:-}" ] && [ -n "${CI_REBASE_OF:-}" ] && [ "$SCOPE" = full ] \
   && [ "$(gh api "repos/$REPO/commits/$CI_REBASE_OF/status" --jq '[.statuses[] | select(.context == "local-ci")][0].state // "missing"')" = success ] \
@@ -73,7 +75,7 @@ while ! mkdir "$LOCK" 2>/dev/null; do
   waited=$((waited + 1))
   if [ $((waited % 6)) = 0 ] && superseded; then
     echo "local-ci SUPERSEDED while queued: $BRANCH has a newer commit than $SHA"
-    status error "superseded by a newer push"; exit 0
+    status error "superseded by a newer push"; exit "$CI_SUPERSEDED"
   fi
   owner=$(cat "$LOCK/pid" 2>/dev/null || true)
   age=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || date +%s) ))
@@ -162,6 +164,13 @@ if [ "$SCOPE" = pipeline ]; then
   for t in scripts/*.test.sh; do
     step "$t" bash "$t" || fail "$t" "no retry"
   done
+  # Some pipeline tests are Vitest files that read or run these scripts (catalog-prune.test.ts). Found by content,
+  # so a new one joins this tier without a list to update.
+  SCRIPT_TESTS=$(git grep -lE 'scripts/[a-z-]+\.(sh|mjs)|"scripts"' -- 'src/*.test.ts' 'src/*.test.tsx' || true)
+  if [ -n "$SCRIPT_TESTS" ]; then
+    # shellcheck disable=SC2086
+    step test pnpm exec vitest run --retry=1 $SCRIPT_TESTS || fail test "each failed test already retried once"
+  fi
   status success "pipeline scripts: their tests passed"
   echo "local-ci PASSED on $SHA (pipeline scope)"
   exit 0
@@ -169,8 +178,8 @@ fi
 step typecheck pnpm typecheck || fail typecheck "no retry"
 step lint pnpm lint || fail lint "no retry"
 if [ "$SCOPE" = tests ]; then
-  UNIT=$(printf '%s\n' "$CHANGED" | grep -E '^src/.*\.test\.tsx?$' || true)
-  SPECS=$(printf '%s\n' "$CHANGED" | grep -E '^e2e/.*\.spec\.ts$' || true)
+  UNIT=$(printf '%s\n' "$PRESENT" | grep -E '^src/.*\.test\.tsx?$' || true)
+  SPECS=$(printf '%s\n' "$PRESENT" | grep -E '^e2e/.*\.spec\.ts$' || true)
   if [ -n "$UNIT" ]; then
     # shellcheck disable=SC2086
     step test pnpm exec vitest run --retry=1 $UNIT || fail test "each failed test already retried once"
@@ -185,7 +194,7 @@ if [ "$SCOPE" = tests ]; then
   exit 0
 fi
 if [ "$SCOPE" = rebase ]; then
-  SOURCES=$(printf '%s\n' "$CHANGED" | grep -E '^src/.*\.tsx?$' || true)
+  SOURCES=$(printf '%s\n' "$PRESENT" | grep -E '^src/.*\.tsx?$' || true)
   if [ -n "$SOURCES" ]; then
     # shellcheck disable=SC2086
     step test pnpm exec vitest related --run --retry=1 --passWithNoTests $SOURCES || fail test "each failed test already retried once"
