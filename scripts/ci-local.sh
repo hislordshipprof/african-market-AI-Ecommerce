@@ -5,6 +5,8 @@
 # "run-ci" label to a PR).
 # Usage (inside a ticket worktree, tracked changes committed, HEAD pushed):
 #   E2E_PORT=3100 scripts/ci-local.sh
+# A run does only what the change needs (scripts/ci-scope.sh): docs, pipeline scripts and test-only changes skip
+# the whole suite, and a push makes an older run of the same branch stop. scripts/ci-main.sh is the full run on main.
 # scripts/build-ticket.sh runs this itself after each builder push, in parallel with the independent review;
 # builders do not run it. CI_DB=<name> runs on a fresh private database, and CI_RUNNER=<dir> runs in a separate
 # checkout of HEAD, so the reviewer working in the ticket worktree at the same time is never disturbed.
@@ -27,6 +29,35 @@ if [ -z "$(git branch -r --contains "$SHA")" ]; then
 fi
 
 status() { gh api "repos/$REPO/statuses/$SHA" -f state="$1" -f context=local-ci -f description="$2" >/dev/null || true; }
+
+# How much to run (scripts/ci-scope.sh). CI_SCOPE forces a tier. CI_REBASE_OF=<sha> is set by merge-ticket.sh:
+# that commit already passed, and this one is it replayed on a newer main, so only the tests it reaches rerun.
+. "$SCRIPTS/review-watch.sh"
+. "$SCRIPTS/ci-scope.sh"
+CHANGED=$(git diff --name-only "$(git merge-base origin/main "$SHA")" "$SHA" 2>/dev/null || true)
+SCOPE="${CI_SCOPE:-$(printf '%s\n' "$CHANGED" | ci_scope)}"
+if [ -z "${CI_SCOPE:-}" ] && [ -n "${CI_REBASE_OF:-}" ] && [ "$SCOPE" = full ] \
+  && [ "$(gh api "repos/$REPO/commits/$CI_REBASE_OF/status" --jq '[.statuses[] | select(.context == "local-ci")][0].state // "missing"')" = success ] \
+  && rebase_is_safe "$CI_REBASE_OF" "$SHA"; then
+  SCOPE=rebase
+fi
+echo "== local-ci: scope $SCOPE"
+if [ "$SCOPE" = docs ]; then
+  status success "docs only: nothing to run"
+  echo "local-ci PASSED on $SHA (docs only)"
+  exit 0
+fi
+
+# A newer push to this branch makes this run pointless, queued or running: stop and free the machine for it.
+# main is excluded, because a full run on main is still wanted after main moves on.
+BRANCH=$(git symbolic-ref --short -q HEAD || true)
+[ "$BRANCH" != main ] || BRANCH=""
+superseded() {
+  [ -n "$BRANCH" ] || return 1
+  local tip; tip=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
+  [ -n "$tip" ] && [ "$tip" != "$SHA" ]
+}
+
 export E2E_WORKERS="${E2E_WORKERS:-4}"
 export VITEST_MAX_WORKERS="${VITEST_MAX_WORKERS:-4}"
 STEP_TIMEOUT="${CI_STEP_TIMEOUT:-40m}"
@@ -37,7 +68,13 @@ STEP_TIMEOUT="${CI_STEP_TIMEOUT:-40m}"
 # when it has no pid after 2 minutes, or when it is older than 3 hours (a hung run).
 LOCK="$(git rev-parse --git-common-dir)/ci-local.lock"
 status pending "queued for the machine-wide local-ci lock"
+waited=0
 while ! mkdir "$LOCK" 2>/dev/null; do
+  waited=$((waited + 1))
+  if [ $((waited % 6)) = 0 ] && superseded; then
+    echo "local-ci SUPERSEDED while queued: $BRANCH has a newer commit than $SHA"
+    status error "superseded by a newer push"; exit 0
+  fi
   owner=$(cat "$LOCK/pid" 2>/dev/null || true)
   age=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || date +%s) ))
   if { [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; } || { [ -z "$owner" ] && [ "$age" -gt 120 ]; } || [ "$age" -gt 10800 ]; then
@@ -56,9 +93,28 @@ cleanup() {
   local rc=$?
   if [ "$rc" -ne 0 ] && [ -z "$FAILED_AT" ]; then status failure "failed: setup (see log)"; echo "local-ci SETUP failed on $SHA"; fi
   [ -z "$TEST_OUT" ] || rm -f "$TEST_OUT"
+  [ -z "${SUPERSEDE_WATCH:-}" ] || kill "$SUPERSEDE_WATCH" 2>/dev/null || true
   rm -rf "$LOCK"
 }
 trap cleanup EXIT
+
+# Checks once a minute while the run holds the lock. The running step is stopped, then this script, so a stale
+# run gives up the lock in about a minute instead of finishing a suite nobody will read.
+if [ -n "$BRANCH" ]; then
+  (
+    while sleep "${CI_SUPERSEDE_POLL_SEC:-60}"; do
+      if superseded; then
+        echo "local-ci SUPERSEDED: $BRANCH has a newer commit than $SHA"
+        status error "superseded by a newer push"
+        stop_all_children_but "$BASHPID"
+        rm -rf "$LOCK"
+        kill -KILL "$$"
+        exit 0
+      fi
+    done
+  ) &
+  SUPERSEDE_WATCH=$!
+fi
 
 # Separate checkout: the ticket worktree's .next, prisma client and test-results stay the reviewer's.
 if [ -n "${CI_RUNNER:-}" ]; then
@@ -91,7 +147,7 @@ if [ -n "${CI_DB:-}" ]; then
   echo "== local-ci: fresh database $db (migrated + seeded)"
 fi
 
-status pending "typecheck, lint, test, build, e2e (E2E_WORKERS=$E2E_WORKERS, VITEST_MAX_WORKERS=$VITEST_MAX_WORKERS)"
+status pending "scope $SCOPE: running (E2E_WORKERS=$E2E_WORKERS, VITEST_MAX_WORKERS=$VITEST_MAX_WORKERS)"
 
 # Retries rerun only what failed, never the whole suite again: a real failure used to cost two full runs while
 # every other lane waited for the lock. Vitest and Playwright retry a failed test in place (--retry/--retries);
@@ -100,8 +156,44 @@ status pending "typecheck, lint, test, build, e2e (E2E_WORKERS=$E2E_WORKERS, VIT
 # Every step has a timeout, so one hung run cannot hold the machine-wide lock for every lane.
 fail() { FAILED_AT="$1"; status failure "failed: $1"; echo "local-ci FAILED at $1 on $SHA ($2)"; exit 1; }
 step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
+
+# Lighter tiers end here. Each one finishes with the same success status, which the merge gate reads.
+if [ "$SCOPE" = pipeline ]; then
+  for t in scripts/*.test.sh; do
+    step "$t" bash "$t" || fail "$t" "no retry"
+  done
+  status success "pipeline scripts: their tests passed"
+  echo "local-ci PASSED on $SHA (pipeline scope)"
+  exit 0
+fi
 step typecheck pnpm typecheck || fail typecheck "no retry"
 step lint pnpm lint || fail lint "no retry"
+if [ "$SCOPE" = tests ]; then
+  UNIT=$(printf '%s\n' "$CHANGED" | grep -E '^src/.*\.test\.tsx?$' || true)
+  SPECS=$(printf '%s\n' "$CHANGED" | grep -E '^e2e/.*\.spec\.ts$' || true)
+  if [ -n "$UNIT" ]; then
+    # shellcheck disable=SC2086
+    step test pnpm exec vitest run --retry=1 $UNIT || fail test "each failed test already retried once"
+  fi
+  if [ -n "$SPECS" ]; then
+    step build pnpm build || fail build "no retry"
+    # shellcheck disable=SC2086
+    step e2e pnpm test:e2e --retries=1 $SPECS || fail e2e "each failed test already retried"
+  fi
+  status success "test files only: typecheck, lint and the changed tests passed"
+  echo "local-ci PASSED on $SHA (tests scope)"
+  exit 0
+fi
+if [ "$SCOPE" = rebase ]; then
+  SOURCES=$(printf '%s\n' "$CHANGED" | grep -E '^src/.*\.tsx?$' || true)
+  if [ -n "$SOURCES" ]; then
+    # shellcheck disable=SC2086
+    step test pnpm exec vitest related --run --retry=1 --passWithNoTests $SOURCES || fail test "each failed test already retried once"
+  fi
+  status success "clean rebase of a passing commit: typecheck, lint and related tests passed"
+  echo "local-ci PASSED on $SHA (rebase scope)"
+  exit 0
+fi
 TEST_OUT="$(mktemp)"
 if ! step test pnpm test --retry=1 2>&1 | tee "$TEST_OUT"; then
   # Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during the slow Stripe sandbox tests even

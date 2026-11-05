@@ -6,6 +6,21 @@ set -euo pipefail
 REPO="hislordshipprof/african-market-AI-Ecommerce"
 N="${1:?usage: scripts/merge-ticket.sh <issue> \"<QA verdict>\"}"
 VERDICT="${2:?QA verdict required}"
+
+# Hosted CI is off, so a full run on main happens here, every CI_MAIN_EVERY merges. It runs detached and queues
+# for the machine-wide lock, so it never holds up this merge. A failure opens a bug issue.
+start_main_run_if_due() {
+  local root last due
+  root="$(git rev-parse --show-toplevel)"
+  git -C "$root" fetch -q origin main || return 0
+  last=$(cat "$root/.builder/ci-main-last" 2>/dev/null || true)
+  due=$(git -C "$root" rev-list --count "${last:-origin/main~${CI_MAIN_EVERY:-3}}..origin/main" 2>/dev/null || echo "${CI_MAIN_EVERY:-3}")
+  if [ "$due" -ge "${CI_MAIN_EVERY:-3}" ]; then
+    nohup bash "$root/scripts/ci-main.sh" >/dev/null 2>&1 &
+    echo "Started the full run on main ($due merge(s) since the last one)."
+  fi
+}
+
 PR=$(gh pr list -R "$REPO" --state open --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"ticket-$N-\")) | .number" | head -1)
 [ -n "$PR" ] || { echo "No open PR for ticket #$N"; exit 1; }
 HEAD_REF=$(gh api "repos/$REPO/pulls/$PR" --jq .head.ref)
@@ -20,7 +35,7 @@ fi
 # Vercel previews are optional on ticket branches (they build only on "[preview]" commits); a canceled or skipped preview never blocks a merge.
 PENDING_OR_FAILED=$(gh pr checks "$PR" -R "$REPO" --json name,bucket,description --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping") | select((.name | startswith("Vercel")) and ((.description // "") | test("[Cc]ancel|[Ii]gnored|[Ss]kipp|[Rr]ate limit")) | not)] | length')
 # Behind main but disjoint: if no file changed on main since the PR's merge base is also changed by the PR,
-# merge without re-running CI (main's post-merge CI is the safety net). Owner-approved 2026-11-02.
+# merge without re-running CI (scripts/ci-main.sh, below, is the safety net). Owner-approved 2026-11-02.
 DISJOINT=no
 if [ "$CMP" != "0" ] && [ "$PENDING_OR_FAILED" = "0" ]; then
   git fetch -q origin main "$HEAD_REF" 2>/dev/null || true
@@ -34,7 +49,31 @@ if { [ "$CMP" = "0" ] || [ "$DISJOINT" = "yes" ]; } && [ "$PENDING_OR_FAILED" = 
   gh pr comment "$PR" -R "$REPO" --body "Coordinator QA verdict: $VERDICT" >/dev/null
   gh pr merge "$PR" -R "$REPO" --squash --delete-branch
   echo "Merged PR #$PR (fast path: $([ "$CMP" = "0" ] && echo "up to date with main" || echo "behind main by $CMP commit(s), no overlapping files"), all checks green)."
+  start_main_run_if_due
 else
+  # Behind with green CI and no conflict: rebase here and rerun only what the rebase can affect. An agent is
+  # for real repairs: a ship round cost #301 over an hour on 2026-11-05.
+  ROOT="$(git rev-parse --show-toplevel)"
+  WT="$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N"
+  if [ "$CMP" != "0" ] && [ "$PENDING_OR_FAILED" = "0" ] && [ "${MERGE_REBASED:-0}" = 0 ] && [ -d "$WT" ] \
+    && [ -z "$(git -C "$WT" status --porcelain --untracked-files=no -- . ':!screenshots')" ] \
+    && [ "$(git -C "$WT" rev-parse HEAD)" = "$HEAD_SHA" ]; then
+    git -C "$WT" checkout -q -- screenshots 2>/dev/null || true
+    git -C "$WT" fetch -q origin main
+    if git -C "$WT" rebase -q origin/main; then
+      git -C "$WT" push -q --force-with-lease
+      echo "PR #$PR rebased cleanly onto main; rerunning local-ci for what the rebase can affect."
+      CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
+      if (cd "$WT" && CI_REBASE_OF="$HEAD_SHA" E2E_PORT="${E2E_PORT:-3950}" CI_DB=ci \
+        CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" bash "$ROOT/scripts/ci-local.sh" > "$CI_LOG" 2>&1); then
+        MERGE_REBASED=1 exec bash "$0" "$N" "$VERDICT"
+      fi
+      echo "local-ci failed after the rebase. Log: $CI_LOG"
+      exit 1
+    fi
+    git -C "$WT" rebase --abort 2>/dev/null || true
+    echo "The rebase has conflicts."
+  fi
   echo "PR #$PR is $CMP commit(s) behind main or has $PENDING_OR_FAILED non-green check(s); using ship-ticket.sh."
   exec "$(dirname "$0")/ship-ticket.sh" "$N" "$VERDICT"
 fi
