@@ -10,10 +10,12 @@ export const checkoutTestHooks: {
   afterPostReadLookupMiss: (() => Promise<void>) | null;
   beforePersistCartPaymentIntent: (() => Promise<void>) | null;
   beforeCancelPaymentIntent: (() => Promise<void>) | null;
+  beforeBindSavedCardConsent: (() => Promise<void>) | null;
 } = {
   afterMissedOrderLookup: null,
   aroundCartRead: null,
   afterPostReadLookupMiss: null,
   beforePersistCartPaymentIntent: null,
   beforeCancelPaymentIntent: null,
+  beforeBindSavedCardConsent: null,
 };

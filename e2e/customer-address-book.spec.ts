@@ -42,6 +42,15 @@ test.describe("Customer address book", () => {
     await expect(list.getByText("Default")).toBeVisible();
     await expect(page.locator("script", { hasText: "alert(1)" })).toHaveCount(0);
 
+    await list.locator("article", { hasText: "Home" }).getByRole("button", { name: "Edit" }).click();
+    await expect(form.getByRole("button", { name: "Save address" })).toBeVisible();
+    await form.getByLabel("Street").fill("9 Market St");
+    await form.getByRole("button", { name: "Save address" }).click();
+    await expect(list.getByText("9 Market St")).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
+    await expect(page.getByTestId("account-address-list").getByText("9 Market St")).toBeVisible();
+
     await form.getByLabel("Label").fill("Work");
     await form.getByLabel("Street").fill("2 Market St");
     await form.getByLabel("City").fill("Silver Spring");
@@ -60,5 +69,28 @@ test.describe("Customer address book", () => {
     await page.getByLabel("Phone").fill("(301) 555-0100");
     await page.getByRole("button", { name: "Save phone" }).click();
     await expect(page.getByText("Phone saved.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page.getByRole("button", { name: "Send sign-in link" })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("9 Market St")).toHaveCount(0);
+
+    const other = `e2e-address-b-${Date.now()}@test.example`;
+    const otherSignup = await request.post(`${apiBase}/api/auth/sign-up/email`, {
+      headers: { origin: apiBase },
+      data: { email: other, password: "E2eTestPass-123!", name: "Bea Address" },
+    });
+    expect(otherSignup.ok(), await otherSignup.text()).toBe(true);
+    await page.getByLabel("Email address").fill(other);
+    await page.getByRole("button", { name: "Send sign-in link" }).click();
+    await expect(page.locator("[data-slot='card-title']")).toContainText("Check your email", { timeout: 10000 });
+    const otherToken = await request.get(
+      `${apiBase}/api/e2e/magic-link-token?email=${encodeURIComponent(other)}`,
+    );
+    const otherBody = await otherToken.json();
+    expect(otherToken.ok(), JSON.stringify(otherBody)).toBe(true);
+    await page.goto(`${base}/api/auth/magic-link/verify?token=${otherBody.token}&callbackURL=/account`);
+    await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("9 Market St")).toHaveCount(0);
+    await expect(page.getByText("No saved addresses yet.")).toBeVisible();
   });
 });

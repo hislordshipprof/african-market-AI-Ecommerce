@@ -22,8 +22,11 @@ vi.mock("next/headers", () => ({
 import { auth } from "../auth";
 import { authPrisma, customerScoped } from "../db";
 import { clearTestSentEmails, getTestSentEmails } from "../email/send";
-import { addAddressAction, editAddressAction, removeAddressAction, savePhoneAction } from "./actions";
+import { addAddressAction, accountBookAction, editAddressAction, removeAddressAction, removeCardAction, savePhoneAction, setDefaultAddressAction } from "./actions";
 import { ADDRESS_NOT_FOUND, SIGN_IN_MESSAGE } from "./address-validation";
+import { SAVED_CARD_PURPOSE, SAVED_CARD_TERMS_VERSION } from "./consent";
+import { ensureStripeCustomer } from "./stripe-customer";
+import { getCheckoutPayments } from "../stripe/checkout-payments";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const BASE = "http://localhost:3000/api/auth";
@@ -95,7 +98,7 @@ const home = {
 };
 
 describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
-  const emails = [`a-${RUN}@example.test`, `b-${RUN}@example.test`];
+  const emails = [`a-${RUN}@example.test`, `b-${RUN}@example.test`, `c-${RUN}@example.test`, `d-${RUN}@example.test`];
 
   afterAll(async () => {
     await authPrisma.user.deleteMany({ where: { email: { in: emails } } });
@@ -127,5 +130,91 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
     expect(own?.label).toBe("Home");
     const aPhone = await customerScoped(a.id).platformCustomerProfile.findUnique({ where: { userId: a.id } });
     expect(aPhone?.phone ?? null).toBeNull();
+  });
+
+  it("checks the session on the card, default-address, and account-book actions", async () => {
+    const signedOutCard = await asUser("", () => removeCardAction("pm_missing"));
+    const signedOutDefault = await asUser("", () => setDefaultAddressAction("missing"));
+    const signedOutBook = await asUser("", () => accountBookAction());
+    for (const signedOut of [signedOutCard, signedOutDefault, signedOutBook]) {
+      expect(signedOut.ok).toBe(false);
+      if (!signedOut.ok) expect(signedOut.error).toBe(SIGN_IN_MESSAGE);
+    }
+
+    const a = await customerCookie(emails[2], "Cara");
+    const b = await customerCookie(emails[3], "Bea");
+    const first = await asUser(a.cookie, () => addAddressAction(home));
+    const second = await asUser(a.cookie, () => addAddressAction({ ...home, label: "Work", line1: "2 Market St" }));
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+
+    const stolen = await asUser(b.cookie, () => setDefaultAddressAction(second.address.id));
+    expect(stolen.ok).toBe(false);
+    if (!stolen.ok) expect(stolen.error).toBe(ADDRESS_NOT_FOUND);
+
+    const chosen = await asUser(a.cookie, () => setDefaultAddressAction(second.address.id));
+    expect(chosen.ok).toBe(true);
+    const stored = await customerScoped(a.id).customerAddress.findUnique({ where: { id: second.address.id } });
+    expect(stored?.isDefault).toBe(true);
+
+    const book = await asUser(a.cookie, () => accountBookAction());
+    expect(book.ok).toBe(true);
+    if (book.ok) expect(book.addresses.some((address) => address.id === second.address.id)).toBe(true);
+    const otherBook = await asUser(b.cookie, () => accountBookAction());
+    expect(otherBook.ok).toBe(true);
+    if (otherBook.ok) expect(otherBook.addresses.some((address) => address.id === second.address.id)).toBe(false);
+
+    const previousFake = process.env.E2E_FAKE_STRIPE;
+    const previousCi = process.env.CI;
+    const previousVercel = process.env.VERCEL;
+    process.env.E2E_FAKE_STRIPE = "1";
+    process.env.CI = "true";
+    process.env.VERCEL = "";
+    try {
+      const customerId = await ensureStripeCustomer(a.id);
+      const pi = await getCheckoutPayments().createPaymentIntent({
+        amount: 100,
+        currency: "usd",
+        customer: customerId,
+        setup_future_usage: "on_session",
+        capture_method: "manual",
+      }, `auth-card-${a.id}`);
+      const confirmed = await getCheckoutPayments().confirmPaymentIntent(pi.id, { payment_method: "pm_card_visa" });
+      const paymentMethodId = confirmed.payment_method;
+      expect(paymentMethodId).toBeTruthy();
+      await customerScoped(a.id).cardSaveConsent.create({
+        data: {
+          userId: a.id,
+          paymentIntentId: pi.id,
+          paymentMethodId,
+          stripeCustomerId: customerId,
+          termsVersion: SAVED_CARD_TERMS_VERSION,
+          purpose: SAVED_CARD_PURPOSE,
+        },
+      });
+      const foreignCard = await asUser(b.cookie, () => removeCardAction(paymentMethodId!));
+      expect(foreignCard.ok).toBe(false);
+      const removed = await asUser(a.cookie, () => removeCardAction(paymentMethodId!));
+      expect(removed.ok).toBe(true);
+      if (removed.ok) expect(removed.cards.some((card) => card.id === paymentMethodId)).toBe(false);
+      const stillThere = await getCheckoutPayments().retrievePaymentMethod(paymentMethodId!);
+      expect(stillThere.detached).toBe(true);
+    } finally {
+      if (previousFake === undefined) delete process.env.E2E_FAKE_STRIPE;
+      else process.env.E2E_FAKE_STRIPE = previousFake;
+      if (previousCi === undefined) delete process.env.CI;
+      else process.env.CI = previousCi;
+      if (previousVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = previousVercel;
+    }
+
+    const signOut = await auth.handler(new Request(`${BASE}/sign-out`, {
+      method: "POST",
+      headers: { cookie: a.cookie, origin: "http://localhost:3000" },
+    }));
+    expect(signOut.status).toBeLessThan(400);
+    const revoked = await asUser(a.cookie, () => accountBookAction());
+    expect(revoked.ok).toBe(false);
+    if (!revoked.ok) expect(revoked.error).toBe(SIGN_IN_MESSAGE);
   });
 });

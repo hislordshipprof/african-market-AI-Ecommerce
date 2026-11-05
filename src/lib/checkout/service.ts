@@ -184,32 +184,55 @@ export async function createPaymentIntent(
       attemptToken: options.attemptToken ?? null,
     }, store.stripeAccountId);
   }
-  const scoped = storeScoped(storeId);
+  const reserved = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    const cart = await tx.cart.findUnique({ where: { id: cartId } });
+    if (!cart) throw new Error("Cart not found");
 
-  const cart = await scoped.cart.findUnique({ where: { id: cartId } });
-  if (!cart) throw new Error("Cart not found");
-
-  if (cart.paymentIntentId) {
-    const existing = await retrieveCheckoutIntent(cart.paymentIntentId);
-    const provenanceOk = paymentIntentProvenanceOk(existing, {
-      storeId,
-      cartId,
-      storeAccountId: store.stripeAccountId,
-    });
-    if (provenanceOk && SETTLED_PAYMENT.has(existing.status)) {
-      throw new Error("Payment already confirmed for this cart");
-    }
-    if (provenanceOk && OPENABLE_PAYMENT.has(existing.status)) {
-      if (existing.amount !== holdCents) {
-        if (fakeIntent(cart.paymentIntentId)) {
-          await getCheckoutPayments().updatePaymentIntent(cart.paymentIntentId, { amount: holdCents });
-        } else {
-          await getStripeClient().paymentIntents.update(cart.paymentIntentId, { amount: holdCents });
-        }
+    if (cart.paymentIntentId) {
+      const existing = await retrieveCheckoutIntent(cart.paymentIntentId);
+      const provenanceOk = paymentIntentProvenanceOk(existing, {
+        storeId,
+        cartId,
+        storeAccountId: store.stripeAccountId,
+      });
+      if (provenanceOk && SETTLED_PAYMENT.has(existing.status)) {
+        throw new Error("Payment already confirmed for this cart");
       }
-      if (!existing.client_secret) throw new Error("Stripe did not return a client secret");
-      return { clientSecret: existing.client_secret, paymentIntentId: existing.id };
+      if (provenanceOk && OPENABLE_PAYMENT.has(existing.status)) {
+        if (!existing.client_secret) throw new Error("Stripe did not return a client secret");
+        return {
+          kind: "reuse" as const,
+          clientSecret: existing.client_secret,
+          paymentIntentId: existing.id,
+          amount: existing.amount,
+        };
+      }
     }
+
+    const generation = nextAttemptToken({
+      paymentIntentId: cart.paymentIntentId,
+      storedToken: cart.paymentAttemptToken,
+      fingerprint: `guest:${holdCents}`,
+      forceNew: false,
+    });
+    await tx.cart.update({
+      where: { id: cartId },
+      data: { paymentAttemptToken: generation, paymentIntentId: null },
+    });
+    return { kind: "create" as const, generation };
+  }, { timeout: 20_000, maxWait: 8_000 });
+
+  if (reserved.kind === "reuse") {
+    if (reserved.amount !== holdCents) {
+      if (fakeIntent(reserved.paymentIntentId)) {
+        await getCheckoutPayments().updatePaymentIntent(reserved.paymentIntentId, { amount: holdCents });
+      } else {
+        await getStripeClient().paymentIntents.update(reserved.paymentIntentId, { amount: holdCents });
+      }
+    }
+    return { clientSecret: reserved.clientSecret, paymentIntentId: reserved.paymentIntentId };
   }
 
   const guestParams = guestPaymentIntentParams({
@@ -218,17 +241,7 @@ export async function createPaymentIntent(
     storeId,
     cartId,
   });
-  const generation = nextAttemptToken({
-    paymentIntentId: cart.paymentIntentId,
-    storedToken: cart.paymentAttemptToken,
-    fingerprint: `guest:${holdCents}`,
-    forceNew: false,
-  });
-  await scoped.cart.update({
-    where: { id: cartId },
-    data: { paymentAttemptToken: generation, paymentIntentId: null },
-  });
-  const guestKey = cartPaymentIdempotencyKey(cartId, generation);
+  const guestKey = cartPaymentIdempotencyKey(cartId, reserved.generation);
   const pi = checkoutPaymentsUseFake()
     ? await getCheckoutPayments().createPaymentIntent(guestParams as unknown as Record<string, unknown>, guestKey)
     : await getStripeClient().paymentIntents.create(guestParams, { idempotencyKey: guestKey });
@@ -237,9 +250,15 @@ export async function createPaymentIntent(
     await checkoutTestHooks.beforePersistCartPaymentIntent();
   }
 
-  await scoped.cart.update({
-    where: { id: cartId },
-    data: { paymentIntentId: pi.id },
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    const current = await tx.cart.findUnique({ where: { id: cartId } });
+    if (!current || current.paymentAttemptToken !== reserved.generation) return;
+    await tx.cart.update({
+      where: { id: cartId },
+      data: { paymentIntentId: pi.id, paymentAttemptToken: reserved.generation },
+    });
   });
 
   if (!pi.client_secret) {
@@ -488,6 +507,7 @@ export async function placeOrder(
     }
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
     // Idempotent replay — don't re-send the Inngest event or touch the cart.
+    await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
     return { token: existingOrder.id, quote };
   }
 
@@ -508,6 +528,7 @@ export async function placeOrder(
       throw new Error("PaymentIntent is already recorded");
     }
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
+    await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
     return { token: replay.id, quote };
   }
 
@@ -573,16 +594,27 @@ export async function placeOrder(
   });
 
   if (recorded.created) {
-    if (actorUserId) {
-      await bindSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
-    }
     scheduleAfterResponse(
       () => sendOrderAuthorized(storeId, recorded.orderId),
       "inngest_send_failed",
     );
   }
+  await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
 
   return { token: recorded.orderId, quote };
+}
+
+async function recoverSavedCardConsent(
+  actorUserId: string | null,
+  paymentIntentId: string,
+  paymentMethodId: string | null,
+): Promise<void> {
+  if (!actorUserId || !paymentMethodId) return;
+  try {
+    await bindSavedCardConsent(actorUserId, paymentIntentId, paymentMethodId);
+  } catch {
+    // The order is already committed. The next replay binds the card.
+  }
 }
 
 async function quoteFromCart(

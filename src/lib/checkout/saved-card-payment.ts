@@ -15,6 +15,7 @@ import {
   planPaymentAttempt,
   selectionFingerprint,
   type ExistingPaymentIntent,
+  type PaymentIntentCreateParams,
 } from "./payment-intent-params";
 import { checkoutTestHooks } from "./test-hooks";
 
@@ -49,11 +50,6 @@ function asExisting(intent: NormalizedPaymentIntent): ExistingPaymentIntent {
   };
 }
 
-function alreadyCanceled(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  return message.includes("status of canceled") || message.includes("already canceled") || message.includes("status canceled");
-}
-
 export async function cancelReplaceablePaymentIntent(
   payments: { retrievePaymentIntent: (id: string) => Promise<{ status: string }>; cancelPaymentIntent: (id: string, idempotencyKey?: string) => Promise<unknown> },
   paymentIntentId: string,
@@ -65,15 +61,19 @@ export async function cancelReplaceablePaymentIntent(
   if (!isReplaceablePaymentStatus(fresh.status)) {
     throw new Error("Payment already confirmed for this cart");
   }
-  try {
-    await payments.cancelPaymentIntent(paymentIntentId, `cancel-${paymentIntentId}`);
-  } catch (error) {
-    if (!alreadyCanceled(error)) throw error;
-  }
-  const after = await payments.retrievePaymentIntent(paymentIntentId);
-  if (after.status !== "canceled") {
-    throw new Error("Payment already confirmed for this cart");
-  }
+}
+
+function savedCardProviderUnavailable(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: string; statusCode?: number; message?: string; type?: string };
+  if (value.statusCode === 408 || (value.statusCode ?? 0) >= 500) return false;
+  if (value.type === "StripeConnectionError" || value.type === "StripeAPIError") return false;
+  const message = (value.message ?? "").toLowerCase();
+  if (value.code === "resource_missing") return true;
+  return message.includes("detached")
+    || message.includes("not attached")
+    || message.includes("no such payment_method")
+    || message.includes("no such paymentmethod");
 }
 
 async function usableSavedCard(userId: string, stripeCustomerId: string, savedCardId: string) {
@@ -119,6 +119,46 @@ async function clearConsent(userId: string, paymentIntentId: string): Promise<vo
   });
 }
 
+async function finishSignedInCreate(
+  storeId: string,
+  cartId: string,
+  payments: ReturnType<typeof getCheckoutPayments>,
+  reserved: {
+    params: PaymentIntentCreateParams;
+    attemptKey: string;
+    generation: string;
+  },
+  savedCardId: string | null,
+): Promise<{ clientSecret: string; paymentIntentId: string; attemptToken: string; saved: boolean }> {
+  let intent;
+  try {
+    intent = await payments.createPaymentIntent(reserved.params as unknown as Record<string, unknown>, reserved.attemptKey);
+  } catch (error) {
+    if (savedCardId && savedCardProviderUnavailable(error)) throw new SavedCardUnavailableError();
+    throw error;
+  }
+  if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforePersistCartPaymentIntent) {
+    await checkoutTestHooks.beforePersistCartPaymentIntent();
+  }
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    const current = await tx.cart.findUnique({ where: { id: cartId } });
+    if (!current || current.paymentAttemptToken !== reserved.generation) return;
+    await tx.cart.update({
+      where: { id: cartId },
+      data: { paymentIntentId: intent.id, paymentAttemptToken: reserved.generation },
+    });
+  });
+  if (!intent.client_secret) throw new Error("Stripe did not return a client secret");
+  return {
+    clientSecret: intent.client_secret,
+    paymentIntentId: intent.id,
+    attemptToken: reserved.generation,
+    saved: intent.setup_future_usage === "on_session",
+  };
+}
+
 export async function prepareSignedInPaymentIntent(
   storeId: string,
   cartId: string,
@@ -145,7 +185,7 @@ export async function prepareSignedInPaymentIntent(
   });
   const payments = getCheckoutPayments();
 
-  const prepared = await storeScopedTransaction(storeId, async (tx) => {
+  const reserved = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     await lockCart(tx, cartId);
     const cart = await tx.cart.findUnique({ where: { id: cartId } });
@@ -183,6 +223,7 @@ export async function prepareSignedInPaymentIntent(
     }
     if (plan.action === "reuse") {
       return {
+        kind: "ready" as const,
         clientSecret: plan.clientSecret,
         paymentIntentId: plan.paymentIntentId,
         attemptToken: plan.attemptToken,
@@ -197,30 +238,17 @@ export async function prepareSignedInPaymentIntent(
         where: { id: cartId },
         data: { paymentAttemptToken: generation, paymentIntentId: null },
       });
-      const params = {
-        ...plan.params,
-        metadata: { ...plan.params.metadata, attempt_token: generation },
-      };
-      const intent = await payments.createPaymentIntent(params, attemptKey);
-      if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforePersistCartPaymentIntent) {
-        await checkoutTestHooks.beforePersistCartPaymentIntent();
-      }
-      await tx.cart.update({
-        where: { id: cartId },
-        data: { paymentIntentId: intent.id, paymentAttemptToken: generation },
-      });
-      if (!intent.client_secret) throw new Error("Stripe did not return a client secret");
       return {
-        clientSecret: intent.client_secret,
-        paymentIntentId: intent.id,
-        attemptToken: generation,
-        saved: intent.setup_future_usage === "on_session",
+        kind: "create" as const,
+        params: {
+          ...plan.params,
+          metadata: { ...plan.params.metadata, attempt_token: generation },
+        },
+        attemptKey,
+        generation,
       };
     }
     const intent = await payments.updatePaymentIntent(plan.paymentIntentId, plan.params);
-    if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforePersistCartPaymentIntent) {
-      await checkoutTestHooks.beforePersistCartPaymentIntent();
-    }
     await tx.cart.update({
       where: { id: cartId },
       data: {
@@ -230,12 +258,17 @@ export async function prepareSignedInPaymentIntent(
     });
     if (!intent.client_secret) throw new Error("Stripe did not return a client secret");
     return {
+      kind: "ready" as const,
       clientSecret: intent.client_secret,
       paymentIntentId: intent.id,
       attemptToken: plan.attemptToken,
       saved: intent.setup_future_usage === "on_session",
     };
   }, { timeout: 20_000, maxWait: 8_000 });
+
+  const prepared = reserved.kind === "ready"
+    ? reserved
+    : await finishSignedInCreate(storeId, cartId, payments, reserved, input.savedCardId);
 
   if (prepared.saved && stripeCustomerId) {
     await writeConsent(input.actorUserId, prepared.paymentIntentId, stripeCustomerId);
@@ -254,6 +287,9 @@ export async function bindSavedCardConsent(
   paymentIntentId: string,
   paymentMethodId: string | null,
 ): Promise<void> {
+  if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforeBindSavedCardConsent) {
+    await checkoutTestHooks.beforeBindSavedCardConsent();
+  }
   if (!paymentMethodId) return;
   const row = await customerScoped(userId).cardSaveConsent.findFirst({
     where: { userId, paymentIntentId },
