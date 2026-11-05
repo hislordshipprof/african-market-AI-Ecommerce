@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
+import { recordReconcileResult } from "../inngest/functions";
 import { acceptOrder, autoCancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
@@ -2337,6 +2338,74 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.capturedAmountCents).toBe(capturedPayments.get(pi));
   });
 
+  it("markReady returns the captured amount when a sweep finalizes the fifth attempt", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: 5500, status: "CAPTURING" },
+      });
+    });
+    await platformAdminTransaction(async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { updatedAt: new Date(Date.now() - 20 * 60_000) },
+      });
+    });
+    await seedFifthCapture(order.id);
+    setNextCaptureAppliedFailure(pi, 1);
+    const original = fakeStripeProvider.capturePaymentIntent.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "capturePaymentIntent").mockImplementation(async (...args) => {
+      try {
+        return await original(...args);
+      } catch (err) {
+        await reconcileStuckOrder(storeId, order.id);
+        throw err;
+      }
+    });
+    try {
+      const result = await markReady(storeId, order.id);
+      expect(result).toEqual({ ok: true, capturedAmountCents: 5500 });
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("AWAITING_PICKUP");
+      expect(updated!.capturedAmountCents).toBe(5500);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a fifth capture error reports the cancelled message when the order is already cancelled", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: 5500, status: "CAPTURING" },
+      });
+    });
+    await seedFifthCapture(order.id);
+    setNextCaptureFailure(pi, 1);
+    const original = fakeStripeProvider.capturePaymentIntent.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "capturePaymentIntent").mockImplementation(async (...args) => {
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
+      });
+      return original(...args);
+    });
+    try {
+      const result = await markReady(storeId, order.id);
+      expect(result).toEqual({
+        ok: false,
+        error: "Payment authorization was released — order cancelled; contact the customer",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   async function seedFifthCapture(orderId: string) {
     await storeScopedTransaction(storeId, async (tx) => {
       for (let attempt = 1; attempt <= 4; attempt++) {
@@ -2559,6 +2628,123 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
     expect(logs).toHaveLength(1);
     expect(logs[0].after).toMatchObject({ refundId: newer.refundId, amountRefunded: 1000 });
+  });
+
+  it("saves the newest refund id when an older succeeded refund id was already stored", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "older");
+    const newer = await fakeStripeProvider.refundPayment(pi, 600, "newer");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: 1000, refundId: older.refundId },
+      });
+    });
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.refundId).toBe(newer.refundId);
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "anomaly_refund" },
+    });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].after).toMatchObject({ refundId: newer.refundId, amountRefunded: 1000 });
+  });
+
+  it("sums every succeeded refund when reconciliation creates the remaining refund", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "external");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: 1000, refundId: null },
+      });
+    });
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(true);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    const listed = await fakeStripeProvider.listRefunds(pi);
+    expect(listed).toHaveLength(2);
+    expect(updated!.refundId).toBe(listed[0].refundId);
+    expect(updated!.refundId).not.toBe(older.refundId);
+    const logs = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "anomaly_refund" },
+    });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].after).toMatchObject({ refundId: listed[0].refundId, amountRefunded: 1000 });
+  });
+
+  it("an in-flight refund key writes no reconcile_failed row and keeps the same key", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: 1000, refundId: null },
+      });
+    });
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    const keys: string[] = [];
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (paymentIntentId, amount, key, fee) => {
+      keys.push(key ?? "");
+      if (keys.length === 1) {
+        throw Object.assign(new Error("in flight"), { statusCode: 409, code: "idempotency_key_in_use" });
+      }
+      return original(paymentIntentId, amount, key, fee);
+    });
+    try {
+      await recordReconcileResult(storeId, order.id);
+      await recordReconcileResult(storeId, order.id);
+      expect(keys[0]).toBe(`refund:${order.id}:0:1`);
+      expect(keys[1]).toBe(keys[0]);
+      expect(
+        await storeScoped(storeId).auditLog.count({
+          where: { entityId: order.id, action: "reconcile_failed" },
+        }),
+      ).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("an in-flight cancel key writes no reconcile_failed row and keeps the same key", async () => {
+    const order = await createTestOrder("CANCELLING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    const original = fakeStripeProvider.cancelPaymentIntent.bind(fakeStripeProvider);
+    const keys: string[] = [];
+    const spy = vi.spyOn(fakeStripeProvider, "cancelPaymentIntent").mockImplementation(async (paymentIntentId, key) => {
+      keys.push(key ?? "");
+      if (keys.length === 1) {
+        throw Object.assign(new Error("in flight"), { statusCode: 409, code: "idempotency_key_in_use" });
+      }
+      return original(paymentIntentId, key);
+    });
+    try {
+      await recordReconcileResult(storeId, order.id);
+      await recordReconcileResult(storeId, order.id);
+      expect(keys[0]).toBe(`cancel:${order.id}:1`);
+      expect(keys[1]).toBe(keys[0]);
+      expect(
+        await storeScoped(storeId).auditLog.count({
+          where: { entityId: order.id, action: "reconcile_failed" },
+        }),
+      ).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("reconcile after a restart registers a seeded hold before the first retrieve", async () => {
