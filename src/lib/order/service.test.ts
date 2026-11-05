@@ -2588,12 +2588,26 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   it("the staff inbox keeps a resolved cancellation and hides a plain one", async () => {
     const shown = await createTestOrder("CANCELLED");
     const hidden = await createTestOrder("CANCELLED");
+    const customerNote = await createTestOrder("CANCELLED");
     await storeScopedTransaction(storeId, async (tx) => {
       await tx.order.update({ where: { id: shown.id }, data: { notes: "Paid by Zelle" } });
+      await tx.order.update({ where: { id: customerNote.id }, data: { notes: "Ring the side door" } });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "refund_resolved_manually",
+          entityType: "order",
+          entityId: shown.id,
+          after: { note: "Paid by Zelle", alert: "store" },
+        },
+      });
     });
     const ids = (await getStoreOrders(storeId)).map((row) => row.id);
     expect(ids).toContain(shown.id);
     expect(ids).not.toContain(hidden.id);
+    expect(ids).not.toContain(customerNote.id);
   });
 
   it("a second cancellation writes no extra audit and another store cannot finalize it", async () => {

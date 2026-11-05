@@ -194,6 +194,7 @@ test.describe("Order inbox", () => {
       status: "CANCELLED",
       capturedAmountCents: 2500,
       notes: "Paid customer by Zelle 11/05",
+      platformResolved: true,
     });
     try {
       await storeOwnerSignIn(page);

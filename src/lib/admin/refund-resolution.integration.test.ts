@@ -254,6 +254,33 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     });
   });
 
+  it("resolving keeps the customer's existing note", async () => {
+    asAdmin(cookiesAdmin);
+    await storeScopedTransaction(storeAId, async (tx) => {
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: "REFUND_FAILED", notes: "Call before 5pm — no onions." },
+      });
+    });
+    const result = await resolveRefundFailed(orderId, "Paid customer by Zelle 11/05");
+    expect(result).toEqual({ ok: true });
+    const updated = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
+    expect(updated?.notes).toBe("Call before 5pm — no onions.\nPaid customer by Zelle 11/05");
+    const audit = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: orderId, action: "refund_resolved_manually" },
+    });
+    expect(audit?.after).toMatchObject({ note: "Paid customer by Zelle 11/05" });
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: "REFUND_FAILED", notes: null, cancelledAt: null },
+      });
+      await tx.auditLog.deleteMany({ where: { entityId: orderId, action: "refund_resolved_manually" } });
+    });
+  });
+
   it("a platform admin resolves a refund-failed order with a note", async () => {
     asAdmin(cookiesAdmin);
     const result = await resolveRefundFailed(orderId, "Paid customer by Zelle 11/05");

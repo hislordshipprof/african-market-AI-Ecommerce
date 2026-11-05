@@ -232,11 +232,18 @@ const ORDER_WITH_LINES = {
 
 export async function getStoreOrders(storeId: string) {
   return storeScopedTransaction(storeId, async (tx) => {
+    const resolved = await tx.auditLog.findMany({
+      where: { action: "refund_resolved_manually", entityType: "order" },
+      select: { entityId: true },
+    });
+    const resolvedIds = resolved.map((row) => row.entityId);
     return tx.order.findMany({
       where: {
         OR: [
           { status: { in: ACTIVE_STATUSES } },
-          { status: "CANCELLED", notes: { not: null } },
+          ...(resolvedIds.length > 0
+            ? [{ id: { in: resolvedIds }, status: "CANCELLED" as const }]
+            : []),
         ],
       },
       include: ORDER_WITH_LINES,

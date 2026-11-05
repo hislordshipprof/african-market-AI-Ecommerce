@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { resolveRefundFailedAction, type ResolveResult } from "@/lib/admin/refund-resolution";
 
 export function ResolveForm({ orderId }: { orderId: string }) {
@@ -8,6 +8,8 @@ export function ResolveForm({ orderId }: { orderId: string }) {
     resolveRefundFailedAction,
     null,
   );
+  const [note, setNote] = useState("");
+  const noteValid = note.trim().length >= 1 && note.trim().length <= 500;
 
   return (
     <form action={action} className="flex flex-col gap-2">
@@ -20,9 +22,11 @@ export function ResolveForm({ orderId }: { orderId: string }) {
         name="note"
         required
         maxLength={500}
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
         className="w-full rounded-md border border-input px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
-      {state && !state.ok && state.fieldError ? (
+      {state && !state.ok && state.fieldError && !noteValid ? (
         <p className="text-xs text-destructive">{state.fieldError}</p>
       ) : null}
       {state && !state.ok && !state.fieldError ? (

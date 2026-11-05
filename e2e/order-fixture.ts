@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../src/lib/system-actor";
 
 async function withMama<T>(run: (tx: import("@prisma/client").Prisma.TransactionClient, storeId: string) => Promise<T>): Promise<T> {
   const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
@@ -23,6 +24,7 @@ export async function insertInboxOrder(input: {
   refundId?: string;
   seedHold?: boolean;
   notes?: string | null;
+  platformResolved?: boolean;
 }): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
@@ -34,7 +36,7 @@ export async function insertInboxOrder(input: {
     const variant = listing.variants[0];
     if (!variant) throw new Error("mama-ngozi has no listing variant");
     const amount = input.capturedAmountCents ?? 1000;
-    await tx.order.create({
+    const order = await tx.order.create({
       data: {
         storeId,
         number: input.number,
@@ -60,6 +62,19 @@ export async function insertInboxOrder(input: {
         },
       },
     });
+    if (input.platformResolved) {
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "refund_resolved_manually",
+          entityType: "order",
+          entityId: order.id,
+          after: { note: input.notes ?? "", alert: "store" },
+        },
+      });
+    }
   });
 }
 

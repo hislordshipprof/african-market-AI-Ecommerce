@@ -117,9 +117,15 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
 
   return storeScopedTransaction(order.storeId, async (tx) => {
     await lockStoreRow(tx, order.storeId);
+    const current = await tx.order.findUnique({ where: { id: orderId } });
+    if (!current || current.status !== "REFUND_FAILED") {
+      return { ok: false as const, error: "already resolved" };
+    }
+    const existing = current.notes?.trim();
+    const notes = existing ? `${existing}\n${trimmed}` : trimmed;
     const updated = await tx.order.updateMany({
       where: { id: orderId, status: "REFUND_FAILED" },
-      data: { status: "CANCELLED", cancelledAt: new Date(), notes: trimmed },
+      data: { status: "CANCELLED", cancelledAt: new Date(), notes },
     });
     if (updated.count !== 1) return { ok: false as const, error: "already resolved" };
     await tx.auditLog.create({
