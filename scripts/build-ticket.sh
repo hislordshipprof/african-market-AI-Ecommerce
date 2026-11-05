@@ -22,6 +22,17 @@ SESSION_FILE="$ROOT/.builder/session-$N.txt"
 REPORT="$ROOT/.builder/report-$N.md"
 LOG="$ROOT/.builder/logs/ticket-$N-$(date +%Y%m%d-%H%M%S).json"
 
+# True when the planner (plan-ticket.sh) has posted its brief: a comment whose heading starts with "Agent brief".
+# The builder's own fast-path brief is headed "Fast-path brief" and never counts. The comments are captured first
+# so that grep stopping early cannot SIGPIPE gh under pipefail.
+has_planner_brief() {
+  local bodies lines
+  bodies=$(gh issue view "$N" -R "$REPO" --comments --json comments --jq '.comments[].body') || return 1
+  lines=$(grep -iE '^[#* ]*agent brief' <<<"$bodies" || true)
+  lines=$(grep -vi 'fast.path' <<<"$lines" || true)
+  [ -n "$lines" ]
+}
+
 if [ "$MODE" = "build" ]; then
   # Preflight 1: open and unblocked.
   state=$(gh issue view "$N" -R "$REPO" --json state --jq .state)
@@ -29,13 +40,18 @@ if [ "$MODE" = "build" ]; then
   blockers=$(gh api "repos/$REPO/issues/$N/dependencies/blocked_by" --jq '[.[] | select(.state=="open") | .number] | join(",")')
   [ -z "$blockers" ] || { echo "Issue #$N is blocked by open issues: $blockers"; exit 1; }
 
-  # Preflight 2: planner brief exists (stage T).
-  if ! gh issue view "$N" -R "$REPO" --comments --json comments --jq '.comments[].body' | grep -qi "agent brief"; then
-    echo "Issue #$N has no agent brief yet. Run scripts/plan-ticket.sh $N first."; exit 3
+  # Preflight 2: planner brief exists (stage T). FAST=1 skips it (the builder posts a 'Fast-path brief',
+  # which never counts as a planner brief), except for RISK (money/auth) tickets.
+  need=$(node "$ROOT/scripts/lane-env.mjs" keys "$N" "$ROOT/scripts/ticket-env.txt")
+  if ! has_planner_brief; then
+    if [ "${FAST:-0}" != "1" ]; then
+      echo "Issue #$N has no agent brief yet. Run scripts/plan-ticket.sh $N first."; exit 3
+    elif [ "${RISK:-}" = "1" ] || { [ -z "${RISK:-}" ] && printf '%s\n' "$need" | grep -qE 'STRIPE|BETTER_AUTH'; }; then
+      echo "Issue #$N is a RISK ticket (money/auth): no fast path. Run scripts/plan-ticket.sh $N first."; exit 3
+    fi
   fi
 
   # Preflight 3: required keys present in .env.local (values never printed).
-  need=$(node "$ROOT/scripts/lane-env.mjs" keys "$N" "$ROOT/scripts/ticket-env.txt")
   missing=()
   for k in $need; do grep -Eq "^$k=.+" .env.local 2>/dev/null || missing+=("$k"); done
   if [ ${#missing[@]} -gt 0 ] && [ "${NO_KEYS:-}" != "1" ]; then
@@ -77,6 +93,17 @@ export RISK
 # external providers.
 TIER="${TIER:-full}"
 [ "$RISK" = "1" ] && TIER=full
+
+# Fast path (owner-approved 2026-11-05): small, low-risk tickets skip the separate plan and brief review, and
+# QA is proportionate. Never for RISK tickets: those need the planner and brief review first.
+FAST="${FAST:-0}"
+# A RISK ticket never runs fast. (With no planner brief the build preflight has already refused it.)
+[ "$RISK" = "1" ] && FAST=0
+# Inside the worktree, so a sandboxed engine can write it too (.builder/ is git-ignored).
+REPLAN="$WT/.builder/replan-$N"
+mkdir -p "$WT/.builder"; rm -f "$REPLAN"
+FAST_RULE=""
+[ "$FAST" = "1" ] && FAST_RULE="FAST PATH. This overrides the rules above where they differ. The coordinator judged this ticket small and low-risk, so there is no planner brief and no Brief review. (1) Before writing code, read the issue, check its claims against origin/main, and post one short issue comment whose first line is '## Fast-path brief' (never call it an agent brief): scope and exclusions, each acceptance criterion as a scenario, the edge cases, and the tests you will write. Where the rules above mention the agent brief, its 'Brief review' or its Review checklist, use this Fast-path brief. The independent reviewer reviews against it. (2) QA is proportionate, replacing the qa pass in /supermatt:implement and docs/agents/builder.md: prove every acceptance criterion and edge case with an automated test; no separate qa pass, no mutation runs, no manual scenario walkthroughs. Only if the ticket changes something a user sees in the running app, check that one behaviour there (and the UI design pass still applies). Write the QA verdict line as 'QA: proportionate (fast path), <n> criteria covered by tests'. (3) If the work turns out to touch money, auth, RLS/data isolation, migrations, order state or an external provider: stop, post that on the issue, write the reason to $REPLAN, and end without committing or pushing. The coordinator replans it in full."
 LANE_PORT="${E2E_PORT:-3000}"
 # Cap local Playwright browsers per lane (several lanes share this machine).
 export E2E_WORKERS="${E2E_WORKERS:-4}"
@@ -103,7 +130,8 @@ run_fix() {
   sid=$(cat "$SESSION_FILE" 2>/dev/null || true)
   LOG="$ROOT/.builder/logs/ticket-$N-fix-$(date +%Y%m%d-%H%M%S).json"
   local prompt="/supermatt:fix-findings $findings
-These findings come from an independent reviewer or from local-ci, not from you. Reproduce each one first (a failing test, or a command showing the failure). If one does not reproduce, say so with the evidence and leave that code alone. Fix the rest test-first. In a fix round run only the unit, integration and e2e specs affected by these findings, plus typecheck and lint; never run the whole suite or scripts/ci-local.sh. Then commit and push to the same PR; the pipeline re-runs local-ci. Do not review your own fix; the independent reviewer re-reviews it. $RULES"
+These findings come from an independent reviewer or from local-ci, not from you. Reproduce each one first (a failing test, or a command showing the failure). If one does not reproduce, say so with the evidence and leave that code alone. Fix the rest test-first. In a fix round run only the unit, integration and e2e specs affected by these findings, plus typecheck and lint; never run the whole suite or scripts/ci-local.sh. Then commit and push to the same PR; the pipeline re-runs local-ci. Do not review your own fix; the independent reviewer re-reviews it. $RULES${FAST_RULE:+
+$FAST_RULE}"
   [ -n "$sid" ] || prompt="$FRESH_CONTEXT
 $prompt"
   agent_run "$ROLE" "$LOG" "$prompt" "$sid" || status=$?
@@ -117,7 +145,8 @@ Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build 
 If this ticket touches UI, the design pass in docs/agents/builder.md is part of done: the report must include the impeccable critique score and screenshots at 390px and 1440px (light and dark), or the coordinator will reject the PR.
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
 ${KEYLESS:-}
-$RULES"
+$RULES${FAST_RULE:+
+$FAST_RULE}"
     agent_run "$ROLE" "$LOG" "$PROMPT" || status=$?
     ;;
   --resume)
@@ -126,14 +155,23 @@ $RULES"
     ;;
   --continue)
     SID=$(cat "$SESSION_FILE" 2>/dev/null || true)
-    if [ -n "$SID" ]; then agent_run "$ROLE" "$LOG" "Continue where you stopped. $RULES" "$SID" || status=$?
-    else agent_run "$ROLE" "$LOG" "$FRESH_CONTEXT Then continue the work to done. $RULES" || status=$?; fi
+    if [ -n "$SID" ]; then agent_run "$ROLE" "$LOG" "Continue where you stopped. $RULES${FAST_RULE:+ $FAST_RULE}" "$SID" || status=$?
+    else agent_run "$ROLE" "$LOG" "$FRESH_CONTEXT Then continue the work to done. $RULES${FAST_RULE:+ $FAST_RULE}" || status=$?; fi
     ;;
   *) echo "unknown mode $MODE"; exit 1 ;;
 esac
 
 # Keep the session id for --resume / --continue.
 save_session
+
+# Fast path stopped for a replan, or nothing was built: never fall into the review/CI loop (it would review an
+# empty branch, run local-ci on main and send a fix round that pushes the out-of-scope work).
+if [ "$FAST" = "1" ] && [ -z "${status:-}" ]; then
+  if [ -f "$REPLAN" ] || [ "$(git -C "$WT" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)" = "0" ]; then
+    echo "Fast path stopped: replan required for #$N. $(cat "$REPLAN" 2>/dev/null || echo 'No commits on the branch.')"
+    exit 4
+  fi
+fi
 
 # Independent review loop: a fresh session reviews the branch while local-ci runs on the same pushed HEAD
 # (in parallel: the builder never runs the full suite). Blocking findings and real CI failures go back to the
