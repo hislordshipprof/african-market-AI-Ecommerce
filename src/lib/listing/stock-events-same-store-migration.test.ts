@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Client } from "pg";
+import { backendPid, pgError, waitForLockWait } from "./lock-wait-test-helpers";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -162,15 +163,6 @@ type EventRow = {
   actor_id: string;
   created_at: string;
 };
-
-function pgError(error: unknown): { code: string; message: string } {
-  if (typeof error === "object" && error !== null) {
-    const code = "code" in error && error.code != null ? String(error.code) : "";
-    const message = error instanceof Error ? error.message : "";
-    return { code, message };
-  }
-  return { code: "", message: "" };
-}
 
 describe("stock_events same-store migration file", () => {
   const raw = migrationSql();
@@ -1048,24 +1040,6 @@ async function connectSchema(schema: string): Promise<Client> {
   await extra.connect();
   await extra.query(`SET search_path = ${schema}`);
   return extra;
-}
-
-async function backendPid(client: Client): Promise<number> {
-  const { rows } = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-  return rows[0].pid;
-}
-
-async function waitForLockWait(observer: Client, pid: number) {
-  const deadline = Date.now() + 8_000;
-  while (Date.now() < deadline) {
-    const { rows } = await observer.query(
-      "SELECT 1 FROM pg_locks WHERE pid = $1 AND NOT granted LIMIT 1",
-      [pid],
-    );
-    if (rows.length > 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error("the overlapping statement never waited on a lock");
 }
 
 function setupConnectionString(direct: string): string {
