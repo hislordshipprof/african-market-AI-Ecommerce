@@ -57,6 +57,7 @@ test("a shopper can add egusi, undo it, and keep the transcript across pages", a
   await page.getByRole("link", { name: /Tubers/ }).first().click();
   await page.getByTestId("assistant-launcher").click();
   await expect(page.getByText("add two egusi")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Shop with help" }).getByRole("button", { name: "Undone", exact: true })).toBeVisible();
 });
 
 test("markup and stray prices stay plain text, and a card number never leaves the browser", async ({ page }) => {

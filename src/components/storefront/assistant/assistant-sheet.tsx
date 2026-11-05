@@ -12,6 +12,7 @@ import { retainSession } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
 import { createSendLock, outgoingMessage } from "@/lib/assistant/ui/send";
 import { planUndo, undoCardAfter, type UndoAck } from "@/lib/assistant/ui/undo";
+import { replaceUndoLabels, undoLabelsForStore } from "@/lib/assistant/ui/undo-memory";
 import { AssistantRouteError, mapRouteError, type RouteView } from "@/lib/assistant/ui/route-errors";
 import { undoAssistantAdditionAction } from "@/lib/cart/actions";
 import type { CartLine } from "@/lib/storefront/cart-store";
@@ -118,7 +119,19 @@ function Thread({
   const announced = useRef(new Set<string>());
   const [lastSent, setLastSent] = useState<{ id: string; text: string } | null>(null);
   const [draft, setDraft] = useState("");
-  const [undoState, setUndoState] = useState<Record<string, "undone" | "already_removed">>({});
+  const [trackedStore, setTrackedStore] = useState(storeId);
+  const [undoState, setUndoState] = useState(() => undoLabelsForStore(storeId));
+  if (trackedStore !== storeId) {
+    setTrackedStore(storeId);
+    setUndoState(undoLabelsForStore(storeId));
+  }
+  function rememberUndoState(update: (current: Record<string, "undone" | "already_removed">) => Record<string, "undone" | "already_removed">) {
+    setUndoState((current) => {
+      const next = update(current);
+      replaceUndoLabels(storeId, next);
+      return next;
+    });
+  }
   const liveRef = useRef<HTMLParagraphElement>(null);
   const busy = status === "submitted" || status === "streaming";
   const routeError: RouteView | null = error ? viewFor(error) : null;
@@ -189,7 +202,7 @@ function Thread({
             disabled={!!routeError?.terminal || busy}
             onChoice={(text) => { void submit(text); }}
             onUndo={(card) => {
-              void undoCard(card, lines, attention, storeId, undoState, setUndoState, onCartFailure);
+              void undoCard(card, lines, attention, storeId, undoState, rememberUndoState, onCartFailure);
             }}
             onChange={() => composer.current?.focus()}
           />
