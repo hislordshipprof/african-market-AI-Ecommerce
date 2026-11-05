@@ -87,9 +87,45 @@ function setPrototypeQuery(query: QueryFn) {
   (Client.prototype as unknown as { query: QueryFn }).query = query;
 }
 
+function isSubmittableQuery(value: unknown): boolean {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    typeof (value as { submit?: unknown }).submit === "function",
+  );
+}
+
+function callbackDescriptor(config: object): PropertyDescriptor | undefined {
+  let current: object | null = config;
+  while (current) {
+    const desc = Object.getOwnPropertyDescriptor(current, "callback");
+    if (desc) return desc;
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+  return undefined;
+}
+
+/**
+ * pg 8.23.1 returns a Promise only when the normalized config has no truthy callback.
+ * Callback-form and Submittable calls are forwarded unchanged and do not consume a rule.
+ * Accessor callbacks are not read here: pg copies the descriptor onto a clone and reads it there.
+ */
+function isImmediateQuery(args: unknown[]): boolean {
+  const first = args[0];
+  if (isSubmittableQuery(first)) return true;
+  if (args[2]) return true;
+  if (typeof args[1] === "function") return true;
+  if (first == null || typeof first !== "object") return false;
+  const desc = callbackDescriptor(first);
+  if (!desc) return false;
+  if (desc.get || desc.set) return true;
+  return Boolean(desc.value);
+}
+
 function dispatcher(this: Client, ...args: unknown[]): unknown {
-  const rule = delayRules.find((candidate) => !candidate.consumed && delayMatches(candidate, args));
   const next = nativeQuery ?? prototypeQuery();
+  if (isImmediateQuery(args)) return next.apply(this, args);
+  const rule = delayRules.find((candidate) => !candidate.consumed && delayMatches(candidate, args));
   if (!rule) return next.apply(this, args);
   rule.consumed = true;
   rule.fired = true;
@@ -115,11 +151,7 @@ function ensureDelayInstalled() {
 }
 
 function delayMatches(rule: DelayRule, args: unknown[]): boolean {
-  if (typeof args[args.length - 1] === "function") return false;
   const first = args[0];
-  if (first && typeof first === "object" && typeof (first as { submit?: unknown }).submit === "function") {
-    return false;
-  }
   let text = "";
   let values: unknown[] = [];
   if (typeof first === "string") {

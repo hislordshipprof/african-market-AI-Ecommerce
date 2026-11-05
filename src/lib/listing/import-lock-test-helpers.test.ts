@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "fs";
 import { createServer, type AddressInfo, type Socket } from "net";
 import { join } from "path";
-import { Client } from "pg";
+import { Client, Query } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runtimeDatabaseUrl } from "../env";
 import { IMPORT_TOKEN_TTL_MS } from "../db";
@@ -23,6 +23,111 @@ function installQuery(impl: (this: Client, ...args: unknown[]) => unknown) {
   proto.query = impl;
   return () => {
     proto.query = original;
+  };
+}
+
+const LISTING_SQL = "SELECT id FROM listing_imports WHERE id=$1";
+const CLOSED_CLIENT = "Client was closed and is not queryable";
+
+type QueryCall = (this: Client, ...args: unknown[]) => unknown;
+
+function queryAs(client: Client, ...args: unknown[]): unknown {
+  return (client.query as unknown as QueryCall).apply(client, args);
+}
+
+async function endedClient(): Promise<Client> {
+  const client = new Client({ connectionString: "postgres://127.0.0.1:9/none" });
+  await client.end();
+  return client;
+}
+
+type NativeCall = { self: unknown; args: unknown[]; at: number };
+
+function installCallThrough() {
+  const original = proto.query;
+  const seen: NativeCall[] = [];
+  function wrapped(this: Client, ...args: unknown[]) {
+    seen.push({ self: this, args, at: Date.now() });
+    return original.apply(this, args);
+  }
+  proto.query = wrapped;
+  return {
+    seen,
+    wrapped,
+    restore() {
+      proto.query = original;
+    },
+  };
+}
+
+function trackedCallback(label: string) {
+  const calls: string[] = [];
+  let settle: (line: string) => void = () => undefined;
+  const done = new Promise<string>((resolve) => {
+    settle = resolve;
+  });
+  const fn = (err: unknown) => {
+    const line = `${label}:${err instanceof Error ? err.message : String(err)}`;
+    calls.push(line);
+    settle(line);
+  };
+  return { fn, done, calls };
+}
+
+function expectClosedClient(result: unknown): Promise<void> {
+  const captured = (result as Promise<unknown>).then(
+    () => {
+      throw new Error("expected the driver to reject the delayed query");
+    },
+    (reason: unknown) => reason,
+  );
+  return captured.then((err) => {
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe(CLOSED_CLIENT);
+  });
+}
+
+async function awaitCallback(done: Promise<string>, label: string): Promise<string> {
+  const line = await Promise.race([
+    done,
+    new Promise<string>((_, reject) => {
+      setTimeout(() => reject(new Error(`callback ${label} was not called`)), 500);
+    }),
+  ]);
+  return line;
+}
+
+function listingConfig(values: string[], extra?: Record<string, unknown>) {
+  return { text: LISTING_SQL, values, ...extra };
+}
+
+function receiverCallbackConfig(kind: "own" | "inherited") {
+  let observations = 0;
+  const receivers: unknown[] = [];
+  const fields = { text: LISTING_SQL, values: ["token"] };
+  const config = kind === "own" ? fields : Object.assign(Object.create({}), fields);
+  const host = kind === "own" ? config : (Object.getPrototypeOf(config) as object);
+  let settle: (line: string) => void = () => undefined;
+  const done = new Promise<string>((resolve) => {
+    settle = resolve;
+  });
+  const fn = (err: unknown) => {
+    settle(err instanceof Error ? err.message : String(err));
+  };
+  Object.defineProperty(host, "callback", {
+    configurable: true,
+    enumerable: true,
+    get() {
+      observations += 1;
+      receivers.push(this);
+      return this === config ? null : fn;
+    },
+  });
+  return {
+    config,
+    done,
+    receivers,
+    observations: () => observations,
   };
 }
 
@@ -688,5 +793,745 @@ describe("import lock test helpers", () => {
     };
     walk(root);
     expect(importers).toEqual([]);
+  });
+
+  describe("pg callback form", () => {
+    it("config callback is forwarded at once, returns undefined, and leaves the delay unfired", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const callback = trackedCallback("config");
+      const config = listingConfig(["token"], { callback: callback.fn });
+      try {
+        const started = Date.now();
+        const result = queryAs(client, config);
+        expect(result).toBeUndefined();
+        expect(result).not.toBeInstanceOf(Promise);
+        expect(delay.fired()).toBe(false);
+        expect(spy.seen).toHaveLength(1);
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]?.args).toEqual([config]);
+        expect(spy.seen[0]?.args[0]).toBe(config);
+        const line = await awaitCallback(callback.done, "config");
+        expect(line).toBe(`config:${CLOSED_CLIENT}`);
+        expect(Date.now() - started).toBeLessThan(150);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("a later promise query still takes the one-shot delay after a config callback", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+      const callback = trackedCallback("config");
+      const callbackConfig = listingConfig(["token"], { callback: callback.fn });
+      const promiseConfig = listingConfig(["token"]);
+      try {
+        expect(queryAs(client, callbackConfig)).toBeUndefined();
+        await awaitCallback(callback.done, "config");
+        expect(delay.fired()).toBe(false);
+        const started = Date.now();
+        const pending = queryAs(client, promiseConfig);
+        expect(pending).toBeInstanceOf(Promise);
+        const rejection = expectClosedClient(pending);
+        expect(delay.fired()).toBe(true);
+        expect(spy.seen.filter((row) => row.args[0] === promiseConfig)).toHaveLength(0);
+        await rejection;
+        const forwarded = spy.seen.filter((row) => row.args[0] === promiseConfig);
+        expect(forwarded).toHaveLength(1);
+        expect(forwarded[0]?.self).toBe(client);
+        expect(forwarded[0]?.args[0]).toBe(promiseConfig);
+        expect(forwarded[0]!.at - started).toBeGreaterThanOrEqual(60);
+        expect(delay.fired()).toBe(true);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("inherited config callback is treated as callback form", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const callback = trackedCallback("inherited");
+      const config = Object.assign(Object.create({ callback: callback.fn }), {
+        text: LISTING_SQL,
+        values: ["token"],
+      });
+      try {
+        expect(Object.hasOwn(config, "callback")).toBe(false);
+        const result = queryAs(client, config);
+        expect(result).toBeUndefined();
+        expect(spy.seen[0]?.args[0]).toBe(config);
+        expect(await awaitCallback(callback.done, "inherited")).toBe(`inherited:${CLOSED_CLIENT}`);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("second-argument callback with a trailing undefined is forwarded at once", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const callback = trackedCallback("second");
+      const config = listingConfig(["token"]);
+      try {
+        const result = queryAs(client, config, callback.fn, undefined);
+        expect(result).toBeUndefined();
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]?.args).toHaveLength(3);
+        expect(spy.seen[0]?.args[0]).toBe(config);
+        expect(spy.seen[0]?.args[1]).toBe(callback.fn);
+        expect(spy.seen[0]?.args[2]).toBeUndefined();
+        expect(await awaitCallback(callback.done, "second")).toBe(`second:${CLOSED_CLIENT}`);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("non-function config callback throws pg's TypeError synchronously", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const callback = trackedCallback("should-not-run");
+      try {
+        const config = listingConfig(["token"], { callback: "x" });
+        expect(spy.seen).toHaveLength(0);
+        expect(() => queryAs(client, config)).toThrow(TypeError);
+        expect(() => queryAs(client, config)).toThrow("callback is not a function");
+        expect(spy.seen).toHaveLength(2);
+        expect(spy.seen[0]?.args[0]).toBe(config);
+        expect(() => queryAs(client, listingConfig(["token"], { callback: callback.fn }), ["token"], "x")).toThrow(
+          "callback is not a function",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(callback.calls).toEqual([]);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("null or false callback stays promise form and is delayed", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delays = [0, 1, 2].map(() => delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 }));
+      const nullConfig = listingConfig(["token"], { callback: null });
+      const falseConfig = listingConfig(["token"], { callback: false });
+      const positionalValues = ["token"];
+      try {
+        const started = Date.now();
+        const pending = [
+          queryAs(client, nullConfig),
+          queryAs(client, falseConfig),
+          queryAs(client, LISTING_SQL, positionalValues, null),
+        ];
+        for (const result of pending) expect(result).toBeInstanceOf(Promise);
+        const rejections = pending.map((result) => expectClosedClient(result));
+        expect(delays.map((delay) => delay.fired())).toEqual([true, true, true]);
+        expect(spy.seen).toHaveLength(0);
+        await Promise.all(rejections);
+        expect(spy.seen.map((row) => row.args[0])).toEqual([nullConfig, falseConfig, LISTING_SQL]);
+        expect(spy.seen[2]?.args[1]).toBe(positionalValues);
+        expect(spy.seen[2]?.args[2]).toBeNull();
+        for (const row of spy.seen) {
+          expect(row.self).toBe(client);
+          expect(row.at - started).toBeGreaterThanOrEqual(60);
+        }
+        for (const delay of delays) expect(delay.fired()).toBe(true);
+      } finally {
+        await Promise.all(delays.map((delay) => delay.restore()));
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("real Submittable and positional callback keep their driver return values", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const callback = trackedCallback("positional");
+      const positionalValues = ["token"];
+      const submittable = new Query(LISTING_SQL, ["token"]);
+      const errors: Error[] = [];
+      const errorSeen = new Promise<Error>((resolve) => {
+        submittable.on("error", (err) => {
+          errors.push(err);
+          resolve(err);
+        });
+      });
+      try {
+        const positional = queryAs(client, LISTING_SQL, positionalValues, callback.fn);
+        expect(positional).toBeUndefined();
+        expect(spy.seen[0]?.args[2]).toBe(callback.fn);
+        expect(await awaitCallback(callback.done, "positional")).toBe(`positional:${CLOSED_CLIENT}`);
+        const returned = client.query(submittable);
+        expect(returned).toBe(submittable);
+        expect(delay.fired()).toBe(false);
+        const err = await Promise.race([
+          errorSeen,
+          new Promise<Error>((_, reject) => setTimeout(() => reject(new Error("submittable error missing")), 500)),
+        ]);
+        expect(err.message).toBe(CLOSED_CLIENT);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(errors).toHaveLength(1);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("null query still reaches pg's own TypeError", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      try {
+        expect(() => queryAs(client, null)).toThrow(TypeError);
+        expect(() => queryAs(client, null)).toThrow("Client was passed a null or undefined query");
+        expect(() => queryAs(client, undefined)).toThrow("Client was passed a null or undefined query");
+        expect(delay.fired()).toBe(false);
+        expect(spy.seen.map((row) => row.args[0])).toEqual([null, null, undefined]);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("callback calls do not consume either of two stacked rules", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const first = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+      const second = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+      const callback = trackedCallback("stacked");
+      const callbackConfig = listingConfig(["token"], { callback: callback.fn });
+      const firstConfig = listingConfig(["token"]);
+      const secondConfig = listingConfig(["token"]);
+      try {
+        expect(queryAs(client, callbackConfig)).toBeUndefined();
+        await awaitCallback(callback.done, "stacked");
+        expect(first.fired()).toBe(false);
+        expect(second.fired()).toBe(false);
+        const started = Date.now();
+        const pendingFirst = queryAs(client, firstConfig);
+        expect(pendingFirst).toBeInstanceOf(Promise);
+        const firstRejection = expectClosedClient(pendingFirst);
+        expect(first.fired()).toBe(true);
+        expect(second.fired()).toBe(false);
+        expect(queryAs(client, callbackConfig)).toBeUndefined();
+        expect(second.fired()).toBe(false);
+        const pendingSecond = queryAs(client, secondConfig);
+        const secondRejection = expectClosedClient(pendingSecond);
+        expect(second.fired()).toBe(true);
+        expect(spy.seen.filter((row) => row.args[0] === firstConfig || row.args[0] === secondConfig)).toHaveLength(0);
+        await Promise.all([firstRejection, secondRejection]);
+        const forwarded = spy.seen.filter((row) => row.args[0] === firstConfig || row.args[0] === secondConfig);
+        expect(forwarded.map((row) => row.args[0])).toEqual([firstConfig, secondConfig]);
+        for (const row of forwarded) expect(row.at - started).toBeGreaterThanOrEqual(60);
+      } finally {
+        await first.restore();
+        await second.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("callback call is not held behind a pending delayed query", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+      const stillOpen = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+      const promiseConfig = listingConfig(["token"]);
+      const callback = trackedCallback("interleaved");
+      const callbackConfig = listingConfig(["token"], { callback: callback.fn });
+      try {
+        const started = Date.now();
+        const pending = queryAs(client, promiseConfig);
+        expect(pending).toBeInstanceOf(Promise);
+        const rejection = expectClosedClient(pending);
+        expect(delay.fired()).toBe(true);
+        expect(stillOpen.fired()).toBe(false);
+        expect(spy.seen).toHaveLength(0);
+        expect(queryAs(client, callbackConfig)).toBeUndefined();
+        expect(stillOpen.fired()).toBe(false);
+        expect(spy.seen).toHaveLength(1);
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]?.args[0]).toBe(callbackConfig);
+        expect(spy.seen[0]!.at - started).toBeLessThan(40);
+        expect(await awaitCallback(callback.done, "interleaved")).toBe(`interleaved:${CLOSED_CLIENT}`);
+        expect(spy.seen.filter((row) => row.args[0] === promiseConfig)).toHaveLength(0);
+        await rejection;
+        expect(spy.seen.map((row) => row.args[0])).toEqual([callbackConfig, promiseConfig]);
+        expect(spy.seen[1]!.at - started).toBeGreaterThanOrEqual(60);
+        expect(stillOpen.fired()).toBe(false);
+        const laterConfig = listingConfig(["token"]);
+        const later = queryAs(client, laterConfig);
+        expect(later).toBeInstanceOf(Promise);
+        const laterRejection = expectClosedClient(later);
+        expect(stillOpen.fired()).toBe(true);
+        await laterRejection;
+      } finally {
+        await delay.restore();
+        await stillOpen.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("restore after callback-only calls is immediate and reinstalls native query", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const callback = trackedCallback("restore");
+      try {
+        expect(proto.query).not.toBe(spy.wrapped);
+        const started = Date.now();
+        expect(queryAs(client, listingConfig(["token"], { callback: callback.fn }))).toBeUndefined();
+        await awaitCallback(callback.done, "restore");
+        expect(delay.fired()).toBe(false);
+        await delay.restore();
+        expect(Date.now() - started).toBeLessThan(150);
+        expect(proto.query).toBe(spy.wrapped);
+      } finally {
+        if (proto.query !== spy.wrapped) await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("callback accessors preserve native clone receiver and observation count", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      try {
+        for (const kind of ["own", "inherited"] as const) {
+          const native = receiverCallbackConfig(kind);
+          expect(queryAs(client, native.config)).toBeUndefined();
+          expect(await awaitCallback(native.done, kind)).toBe(CLOSED_CLIENT);
+          const first = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+          const second = delayFirstQuery({ table: "listing_imports", value: "other", ms: 80 });
+          const patched = receiverCallbackConfig(kind);
+          try {
+            const mark = spy.seen.length;
+            expect(queryAs(client, patched.config)).toBeUndefined();
+            expect(await awaitCallback(patched.done, kind)).toBe(CLOSED_CLIENT);
+            expect(patched.observations()).toBe(native.observations());
+            expect(patched.receivers).toHaveLength(native.receivers.length);
+            expect(native.receivers.every((receiver) => receiver !== native.config)).toBe(true);
+            expect(patched.receivers.every((receiver) => receiver !== patched.config)).toBe(true);
+            expect(first.fired()).toBe(false);
+            expect(second.fired()).toBe(false);
+            expect(spy.seen[mark]?.args[0]).toBe(patched.config);
+            const promiseConfig = listingConfig(["token"]);
+            const started = Date.now();
+            const pending = queryAs(client, promiseConfig);
+            expect(pending).toBeInstanceOf(Promise);
+            const rejection = expectClosedClient(pending);
+            expect(first.fired()).toBe(true);
+            expect(second.fired()).toBe(false);
+            expect(spy.seen.filter((row) => row.args[0] === promiseConfig)).toHaveLength(0);
+            await rejection;
+            const forwarded = spy.seen.find((row) => row.args[0] === promiseConfig);
+            expect(forwarded?.at).toBeGreaterThanOrEqual(started + 60);
+          } finally {
+            await first.restore();
+            await second.restore();
+          }
+        }
+        let sets = 0;
+        const setterConfig = listingConfig(["token"]);
+        Object.defineProperty(setterConfig, "callback", {
+          configurable: true,
+          enumerable: true,
+          set() {
+            sets += 1;
+          },
+        });
+        const nativeResult = queryAs(client, setterConfig);
+        expect(nativeResult).toBeInstanceOf(Promise);
+        const nativeRejection = expectClosedClient(nativeResult);
+        const nativeSets = sets;
+        await nativeRejection;
+        const held = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+        try {
+          const started = Date.now();
+          const patched = queryAs(client, setterConfig);
+          expect(patched).toBeInstanceOf(Promise);
+          const patchedRejection = expectClosedClient(patched);
+          expect(held.fired()).toBe(false);
+          expect(sets).toBe(nativeSets);
+          await patchedRejection;
+          expect(Date.now() - started).toBeLessThan(150);
+          expect(held.fired()).toBe(false);
+        } finally {
+          await held.restore();
+        }
+      } finally {
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("non-enumerable and null-prototype callbacks bypass the delay", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const hidden = trackedCallback("hidden");
+      const bare = trackedCallback("bare");
+      const hiddenConfig = listingConfig(["token"]);
+      Object.defineProperty(hiddenConfig, "callback", {
+        value: hidden.fn,
+        enumerable: false,
+        writable: true,
+        configurable: true,
+      });
+      const bareConfig = Object.assign(Object.create(null), { text: LISTING_SQL, values: ["token"] });
+      Object.defineProperty(bareConfig, "callback", {
+        value: bare.fn,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      try {
+        expect(Object.keys(hiddenConfig)).not.toContain("callback");
+        expect(Object.getPrototypeOf(bareConfig)).toBeNull();
+        expect(queryAs(client, hiddenConfig)).toBeUndefined();
+        expect(queryAs(client, bareConfig)).toBeUndefined();
+        expect(await awaitCallback(hidden.done, "hidden")).toBe(`hidden:${CLOSED_CLIENT}`);
+        expect(await awaitCallback(bare.done, "bare")).toBe(`bare:${CLOSED_CLIENT}`);
+        expect(spy.seen.map((row) => row.args[0])).toEqual([hiddenConfig, bareConfig]);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("callback precedence follows only the first three driver arguments", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+      try {
+        const winner = trackedCallback("third");
+        const loserA = trackedCallback("config");
+        const loserB = trackedCallback("second");
+        const config = listingConfig(["token"], { callback: loserA.fn });
+        expect(queryAs(client, config, loserB.fn, winner.fn)).toBeUndefined();
+        expect(await awaitCallback(winner.done, "third")).toBe(`third:${CLOSED_CLIENT}`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(loserA.calls).toEqual([]);
+        expect(loserB.calls).toEqual([]);
+        expect(delay.fired()).toBe(false);
+
+        const invalidA = trackedCallback("invalid-config");
+        const invalidB = trackedCallback("invalid-second");
+        expect(() => queryAs(
+          client,
+          listingConfig(["token"], { callback: invalidA.fn }),
+          invalidB.fn,
+          "x",
+        )).toThrow("callback is not a function");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(invalidA.calls).toEqual([]);
+        expect(invalidB.calls).toEqual([]);
+        expect(delay.fired()).toBe(false);
+
+        for (const third of [null, undefined, false]) {
+          const configCallback = trackedCallback("fallback-config");
+          const secondCallback = trackedCallback("fallback-second");
+          expect(queryAs(
+            client,
+            listingConfig(["token"], { callback: configCallback.fn }),
+            secondCallback.fn,
+            third,
+          )).toBeUndefined();
+          expect(await awaitCallback(secondCallback.done, "fallback-second")).toBe(`fallback-second:${CLOSED_CLIENT}`);
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          expect(configCallback.calls).toEqual([]);
+        }
+        expect(delay.fired()).toBe(false);
+
+        const ignored = trackedCallback("fourth");
+        const promiseConfig = listingConfig(["token"]);
+        const started = Date.now();
+        const pending = queryAs(client, promiseConfig, undefined, undefined, ignored.fn);
+        expect(pending).toBeInstanceOf(Promise);
+        const rejection = expectClosedClient(pending);
+        expect(delay.fired()).toBe(true);
+        expect(spy.seen.filter((row) => row.args[0] === promiseConfig)).toHaveLength(0);
+        await rejection;
+        const forwarded = spy.seen.find((row) => row.args[0] === promiseConfig);
+        expect(forwarded?.args).toHaveLength(4);
+        expect(forwarded?.args[3]).toBe(ignored.fn);
+        expect(forwarded!.at - started).toBeGreaterThanOrEqual(60);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(ignored.calls).toEqual([]);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("callback overrides preserve native synchronous normalization errors", async () => {
+      const client = await endedClient();
+      const samples = [
+        () => {
+          const calls: string[] = [];
+          const config = listingConfig(["token"]);
+          Object.defineProperty(config, "callback", {
+            value: () => calls.push("own"),
+            writable: false,
+            enumerable: true,
+            configurable: true,
+          });
+          return { config, calls, gets: () => 0 };
+        },
+        () => {
+          const calls: string[] = [];
+          let gets = 0;
+          const config = listingConfig(["token"]);
+          Object.defineProperty(config, "callback", {
+            configurable: true,
+            enumerable: true,
+            get() {
+              gets += 1;
+              return () => calls.push("getter");
+            },
+          });
+          return { config, calls, gets: () => gets };
+        },
+        () => {
+          const calls: string[] = [];
+          const proto = {};
+          Object.defineProperty(proto, "callback", {
+            value: () => calls.push("inherited"),
+            writable: false,
+            enumerable: true,
+            configurable: true,
+          });
+          const config = Object.assign(Object.create(proto), { text: LISTING_SQL, values: ["token"] });
+          return { config, calls, gets: () => 0 };
+        },
+      ];
+      const baselines: Error[] = [];
+      for (const sample of samples) {
+        const made = sample();
+        const override = () => undefined;
+        try {
+          queryAs(client, made.config, override);
+          throw new Error("native override should throw");
+        } catch (err) {
+          baselines.push(err as Error);
+        }
+        expect(made.calls).toEqual([]);
+      }
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+      try {
+        for (const [index, sample] of samples.entries()) {
+          const made = sample();
+          const beforeGets = made.gets();
+          let thrown: unknown;
+          try {
+            queryAs(client, made.config, () => undefined);
+          } catch (err) {
+            thrown = err;
+          }
+          expect(thrown).toBeInstanceOf(baselines[index]!.constructor);
+          expect((thrown as Error).message).toBe(baselines[index]!.message);
+          expect(made.calls).toEqual([]);
+          expect(made.gets()).toBe(beforeGets);
+          expect(delay.fired()).toBe(false);
+        }
+        const promiseConfig = listingConfig(["token"]);
+        const started = Date.now();
+        const pending = queryAs(client, promiseConfig);
+        expect(pending).toBeInstanceOf(Promise);
+        const rejection = expectClosedClient(pending);
+        expect(delay.fired()).toBe(true);
+        expect(spy.seen.filter((row) => row.args[0] === promiseConfig)).toHaveLength(0);
+        await rejection;
+        const forwarded = spy.seen.find((row) => row.args[0] === promiseConfig);
+        expect(forwarded?.at).toBeGreaterThanOrEqual(started + 60);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("callbacks on another client bypass pending work and partial restore preserves remaining rules", async () => {
+      const clientA = await endedClient();
+      const clientB = await endedClient();
+      const spy = installCallThrough();
+      const delayA = delayFirstQuery({ table: "listing_imports", value: "token-a", ms: 80 });
+      const delayB = delayFirstQuery({ table: "listing_imports", value: "token-b", ms: 80 });
+      const callback = trackedCallback("other");
+      const promiseConfig = listingConfig(["token-a"]);
+      const callbackConfig = listingConfig(["token-b"], { callback: callback.fn });
+      try {
+        const started = Date.now();
+        const pending = queryAs(clientA, promiseConfig);
+        expect(pending).toBeInstanceOf(Promise);
+        const rejection = expectClosedClient(pending);
+        expect(delayA.fired()).toBe(true);
+        expect(spy.seen).toHaveLength(0);
+        expect(queryAs(clientB, callbackConfig)).toBeUndefined();
+        expect(delayB.fired()).toBe(false);
+        expect(spy.seen).toHaveLength(1);
+        expect(spy.seen[0]?.self).toBe(clientB);
+        expect(spy.seen[0]?.args).toEqual([callbackConfig]);
+        expect(await awaitCallback(callback.done, "other")).toBe(`other:${CLOSED_CLIENT}`);
+        expect(spy.seen.filter((row) => row.self === clientA)).toHaveLength(0);
+        await rejection;
+        const forwarded = spy.seen.find((row) => row.args[0] === promiseConfig);
+        expect(forwarded?.self).toBe(clientA);
+        expect(forwarded!.at - started).toBeGreaterThanOrEqual(60);
+        const wrapped = proto.query;
+        expect(wrapped).not.toBe(spy.wrapped);
+        await delayA.restore();
+        expect(proto.query).toBe(wrapped);
+        expect(delayB.fired()).toBe(false);
+        const laterConfig = listingConfig(["token-b"]);
+        const laterStarted = Date.now();
+        const later = queryAs(clientB, laterConfig);
+        expect(later).toBeInstanceOf(Promise);
+        const laterRejection = expectClosedClient(later);
+        expect(delayB.fired()).toBe(true);
+        expect(proto.query).toBe(wrapped);
+        expect(spy.seen.filter((row) => row.args[0] === laterConfig)).toHaveLength(0);
+        await laterRejection;
+        const laterForwarded = spy.seen.find((row) => row.args[0] === laterConfig);
+        expect(laterForwarded?.self).toBe(clientB);
+        expect(laterForwarded!.at - laterStarted).toBeGreaterThanOrEqual(60);
+        await delayB.restore();
+        expect(proto.query).toBe(spy.wrapped);
+      } finally {
+        await delayA.restore();
+        await delayB.restore();
+        spy.restore();
+        await clientA.end().catch(() => undefined);
+        await clientB.end().catch(() => undefined);
+      }
+    });
+
+    it("fired marks scheduling and only one same-turn promise call is delayed", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 80 });
+      const first = listingConfig(["token"]);
+      const second = listingConfig(["token"]);
+      try {
+        const started = Date.now();
+        const pendingFirst = queryAs(client, first);
+        expect(pendingFirst).toBeInstanceOf(Promise);
+        const firstRejection = expectClosedClient(pendingFirst);
+        expect(delay.fired()).toBe(true);
+        expect(spy.seen).toHaveLength(0);
+        const pendingSecond = queryAs(client, second);
+        expect(pendingSecond).toBeInstanceOf(Promise);
+        const secondRejection = expectClosedClient(pendingSecond);
+        expect(spy.seen).toHaveLength(1);
+        expect(spy.seen[0]?.args[0]).toBe(second);
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]!.at - started).toBeLessThan(40);
+        await Promise.all([firstRejection, secondRejection]);
+        expect(spy.seen.map((row) => row.args[0])).toEqual([second, first]);
+        expect(spy.seen[1]!.at - started).toBeGreaterThanOrEqual(60);
+        expect(spy.seen[0]!.at).toBeLessThan(spy.seen[1]!.at);
+        expect(delay.fired()).toBe(true);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("real Query returns by identity and delivers its native error before cleanup", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const submittable = new Query(LISTING_SQL, ["token"]);
+      const errors: Error[] = [];
+      const errorSeen = new Promise<Error>((resolve) => {
+        submittable.on("error", (err) => {
+          errors.push(err);
+          resolve(err);
+        });
+      });
+      try {
+        const returned = client.query(submittable);
+        expect(returned).toBe(submittable);
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]?.args[0]).toBe(submittable);
+        expect(delay.fired()).toBe(false);
+        const err = await Promise.race([
+          errorSeen,
+          new Promise<Error>((_, reject) => setTimeout(() => reject(new Error("query error missing")), 500)),
+        ]);
+        expect(err).toBeInstanceOf(Error);
+        expect(err.message).toBe(CLOSED_CLIENT);
+        await delay.restore();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(errors).toEqual([err]);
+        expect(delay.fired()).toBe(false);
+        expect(proto.query).toBe(spy.wrapped);
+      } finally {
+        if (proto.query !== spy.wrapped) await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
+
+    it("callback bypass preserves config identity descriptors and original argument list", async () => {
+      const client = await endedClient();
+      const spy = installCallThrough();
+      const delay = delayFirstQuery({ table: "listing_imports", value: "token", ms: 200 });
+      const callback = trackedCallback("identity");
+      const config = listingConfig(["token"], {
+        callback: callback.fn,
+        rowMode: "array",
+        name: "listing_import_read",
+      });
+      const before = Object.getOwnPropertyDescriptors(config);
+      const positionalValues = ["token"];
+      const positional = trackedCallback("positional-identity");
+      try {
+        expect(queryAs(client, config)).toBeUndefined();
+        expect(spy.seen[0]?.self).toBe(client);
+        expect(spy.seen[0]?.args).toHaveLength(1);
+        expect(spy.seen[0]?.args[0]).toBe(config);
+        expect(Object.getOwnPropertyDescriptors(config)).toEqual(before);
+        expect(queryAs(client, LISTING_SQL, positionalValues, positional.fn)).toBeUndefined();
+        expect(spy.seen[1]?.args).toHaveLength(3);
+        expect(spy.seen[1]?.args[0]).toBe(LISTING_SQL);
+        expect(spy.seen[1]?.args[1]).toBe(positionalValues);
+        expect(spy.seen[1]?.args[2]).toBe(positional.fn);
+        expect(await awaitCallback(callback.done, "identity")).toBe(`identity:${CLOSED_CLIENT}`);
+        expect(await awaitCallback(positional.done, "positional-identity")).toBe(`positional-identity:${CLOSED_CLIENT}`);
+        expect(Object.getOwnPropertyDescriptors(config)).toEqual(before);
+        expect(delay.fired()).toBe(false);
+      } finally {
+        await delay.restore();
+        spy.restore();
+        await client.end().catch(() => undefined);
+      }
+    });
   });
 });
