@@ -9,6 +9,7 @@ import {
   quoteCheckout,
   createPaymentIntent,
   placeOrder,
+  resumeOrderedCart,
   SavedCardUnavailableError,
   BasketAlreadyOrderedError,
   BasketChangedError,
@@ -26,12 +27,20 @@ async function signedInUserId(): Promise<string | null> {
 export async function quoteCheckoutAction(
   contact: Contact,
   fulfillment: Fulfillment,
-): Promise<{ ok: true; quote: CheckoutQuote } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; quote: CheckoutQuote; orderedToken?: string }
+  | { ok: false; error: string; code?: "basket_already_ordered" }
+> {
   try {
     const store = await getStore();
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
     const cartId = resolved.cartId;
+    const actorUserId = await signedInUserId();
+    const resume = await resumeOrderedCart(store.id, cartId, actorUserId);
+    if (resume?.kind === "unproved") {
+      return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
+    }
     const quote = await quoteCheckout(
       store.id,
       store.minimumOrderCents,
@@ -39,6 +48,7 @@ export async function quoteCheckoutAction(
       contact,
       fulfillment,
     );
+    if (resume?.kind === "order") return { ok: true, quote, orderedToken: resume.token };
     return { ok: true, quote };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Quote failed" };
@@ -50,8 +60,9 @@ export async function createPaymentIntentAction(
   fulfillment: Fulfillment,
   selection?: { saveCard?: boolean; savedCardId?: string | null; attemptToken?: string | null },
 ): Promise<
+  | { ok: true; orderedToken: string }
   | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number; attemptToken?: string }
-  | { ok: false; error: string; code?: "saved_card_unavailable" }
+  | { ok: false; error: string; code?: "saved_card_unavailable" | "basket_already_ordered" }
 > {
   try {
     const store = await getStore();
@@ -62,6 +73,12 @@ export async function createPaymentIntentAction(
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
     const cartId = resolved.cartId;
+    const actorUserId = await signedInUserId();
+    const resume = await resumeOrderedCart(store.id, cartId, actorUserId);
+    if (resume?.kind === "order") return { ok: true, orderedToken: resume.token };
+    if (resume?.kind === "unproved") {
+      return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
+    }
     const quote = await quoteCheckout(
       store.id,
       store.minimumOrderCents,
@@ -75,7 +92,6 @@ export async function createPaymentIntentAction(
     if (quote.holdCents < 50) {
       return { ok: false, error: "Order total is too low" };
     }
-    const actorUserId = await signedInUserId();
     const result = await createPaymentIntent(store.id, cartId, quote.holdCents, actorUserId
       ? {
           actorUserId,

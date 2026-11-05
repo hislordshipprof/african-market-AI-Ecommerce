@@ -45,10 +45,14 @@ export class BasketChangedError extends Error {
   }
 }
 
-function metadataEpoch(metadata: Record<string, string> | null | undefined): number | null {
+function epochStamp(metadata: Record<string, string> | null | undefined): {
+  present: boolean;
+  epoch: number | null;
+} {
   const raw = metadata?.purchase_epoch;
-  if (raw == null || !/^\d+$/.test(raw)) return null;
-  return Number(raw);
+  if (raw == null || raw === "") return { present: false, epoch: null };
+  if (!/^\d+$/.test(raw)) return { present: true, epoch: null };
+  return { present: true, epoch: Number(raw) };
 }
 
 function sameBasket(
@@ -338,6 +342,8 @@ export interface RecordAuthorizedOrderInput {
   paymentAmount?: number;
   /** Null when the intent was created before purchase epochs were stamped. */
   purchaseEpoch?: number | null;
+  /** True when metadata includes purchase_epoch, including a value that is not a number. */
+  epochPresent?: boolean;
   minimumOrderCents?: number;
 }
 
@@ -392,8 +398,7 @@ export async function recordAuthorizedOrder(
       if (input.actorUserId !== undefined && cart.userId !== input.actorUserId) {
         throw new Error("Cart not found");
       }
-      const stampedEpoch = input.purchaseEpoch === undefined ? null : input.purchaseEpoch;
-      if (stampedEpoch !== null && stampedEpoch !== cart.purchaseEpoch) {
+      if (input.epochPresent && input.purchaseEpoch !== cart.purchaseEpoch) {
         throw new BasketAlreadyOrderedError();
       }
 
@@ -573,7 +578,7 @@ async function settleConsumedBasket(input: {
 }): Promise<
   | { kind: "order"; result: { token: string; quote: CheckoutQuote } }
   | { kind: "unproved" }
-  | { kind: "none" }
+  | { kind: "none"; lines: number }
 > {
   const scoped = storeScoped(input.storeId);
   const [cart, order] = await Promise.all([
@@ -584,7 +589,10 @@ async function settleConsumedBasket(input: {
       include: { lines: true },
     }),
   ]);
-  if (!order) return { kind: "none" };
+  if (!order) {
+    const lines = await scoped.cartLine.count({ where: { cartId: input.cartId } });
+    return { kind: "none", lines };
+  }
   await releaseLosingHold(input.paymentIntentId);
   if (!cart || cart.userId !== input.actorUserId) return { kind: "unproved" };
   const quote = computeQuote(
@@ -598,6 +606,28 @@ async function settleConsumedBasket(input: {
     input.fulfillment,
   );
   return { kind: "order", result: { token: order.id, quote } };
+}
+
+/** An emptied cart that already has an order for this actor. Pay uses this before quoting a new charge. */
+export async function resumeOrderedCart(
+  storeId: string,
+  cartId: string,
+  actorUserId: string | null,
+): Promise<{ kind: "order"; token: string } | { kind: "unproved" } | null> {
+  const scoped = storeScoped(storeId);
+  const cart = await scoped.cart.findUnique({
+    where: { id: cartId },
+    include: { lines: { select: { id: true }, take: 1 } },
+  });
+  if (!cart || cart.lines.length > 0) return null;
+  const order = await scoped.order.findFirst({
+    where: { sourceCartId: cartId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  if (!order) return null;
+  if (cart.userId !== actorUserId) return { kind: "unproved" };
+  return { kind: "order", token: order.id };
 }
 
 export async function placeOrder(
@@ -748,7 +778,8 @@ export async function placeOrder(
       quote,
       actorUserId,
       paymentAmount: pi.amount,
-      purchaseEpoch: metadataEpoch(pi.metadata),
+      purchaseEpoch: epochStamp(pi.metadata).epoch,
+      epochPresent: epochStamp(pi.metadata).present,
       minimumOrderCents,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
@@ -771,6 +802,10 @@ export async function placeOrder(
       });
       if (settled.kind === "order") return settled.result;
       if (settled.kind === "unproved") throw error;
+      if (settled.lines > 0) {
+        await releaseLosingHold(paymentIntentId);
+        throw new BasketChangedError();
+      }
       throw new Error("Cart is empty");
     }
     if (error instanceof BasketChangedError) {

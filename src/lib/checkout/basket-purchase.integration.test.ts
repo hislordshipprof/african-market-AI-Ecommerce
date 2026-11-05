@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { authPrisma, platformAdmin, storeScoped } from "../db";
 import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
-import { BasketChangedError, computeQuote, placeOrder } from "./service";
+import { BasketChangedError, computeQuote, placeOrder, resumeOrderedCart } from "./service";
 import { checkoutTestHooks } from "./test-hooks";
 
 vi.mock("../inngest/send", () => ({
@@ -217,6 +217,42 @@ describe.skipIf(!hasDb)("one basket purchase", () => {
     expect(again.token).toBe(first.token);
     expect(await storeScoped(storeId).order.count({ where: { sourceCartId: cart.id } })).toBe(1);
     expect((await getCheckoutPayments().retrievePaymentIntent(stale.id)).status).toBe("canceled");
+  });
+
+  it("refuses a non-numeric epoch after the same items are refilled", async () => {
+    const cart = await cartWith(1, null);
+    const hold = holdFor(1);
+    const firstPi = await authorize(cart.id, hold, { purchase_epoch: "0" });
+    const first = await place(cart.id, firstPi.id, null);
+    await storeScoped(storeId).cartLine.create({
+      data: { storeId, cartId: cart.id, variantId, qty: 1, swapRule: "exact_only" },
+    });
+    const stale = await authorize(cart.id, hold, { purchase_epoch: "nope" });
+    const again = await place(cart.id, stale.id, null);
+    expect(again.token).toBe(first.token);
+    expect(await storeScoped(storeId).order.count({ where: { sourceCartId: cart.id } })).toBe(1);
+    expect((await getCheckoutPayments().retrievePaymentIntent(stale.id)).status).toBe("canceled");
+  });
+
+  it("releases a future epoch when this basket has not been ordered", async () => {
+    const cart = await cartWith(1, null);
+    const pi = await authorize(cart.id, holdFor(1), { purchase_epoch: "4" });
+    await expect(place(cart.id, pi.id, null)).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(storeId).order.count({ where: { sourceCartId: cart.id } })).toBe(0);
+    expect((await getCheckoutPayments().retrievePaymentIntent(pi.id)).status).toBe("canceled");
+    expect(await storeScoped(storeId).cartLine.count({ where: { cartId: cart.id } })).toBe(1);
+  });
+
+  it("sends a later pay to the order once the basket is empty", async () => {
+    const cart = await cartWith(1, userId);
+    expect(await resumeOrderedCart(storeId, cart.id, userId)).toBeNull();
+    const pi = await authorize(cart.id, holdFor(1), { purchase_epoch: "0" });
+    const order = await place(cart.id, pi.id, userId);
+    expect(await resumeOrderedCart(storeId, cart.id, userId)).toEqual({
+      kind: "order",
+      token: order.token,
+    });
+    expect(await resumeOrderedCart(storeId, cart.id, null)).toEqual({ kind: "unproved" });
   });
 
   it("places a new order for a new intent after a refill", async () => {

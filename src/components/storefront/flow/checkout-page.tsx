@@ -228,7 +228,22 @@ function RealCheckoutForm({
     setPayState("pending");
     try {
       const quoteResult = await quoteCheckoutAction(contact, "pickup");
-      if (!quoteResult.ok) throw new Error(quoteResult.error);
+      if (!quoteResult.ok) {
+        if (quoteResult.code === "basket_already_ordered") {
+          setErrorHref("/account");
+          setError(quoteResult.error);
+          setPayState("idle");
+          return;
+        }
+        throw new Error(quoteResult.error);
+      }
+      if (quoteResult.orderedToken) {
+        setPayState("success");
+        await clearCart();
+        await refreshCart();
+        router.push(`/order/${quoteResult.orderedToken}?placed=1`);
+        return;
+      }
       const latest = quoteResult.quote;
       if (latest.problems.length) {
         throw new Error(
@@ -252,12 +267,25 @@ function RealCheckoutForm({
           : undefined,
       );
       if (!piResult.ok) {
+        if (piResult.code === "basket_already_ordered") {
+          setErrorHref("/account");
+          setError(piResult.error);
+          setPayState("idle");
+          return;
+        }
         if (piResult.code === "saved_card_unavailable") {
           setSelectedCardId(null);
           setShowCardForm(true);
           setSaveCard(false);
         }
         throw new Error(piResult.error);
+      }
+      if ("orderedToken" in piResult) {
+        setPayState("success");
+        await clearCart();
+        await refreshCart();
+        router.push(`/order/${piResult.orderedToken}?placed=1`);
+        return;
       }
       if (piResult.attemptToken) setAttemptToken(piResult.attemptToken);
 
