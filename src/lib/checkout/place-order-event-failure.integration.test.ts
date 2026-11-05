@@ -94,7 +94,9 @@ describe.skipIf(!hasDb)("placeOrder event failure (real send, mocked transport)"
     warn.mockRestore();
 
     expect(result.token).toBeTruthy();
-    expect(send).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(send).toHaveBeenCalledTimes(1);
+    });
     const order = await storeScoped(store.id).order.findUnique({ where: { id: result.token } });
     expect(order?.status).toBe("AUTHORIZED");
     expect(order?.inngestEventSentAt).toBeNull();

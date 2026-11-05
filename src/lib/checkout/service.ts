@@ -4,6 +4,7 @@ import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
+import { scheduleAfterResponse } from "../schedule-after-response";
 import { checkoutTestHooks } from "./test-hooks";
 import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
@@ -575,7 +576,10 @@ export async function placeOrder(
     if (actorUserId) {
       await bindSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
     }
-    await sendOrderAuthorized(storeId, recorded.orderId);
+    scheduleAfterResponse(
+      () => sendOrderAuthorized(storeId, recorded.orderId),
+      "inngest_send_failed",
+    );
   }
 
   return { token: recorded.orderId, quote };

@@ -43,7 +43,7 @@ export function StoreForm({
       )}
 
       {state.error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
           {state.error}
         </div>
       )}
@@ -68,7 +68,7 @@ export function StoreForm({
       )}
 
       <div>
-        <label htmlFor="slug" className="mb-1 block text-sm font-medium text-[#15201A]">
+        <label htmlFor="slug" className="mb-1 block text-sm font-medium text-foreground">
           Slug
         </label>
         <input
@@ -78,19 +78,19 @@ export function StoreForm({
           required
           defaultValue={sv?.slug ?? store?.slug ?? ""}
           pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
-          className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+          className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           placeholder="mama-ngozi"
         />
         {state.fieldErrors?.slug && (
-          <p className="mt-1 text-xs text-red-600">{state.fieldErrors.slug}</p>
+          <p className="mt-1 text-xs text-destructive">{state.fieldErrors.slug}</p>
         )}
-        <p className="mt-1 text-xs text-[#55625A]">
+        <p className="mt-1 text-xs text-muted-foreground">
           Becomes the subdomain: slug.yourplatform.com
         </p>
       </div>
 
       <div>
-        <label htmlFor="storeName" className="mb-1 block text-sm font-medium text-[#15201A]">
+        <label htmlFor="storeName" className="mb-1 block text-sm font-medium text-foreground">
           Store name
         </label>
         <input
@@ -99,28 +99,28 @@ export function StoreForm({
           type="text"
           required
           defaultValue={sv?.name ?? store?.name ?? ""}
-          className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+          className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           placeholder="Mama Ngozi African Market"
         />
         {state.fieldErrors?.name && (
-          <p className="mt-1 text-xs text-red-600">{state.fieldErrors.name}</p>
+          <p className="mt-1 text-xs text-destructive">{state.fieldErrors.name}</p>
         )}
       </div>
 
-      <fieldset className="rounded-lg border border-[#e2e4e9] p-4">
-        <legend className="px-2 text-sm font-medium text-[#15201A]">
+      <fieldset className="rounded-lg border border-input p-4">
+        <legend className="px-2 text-sm font-medium text-foreground">
           Branding
         </legend>
         <div className="space-y-4">
           <div>
-            <label htmlFor="themePreset" className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="themePreset" className="mb-1 block text-sm font-medium text-foreground">
               Theme preset
             </label>
             <select
               id="themePreset"
               name="themePreset"
               defaultValue={sv?.themePreset ?? store?.themePreset ?? "palm-and-shea"}
-              className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+              className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {PRESETS.map((p) => (
                 <option key={p.value} value={p.value}>
@@ -131,7 +131,7 @@ export function StoreForm({
           </div>
 
           <div>
-            <label htmlFor="brandColor" className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="brandColor" className="mb-1 block text-sm font-medium text-foreground">
               Brand color
             </label>
             <div className="flex items-center gap-2">
@@ -141,22 +141,22 @@ export function StoreForm({
                 type="text"
                 defaultValue={sv?.brandColor ?? store?.brandColor ?? ""}
                 pattern="#[0-9A-Fa-f]{6}"
-                className="flex-1 rounded-md border border-[#e2e4e9] px-3 py-2 font-mono text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+                className="flex-1 rounded-md border border-input px-3 py-2 font-mono text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 placeholder="#1F5A43"
               />
             </div>
             {state.fieldErrors?.brandColor && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-destructive">
                 {state.fieldErrors.brandColor}
               </p>
             )}
-            <p className="mt-1 text-xs text-[#55625A]">
+            <p className="mt-1 text-xs text-muted-foreground">
               Optional. Will be adjusted if it does not meet contrast requirements.
             </p>
           </div>
 
           <div>
-            <label htmlFor="logoUrl" className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="logoUrl" className="mb-1 block text-sm font-medium text-foreground">
               Logo URL
             </label>
             <input
@@ -164,11 +164,11 @@ export function StoreForm({
               name="logoUrl"
               type="text"
               defaultValue={sv?.logoUrl ?? store?.logoUrl ?? ""}
-              className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+              className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               placeholder="/logos/store-logo.svg"
             />
             {state.fieldErrors?.logoUrl && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-destructive">
                 {state.fieldErrors.logoUrl}
               </p>
             )}
@@ -176,13 +176,13 @@ export function StoreForm({
         </div>
       </fieldset>
 
-      <fieldset className="rounded-lg border border-[#e2e4e9] p-4">
-        <legend className="px-2 text-sm font-medium text-[#15201A]">
+      <fieldset className="rounded-lg border border-input p-4">
+        <legend className="px-2 text-sm font-medium text-foreground">
           Settings
         </legend>
         <div className="space-y-4">
           <div>
-            <label htmlFor="hours" className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="hours" className="mb-1 block text-sm font-medium text-foreground">
               Hours (JSON)
             </label>
             <textarea
@@ -192,25 +192,25 @@ export function StoreForm({
               defaultValue={
                 sv?.hours ?? (store?.hours ? JSON.stringify(store.hours, null, 2) : "")
               }
-              className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 font-mono text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+              className="w-full rounded-md border border-input px-3 py-2 font-mono text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               placeholder='{"mon": "9:00-21:00", "tue": "9:00-21:00"}'
             />
             {state.fieldErrors?.hours && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-destructive">
                 {state.fieldErrors.hours}
               </p>
             )}
           </div>
 
           <div>
-            <label htmlFor="timezone" className="mb-1 block text-sm font-medium text-[#15201A]">
+            <label htmlFor="timezone" className="mb-1 block text-sm font-medium text-foreground">
               Timezone
             </label>
             <select
               id="timezone"
               name="timezone"
               defaultValue={sv?.timezone ?? store?.timezone ?? "America/New_York"}
-              className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+              className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {VALID_US_TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>
@@ -219,7 +219,7 @@ export function StoreForm({
               ))}
             </select>
             {state.fieldErrors?.timezone && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-destructive">
                 {state.fieldErrors.timezone}
               </p>
             )}
@@ -227,7 +227,7 @@ export function StoreForm({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="prepTimeMinutes" className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="prepTimeMinutes" className="mb-1 block text-sm font-medium text-foreground">
                 Prep time (minutes)
               </label>
               <input
@@ -237,11 +237,11 @@ export function StoreForm({
                 min={0}
                 max={480}
                 defaultValue={sv?.prepTimeMinutes ?? store?.prepTimeMinutes ?? 30}
-                className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div>
-              <label htmlFor="deliveryRadiusMi" className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="deliveryRadiusMi" className="mb-1 block text-sm font-medium text-foreground">
                 Delivery radius (miles)
               </label>
               <input
@@ -252,14 +252,14 @@ export function StoreForm({
                 max={15}
                 step={0.5}
                 defaultValue={sv?.deliveryRadiusMi ?? (store ? Number(store.deliveryRadiusMi) : 8)}
-                className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="minimumOrder" className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="minimumOrder" className="mb-1 block text-sm font-medium text-foreground">
                 Minimum order ($)
               </label>
               <input
@@ -269,16 +269,16 @@ export function StoreForm({
                 min={0}
                 step={0.01}
                 defaultValue={sv?.minimumOrder ?? (store ? store.minimumOrderCents / 100 : 35)}
-                className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               {state.fieldErrors?.minimumOrder && (
-                <p className="mt-1 text-xs text-red-600">
+                <p className="mt-1 text-xs text-destructive">
                   {state.fieldErrors.minimumOrder}
                 </p>
               )}
             </div>
             <div>
-              <label htmlFor="autoRefundLimit" className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="autoRefundLimit" className="mb-1 block text-sm font-medium text-foreground">
                 Auto-refund limit ($)
               </label>
               <input
@@ -288,10 +288,10 @@ export function StoreForm({
                 min={0}
                 step={0.01}
                 defaultValue={sv?.autoRefundLimit ?? (store ? store.autoRefundLimitCents / 100 : 25)}
-                className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               {state.fieldErrors?.autoRefundLimit && (
-                <p className="mt-1 text-xs text-red-600">
+                <p className="mt-1 text-xs text-destructive">
                   {state.fieldErrors.autoRefundLimit}
                 </p>
               )}
@@ -304,23 +304,23 @@ export function StoreForm({
               type="checkbox"
               id="pickupEnabled"
               defaultChecked={sv ? sv.pickupEnabled === "on" : (store?.pickupEnabled ?? false)}
-              className="h-4 w-4 rounded border-[#e2e4e9] text-[#1F5A43] focus:ring-[#1F5A43]"
+              className="h-4 w-4 rounded border-input text-primary focus-visible:ring-ring"
             />
-            <label htmlFor="pickupEnabled" className="text-sm text-[#15201A]">
+            <label htmlFor="pickupEnabled" className="text-sm text-foreground">
               Pickup enabled
             </label>
           </div>
 
           {mode === "edit" && (
             <div>
-              <label htmlFor="status" className="mb-1 block text-sm font-medium text-[#15201A]">
+              <label htmlFor="status" className="mb-1 block text-sm font-medium text-foreground">
                 Status
               </label>
               <select
                 id="status"
                 name="status"
                 defaultValue={sv?.status ?? store?.status ?? "active"}
-                className="w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <option value="active">Active</option>
                 <option value="suspended">Suspended</option>
@@ -336,7 +336,7 @@ export function StoreForm({
         <button
           type="submit"
           disabled={isPending}
-          className="rounded-full bg-[#1F5A43] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
+          className="rounded-full bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {isPending
             ? mode === "create"
@@ -349,7 +349,7 @@ export function StoreForm({
         <button
           type="button"
           onClick={() => router.push("/admin/stores")}
-          className="rounded-full border border-[#e2e4e9] px-6 py-2.5 text-sm font-medium text-[#55625A] hover:bg-[#f8f9fa]"
+          className="rounded-full border border-input px-6 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted"
         >
           Cancel
         </button>

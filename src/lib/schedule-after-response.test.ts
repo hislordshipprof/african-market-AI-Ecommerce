@@ -60,4 +60,22 @@ describe("scheduleAfterResponse", () => {
     expect(logged).not.toContain("shopper@example.com");
     errorSpy.mockRestore();
   });
+
+  it("logs the caller's event name on failure", async () => {
+    afterMock.mockImplementation(() => {
+      throw new Error("`after` was called outside a request scope");
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    scheduleAfterResponse(async () => {
+      throw new Error("send down");
+    }, "inngest_send_failed");
+
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalled();
+    });
+    expect(errorSpy.mock.calls.flat().join(" ")).toContain("inngest_send_failed");
+    expect(errorSpy.mock.calls.flat().join(" ")).not.toContain("magic_link_delivery_failed");
+    errorSpy.mockRestore();
+  });
 });

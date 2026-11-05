@@ -9,12 +9,17 @@ export default async function StoreListPage() {
     <div className="mx-auto max-w-4xl px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-[#15201A]">Stores</h1>
-        <Link
-          href="/admin/stores/new"
-          className="rounded-full bg-[#1F5A43] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#123726]"
-        >
-          Create store
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/admin/orders" className="text-sm text-primary underline">
+            Refunds
+          </Link>
+          <Link
+            href="/admin/stores/new"
+            className="rounded-full bg-[#1F5A43] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#123726]"
+          >
+            Create store
+          </Link>
+        </div>
       </div>
 
       {stores.length === 0 ? (

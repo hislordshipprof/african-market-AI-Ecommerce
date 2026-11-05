@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { generateTOTP } from "./totp";
+import { deleteInboxOrder, insertInboxOrder, seedCaptureLabel, setInboxOrderStatus } from "./order-fixture";
 
 const OWNER_EMAIL = "owner@mama-ngozi.test";
 const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
@@ -108,11 +109,14 @@ test.describe("Order inbox", () => {
     await expect(page.getByRole("button", { name: "Pick" }).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("Mark ready button disabled until all lines picked, then captures and transitions", async ({ page }) => {
+  test("picking every line marks the order ready and captures the seed total", async ({ page }, testInfo) => {
+    const number = 18680 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    await insertInboxOrder({ number, status: "PICKING", capturedAmountCents: null, seedHold: true });
+    try {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
-    const orderCard = page.locator("button", { hasText: "#1005" });
+    const orderCard = page.locator("button", { hasText: `#${number}` });
     await expect(orderCard).toBeVisible();
     await orderCard.click();
     await expect(page.locator("text=Pick list")).toBeVisible();
@@ -122,13 +126,15 @@ test.describe("Order inbox", () => {
     await expect(markReadyBtn).toBeDisabled();
 
     const pickButtons = page.getByRole("button", { name: "Pick" });
-    const count = await pickButtons.count();
-    for (let i = 0; i < count; i++) {
+    let remaining = await pickButtons.count();
+    while (remaining > 0) {
       await pickButtons.first().click();
-      await page.waitForTimeout(500);
+      remaining -= 1;
+      await expect(pickButtons).toHaveCount(remaining);
     }
 
     await expect(markReadyBtn).toBeEnabled({ timeout: 10000 });
+    await expect(page.getByTestId("order-captured")).toHaveCount(0);
 
     await markReadyBtn.click();
 
@@ -140,18 +146,73 @@ test.describe("Order inbox", () => {
     const handOffBtn = page.getByRole("button", { name: "Hand off" });
     await expect(handOffBtn).toBeVisible({ timeout: 10000 });
 
-    const totalText = await page.getByTestId("order-total").innerText();
-    expect(totalText).toMatch(/^\$\d+\.\d{2}$/);
-    expect(totalText).not.toBe("$0.00");
-    await expect(page.getByTestId("order-captured")).toHaveText(totalText);
+    const seedTotal = await seedCaptureLabel(number);
+    await expect(page.getByTestId("order-captured")).toHaveText(seedTotal);
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("the Captured line appears only after the order is ready", async ({ page }) => {
+    const number = 18601;
+    await insertInboxOrder({ number, status: "PICKING", capturedAmountCents: 2500 });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.locator(`text=Order #${number}`)).toBeVisible();
+      await expect(page.getByTestId("order-captured")).toHaveCount(0);
+
+      await setInboxOrderStatus(number, "AWAITING_PICKUP");
+      await page.reload();
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByTestId("order-captured")).toHaveText("$25.00");
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("a refund-failed order tells staff the platform is resolving it", async ({ page }) => {
+    const number = 18602;
+    await insertInboxOrder({ number, status: "REFUND_FAILED", capturedAmountCents: 1800 });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByText("The platform team is resolving this refund. Do not refund the customer yourself.")).toBeVisible();
+      await expect(page.getByTestId("order-captured")).toHaveText("$18.00");
+      await expect(page.getByText("refund them another way")).toHaveCount(0);
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("a resolved cancellation stays in the inbox with the platform note", async ({ page }, testInfo) => {
+    const number = 18691 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    await insertInboxOrder({
+      number,
+      status: "CANCELLED",
+      capturedAmountCents: 2500,
+      notes: "Paid customer by Zelle 11/05",
+      platformResolved: true,
+    });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+      await expect(page.getByText("Paid customer by Zelle 11/05")).toBeVisible();
+      await expect(page.getByText("The platform resolved this refund.")).toBeVisible();
+    } finally {
+      await deleteInboxOrder(number);
+    }
   });
 
   test("no horizontal overflow at 390px mobile", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
-
-    await page.waitForTimeout(1000);
+    await expect(page.getByRole("heading", { name: /orders/i })).toBeVisible();
     const scrollWidth = await page.evaluate(() => document.body.scrollWidth);
     expect(scrollWidth).toBeLessThanOrEqual(390);
   });
