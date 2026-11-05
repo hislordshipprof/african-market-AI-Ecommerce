@@ -43,6 +43,8 @@ if [ -z "${CI_SCOPE:-}" ] && [ -n "${CI_REBASE_OF:-}" ] && [ "$SCOPE" = full ] \
   && rebase_is_safe "$CI_REBASE_OF" "$SHA"; then
   SCOPE=rebase
 fi
+# A deleted test can be one another test depends on, and the tests tier would have nothing to run for it.
+if [ "$SCOPE" = tests ] && [ "$CHANGED" != "$PRESENT" ]; then SCOPE=full; fi
 echo "== local-ci: scope $SCOPE"
 if [ "$SCOPE" = docs ]; then
   status success "docs only: nothing to run"
@@ -178,10 +180,12 @@ run_unit() {
 }
 
 # Lighter tiers end here. Each one finishes with the same success status, which the merge gate reads.
-if [ "$SCOPE" = pipeline ]; then
+if [ "$SCOPE" = pipeline ] || [ "$SCOPE" = full ]; then
   for t in scripts/*.test.sh; do
     step "$t" bash "$t" || fail "$t" "no retry"
   done
+fi
+if [ "$SCOPE" = pipeline ]; then
   # Some pipeline tests are Vitest files that read or run these scripts (catalog-prune.test.ts). Found by content,
   # so a new one joins this tier without a list to update.
   SCRIPT_TESTS=$(git grep -lE 'scripts/[a-z-]+\.(sh|mjs)|"scripts"' -- 'src/*.test.ts' 'src/*.test.tsx' || true)
