@@ -29,8 +29,8 @@ if [ "$MODE" = "build" ]; then
   blockers=$(gh api "repos/$REPO/issues/$N/dependencies/blocked_by" --jq '[.[] | select(.state=="open") | .number] | join(",")')
   [ -z "$blockers" ] || { echo "Issue #$N is blocked by open issues: $blockers"; exit 1; }
 
-  # Preflight 2: planner brief exists (stage T).
-  if ! gh issue view "$N" -R "$REPO" --comments --json comments --jq '.comments[].body' | grep -qi "agent brief"; then
+  # Preflight 2: planner brief exists (stage T). FAST=1 skips it: the builder writes its own brief (see FAST_RULE).
+  if [ "${FAST:-0}" != "1" ] && ! gh issue view "$N" -R "$REPO" --comments --json comments --jq '.comments[].body' | grep -qi "agent brief"; then
     echo "Issue #$N has no agent brief yet. Run scripts/plan-ticket.sh $N first."; exit 3
   fi
 
@@ -77,6 +77,18 @@ export RISK
 # external providers.
 TIER="${TIER:-full}"
 [ "$RISK" = "1" ] && TIER=full
+
+# Fast path (owner-approved 2026-11-05): small, low-risk tickets skip the separate plan and brief review, and
+# QA is proportionate. Never for RISK tickets: those need the planner and brief review first.
+FAST="${FAST:-0}"
+if [ "$FAST" = "1" ] && [ "$RISK" = "1" ]; then
+  if [ "$MODE" = "build" ] && ! gh issue view "$N" -R "$REPO" --comments --json comments --jq '.comments[].body' | grep -qi "agent brief"; then
+    echo "Issue #$N is a RISK ticket (money/auth): no fast path. Run scripts/plan-ticket.sh $N first."; exit 3
+  fi
+  FAST=0
+fi
+FAST_RULE=""
+[ "$FAST" = "1" ] && FAST_RULE="Fast path (the coordinator judged this ticket small and low-risk): there is no separate plan or brief review. Before writing code, read the issue, check its claims against origin/main, and post one short issue comment headed 'Agent brief (fast path)': scope and exclusions, each acceptance criterion as a scenario, the edge cases, and the tests you will write. The independent reviewer reviews against it. Keep QA proportionate: prove every acceptance criterion and edge case with an automated test; skip the separate qa pass, mutation runs and manual scenario walkthroughs, unless the ticket changes behaviour a user sees in the running app, in which case check only that behaviour. If the work turns out to touch money, auth, RLS/data isolation, migrations, order state or an external provider, stop: post that on the issue and exit without pushing, so the coordinator replans it in full."
 LANE_PORT="${E2E_PORT:-3000}"
 # Cap local Playwright browsers per lane (several lanes share this machine).
 export E2E_WORKERS="${E2E_WORKERS:-4}"
@@ -117,7 +129,8 @@ Worktree: $WT (branch $BRANCH, based on origin/main). Local preview: pnpm build 
 If this ticket touches UI, the design pass in docs/agents/builder.md is part of done: the report must include the impeccable critique score and screenshots at 390px and 1440px (light and dark), or the coordinator will reject the PR.
 When implement reports the work ready: push the branch and open a PR to main ('Closes #$N'), but do not merge.
 ${KEYLESS:-}
-$RULES"
+$RULES${FAST_RULE:+
+$FAST_RULE}"
     agent_run "$ROLE" "$LOG" "$PROMPT" || status=$?
     ;;
   --resume)
