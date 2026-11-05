@@ -4,7 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { addToCart as storefrontAddToCart, setLineQty } from "../../cart/actions";
 import { addLine } from "../../cart/service";
-import { storeScoped } from "../../db";
+import { platformAdmin, storeScoped } from "../../db";
 import {
   addToCart,
   checkAvailability,
@@ -13,6 +13,7 @@ import {
   searchCatalog,
   setSwapRule,
   showProducts,
+  suggestSubstitutes,
   updateCart,
   type AssistantContext,
 } from "./execute";
@@ -60,6 +61,8 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   let variantA = "";
   let variantB = "";
   let listingA = "";
+  const createdMasterProductIds: string[] = [];
+  const createdCategoryIds: string[] = [];
 
   beforeAll(async () => {
     raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
@@ -94,6 +97,12 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     if (storeB) await storeScoped(storeB).cart.deleteMany({});
     if (storeA) await storeScoped(storeA).listing.deleteMany({});
     if (storeB) await storeScoped(storeB).listing.deleteMany({});
+    for (const id of createdMasterProductIds) {
+      await platformAdmin.masterProduct.delete({ where: { id } });
+    }
+    for (const id of createdCategoryIds) {
+      await platformAdmin.category.delete({ where: { id } });
+    }
     if (raw) {
       await raw.store.deleteMany({ where: { id: { in: [storeA, storeB].filter(Boolean) } } });
       await raw.$disconnect();
@@ -146,6 +155,54 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
 
   async function lineCount() {
     return storeScoped(storeA).cartLine.count({ where: { cartId: cartA } });
+  }
+
+  async function makeCategory(label: string) {
+    const suffix = randomUUID().slice(0, 8);
+    const category = await platformAdmin.category.create({
+      data: { name: `${label} ${suffix}`, slug: `${label}-${suffix}`, sortOrder: 900 },
+    });
+    createdCategoryIds.push(category.id);
+    return category.id;
+  }
+
+  async function makeCatalogListing(
+    storeId: string,
+    options: {
+      name: string;
+      price: number;
+      confidence?: number;
+      active?: boolean;
+      categoryId: string | null;
+      variantPrices?: number[];
+    },
+  ) {
+    const product = await platformAdmin.masterProduct.create({
+      data: { name: `${options.name} ${randomUUID().slice(0, 8)}`, categoryId: options.categoryId },
+    });
+    createdMasterProductIds.push(product.id);
+    const listing = await storeScoped(storeId).listing.create({
+      data: {
+        storeId,
+        masterProductId: product.id,
+        customName: options.name,
+        price: options.price,
+        stockMode: "unlimited",
+        confidence: options.confidence ?? 1,
+        active: options.active ?? true,
+        frozen: false,
+        perishable: false,
+      },
+    });
+    const prices = options.variantPrices ?? [options.price];
+    let variantId = "";
+    for (const price of prices) {
+      const variant = await storeScoped(storeId).listingVariant.create({
+        data: { listingId: listing.id, label: "Each", price, weightG: 100 },
+      });
+      if (!variantId) variantId = variant.id;
+    }
+    return { listingId: listing.id, variantId };
   }
 
   it("tool schemas expose no store, cart or conversation field", () => {
@@ -427,6 +484,104 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(result.ok).toBe(true);
     const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
     expect(line?.cartId).toBe(cartA);
+  });
+
+  it("suggest_substitutes returns this store's ids in confidence, price, then id order", async () => {
+    const categoryId = await makeCategory("subs");
+    const source = await makeCatalogListing(storeA, { name: "Source Yam", price: 100, confidence: 1, categoryId });
+    const premium = await makeCatalogListing(storeA, {
+      name: "Premium Garri",
+      price: 900,
+      confidence: 1,
+      categoryId,
+      variantPrices: [900, 150],
+    });
+    const tiedLow = await makeCatalogListing(storeA, { name: "Tied Low", price: 200, confidence: 0.9, categoryId });
+    const tiedHigh = await makeCatalogListing(storeA, { name: "Tied High", price: 200, confidence: 0.9, categoryId });
+    const pricey = await makeCatalogListing(storeA, { name: "Pricey Twin", price: 800, confidence: 0.9, categoryId });
+    const soft = await makeCatalogListing(storeA, { name: "Soft Stock", price: 50, confidence: 0.55, categoryId });
+    const dropped = await makeCatalogListing(storeA, { name: "Dropped Sixth", price: 10, confidence: 0.4, categoryId });
+    const quieter = await makeCatalogListing(storeA, { name: "Dropped Seventh", price: 10, confidence: 0.1, categoryId });
+    const inactive = await makeCatalogListing(storeA, {
+      name: "Inactive Twin",
+      price: 1,
+      confidence: 1,
+      categoryId,
+      active: false,
+    });
+    const foreign = await makeCatalogListing(storeB, { name: "Foreign Twin", price: 1, confidence: 1, categoryId });
+    const tiedOrder = await storeScoped(storeA).listing.findMany({
+      where: { id: { in: [tiedLow.listingId, tiedHigh.listingId] } },
+      orderBy: { id: "asc" },
+      select: { id: true, customName: true },
+    });
+
+    const result = await suggestSubstitutes(ctx(), { listing_id: source.listingId });
+    expect(result).toEqual({
+      ok: true,
+      items: [
+        { listingId: premium.listingId, name: "Premium Garri", priceCents: 150, mayBeUnavailable: false },
+        { listingId: tiedOrder[0]?.id, name: tiedOrder[0]?.customName, priceCents: 200, mayBeUnavailable: false },
+        { listingId: tiedOrder[1]?.id, name: tiedOrder[1]?.customName, priceCents: 200, mayBeUnavailable: false },
+        { listingId: pricey.listingId, name: "Pricey Twin", priceCents: 800, mayBeUnavailable: false },
+        { listingId: soft.listingId, name: "Soft Stock", priceCents: 50, mayBeUnavailable: true },
+      ],
+    });
+
+    const action = await storeScoped(storeA).aiAction.findFirst({
+      where: { conversationId: conversation, tool: "suggest_substitutes" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(action).toMatchObject({
+      ok: true,
+      input: { listing_id: source.listingId },
+      output: result,
+    });
+    expect(await storeScoped(storeB).aiAction.findFirst({
+      where: { id: action?.id },
+    })).toBeNull();
+    const returnedIds = (result.ok ? result.items as Array<{ listingId: string }> : []).map((item) => item.listingId);
+    for (const excluded of [source.listingId, dropped.listingId, quieter.listingId, inactive.listingId, foreign.listingId]) {
+      expect(returnedIds).not.toContain(excluded);
+    }
+  });
+
+  it("suggest_substitutes returns nothing when the listing has no category or no active sibling", async () => {
+    const bare = await suggestSubstitutes(ctx(), { listing_id: listingA });
+    expect(bare).toEqual({ ok: true, items: [], reason: "no_category" });
+
+    const categoryId = await makeCategory("alone");
+    const only = await makeCatalogListing(storeA, { name: "Only Grain", price: 300, categoryId });
+    const inactive = await makeCatalogListing(storeA, {
+      name: "Inactive Sibling",
+      price: 100,
+      confidence: 1,
+      categoryId,
+      active: false,
+    });
+    const empty = await suggestSubstitutes(ctx(), { listing_id: only.listingId });
+    expect(empty).toEqual({ ok: true, items: [] });
+    expect(JSON.stringify(empty)).not.toContain(inactive.listingId);
+  });
+
+  it("suggest_substitutes reports another store's listing as not found and records the action", async () => {
+    const foreign = await storeScoped(storeB).listing.findFirstOrThrow({ where: { storeId: storeB } });
+    const result = await suggestSubstitutes(ctx(), { listing_id: foreign.id });
+    expect(result).toMatchObject({
+      ok: false,
+      code: "listing_not_found",
+      message: "That product is not in this store.",
+    });
+    const action = await storeScoped(storeA).aiAction.findFirst({
+      where: { conversationId: conversation, tool: "suggest_substitutes", ok: false },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(action).toMatchObject({
+      ok: false,
+      input: { listing_id: foreign.id },
+      output: { ok: false, code: "listing_not_found" },
+    });
+    expect(await storeScoped(storeB).aiAction.findFirst({ where: { id: action?.id } })).toBeNull();
   });
 
   it("prices 199 cents times 3 as an exact line total", async () => {
