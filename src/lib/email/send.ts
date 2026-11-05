@@ -61,6 +61,15 @@ export function clearTestSentEmails(): void {
   sent.length = 0;
 }
 
+class UnconfiguredSender implements EmailSender {
+  async send(): Promise<{ id: string }> {
+    throw new Error(
+      "RESEND_API_KEY is required in production. " +
+        "All transactional emails (invites, order confirmations) will fail without it.",
+    );
+  }
+}
+
 export function createSender(
   env: Record<string, string | undefined> = process.env,
 ): EmailSender {
@@ -76,12 +85,7 @@ export function createSender(
   const from = env.EMAIL_FROM ?? "onboarding@resend.dev";
 
   if (!apiKey) {
-    if (env.NODE_ENV === "production") {
-      throw new Error(
-        "RESEND_API_KEY is required in production. " +
-          "All transactional emails (invites, order confirmations) will fail without it.",
-      );
-    }
+    if (env.NODE_ENV === "production") return new UnconfiguredSender();
     console.warn("RESEND_API_KEY not set — emails will be logged to console");
     return new TestSender();
   }

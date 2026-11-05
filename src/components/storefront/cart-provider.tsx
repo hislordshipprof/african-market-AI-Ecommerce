@@ -64,6 +64,16 @@ function serverLineToClient(sl: CartLineView): CartLine {
   };
 }
 
+function e2eRemovalOverride(): { ok: false; error: string; code: string } | null {
+  if (typeof window === "undefined") return null;
+  const host = window.location.hostname;
+  if (host !== "localhost" && !host.endsWith(".localhost")) return null;
+  const hooked = (window as Window & {
+    __e2eRemovalResult?: { ok: false; error: string; code: string };
+  }).__e2eRemovalResult;
+  return hooked ?? null;
+}
+
 function isStaleAction(error: unknown) {
   if (unstable_isUnrecognizedActionError(error)) return true;
   const message = error instanceof Error ? error.message : String(error);
@@ -163,7 +173,7 @@ export function CartProvider({
   }
   function rememberFallback(key: string, line: CartLine | undefined) {
     const lineId = line?.serverLineId ?? confirmed.current.get(key)?.lineId;
-    if (!line || !lineId || fallback.current.has(key)) return;
+    if (!line || !lineId) return;
     fallback.current.set(
       key,
       confirmedSnapshot(
@@ -182,7 +192,19 @@ export function CartProvider({
   }
   function clearFailure(key: string) {
     failedKeys.current.delete(key);
-    fallback.current.delete(key);
+    if (pendingDelete.current.has(key)) {
+      const snap = fallback.current.get(key);
+      const known = confirmed.current.get(key);
+      if (snap && known?.lineId && known.qty > 0) {
+        fallback.current.set(key, {
+          ...snap,
+          quantity: known.qty,
+          serverLineId: known.lineId,
+        });
+      }
+    } else {
+      fallback.current.delete(key);
+    }
     if (failedKeys.current.size === 0 && mounted.current) setAttention(false);
   }
   function applyMerged(
@@ -199,6 +221,16 @@ export function CartProvider({
     dropAfterAdd.current = merged.dropAfterAdd;
     if (scope && (revs.current.get(scope.key) ?? 0) <= scope.sinceRev) {
       fallback.current.delete(scope.key);
+    } else if (!scope) {
+      for (const line of merged.lines) {
+        const key = cartItemKey(line);
+        if (!fallback.current.has(key) || pendingDelete.current.has(key)) continue;
+        const known = merged.confirmed.get(key);
+        fallback.current.set(
+          key,
+          confirmedSnapshot(line, known?.qty ?? line.quantity),
+        );
+      }
     }
     publish(merged.lines);
   }
@@ -421,7 +453,8 @@ export function CartProvider({
     if (doomed) {
       const revAtSend = revs.current.get(key) ?? 0;
       try {
-        const result = await removeCartLine(doomed);
+        const override = e2eRemovalOverride();
+        const result = override ?? (await removeCartLine(doomed));
         if (!result.ok && removalResultAction(result.code) === "rejected") {
           if (mounted.current) {
             toast.error(result.error);
