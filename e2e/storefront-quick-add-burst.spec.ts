@@ -65,6 +65,31 @@ async function fetchAction(route: Route) {
   });
 }
 
+async function deferRemoval(page: Page) {
+  await page.evaluate(() => {
+    const win = window as Window & {
+      __e2eRemovalResult?: () => Promise<{ ok: false; error: string; code: string }>;
+      __releaseE2ERemoval?: (result: { ok: false; error: string; code: string }) => void;
+    };
+    win.__e2eRemovalResult = () =>
+      new Promise((resolve) => {
+        win.__releaseE2ERemoval = resolve;
+      });
+  });
+}
+
+async function releaseRemoval(page: Page) {
+  await page.evaluate(() => {
+    (window as Window & {
+      __releaseE2ERemoval?: (result: { ok: false; error: string; code: string }) => void;
+    }).__releaseE2ERemoval?.({
+      ok: false,
+      error: "Please sign in again.",
+      code: "USER_NOT_FOUND",
+    });
+  });
+}
+
 async function burst(locator: Locator, times: number) {
   await locator.evaluate((el, n) => {
     const button = el as HTMLButtonElement;
@@ -2441,45 +2466,32 @@ test.describe("cart recovery after a failed write", () => {
     const before = await readCartLines("mama-ngozi", await cartCookie(page));
     const yellow = before.find((line) => line.listingId === "mn_garri_yellow");
     const white = before.find((line) => line.variantId === "mn_garri_w_v1");
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let held = false;
     let reads = 0;
     let yellowWrites = 0;
-    await page.evaluate(() => {
-      (window as Window & { __e2eRemovalResult?: { ok: false; error: string; code: string } }).__e2eRemovalResult = {
-        ok: false,
-        error: "Please sign in again.",
-        code: "USER_NOT_FOUND",
-      };
-    });
+    await deferRemoval(page);
     await page.route("**/*", async (route) => {
       const request = route.request();
       const body = request.postData() ?? "";
       if (isAction(request) && body.includes(yellow!.id)) yellowWrites += 1;
-      if (!held && isAction(request) && body.includes(white!.id) && quantitiesIn(body).includes(2)) {
-        held = true;
-        await gate;
-        await route.fallback();
-        return;
-      }
       if (isAction(request) && looksLikeRead(body)) reads += 1;
       await route.fallback();
     });
-    await whiteGarri(page).getByTestId("stepper-plus").click();
-    await expect.poll(() => held).toBe(true);
     const sheet = await openSheet(page);
     await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
-    release();
+    await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toHaveCount(0);
+    const whiteRow = sheet.getByRole("listitem").filter({ hasText: "White Garri" });
+    await whiteRow.getByTestId("stepper-plus").click();
+    await expect(whiteRow.getByTestId("stepper-qty")).toHaveText("2");
+    const queued = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(queued.find((line) => line.id === white!.id)?.qty).toBe(1);
+    await releaseRemoval(page);
     await settle(page);
     expect(yellowWrites).toBe(0);
     expect(reads).toBeGreaterThan(0);
     expect(reads).toBeLessThan(4);
     const rowUi = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
     await expect(rowUi.getByTestId("stepper-qty")).toHaveText("1");
-    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+    await expect(whiteRow.getByTestId("stepper-qty")).toHaveText("2");
     const saved = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(saved.find((line) => line.id === yellow!.id)?.qty).toBe(1);
     expect(saved.find((line) => line.id === white!.id)?.qty).toBe(2);
@@ -2494,47 +2506,36 @@ test.describe("cart recovery after a failed write", () => {
     const before = await readCartLines("mama-ngozi", await cartCookie(page));
     const yellow = before.find((line) => line.listingId === "mn_garri_yellow");
     const white = before.find((line) => line.variantId === "mn_garri_w_v1");
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let held = false;
     let reads = 0;
-    await page.evaluate(() => {
-      (window as Window & { __e2eRemovalResult?: { ok: false; error: string; code: string } }).__e2eRemovalResult = {
-        ok: false,
-        error: "Please sign in again.",
-        code: "USER_NOT_FOUND",
-      };
-    });
+    let released = false;
+    await deferRemoval(page);
     await page.route("**/*", async (route) => {
       const request = route.request();
       const body = request.postData() ?? "";
-      if (!held && isAction(request) && body.includes(white!.id) && quantitiesIn(body).includes(2)) {
-        held = true;
-        await gate;
-        await route.fallback();
-        return;
-      }
-      if (held && isAction(request) && looksLikeRead(body)) {
+      if (released && isAction(request) && looksLikeRead(body)) {
         reads += 1;
         await route.abort("failed");
         return;
       }
       await route.fallback();
     });
-    await whiteGarri(page).getByTestId("stepper-plus").click();
-    await expect.poll(() => held).toBe(true);
     const sheet = await openSheet(page);
     await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
     await expect(sheet.getByRole("heading", { name: "Yellow Garri (Ijebu)" })).toHaveCount(0);
-    release();
+    const whiteRow = sheet.getByRole("listitem").filter({ hasText: "White Garri" });
+    await whiteRow.getByTestId("stepper-plus").click();
+    await expect(whiteRow.getByTestId("stepper-qty")).toHaveText("2");
+    const queued = await readCartLines("mama-ngozi", await cartCookie(page));
+    expect(queued.find((line) => line.id === white!.id)?.qty).toBe(1);
+    released = true;
+    await releaseRemoval(page);
     await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
     await settle(page);
     await expect(attention(page)).toBeVisible();
     await expect(pending(page)).toBeHidden();
     const rowUi = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
     await expect(rowUi.getByTestId("stepper-qty")).toHaveText("1");
+    await expect(whiteRow.getByTestId("stepper-qty")).toHaveText("2");
     const saved = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(saved.find((line) => line.id === yellow!.id)?.qty).toBe(1);
     expect(saved.find((line) => line.id === white!.id)?.qty).toBe(2);
@@ -2900,6 +2901,124 @@ test.describe("cart recovery after a failed write", () => {
     const saved = await readCartLines("mama-ngozi", await cartCookie(page));
     expect(saved.find((line) => line.id === row!.id)?.qty).toBe(1);
     expect(saved.find((line) => line.variantId === "mn_garri_w_v1")?.qty).toBe(1);
+  });
+
+  test("a lost quantity save keeps the newer removal's confirmed quantity", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const cartId = await cartCookie(page);
+    const before = await readCartLines("mama-ngozi", cartId);
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let proved = false;
+    let recover = false;
+    let reads = 0;
+    let removals = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (!proved && isAction(request) && body.includes(row!.id) && quantitiesIn(body).includes(2)) {
+        await fetchAction(route);
+        const committed = await readCartLines("mama-ngozi", cartId);
+        expect(committed.find((line) => line.id === row!.id)?.qty).toBe(2);
+        proved = true;
+        await gate;
+        await route.abort("failed");
+        return;
+      }
+      if (recover && isAction(request) && looksLikeRead(body)) {
+        reads += 1;
+        if (reads === 1) {
+          await route.fallback();
+          return;
+        }
+        await route.abort("failed");
+        return;
+      }
+      if (recover && isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        removals += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect.poll(() => proved).toBe(true);
+    const sheet = await openSheet(page);
+    await sheet.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
+    recover = true;
+    release();
+    await expect.poll(() => reads).toBeGreaterThanOrEqual(3);
+    await settle(page);
+    expect(removals).toBe(1);
+    const rowUi = sheet.getByRole("listitem").filter({ hasText: "Yellow Garri" });
+    await expect(rowUi.getByTestId("stepper-qty")).toHaveText("2");
+    await expect(cartCount(page)).toHaveText("2");
+    const saved = await readCartLines("mama-ngozi", cartId);
+    expect(saved.find((line) => line.id === row!.id)?.qty).toBe(2);
+  });
+
+  test("remove re-add remove keeps the saved substitute when the later removal fails", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    const cartId = await cartCookie(page);
+    const before = await readCartLines("mama-ngozi", cartId);
+    const row = before.find((line) => line.listingId === "mn_garri_yellow");
+    expect(
+      await writeCartLine("mama-ngozi", row!.id, {
+        swapRule: "named_substitute",
+        substituteVariantId: "mn_garri_w_v1",
+      }),
+    ).toBe(true);
+    await page.reload();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let removals = 0;
+    let reads = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
+        removals += 1;
+        if (removals === 1) await gate;
+        await route.abort("failed");
+        return;
+      }
+      if (removals > 0 && isAction(request) && looksLikeRead(body)) {
+        reads += 1;
+        if (reads === 1) {
+          await route.fallback();
+          return;
+        }
+        await route.abort("failed");
+        return;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect.poll(() => removals).toBe(1);
+    await garri(page).getByTestId("quick-add-btn").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await garri(page).getByTestId("stepper-minus").click();
+    await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
+    release();
+    await expect.poll(() => reads).toBeGreaterThanOrEqual(3);
+    await settle(page);
+    const sheet = await openSheet(page);
+    await expect(sheet.getByText("Named substitute chosen")).toBeVisible();
+    await expect(sheet.getByText("Exact item only")).toHaveCount(0);
+    const saved = await readCartLines("mama-ngozi", cartId);
+    expect(saved.find((line) => line.id === row!.id)).toMatchObject({
+      qty: 1,
+      swapRule: "named_substitute",
+      substituteVariantId: "mn_garri_w_v1",
+    });
   });
 });
 

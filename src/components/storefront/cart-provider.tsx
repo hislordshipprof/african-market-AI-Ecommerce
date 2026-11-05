@@ -64,14 +64,18 @@ function serverLineToClient(sl: CartLineView): CartLine {
   };
 }
 
-function e2eRemovalOverride(): { ok: false; error: string; code: string } | null {
-  if (typeof window === "undefined") return null;
+function e2eRemovalOverride(): Promise<{ ok: false; error: string; code: string } | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
   const host = window.location.hostname;
-  if (host !== "localhost" && !host.endsWith(".localhost")) return null;
+  if (host !== "localhost" && !host.endsWith(".localhost")) return Promise.resolve(null);
   const hooked = (window as Window & {
-    __e2eRemovalResult?: { ok: false; error: string; code: string };
+    __e2eRemovalResult?:
+      | { ok: false; error: string; code: string }
+      | (() => Promise<{ ok: false; error: string; code: string }>);
   }).__e2eRemovalResult;
-  return hooked ?? null;
+  if (!hooked) return Promise.resolve(null);
+  if (typeof hooked === "function") return hooked();
+  return Promise.resolve(hooked);
 }
 
 function isStaleAction(error: unknown) {
@@ -172,13 +176,21 @@ export function CartProvider({
     );
   }
   function rememberFallback(key: string, line: CartLine | undefined) {
-    const lineId = line?.serverLineId ?? confirmed.current.get(key)?.lineId;
-    if (!line || !lineId) return;
+    const prior = fallback.current.get(key);
+    const lineId = line?.serverLineId ?? confirmed.current.get(key)?.lineId ?? prior?.serverLineId;
+    if ((!line && !prior) || !lineId) return;
+    const base = line ?? prior;
+    if (!base) return;
     fallback.current.set(
       key,
       confirmedSnapshot(
-        { ...line, serverLineId: lineId },
-        confirmed.current.get(key)?.qty ?? 0,
+        {
+          ...base,
+          serverLineId: lineId,
+          swapRule: line?.swapRule ?? prior?.swapRule,
+          substituteVariantId: line?.substituteVariantId ?? prior?.substituteVariantId,
+        },
+        confirmed.current.get(key)?.qty ?? prior?.quantity ?? 0,
       ),
     );
   }
@@ -281,6 +293,26 @@ export function CartProvider({
       scope,
     });
     applyMerged(merged, scope);
+    for (const server of serverLines) {
+      const key = cartItemKey(server);
+      if (!pendingDelete.current.has(key)) continue;
+      if (scope && scope.key === key && (revs.current.get(key) ?? 0) <= scope.sinceRev) continue;
+      const known = confirmed.current.get(key);
+      if (!known?.lineId || known.qty <= 0) continue;
+      const prior = fallback.current.get(key);
+      fallback.current.set(
+        key,
+        confirmedSnapshot(
+          {
+            ...server,
+            serverLineId: known.lineId,
+            swapRule: server.swapRule ?? prior?.swapRule,
+            substituteVariantId: server.substituteVariantId ?? prior?.substituteVariantId,
+          },
+          known.qty,
+        ),
+      );
+    }
   }
   async function pullServer(mode: PullMode, scope?: ReconcileScope): Promise<"ok" | "empty" | "failed"> {
     if (!mounted.current || staleDeployment.current) return "failed";
@@ -453,7 +485,7 @@ export function CartProvider({
     if (doomed) {
       const revAtSend = revs.current.get(key) ?? 0;
       try {
-        const override = e2eRemovalOverride();
+        const override = await e2eRemovalOverride();
         const result = override ?? (await removeCartLine(doomed));
         if (!result.ok && removalResultAction(result.code) === "rejected") {
           if (mounted.current) {
