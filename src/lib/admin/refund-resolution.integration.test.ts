@@ -27,7 +27,7 @@ import { recordReconcileResult } from "../inngest/functions";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundCreatedLate, setRefundStatus } from "../stripe/fake";
 import { RefundNotCreatedError } from "../stripe/errors";
-import { applyProviderRefund, evaluateOrderRefundState } from "../order/refund-requests";
+import { applyProviderRefund, evaluateOrderRefundState, reconcileRefundRequest, REFUND_REQUEST_ABANDON_MS } from "../order/refund-requests";
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { failedAtLabel } from "./failed-at";
 import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction } from "./refund-resolution";
@@ -2088,5 +2088,129 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       where: { entityId: order.id, action: "refund_resolved_manually" },
     });
     expect(recorded?.after).toMatchObject({ repaidCents: 2500, displayedOwedCents: 2500, capturedCents: 2500 });
+  });
+
+  it("an active replay cannot be repaid when it crosses the abandon boundary", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Replay in flight" },
+    });
+    const pi = `pi_replay_inflight_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "replay-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26625,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const key = `refund:${order.id}:1`;
+    const stored = await storeScoped(storeAId).refundRequest.create({
+      data: {
+        storeId: storeAId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "UNKNOWN",
+        createdAt: new Date(Date.now() - REFUND_REQUEST_ABANDON_MS + 5_000),
+      },
+    });
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const enteredGate = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (...args) => {
+      entered();
+      await gate;
+      return original(...args);
+    });
+    const now = Date.now();
+    const replay = reconcileRefundRequest(stored);
+    try {
+      await enteredGate;
+      vi.spyOn(Date, "now").mockReturnValue(now + 10_000);
+      const result = await resolveRefundFailed(order.id, "Repaid 1000 outside app", 1000, 1000);
+      expect(result.ok).toBe(false);
+    } finally {
+      release();
+      await replay;
+      spy.mockRestore();
+      vi.spyOn(Date, "now").mockRestore();
+      setStripeProvider(fakeStripeProvider);
+    }
+
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    })).toBe(0);
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    })).toBe(0);
+    const listed = await fakeStripeProvider.listRefunds(pi);
+    expect(listed.filter((refund) => refund.status === "succeeded")).toHaveLength(1);
+    expect(listed[0]?.amountRefunded).toBe(1000);
+  });
+
+  it("a replay reserved on another server cannot be repaid or abandoned", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Other server replay" },
+    });
+    const pi = `pi_other_server_replay_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "other-server-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26626,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const key = `refund:${order.id}:1`;
+    await storeScoped(storeAId).refundRequest.create({
+      data: {
+        storeId: storeAId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 400,
+        refundApplicationFee: true,
+        state: "REPLAYING",
+        createdAt: new Date(Date.now() - REFUND_REQUEST_ABANDON_MS - 5_000),
+        lastCheckedAt: new Date(),
+      },
+    });
+    const result = await resolveRefundFailed(order.id, "Repaid the rest", 600, 1000);
+    expect(result.ok).toBe(false);
+    const stored = await storeScoped(storeAId).refundRequest.findFirst({ where: { key } });
+    expect(stored?.state).toBe("REPLAYING");
+    expect(await fakeStripeProvider.listRefunds(pi)).toHaveLength(0);
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    })).toBe(0);
   });
 });

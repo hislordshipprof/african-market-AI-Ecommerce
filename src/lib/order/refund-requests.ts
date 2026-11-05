@@ -13,6 +13,9 @@ import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 /** Inside Stripe's 24h idempotency window. Coordinator default, pending owner confirmation. */
 export const REFUND_REQUEST_ABANDON_MS = 23 * 60 * 60 * 1000;
 
+/** How long a replay stays reserved after the process that started it stops answering. */
+export const REPLAY_LEASE_MS = 2 * 60 * 1000;
+
 /** Keys whose refundPayment call has not returned in this process. A sweep must not replay them. */
 const callsInFlight = new Set<string>();
 
@@ -24,7 +27,7 @@ export function requestIsOpen(row: {
   state: string;
   providerStatus: string | null;
 }): boolean {
-  if (row.state === "RESERVED" || row.state === "UNKNOWN") return true;
+  if (row.state === "RESERVED" || row.state === "UNKNOWN" || row.state === "REPLAYING") return true;
   if (row.state !== "CREATED") return false;
   return !row.providerStatus || !TERMINAL_PROVIDER_STATUSES.has(row.providerStatus);
 }
@@ -138,6 +141,25 @@ async function alertAbandoned(storeId: string, orderId: string, key: string): Pr
   console.error(`Refund request ${key} for order ${orderId} is still unknown. Platform alerted.`);
 }
 
+function replayLeaseFresh(row: { state: string; lastCheckedAt: Date }, now = Date.now()): boolean {
+  return row.state === "REPLAYING" && now - row.lastCheckedAt.getTime() < REPLAY_LEASE_MS;
+}
+
+/** One server reserves the replay. Another server sees the reservation and does not send it again. */
+async function claimReplay(row: RefundRequestRow): Promise<RefundRequestRow | null> {
+  return storeScopedTransaction(row.storeId, async (tx) => {
+    await lockStoreRow(tx, row.storeId);
+    const current = await tx.refundRequest.findUnique({ where: { id: row.id } });
+    if (!current) return null;
+    if (current.state === "CREATED" || current.state === "ABANDONED" || current.state === "NOT_CREATED") return null;
+    if (replayLeaseFresh(current)) return null;
+    return tx.refundRequest.update({
+      where: { id: row.id },
+      data: { state: "REPLAYING", lastCheckedAt: new Date(Date.now()) },
+    });
+  });
+}
+
 /**
  * List, then replay the stored key, then abandon after 23h.
  * A refund that appears for an abandoned request becomes CREATED.
@@ -161,25 +183,35 @@ export async function reconcileRefundRequest(row: RefundRequestRow): Promise<Ref
     await evaluateOrderRefundState(row.orderId);
     return updated;
   }
-  if (callsInFlight.has(row.key)) return row;
+  if (callsInFlight.has(row.key) || replayLeaseFresh(row)) return row;
   const age = Date.now() - row.createdAt.getTime();
-  if (age < REFUND_REQUEST_ABANDON_MS && (row.state === "RESERVED" || row.state === "UNKNOWN")) {
+  const canReplay = row.state === "RESERVED" || row.state === "UNKNOWN" || row.state === "REPLAYING";
+  if (age < REFUND_REQUEST_ABANDON_MS && canReplay) {
+    const claimed = await claimReplay(row);
+    if (!claimed) {
+      const current = await storeScoped(row.storeId).refundRequest.findUnique({ where: { id: row.id } });
+      return current ?? row;
+    }
+    callsInFlight.add(claimed.key);
     try {
-      const refund = await stripe.refundPayment(row.paymentIntentId, row.amountCents, row.key, {
-        refundApplicationFee: row.refundApplicationFee,
-        reservationKey: row.key,
-        orderId: row.orderId,
+      const refund = await stripe.refundPayment(claimed.paymentIntentId, claimed.amountCents, claimed.key, {
+        refundApplicationFee: claimed.refundApplicationFee,
+        reservationKey: claimed.key,
+        orderId: claimed.orderId,
       });
-      const saved = await classifyRefundRequest(row, { refund });
-      await evaluateOrderRefundState(row.orderId);
+      const saved = await classifyRefundRequest(claimed, { refund });
+      await evaluateOrderRefundState(claimed.orderId);
       return saved;
     } catch (err) {
-      const saved = await classifyRefundRequest(row, { error: err });
-      await evaluateOrderRefundState(row.orderId);
+      const saved = await classifyRefundRequest(claimed, { error: err });
+      await evaluateOrderRefundState(claimed.orderId);
       return saved;
+    } finally {
+      callsInFlight.delete(claimed.key);
     }
   }
   if (row.state === "ABANDONED" || row.state === "NOT_CREATED" || row.state === "CREATED") return row;
+  if (replayLeaseFresh(row)) return row;
   const abandoned = await saveRequest(row.storeId, row.id, { state: "ABANDONED" });
   await alertAbandoned(row.storeId, row.orderId, row.key);
   await evaluateOrderRefundState(row.orderId);

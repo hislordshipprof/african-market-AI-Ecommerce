@@ -317,7 +317,7 @@ export async function findStuckTransitionalOrders(): Promise<Array<{ id: string;
           )
           OR id IN (
             SELECT order_id FROM refund_requests
-            WHERE state IN ('RESERVED', 'UNKNOWN')
+            WHERE state IN ('RESERVED', 'UNKNOWN', 'REPLAYING')
               OR (
                 state = 'CREATED'
                 AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))

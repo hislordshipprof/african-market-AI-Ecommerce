@@ -958,7 +958,11 @@ export async function markReady(
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order || order.status !== "CAPTURING") {
-      if (order?.status === validation.newStatus && order.capturedAmountCents != null) {
+      if (
+        order
+        && order.capturedAmountCents != null
+        && (order.status === validation.newStatus || order.status === "COMPLETED")
+      ) {
         return { ok: true as const, capturedAmountCents: order.capturedAmountCents };
       }
       if (order?.status === "CANCELLED") {

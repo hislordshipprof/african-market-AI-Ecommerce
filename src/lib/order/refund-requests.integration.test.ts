@@ -6,7 +6,7 @@ import { setStripeProvider } from "../stripe";
 import { OverRefundError } from "../stripe/errors";
 import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount } from "../stripe/fake";
 import { autoCancelOrder, reconcileStuckOrder } from "./service";
-import { reconcileRefundRequest, submitRefund } from "./refund-requests";
+import { reconcileRefundRequest, REPLAY_LEASE_MS, submitRefund } from "./refund-requests";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -251,5 +251,67 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     });
     expect(alerts).toHaveLength(1);
     expect(alerts[0]?.after).toMatchObject({ key, alert: "platform" });
+  });
+
+  it("two replays of one request send one refund", async () => {
+    const { order, pi } = await cancellingOrder();
+    const key = `refund:${order.id}:1`;
+    const row = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "UNKNOWN",
+      },
+    });
+    await Promise.all([reconcileRefundRequest(row), reconcileRefundRequest(row)]);
+    const sent = refundRequests.filter((call) => call.paymentIntentId === pi);
+    expect(sent).toHaveLength(1);
+    const listed = await fakeStripeProvider.listRefunds(pi);
+    expect(listed.filter((refund) => refund.status === "succeeded")).toHaveLength(1);
+  });
+
+  it("an expired replay inside the abandon window is sent once", async () => {
+    const { order, pi } = await cancellingOrder();
+    const key = `refund:${order.id}:1`;
+    const row = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "REPLAYING",
+        lastCheckedAt: new Date(Date.now() - REPLAY_LEASE_MS - 1_000),
+      },
+    });
+    const saved = await reconcileRefundRequest(row);
+    expect(saved.state).toBe("CREATED");
+    expect(refundRequests.filter((call) => call.paymentIntentId === pi)).toHaveLength(1);
+  });
+
+  it("an expired replay past 23 hours is abandoned and not sent", async () => {
+    const { order, pi } = await cancellingOrder();
+    const key = `refund:${order.id}:1`;
+    const row = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "REPLAYING",
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        lastCheckedAt: new Date(Date.now() - REPLAY_LEASE_MS - 1_000),
+      },
+    });
+    const saved = await reconcileRefundRequest(row);
+    expect(saved.state).toBe("ABANDONED");
+    expect(refundRequests.filter((call) => call.paymentIntentId === pi)).toHaveLength(0);
   });
 });

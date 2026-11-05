@@ -3216,6 +3216,98 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     }
   });
 
+  it("markReady returns success when pickup was completed before the capture response", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    const provider = getStripeProvider();
+    setStripeProvider({
+      ...provider,
+      async capturePaymentIntent(...args) {
+        const captured = await provider.capturePaymentIntent(...args);
+        await reconcileStuckOrder(storeId, order.id);
+        await completePickup(storeId, order.id);
+        return captured;
+      },
+    });
+    try {
+      const result = await markReady(storeId, order.id);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.capturedAmountCents).toBeGreaterThan(0);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("COMPLETED");
+      expect(updated!.capturedAmountCents).toBe(result.ok ? result.capturedAmountCents : null);
+    } finally {
+      setStripeProvider(fakeStripeProvider);
+    }
+  });
+
+  it("markReady returns success when a delivery order was completed before the capture response", async () => {
+    const order = await createTestOrder("AUTHORIZED", { fulfillment: "delivery" });
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    const provider = getStripeProvider();
+    setStripeProvider({
+      ...provider,
+      async capturePaymentIntent(...args) {
+        const captured = await provider.capturePaymentIntent(...args);
+        await reconcileStuckOrder(storeId, order.id);
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { status: "COMPLETED", completedAt: new Date() },
+          });
+        });
+        return captured;
+      },
+    });
+    try {
+      const result = await markReady(storeId, order.id);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.capturedAmountCents).toBeGreaterThan(0);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("COMPLETED");
+      expect(updated!.capturedAmountCents).toBe(result.ok ? result.capturedAmountCents : null);
+    } finally {
+      setStripeProvider(fakeStripeProvider);
+    }
+  });
+
+  it("markReady reports a capture error when a completed order has no captured amount", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    const provider = getStripeProvider();
+    setStripeProvider({
+      ...provider,
+      async capturePaymentIntent(...args) {
+        const captured = await provider.capturePaymentIntent(...args);
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { status: "COMPLETED", capturedAmountCents: null },
+          });
+        });
+        return captured;
+      },
+    });
+    try {
+      const result = await markReady(storeId, order.id);
+      expect(result).toEqual({ ok: false, error: "Order status changed during capture" });
+    } finally {
+      setStripeProvider(fakeStripeProvider);
+    }
+  });
+
   it("a refund.failed for an older refund leaves an order covered by a newer refund CANCELLED", async () => {
     const order = await createTestOrder();
     const pi = order.paymentIntentId!;
