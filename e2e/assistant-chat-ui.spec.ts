@@ -267,7 +267,6 @@ test("the open sheet is readable at phone and desktop in light and dark", async 
 
 const LONG_NAME = `Egusi ${"X".repeat(114)}`;
 const CHIP_A = `Yam ${"C".repeat(70)}`;
-const CHIP_B = `Yam ${"D".repeat(70)}`;
 
 function ownerPrisma() {
   return new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
@@ -311,7 +310,9 @@ test("long names, tokens, and the cart bar stay within a 375px screen", async ({
         select: { id: true, customName: true, masterProduct: { select: { name: true } } },
       });
       const egusi = listings.filter((row) => /egusi/i.test(row.masterProduct?.name ?? ""));
-      const yams = listings.filter((row) => /yam/i.test(row.masterProduct?.name ?? "")).slice(0, 2);
+      // Choice chips use the first two search hits, which an earlier test may have cached.
+      // Renaming only findMany's first two leaves the offered yam on its short name.
+      const yams = listings.filter((row) => /yam/i.test(row.masterProduct?.name ?? ""));
       if (egusi.length === 0 || yams.length < 2) {
         throw new Error(`expected egusi and two yam listings, saw ${egusi.length} and ${yams.length}`);
       }
@@ -319,8 +320,10 @@ test("long names, tokens, and the cart bar stay within a 375px screen", async ({
         where: { id: { in: egusi.map((row) => row.id) } },
         data: { customName: LONG_NAME },
       });
-      await tx.listing.update({ where: { id: yams[0].id }, data: { customName: CHIP_A } });
-      await tx.listing.update({ where: { id: yams[1].id }, data: { customName: CHIP_B } });
+      await tx.listing.updateMany({
+        where: { id: { in: yams.map((row) => row.id) } },
+        data: { customName: CHIP_A },
+      });
       return [...egusi, ...yams].map((row) => ({ id: row.id, customName: row.customName }));
     });
 
