@@ -239,7 +239,6 @@ function RealCheckoutForm({
       }
       if (quoteResult.orderedToken) {
         setPayState("success");
-        await clearCart();
         await refreshCart();
         router.push(`/order/${quoteResult.orderedToken}?placed=1`);
         return;
@@ -282,7 +281,6 @@ function RealCheckoutForm({
       }
       if ("orderedToken" in piResult) {
         setPayState("success");
-        await clearCart();
         await refreshCart();
         router.push(`/order/${piResult.orderedToken}?placed=1`);
         return;
@@ -336,7 +334,6 @@ function RealCheckoutForm({
       setErrorHref(null);
 
       setPayState("success");
-      await clearCart();
       await refreshCart();
       if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
         await new Promise((r) => setTimeout(r, 650));

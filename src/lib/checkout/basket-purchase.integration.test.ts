@@ -2,7 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { authPrisma, platformAdmin, storeScoped } from "../db";
 import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
-import { BasketChangedError, computeQuote, placeOrder, resumeOrderedCart } from "./service";
+import { BasketChangedError, computeQuote, createPaymentIntent, placeOrder, releaseLosingHold, resumeOrderedCart } from "./service";
+import { prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { checkoutTestHooks } from "./test-hooks";
 
 vi.mock("../inngest/send", () => ({
@@ -104,8 +105,13 @@ describe.skipIf(!hasDb)("one basket purchase", () => {
     return rows.map((row) => row.status).sort();
   }
 
-  async function place(cartId: string, paymentIntentId: string, actor: string | null) {
-    return placeOrder(storeId, 0, cartId, contact, "pickup", null, null, paymentIntentId, actor);
+  async function place(
+    cartId: string,
+    paymentIntentId: string,
+    actor: string | null,
+    buyer: typeof contact = contact,
+  ) {
+    return placeOrder(storeId, 0, cartId, buyer, "pickup", null, null, paymentIntentId, actor);
   }
 
   it("lets two concurrent tabs place one order and releases the losing hold", async () => {
@@ -217,6 +223,9 @@ describe.skipIf(!hasDb)("one basket purchase", () => {
     expect(again.token).toBe(first.token);
     expect(await storeScoped(storeId).order.count({ where: { sourceCartId: cart.id } })).toBe(1);
     expect((await getCheckoutPayments().retrievePaymentIntent(stale.id)).status).toBe("canceled");
+    const kept = await storeScoped(storeId).cartLine.findMany({ where: { cartId: cart.id } });
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({ variantId, qty: 1 });
   });
 
   it("refuses a non-numeric epoch after the same items are refilled", async () => {
@@ -296,53 +305,132 @@ describe.skipIf(!hasDb)("one basket purchase", () => {
     expect((await getCheckoutPayments().retrievePaymentIntent(pi.id)).status).toBe("requires_capture");
   });
 
-  it("still reaches the order when releasing the losing hold fails", async () => {
+  it("reserves a release so it cannot cancel an order, and an order blocks the release", async () => {
     const cart = await cartWith(1, null);
     const hold = holdFor(1);
-    const winnerPi = await authorize(cart.id, hold);
-    const loserPi = await authorize(cart.id, hold);
-    const winner = await place(cart.id, winnerPi.id, null);
-    const cancel = vi.spyOn(getCheckoutPayments(), "cancelPaymentIntent").mockRejectedValue(new Error("stripe down"));
+    const pi = await authorize(cart.id, hold);
+    await storeScoped(storeId).cartLine.updateMany({ where: { cartId: cart.id }, data: { qty: 2 } });
+    let releaseReached!: () => void;
+    const releaseReachedPromise = new Promise<void>((resolve) => {
+      releaseReached = resolve;
+    });
+    let allowCancel!: () => void;
+    const allowCancelPromise = new Promise<void>((resolve) => {
+      allowCancel = resolve;
+    });
+    checkoutTestHooks.beforeReleaseLosingHold = async () => {
+      releaseReached();
+      await allowCancelPromise;
+    };
+    const releasing = place(cart.id, pi.id, null);
+    await releaseReachedPromise;
+    await storeScoped(storeId).cartLine.updateMany({ where: { cartId: cart.id }, data: { qty: 1 } });
+    const placing = place(cart.id, pi.id, null);
+    allowCancel();
+    await expect(releasing).rejects.toBeInstanceOf(BasketChangedError);
+    await expect(placing).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(storeId).order.count({ where: { sourceCartId: cart.id } })).toBe(0);
+    expect((await getCheckoutPayments().retrievePaymentIntent(pi.id)).status).toBe("canceled");
+    await expect(place(cart.id, pi.id, null)).rejects.toBeInstanceOf(BasketChangedError);
+
+    const ordered = await cartWith(1, null);
+    const winner = await authorize(ordered.id, hold);
+    const placed = await place(ordered.id, winner.id, null);
+    const cancel = vi.spyOn(getCheckoutPayments(), "cancelPaymentIntent");
+    checkoutTestHooks.beforeReleaseLosingHold = async () => {
+      throw new Error("cancel must not start once the order exists");
+    };
+    await storeScoped(storeId).cartLine.create({
+      data: { storeId, cartId: ordered.id, variantId, qty: 2, swapRule: "exact_only" },
+    });
+    const replay = await place(ordered.id, winner.id, null);
+    expect(replay.token).toBe(placed.token);
+    await releaseLosingHold(storeId, ordered.id, winner.id);
+    expect(cancel).not.toHaveBeenCalled();
+    expect((await getCheckoutPayments().retrievePaymentIntent(winner.id)).status).toBe("requires_capture");
+    cancel.mockRestore();
+  });
+
+  it("clears the cart when Stripe cancel fails and the next attempt is a new intent", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const loser = await place(cart.id, loserPi.id, null);
-    expect(loser.token).toBe(winner.token);
+    const cancel = vi.spyOn(getCheckoutPayments(), "cancelPaymentIntent");
+
+    const already = await cartWith(1, null);
+    const alreadyHold = holdFor(1);
+    const alreadyPi = await authorize(already.id, alreadyHold);
+    await storeScoped(storeId).cart.update({
+      where: { id: already.id },
+      data: {
+        paymentIntentId: alreadyPi.id,
+        paymentAttemptToken: `gen:${crypto.randomUUID()}:guest:${alreadyHold}`,
+      },
+    });
+    await storeScoped(storeId).cartLine.updateMany({ where: { cartId: already.id }, data: { qty: 2 } });
+    cancel.mockRejectedValueOnce(new Error("You cannot cancel this PaymentIntent because it has a status of canceled"));
+    await expect(place(already.id, alreadyPi.id, null)).rejects.toBeInstanceOf(BasketChangedError);
+    expect(logged.mock.calls.some((call) => String(call[0]).includes("losing_hold_release_failed"))).toBe(false);
+    const cleared = await storeScoped(storeId).cart.findUnique({ where: { id: already.id } });
+    expect(cleared?.paymentIntentId).toBeNull();
+    const guestNext = await createPaymentIntent(storeId, already.id, alreadyHold);
+    expect(guestNext.paymentIntentId).not.toBe(alreadyPi.id);
+
+    const signed = await cartWith(1, userId);
+    const signedHold = holdFor(1);
+    const signedPi = await authorize(signed.id, signedHold);
+    await storeScoped(storeId).cart.update({
+      where: { id: signed.id },
+      data: {
+        paymentIntentId: signedPi.id,
+        paymentAttemptToken: `gen:${crypto.randomUUID()}:guest:${signedHold}`,
+      },
+    });
+    await storeScoped(storeId).cartLine.updateMany({ where: { cartId: signed.id }, data: { qty: 2 } });
+    cancel.mockRejectedValueOnce(new Error("stripe down"));
+    await expect(place(signed.id, signedPi.id, userId)).rejects.toBeInstanceOf(BasketChangedError);
     expect(logged.mock.calls.some((call) => String(call[0]).includes("losing_hold_release_failed"))).toBe(true);
-    const retry = await place(cart.id, loserPi.id, null);
-    expect(retry.token).toBe(winner.token);
-    expect(await storeScoped(storeId).order.count({ where: { sourceCartId: cart.id } })).toBe(1);
+    const signedCleared = await storeScoped(storeId).cart.findUnique({ where: { id: signed.id } });
+    expect(signedCleared?.paymentIntentId).toBeNull();
+    const signedNext = await prepareSignedInPaymentIntent(storeId, signed.id, signedHold, {
+      actorUserId: userId,
+      saveCard: false,
+      savedCardId: null,
+      attemptToken: null,
+    }, storeAccountId);
+    expect(signedNext.paymentIntentId).not.toBe(signedPi.id);
     cancel.mockRestore();
     logged.mockRestore();
   });
 
-  it("does not cancel a losing intent once an order references it", async () => {
-    const cart = await cartWith(1, null);
+  it("releases a hold edited below the minimum and keeps one with a bad contact", async () => {
+    const low = await cartWith(2, null);
+    const two = computeQuote(800, [{ price: 500, qty: 2, maxPerOrder: null }], contact, "pickup");
+    const pi = await authorize(low.id, two.holdCents);
+    await storeScoped(storeId).cartLine.updateMany({ where: { cartId: low.id }, data: { qty: 1 } });
+    await expect(
+      placeOrder(storeId, 800, low.id, contact, "pickup", null, null, pi.id, null),
+    ).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(storeId).order.count({ where: { sourceCartId: low.id } })).toBe(0);
+    expect((await getCheckoutPayments().retrievePaymentIntent(pi.id)).status).toBe("canceled");
+
+    const typo = await cartWith(1, null);
     const hold = holdFor(1);
-    const winnerPi = await authorize(cart.id, hold);
-    const loserPi = await authorize(cart.id, hold);
-    await place(cart.id, winnerPi.id, null);
-    const cancel = vi.spyOn(getCheckoutPayments(), "cancelPaymentIntent");
-    checkoutTestHooks.beforeReleaseLosingHold = async () => {
-      const customer = await storeScoped(storeId).customer.create({
-        data: { storeId, name: "Race", email: `race-${cart.id}@example.test`, phone: "+15551234567" },
-      });
-      await storeScoped(storeId).order.create({
-        data: {
-          storeId,
-          number: 9000 + Math.floor(Math.random() * 1000),
-          customerId: customer.id,
-          status: "AUTHORIZED",
-          fulfillment: "pickup",
-          subtotalCents: 500,
-          bufferCents: 50,
-          totalAuthorizedCents: hold,
-          paymentIntentId: loserPi.id,
-          sourceCartId: cart.id,
-        },
-      });
-    };
-    await place(cart.id, loserPi.id, null);
-    expect(cancel).not.toHaveBeenCalled();
-    expect((await getCheckoutPayments().retrievePaymentIntent(loserPi.id)).status).toBe("requires_capture");
-    cancel.mockRestore();
+    const kept = await authorize(typo.id, hold);
+    await expect(
+      place(typo.id, kept.id, null, { ...contact, email: "not-an-email" }),
+    ).rejects.toThrow(/Name, email, and a valid phone/);
+    expect((await getCheckoutPayments().retrievePaymentIntent(kept.id)).status).toBe("requires_capture");
+    const ordered = await place(typo.id, kept.id, null);
+    expect(ordered.token).toBeTruthy();
+
+    const empty = await cartWith(1, null);
+    const open = await authorize(empty.id, hold);
+    await storeScoped(storeId).cart.update({
+      where: { id: empty.id },
+      data: { paymentIntentId: open.id },
+    });
+    await storeScoped(storeId).cartLine.deleteMany({ where: { cartId: empty.id } });
+    await expect(place(empty.id, open.id, null)).rejects.toThrow("Cart is empty");
+    expect(await storeScoped(storeId).order.count({ where: { sourceCartId: empty.id } })).toBe(0);
+    expect((await getCheckoutPayments().retrievePaymentIntent(open.id)).status).toBe("canceled");
   });
 });

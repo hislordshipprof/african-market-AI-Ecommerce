@@ -279,7 +279,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -300,6 +300,7 @@ export async function storeScopedTransaction<T>(
       customer: tx.customer,
       order: tx.order,
       orderLine: tx.orderLine,
+      paymentIntentRelease: tx.paymentIntentRelease,
       refundRequest: tx.refundRequest,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
@@ -341,6 +342,20 @@ export async function lockConversationRow(tx: Pick<PrismaClient, "$queryRaw">, c
 
 export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
   await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
+}
+
+/** Sees an order in any store. The caller is inside a store-scoped transaction and must not insert while this is on. */
+export async function orderExistsForPaymentIntent(
+  tx: Pick<PrismaClient, "order" | "$executeRaw">,
+  paymentIntentId: string,
+): Promise<boolean> {
+  await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+  const existing = await tx.order.findUnique({
+    where: { paymentIntentId },
+    select: { id: true },
+  });
+  await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'false', true)`;
+  return Boolean(existing);
 }
 
 export async function getNextOrderNumber(tx: Pick<PrismaClient, "$queryRaw">, storeId: string): Promise<number> {

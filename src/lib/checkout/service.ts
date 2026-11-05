@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped, platformAdminTransaction } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent } from "../db";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
@@ -391,6 +391,10 @@ export async function recordAuthorizedOrder(
       }
 
       await lockCart(tx, input.cartId);
+      const released = await tx.paymentIntentRelease.findUnique({
+        where: { paymentIntentId: input.paymentIntentId },
+      });
+      if (released) throw new BasketChangedError();
       const cart = await tx.cart.findUnique({ where: { id: input.cartId } });
       if (!cart || cart.storeId !== storeId) {
         throw new Error("Cart not found");
@@ -537,19 +541,48 @@ function cartLinesToOrderLines(
   }));
 }
 
-async function intentHasOrder(paymentIntentId: string): Promise<boolean> {
-  const order = await platformAdminTransaction((tx) =>
-    tx.order.findUnique({ where: { paymentIntentId }, select: { id: true } }),
-  );
-  return Boolean(order);
+function stripeAlreadyCanceled(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /status of canceled/i.test(message)
+    || /already canceled/i.test(message)
+    || /status canceled/i.test(message);
 }
 
-async function releaseLosingHold(paymentIntentId: string): Promise<void> {
-  if (await intentHasOrder(paymentIntentId)) return;
+/**
+ * Reserves this intent for release under the same locks placement takes, then
+ * tells Stripe. An order that commits first is left capturable. A reservation
+ * that commits first makes a later place refuse.
+ */
+export async function releaseLosingHold(
+  storeId: string,
+  cartId: string,
+  paymentIntentId: string,
+): Promise<void> {
+  const reserved = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    if (await orderExistsForPaymentIntent(tx, paymentIntentId)) return false;
+    await tx.paymentIntentRelease.upsert({
+      where: { paymentIntentId },
+      create: { paymentIntentId, storeId },
+      update: {},
+    });
+    const cart = await tx.cart.findUnique({
+      where: { id: cartId },
+      select: { paymentIntentId: true },
+    });
+    if (cart?.paymentIntentId === paymentIntentId) {
+      await tx.cart.update({
+        where: { id: cartId },
+        data: { paymentIntentId: null, paymentAttemptToken: null },
+      });
+    }
+    return true;
+  });
+  if (!reserved) return;
   if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforeReleaseLosingHold) {
     await checkoutTestHooks.beforeReleaseLosingHold();
   }
-  if (await intentHasOrder(paymentIntentId)) return;
   try {
     const key = `release-${paymentIntentId}`;
     if (fakeIntent(paymentIntentId)) {
@@ -561,7 +594,8 @@ async function releaseLosingHold(paymentIntentId: string): Promise<void> {
       undefined,
       { idempotencyKey: key },
     );
-  } catch {
+  } catch (error) {
+    if (stripeAlreadyCanceled(error)) return;
     console.error(JSON.stringify({
       event: "losing_hold_release_failed",
       paymentIntentId,
@@ -596,7 +630,7 @@ async function settleConsumedBasket(input: {
     const lines = await scoped.cartLine.count({ where: { cartId: input.cartId } });
     return { kind: "none", lines };
   }
-  await releaseLosingHold(input.paymentIntentId);
+  await releaseLosingHold(input.storeId, input.cartId, input.paymentIntentId);
   if (!cart || cart.userId !== input.actorUserId) return { kind: "unproved" };
   const quote = computeQuote(
     input.minimumOrderCents,
@@ -651,6 +685,13 @@ export async function placeOrder(
   }
 
   const pi = await retrieveCheckoutIntent(paymentIntentId);
+
+  if (pi.status === "canceled") {
+    const canceledOrder = await storeScoped(storeId).order.findUnique({
+      where: { paymentIntentId },
+    });
+    if (!canceledOrder) throw new BasketChangedError();
+  }
 
   if (pi.status !== "requires_capture") {
     throw new Error(
@@ -730,6 +771,7 @@ export async function placeOrder(
     });
     if (settled.kind === "order") return settled.result;
     if (settled.kind === "unproved") throw new BasketAlreadyOrderedError();
+    await releaseLosingHold(storeId, cartId, paymentIntentId);
     throw new Error("Cart is empty");
   }
 
@@ -741,13 +783,13 @@ export async function placeOrder(
   }));
   const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
 
-  if (quote.problems.length) {
-    throw new Error(quote.problems.map((p) => p.message).join(" "));
+  if (pi.amount !== quote.holdCents) {
+    await releaseLosingHold(storeId, cartId, paymentIntentId);
+    throw new BasketChangedError();
   }
 
-  if (pi.amount !== quote.holdCents) {
-    await releaseLosingHold(paymentIntentId);
-    throw new BasketChangedError();
+  if (quote.problems.length) {
+    throw new Error(quote.problems.map((p) => p.message).join(" "));
   }
 
   for (const line of orderLineData) {
@@ -806,13 +848,14 @@ export async function placeOrder(
       if (settled.kind === "order") return settled.result;
       if (settled.kind === "unproved") throw error;
       if (settled.lines > 0) {
-        await releaseLosingHold(paymentIntentId);
+        await releaseLosingHold(storeId, cartId, paymentIntentId);
         throw new BasketChangedError();
       }
+      await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw new Error("Cart is empty");
     }
     if (error instanceof BasketChangedError) {
-      await releaseLosingHold(paymentIntentId);
+      await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw error;
     }
     throw error;

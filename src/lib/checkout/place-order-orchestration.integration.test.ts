@@ -5,7 +5,7 @@ import { addLine } from "../cart/service";
 import { healthQueryRaw, storeScoped } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 
-const { retrieve, paymentIntents } = vi.hoisted(() => {
+const { retrieve, cancel, paymentIntents } = vi.hoisted(() => {
   const paymentIntents = new Map<string, Record<string, unknown>>();
   function usesConnectedAccount(arg: unknown): boolean {
     return Boolean(
@@ -23,11 +23,20 @@ const { retrieve, paymentIntents } = vi.hoisted(() => {
     if (!fixture) throw new Error(`No such payment_intent: '${id}'`);
     return fixture;
   });
-  return { retrieve, paymentIntents };
+  const cancel = vi.fn(async (id: string) => {
+    const fixture = paymentIntents.get(id);
+    if (!fixture) throw new Error(`No such payment_intent: '${id}'`);
+    if (fixture.status === "canceled") {
+      throw new Error("You cannot cancel this PaymentIntent because it has a status of canceled");
+    }
+    fixture.status = "canceled";
+    return fixture;
+  });
+  return { retrieve, cancel, paymentIntents };
 });
 
 vi.mock("../stripe/provider", () => ({
-  getStripeClient: () => ({ paymentIntents: { retrieve } }),
+  getStripeClient: () => ({ paymentIntents: { retrieve, cancel } }),
 }));
 
 vi.mock("../inngest/send", () => ({
@@ -502,7 +511,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     const variant = await makeVariant(store.id);
     const hold = holdFor(500, 1);
     const cases = [
-      { status: "canceled", amount: hold, message: /canceled/ },
+      { status: "canceled", amount: hold, message: /Your basket changed/ },
       { status: "succeeded", amount: hold, message: /succeeded/ },
       { status: "requires_payment_method", amount: hold, message: /requires_payment_method/ },
       { status: "requires_capture", amount: hold + 1, message: /Your basket changed/ },
@@ -527,7 +536,9 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
         placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId),
       ).rejects.toThrow(field.message);
       const kept = await storeScoped(store.id).cart.findUnique({ where: { id: cart.id } });
-      expect(kept?.paymentIntentId).toBe(paymentIntentId);
+      expect(kept?.paymentIntentId).toBe(
+        field.status === "requires_capture" ? null : paymentIntentId,
+      );
     }
     expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
@@ -746,7 +757,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
         placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId),
       ).rejects.toThrow(/Your basket changed/);
       const kept = await storeScoped(store.id).cart.findUnique({ where: { id: cart.id } });
-      expect(kept?.paymentIntentId).toBe(paymentIntentId);
+      expect(kept?.paymentIntentId).toBeNull();
     }
     expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
     expect(sendOrderAuthorized).not.toHaveBeenCalled();

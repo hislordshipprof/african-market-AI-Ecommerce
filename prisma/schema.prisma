@@ -50,6 +50,7 @@ model Store {
   aiActions       AiAction[]
   assistantUndoReceipts AssistantUndoReceipt[]
   guestBrowserCarts GuestBrowserCart[]
+  paymentIntentReleases PaymentIntentRelease[]
 
   @@map("stores")
 }
@@ -443,6 +444,20 @@ model Cart {
   @@map("carts")
 }
 
+/// A PaymentIntent reserved for release. Placement and release take the same
+/// locks, and this row is the decision: the intent becomes an order, or it is
+/// released. Stripe is told only after the row commits.
+model PaymentIntentRelease {
+  paymentIntentId String   @id @map("payment_intent_id")
+  storeId         String   @map("store_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("payment_intent_releases")
+}
+
 model CartLine {
   id                  String   @id @default(cuid())
   storeId             String   @map("store_id")
@@ -639,6 +654,7 @@ model Order {
   @@unique([storeId, number])
   @@index([storeId])
   @@index([storeId, status])
+  @@index([storeId, sourceCartId, createdAt])
   @@index([customerId])
   @@map("orders")
 }
