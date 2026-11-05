@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { lockStoreRow, platformAdminTransaction, storeScopedTransaction } from "../db";
+import { z } from "zod";
 import { requirePlatformAdmin } from "./session";
+import { parseRepaidDollars } from "./repaid-dollars";
+import { parseInput, readFormFields } from "../security/parse-input";
 import { getStripeProvider } from "../stripe";
 import { findOpenRefundRequest, reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
@@ -141,14 +144,6 @@ export type ResolveResult =
   | { ok: false; error: string; fieldError?: string };
 
 const BALANCE_CHANGED = "The balance changed since you loaded this page. An alert was recorded.";
-
-/** Dollars as typed, to cents. "10.5" is 1050. Anything that is not a dollar amount is rejected. */
-export async function parseRepaidDollars(raw: string): Promise<number | null> {
-  const trimmed = raw.trim();
-  const match = /^(\d{1,8})(?:\.(\d{1,2}))?$/.exec(trimmed);
-  if (!match) return null;
-  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
-}
 
 export async function resolveRefundFailed(
   orderId: string,
@@ -298,8 +293,22 @@ export async function resolveRefundFailedAction(
   _prev: ResolveResult | null,
   formData: FormData,
 ): Promise<ResolveResult> {
-  const repaidCents = await parseRepaidDollars(String(formData.get("repaidDollars") ?? ""));
-  const displayedRaw = String(formData.get("displayedOwedCents") ?? "");
+  await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({
+    orderId: z.string().max(200).nullable(),
+    note: z.string().max(2_000).nullable(),
+    repaidDollars: z.string().max(40).nullable(),
+    displayedOwedCents: z.string().max(20).nullable(),
+  }), readFormFields(formData, ["orderId", "note", "repaidDollars", "displayedOwedCents"]));
+  if (!fields.ok) {
+    return {
+      ok: false,
+      error: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+      fieldError: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+    };
+  }
+  const repaidCents = parseRepaidDollars(fields.data.repaidDollars ?? "");
+  const displayedRaw = fields.data.displayedOwedCents ?? "";
   const displayedOwedCents = /^-?\d+$/.test(displayedRaw) ? Number(displayedRaw) : Number.NaN;
   if (repaidCents == null || !Number.isInteger(displayedOwedCents)) {
     return {
@@ -309,8 +318,8 @@ export async function resolveRefundFailedAction(
     };
   }
   return resolveRefundFailed(
-    String(formData.get("orderId") ?? ""),
-    String(formData.get("note") ?? ""),
+    fields.data.orderId ?? "",
+    fields.data.note ?? "",
     repaidCents,
     displayedOwedCents,
   );

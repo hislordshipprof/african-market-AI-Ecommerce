@@ -1,6 +1,7 @@
 "use server";
 import { revalidateStorefront } from "../storefront/cache";
 
+import { z } from "zod";
 import { requireStoreOwner } from "../store-admin/session";
 import { parseVariantsJson } from "./parse-variants";
 import {
@@ -13,6 +14,42 @@ import {
   type StockMode,
   type StockStatus,
 } from "./service";
+import { parseInput, readFormFields } from "../security/parse-input";
+
+const listingField = z.string().max(500).nullable();
+const listingFormSchema = z.strictObject({
+  customName: listingField,
+  masterProductId: listingField,
+  price: z.string().max(40).nullable(),
+  stockMode: z.string().max(20).nullable(),
+  qty: z.string().max(20).nullable(),
+  status: z.string().max(40).nullable(),
+  frozen: z.string().max(10).nullable(),
+  perishable: z.string().max(10).nullable(),
+  maxPerOrder: z.string().max(20).nullable(),
+  variants: z.string().max(200_000).nullable(),
+  listingId: z.string().max(200).nullable(),
+});
+const LISTING_FIELDS = [
+  "customName",
+  "masterProductId",
+  "price",
+  "stockMode",
+  "qty",
+  "status",
+  "frozen",
+  "perishable",
+  "maxPerOrder",
+  "variants",
+  "listingId",
+] as const;
+const MAX_VARIANTS = 50;
+
+function boundListingForm(formData: FormData): string | null {
+  const parsed = parseInput(listingFormSchema, readFormFields(formData, LISTING_FIELDS));
+  if (!parsed.ok) return "Valid non-negative price is required";
+  return null;
+}
 
 const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
 
@@ -22,6 +59,8 @@ function toActor(user: { id: string; email: string }): Actor {
 
 export async function createListingAction(formData: FormData) {
   const session = await requireStoreOwner();
+  const formError = boundListingForm(formData);
+  if (formError) return { error: formError };
 
   const customName = formData.get("customName") as string | null;
   const masterProductId = formData.get("masterProductId") as string | null;
@@ -38,7 +77,7 @@ export async function createListingAction(formData: FormData) {
     return { error: "Product name or master product is required" };
   }
   const price = Number(priceRaw);
-  if (!priceRaw || !isFinite(price) || price < 0) {
+  if (!priceRaw || !isFinite(price) || price < 0 || !Number.isInteger(price)) {
     return { error: "Valid non-negative price is required" };
   }
   if (!VALID_STOCK_MODES.has(stockMode)) {
@@ -53,6 +92,9 @@ export async function createListingAction(formData: FormData) {
     const variants = parseVariantsJson(variantsJson);
     if (variants.length === 0) {
       return { error: "At least one variant is required" };
+    }
+    if (variants.length > MAX_VARIANTS) {
+      return { error: "Too many variants" };
     }
 
     const result = await createListing({
@@ -79,6 +121,8 @@ export async function createListingAction(formData: FormData) {
 
 export async function updateListingAction(formData: FormData) {
   const session = await requireStoreOwner();
+  const formError = boundListingForm(formData);
+  if (formError) return { error: formError };
 
   const listingId = formData.get("listingId") as string | null;
   if (!listingId) return { error: "Listing ID is required" };
@@ -99,7 +143,7 @@ export async function updateListingAction(formData: FormData) {
   }
   if (priceRaw !== null) {
     const p = Number(priceRaw);
-    if (!isFinite(p) || p < 0) return { error: "Valid non-negative price is required" };
+    if (!isFinite(p) || p < 0 || !Number.isInteger(p)) return { error: "Valid non-negative price is required" };
   }
   if (stockMode !== null && !VALID_STOCK_MODES.has(stockMode)) {
     return { error: "Stock mode must be 'counted' or 'status'" };
@@ -115,6 +159,9 @@ export async function updateListingAction(formData: FormData) {
       parsedVariants = parseVariantsJson(variantsJson);
       if (parsedVariants.length === 0) {
         return { error: "At least one variant is required" };
+      }
+      if (parsedVariants.length > MAX_VARIANTS) {
+        return { error: "Too many variants" };
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Invalid variants";
@@ -149,11 +196,13 @@ export async function updateListingAction(formData: FormData) {
 
 export async function deactivateListingAction(listingId: string) {
   const session = await requireStoreOwner();
+  const id = parseInput(z.string().min(1).max(200), listingId);
+  if (!id.ok) return { error: "Listing ID is required" };
 
   try {
     await deactivateListing(
       session.store.id,
-      listingId,
+      id.data,
       toActor(session.user),
     );
     revalidateStorefront(session.store.id);
@@ -166,11 +215,13 @@ export async function deactivateListingAction(listingId: string) {
 
 export async function reactivateListingAction(listingId: string) {
   const session = await requireStoreOwner();
+  const id = parseInput(z.string().min(1).max(200), listingId);
+  if (!id.ok) return { error: "Listing ID is required" };
 
   try {
     await reactivateListing(
       session.store.id,
-      listingId,
+      id.data,
       toActor(session.user),
     );
     revalidateStorefront(session.store.id);
@@ -183,7 +234,9 @@ export async function reactivateListingAction(listingId: string) {
 
 export async function listMasterProductsAction(query?: string) {
   await requireStoreOwner();
-  const safeQuery = typeof query === "string" ? query.slice(0, 100) : undefined;
+  const parsed = parseInput(z.string().max(1_000).optional(), query);
+  if (!parsed.ok) return [];
+  const safeQuery = parsed.data?.slice(0, 100);
   const products = await listMasterProducts(safeQuery, 50);
   return products.map((p) => ({ id: p.id, name: p.name }));
 }

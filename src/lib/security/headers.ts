@@ -1,0 +1,75 @@
+export const ENFORCED_CSP = "frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
+
+const STATIC_HEADERS: Array<{ key: string; value: string }> = [
+  { key: "Strict-Transport-Security", value: "max-age=63072000" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Content-Security-Policy", value: ENFORCED_CSP },
+];
+
+export function staticSecurityHeaders(): Array<{ key: string; value: string }> {
+  return STATIC_HEADERS.map((header) => ({ ...header }));
+}
+
+export function newCspNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function hostnameOf(value: string | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw || raw === "undefined") return null;
+  try {
+    const withScheme = raw.includes("://") ? raw : `https://${raw}`;
+    const host = new URL(withScheme).hostname;
+    if (!host || host === "undefined") return null;
+    return host;
+  } catch {
+    return null;
+  }
+}
+
+/** Hosts added to img-src. Empty, blank, and unparseable values are omitted. */
+export function imageHosts(env: Record<string, string | undefined>): string[] {
+  const hosts = new Set<string>();
+  const r2 = hostnameOf(env.R2_PUBLIC_URL);
+  if (r2) hosts.add(r2);
+  for (const part of (env.LOGO_HOSTS ?? "").split(",")) {
+    const host = hostnameOf(part);
+    if (host) hosts.add(host);
+  }
+  return [...hosts];
+}
+
+export function reportOnlyPolicy(
+  nonce: string,
+  env: Record<string, string | undefined>,
+): string {
+  const devEval = env.NODE_ENV === "development" ? " 'unsafe-eval'" : "";
+  const images = imageHosts(env).map((host) => `https://${host}`).join(" ");
+  const imgSrc = [
+    "'self'",
+    "data:",
+    "blob:",
+    "https://images.unsplash.com",
+    "https://*.stripe.com",
+    images,
+  ].filter(Boolean).join(" ");
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://js.stripe.com https://*.js.stripe.com https://maps.googleapis.com${devEval}`,
+    "style-src 'self' 'unsafe-inline'",
+    `img-src ${imgSrc}`,
+    "font-src 'self'",
+    "connect-src 'self' https://api.stripe.com https://maps.googleapis.com",
+    "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+  ].join("; ");
+}

@@ -1,6 +1,8 @@
 "use server";
 
+import { z } from "zod";
 import { requireStoreOwner } from "../store-admin/session";
+import { parseInput } from "../security/parse-input";
 import {
   generatePreview,
   commitImport,
@@ -25,9 +27,14 @@ export async function csvPreviewAction(
   formData: FormData,
 ): Promise<PreviewActionResult> {
   const session = await requireStoreOwner();
-  const file = formData.get("file") as File | null;
+  const file = formData.get("file");
+  const sized = parseInput(
+    z.object({ size: z.number().int().nonnegative().max(2 * 1024 * 1024) }),
+    { size: file instanceof File ? file.size : -1 },
+  );
+  if (!sized.ok) return { error: "Please select a CSV file." };
 
-  if (!file || file.size === 0) {
+  if (!(file instanceof File) || file.size === 0) {
     return { error: "Please select a CSV file." };
   }
 
@@ -61,17 +68,28 @@ export async function csvCommitAction(
   selection: CommitSelection,
 ): Promise<CommitActionResult> {
   const session = await requireStoreOwner();
-
-  if (!importToken) {
+  const token = parseInput(z.string().min(1).max(200), importToken);
+  const selectionParsed = parseInput(z.strictObject({
+    matchedRows: z.array(z.number().int().nonnegative()).max(5000),
+    newItemRows: z.array(z.number().int().nonnegative()).max(5000),
+    ambiguousResolutions: z.array(z.strictObject({
+      row: z.number().int().nonnegative(),
+      masterProductId: z.string().min(1).max(200),
+    })).max(5000),
+  }), selection);
+  if (!token.ok) {
     return { error: "Missing import token. Please upload the file again." };
+  }
+  if (!selectionParsed.ok) {
+    return { error: "No rows selected." };
   }
 
   let result: CommitResult;
   try {
     result = await commitImport(
       session.store.id,
-      importToken,
-      selection,
+      token.data,
+      selectionParsed.data,
       toActor(session.user),
     );
   } catch (e) {

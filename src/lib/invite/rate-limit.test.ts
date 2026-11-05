@@ -35,13 +35,13 @@ describe.skipIf(!hasDb)("checkInviteRateLimit", () => {
   });
 
   beforeEach(async () => {
-    await rawPrisma.rateLimit.deleteMany({
+    await rawPrisma.appRateLimit.deleteMany({
       where: { key: { in: [`invite:${storeAId}`, `invite:${storeBId}`] } },
     });
   });
 
   afterAll(async () => {
-    await rawPrisma.rateLimit.deleteMany({
+    await rawPrisma.appRateLimit.deleteMany({
       where: { key: { startsWith: "invite:" } },
     });
     await rawPrisma.store.deleteMany({
@@ -95,9 +95,9 @@ describe.skipIf(!hasDb)("checkInviteRateLimit", () => {
     // Simulate window expiry by backdating last_request
     const key = `invite:${storeAId}`;
     const pastTimestamp = BigInt(Date.now() - 2 * 60 * 60 * 1000);
-    await rawPrisma.rateLimit.update({
+    await rawPrisma.appRateLimit.update({
       where: { key },
-      data: { lastRequest: pastTimestamp },
+      data: { windowStart: pastTimestamp },
     });
 
     const afterExpiry = await checkInviteRateLimit(storeAId);

@@ -1,6 +1,8 @@
 import { auth } from "@/lib/auth";
 import { toNextJsHandler } from "better-auth/next-js";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { parseInput } from "@/lib/security/parse-input";
 
 const { GET: rawGET, POST: rawPOST } = toNextJsHandler(auth);
 
@@ -11,20 +13,27 @@ const CUSTOMER_ONLY_PATHS = [
 
 const CALLBACK_PARAMS = ["callbackURL", "newUserCallbackURL", "errorCallbackURL"];
 
-function isRelativeUrl(url: string): boolean {
-  return url.startsWith("/") && !url.startsWith("//");
+const callbackValue = z.string().max(2000).refine(
+  (value) => value.startsWith("/") && !value.startsWith("//"),
+);
+
+function rejectCallback(param: string, value: unknown): NextResponse | null {
+  if (value === undefined || value === null) return null;
+  const parsed = parseInput(callbackValue, value);
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: `${param} must be a relative path` },
+      { status: 400 },
+    );
+  }
+  return null;
 }
 
 function rejectIfBadCallback(req: NextRequest): NextResponse | null {
   const url = new URL(req.url);
   for (const param of CALLBACK_PARAMS) {
-    const value = url.searchParams.get(param);
-    if (value !== null && (typeof value !== "string" || !isRelativeUrl(value))) {
-      return NextResponse.json(
-        { error: `${param} must be a relative path` },
-        { status: 400 },
-      );
-    }
+    const rejected = rejectCallback(param, url.searchParams.get(param));
+    if (rejected) return rejected;
   }
   return null;
 }
@@ -58,13 +67,8 @@ export async function POST(req: NextRequest) {
   } catch {}
   if (body) {
     for (const param of CALLBACK_PARAMS) {
-      const val = body[param];
-      if (val !== undefined && (typeof val !== "string" || !isRelativeUrl(val))) {
-        return NextResponse.json(
-          { error: `${param} must be a relative path` },
-          { status: 400 },
-        );
-      }
+      const rejected = rejectCallback(param, body[param]);
+      if (rejected) return rejected;
     }
   }
   return rawPOST(req);

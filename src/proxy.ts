@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BROWSER_COOKIE } from "@/lib/cart/browser";
 import { slugFromHost, isSlugRoutable } from "@/lib/slug";
+import { newCspNonce, reportOnlyPolicy, staticSecurityHeaders } from "@/lib/security/headers";
 
 const COOKIE_NAME = "store_override";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -29,6 +30,7 @@ export function proxy(request: NextRequest) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.searchParams.delete("store");
       const response = NextResponse.redirect(redirectUrl, 307);
+      stampSecurity(headers, response);
       rememberBrowser(request, response, browserIdentity(request));
       response.cookies.set(COOKIE_NAME, paramSlug, {
         httpOnly: true,
@@ -56,9 +58,24 @@ export function proxy(request: NextRequest) {
 
   const browserId = browserIdentity(request);
   headers.set("x-shop-browser", browserId);
+  const policy = reportOnlyPolicy(newCspNonce(), process.env);
+  headers.set("content-security-policy-report-only", policy);
   const response = NextResponse.next({ request: { headers } });
+  response.headers.set("content-security-policy-report-only", policy);
+  for (const header of staticSecurityHeaders()) {
+    response.headers.set(header.key, header.value);
+  }
   rememberBrowser(request, response, browserId);
   return response;
+}
+
+function stampSecurity(requestHeaders: Headers, response: NextResponse) {
+  const policy = reportOnlyPolicy(newCspNonce(), process.env);
+  requestHeaders.set("content-security-policy-report-only", policy);
+  response.headers.set("content-security-policy-report-only", policy);
+  for (const header of staticSecurityHeaders()) {
+    response.headers.set(header.key, header.value);
+  }
 }
 
 function browserIdentity(request: NextRequest): string {

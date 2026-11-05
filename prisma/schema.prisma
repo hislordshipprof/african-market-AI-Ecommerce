@@ -173,6 +173,16 @@ model RateLimit {
   @@map("rate_limits")
 }
 
+/// Platform counters. Not store-owned: no store_id and no RLS, same grants as rate_limits.
+/// Better Auth prunes rate_limits; it never touches this table.
+model AppRateLimit {
+  key         String @id
+  windowStart BigInt @map("window_start")
+  count       Int
+
+  @@map("app_rate_limits")
+}
+
 model AuditLog {
   id         String   @id @default(cuid())
   storeId    String?  @map("store_id")

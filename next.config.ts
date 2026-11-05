@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { staticSecurityHeaders } from "./src/lib/security/headers";
 
 const logoHosts = (process.env.LOGO_HOSTS ?? "")
   .split(",")
@@ -10,6 +11,14 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "3mb",
     },
+  },
+  async headers() {
+    const headers = staticSecurityHeaders();
+    return [
+      { source: "/:path*", headers },
+      { source: "/", headers },
+      { source: "/_next/static/:path*", headers },
+    ];
   },
   images: {
     // SVG logos are rendered with a plain <img> (StoreLogo), never via the optimizer (#60).
