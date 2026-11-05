@@ -1231,4 +1231,311 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(alert?.after).toMatchObject({ overpaidCents: 600, refundId: late.refundId, alert: "store_and_platform" });
     expect(refundRequests.filter((request) => request.paymentIntentId === pi)).toHaveLength(1);
   });
+
+  it("a failed order that later becomes fully refunded is cancelled by sweep", async () => {
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Sweep full cover" },
+    });
+    const pi = `pi_sweep_cover_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "sweep-cover-cap");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "sweep-cover-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26510,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    expect(await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: failed.refundId,
+      refundStatus: "failed",
+    })).toEqual({ ok: true, action: "refund_failed" });
+    await fakeStripeProvider.refundPayment(pi, 1000, "sweep-cover-ok");
+    await reconcileStuckOrder(storeAId, order.id);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+  });
+
+  function holdSecondRefundRead(pi: string): {
+    entered: Promise<void>;
+    release: () => void;
+  } {
+    const original = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => {};
+    const enteredGate = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let calls = 0;
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id: string) => {
+      const live = await original(id);
+      calls += 1;
+      if (id === pi && calls === 1) {
+        entered();
+        await gate;
+        return live;
+      }
+      return original(id);
+    });
+    return { entered: enteredGate, release };
+  }
+
+  it("a counted refund reversed between the resolution snapshot and commit is refused", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Stale underpay" },
+    });
+    const pi = `pi_stale_under_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "stale-under-cap");
+    const counted = await fakeStripeProvider.refundPayment(pi, 400, "stale-under-ok");
+    const failed = await fakeStripeProvider.refundPayment(pi, 600, "stale-under-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26511,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const held = holdSecondRefundRead(pi);
+    const resolving = resolveRefundFailed(order.id, "Paid 600 by Zelle");
+    try {
+      const winner = await Promise.race([
+        held.entered.then(() => "held" as const),
+        resolving.then(() => "done" as const),
+      ]);
+      expect(winner).toBe("held");
+      setRefundStatus(counted.refundId, "failed");
+      await applyProviderRefund({ ...counted, status: "failed", amountRefunded: 400, paymentIntentId: pi });
+      held.release();
+      expect(await resolving).toEqual({ ok: false, error: "balance changed, refresh" });
+    } finally {
+      held.release();
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("REFUND_FAILED");
+    expect(await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    })).toBeNull();
+  });
+
+  it("a refund succeeding between the resolution snapshot and commit is refused", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Stale overpay" },
+    });
+    const pi = `pi_stale_over_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "stale-over-cap");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "stale-over-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26512,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const held = holdSecondRefundRead(pi);
+    const resolving = resolveRefundFailed(order.id, "Paid 1000 by Zelle");
+    try {
+      const winner = await Promise.race([
+        held.entered.then(() => "held" as const),
+        resolving.then(() => "done" as const),
+      ]);
+      expect(winner).toBe("held");
+      const late = await fakeStripeProvider.refundPayment(pi, 600, "stale-over-ok");
+      await applyProviderRefund({ ...late, paymentIntentId: pi });
+      held.release();
+      expect(await resolving).toEqual({ ok: false, error: "balance changed, refresh" });
+    } finally {
+      held.release();
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("REFUND_FAILED");
+    expect(await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    })).toBeNull();
+  });
+
+  it("a sweep-observed late success after manual resolution alerts overpayment", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Sweep late success" },
+    });
+    const pi = `pi_sweep_late_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "sweep-late-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26513,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const key = `refund:${order.id}:1`;
+    await storeScoped(storeAId).refundRequest.create({
+      data: {
+        storeId: storeAId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 600,
+        refundApplicationFee: true,
+        state: "ABANDONED",
+      },
+    });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    setNextRefundStatus(pi, "pending");
+    const late = await fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: order.id });
+    await applyProviderRefund({ ...late, paymentIntentId: pi });
+    setRefundStatus(late.refundId, "succeeded");
+    await reconcileStuckOrder(storeAId, order.id);
+    const alert = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    });
+    expect(alert?.after).toMatchObject({ overpaidCents: 600, alert: "store_and_platform" });
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+  });
+
+  it("redelivering an already-counted success after manual resolution writes no alert", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Counted again" },
+    });
+    const pi = `pi_counted_again_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "counted-again-cap");
+    const counted = await fakeStripeProvider.refundPayment(pi, 400, "counted-again-ok");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26514,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: counted.refundId,
+      },
+    });
+    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle")).toEqual({ ok: true });
+    await applyProviderRefund({ ...counted, paymentIntentId: pi });
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    })).toBe(0);
+  });
+
+  it("a failure already counted before manual resolution writes no underpayment alert", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Already failed" },
+    });
+    const pi = `pi_already_failed_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "already-failed-cap");
+    await fakeStripeProvider.refundPayment(pi, 400, "already-failed-ok");
+    const failed = await fakeStripeProvider.refundPayment(pi, 600, "already-failed-no");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26515,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle")).toEqual({ ok: true });
+    await applyProviderRefund({ ...failed, status: "failed", paymentIntentId: pi });
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_reversed_after_resolution" },
+    })).toBe(0);
+  });
+
+  it("two alerts never fire for the same balance change", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "One balance change" },
+    });
+    const pi = `pi_one_alert_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "one-alert-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26516,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    const late = await fakeStripeProvider.refundPayment(pi, 600, "one-alert-late");
+    await applyProviderRefund({ ...late, paymentIntentId: pi });
+    await applyProviderRefund({ ...late, paymentIntentId: pi });
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    })).toBe(1);
+  });
 });

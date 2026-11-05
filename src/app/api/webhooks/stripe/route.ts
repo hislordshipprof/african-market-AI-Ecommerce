@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { findOrderByPaymentIntent } from "@/lib/db";
 import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
 import { markTerminalRefundFailure } from "@/lib/order/service";
-import { applyProviderRefund } from "@/lib/order/refund-requests";
+import { applyProviderRefund, evaluateOrderRefundState } from "@/lib/order/refund-requests";
 import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
 import type { RefundResult } from "@/lib/stripe/types";
 
@@ -82,6 +83,8 @@ export async function POST(req: NextRequest) {
       }
     }
     await applyProviderRefund({ ...refund, paymentIntentId: event.refund.paymentIntentId });
+    const refundedOrder = await findOrderByPaymentIntent(event.refund.paymentIntentId);
+    if (refundedOrder) await evaluateOrderRefundState(refundedOrder.id);
     if (refund.status === "failed" || refund.status === "canceled") {
       const settled = await markTerminalRefundFailure({
         paymentIntentId: event.refund.paymentIntentId,

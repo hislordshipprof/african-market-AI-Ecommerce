@@ -1,5 +1,5 @@
 import type { Prisma, RefundRequest } from "@prisma/client";
-import { findOrderByPaymentIntent, lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
+import { findOrderByPaymentIntent, lockStoreRow, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { getStripeProvider } from "../stripe";
 import {
   isIdempotencyKeyInUse,
@@ -136,13 +136,6 @@ async function alertAbandoned(storeId: string, orderId: string, key: string): Pr
   console.error(`Refund request ${key} for order ${orderId} is still unknown. Platform alerted.`);
 }
 
-async function orderWasResolved(storeId: string, orderId: string): Promise<boolean> {
-  const manual = await storeScoped(storeId).auditLog.findFirst({
-    where: { entityId: orderId, action: "refund_resolved_manually" },
-  });
-  return !!manual;
-}
-
 /**
  * List, then replay the stored key, then abandon after 23h.
  * A refund that appears for an abandoned request becomes CREATED.
@@ -163,17 +156,7 @@ export async function reconcileRefundRequest(row: RefundRequestRow): Promise<Ref
       providerRefundId: match.refundId,
       providerStatus: match.status,
     });
-    if (row.state === "ABANDONED" && await orderWasResolved(row.storeId, row.orderId)) {
-      await storeScopedTransaction(row.storeId, async (tx) => {
-        await lockStoreRow(tx, row.storeId);
-        await writeAuditOnce(tx, row.storeId, row.orderId, "refund_after_manual_resolution", match.refundId, {
-          refundId: match.refundId,
-          overpaidCents: match.status === "succeeded" ? match.amountRefunded : 0,
-          alert: "store_and_platform",
-        });
-      });
-      console.error(`Refund ${match.refundId} appeared after order ${row.orderId} was resolved. Store and platform alerted.`);
-    }
+    await evaluateOrderRefundState(row.orderId);
     return updated;
   }
   if (callsInFlight.has(row.key)) return row;
@@ -185,14 +168,19 @@ export async function reconcileRefundRequest(row: RefundRequestRow): Promise<Ref
         reservationKey: row.key,
         orderId: row.orderId,
       });
-      return classifyRefundRequest(row, { refund });
+      const saved = await classifyRefundRequest(row, { refund });
+      await evaluateOrderRefundState(row.orderId);
+      return saved;
     } catch (err) {
-      return classifyRefundRequest(row, { error: err });
+      const saved = await classifyRefundRequest(row, { error: err });
+      await evaluateOrderRefundState(row.orderId);
+      return saved;
     }
   }
   if (row.state === "ABANDONED" || row.state === "NOT_CREATED" || row.state === "CREATED") return row;
   const abandoned = await saveRequest(row.storeId, row.id, { state: "ABANDONED" });
   await alertAbandoned(row.storeId, row.orderId, row.key);
+  await evaluateOrderRefundState(row.orderId);
   return abandoned;
 }
 
@@ -313,7 +301,154 @@ export async function submitRefund(
   }
 }
 
-/** Match a provider refund to its request and record post-resolution alerts. */
+function succeededCents(listed: RefundResult[]): number {
+  return countedCents(listed, ["succeeded"]);
+}
+
+function pendingCents(listed: RefundResult[]): number {
+  return countedCents(listed, ["pending", "requires_action"]);
+}
+
+function baselineBody(after: Prisma.JsonValue): { refundedCents: number; countedRefundIds: string[]; raw: Record<string, unknown> } {
+  const raw = after && typeof after === "object" && !Array.isArray(after) ? { ...(after as Record<string, unknown>) } : {};
+  const countedRefundIds = Array.isArray(raw.countedRefundIds)
+    ? raw.countedRefundIds.filter((id): id is string => typeof id === "string")
+    : [];
+  return {
+    refundedCents: typeof raw.refundedCents === "number" ? raw.refundedCents : 0,
+    countedRefundIds,
+    raw,
+  };
+}
+
+/**
+ * The only place that changes an order's refund status or writes a post-resolution alert.
+ * It compares the provider balance with the ledger under the store lock.
+ */
+export async function evaluateOrderRefundState(orderId: string): Promise<void> {
+  const located = await platformAdminTransaction((tx) => tx.order.findUnique({ where: { id: orderId } }));
+  if (!located?.paymentIntentId) return;
+  await storeScopedTransaction(located.storeId, async (tx) => {
+    await lockStoreRow(tx, located.storeId);
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    if (!order?.paymentIntentId) return;
+    let listed: RefundResult[] = [];
+    let captured = order.capturedAmountCents ?? 0;
+    try {
+      const stripe = getStripeProvider();
+      const refunds = stripe.listRefunds(order.paymentIntentId);
+      const pi = order.capturedAmountCents == null ? stripe.retrievePaymentIntent(order.paymentIntentId) : null;
+      listed = await refunds;
+      if (pi) captured = (await pi).amountReceived;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "resource_missing") {
+        listed = [];
+        captured = order.capturedAmountCents ?? 0;
+      } else {
+        throw err;
+      }
+    }
+    const open = await openRefundRequest(tx, orderId);
+    const manual = await tx.auditLog.findFirst({
+      where: { entityId: orderId, action: "refund_resolved_manually" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    const succeeded = listed.filter((refund) => refund.status === "succeeded");
+    const settled = succeededCents(listed);
+    const pending = pendingCents(listed);
+    if (manual) {
+      // Store audit policies allow insert and select. The moving baseline is a new row.
+      const baselineRow = await tx.auditLog.findFirst({
+        where: { entityId: orderId, action: "refund_resolution_baseline" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
+      const baseline = baselineBody(baselineRow?.after ?? manual.after);
+      const ids = succeeded.map((refund) => refund.refundId);
+      if (settled > baseline.refundedCents) {
+        const refundId = ids.find((id) => !baseline.countedRefundIds.includes(id)) ?? ids.at(-1) ?? "";
+        await tx.auditLog.create({
+          data: systemAudit(order.storeId, orderId, "refund_after_manual_resolution", {
+            refundId,
+            overpaidCents: settled - baseline.refundedCents,
+            alert: "store_and_platform",
+          }),
+        });
+        console.error(`Refund ${refundId} succeeded after order ${orderId} was resolved. Store and platform alerted.`);
+      } else if (settled < baseline.refundedCents) {
+        const refundId = baseline.countedRefundIds.find((id) => !ids.includes(id))
+          ?? listed.find((refund) => refund.status === "failed" || refund.status === "canceled")?.refundId
+          ?? "";
+        await tx.auditLog.create({
+          data: systemAudit(order.storeId, orderId, "refund_reversed_after_resolution", {
+            refundId,
+            underpaidCents: baseline.refundedCents - settled,
+            alert: "store_and_platform",
+          }),
+        });
+        console.error(`Refund ${refundId} failed after order ${orderId} was resolved. Store and platform alerted.`);
+      }
+      const sameIds = ids.length === baseline.countedRefundIds.length && ids.every((id) => baseline.countedRefundIds.includes(id));
+      if (settled !== baseline.refundedCents || !sameIds) {
+        await tx.auditLog.create({
+          data: systemAudit(order.storeId, orderId, "refund_resolution_baseline", {
+            refundedCents: settled,
+            countedRefundIds: ids,
+          }),
+        });
+      }
+      return;
+    }
+    if (open) return;
+    // A Cancelling order is settled by the cancellation flow. Cancelling here would
+    // skip that flow when a covered failure is observed. Refund failed is the stuck state.
+    if (captured > 0 && settled === captured && pending === 0 && order.status === "REFUND_FAILED") {
+      const refundId = succeeded[0]?.refundId ?? order.refundId;
+      const existing = await tx.auditLog.findFirst({ where: { entityId: orderId, action: "anomaly_refund" } });
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: order.cancelledAt ?? new Date(),
+          capturedAmountCents: null,
+          ...(refundId ? { refundId } : {}),
+        },
+      });
+      if (!existing) {
+        await tx.auditLog.create({
+          data: systemAudit(order.storeId, orderId, "anomaly_refund", {
+            refundId,
+            amountRefunded: settled,
+          }),
+        });
+      }
+      return;
+    }
+    const failed = listed.find((refund) => refund.status === "failed" || refund.status === "canceled");
+    if (failed && settled + pending < captured && (order.status === "CANCELLING" || order.status === "CANCELLED")) {
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: "REFUND_FAILED",
+          refundId: failed.refundId,
+          ...(order.capturedAmountCents == null ? { capturedAmountCents: captured } : {}),
+        },
+      });
+      const existing = await tx.auditLog.findFirst({ where: { entityId: orderId, action: "refund_failed" } });
+      if (!existing) {
+        await tx.auditLog.create({
+          data: systemAudit(order.storeId, orderId, "refund_failed", {
+            refundId: failed.refundId,
+            refundStatus: failed.status,
+            alert: "store_and_platform",
+          }),
+        });
+      }
+    }
+  }, { timeout: 20_000 });
+}
+
+/** Match a provider refund to its request. The evaluator decides the order. */
 export async function applyProviderRefund(refund: RefundResult & { paymentIntentId: string }): Promise<void> {
   const order = await findOrderByPaymentIntent(refund.paymentIntentId);
   if (!order) return;
@@ -322,35 +457,16 @@ export async function applyProviderRefund(refund: RefundResult & { paymentIntent
     const request = refund.reservationKey
       ? await tx.refundRequest.findUnique({ where: { key: refund.reservationKey } })
       : await tx.refundRequest.findFirst({ where: { providerRefundId: refund.refundId, orderId: order.id } });
-    if (request) {
-      await tx.refundRequest.update({
-        where: { id: request.id },
-        data: {
-          state: "CREATED",
-          providerRefundId: refund.refundId,
-          providerStatus: refund.status,
-          lastCheckedAt: new Date(),
-        },
-      });
-    }
-    const manual = await tx.auditLog.findFirst({
-      where: { entityId: order.id, action: "refund_resolved_manually" },
+    if (!request) return;
+    await tx.refundRequest.update({
+      where: { id: request.id },
+      data: {
+        state: "CREATED",
+        providerRefundId: refund.refundId,
+        providerStatus: refund.status,
+        lastCheckedAt: new Date(),
+      },
     });
-    if (!manual) return;
-    if (refund.status === "succeeded") {
-      await writeAuditOnce(tx, order.storeId, order.id, "refund_after_manual_resolution", refund.refundId, {
-        refundId: refund.refundId,
-        overpaidCents: refund.amountRefunded,
-        alert: "store_and_platform",
-      });
-      console.error(`Refund ${refund.refundId} succeeded after order ${order.id} was resolved. Store and platform alerted.`);
-    } else if (refund.status === "failed" || refund.status === "canceled") {
-      await writeAuditOnce(tx, order.storeId, order.id, "refund_reversed_after_resolution", refund.refundId, {
-        refundId: refund.refundId,
-        underpaidCents: refund.amountRefunded,
-        alert: "store_and_platform",
-      });
-      console.error(`Refund ${refund.refundId} failed after order ${order.id} was resolved. Store and platform alerted.`);
-    }
   });
+  await evaluateOrderRefundState(order.id);
 }

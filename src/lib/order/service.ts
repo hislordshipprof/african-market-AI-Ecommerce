@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, findOpenRefundRequest, openRefundRequest, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
+import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
@@ -533,6 +533,7 @@ async function settleCapturedRefund(
     if (await findOpenRefundRequest(storeId, orderId)) {
       return { outcome: "waiting", error: "Refund is still confirming with the bank" };
     }
+    await evaluateOrderRefundState(orderId);
     await finalizeCancelledOrder(storeId, orderId, "anomaly_refund", {
       from: ["CANCELLING"],
       refundId: decision.refundId,
@@ -1067,6 +1068,7 @@ export async function reconcileStuckOrder(
   }
 
   if (!order || (order.status !== "CAPTURING" && order.status !== "CANCELLING")) {
+    if (order?.paymentIntentId) await evaluateOrderRefundState(orderId);
     return { ok: true, action: "already_resolved" };
   }
 

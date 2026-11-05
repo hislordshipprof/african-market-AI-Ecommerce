@@ -308,4 +308,42 @@ describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
     expect(row.providerStatus).toBe("succeeded");
     expect(row.state).toBe("CREATED");
   });
+
+  it("a failed order that later becomes fully refunded is cancelled by webhook", async () => {
+    const customer = await storeScoped(storeA).customer.create({
+      data: { storeId: storeA, name: "Fully refunded later" },
+    });
+    const pi = `pi_full_later_${run}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-full-later");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "full-later-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeA).order.create({
+      data: {
+        storeId: storeA,
+        number: 18614,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: null,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    expect((await postRefund("refund.failed", failed.refundId, pi, "failed")).status).toBe(200);
+    expect((await storeScoped(storeA).order.findUnique({ where: { id: order.id } }))?.status).toBe("REFUND_FAILED");
+    const covered = await fakeStripeProvider.refundPayment(pi, 1000, "full-later-ok");
+    expect((await postRefund("refund.updated", covered.refundId, pi, "succeeded")).status).toBe(200);
+    const stored = await storeScoped(storeA).order.findUnique({ where: { id: order.id } });
+    expect(stored?.status).toBe("CANCELLED");
+    const succeeded = (await fakeStripeProvider.listRefunds(pi))
+      .filter((refund) => refund.status === "succeeded")
+      .reduce((sum, refund) => sum + refund.amountRefunded, 0);
+    expect(succeeded).toBe(1000);
+    expect(await storeScoped(storeA).refundRequest.count({ where: { orderId: order.id, state: { in: ["RESERVED", "UNKNOWN"] } } })).toBe(0);
+  });
 });

@@ -413,7 +413,9 @@ const fakeStripeProvider: StripeProvider = {
 
   async refundPayment(paymentIntentId, amountCents, idempotencyKey, options) {
     const refundApplicationFee = options?.refundApplicationFee === true;
-    const fingerprint = `refund:${paymentIntentId}:${amountCents}:${refundApplicationFee}`;
+    const reservationKey = options?.reservationKey ?? "";
+    const orderId = options?.orderId ?? "";
+    const fingerprint = `refund:${paymentIntentId}:${amountCents}:${refundApplicationFee}:${reservationKey}:${orderId}`;
     return withIdempotency(idempotencyKey, fingerprint, async () => {
       refundRequests.push({
         paymentIntentId,

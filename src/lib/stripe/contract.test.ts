@@ -284,6 +284,20 @@ describe("Stripe contract: fake and sandbox", () => {
     });
   }, 60_000);
 
+  it("same key with different metadata is an idempotency error", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(500);
+      await world.provider.capturePaymentIntent(pi, 500, `cap-meta-idem-${pi}`);
+      const key = `refund-meta-idem-${pi}`;
+      await world.provider.refundPayment(pi, 200, key, { reservationKey: key, orderId: "order_a" });
+      const error = await errorOf(() =>
+        world.provider.refundPayment(pi, 200, key, { reservationKey: key, orderId: "order_b" }),
+      );
+      return { type: error.type, statusCode: error.statusCode };
+    });
+    expect(observed).toEqual({ type: "StripeIdempotencyError", statusCode: 400 });
+  }, 60_000);
+
   it("same key with a different refund amount is an idempotency error", async () => {
     const observed = await compare(async (world) => {
       const pi = await world.authorize(500);

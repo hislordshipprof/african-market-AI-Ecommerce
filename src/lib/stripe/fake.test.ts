@@ -370,6 +370,16 @@ describe("Fake Stripe state machine (K6)", () => {
     expect(listed.map((refund) => refund.refundId)).toEqual([newer.refundId, older.refundId]);
   });
 
+  it("same key with different metadata is an idempotency error", async () => {
+    const pi = "pi_meta_idem";
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-meta-idem");
+    await fakeStripeProvider.refundPayment(pi, 200, "k", { reservationKey: "k", orderId: "order_a" });
+    await expect(
+      fakeStripeProvider.refundPayment(pi, 200, "k", { reservationKey: "k", orderId: "order_b" }),
+    ).rejects.toMatchObject({ type: "StripeIdempotencyError", statusCode: 400 });
+  });
+
   it("a late-executed unknown request appears with its metadata", async () => {
     const pi = "pi_late_meta";
     const key = "refund:order_late:1";
