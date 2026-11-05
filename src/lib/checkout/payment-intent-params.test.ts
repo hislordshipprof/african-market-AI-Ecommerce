@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { guestPaymentIntentParams, planPaymentAttempt } from "./payment-intent-params";
+import { cartPaymentIdempotencyKey } from "../customer-account/consent";
+import {
+  guestPaymentIntentParams,
+  nextAttemptToken,
+  planPaymentAttempt,
+} from "./payment-intent-params";
 
 const base = {
   holdCents: 4200,
@@ -59,7 +64,7 @@ describe("payment intent params", () => {
     expect(saved.params.setup_future_usage).toBeUndefined();
   });
 
-  it("a matching attempt token clears save intent and a stale token replaces the PaymentIntent", () => {
+  it("a capability change replaces the PaymentIntent and a stale customer replaces it", () => {
     const existing = {
       id: "pi_1",
       status: "requires_payment_method",
@@ -84,10 +89,10 @@ describe("payment intent params", () => {
       nextToken: "attempt_2",
       idempotencyKey: "attempt_2",
     });
-    expect(cleared.action).toBe("update");
-    if (cleared.action !== "update") return;
-    expect(cleared.params.setup_future_usage).toBe("");
-    expect(cleared.paymentIntentId).toBe("pi_1");
+    expect(cleared.action).toBe("replace");
+    if (cleared.action !== "replace") return;
+    expect(cleared.cancelId).toBe("pi_1");
+    expect(cleared.params.setup_future_usage).toBeUndefined();
 
     const replaced = planPaymentAttempt({
       existing,
@@ -120,5 +125,98 @@ describe("payment intent params", () => {
       idempotencyKey: "attempt_4",
     });
     expect(held).toEqual({ action: "blocked", reason: "already_confirmed" });
+  });
+
+  it("reuses the same selection and only updates the amount when capabilities match", () => {
+    const existing = {
+      id: "pi_1",
+      status: "requires_payment_method",
+      amount: 4200,
+      currency: "usd",
+      customer: null,
+      setup_future_usage: null,
+      payment_method: null,
+      client_secret: "pi_1_secret",
+      metadata: { store_id: "store_1", cart_id: "cart_1", attempt_token: "attempt_1" },
+    };
+    const selection = {
+      actorUserId: "user_1",
+      stripeCustomerId: null,
+      saveCard: false,
+      paymentMethodId: null,
+      attemptToken: "attempt_1",
+    };
+    const reused = planPaymentAttempt({
+      existing,
+      ...base,
+      selection,
+      nextToken: "attempt_2",
+      idempotencyKey: "attempt_2",
+    });
+    expect(reused).toMatchObject({ action: "reuse", paymentIntentId: "pi_1", clientSecret: "pi_1_secret" });
+
+    const amount = planPaymentAttempt({
+      existing,
+      ...base,
+      holdCents: 5000,
+      selection,
+      nextToken: "attempt_2",
+      idempotencyKey: "attempt_2",
+    });
+    expect(amount).toMatchObject({
+      action: "update",
+      paymentIntentId: "pi_1",
+      params: { amount: 5000 },
+    });
+  });
+
+  it("leaves a PaymentIntent from another cart untouched", () => {
+    const foreign = planPaymentAttempt({
+      existing: {
+        id: "pi_foreign",
+        status: "requires_payment_method",
+        amount: 4200,
+        currency: "usd",
+        customer: null,
+        setup_future_usage: null,
+        payment_method: null,
+        client_secret: "foreign_secret",
+        on_behalf_of: "acct_other",
+        transfer_data: { destination: "acct_other" },
+        metadata: { store_id: "store_other", cart_id: "cart_other", attempt_token: "attempt_1" },
+      },
+      ...base,
+      selection: {
+        actorUserId: "user_1",
+        stripeCustomerId: null,
+        saveCard: false,
+        paymentMethodId: null,
+        attemptToken: "attempt_1",
+      },
+      nextToken: "attempt_new",
+      idempotencyKey: "attempt_new",
+    });
+    expect(foreign.action).toBe("create");
+    if (foreign.action !== "create") return;
+    expect(foreign.params.metadata.cart_id).toBe("cart_1");
+  });
+
+  it("reuses a key only for the generation that has not recorded a PaymentIntent", () => {
+    const fingerprint = "4200||nosave|";
+    const stored = `gen:one:${fingerprint}`;
+    expect(nextAttemptToken({
+      paymentIntentId: null,
+      storedToken: stored,
+      fingerprint,
+      forceNew: false,
+    })).toBe(stored);
+    const created = nextAttemptToken({
+      paymentIntentId: "pi_1",
+      storedToken: stored,
+      fingerprint,
+      forceNew: false,
+    });
+    expect(created).not.toBe(stored);
+    expect(cartPaymentIdempotencyKey("cart_1", stored)).not.toBe(cartPaymentIdempotencyKey("cart_1", created));
   });
 });

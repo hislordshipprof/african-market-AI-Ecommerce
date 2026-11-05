@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 export interface PaymentIntentCreateParams {
   amount: number;
   currency: "usd";
@@ -33,6 +35,8 @@ export interface ExistingPaymentIntent {
   setup_future_usage: string | null;
   payment_method: string | null;
   client_secret: string | null;
+  on_behalf_of?: string | null;
+  transfer_data?: { destination: string | null } | null;
   metadata: {
     store_id?: string;
     cart_id?: string;
@@ -43,6 +47,47 @@ export interface ExistingPaymentIntent {
 
 const OPENABLE = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
 const SETTLED = new Set(["requires_capture", "processing", "succeeded"]);
+
+export function isReplaceablePaymentStatus(status: string): boolean {
+  return OPENABLE.has(status);
+}
+
+/**
+ * A stored token is reused only to recover a create that never recorded its
+ * PaymentIntent. A live, canceled, or replaced attempt gets a new generation
+ * so Stripe cannot replay the previous create.
+ */
+export function nextAttemptToken(input: {
+  paymentIntentId: string | null;
+  storedToken: string | null;
+  fingerprint: string;
+  forceNew: boolean;
+}): string {
+  if (
+    !input.forceNew &&
+    !input.paymentIntentId &&
+    input.storedToken?.endsWith(`:${input.fingerprint}`)
+  ) {
+    return input.storedToken;
+  }
+  return `gen:${randomUUID()}:${input.fingerprint}`;
+}
+
+export function paymentIntentProvenanceOk(
+  existing: Pick<ExistingPaymentIntent, "currency" | "metadata"> & {
+    on_behalf_of?: string | null;
+    transfer_data?: { destination?: string | null } | null;
+  },
+  expected: { storeId: string; cartId: string; storeAccountId: string },
+): boolean {
+  if (existing.metadata.store_id !== expected.storeId) return false;
+  if (existing.metadata.cart_id !== expected.cartId) return false;
+  if (existing.currency && existing.currency !== "usd") return false;
+  if (existing.on_behalf_of && existing.on_behalf_of !== expected.storeAccountId) return false;
+  const destination = existing.transfer_data?.destination;
+  if (destination && destination !== expected.storeAccountId) return false;
+  return true;
+}
 
 export function guestPaymentIntentParams(input: {
   holdCents: number;
@@ -119,8 +164,9 @@ function fingerprint(input: {
 
 /**
  * Guest creates use guestPaymentIntentParams and nothing else.
- * A matching attempt token updates the same PaymentIntent.
- * A missing or stale token with a different selection replaces it.
+ * The same selection reuses the PaymentIntent. A capability change
+ * (save, customer, or payment method) starts a new one.
+ * A PaymentIntent for another cart or store is left untouched.
  * requires_capture, processing and succeeded are never cancelled.
  */
 export function planPaymentAttempt(input: {
@@ -149,6 +195,22 @@ export function planPaymentAttempt(input: {
     paymentMethodId: selection.paymentMethodId,
     attemptToken: input.nextToken,
   });
+
+  if (
+    input.existing &&
+    !paymentIntentProvenanceOk(input.existing, {
+      storeId: input.storeId,
+      cartId: input.cartId,
+      storeAccountId: input.storeAccountId,
+    })
+  ) {
+    return {
+      action: "create",
+      params: signedIn ? createParams : guestPaymentIntentParams(input),
+      idempotencyKey: input.idempotencyKey,
+      attemptToken: input.nextToken,
+    };
+  }
 
   if (!input.existing || input.existing.status === "canceled") {
     return {
@@ -192,11 +254,10 @@ export function planPaymentAttempt(input: {
 
   const desiredSave = selection.saveCard;
   const existingSave = input.existing.setup_future_usage === "on_session";
-  const same =
-    input.existing.amount === input.holdCents &&
+  const capabilitiesMatch =
     existingSave === desiredSave &&
     (input.existing.payment_method ?? null) === (selection.paymentMethodId ?? null) &&
-    (desiredCustomer == null || input.existing.customer === desiredCustomer);
+    (input.existing.customer ?? null) === (desiredCustomer ?? null);
 
   if (!signedIn) {
     if (input.existing.amount === input.holdCents && !input.existing.customer && !input.existing.setup_future_usage && !input.existing.payment_method) {
@@ -224,7 +285,7 @@ export function planPaymentAttempt(input: {
     };
   }
 
-  if (same && (tokenMatches || selection.attemptToken == null)) {
+  if (capabilitiesMatch && (tokenMatches || selection.attemptToken == null)) {
     if (input.existing.amount !== input.holdCents) {
       return {
         action: "update",
@@ -238,30 +299,6 @@ export function planPaymentAttempt(input: {
       paymentIntentId: input.existing.id,
       clientSecret: input.existing.client_secret ?? "",
       attemptToken: input.existing.metadata.attempt_token ?? input.nextToken,
-    };
-  }
-
-  if (tokenMatches) {
-    const update: Record<string, unknown> = {
-      amount: input.holdCents,
-      metadata: createParams.metadata,
-    };
-    if (desiredCustomer && input.existing.customer == null) update.customer = desiredCustomer;
-    if (selection.paymentMethodId) {
-      update.payment_method = selection.paymentMethodId;
-      update.setup_future_usage = "";
-    } else if (desiredSave) {
-      update.setup_future_usage = "on_session";
-      update.payment_method = "";
-    } else {
-      update.setup_future_usage = "";
-      update.payment_method = "";
-    }
-    return {
-      action: "update",
-      paymentIntentId: input.existing.id,
-      params: update,
-      attemptToken: input.nextToken,
     };
   }
 

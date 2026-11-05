@@ -311,7 +311,7 @@ export const fakeCheckoutPayments: CheckoutPayments = {
     const intent = intents.get(id);
     if (!intent) throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
     if (intent.status === "canceled") return { id, status: "canceled" };
-    if (intent.status === "requires_capture" || intent.status === "succeeded" || intent.status === "processing") {
+    if (intent.status === "succeeded" || intent.status === "processing") {
       throw invalid(`You cannot cancel a PaymentIntent in status ${intent.status}.`);
     }
     intent.status = "canceled";
@@ -320,6 +320,17 @@ export const fakeCheckoutPayments: CheckoutPayments = {
 
   async confirmPaymentIntent(id, params) {
     const intent = requireIntent(id);
+    if (
+      intent.status === "canceled" ||
+      intent.status === "requires_capture" ||
+      intent.status === "succeeded" ||
+      intent.status === "processing"
+    ) {
+      throw invalid(
+        `You cannot confirm this PaymentIntent because it has a status of ${intent.status}.`,
+        "payment_intent_unexpected_state",
+      );
+    }
     const paymentMethodId = params?.payment_method ?? intent.payment_method;
     if (!paymentMethodId) throw invalid("A payment method is required.");
     assertPaymentMethodUsable(paymentMethodId, intent.customer);

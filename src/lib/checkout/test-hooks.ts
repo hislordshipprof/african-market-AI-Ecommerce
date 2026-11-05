@@ -9,9 +9,11 @@ export const checkoutTestHooks: {
   aroundCartRead: ((read: () => Promise<CartWithLines | null>) => Promise<CartWithLines | null>) | null;
   afterPostReadLookupMiss: (() => Promise<void>) | null;
   beforePersistCartPaymentIntent: (() => Promise<void>) | null;
+  beforeCancelPaymentIntent: (() => Promise<void>) | null;
 } = {
   afterMissedOrderLookup: null,
   aroundCartRead: null,
   afterPostReadLookupMiss: null,
   beforePersistCartPaymentIntent: null,
+  beforeCancelPaymentIntent: null,
 };

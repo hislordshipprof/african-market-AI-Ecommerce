@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { customerScoped, customerScopedTransaction, lockCustomerAccount, lockCustomerProfileRow } from "../db";
 import {
   CARDS_UNAVAILABLE,
@@ -66,6 +67,48 @@ async function runPersistHook(): Promise<void> {
   }
 }
 
+async function customerIsLive(id: string): Promise<boolean> {
+  try {
+    const found = await getCheckoutPayments().retrieveCustomer(id);
+    return !found.deleted;
+  } catch (error) {
+    if (isMissing(error)) return false;
+    throw error;
+  }
+}
+
+async function createCustomerOnce(userId: string, key: string): Promise<{ id: string }> {
+  const payments = getCheckoutPayments();
+  try {
+    return await payments.createCustomer({ metadata: { user_id: userId } }, key);
+  } catch (error) {
+    if (isIdempotency(error)) return payments.createCustomer({ metadata: { user_id: userId } }, key);
+    if (isAmbiguous(error)) throw new Error(CUSTOMER_AMBIGUOUS);
+    throw error;
+  }
+}
+
+async function createLiveCustomer(userId: string, key: string): Promise<{ id: string; key: string }> {
+  let currentKey = key;
+  let created = await createCustomerOnce(userId, currentKey);
+  if (await customerIsLive(created.id)) return { id: created.id, key: currentKey };
+  currentKey = `${key}-r${randomUUID()}`;
+  await customerScopedTransaction(userId, async (tx) => {
+    await lockCustomerAccount(tx, userId);
+    await tx.platformCustomerProfile.update({
+      where: { userId },
+      data: {
+        stripeCustomerStatus: "pending",
+        stripeCustomerIdempotencyKey: currentKey,
+        stripeCustomerAttemptedAt: new Date(),
+      },
+    });
+  });
+  created = await createCustomerOnce(userId, currentKey);
+  if (!(await customerIsLive(created.id))) throw new Error(CUSTOMER_AMBIGUOUS);
+  return { id: created.id, key: currentKey };
+}
+
 export async function ensureStripeCustomer(userId: string): Promise<string> {
   assertStripeConfigured();
   const payments = getCheckoutPayments();
@@ -82,9 +125,12 @@ export async function ensureStripeCustomer(userId: string): Promise<string> {
     return replaceCustomer(userId, row.stripeCustomerId);
   }
 
-  if (row.stripeCustomerStatus === "pending" && row.stripeCustomerAttemptedAt && !row.stripeCustomerId) {
+  if (row.stripeCustomerStatus === "pending" && row.stripeCustomerAttemptedAt) {
     const age = Date.now() - row.stripeCustomerAttemptedAt.getTime();
-    if (age > idempotencyWindowMs()) throw new Error(CUSTOMER_AMBIGUOUS);
+    if (age > idempotencyWindowMs()) {
+      const live = row.stripeCustomerId ? await customerIsLive(row.stripeCustomerId) : false;
+      if (!live) throw new Error(CUSTOMER_AMBIGUOUS);
+    }
   }
 
   const key = row.stripeCustomerIdempotencyKey && row.stripeCustomerStatus === "pending"
@@ -107,20 +153,10 @@ export async function ensureStripeCustomer(userId: string): Promise<string> {
     });
   }
 
-  let created: { id: string };
-  try {
-    created = await payments.createCustomer({ metadata: { user_id: userId } }, key);
-  } catch (error) {
-    if (isIdempotency(error)) {
-      created = await payments.createCustomer({ metadata: { user_id: userId } }, key);
-    } else if (isAmbiguous(error)) {
-      throw new Error(CUSTOMER_AMBIGUOUS);
-    } else {
-      throw error;
-    }
-  }
+  const created = await createLiveCustomer(userId, key);
 
   await runPersistHook();
+  if (!(await customerIsLive(created.id))) throw new Error(CUSTOMER_AMBIGUOUS);
 
   return customerScopedTransaction(userId, async (tx) => {
     await lockCustomerAccount(tx, userId);
@@ -137,7 +173,7 @@ export async function ensureStripeCustomer(userId: string): Promise<string> {
       data: {
         stripeCustomerId: created.id,
         stripeCustomerStatus: "ready",
-        stripeCustomerIdempotencyKey: key,
+        stripeCustomerIdempotencyKey: created.key,
       },
     });
     return created.id;
@@ -145,7 +181,6 @@ export async function ensureStripeCustomer(userId: string): Promise<string> {
 }
 
 async function replaceCustomer(userId: string, oldId: string): Promise<string> {
-  const payments = getCheckoutPayments();
   const key = platformCustomerIdempotencyKey(userId, oldId);
   await customerScopedTransaction(userId, async (tx) => {
     await lockCustomerAccount(tx, userId);
@@ -160,11 +195,12 @@ async function replaceCustomer(userId: string, oldId: string): Promise<string> {
       },
     });
   });
-  const created = await payments.createCustomer({ metadata: { user_id: userId } }, key);
+  const created = await createLiveCustomer(userId, key);
+  if (!(await customerIsLive(created.id))) throw new Error(CUSTOMER_AMBIGUOUS);
   return customerScopedTransaction(userId, async (tx) => {
     await lockCustomerAccount(tx, userId);
     const current = await tx.platformCustomerProfile.findUnique({ where: { userId } });
-    if (current?.stripeCustomerStatus === "ready" && current.stripeCustomerId && current.stripeCustomerId !== oldId) {
+    if (current?.stripeCustomerStatus === "ready" && current.stripeCustomerId && current.stripeCustomerId !== oldId && current.stripeCustomerId !== created.id) {
       return current.stripeCustomerId;
     }
     await tx.platformCustomerProfile.update({
@@ -172,7 +208,7 @@ async function replaceCustomer(userId: string, oldId: string): Promise<string> {
       data: {
         stripeCustomerId: created.id,
         stripeCustomerStatus: "ready",
-        stripeCustomerIdempotencyKey: key,
+        stripeCustomerIdempotencyKey: created.key,
       },
     });
     return created.id;

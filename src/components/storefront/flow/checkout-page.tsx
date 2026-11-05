@@ -249,7 +249,14 @@ function RealCheckoutForm({
             }
           : undefined,
       );
-      if (!piResult.ok) throw new Error(piResult.error);
+      if (!piResult.ok) {
+        if (piResult.code === "saved_card_unavailable") {
+          setSelectedCardId(null);
+          setShowCardForm(true);
+          setSaveCard(false);
+        }
+        throw new Error(piResult.error);
+      }
       if (piResult.attemptToken) setAttemptToken(piResult.attemptToken);
 
       let confirmError: { message?: string } | undefined;
@@ -351,7 +358,6 @@ function RealCheckoutForm({
       courierEligible={false}
       onSubmit={pay}
       signedIn={Boolean(stripeConfig.signedIn)}
-      identityLocked={Boolean(stripeConfig.signedIn)}
       paymentSection={
         <>
           {prefill?.cardsUnavailable ? <p>Saved cards are unavailable right now</p> : null}
@@ -737,7 +743,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             <FlowCard title="Contact details">
               <p className={styles.muted}>
                 {signedIn
-                  ? "Your name and email come from your account. Phone is used for this order only."
+                  ? "We filled your name and email from your account. Edits apply to this order only."
                   : "Guest checkout. A phone number helps your shopper reach you about substitutions."}
               </p>
               <label className={styles.field}>

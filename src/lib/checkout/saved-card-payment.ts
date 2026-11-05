@@ -10,6 +10,8 @@ import {
 import { ensureStripeCustomer, readStripeCustomerId } from "../customer-account/stripe-customer";
 import { getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
 import {
+  isReplaceablePaymentStatus,
+  nextAttemptToken,
   planPaymentAttempt,
   selectionFingerprint,
   type ExistingPaymentIntent,
@@ -41,8 +43,37 @@ function asExisting(intent: NormalizedPaymentIntent): ExistingPaymentIntent {
     setup_future_usage: intent.setup_future_usage,
     payment_method: intent.payment_method,
     client_secret: intent.client_secret,
+    on_behalf_of: intent.on_behalf_of,
+    transfer_data: intent.transfer_data,
     metadata: intent.metadata,
   };
+}
+
+function alreadyCanceled(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return message.includes("status of canceled") || message.includes("already canceled") || message.includes("status canceled");
+}
+
+export async function cancelReplaceablePaymentIntent(
+  payments: { retrievePaymentIntent: (id: string) => Promise<{ status: string }>; cancelPaymentIntent: (id: string, idempotencyKey?: string) => Promise<unknown> },
+  paymentIntentId: string,
+): Promise<void> {
+  if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforeCancelPaymentIntent) {
+    await checkoutTestHooks.beforeCancelPaymentIntent();
+  }
+  const fresh = await payments.retrievePaymentIntent(paymentIntentId);
+  if (!isReplaceablePaymentStatus(fresh.status)) {
+    throw new Error("Payment already confirmed for this cart");
+  }
+  try {
+    await payments.cancelPaymentIntent(paymentIntentId, `cancel-${paymentIntentId}`);
+  } catch (error) {
+    if (!alreadyCanceled(error)) throw error;
+  }
+  const after = await payments.retrievePaymentIntent(paymentIntentId);
+  if (after.status !== "canceled") {
+    throw new Error("Payment already confirmed for this cart");
+  }
 }
 
 async function usableSavedCard(userId: string, stripeCustomerId: string, savedCardId: string) {
@@ -112,7 +143,6 @@ export async function prepareSignedInPaymentIntent(
     saveCard,
     paymentMethodId: input.savedCardId,
   });
-  const attemptKey = cartPaymentIdempotencyKey(cartId, fingerprint);
   const payments = getCheckoutPayments();
 
   const prepared = await storeScopedTransaction(storeId, async (tx) => {
@@ -125,6 +155,13 @@ export async function prepareSignedInPaymentIntent(
     const existing = cart.paymentIntentId
       ? asExisting(await payments.retrievePaymentIntent(cart.paymentIntentId))
       : null;
+    const generation = nextAttemptToken({
+      paymentIntentId: cart.paymentIntentId,
+      storedToken: cart.paymentAttemptToken,
+      fingerprint,
+      forceNew: false,
+    });
+    const attemptKey = cartPaymentIdempotencyKey(cartId, generation);
     const plan = planPaymentAttempt({
       existing,
       holdCents,
@@ -138,7 +175,7 @@ export async function prepareSignedInPaymentIntent(
         paymentMethodId: input.savedCardId,
         attemptToken: input.attemptToken,
       },
-      nextToken: attemptKey,
+      nextToken: generation,
       idempotencyKey: attemptKey,
     });
     if (plan.action === "blocked") {
@@ -149,23 +186,38 @@ export async function prepareSignedInPaymentIntent(
         clientSecret: plan.clientSecret,
         paymentIntentId: plan.paymentIntentId,
         attemptToken: plan.attemptToken,
-        saved: false,
+        saved: existing?.setup_future_usage === "on_session",
       };
     }
     if (plan.action === "replace") {
-      try {
-        await payments.cancelPaymentIntent(plan.cancelId, `cancel-${plan.cancelId}`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        if (!message.includes("canceled") && !message.includes("cancel")) throw error;
-      }
+      await cancelReplaceablePaymentIntent(payments, plan.cancelId);
     }
-    const intent = plan.action === "update"
-      ? await payments.updatePaymentIntent(plan.paymentIntentId, plan.params)
-      : await payments.createPaymentIntent(
-          plan.params as unknown as Record<string, unknown>,
-          plan.idempotencyKey,
-        );
+    if (plan.action === "create" || plan.action === "replace") {
+      await tx.cart.update({
+        where: { id: cartId },
+        data: { paymentAttemptToken: generation, paymentIntentId: null },
+      });
+      const params = {
+        ...plan.params,
+        metadata: { ...plan.params.metadata, attempt_token: generation },
+      };
+      const intent = await payments.createPaymentIntent(params, attemptKey);
+      if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforePersistCartPaymentIntent) {
+        await checkoutTestHooks.beforePersistCartPaymentIntent();
+      }
+      await tx.cart.update({
+        where: { id: cartId },
+        data: { paymentIntentId: intent.id, paymentAttemptToken: generation },
+      });
+      if (!intent.client_secret) throw new Error("Stripe did not return a client secret");
+      return {
+        clientSecret: intent.client_secret,
+        paymentIntentId: intent.id,
+        attemptToken: generation,
+        saved: intent.setup_future_usage === "on_session",
+      };
+    }
+    const intent = await payments.updatePaymentIntent(plan.paymentIntentId, plan.params);
     if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforePersistCartPaymentIntent) {
       await checkoutTestHooks.beforePersistCartPaymentIntent();
     }

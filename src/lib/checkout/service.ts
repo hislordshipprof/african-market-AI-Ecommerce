@@ -2,10 +2,11 @@ import { Prisma } from "@prisma/client";
 import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped } from "../db";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
+import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
 import { checkoutTestHooks } from "./test-hooks";
 import { cartPaymentIdempotencyKey } from "../customer-account/consent";
-import { guestPaymentIntentParams } from "./payment-intent-params";
+import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
 import { validPhone } from "../customer-account/phone";
@@ -22,6 +23,43 @@ async function getStripeStore(storeId: string) {
     throw new Error("Store is not connected to Stripe");
   }
   return store as typeof store & { stripeAccountId: string };
+}
+
+const SETTLED_PAYMENT = new Set(["requires_capture", "processing", "succeeded"]);
+const OPENABLE_PAYMENT = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
+
+function idOf(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || !("id" in value)) return null;
+  if ("deleted" in value && (value as { deleted?: boolean }).deleted) return null;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" ? id : null;
+}
+
+function fakeIntent(id: string | null | undefined): boolean {
+  return checkoutPaymentsUseFake() && Boolean(id?.startsWith("pi_fake_"));
+}
+
+async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentIntent> {
+  if (fakeIntent(id)) return getCheckoutPayments().retrievePaymentIntent(id);
+  const pi = await getStripeClient().paymentIntents.retrieve(id);
+  const destination = pi.transfer_data?.destination;
+  return {
+    id: pi.id,
+    status: pi.status,
+    amount: pi.amount,
+    currency: pi.currency,
+    customer: idOf(pi.customer),
+    setup_future_usage: pi.setup_future_usage,
+    payment_method: idOf(pi.payment_method),
+    client_secret: pi.client_secret,
+    on_behalf_of: idOf(pi.on_behalf_of),
+    transfer_data: pi.transfer_data
+      ? { destination: typeof destination === "string" ? destination : destination?.id ?? null }
+      : null,
+    metadata: pi.metadata ?? {},
+    capture_method: pi.capture_method,
+  };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -147,25 +185,29 @@ export async function createPaymentIntent(
   }
   const scoped = storeScoped(storeId);
 
-  const stripe = getStripeClient();
-
   const cart = await scoped.cart.findUnique({ where: { id: cartId } });
   if (!cart) throw new Error("Cart not found");
 
   if (cart.paymentIntentId) {
-    const existing = await stripe.paymentIntents.retrieve(cart.paymentIntentId);
-    if (existing.status === "requires_capture") {
+    const existing = await retrieveCheckoutIntent(cart.paymentIntentId);
+    const provenanceOk = paymentIntentProvenanceOk(existing, {
+      storeId,
+      cartId,
+      storeAccountId: store.stripeAccountId,
+    });
+    if (provenanceOk && SETTLED_PAYMENT.has(existing.status)) {
       throw new Error("Payment already confirmed for this cart");
     }
-    if (
-      existing.status === "requires_payment_method" ||
-      existing.status === "requires_confirmation" ||
-      existing.status === "requires_action"
-    ) {
+    if (provenanceOk && OPENABLE_PAYMENT.has(existing.status)) {
       if (existing.amount !== holdCents) {
-        await stripe.paymentIntents.update(cart.paymentIntentId, { amount: holdCents });
+        if (fakeIntent(cart.paymentIntentId)) {
+          await getCheckoutPayments().updatePaymentIntent(cart.paymentIntentId, { amount: holdCents });
+        } else {
+          await getStripeClient().paymentIntents.update(cart.paymentIntentId, { amount: holdCents });
+        }
       }
-      return { clientSecret: existing.client_secret!, paymentIntentId: existing.id };
+      if (!existing.client_secret) throw new Error("Stripe did not return a client secret");
+      return { clientSecret: existing.client_secret, paymentIntentId: existing.id };
     }
   }
 
@@ -175,10 +217,20 @@ export async function createPaymentIntent(
     storeId,
     cartId,
   });
-  const pi = await stripe.paymentIntents.create(
-    guestParams,
-    { idempotencyKey: cartPaymentIdempotencyKey(cartId, `guest:${holdCents}`) },
-  );
+  const generation = nextAttemptToken({
+    paymentIntentId: cart.paymentIntentId,
+    storedToken: cart.paymentAttemptToken,
+    fingerprint: `guest:${holdCents}`,
+    forceNew: false,
+  });
+  await scoped.cart.update({
+    where: { id: cartId },
+    data: { paymentAttemptToken: generation, paymentIntentId: null },
+  });
+  const guestKey = cartPaymentIdempotencyKey(cartId, generation);
+  const pi = checkoutPaymentsUseFake()
+    ? await getCheckoutPayments().createPaymentIntent(guestParams as unknown as Record<string, unknown>, guestKey)
+    : await getStripeClient().paymentIntents.create(guestParams, { idempotencyKey: guestKey });
 
   if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforePersistCartPaymentIntent) {
     await checkoutTestHooks.beforePersistCartPaymentIntent();
@@ -344,7 +396,7 @@ export async function recordAuthorizedOrder(
       await tx.cartLine.deleteMany({ where: { cartId: input.cartId } });
       await tx.cart.update({
         where: { id: input.cartId },
-        data: { paymentIntentId: null },
+        data: { paymentIntentId: null, paymentAttemptToken: null },
       });
       return { orderId: order.id, created: true };
     }, { timeout: 40_000, maxWait: 8_000 });
@@ -395,8 +447,7 @@ export async function placeOrder(
     throw new Error("Only pickup fulfillment is supported");
   }
 
-  const stripe = getStripeClient();
-  const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+  const pi = await retrieveCheckoutIntent(paymentIntentId);
 
   if (pi.status !== "requires_capture") {
     throw new Error(
@@ -417,15 +468,11 @@ export async function placeOrder(
     throw new Error("PaymentIntent currency does not match");
   }
   if (pi.customer) {
-    const customerId = typeof pi.customer === "string" ? pi.customer : pi.customer.id;
     if (!actorUserId || pi.metadata?.user_id !== actorUserId) {
       throw new Error("PaymentIntent customer does not match this account");
     }
     if (pi.metadata?.cart_id !== cartId) {
       throw new Error("PaymentIntent does not belong to this cart");
-    }
-    if (!customerId) {
-      throw new Error("PaymentIntent customer does not match this account");
     }
   } else if (pi.metadata?.cart_id && pi.metadata.cart_id !== cartId) {
     throw new Error("PaymentIntent does not belong to this cart");
@@ -526,10 +573,7 @@ export async function placeOrder(
 
   if (recorded.created) {
     if (actorUserId) {
-      const method = typeof pi.payment_method === "string"
-        ? pi.payment_method
-        : pi.payment_method?.id ?? null;
-      await bindSavedCardConsent(actorUserId, paymentIntentId, method);
+      await bindSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
     }
     await sendOrderAuthorized(storeId, recorded.orderId);
   }
