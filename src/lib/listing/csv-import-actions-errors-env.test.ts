@@ -232,30 +232,18 @@ describe("csv commit action error suite env", () => {
     expect(local.output).toMatch(/Tests\s+1\s+passed/);
   }, 180_000);
 
-  it("parent database cases require every prerequisite", async () => {
+  it("local no-database run skips the parent database prerequisite probe", async () => {
     const envFile = "src/lib/listing/csv-import-actions-errors-env.test.ts";
-    const dbFilter = ["-t", "cleanup preserves an active neighboring identity and unrelated row contents"];
-    for (const key of ["DIRECT_URL", "APP_RUNTIME_PASSWORD", "BETTER_AUTH_SECRET"] as const) {
-      for (const value of ["", "   ", "\t"]) {
-        const result = await runProcess(
-          process.execPath,
-          [vitestEntry, "run", envFile, "--reporter=verbose", ...dbFilter],
-          { cwd: process.cwd(), env: childEnv({ CI: "true", [key]: value }), timeoutMs: 60_000 },
-        );
-        expect(result.status, `${key}=${JSON.stringify(value)}\n${result.output.slice(-1200)}`).not.toBe(0);
-        expect(result.output).toContain(`csv commit error suite requires ${key}`);
-        expect(result.output).not.toMatch(/✓.*cleanup preserves an active neighboring identity/);
-        expect(result.output).not.toMatch(/Tests\s+\d+\s+passed/);
-      }
-    }
-    const sourceScan = await runProcess(
+    const result = await runProcess(
       process.execPath,
-      [vitestEntry, "run", envFile, "--reporter=verbose", "-t", "no test deletes every rate_limits row"],
-      { cwd: process.cwd(), env: childEnv({ CI: "true", DIRECT_URL: "" }), timeoutMs: 60_000 },
+      [vitestEntry, "run", envFile, "--reporter=verbose", "-t", "parent database cases require every prerequisite"],
+      { cwd: process.cwd(), env: childEnv({ CI: undefined, DATABASE_URL: "" }), timeoutMs: 60_000 },
     );
-    expect(sourceScan.status, sourceScan.output.slice(-1500)).toBe(0);
-    expect(sourceScan.output).toMatch(/Tests\s+1\s+passed/);
-  }, 180_000);
+    expect(result.status, result.output.slice(-2000)).toBe(0);
+    expect(result.output).toMatch(/↓[^\n]*parent database cases require every prerequisite/);
+    expect(result.output).not.toContain("csv commit error suite requires DIRECT_URL");
+    expect(result.output).not.toContain("AssertionError");
+  }, 90_000);
 
   dbDescribe("lane database", () => {
     const leftoverKeys: string[] = [];
@@ -263,6 +251,31 @@ describe("csv commit action error suite env", () => {
     afterAll(async () => {
       await deleteExact(leftoverKeys);
     });
+
+    it("parent database cases require every prerequisite", async () => {
+      const envFile = "src/lib/listing/csv-import-actions-errors-env.test.ts";
+      const dbFilter = ["-t", "cleanup preserves an active neighboring identity and unrelated row contents"];
+      for (const key of ["DIRECT_URL", "APP_RUNTIME_PASSWORD", "BETTER_AUTH_SECRET"] as const) {
+        for (const value of ["", "   ", "\t"]) {
+          const result = await runProcess(
+            process.execPath,
+            [vitestEntry, "run", envFile, "--reporter=verbose", ...dbFilter],
+            { cwd: process.cwd(), env: childEnv({ CI: "true", [key]: value }), timeoutMs: 60_000 },
+          );
+          expect(result.status, `${key}=${JSON.stringify(value)}\n${result.output.slice(-1200)}`).not.toBe(0);
+          expect(result.output).toContain(`csv commit error suite requires ${key}`);
+          expect(result.output).not.toMatch(/✓.*cleanup preserves an active neighboring identity/);
+          expect(result.output).not.toMatch(/Tests\s+\d+\s+passed/);
+        }
+      }
+      const sourceScan = await runProcess(
+        process.execPath,
+        [vitestEntry, "run", envFile, "--reporter=verbose", "-t", "no test deletes every rate_limits row"],
+        { cwd: process.cwd(), env: childEnv({ CI: "true", DIRECT_URL: "" }), timeoutMs: 60_000 },
+      );
+      expect(sourceScan.status, sourceScan.output.slice(-1500)).toBe(0);
+      expect(sourceScan.output).toMatch(/Tests\s+1\s+passed/);
+    }, 180_000);
 
     it(PRODUCTION_TEST, async () => {
       requireLaneDb();
