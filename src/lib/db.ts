@@ -309,21 +309,33 @@ export async function findStuckTransitionalOrders(): Promise<Array<{ id: string;
   const cutoff = new Date(Date.now() - 5 * 60_000);
   return platformAdminTransaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-      SELECT id, store_id FROM orders
-      WHERE (
-          status IN ('CAPTURING', 'CANCELLING')
-          AND updated_at < ${cutoff}
-        )
-        OR id IN (
-          SELECT order_id FROM refund_requests
-          WHERE state IN ('RESERVED', 'UNKNOWN')
-            OR (
-              state = 'CREATED'
-              AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
-            )
-        )
-      ORDER BY updated_at ASC
-      LIMIT 50
+      SELECT id, store_id FROM (
+        SELECT id, store_id, updated_at FROM orders
+        WHERE (
+            status IN ('CAPTURING', 'CANCELLING')
+            AND updated_at < ${cutoff}
+          )
+          OR id IN (
+            SELECT order_id FROM refund_requests
+            WHERE state IN ('RESERVED', 'UNKNOWN')
+              OR (
+                state = 'CREATED'
+                AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
+              )
+          )
+        ORDER BY updated_at ASC
+        LIMIT 50
+      ) AS in_flight
+      UNION
+      SELECT id, store_id FROM (
+        SELECT id, store_id, updated_at FROM orders
+        WHERE status = 'REFUND_FAILED'
+          OR id IN (
+            SELECT order_id FROM refund_requests WHERE state = 'ABANDONED'
+          )
+        ORDER BY updated_at ASC
+        LIMIT 50
+      ) AS refund_recovery
     `;
     return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
   });

@@ -191,6 +191,14 @@ export async function reconcileOpenRefundRequests(storeId: string, orderId: stri
   }
 }
 
+/** Match a closed request to a refund Stripe already has. Never replay the key. */
+export async function reconcileAbandonedRefundRequests(storeId: string, orderId: string): Promise<void> {
+  const rows = await storeScoped(storeId).refundRequest.findMany({
+    where: { orderId, state: "ABANDONED" },
+  });
+  for (const row of rows) await reconcileRefundRequest(row);
+}
+
 async function uncoveredFailure(listed: RefundResult[], captured: number): Promise<RefundResult | null> {
   const covering = countedCents(listed, ["succeeded", "pending", "requires_action"]);
   if (covering >= captured) return null;

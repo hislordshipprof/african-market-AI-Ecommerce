@@ -22,7 +22,8 @@ import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { getURLFromRedirectError } from "next/dist/client/components/redirect";
 import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
-import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
+import { authPrisma, findStuckTransitionalOrders, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
+import { recordReconcileResult } from "../inngest/functions";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundCreatedLate, setRefundStatus } from "../stripe/fake";
 import { RefundNotCreatedError } from "../stripe/errors";
@@ -1263,7 +1264,10 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       refundStatus: "failed",
     })).toEqual({ ok: true, action: "refund_failed" });
     await fakeStripeProvider.refundPayment(pi, 1000, "sweep-cover-ok");
-    await reconcileStuckOrder(storeAId, order.id);
+    const candidates = await findStuckTransitionalOrders();
+    const selected = candidates.filter((row) => row.id === order.id);
+    expect(selected).toHaveLength(1);
+    for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
     expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
   });
 
@@ -1431,14 +1435,27 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
     setNextRefundStatus(pi, "pending");
     const late = await fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: order.id });
-    await applyProviderRefund({ ...late, paymentIntentId: pi });
     setRefundStatus(late.refundId, "succeeded");
-    await reconcileStuckOrder(storeAId, order.id);
+    const candidates = await findStuckTransitionalOrders();
+    const selected = candidates.filter((row) => row.id === order.id);
+    expect(selected).toHaveLength(1);
+    for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
     const alert = await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: order.id, action: "refund_after_manual_resolution" },
     });
-    expect(alert?.after).toMatchObject({ overpaidCents: 600, alert: "store_and_platform" });
+    expect(alert?.after).toMatchObject({ overpaidCents: 600, refundId: late.refundId, alert: "store_and_platform" });
     expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+    const matched = await storeScoped(storeAId).refundRequest.findFirst({ where: { orderId: order.id } });
+    expect(matched?.state).toBe("CREATED");
+    expect(matched?.providerStatus).toBe("succeeded");
+    const again = await findStuckTransitionalOrders();
+    for (const candidate of again.filter((row) => row.id === order.id)) {
+      await recordReconcileResult(candidate.storeId, candidate.id);
+    }
+    const alerts = await storeScoped(storeAId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    });
+    expect(alerts).toHaveLength(1);
   });
 
   it("redelivering an already-counted success after manual resolution writes no alert", async () => {
@@ -1537,5 +1554,156 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await storeScoped(storeAId).auditLog.count({
       where: { entityId: order.id, action: "refund_after_manual_resolution" },
     })).toBe(1);
+  });
+
+  it("an uncovered refund-failed order stays failed and stays on the sweep", async () => {
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Still uncovered" },
+    });
+    const pi = `pi_still_uncovered_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "still-uncovered-cap");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "still-uncovered-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26601,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const selected = (await findStuckTransitionalOrders()).filter((row) => row.id === order.id);
+    expect(selected).toHaveLength(1);
+    for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("REFUND_FAILED");
+  });
+
+  it("a cancelled order with no abandoned request is not selected by the sweep", async () => {
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Quiet cancelled" },
+    });
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26602,
+        customerId: customer.id,
+        status: "CANCELLED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+      },
+    });
+    expect((await findStuckTransitionalOrders()).some((row) => row.id === order.id)).toBe(false);
+  });
+
+  it("a late pending refund on an abandoned request does not alert", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Late still pending" },
+    });
+    const pi = `pi_late_pending_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "late-pending-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26603,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const key = `refund:${order.id}:1`;
+    await storeScoped(storeAId).refundRequest.create({
+      data: {
+        storeId: storeAId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 600,
+        refundApplicationFee: true,
+        state: "ABANDONED",
+      },
+    });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    setNextRefundStatus(pi, "pending");
+    const late = await fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: order.id });
+    const selected = (await findStuckTransitionalOrders()).filter((row) => row.id === order.id);
+    expect(selected).toHaveLength(1);
+    for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
+    expect(await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    })).toBeNull();
+    const matched = await storeScoped(storeAId).refundRequest.findFirst({ where: { orderId: order.id } });
+    expect(matched?.state).toBe("CREATED");
+    expect(matched?.providerStatus).toBe("pending");
+    expect(matched?.providerRefundId).toBe(late.refundId);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+  });
+
+  it("an abandoned request with no provider refund is not sent again", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Nothing at the bank" },
+    });
+    const pi = `pi_abandoned_quiet_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "abandoned-quiet-cap");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26604,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    await storeScoped(storeAId).refundRequest.create({
+      data: {
+        storeId: storeAId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key: `refund:${order.id}:1`,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "ABANDONED",
+      },
+    });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    const sent = () => refundRequests.filter((request) => request.paymentIntentId === pi);
+    expect(sent()).toHaveLength(0);
+    const selected = (await findStuckTransitionalOrders()).filter((row) => row.id === order.id);
+    expect(selected).toHaveLength(1);
+    for (const candidate of selected) await recordReconcileResult(candidate.storeId, candidate.id);
+    expect(sent()).toHaveLength(0);
+    expect((await storeScoped(storeAId).refundRequest.findFirst({ where: { orderId: order.id } }))?.state).toBe("ABANDONED");
+    expect(await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    })).toBeNull();
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
   });
 });

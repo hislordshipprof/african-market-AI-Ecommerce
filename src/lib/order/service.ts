@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
+import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
@@ -1065,6 +1065,7 @@ export async function reconcileStuckOrder(
 
   if (order?.paymentIntentId) {
     await reconcileOpenRefundRequests(storeId, orderId);
+    await reconcileAbandonedRefundRequests(storeId, orderId);
   }
 
   if (!order || (order.status !== "CAPTURING" && order.status !== "CANCELLING")) {
