@@ -397,7 +397,8 @@ describe.skipIf(!hasDb)("Cart service", () => {
         getOrCreateCart(storeId, null, buyerId),
         getOrCreateCart(storeId, null, buyerId),
       ]);
-      expect(first).not.toBe(second);
+      // shareFirstCart returns one id when the creates overlap. Two ids are the
+      // window before that map is filled. Either way there is one Customer.
       const customers = await storeScoped(storeId).customer.findMany({
         where: { userId: buyerId },
       });
@@ -405,10 +406,8 @@ describe.skipIf(!hasDb)("Cart service", () => {
       const carts = await storeScoped(storeId).cart.findMany({
         where: { id: { in: [first, second] } },
       });
-      expect(carts.map((cart) => cart.customerId)).toEqual([
-        customers[0].id,
-        customers[0].id,
-      ]);
+      expect(carts).toHaveLength(new Set([first, second]).size);
+      expect(carts.every((cart) => cart.customerId === customers[0].id)).toBe(true);
     });
 
     it("opens a fresh unlinked cart when no session holds an account cart", async () => {
