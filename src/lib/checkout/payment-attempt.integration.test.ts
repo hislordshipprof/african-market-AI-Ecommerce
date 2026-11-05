@@ -3,6 +3,7 @@ import { authPrisma, customerScoped, platformAdmin, storeScoped } from "../db";
 import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
 import { computeQuote, createPaymentIntent, placeOrder } from "./service";
 import { prepareSignedInPaymentIntent, SavedCardUnavailableError } from "./saved-card-payment";
+import { ensureStripeCustomer } from "../customer-account/stripe-customer";
 import { SAVED_CARD_PURPOSE, SAVED_CARD_TERMS_VERSION } from "../customer-account/consent";
 import { sendOrderAuthorized } from "../inngest/send";
 import { checkoutTestHooks } from "./test-hooks";
@@ -408,5 +409,37 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
       where: { paymentIntentId: pi.id },
     });
     expect(bound?.paymentMethodId).toBe("pm_card_visa");
+  });
+
+  it("does not treat a Stripe outage as a missing saved card", async () => {
+    await ensureStripeCustomer(userId);
+    const retrieve = vi.spyOn(getCheckoutPayments(), "retrievePaymentMethod");
+    retrieve.mockRejectedValueOnce({ type: "StripeConnectionError", message: "network down", statusCode: 500 });
+    await expect(prepareSignedInPaymentIntent(storeId, cartId, 4200, {
+      actorUserId: userId,
+      saveCard: false,
+      savedCardId: "pm_card_visa",
+      attemptToken: null,
+    }, storeAccountId)).rejects.not.toBeInstanceOf(SavedCardUnavailableError);
+    retrieve.mockRejectedValueOnce({ type: "StripeAPIError", message: "upstream", statusCode: 500 });
+    await expect(prepareSignedInPaymentIntent(storeId, cartId, 4200, {
+      actorUserId: userId,
+      saveCard: false,
+      savedCardId: "pm_card_visa",
+      attemptToken: null,
+    }, storeAccountId)).rejects.not.toBeInstanceOf(SavedCardUnavailableError);
+    retrieve.mockRejectedValueOnce({
+      type: "StripeInvalidRequestError",
+      code: "resource_missing",
+      message: "No such payment_method: 'pm_card_visa'",
+      statusCode: 404,
+    });
+    await expect(prepareSignedInPaymentIntent(storeId, cartId, 4200, {
+      actorUserId: userId,
+      saveCard: false,
+      savedCardId: "pm_card_visa",
+      attemptToken: null,
+    }, storeAccountId)).rejects.toBeInstanceOf(SavedCardUnavailableError);
+    retrieve.mockRestore();
   });
 });

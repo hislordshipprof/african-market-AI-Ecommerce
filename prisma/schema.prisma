@@ -423,6 +423,7 @@ model Cart {
   customerId      String?  @map("customer_id")
   paymentIntentId     String? @unique @map("payment_intent_id")
   paymentAttemptToken String? @map("payment_attempt_token")
+  purchaseEpoch       Int     @default(0) @map("purchase_epoch")
   source              String  @default("manual")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")

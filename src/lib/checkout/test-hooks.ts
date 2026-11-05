@@ -11,6 +11,7 @@ export const checkoutTestHooks: {
   beforePersistCartPaymentIntent: (() => Promise<void>) | null;
   beforeCancelPaymentIntent: (() => Promise<void>) | null;
   beforeBindSavedCardConsent: (() => Promise<void>) | null;
+  beforeReleaseLosingHold: (() => Promise<void>) | null;
 } = {
   afterMissedOrderLookup: null,
   aroundCartRead: null,
@@ -18,4 +19,5 @@ export const checkoutTestHooks: {
   beforePersistCartPaymentIntent: null,
   beforeCancelPaymentIntent: null,
   beforeBindSavedCardConsent: null,
+  beforeReleaseLosingHold: null,
 };

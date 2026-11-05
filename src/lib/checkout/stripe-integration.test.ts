@@ -628,7 +628,7 @@ describe.skipIf(!hasKey || !hasDb)(
         });
         await expect(
           placeOrder(storeAId, 0, cart.id, contact, "pickup", null, null, pi.id),
-        ).rejects.toThrow(/does not match quote hold/);
+        ).rejects.toThrow(/Your basket changed/);
         expect(await storeScoped(storeAId).customer.count({ where: { email: contact.email } })).toBe(0);
         expect(await storeScoped(storeAId).order.count({ where: { paymentIntentId: pi.id } })).toBe(0);
       },

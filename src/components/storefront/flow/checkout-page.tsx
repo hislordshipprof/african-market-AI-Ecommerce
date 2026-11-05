@@ -168,6 +168,7 @@ function RealCheckoutForm({
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   const [quoteKey, setQuoteKey] = useState("");
   const [error, setError] = useState("");
+  const [errorHref, setErrorHref] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [payState, setPayState] = useState<"idle" | "pending" | "success">("idle");
   const metadata = lines.map((line) => ({
@@ -218,6 +219,7 @@ function RealCheckoutForm({
     event.preventDefault();
     setSubmitted(true);
     setError("");
+    setErrorHref(null);
     if (schedule && slot === "asap") {
       setError("Choose a pickup time within the next six days.");
       return;
@@ -294,7 +296,16 @@ function RealCheckoutForm({
         notes,
         schedule ? slot : "asap",
       );
-      if (!orderResult.ok) throw new Error(orderResult.error);
+      if (!orderResult.ok) {
+        setErrorHref(orderResult.code === "basket_already_ordered" ? "/account" : null);
+        if (orderResult.code === "basket_changed" || orderResult.code === "basket_already_ordered") {
+          setError(orderResult.error);
+          setPayState("idle");
+          return;
+        }
+        throw new Error(orderResult.error);
+      }
+      setErrorHref(null);
 
       setPayState("success");
       await clearCart();
@@ -303,6 +314,7 @@ function RealCheckoutForm({
         await new Promise((r) => setTimeout(r, 650));
       router.push(`/order/${orderResult.token}?placed=1`);
     } catch (reason) {
+      setErrorHref(null);
       setError(
         reason instanceof Error
           ? reason.message
@@ -351,6 +363,7 @@ function RealCheckoutForm({
       quote={quote}
       quotePending={quotePending}
       error={error}
+      errorHref={errorHref}
       submitted={submitted}
       payState={payState}
       frozen={frozen}
@@ -533,6 +546,7 @@ interface CheckoutLayoutProps {
   quote: CheckoutQuote | null;
   quotePending: boolean;
   error: string;
+  errorHref?: string | null;
   submitted: boolean;
   payState: "idle" | "pending" | "success";
   signedIn?: boolean;
@@ -556,7 +570,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     slot, setSlot, slots, promo, setPromo,
     setAppliedPromo, promoMessage, setPromoMessage,
     tipPercent, setTipPercent, customTip, setCustomTip,
-    quote, quotePending, error, submitted, payState,
+    quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector,
     signedIn = false, identityLocked = false,
@@ -926,7 +940,11 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             {quotePending && (
               <p className={styles.muted} role="status">Updating estimate…</p>
             )}
-            {error && <FlowError title="Let's review that" message={error} />}
+            {error && (
+              <FlowError title="Let's review that" message={error}>
+                {errorHref ? <Link className="sf-text-link" href={errorHref}>View your orders</Link> : null}
+              </FlowError>
+            )}
             <PayButton
               type="submit"
               state={payState}

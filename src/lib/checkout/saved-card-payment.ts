@@ -81,8 +81,9 @@ async function usableSavedCard(userId: string, stripeCustomerId: string, savedCa
   let card;
   try {
     card = await payments.retrievePaymentMethod(savedCardId);
-  } catch {
-    throw new SavedCardUnavailableError();
+  } catch (error) {
+    if (savedCardProviderUnavailable(error)) throw new SavedCardUnavailableError();
+    throw error;
   }
   if (card.type !== "card" || card.detached || card.customer !== stripeCustomerId) {
     throw new SavedCardUnavailableError();
@@ -242,13 +243,23 @@ export async function prepareSignedInPaymentIntent(
         kind: "create" as const,
         params: {
           ...plan.params,
-          metadata: { ...plan.params.metadata, attempt_token: generation },
+          metadata: {
+            ...plan.params.metadata,
+            attempt_token: generation,
+            purchase_epoch: String(cart.purchaseEpoch),
+          },
         },
         attemptKey,
         generation,
       };
     }
-    const intent = await payments.updatePaymentIntent(plan.paymentIntentId, plan.params);
+    const intent = await payments.updatePaymentIntent(plan.paymentIntentId, {
+      ...plan.params,
+      metadata: {
+        ...(plan.params.metadata as Record<string, string> | undefined),
+        purchase_epoch: String(cart.purchaseEpoch),
+      },
+    });
     await tx.cart.update({
       where: { id: cartId },
       data: {

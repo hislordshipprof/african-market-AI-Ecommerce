@@ -11,6 +11,7 @@ export interface PaymentIntentCreateParams {
     cart_id: string;
     attempt_token?: string;
     user_id?: string;
+    purchase_epoch?: string;
   };
   customer?: string;
   setup_future_usage?: "on_session";
@@ -42,6 +43,7 @@ export interface ExistingPaymentIntent {
     cart_id?: string;
     attempt_token?: string;
     user_id?: string;
+    purchase_epoch?: string;
   };
 }
 

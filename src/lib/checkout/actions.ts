@@ -5,7 +5,14 @@ import { auth } from "../auth";
 import { getStore } from "../get-store";
 import { resolveShopperCart } from "../cart/actions";
 import { checkCheckoutReady } from "../stripe/checkout-gate";
-import { quoteCheckout, createPaymentIntent, placeOrder, SavedCardUnavailableError } from "./service";
+import {
+  quoteCheckout,
+  createPaymentIntent,
+  placeOrder,
+  SavedCardUnavailableError,
+  BasketAlreadyOrderedError,
+  BasketChangedError,
+} from "./service";
 import type { CheckoutQuote, Contact, Fulfillment } from "../customer-flow/contracts";
 
 async function signedInUserId(): Promise<string | null> {
@@ -95,7 +102,10 @@ export async function placeOrderAction(
   fulfillment: Fulfillment,
   notes: string,
   slot: string,
-): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; token: string }
+  | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" }
+> {
   try {
     const store = await getStore();
     const resolved = await resolveShopperCart();
@@ -114,6 +124,12 @@ export async function placeOrderAction(
     );
     return { ok: true, token: result.token };
   } catch (e) {
+    if (e instanceof BasketAlreadyOrderedError) {
+      return { ok: false, error: e.message, code: e.code };
+    }
+    if (e instanceof BasketChangedError) {
+      return { ok: false, error: e.message, code: e.code };
+    }
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Could not place order",

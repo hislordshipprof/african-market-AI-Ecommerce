@@ -681,7 +681,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     }
   }, 45_000);
 
-  it("addLine owning the cart first completes with checkout", async () => {
+  it("addLine owning the cart first changes the basket, so checkout places nothing", async () => {
     const storeId = await makeStore("addfirst");
     const { variants } = await makeVariants(storeId, 1);
     const variantId = variants[0]!.id;
@@ -716,17 +716,14 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       });
       holder.release();
       await adding;
-      const recorded = await checkout;
-      const order = await storeScoped(storeId).order.findUnique({
-        where: { id: recorded.orderId },
-        include: { lines: true },
-      });
-      expect(order?.lines.map((row) => row.qtyOrdered)).toEqual([1]);
+      await expect(checkout).rejects.toThrow(/Your basket changed/);
+      expect(await storeScoped(storeId).order.count({ where: { sourceCartId: cart.id } })).toBe(0);
       const stored = await storeScoped(storeId).cart.findUnique({
         where: { id: cart.id },
         include: { lines: true },
       });
-      expect(stored?.lines).toEqual([]);
+      expect(stored?.lines).toHaveLength(1);
+      expect(stored?.lines[0]).toMatchObject({ variantId, qty: 3 });
     } finally {
       holder.release();
       await Promise.allSettled([holder.done, adding, checkout]);
@@ -974,7 +971,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
         storeId,
         orderInput(cart.id, paymentIntentId, orderLines([missing], 1), "badline@t236.test"),
       ),
-    ).rejects.toThrow(/does not belong to this store/);
+    ).rejects.toThrow(/Your basket changed/);
     expect(await storeScoped(storeId).customer.count()).toBe(0);
     expect(await storeScoped(storeId).order.count()).toBe(0);
     expect(await storeScoped(storeId).orderLine.count()).toBe(0);
