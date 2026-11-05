@@ -80,10 +80,17 @@ stop_worktree_servers() {
     return 0
   }
   wtwin=$(cygpath -w "$wt" 2>/dev/null || echo "$wt")
+  # The path must be followed by a separator, so ticket-24 never matches ticket-246. Slashes and case are
+  # normalised, so C:/… and c:\… forms match too. `next dev` forks start-server.js, which holds the port, so
+  # that is matched as well, and each match is stopped with its tree (taskkill /T).
   WT_WIN="$wtwin" powershell -NoProfile -NonInteractive -Command '
-    $wt = $env:WT_WIN
+    $wt = ($env:WT_WIN -replace "/", "\").TrimEnd("\").ToLowerInvariant() + "\"
     Get-CimInstance Win32_Process |
-      Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -and $_.CommandLine.Contains($wt) -and $_.CommandLine -match "next.*\s(start|dev)(\s|$)" } |
-      ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; "stopped stray server $($_.ProcessId)" } catch {} }
+      Where-Object {
+        $_.Name -eq "node.exe" -and $_.CommandLine -and
+        ($_.CommandLine -replace "/", "\").ToLowerInvariant().Contains($wt) -and
+        ($_.CommandLine -match "next.*\s(start|dev)(\s|$)" -or $_.CommandLine -match "next[\\/]dist[\\/]server[\\/]lib[\\/]start-server\.js")
+      } |
+      ForEach-Object { & taskkill /PID $_.ProcessId /T /F *> $null; "stopped stray server $($_.ProcessId)" }
   ' 2>/dev/null || true
 }

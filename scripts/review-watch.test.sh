@@ -63,6 +63,19 @@ if command -v powershell >/dev/null 2>&1; then
   kill -0 "$a" 2>/dev/null && bad "own worktree server still running" || ok "own worktree server stopped"
   kill -0 "$b" 2>/dev/null && ok "other worktree server untouched" || bad "other worktree server was stopped"
   kill "$b" 2>/dev/null; wait 2>/dev/null
+
+  # 8. Prefix collision: cleaning ticket-wt27 must not touch ticket-wt275. Forward-slash and lower-case
+  #    forms of the own path, and next dev's start-server.js child, are stopped.
+  node -e "setTimeout(()=>{},120000)" "C:\\E-commerce-worktrees\\ticket-wt275\\node_modules\\next\\dist\\bin\\next" start -p 3997 & p275=$!
+  node -e "setTimeout(()=>{},120000)" "C:/E-commerce-worktrees/ticket-wt27/node_modules/next/dist/bin/next" start -p 3996 & fwd=$!
+  node -e "setTimeout(()=>{},120000)" "c:\\e-commerce-worktrees\\ticket-wt27\\node_modules\\next\\dist\\server\\lib\\start-server.js" & srv=$!
+  sleep 2
+  stop_worktree_servers /c/E-commerce-worktrees/ticket-wt27 >/dev/null
+  sleep 1
+  kill -0 "$p275" 2>/dev/null && ok "ticket-wt275 untouched by ticket-wt27 cleanup" || bad "prefix collision: ticket-wt275 was stopped"
+  kill -0 "$fwd" 2>/dev/null && bad "forward-slash own path missed" || ok "forward-slash own path stopped"
+  kill -0 "$srv" 2>/dev/null && bad "next dev start-server child missed" || ok "next dev start-server child stopped"
+  kill "$p275" "$fwd" "$srv" 2>/dev/null; wait 2>/dev/null
 fi
 
 exit "$fail"
