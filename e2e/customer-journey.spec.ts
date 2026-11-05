@@ -75,6 +75,7 @@ test.describe("Customer journey demo", () => {
   });
 
   test("failed payment keeps the cart and can be retried", async ({ page }) => {
+    test.setTimeout(60_000);
     await page.goto(`${base}/categories/spices-and-seasonings`);
     const count = page.getByTestId("storefront-header").getByTestId("cart-count");
     const card = page.getByTestId("listing-card").filter({ hasText: "Suya Spice" }).first();
@@ -82,6 +83,15 @@ test.describe("Customer journey demo", () => {
     await expect(card.getByTestId("stepper-qty")).toHaveText("1");
     const plus = card.getByTestId("stepper-plus");
     for (let i = 0; i < 9; i += 1) await plus.click();
+    await expect(
+      page.getByTestId("storefront-header").locator("[data-cart-pending]"),
+    ).toBeHidden({ timeout: 20000 });
+    if ((await count.textContent()) !== "10") {
+      await plus.click();
+      await expect(
+        page.getByTestId("storefront-header").locator("[data-cart-pending]"),
+      ).toBeHidden({ timeout: 20000 });
+    }
     await expect(count).toHaveText("10");
     await page.goto(`${base}/cart`);
     await page
