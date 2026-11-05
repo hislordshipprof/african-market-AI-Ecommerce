@@ -2791,6 +2791,44 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.notes).toBe("Paid by Zelle");
   });
 
+  it("a lost refund response that later fails does not start a second refund", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    capturedPayments.set(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: order.totalAuthorizedCents, refundId: null },
+      });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "refund_retry",
+          entityType: "order",
+          entityId: order.id,
+          after: { attempt: 1, alreadyRefundedCents: 0 },
+        },
+      });
+    });
+    const committed = await fakeStripeProvider.refundPayment(
+      pi,
+      order.totalAuthorizedCents,
+      `refund:${order.id}:0:1`,
+    );
+    setRefundStatus(committed.refundId, "failed");
+
+    const result = await reconcileStuckOrder(storeId, order.id);
+    expect(result.ok).toBe(false);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("REFUND_FAILED");
+    expect(updated!.refundId).toBe(committed.refundId);
+    expect(refundRequests.filter((request) => request.paymentIntentId === pi)).toHaveLength(1);
+    expect(await fakeStripeProvider.listRefunds(pi)).toHaveLength(1);
+  });
+
   it("a refund that lands before the cancellation write is not issued again", async () => {
     const order = await createTestOrder();
     const pi = order.paymentIntentId!;

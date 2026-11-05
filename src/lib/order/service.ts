@@ -103,6 +103,8 @@ async function refundCapturedBalance(
     if (remaining === 0) {
       return refundRecordedOnCharge(paymentIntentId, pi.amountReceived);
     }
+    const uncovered = await failedRefundLeavingCaptureUncovered(paymentIntentId, pi.amountReceived);
+    if (uncovered) return uncovered;
     const reservedRefund = await reserveAttempt(storeId, orderId, "refund_retry", {
       alreadyRefundedCents: already,
     });
@@ -430,10 +432,18 @@ async function persistRefundFailure(
     const pi = await getStripeProvider().retrievePaymentIntent(preview.paymentIntentId);
     if (pi.amountReceived > 0) restoredCapture = pi.amountReceived;
   }
+  let alreadyResolved = false;
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || (current.status !== "CANCELLING" && current.status !== "CANCELLED")) return;
+    const manual = await tx.auditLog.findFirst({
+      where: { entityId: orderId, action: "refund_resolved_manually" },
+    });
+    if (manual) {
+      alreadyResolved = true;
+      return;
+    }
     await tx.order.update({
       where: { id: orderId },
       data: {
@@ -456,6 +466,7 @@ async function persistRefundFailure(
       }),
     });
   });
+  if (alreadyResolved) return;
   console.error(
     `Refund ${refundStatus} for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,
   );
@@ -517,6 +528,19 @@ async function refundReadyToSettle(
   const after = await stripe.retrievePaymentIntent(paymentIntentId);
   if (succeededTotal(again) >= after.amountReceived) return gap;
   return { ...gap, status: "pending" };
+}
+
+/** A failed refund that leaves the capture uncovered is resolved by hand. Never start another. */
+async function failedRefundLeavingCaptureUncovered(
+  paymentIntentId: string,
+  amountReceived: number,
+): Promise<RefundResult | null> {
+  const listed = await getStripeProvider().listRefunds(paymentIntentId);
+  const covering = listed
+    .filter((refund) => refund.status === "succeeded" || refund.status === "pending" || refund.status === "requires_action")
+    .reduce((sum, refund) => sum + refund.amountRefunded, 0);
+  if (covering >= amountReceived) return null;
+  return listed.find((refund) => isTerminalRefundStatus(refund.status)) ?? null;
 }
 
 function refundStillCovers(refunds: RefundResult[], capturedCents: number): boolean {

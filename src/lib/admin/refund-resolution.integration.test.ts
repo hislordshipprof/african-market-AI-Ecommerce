@@ -25,7 +25,7 @@ import { auth } from "../auth";
 import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
-import { markTerminalRefundFailure } from "../order/service";
+import { markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { listRefundFailedOrders, resolveRefundFailed } from "./refund-resolution";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -434,5 +434,76 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(untouched?.status).toBe("REFUND_FAILED");
     expect(untouched?.notes).toBeNull();
     expect(untouched?.capturedAmountCents).toBe(700);
+  });
+
+  it("a stale sweep does not reopen a refund an admin already repaid", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Sweep Customer" },
+    });
+    const pi = `pi_stale_sweep_${RUN}`;
+    setAuthorizedAmount(pi, 2500);
+    await fakeStripeProvider.capturePaymentIntent(pi, 2500, "cap-stale-sweep");
+    const refund = await fakeStripeProvider.refundPayment(pi, 2500, "ref-stale-sweep");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26406,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 2500,
+        bufferCents: 0,
+        totalAuthorizedCents: 2500,
+        totalCents: 2500,
+        capturedAmountCents: null,
+        paymentIntentId: pi,
+        refundId: refund.refundId,
+      },
+    });
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const enteredGate = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const original = fakeStripeProvider.retrieveRefund.bind(fakeStripeProvider);
+    vi.spyOn(fakeStripeProvider, "retrieveRefund").mockImplementation(async (id: string) => {
+      if (id === refund.refundId) {
+        entered();
+        await gate;
+      }
+      return original(id);
+    });
+
+    const reconcile = reconcileStuckOrder(storeAId, order.id);
+    try {
+      await enteredGate;
+      setRefundStatus(refund.refundId, "failed");
+      expect(
+        await markTerminalRefundFailure({
+          paymentIntentId: pi,
+          refundId: refund.refundId,
+          refundStatus: "failed",
+        }),
+      ).toEqual({ ok: true, action: "refund_failed" });
+      expect(await resolveRefundFailed(order.id, "Paid customer by Zelle")).toEqual({ ok: true });
+      release();
+      await reconcile;
+    } finally {
+      release();
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
+
+    const updated = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(updated?.status).toBe("CANCELLED");
+    const resolutions = await storeScoped(storeAId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(resolutions).toHaveLength(1);
   });
 });
