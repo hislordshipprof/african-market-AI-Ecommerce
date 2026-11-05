@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UNSET_MAX_PER_ORDER } from "../../cart/limits";
 
 const listingIds = (max: number) =>
   z.array(z.string().min(1)).min(1).max(max);
@@ -23,14 +24,14 @@ export const suggestSubstitutesInput = z.object({
 export const addToCartInput = z.object({
   items: z.array(z.object({
     variant_id: z.string().min(1),
-    qty: z.number().int().min(1).max(99),
+    qty: z.number().int().min(1).max(UNSET_MAX_PER_ORDER),
     backup_variant_id: z.string().min(1).optional(),
   })).min(1).max(20),
 });
 
 export const updateCartInput = z.object({
   line_id: z.string().min(1),
-  qty: z.number().int().min(0).max(99),
+  qty: z.number().int().min(0).max(UNSET_MAX_PER_ORDER),
 });
 
 export const removeFromCartInput = z.object({

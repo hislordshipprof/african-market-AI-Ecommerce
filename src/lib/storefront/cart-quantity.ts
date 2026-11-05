@@ -1,5 +1,7 @@
+import { UNSET_MAX_PER_ORDER } from "../cart/limits";
+
 /** Hard cap used when a listing has no max, matching the cart service. */
-export const CART_QTY_HARD_CAP = 99;
+export const CART_QTY_HARD_CAP = UNSET_MAX_PER_ORDER;
 
 /**
  * Ceiling for a plus click. Unavailable lines pass max 0.

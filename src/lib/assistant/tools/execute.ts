@@ -1,5 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import {
+  backupSwap,
+  decideLineQty,
+  decideNamedSubstitute,
+  substituteIdForSwap,
+} from "../../cart/limits";
+import {
   applyAddLine,
   checkMinimumOrder,
   runCartMutation,
@@ -249,16 +255,19 @@ async function chooseBackup(
   backupId: string | undefined,
 ): Promise<{ swapRule: SwapRuleValue; substituteVariantId: string | null }> {
   if (!backupId || backupId === variantId) {
-    return { swapRule: "store_suggests", substituteVariantId: null };
+    return backupSwap(variantId, storeId, null);
   }
   const backup = await tx.listingVariant.findUnique({
     where: { id: backupId },
     include: { listing: true },
   });
-  if (!backup || backup.listing.storeId !== storeId || !backup.listing.active) {
-    return { swapRule: "store_suggests", substituteVariantId: null };
-  }
-  return { swapRule: "named_substitute", substituteVariantId: backup.id };
+  return backupSwap(
+    variantId,
+    storeId,
+    backup
+      ? { id: backup.id, storeId: backup.listing.storeId, active: backup.listing.active }
+      : null,
+  );
 }
 
 const NOT_ENOUGH = "There are not enough choices to pick from.";
@@ -405,8 +414,8 @@ export async function updateCart(ctx: AssistantContext, input: unknown): Promise
       await tx.cartLine.delete({ where: { id: line.id } });
       return { ok: true, removed: true, lineId: line.id, qty: 0 };
     }
-    const maxPerOrder = line.variant.listing.maxPerOrder ?? 99;
-    if (parsed.qty > maxPerOrder) return fail("max_per_order");
+    const decision = decideLineQty(parsed.qty, line.variant.listing.maxPerOrder);
+    if (!decision.ok) return fail("max_per_order");
     await tx.cartLine.update({ where: { id: line.id }, data: { qty: parsed.qty } });
     return { ok: true, lineId: line.id, qty: parsed.qty, swapRule: line.swapRule };
   });
@@ -429,22 +438,40 @@ export async function setSwapRule(ctx: AssistantContext, input: unknown): Promis
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
     if (parsed.rule === "named_substitute") {
       const substituteId = parsed.substitute_variant_id;
-      if (!substituteId) return fail("variant_not_found");
-      const substitute = await tx.listingVariant.findUnique({
-        where: { id: substituteId },
-        include: { listing: true },
-      });
-      if (!substitute || substitute.listing.storeId !== ctx.storeId) return fail("variant_not_found");
-      if (!substitute.listing.active) return fail("unavailable");
+      const substitute = substituteId
+        ? await tx.listingVariant.findUnique({
+            where: { id: substituteId },
+            include: { listing: true },
+          })
+        : null;
+      const decision = decideNamedSubstitute(
+        substitute
+          ? {
+              id: substitute.id,
+              storeId: substitute.listing.storeId,
+              active: substitute.listing.active,
+            }
+          : null,
+        ctx.storeId,
+        { requireActive: true },
+      );
+      if (!decision.ok) {
+        return fail(decision.reason === "inactive" ? "unavailable" : "variant_not_found");
+      }
       await tx.cartLine.update({
         where: { id: line.id },
-        data: { swapRule: parsed.rule, substituteVariantId: substitute.id },
+        data: { swapRule: parsed.rule, substituteVariantId: decision.substituteVariantId },
       });
-      return { ok: true, lineId: line.id, swapRule: parsed.rule, substituteVariantId: substitute.id };
+      return {
+        ok: true,
+        lineId: line.id,
+        swapRule: parsed.rule,
+        substituteVariantId: decision.substituteVariantId,
+      };
     }
     await tx.cartLine.update({
       where: { id: line.id },
-      data: { swapRule: parsed.rule, substituteVariantId: null },
+      data: { swapRule: parsed.rule, substituteVariantId: substituteIdForSwap(parsed.rule, null) },
     });
     return { ok: true, lineId: line.id, swapRule: parsed.rule };
   });
