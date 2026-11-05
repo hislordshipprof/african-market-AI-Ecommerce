@@ -97,7 +97,19 @@ fail() { FAILED_AT="$1"; status failure "failed: $1"; echo "local-ci FAILED at $
 step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
 step typecheck pnpm typecheck || fail typecheck "no retry"
 step lint pnpm lint || fail lint "no retry"
-step test pnpm test --retry=1 || fail test "each failed test already retried once, so not a one-off flake"
+TEST_OUT="$(mktemp)"
+if ! step test pnpm test --retry=1 2>&1 | tee "$TEST_OUT"; then
+  # Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during the slow Stripe sandbox tests even
+  # when every test passed. That is the runner, not the code, so it gets one whole rerun. A real test failure
+  # does not, because --retry already retried each failed test.
+  if grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" && ! grep -Eq 'Tests +[0-9]+ failed' "$TEST_OUT"; then
+    echo "== local-ci: every test passed but Vitest's worker RPC timed out; rerunning the unit tests once"
+    step test pnpm test --retry=1 || fail test "failed again on the rerun after a Vitest RPC timeout"
+  else
+    fail test "each failed test already retried once, so not a one-off flake"
+  fi
+fi
+rm -f "$TEST_OUT"
 step build pnpm build || { echo "== local-ci: build failed once; rerunning to rule out a load crash"
   step build pnpm build || fail build "failed twice in a row"; }
 if ! step e2e pnpm test:e2e --retries=1; then
