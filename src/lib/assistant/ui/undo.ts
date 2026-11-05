@@ -30,14 +30,16 @@ export function planUndo(input: {
 
 export type UndoAck =
   | { status: "confirmed"; qty: number; removed: boolean }
-  | { status: "already_consumed" }
+  | { status: "already_consumed"; subtracted: number }
   | { status: "already_removed" }
   | { status: "rejected" }
   | { status: "failed" };
 
-/** The card says Undone only after a confirmed or already-consumed write. */
-export function undoCardAfter(ack: UndoAck, refresh: "ok" | "failed"): "undone" | "unchanged" {
-  if (ack.status === "confirmed" || ack.status === "already_consumed") return "undone";
+/** The card says Undone only after a write that actually subtracted. A failed refresh does not undo that. */
+export function undoCardAfter(ack: UndoAck, refresh: "ok" | "failed"): "undone" | "already_removed" | "unchanged" {
   void refresh;
+  if (ack.status === "confirmed") return "undone";
+  if (ack.status === "already_consumed") return ack.subtracted > 0 ? "undone" : "already_removed";
+  if (ack.status === "already_removed") return "already_removed";
   return "unchanged";
 }

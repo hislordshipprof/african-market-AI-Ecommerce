@@ -9,6 +9,7 @@ import {
 } from "../db";
 import { catalogFor } from "../storefront/catalog";
 import type { SwapRuleValue } from "../storefront/cart-store";
+import { shareFirstCart } from "./bootstrap";
 
 export type { SwapRuleValue };
 const VALID_SWAP_RULES: readonly SwapRuleValue[] = [
@@ -81,10 +82,12 @@ export async function getOrCreateCart(
       const existing = await scoped.cart.findUnique({ where: { id: cartId } });
       if (existing && existing.userId === null) return existing.id;
     }
-    const cart = await scoped.cart.create({
-      data: { storeId, userId: null, customerId: null, source: "manual" },
+    return shareFirstCart(`guest:${storeId}`, async () => {
+      const cart = await scoped.cart.create({
+        data: { storeId, userId: null, customerId: null, source: "manual" },
+      });
+      return cart.id;
     });
-    return cart.id;
   }
 
   const customerId = await customerIdForCartUser(storeId, userId);
@@ -108,10 +111,12 @@ export async function getOrCreateCart(
     if (claimed) return cartId;
   }
 
-  const cart = await scoped.cart.create({
-    data: { storeId, userId, customerId, source: "manual" },
+  return shareFirstCart(`user:${storeId}:${userId}`, async () => {
+    const cart = await scoped.cart.create({
+      data: { storeId, userId, customerId, source: "manual" },
+    });
+    return cart.id;
   });
-  return cart.id;
 }
 
 async function requireCartActor(
@@ -402,6 +407,56 @@ export async function removeLine(
   await storeScopedTransaction(storeId, async (tx) => {
     await requireCartActor(tx, cartId, actorUserId);
     await tx.cartLine.deleteMany({ where: { id: lineId, cartId } });
+  });
+}
+
+export type UndoAdditionResult =
+  | { status: "confirmed"; qty: number; removed: boolean }
+  | { status: "already_consumed"; subtracted: number }
+  | { status: "already_removed" };
+
+/**
+ * Subtract one assistant addition under the cart lock. The receipt is the
+ * retry token: a second call for the same addition does not subtract again,
+ * and a line id that no longer exists does not touch a later line for the
+ * same variant.
+ */
+export async function undoAssistantAddition(
+  storeId: string,
+  cartId: string,
+  lineId: string,
+  added: number,
+  additionId: string,
+  actorUserId: string | null = null,
+): Promise<UndoAdditionResult> {
+  if (!Number.isInteger(added) || added < 1 || added > 99) {
+    throw new CartError("Invalid quantity", "MAX_PER_ORDER");
+  }
+  if (!/^[A-Za-z0-9_:-]{1,120}$/.test(additionId)) {
+    throw new CartError("Cart line not found", "CART_NOT_FOUND");
+  }
+  return runCartMutation(storeId, cartId, actorUserId, async (tx) => {
+    const prior = await tx.assistantUndoReceipt.findUnique({
+      where: { storeId_additionId: { storeId, additionId } },
+    });
+    if (prior) return { status: "already_consumed", subtracted: prior.subtracted };
+    const line = await tx.cartLine.findUnique({ where: { id: lineId } });
+    if (line && (line.cartId !== cartId || line.storeId !== storeId)) {
+      throw new CartError("Cart line not found", "CART_NOT_FOUND");
+    }
+    if (!line) {
+      await tx.assistantUndoReceipt.create({
+        data: { storeId, cartId, lineId, additionId, subtracted: 0 },
+      });
+      return { status: "already_removed" };
+    }
+    const next = line.qty - added;
+    if (next <= 0) await tx.cartLine.delete({ where: { id: line.id } });
+    else await tx.cartLine.update({ where: { id: line.id }, data: { qty: next } });
+    await tx.assistantUndoReceipt.create({
+      data: { storeId, cartId, lineId: line.id, additionId, subtracted: added },
+    });
+    return { status: "confirmed", qty: Math.max(0, next), removed: next <= 0 };
   });
 }
 

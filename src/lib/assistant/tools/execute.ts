@@ -18,6 +18,7 @@ import {
   parseToolInput,
   removeFromCartInput,
   searchCatalogInput,
+  offerChoicesInput,
   setSwapRuleInput,
   showProductsInput,
   suggestSubstitutesInput,
@@ -29,6 +30,7 @@ export interface AssistantContext {
   cartId: string;
   conversationId: string;
   actorUserId: string | null;
+  turnMessageId?: string;
 }
 
 type ToolFailure = { ok: false; code: string; message: string; [key: string]: unknown };
@@ -42,6 +44,7 @@ const MESSAGES: Record<string, string> = {
   unavailable: "That product is unavailable.",
   max_per_order: "That is the most of this item the store allows.",
   audit_failed: "Could not record this action.",
+  not_enough_choices: "There are not enough choices to pick from.",
 };
 
 function fail(code: string): ToolFailure {
@@ -50,6 +53,11 @@ function fail(code: string): ToolFailure {
 
 function asJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function auditedInput(ctx: AssistantContext, input: unknown): unknown {
+  if (!ctx.turnMessageId || !input || typeof input !== "object" || Array.isArray(input)) return input;
+  return { ...input, _turn: ctx.turnMessageId };
 }
 
 async function recordRead(
@@ -64,7 +72,7 @@ async function recordRead(
         storeId: ctx.storeId,
         conversationId: ctx.conversationId,
         tool,
-        input: asJson(input),
+        input: asJson(auditedInput(ctx, input)),
         output: asJson(output),
         ok: output.ok,
       },
@@ -89,7 +97,7 @@ async function recordWrite<T extends ToolResult>(
           storeId: ctx.storeId,
           conversationId: ctx.conversationId,
           tool,
-          input: asJson(input),
+          input: asJson(auditedInput(ctx, input)),
           output: asJson(output),
           ok: output.ok,
         },
@@ -248,6 +256,87 @@ async function chooseBackup(
   return { swapRule: "named_substitute", substituteVariantId: backup.id };
 }
 
+const NOT_ENOUGH = "There are not enough choices to pick from.";
+
+export async function offerChoices(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
+  const parsed = parseToolInput(offerChoicesInput, input);
+  const scoped = storeScoped(ctx.storeId);
+  const ids = [...new Set(parsed.options.map((option) => option.listing_id))];
+  const listings = await scoped.listing.findMany({
+    where: { id: { in: ids } },
+    include: {
+      masterProduct: true,
+      variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
+    },
+  });
+  const byId = new Map(listings.map((listing) => [listing.id, listing]));
+  const notFound: string[] = [];
+  const chosen: Array<Record<string, unknown>> = [];
+  const seenVariants = new Set<string>();
+  for (const option of parsed.options) {
+    const listing = byId.get(option.listing_id);
+    if (!listing || !listing.active) {
+      notFound.push(option.listing_id);
+      continue;
+    }
+    const variant = option.variant_id
+      ? listing.variants.find((item) => item.id === option.variant_id) ?? null
+      : listing.variants[0] ?? null;
+    if (!variant) {
+      notFound.push(option.listing_id);
+      continue;
+    }
+    if (seenVariants.has(variant.id)) continue;
+    seenVariants.add(variant.id);
+    const photo = listingImage({
+      customName: listing.customName,
+      masterProduct: listing.masterProduct
+        ? { name: listing.masterProduct.name, imageUrl: listing.masterProduct.imageUrl }
+        : null,
+    });
+    chosen.push({
+      listingId: listing.id,
+      variantId: variant.id,
+      name: listing.customName || listing.masterProduct?.name || "Unnamed",
+      packLabel: variant.label,
+      priceCents: variant.price,
+      imageUrl: photo ?? null,
+      mayBeUnavailable: mayBeUnavailable(listing),
+    });
+  }
+  if (chosen.length < 2) {
+    return recordRead(ctx, "offer_choices", parsed, {
+      ok: false,
+      code: "not_enough_choices",
+      message: NOT_ENOUGH,
+      notFound,
+    });
+  }
+  return recordRead(ctx, "offer_choices", parsed, { ok: true, options: chosen, notFound });
+}
+
+async function enrichAdded(tx: CartWriteTx, variantId: string) {
+  const variant = await tx.listingVariant.findUnique({
+    where: { id: variantId },
+    include: { listing: { include: { masterProduct: true } } },
+  });
+  if (!variant) return null;
+  const photo = listingImage({
+    customName: variant.listing.customName,
+    masterProduct: variant.listing.masterProduct
+      ? { name: variant.listing.masterProduct.name, imageUrl: variant.listing.masterProduct.imageUrl }
+      : null,
+  });
+  return {
+    variantId: variant.id,
+    listingId: variant.listing.id,
+    name: variant.listing.customName || variant.listing.masterProduct?.name || "Unnamed",
+    packLabel: variant.label,
+    unitPriceCents: variant.price,
+    imageUrl: photo ?? null,
+  };
+}
+
 export async function addToCart(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(addToCartInput, input);
   return recordWrite(ctx, "add_to_cart", parsed, async (tx) => {
@@ -274,11 +363,15 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
           data: { swapRule, substituteVariantId },
         });
       }
+      const enriched = await enrichAdded(tx, item.variant_id);
+      if (!enriched) throw new Error("add enrichment failed");
       items.push({
         ok: true as const,
         added: applied.added,
         lineId: applied.lineId,
         qty: applied.qty,
+        created: applied.created,
+        ...enriched,
         ...(applied.limitedTo != null ? { limitedTo: applied.limitedTo, code: "max_per_order" } : {}),
         swapRule,
         mayBeUnavailable: flagged,

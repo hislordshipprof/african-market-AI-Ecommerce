@@ -106,6 +106,7 @@ export function storeScoped(storeId: string) {
     orderLine: wrapDelegate(storeId, prisma.orderLine),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
+    assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
   };
 }
 
@@ -191,7 +192,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -214,6 +215,7 @@ export async function storeScopedTransaction<T>(
       orderLine: tx.orderLine,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
+      assistantUndoReceipt: tx.assistantUndoReceipt,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });

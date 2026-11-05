@@ -85,6 +85,8 @@ type Part = {
   input?: unknown;
   output?: unknown;
   errorText?: unknown;
+  text?: unknown;
+  data?: unknown;
 };
 
 const CART_TOOLS = new Set(["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"]);
@@ -248,13 +250,14 @@ function addedItem(item: unknown, callId: string, index: number): AssistantCard[
     }];
   }
   if (item.ok !== true || typeof item.lineId !== "string" || typeof item.added !== "number") return [];
+  const name = typeof item.name === "string" ? item.name : `Added to cart · Qty ${item.added}`;
   const legacy = typeof item.name !== "string";
   return [{
     kind: "added",
     key: `${callId}:added:${index}`,
     additionId: `${callId}:${index}`,
     lineId: item.lineId,
-    name: legacy ? `Added to cart · Qty ${item.added}` : item.name,
+    name,
     packLabel: typeof item.packLabel === "string" ? item.packLabel : null,
     qtyAdded: item.added,
     limitedTo: typeof item.limitedTo === "number" ? item.limitedTo : null,

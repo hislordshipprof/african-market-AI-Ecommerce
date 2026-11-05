@@ -1,12 +1,14 @@
 "use server";
 
 import { headers } from "next/headers";
+import { assistantFakeAllowed } from "../assistant/contract";
 import { auth } from "../auth";
 import { getStore } from "../get-store";
 import { getCartIdFromCookie, setCartIdCookie } from "./cookies";
 import {
   getOrCreateCart,
   addLine,
+  undoAssistantAddition,
   updateLineQty,
   updateLineSwapRule,
   removeLine,
@@ -61,6 +63,10 @@ export async function resolveShopperCart(): Promise<{
 }
 
 export async function getServerCart(): Promise<CartWithLines | null> {
+  if (assistantFakeAllowed()) {
+    const cookie = (await headers()).get("cookie") ?? "";
+    if (cookie.includes("e2e_fail_cart_read=1")) throw new Error("cart read failed");
+  }
   const resolved = await resolveShopperCart();
   if (!resolved) return null;
   return getCartWithLines(resolved.storeId, resolved.cartId);
@@ -118,6 +124,30 @@ export async function setSwapRule(
     if (e instanceof CartError) {
       return { ok: false, error: e.message, code: e.code };
     }
+    throw e;
+  }
+}
+
+export async function undoAssistantAdditionAction(input: {
+  lineId: string;
+  added: number;
+  additionId: string;
+}): Promise<
+  | { ok: true; result: Awaited<ReturnType<typeof undoAssistantAddition>> }
+  | { ok: false; error: string; code: string }
+> {
+  if (assistantFakeAllowed()) {
+    const cookie = (await headers()).get("cookie") ?? "";
+    if (cookie.includes("e2e_undo=reject")) return { ok: false, error: "Could not undo that", code: "CART_NOT_FOUND" };
+    if (cookie.includes("e2e_undo=throw")) throw new Error("undo failed");
+    if (cookie.includes("e2e_undo=stale")) throw new Error('Server Action "undo" was not found on the server');
+  }
+  try {
+    const { storeId, cartId, userId } = await ensureCartId();
+    const result = await undoAssistantAddition(storeId, cartId, input.lineId, input.added, input.additionId, userId);
+    return { ok: true, result };
+  } catch (e) {
+    if (e instanceof CartError) return { ok: false, error: e.message, code: e.code };
     throw e;
   }
 }

@@ -38,9 +38,10 @@ describe("assistant undo plan", () => {
 
   it("shows Undone only after the write is acknowledged", () => {
     expect(undoCardAfter({ status: "confirmed", qty: 1, removed: false }, "failed")).toBe("undone");
-    expect(undoCardAfter({ status: "already_consumed" }, "failed")).toBe("undone");
+    expect(undoCardAfter({ status: "already_consumed", subtracted: 2 }, "failed")).toBe("undone");
+    expect(undoCardAfter({ status: "already_consumed", subtracted: 0 }, "ok")).toBe("already_removed");
     expect(undoCardAfter({ status: "rejected" }, "ok")).toBe("unchanged");
     expect(undoCardAfter({ status: "failed" }, "ok")).toBe("unchanged");
-    expect(undoCardAfter({ status: "already_removed" }, "ok")).toBe("unchanged");
+    expect(undoCardAfter({ status: "already_removed" }, "ok")).toBe("already_removed");
   });
 });

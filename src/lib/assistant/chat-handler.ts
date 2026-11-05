@@ -17,6 +17,13 @@ import { claimConversationLease, rateLimitUpsert, storeScoped, storeScopedTransa
 import { findStore } from "../get-store";
 import { auth } from "../auth";
 import { scrubCardNumbers } from "./card-scrub";
+import {
+  ASSISTANT_DISABLED_CODE,
+  ASSISTANT_DISABLED_MESSAGE,
+  ASSISTANT_DISABLED_STATUS,
+  assistantChatEnabled,
+} from "./contract";
+import { assistantMessageFromActions, replayAssistantMessage } from "./replay";
 import { clientIp } from "./client-ip";
 import { callCostMicros, type TokenUsage } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
@@ -42,6 +49,9 @@ export interface ChatHandlerOptions {
 export function createChatHandler(options: ChatHandlerOptions = {}) {
   const now = options.now ?? (() => new Date());
   return async function POST(request: Request): Promise<Response> {
+    if (!assistantChatEnabled()) {
+      return jsonError(ASSISTANT_DISABLED_STATUS, ASSISTANT_DISABLED_CODE, ASSISTANT_DISABLED_MESSAGE);
+    }
     const parsed = await readUserMessage(request);
     if (!parsed.ok) return jsonError(400, "invalid_request", parsed.message);
     if (!originAllowed(request)) return jsonError(403, "forbidden_origin", "This request was not sent from the store.");
@@ -95,17 +105,23 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     const cartLimit = await takeLimit(`assistant:cart:${cartId}`, CART_LIMIT, at);
     if (!cartLimit.ok) return rateLimited(cartLimit.retryAfter);
 
+    const headers = new Headers();
+    if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId));
+    const replay = await replayCompletedTurn(store.id, cartId, parsed.id, headers, at);
+    if (replay) return replay;
+
     const turn = await takeTurn(store.id, cartId, userId, at, modelId);
     if (!turn) return jsonError(409, "assistant_busy", "The helper is still working on the previous message.");
 
     const scrubbed = scrubCardNumbers(parsed.text).text;
     const userMessage: UIMessage = {
-      id: generateId(),
+      id: parsed.id,
       role: "user",
       parts: [{ type: "text", text: scrubbed }],
     };
     const prior = asMessages(turn.messages);
-    const withUser = [...prior, userMessage];
+    const alreadyThere = prior.some((message) => message.role === "user" && message.id === parsed.id);
+    const withUser = alreadyThere ? prior : [...prior, userMessage];
     try {
       await storeScoped(store.id).aiConversation.update({
         where: { id: turn.id },
@@ -122,11 +138,10 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       cartId,
       conversationId: turn.id,
       actorUserId: userId,
+      turnMessageId: parsed.id,
     });
     const history = (await usableHistory(withUser, tools)).slice(-30);
     const modelMessages = await convertToModelMessages(history);
-    const headers = new Headers();
-    if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId));
 
     const result = streamText({
       model,
@@ -393,7 +408,47 @@ function asMessages(value: unknown): UIMessage[] {
   });
 }
 
-async function readUserMessage(request: Request): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+async function replayCompletedTurn(
+  storeId: string,
+  cartId: string,
+  clientId: string,
+  headers: Headers,
+  at: Date,
+): Promise<Response | null> {
+  const existing = await storeScoped(storeId).aiConversation.findUnique({
+    where: { storeId_cartId: { storeId, cartId } },
+  });
+  if (!existing) return null;
+  const prior = asMessages(existing.messages);
+  const index = prior.findIndex((message) => message.role === "user" && message.id === clientId);
+  if (index < 0) return null;
+  const assistant = prior.slice(index + 1).find((message) => message.role === "assistant");
+  if (assistant) return replayAssistantMessage(assistant, headers);
+  if (existing.inFlightUntil && existing.inFlightUntil.getTime() > at.getTime()) return null;
+  const actions = await storeScoped(storeId).aiAction.findMany({
+    where: { conversationId: existing.id },
+    orderBy: { createdAt: "asc" },
+  });
+  const mine = actions.filter((action) => {
+    const input = action.input;
+    return !!input && typeof input === "object" && !Array.isArray(input)
+      && (input as { _turn?: unknown })._turn === clientId;
+  });
+  if (mine.length === 0) return null;
+  const synthetic = assistantMessageFromActions(mine.map((action) => ({
+    id: action.id,
+    tool: action.tool,
+    input: action.input,
+    output: action.output,
+  })));
+  await storeScoped(storeId).aiConversation.update({
+    where: { id: existing.id },
+    data: { messages: [...prior, synthetic] as unknown as Prisma.InputJsonValue, inFlightUntil: null },
+  });
+  return replayAssistantMessage(synthetic, headers);
+}
+
+async function readUserMessage(request: Request): Promise<{ ok: true; text: string; id: string } | { ok: false; message: string }> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) {
     return { ok: false, message: "Send a JSON message." };
@@ -421,5 +476,7 @@ async function readUserMessage(request: Request): Promise<{ ok: true; text: stri
   }
   const text = record.parts.map((part) => (part as { text: string }).text).join("").trim();
   if (text.length < 1 || text.length > 2000) return { ok: false, message: "Write between 1 and 2000 characters." };
-  return { ok: true, text };
+  const rawId = typeof (record as { id?: unknown }).id === "string" ? (record as { id: string }).id : "";
+  const id = /^[A-Za-z0-9_-]{8,80}$/.test(rawId) ? rawId : generateId();
+  return { ok: true, text, id };
 }

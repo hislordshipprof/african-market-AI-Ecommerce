@@ -201,6 +201,105 @@ export function judgeMessagesRequest(args: {
       }
     }
   }
+  return judgeToolHistory(body);
+}
+
+function contentBlocks(content: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(content)) return [];
+  return content.filter(isRecord);
+}
+
+/** Anthropic rejects orphaned, mismatched, duplicate, or undeclared tool calls. */
+function judgeToolHistory(body: Record<string, unknown>): MessagesVerdict | null {
+  if (!Array.isArray(body.messages)) return null;
+  const declared = new Set<string>();
+  if (Array.isArray(body.tools)) {
+    for (const tool of body.tools) {
+      if (isRecord(tool) && typeof tool.name === "string") declared.add(tool.name);
+    }
+  }
+  const seen = new Set<string>();
+  let pending = new Map<string, string>();
+  for (const message of body.messages) {
+    if (!isRecord(message)) continue;
+    const blocks = contentBlocks(message.content);
+    if (message.role === "assistant") {
+      if (pending.size > 0) {
+        return {
+          status: 400,
+          errorType: "invalid_request_error",
+          message: "tool_use missing tool_result",
+        };
+      }
+      pending = new Map();
+      for (const block of blocks) {
+        if (block.type !== "tool_use") continue;
+        if (typeof block.id !== "string" || typeof block.name !== "string") {
+          return {
+            status: 400,
+            errorType: "invalid_request_error",
+            message: "tool_use requires id and name",
+          };
+        }
+        if (seen.has(block.id)) {
+          return {
+            status: 400,
+            errorType: "invalid_request_error",
+            message: "duplicate tool_use id",
+          };
+        }
+        if (declared.size > 0 && !declared.has(block.name)) {
+          return {
+            status: 400,
+            errorType: "invalid_request_error",
+            message: "undeclared tool",
+          };
+        }
+        seen.add(block.id);
+        pending.set(block.id, block.name);
+      }
+    }
+    if (message.role === "user") {
+      const results = blocks.filter((block) => block.type === "tool_result");
+      if (results.length === 0) {
+        if (pending.size > 0) {
+          return {
+            status: 400,
+            errorType: "invalid_request_error",
+            message: "tool_use missing tool_result",
+          };
+        }
+        continue;
+      }
+      const answered = new Set<string>();
+      for (const block of results) {
+        const id = block.tool_use_id;
+        if (typeof id !== "string" || !pending.has(id) || answered.has(id)) {
+          return {
+            status: 400,
+            errorType: "invalid_request_error",
+            message: "orphaned or duplicate tool_result",
+          };
+        }
+        answered.add(id);
+      }
+      if (answered.size !== pending.size) {
+        return {
+          status: 400,
+          errorType: "invalid_request_error",
+          message: "tool_result set does not match tool_use",
+        };
+      }
+      pending = new Map();
+    }
+  }
+  if (pending.size > 0) {
+    return {
+      status: 400,
+      errorType: "invalid_request_error",
+      message: "tool_use missing tool_result",
+    };
+  }
   return null;
 }
 
@@ -301,7 +400,7 @@ function usageOf(step: FakeAnthropicStep) {
   };
 }
 
-function eventsFor(step: FakeAnthropicStep, model: string): unknown[] {
+function eventsFor(step: FakeAnthropicStep, model: string, toolId = "toolu_fake_0"): unknown[] {
   const usage = usageOf(step);
   const start = {
     type: "message_start",
@@ -334,7 +433,7 @@ function eventsFor(step: FakeAnthropicStep, model: string): unknown[] {
       {
         type: "content_block_start",
         index: 0,
-        content_block: { type: "tool_use", id: "toolu_fake", name },
+        content_block: { type: "tool_use", id: toolId, name },
       },
       { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: input } },
       { type: "content_block_stop", index: 0 },
@@ -398,10 +497,11 @@ export function createFakeAnthropicFetch(options?: {
       return Response.json(errorBody(verdict), { status: verdict.status });
     }
     const step = steps[Math.min(cursor, steps.length - 1)];
+    const toolId = `toolu_fake_${cursor}`;
     cursor += 1;
     const model = String(body?.model ?? "");
     if (body?.stream === true) {
-      return new Response(sse(eventsFor(step, model)), {
+      return new Response(sse(eventsFor(step, model, toolId)), {
         status: 200,
         headers: { "content-type": "text/event-stream" },
       });

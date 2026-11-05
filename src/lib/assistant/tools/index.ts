@@ -3,6 +3,7 @@ import {
   addToCart,
   checkAvailability,
   getCartSummary,
+  offerChoices,
   removeFromCart,
   searchCatalog,
   setSwapRule,
@@ -17,6 +18,7 @@ import {
   checkAvailabilityInput,
   removeFromCartInput,
   searchCatalogInput,
+  offerChoicesInput,
   setSwapRuleInput,
   showProductsInput,
   suggestSubstitutesInput,
@@ -49,7 +51,7 @@ export function assistantTools(ctx: AssistantContext): ToolSet {
       execute: (input) => suggestSubstitutes(ctx, input),
     }),
     add_to_cart: tool({
-      description: "Add items to this shopper's cart.",
+      description: "Add items to this customer's cart.",
       inputSchema: addToCartInput,
       execute: (input) => addToCart(ctx, input),
     }),
@@ -72,6 +74,11 @@ export function assistantTools(ctx: AssistantContext): ToolSet {
       description: "Read the current cart, prices, and minimum order.",
       inputSchema: cartSummaryInput,
       execute: (input) => getCartSummary(ctx, input),
+    }),
+    offer_choices: tool({
+      description: "Offer 2 to 6 products from this store and wait for the customer to pick one.",
+      inputSchema: offerChoicesInput,
+      execute: (input) => offerChoices(ctx, input),
     }),
   };
 }

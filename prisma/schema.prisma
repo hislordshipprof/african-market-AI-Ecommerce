@@ -47,6 +47,7 @@ model Store {
   listingImports  ListingImport[]
   aiConversations AiConversation[]
   aiActions       AiAction[]
+  assistantUndoReceipts AssistantUndoReceipt[]
 
   @@map("stores")
 }
@@ -425,6 +426,7 @@ model Cart {
   customer Customer? @relation(fields: [customerId], references: [id])
   lines    CartLine[]
   aiConversations AiConversation[]
+  assistantUndoReceipts AssistantUndoReceipt[]
 
   @@index([storeId])
   @@index([storeId, userId])
@@ -526,6 +528,25 @@ model AiAction {
   @@index([storeId])
   @@index([createdAt])
   @@map("ai_actions")
+}
+
+/// One row per assistant addition the customer undoes. A retry sees the row and does not subtract again.
+model AssistantUndoReceipt {
+  id         String   @id @default(cuid())
+  storeId    String   @map("store_id")
+  cartId     String   @map("cart_id")
+  lineId     String   @map("line_id")
+  additionId String   @map("addition_id")
+  subtracted Int
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, additionId])
+  @@index([storeId])
+  @@index([cartId])
+  @@map("assistant_undo_receipts")
 }
 
 /// Platform-wide shopper-assistant spend. No store id, and retention does not delete it.
