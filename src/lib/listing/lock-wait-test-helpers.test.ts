@@ -484,11 +484,22 @@ describe("lock-wait test helpers", () => {
 };
 `,
       );
+      const reportPath = join(configDir, "results.json");
       const env: NodeJS.ProcessEnv = { ...process.env, LOCK_WAIT_DB_FREE: "1" };
       delete env.DATABASE_URL;
       delete env.DIRECT_URL;
       delete env.DATABASE_URL_UNPOOLED;
       delete env.APP_RUNTIME_PASSWORD;
+      const pureTitles = [
+        "pgError maps non-errors and odd shapes to empty fields",
+        "pgError preserves falsy and inherited codes",
+        "lock-wait helper keeps the stock-event poll contract",
+        "app code does not import the lock-wait test helper",
+        "the stock-event suites use the shared lock-wait helper",
+        "integration setup refuses incomplete and unsafe database targets",
+        "helper imports without keys in production on Vercel",
+        "isolated run has no database url",
+      ];
       try {
         const result = spawnSync(
           process.execPath,
@@ -497,23 +508,39 @@ describe("lock-wait test helpers", () => {
             "run",
             "--config",
             configPath,
-            "--reporter=verbose",
+            "--reporter=json",
+            "--outputFile",
+            reportPath,
             "src/lib/listing/lock-wait-test-helpers.test.ts",
           ],
           { cwd: process.cwd(), env, encoding: "utf8", timeout: 120_000 },
         );
         const output = `${result.stdout}\n${result.stderr}`;
         expect(result.status, output).toBe(0);
-        expect(output).toContain("pgError maps non-errors and odd shapes to empty fields");
-        expect(output).toContain("pgError preserves falsy and inherited codes");
-        expect(output).toContain("app code does not import the lock-wait test helper");
-        expect(output).toContain("the stock-event suites use the shared lock-wait helper");
-        expect(output).toContain("integration setup refuses incomplete and unsafe database targets");
-        expect(output).toContain("lock-wait helper keeps the stock-event poll contract");
-        expect(output).toContain("helper imports without keys in production on Vercel");
-        expect(output).toContain("isolated run has no database url");
-        expect(output).not.toContain("FAIL");
-        expect(output).toContain("skipped");
+        const report = JSON.parse(readFileSync(reportPath, "utf8")) as {
+          success: boolean;
+          numPassedTests: number;
+          numFailedTests: number;
+          testResults: Array<{
+            assertionResults: Array<{ ancestorTitles: string[]; title: string; status: string }>;
+          }>;
+        };
+        const assertions = report.testResults.flatMap((file) => file.assertionResults);
+        const statusOf = (title: string) => {
+          const matches = assertions.filter((test) => test.title === title);
+          expect(matches, output).toHaveLength(1);
+          return matches[0].status;
+        };
+        for (const title of pureTitles) expect(statusOf(title), title).toBe("passed");
+        expect(statusOf("database-free invocation executes pure tests and guards"), "database-free invocation").toBe("skipped");
+        const databaseTests = assertions.filter((test) =>
+          test.ancestorTitles.includes("lock-wait helper on the lane database"),
+        );
+        expect(databaseTests.length, output).toBeGreaterThan(0);
+        expect(databaseTests.every((test) => test.status === "skipped"), output).toBe(true);
+        expect(report.numFailedTests, output).toBe(0);
+        expect(report.numPassedTests, output).toBe(pureTitles.length);
+        expect(report.success, output).toBe(true);
       } finally {
         rmSync(configDir, { recursive: true, force: true });
       }
