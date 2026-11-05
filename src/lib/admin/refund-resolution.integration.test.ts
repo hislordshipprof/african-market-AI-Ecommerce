@@ -29,12 +29,23 @@ import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNext
 import { RefundNotCreatedError } from "../stripe/errors";
 import { applyProviderRefund, evaluateOrderRefundState } from "../order/refund-requests";
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
-import { listRefundFailedOrders, resolveRefundFailed } from "./refund-resolution";
+import { failedAtLabel } from "./failed-at";
+import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction } from "./refund-resolution";
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `t264-${Date.now()}`;
 const password = "RefundResolve-186!";
 const hasDb = !!process.env.DATABASE_URL;
+const olderFailureAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+async function secondAuditAt(storeId: string, orderId: string, refundId: string): Promise<Date> {
+  const rows = await storeScoped(storeId).auditLog.findMany({
+    where: { entityId: orderId, action: "refund_failed" },
+    orderBy: { createdAt: "asc" },
+  });
+  const match = rows.find((row) => (row.after as { refundId?: string }).refundId === refundId);
+  if (!match) throw new Error("missing failure audit");
+  return match.createdAt;
+}
 
 class CookieJar {
   private readonly jar = new Map<string, string>();
@@ -206,7 +217,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
 
   it("store owners and staff cannot resolve a refund-failed order", async () => {
     asAdmin(cookiesOwner);
-    await expect(resolveRefundFailed(orderId, "owner tried")).rejects.toSatisfy((error: unknown) => {
+    await expect(resolveRefundFailed(orderId, "owner tried", 600, 600)).rejects.toSatisfy((error: unknown) => {
       return isRedirectError(error) && getURLFromRedirectError(error) === "/admin/sign-in";
     });
     const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
@@ -215,7 +226,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
 
   it("an admin without 2FA cannot resolve", async () => {
     asAdmin(cookiesBare);
-    await expect(resolveRefundFailed(orderId, "no second factor")).rejects.toSatisfy((error: unknown) => {
+    await expect(resolveRefundFailed(orderId, "no second factor", 600, 600)).rejects.toSatisfy((error: unknown) => {
       return isRedirectError(error) && getURLFromRedirectError(error) === "/admin/enroll-2fa";
     });
     const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
@@ -224,7 +235,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
 
   it("signed-out callers cannot resolve", async () => {
     headerState.delete("cookie");
-    await expect(resolveRefundFailed(orderId, "signed out")).rejects.toSatisfy((error: unknown) => {
+    await expect(resolveRefundFailed(orderId, "signed out", 600, 600)).rejects.toSatisfy((error: unknown) => {
       return isRedirectError(error) && getURLFromRedirectError(error) === "/admin/sign-in";
     });
     const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
@@ -234,14 +245,14 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
   it("an empty, whitespace or 501-character note is refused", async () => {
     asAdmin(cookiesAdmin);
     for (const note of ["", "   ", "x".repeat(501)]) {
-      const result = await resolveRefundFailed(orderId, note);
+      const result = await resolveRefundFailed(orderId, note, 600, 600);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.fieldError).toMatch(/1–500/);
     }
     const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(after?.status).toBe("REFUND_FAILED");
     const note = "x".repeat(500);
-    const accepted = await resolveRefundFailed(orderId, note);
+    const accepted = await resolveRefundFailed(orderId, note, 600, 600);
     expect(accepted).toEqual({ ok: true });
     const resolved = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(resolved?.status).toBe("CANCELLED");
@@ -265,7 +276,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         data: { status: "REFUND_FAILED", notes: "Call before 5pm — no onions." },
       });
     });
-    const result = await resolveRefundFailed(orderId, "Paid customer by Zelle 11/05");
+    const result = await resolveRefundFailed(orderId, "Paid customer by Zelle 11/05", 600, 600);
     expect(result).toEqual({ ok: true });
     const updated = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(updated?.notes).toBe("Call before 5pm — no onions.\nPaid customer by Zelle 11/05");
@@ -286,7 +297,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
 
   it("a platform admin resolves a refund-failed order with a note", async () => {
     asAdmin(cookiesAdmin);
-    const result = await resolveRefundFailed(orderId, "Paid customer by Zelle 11/05");
+    const result = await resolveRefundFailed(orderId, "Paid customer by Zelle 11/05", 600, 600);
     expect(result).toEqual({ ok: true });
     const updated = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(updated?.status).toBe("CANCELLED");
@@ -311,8 +322,8 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(cookiesAdmin2).toContain("better-auth");
     headerQueue.push(new Headers({ cookie: cookiesAdmin }), new Headers({ cookie: cookiesAdmin2 }));
     const [first, second] = await Promise.all([
-      resolveRefundFailed(orderId, "first admin"),
-      resolveRefundFailed(orderId, "second admin"),
+      resolveRefundFailed(orderId, "first admin", 600, 600),
+      resolveRefundFailed(orderId, "second admin", 600, 600),
     ]);
     const results = [first, second];
     expect(results.filter((result) => result.ok)).toHaveLength(1);
@@ -429,7 +440,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       },
     });
     asAdmin(cookiesAdmin);
-    const result = await resolveRefundFailed(target.id, "Repaid store A only");
+    const result = await resolveRefundFailed(target.id, "Repaid store A only", 900, 900);
     expect(result).toEqual({ ok: true });
     const resolved = await storeScoped(storeAId).order.findUnique({ where: { id: target.id } });
     expect(resolved?.status).toBe("CANCELLED");
@@ -493,7 +504,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
           refundStatus: "failed",
         }),
       ).toEqual({ ok: true, action: "refund_failed" });
-      expect(await resolveRefundFailed(order.id, "Paid customer by Zelle")).toEqual({ ok: true });
+      expect(await resolveRefundFailed(order.id, "Paid customer by Zelle", 2500, 2500)).toEqual({ ok: true });
       release();
       await reconcile;
     } finally {
@@ -572,7 +583,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
           refundStatus: "failed",
         }),
       ).toEqual({ ok: true, action: "refund_failed" });
-      expect(await resolveRefundFailed(order.id, "Paid customer by Zelle")).toEqual({ ok: true });
+      expect(await resolveRefundFailed(order.id, "Paid customer by Zelle", 1000, 1000)).toEqual({ ok: true });
       const before = (await original(pi))
         .filter((refund) => refund.status === "succeeded")
         .reduce((sum, refund) => sum + refund.amountRefunded, 0);
@@ -638,7 +649,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       }),
     ).toEqual({ ok: true, action: "refund_failed" });
 
-    expect(await resolveRefundFailed(order.id, "Paid customer by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid customer by Zelle", 1000, 1000)).toEqual({ ok: true });
     const updated = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(updated?.status).toBe("CANCELLED");
   });
@@ -693,7 +704,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
     expect(queue?.owedCents).toBe(1000);
     expect(queue?.bankRefundPending).toBe(true);
-    const result = await resolveRefundFailed(order.id, "Paid displayed 1000 cents by Zelle");
+    const result = await resolveRefundFailed(order.id, "Paid displayed 1000 cents by Zelle", 1000, 1000);
     const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(result.ok).toBe(false);
     expect(stored?.status).toBe("REFUND_FAILED");
@@ -735,12 +746,12 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         refundStatus: "failed",
       }),
     ).toEqual({ ok: true, action: "refund_failed" });
-    expect((await resolveRefundFailed(order.id, "Too early")).ok).toBe(false);
+    expect((await resolveRefundFailed(order.id, "Too early", 1000, 1000)).ok).toBe(false);
     setRefundStatus(pending!.refundId, "succeeded");
     const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
     expect(queue?.bankRefundPending).toBe(false);
     expect(queue?.owedCents).toBe(400);
-    expect(await resolveRefundFailed(order.id, "Paid the remaining 400 cents by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid the remaining 400 cents by Zelle", 400, 400)).toEqual({ ok: true });
     const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(stored?.status).toBe("CANCELLED");
   });
@@ -795,7 +806,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         refundStatus: "failed",
       });
       const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
-      const manual = await resolveRefundFailed(order.id, "Paid displayed 900 cents by Zelle");
+      const manual = await resolveRefundFailed(order.id, "Paid displayed 900 cents by Zelle", 900, 900);
       expect(webhook).toEqual({ ok: true, action: "refund_failed" });
       expect(queue?.owedCents).toBe(900);
       expect(queue?.bankRefundPending).toBe(true);
@@ -861,7 +872,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         refundStatus: "failed",
       });
       const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
-      const manual = await resolveRefundFailed(order.id, "Paid displayed 600 cents by Zelle");
+      const manual = await resolveRefundFailed(order.id, "Paid displayed 600 cents by Zelle", 600, 600);
       expect(swept).toEqual({ ok: false, error: "Refund is still confirming with the bank", waiting: true });
       expect(webhook).toEqual({ ok: true, action: "refund_failed" });
       expect(queue?.owedCents).toBe(600);
@@ -912,7 +923,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     setStripeProvider(fakeStripeProvider);
     setRefundStatus(refundId, "failed");
     await reconcileStuckOrder(storeAId, order.id);
-    const result = await resolveRefundFailed(order.id, "Customer repaid outside app");
+    const result = await resolveRefundFailed(order.id, "Customer repaid outside app", 1000, 1000);
     const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
     expect(result).toEqual({ ok: true });
     expect(stored?.status).toBe("CANCELLED");
@@ -950,7 +961,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       refundId: older.refundId,
       refundStatus: "failed",
     });
-    const refused = await resolveRefundFailed(order.id, "too soon");
+    const refused = await resolveRefundFailed(order.id, "too soon", 1000, 1000);
     expect(refused.ok).toBe(false);
     const request = await storeScoped(storeAId).refundRequest.findFirst({ where: { orderId: order.id } });
     expect(request?.state).toBe("UNKNOWN");
@@ -959,7 +970,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
     expect(queue?.owedCents).toBe(400);
     expect(queue?.bankRefundPending).toBe(false);
-    const manual = await resolveRefundFailed(order.id, "Paid the remaining 400 by Zelle");
+    const manual = await resolveRefundFailed(order.id, "Paid the remaining 400 by Zelle", 400, 400);
     expect(manual).toEqual({ ok: true });
     const audit = await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: order.id, action: "refund_resolved_manually" },
@@ -1006,7 +1017,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     }
     const request = await storeScoped(storeAId).refundRequest.findFirst({ where: { orderId: order.id } });
     expect(request?.state).toBe("NOT_CREATED");
-    const manual = await resolveRefundFailed(order.id, "Paid the full 1000 by Zelle");
+    const manual = await resolveRefundFailed(order.id, "Paid the full 1000 by Zelle", 1000, 1000);
     expect(manual).toEqual({ ok: true });
     const audit = await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: order.id, action: "refund_resolved_manually" },
@@ -1046,7 +1057,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       refundId: dashboard.refundId,
       refundStatus: "failed",
     });
-    const refused = await resolveRefundFailed(order.id, "still unknown");
+    const refused = await resolveRefundFailed(order.id, "still unknown", 1000, 1000);
     expect(refused.ok).toBe(false);
     const request = await storeScoped(storeAId).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
     await storeScoped(storeAId).refundRequest.update({
@@ -1060,7 +1071,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       where: { entityId: order.id, action: "refund_request_unknown" },
     });
     expect(alert?.after).toMatchObject({ alert: "platform" });
-    const manual = await resolveRefundFailed(order.id, "Paid 1000 by Zelle after the bank never answered");
+    const manual = await resolveRefundFailed(order.id, "Paid 1000 by Zelle after the bank never answered", 1000, 1000);
     expect(manual).toEqual({ ok: true });
     const audit = await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: order.id, action: "refund_resolved_manually" },
@@ -1103,7 +1114,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       refundId: failed.refundId,
       refundStatus: "failed",
     });
-    expect((await resolveRefundFailed(order.id, "before the window")).ok).toBe(false);
+    expect((await resolveRefundFailed(order.id, "before the window", 1000, 1000)).ok).toBe(false);
     spy.mockRestore();
     setStripeProvider(fakeStripeProvider);
     const request = await storeScoped(storeAId).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
@@ -1115,7 +1126,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
     expect(queue?.owedCents).toBe(1000);
     expect(queue?.bankRefundPending).toBe(false);
-    const manual = await resolveRefundFailed(order.id, "Paid 1000 by Zelle");
+    const manual = await resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000);
     expect(manual).toEqual({ ok: true });
   });
 
@@ -1143,7 +1154,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         paymentIntentId: pi,
       },
     });
-    const manual = await resolveRefundFailed(order.id, "Paid 600 by Zelle");
+    const manual = await resolveRefundFailed(order.id, "Paid 600 by Zelle", 600, 600);
     expect(manual).toEqual({ ok: true });
     const audit = await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: order.id, action: "refund_resolved_manually" },
@@ -1182,7 +1193,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         refundId: counted.refundId,
       },
     });
-    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle", 600, 600)).toEqual({ ok: true });
     setRefundStatus(counted.refundId, "failed");
     const webhook = await markTerminalRefundFailure({
       paymentIntentId: pi,
@@ -1221,7 +1232,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         paymentIntentId: pi,
       },
     });
-    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000)).toEqual({ ok: true });
     const late = await fakeStripeProvider.refundPayment(pi, 600, "over-late");
     await applyProviderRefund({ ...late, paymentIntentId: pi });
     const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
@@ -1326,7 +1337,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       },
     });
     const held = holdSecondRefundRead(pi);
-    const resolving = resolveRefundFailed(order.id, "Paid 600 by Zelle");
+    const resolving = resolveRefundFailed(order.id, "Paid 600 by Zelle", 600, 600);
     try {
       const winner = await Promise.race([
         held.entered.then(() => "held" as const),
@@ -1375,7 +1386,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       },
     });
     const held = holdSecondRefundRead(pi);
-    const resolving = resolveRefundFailed(order.id, "Paid 1000 by Zelle");
+    const resolving = resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000);
     try {
       const winner = await Promise.race([
         held.entered.then(() => "held" as const),
@@ -1432,7 +1443,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         state: "ABANDONED",
       },
     });
-    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000)).toEqual({ ok: true });
     setNextRefundStatus(pi, "pending");
     const late = await fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: order.id });
     setRefundStatus(late.refundId, "succeeded");
@@ -1483,7 +1494,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         refundId: counted.refundId,
       },
     });
-    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle", 600, 600)).toEqual({ ok: true });
     await applyProviderRefund({ ...counted, paymentIntentId: pi });
     expect(await storeScoped(storeAId).auditLog.count({
       where: { entityId: order.id, action: "refund_after_manual_resolution" },
@@ -1517,7 +1528,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         refundId: failed.refundId,
       },
     });
-    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle", 600, 600)).toEqual({ ok: true });
     await applyProviderRefund({ ...failed, status: "failed", paymentIntentId: pi });
     expect(await storeScoped(storeAId).auditLog.count({
       where: { entityId: order.id, action: "refund_reversed_after_resolution" },
@@ -1547,7 +1558,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         paymentIntentId: pi,
       },
     });
-    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000)).toEqual({ ok: true });
     const late = await fakeStripeProvider.refundPayment(pi, 600, "one-alert-late");
     await applyProviderRefund({ ...late, paymentIntentId: pi });
     await applyProviderRefund({ ...late, paymentIntentId: pi });
@@ -1643,7 +1654,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         state: "ABANDONED",
       },
     });
-    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000)).toEqual({ ok: true });
     setNextRefundStatus(pi, "pending");
     const late = await fakeStripeProvider.refundPayment(pi, 600, key, { reservationKey: key, orderId: order.id });
     const selected = (await findStuckTransitionalOrders()).filter((row) => row.id === order.id);
@@ -1693,7 +1704,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         state: "ABANDONED",
       },
     });
-    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle")).toEqual({ ok: true });
+    expect(await resolveRefundFailed(order.id, "Paid 1000 by Zelle", 1000, 1000)).toEqual({ ok: true });
     const sent = () => refundRequests.filter((request) => request.paymentIntentId === pi);
     expect(sent()).toHaveLength(0);
     const selected = (await findStuckTransitionalOrders()).filter((row) => row.id === order.id);
@@ -1747,7 +1758,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         entityType: "order",
         entityId: order.id,
         after: { refundId: first.refundId, refundStatus: "failed", alert: "store_and_platform" },
-        createdAt: new Date("2026-11-01T12:00:00.000Z"),
+        createdAt: olderFailureAt,
       },
     });
     const second = await fakeStripeProvider.refundPayment(pi, 1000, "second-failure-r2");
@@ -1770,7 +1781,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     ]);
     const row = (await listRefundFailedOrders()).find((item) => item.orderId === order.id);
     expect(row?.failedRefundId).toBe(second.refundId);
-    expect(row?.failedAtLabel).not.toContain("Nov 1");
+    expect(row?.failedAtLabel).toBe(failedAtLabel(await secondAuditAt(storeAId, order.id, second.refundId), "America/Chicago"));
     await markTerminalRefundFailure({
       paymentIntentId: pi,
       refundId: second.refundId,
@@ -1789,7 +1800,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     })).toBe(2);
     const still = (await listRefundFailedOrders()).find((item) => item.orderId === order.id);
     expect(still?.failedRefundId).toBe(second.refundId);
-    expect(still?.failedAtLabel).not.toContain("Nov 1");
+    expect(still?.failedAtLabel).toBe(failedAtLabel(await secondAuditAt(storeAId, order.id, second.refundId), "America/Chicago"));
   });
 
   it("two uncovered failures found together each keep a record and the queue shows the newest", async () => {
@@ -1866,7 +1877,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         entityType: "order",
         entityId: order.id,
         after: { refundId: first.refundId, refundStatus: "failed", alert: "store_and_platform" },
-        createdAt: new Date("2026-11-01T12:00:00.000Z"),
+        createdAt: olderFailureAt,
       },
     });
     const second = await fakeStripeProvider.refundPayment(pi, 1000, "ooo-failure-r2");
@@ -1879,9 +1890,203 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     })).toEqual({ ok: true, action: "already_recorded" });
     const row = (await listRefundFailedOrders()).find((item) => item.orderId === order.id);
     expect(row?.failedRefundId).toBe(second.refundId);
-    expect(row?.failedAtLabel).not.toContain("Nov 1");
+    expect(row?.failedAtLabel).toBe(failedAtLabel(await secondAuditAt(storeAId, order.id, second.refundId), "America/Chicago"));
     expect(await storeScoped(storeAId).auditLog.count({
       where: { entityId: order.id, action: "refund_failed" },
     })).toBe(2);
+  });
+
+  it("a refund landing between external repayment and submit records the submitted amount and alerts overpayment", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Paid then refunded" },
+    });
+    const pi = `pi_paid_then_refunded_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "paid-then-cap");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "paid-then-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26620,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const shown = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
+    expect(shown?.owedCents).toBe(1000);
+    await fakeStripeProvider.refundPayment(pi, 600, "paid-then-dashboard");
+    const result = await resolveRefundFailed(order.id, "Paid 1000 cents by Zelle from displayed balance", 1000, shown!.owedCents);
+    expect(result).toEqual({
+      ok: true,
+      message: "The balance changed since you loaded this page. An alert was recorded.",
+    });
+    const recorded = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(recorded?.after).toMatchObject({
+      repaidCents: 1000,
+      displayedOwedCents: 1000,
+      refundedCents: 600,
+      capturedCents: 1000,
+    });
+    const alert = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    });
+    expect(alert?.after).toMatchObject({ overpaidCents: 600, alert: "store_and_platform" });
+    await evaluateOrderRefundState(order.id);
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    })).toBe(1);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+  });
+
+  it("submitting less than owed records an underpayment alert", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Paid less" },
+    });
+    const pi = `pi_paid_less_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "paid-less-cap");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "paid-less-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26621,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const result = await resolveRefundFailed(order.id, "Paid 400 by Zelle", 400, 1000);
+    expect(result).toEqual({ ok: true });
+    const recorded = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(recorded?.after).toMatchObject({ repaidCents: 400, refundedCents: 0, capturedCents: 1000 });
+    const alert = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_reversed_after_resolution" },
+    });
+    expect(alert?.after).toMatchObject({ underpaidCents: 600, alert: "store_and_platform" });
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+  });
+
+  it("an edited amount that meets the new balance does not claim an alert", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Edited to match" },
+    });
+    const pi = `pi_edited_match_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "edited-cap");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "edited-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26624,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    await fakeStripeProvider.refundPayment(pi, 600, "edited-dashboard");
+    const result = await resolveRefundFailed(order.id, "Paid the remaining 400", 400, 1000);
+    expect(result).toEqual({ ok: true, message: "The balance changed since you loaded this page." });
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: {
+        entityId: order.id,
+        action: { in: ["refund_after_manual_resolution", "refund_reversed_after_resolution"] },
+      },
+    })).toBe(0);
+  });
+
+  it("repaidCents outside 1..C or non-integer is rejected", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Bad amount" },
+    });
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26622,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+      },
+    });
+    for (const repaidCents of [0, 1001, 12.5]) {
+      const result = await resolveRefundFailed(order.id, "Paid something", repaidCents, 1000);
+      expect(result.ok).toBe(false);
+    }
+    const empty = new FormData();
+    empty.set("orderId", order.id);
+    empty.set("note", "Paid something");
+    empty.set("repaidDollars", "");
+    empty.set("displayedOwedCents", "1000");
+    const missing = await resolveRefundFailedAction(null, empty);
+    expect(missing.ok).toBe(false);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("REFUND_FAILED");
+  });
+
+  it("the form posts the prefilled dollars as cents", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Form cents" },
+    });
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26623,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 2500,
+        bufferCents: 0,
+        totalAuthorizedCents: 2500,
+        totalCents: 2500,
+        capturedAmountCents: 2500,
+      },
+    });
+    const form = new FormData();
+    form.set("orderId", order.id);
+    form.set("note", "Paid customer by Zelle");
+    form.set("repaidDollars", (2500 / 100).toFixed(2));
+    form.set("displayedOwedCents", "2500");
+    expect(await resolveRefundFailedAction(null, form)).toEqual({ ok: true });
+    const recorded = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(recorded?.after).toMatchObject({ repaidCents: 2500, displayedOwedCents: 2500, capturedCents: 2500 });
   });
 });

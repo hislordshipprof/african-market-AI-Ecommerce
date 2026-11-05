@@ -315,6 +315,28 @@ describe("Fake Stripe state machine (K6)", () => {
     });
   });
 
+  it("does not save an idempotency key when Stripe would reject the refund before execution", async () => {
+    setAuthorizedAmount("pi_invalid_key", 500);
+    await fakeStripeProvider.capturePaymentIntent("pi_invalid_key", 500);
+    await expect(fakeStripeProvider.refundPayment("pi_invalid_key", 0, "K")).rejects.toMatchObject({
+      code: "parameter_invalid_integer",
+    });
+    await expect(fakeStripeProvider.refundPayment("pi_invalid_key", 100, "K")).resolves.toMatchObject({
+      status: "succeeded",
+      amountRefunded: 100,
+    });
+
+    await expect(fakeStripeProvider.refundPayment("pi_missing_key", 100, "K2")).rejects.toMatchObject({
+      code: "resource_missing",
+    });
+    setAuthorizedAmount("pi_after_missing", 500);
+    await fakeStripeProvider.capturePaymentIntent("pi_after_missing", 500);
+    await expect(fakeStripeProvider.refundPayment("pi_after_missing", 100, "K2")).resolves.toMatchObject({
+      status: "succeeded",
+      amountRefunded: 100,
+    });
+  });
+
   it("rejects a refund before capture", async () => {
     const { feeRefunded } = await import("./fake");
     setAuthorizedAmount("pi_uncaptured", 800);

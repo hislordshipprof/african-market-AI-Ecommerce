@@ -77,8 +77,8 @@ async function writeAuditOnce(
 ): Promise<boolean> {
   const prior = await tx.auditLog.findMany({ where: { entityId: orderId, action } });
   const duplicate = prior.some((row) => {
-    const body = row.after as { refundId?: string } | null;
-    return body?.refundId === refundId;
+    const body = row.after as { refundId?: string; key?: string } | null;
+    return body?.refundId === refundId || body?.key === refundId;
   });
   if (duplicate) return false;
   await tx.auditLog.create({ data: systemAudit(storeId, orderId, action, after) });
@@ -127,13 +127,14 @@ export async function classifyRefundRequest(
 }
 
 async function alertAbandoned(storeId: string, orderId: string, key: string): Promise<void> {
-  await storeScopedTransaction(storeId, async (tx) => {
+  const wrote = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
-    await writeAuditOnce(tx, storeId, orderId, "refund_request_unknown", key, {
+    return writeAuditOnce(tx, storeId, orderId, "refund_request_unknown", key, {
       key,
       alert: "platform",
     });
   });
+  if (!wrote) return;
   console.error(`Refund request ${key} for order ${orderId} is still unknown. Platform alerted.`);
 }
 

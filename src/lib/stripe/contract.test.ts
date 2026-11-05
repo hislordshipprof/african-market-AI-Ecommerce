@@ -310,6 +310,24 @@ describe("Stripe contract: fake and sandbox", () => {
     expect(observed).toEqual({ type: "StripeIdempotencyError", statusCode: 400 });
   }, 60_000);
 
+  it("a validation error does not consume the idempotency key", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(500);
+      await world.provider.capturePaymentIntent(pi, 500, `cap-valid-${pi}`);
+      const key = `refund-valid-${pi}`;
+      const rejected = await errorOf(() => world.provider.refundPayment(pi, 0, key));
+      const refund = await world.provider.refundPayment(pi, 100, key);
+      return {
+        rejected: { type: rejected.type, code: rejected.code, statusCode: rejected.statusCode },
+        refund: { status: refund.status, amountRefunded: refund.amountRefunded },
+      };
+    });
+    expect(observed).toEqual({
+      rejected: { type: "StripeInvalidRequestError", code: "parameter_invalid_integer", statusCode: 400 },
+      refund: { status: "succeeded", amountRefunded: 100 },
+    });
+  }, 60_000);
+
   it("listing refunds for an unknown PaymentIntent is resource_missing on the fake and the sandbox", async () => {
     const observed = await compare(async (world) => {
       const missing = await errorOf(() => world.provider.listRefunds("pi_missing_review186"));

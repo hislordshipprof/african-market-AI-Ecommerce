@@ -416,6 +416,15 @@ const fakeStripeProvider: StripeProvider = {
     const reservationKey = options?.reservationKey ?? "";
     const orderId = options?.orderId ?? "";
     const fingerprint = `refund:${paymentIntentId}:${amountCents}:${refundApplicationFee}:${reservationKey}:${orderId}`;
+    if (!Number.isInteger(amountCents) || amountCents < 1) {
+      throw new FakeStripeError(
+        "parameter_invalid_integer",
+        "This value must be greater than or equal to 1.",
+      );
+    }
+    if (!authorizedAmounts.has(paymentIntentId) && !capturedPayments.has(paymentIntentId)) {
+      throw resourceMissing("payment_intent", paymentIntentId);
+    }
     return withIdempotency(idempotencyKey, fingerprint, async () => {
       refundRequests.push({
         paymentIntentId,
@@ -423,15 +432,6 @@ const fakeStripeProvider: StripeProvider = {
         idempotencyKey,
         refundApplicationFee,
       });
-      if (!authorizedAmounts.has(paymentIntentId) && !capturedPayments.has(paymentIntentId)) {
-        throw resourceMissing("payment_intent", paymentIntentId);
-      }
-      if (amountCents < 1) {
-        throw new FakeStripeError(
-          "parameter_invalid_integer",
-          "This value must be greater than or equal to 1.",
-        );
-      }
       if (!capturedPayments.has(paymentIntentId)) {
         throw uncapturedRefundError(paymentIntentId);
       }

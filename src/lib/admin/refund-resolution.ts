@@ -5,6 +5,8 @@ import { lockStoreRow, platformAdminTransaction, storeScopedTransaction } from "
 import { requirePlatformAdmin } from "./session";
 import { getStripeProvider } from "../stripe";
 import { findOpenRefundRequest, reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
+import { failedAtLabel } from "./failed-at";
 
 export type RefundFailedRow = {
   orderId: string;
@@ -22,19 +24,6 @@ function recordedRefundId(after: unknown): string | undefined {
   if (!after || typeof after !== "object" || Array.isArray(after)) return undefined;
   const id = (after as { refundId?: unknown }).refundId;
   return typeof id === "string" ? id : undefined;
-}
-
-function failedAtLabel(at: Date, timeZone: string): string {
-  const formatted = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(at);
-  return `${formatted} (${timeZone})`;
 }
 
 async function capturedCentsFor(order: {
@@ -148,25 +137,54 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
 }
 
 export type ResolveResult =
-  | { ok: true }
+  | { ok: true; message?: string }
   | { ok: false; error: string; fieldError?: string };
 
-export async function resolveRefundFailed(orderId: string, note: string): Promise<ResolveResult> {
+const BALANCE_CHANGED = "The balance changed since you loaded this page. An alert was recorded.";
+
+/** Dollars as typed, to cents. "10.5" is 1050. Anything that is not a dollar amount is rejected. */
+export async function parseRepaidDollars(raw: string): Promise<number | null> {
+  const trimmed = raw.trim();
+  const match = /^(\d{1,8})(?:\.(\d{1,2}))?$/.exec(trimmed);
+  if (!match) return null;
+  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+}
+
+export async function resolveRefundFailed(
+  orderId: string,
+  note: string,
+  repaidCents: number,
+  displayedOwedCents: number,
+): Promise<ResolveResult> {
   const session = await requirePlatformAdmin();
   const trimmed = note.trim();
   if (trimmed.length < 1 || trimmed.length > 500) {
     return { ok: false, error: "Note must be 1–500 characters.", fieldError: "Note must be 1–500 characters." };
+  }
+  if (!Number.isInteger(repaidCents) || !Number.isInteger(displayedOwedCents) || displayedOwedCents < 0) {
+    return {
+      ok: false,
+      error: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+      fieldError: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+    };
   }
 
   const order = await platformAdminTransaction((tx) => tx.order.findUnique({ where: { id: orderId } }));
   if (!order || order.status !== "REFUND_FAILED") {
     return { ok: false, error: "already resolved" };
   }
-  if (order.paymentIntentId) await reconcileOpenRefundRequests(order.storeId, order.id);
-  const balance = await refundBalance(order.paymentIntentId);
   const capturedCents = order.paymentIntentId
     ? await capturedCentsFor(order)
     : (order.capturedAmountCents ?? 0);
+  if (repaidCents < 1 || repaidCents > capturedCents) {
+    return {
+      ok: false,
+      error: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+      fieldError: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+    };
+  }
+  if (order.paymentIntentId) await reconcileOpenRefundRequests(order.storeId, order.id);
+  const balance = await refundBalance(order.paymentIntentId);
   const openBefore = (await storeScopedTransaction(order.storeId, (tx) => tx.refundRequest.findMany({ where: { orderId } })))
     .filter((row) => requestIsOpen(row))
     .map((row) => row.id)
@@ -204,7 +222,7 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
       data: { status: "CANCELLED", cancelledAt: new Date(), notes },
     });
     if (updated.count !== 1) return { ok: false as const, error: "already resolved" };
-    const repaidCents = Math.max(0, capturedCents - fresh.refundedCents);
+    const gap = fresh.refundedCents + repaidCents - capturedCents;
     await tx.auditLog.create({
       data: {
         storeId: order.storeId,
@@ -218,15 +236,60 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
           refundId: order.refundId,
           alert: "store",
           repaidCents,
+          displayedOwedCents,
           refundedCents: fresh.refundedCents,
           capturedCents,
           countedRefundIds: fresh.countedRefundIds,
         },
       },
     });
-    return { ok: true as const };
+    await tx.auditLog.create({
+      data: {
+        storeId: order.storeId,
+        actorId: SYSTEM_ACTOR_ID,
+        actorEmail: SYSTEM_ACTOR_EMAIL,
+        action: "refund_resolution_baseline",
+        entityType: "order",
+        entityId: orderId,
+        after: {
+          refundedCents: fresh.refundedCents,
+          countedRefundIds: fresh.countedRefundIds,
+        },
+      },
+    });
+    if (gap !== 0) {
+      console.error(`Manual repayment for order ${orderId} does not match the capture. Store and platform alerted.`);
+      await tx.auditLog.create({
+        data: {
+          storeId: order.storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: gap > 0 ? "refund_after_manual_resolution" : "refund_reversed_after_resolution",
+          entityType: "order",
+          entityId: orderId,
+          after: gap > 0
+            ? {
+                refundId: fresh.countedRefundIds[0] ?? order.refundId ?? "",
+                overpaidCents: gap,
+                alert: "store_and_platform",
+              }
+            : {
+                refundId: order.refundId ?? "",
+                underpaidCents: -gap,
+                alert: "store_and_platform",
+              },
+        },
+      });
+    }
+    const displayedStale = displayedOwedCents !== capturedCents - fresh.refundedCents;
+    return {
+      ok: true as const,
+      ...(displayedStale
+        ? { message: gap !== 0 ? BALANCE_CHANGED : "The balance changed since you loaded this page." }
+        : {}),
+    };
   }, { timeout: 20_000 }).then((result) => {
-    if (result.ok) revalidatePath("/admin/orders");
+    if (result.ok && !result.message) revalidatePath("/admin/orders");
     return result;
   });
 }
@@ -235,5 +298,20 @@ export async function resolveRefundFailedAction(
   _prev: ResolveResult | null,
   formData: FormData,
 ): Promise<ResolveResult> {
-  return resolveRefundFailed(String(formData.get("orderId") ?? ""), String(formData.get("note") ?? ""));
+  const repaidCents = await parseRepaidDollars(String(formData.get("repaidDollars") ?? ""));
+  const displayedRaw = String(formData.get("displayedOwedCents") ?? "");
+  const displayedOwedCents = /^-?\d+$/.test(displayedRaw) ? Number(displayedRaw) : Number.NaN;
+  if (repaidCents == null || !Number.isInteger(displayedOwedCents)) {
+    return {
+      ok: false,
+      error: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+      fieldError: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+    };
+  }
+  return resolveRefundFailed(
+    String(formData.get("orderId") ?? ""),
+    String(formData.get("note") ?? ""),
+    repaidCents,
+    displayedOwedCents,
+  );
 }

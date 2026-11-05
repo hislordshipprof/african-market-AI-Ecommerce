@@ -6,7 +6,7 @@ import { setStripeProvider } from "../stripe";
 import { OverRefundError } from "../stripe/errors";
 import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount } from "../stripe/fake";
 import { autoCancelOrder, reconcileStuckOrder } from "./service";
-import { submitRefund } from "./refund-requests";
+import { reconcileRefundRequest, submitRefund } from "./refund-requests";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -222,5 +222,34 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
       where: { entityId: { in: [failed.order.id, cancelled.order.id] }, action: "refund_request_unknown" },
     });
     expect(alerts).toHaveLength(2);
+  });
+
+  it("concurrent abandonment writes one alert", async () => {
+    const { order, pi } = await cancellingOrder();
+    const key = `refund:${order.id}:1`;
+    const stale = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "REFUND_FAILED" } });
+      await tx.refundRequest.create({
+        data: {
+          storeId,
+          orderId: order.id,
+          paymentIntentId: pi,
+          key,
+          amountCents: 1000,
+          refundApplicationFee: true,
+          state: "UNKNOWN",
+          createdAt: stale,
+        },
+      });
+    });
+    const row = await storeScoped(storeId).refundRequest.findFirst({ where: { key } });
+    await Promise.all([reconcileRefundRequest(row!), reconcileRefundRequest(row!)]);
+    await reconcileRefundRequest(row!);
+    const alerts = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_request_unknown" },
+    });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]?.after).toMatchObject({ key, alert: "platform" });
   });
 });

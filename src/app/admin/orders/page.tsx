@@ -66,7 +66,7 @@ export default async function RefundFailedOrdersPage() {
                 ) : (
                   <>
                     <p className="mb-2 text-sm text-foreground">Resolve #{row.orderNumber}</p>
-                    <ResolveForm orderId={row.orderId} />
+                    <ResolveForm orderId={row.orderId} owedCents={row.owedCents} capturedCents={row.capturedCents} />
                   </>
                 )}
               </div>

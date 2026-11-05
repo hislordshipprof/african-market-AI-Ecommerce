@@ -28,8 +28,10 @@ test("an admin resolves a refund-failed order from the admin orders view", async
     const row = page.getByTestId(`refund-row-${number}`);
     await expect(row).toBeVisible();
     await expect(row.getByTestId("amount-owed")).toHaveText("$25.00");
-    await page.getByLabel("Resolution note").fill("Paid customer by Zelle 11/05");
-    await page.getByRole("button", { name: "Mark resolved" }).click();
+    const resolve = page.getByText(`Resolve #${number}`).locator("..");
+    await expect(resolve.getByLabel("Amount repaid")).toHaveValue("25.00");
+    await resolve.getByLabel("Resolution note").fill("Paid customer by Zelle 11/05");
+    await resolve.getByRole("button", { name: "Mark resolved" }).click();
     await expect(row).toHaveCount(0);
   } finally {
     await deleteInboxOrder(number);

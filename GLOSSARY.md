@@ -121,7 +121,7 @@ The audit recorded when an unconfirmed card hold is released after capture does 
 The capture still stands because the refund did not cover it. Staff see that the platform is resolving the refund and do not refund the customer themselves. There is no Capture failed status. The reconcile cron keeps checking until the capture is covered or an admin records the repayment. The queue shows the failed refund's id and when that failure was recorded. A later, different failure keeps its own time.
 
 **Resolved manually**:
-A platform admin recorded how a failed refund was repaid outside the app. The order becomes Cancelled. The app moves no money. The record includes the repaid, refunded and captured cents.
+A platform admin recorded the amount they repaid outside the app. The order becomes Cancelled. The app moves no money. The record is the amount the admin entered, plus the refunded and captured cents. If that amount does not meet the capture, the store and the platform are alerted.
 
 **RefundRequest**:
 One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
