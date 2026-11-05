@@ -128,14 +128,15 @@ export function classifyCatalogImage(imageUrl: string | null | undefined): Decis
   return { kind: "not-r2", reason: "storefront returns this URL unchanged" };
 }
 
-function httpStatus(err: unknown): number | undefined {
+/** Reads `$metadata.httpStatusCode` only when it is a number, including 0 and NaN. */
+export function httpStatusOf(err: unknown): number | undefined {
   if (!err || typeof err !== "object" || !("$metadata" in err)) return undefined;
   const metadata = (err as { $metadata?: { httpStatusCode?: unknown } }).$metadata;
   return typeof metadata?.httpStatusCode === "number" ? metadata.httpStatusCode : undefined;
 }
 
 export function statusLabel(err: unknown): string {
-  const status = httpStatus(err);
+  const status = httpStatusOf(err);
   if (status !== undefined) return `HTTP ${status}`;
   const name = err && typeof err === "object" && "name" in err ? String((err as { name: unknown }).name) : "";
   if (name === "TimeoutError" || name === "AbortError") return "timeout";

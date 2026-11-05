@@ -5,6 +5,7 @@ import { autoCancelOrder, reconcileStuckOrder } from "../order/service";
 import { isStoreOpen } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
+import { runAssistantRetention } from "../assistant/retention";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -183,4 +184,21 @@ export const reconcileStuckTransitional = inngest.createFunction(
   },
 );
 
-export const inngestFunctions = [acceptanceAlert, autoCancel, sweepOrphanedAuthorized, reconcileStuckTransitional];
+export const assistantRetention = inngest.createFunction(
+  {
+    id: "assistant/retention",
+    triggers: [{ cron: "TZ=UTC 17 3 * * *" }],
+  },
+  async ({ step }) =>
+    runAssistantRetention({
+      run: (id, fn) => step.run(id, fn) as Promise<Awaited<ReturnType<typeof fn>>>,
+    }),
+);
+
+export const inngestFunctions = [
+  acceptanceAlert,
+  autoCancel,
+  sweepOrphanedAuthorized,
+  reconcileStuckTransitional,
+  assistantRetention,
+];

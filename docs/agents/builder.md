@@ -42,14 +42,14 @@ Write the question in your report and end the run. Do not invent product decisio
 Stop any other server on your lane port (`E2E_PORT`, default 3000) before running `pnpm test:e2e`. If the machine clock is >30 s off, TOTP codes will fail regardless of env setup.
 
 ## Verify before you claim done
-Run and pass all of these, in the worktree:
+These five checks must pass on your pushed HEAD. You run 1 and 2 plus the affected parts of 3–5 (the pipeline's local-ci runs all five in full after each push; see below):
 1. `pnpm typecheck`
 2. `pnpm lint`
 3. `pnpm test` (unit + integration, including store-isolation tests)
 4. `pnpm build`
 5. `pnpm test:e2e`: Playwright opens the running app and checks each acceptance criterion that has a visible result.
 
-While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts --workers=1`), and the affected unit tests (`pnpm test <path>`). When the work is ready, push and run `scripts/ci-local.sh` in the worktree. It runs steps 1–5 in full and records a `local-ci` commit status on the pushed HEAD; that status is the merge gate. GitHub Actions does not run on pushes. It runs only when the coordinator adds the `run-ci` label (milestone PRs), to save Actions minutes. Local e2e runs `E2E_WORKERS` browsers (default 4), so lanes sharing the machine don't starve memory.
+While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts --workers=1`), and the affected unit tests (`pnpm test <path>`). Run `pnpm typecheck` and `pnpm lint` before each push. **Never run `scripts/ci-local.sh` or the whole suite yourself:** after each push, `scripts/build-ticket.sh` runs it once, in parallel with the independent review. It uses a machine-wide queue (one full suite at a time), a private database and port, and one automatic retry of flaky steps. It runs steps 1–5 in full and records a `local-ci` commit status on the pushed HEAD; that status is the merge gate. A real failure comes back to you as a fix-round finding. GitHub Actions does not run on pushes. It runs only when the coordinator adds the `run-ci` label (milestone PRs), to save Actions minutes. Local e2e runs `E2E_WORKERS` browsers (default 4), so lanes sharing the machine don't starve memory.
 
 ### Definition of done (the coordinator rejects the PR if any is missing)
 - The branch is rebased on the latest `origin/main` (`git merge-base --is-ancestor origin/main HEAD` passes).

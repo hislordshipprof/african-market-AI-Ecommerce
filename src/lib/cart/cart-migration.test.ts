@@ -60,7 +60,8 @@ describe.skipIf(!hasDb)("Cart migration schema", () => {
     >`
       SELECT rc.constraint_name, rc.delete_rule
       FROM information_schema.referential_constraints rc
-      WHERE rc.constraint_name IN (
+      WHERE rc.constraint_schema = 'public'
+        AND rc.constraint_name IN (
         'carts_store_id_fkey', 'cart_lines_cart_id_fkey',
         'cart_lines_variant_id_fkey', 'cart_lines_substitute_variant_id_fkey')`;
     expect(

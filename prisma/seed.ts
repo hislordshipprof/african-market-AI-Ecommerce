@@ -19,6 +19,7 @@ async function seedDemoStores() {
   const storeA = await prisma.store.upsert({
     where: { slug: "mama-ngozi" },
     update: {
+      status: "active",
       ownerName: "Ngozi Okafor",
       ownerStory:
         "Mama Ngozi has been bringing the flavors of home to the community since 2009. What started as a small shop in a strip mall is now the neighborhood’s go-to for authentic Nigerian and West African groceries, spices, and fresh produce.",
@@ -72,6 +73,7 @@ async function seedDemoStores() {
   const storeB = await prisma.store.upsert({
     where: { slug: "tante-marie" },
     update: {
+      status: "active",
       ownerName: "Marie Desrosiers",
       ownerStory:
         "Tante Marie left Port-au-Prince in 1995 with three recipes and a dream. Today her shop is where Atlanta’s Caribbean community finds scotch bonnet peppers, fresh plantains, and the taste of the islands.",
