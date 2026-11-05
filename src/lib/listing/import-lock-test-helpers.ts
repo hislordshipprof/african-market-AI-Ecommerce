@@ -108,13 +108,16 @@ function callbackDescriptor(config: object): PropertyDescriptor | undefined {
 /**
  * pg 8.23.1 returns a Promise only when the normalized config has no truthy callback.
  * Callback-form and Submittable calls are forwarded unchanged and do not consume a rule.
- * Accessor callbacks are not read here: pg copies the descriptor onto a clone and reads it there.
+ * Positional callbacks (second-argument function, or any third argument) are recognized
+ * before `submit` is read. pg then applies Submittable precedence on the original
+ * arguments. Accessor callbacks are not read here: pg copies the descriptor onto a
+ * clone and reads it there.
  */
 function isImmediateQuery(args: unknown[]): boolean {
   const first = args[0];
-  if (isSubmittableQuery(first)) return true;
-  if (args[2]) return true;
   if (typeof args[1] === "function") return true;
+  if (args[2]) return true;
+  if (isSubmittableQuery(first)) return true;
   if (first == null || typeof first !== "object") return false;
   const desc = callbackDescriptor(first);
   if (!desc) return false;
