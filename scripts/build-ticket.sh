@@ -152,7 +152,18 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
     REVIEW_TICKET="${REVIEW_TICKET:-$ROOT/scripts/review-ticket.sh}"
     verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
     echo "Independent review $round: $verdict"
-    if wait "$ci_pid"; then ci=pass; else ci=fail; fi
+    # A blocked review means this commit will not merge, so a run still queued for the machine-wide lock only
+    # makes every other lane wait longer: cancel it. A run that already holds the lock finishes, because its
+    # failures go into this fix round.
+    # Round 3 is never cancelled: the coordinator may accept its findings, and then needs the CI result.
+    if [ "$round" != "3" ] && [ "$verdict" != "VERDICT: PASS" ] && kill -0 "$ci_pid" 2>/dev/null && ! grep -q "lock acquired" "$CI_LOG"; then
+      taskkill //F //T //PID "$(cat "/proc/$ci_pid/winpid" 2>/dev/null)" >/dev/null 2>&1 || kill "$ci_pid" 2>/dev/null || true
+      wait "$ci_pid" 2>/dev/null || true
+      gh api "repos/hislordshipprof/african-market-AI-Ecommerce/statuses/$(git -C "$WT" rev-parse HEAD)" -f state=error \
+        -f context=local-ci -f description="cancelled while queued: the review blocked this commit" >/dev/null 2>&1 || true
+      echo "cancelled while queued: the review blocked this commit" >> "$CI_LOG"
+      ci=skipped
+    elif wait "$ci_pid"; then ci=pass; else ci=fail; fi
     echo "local-ci $round: $ci ($(tail -1 "$CI_LOG"))"
     [ "$verdict" = "VERDICT: PASS" ] && [ "$ci" = pass ] && break
     [ "$round" = "3" ] && { echo "Still blocking after 2 fix rounds; the coordinator decides. See .builder/review-$N.md and $CI_LOG"; break; }
@@ -163,7 +174,7 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
 
 ## local-ci failure (blocking; full log: $CI_LOG)
 
-Test, build and e2e failures already failed twice in a row, so they are not one-off load flakes. If the log says 'local-ci SETUP', the pipeline itself failed (unpushed or uncommitted work, database setup): push your work if that is the cause, otherwise note it in the report and change no code for it.
+Each failed test was already retried, so these are not one-off load flakes. If the log says 'local-ci SETUP', the pipeline itself failed (unpushed or uncommitted work, database setup): push your work if that is the cause, otherwise note it in the report and change no code for it.
 \`\`\`
 $(tail -80 "$CI_LOG")
 \`\`\`"
