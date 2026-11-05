@@ -10,6 +10,14 @@
   grid-template-columns: 1fr 1fr;
   gap: 24px;
 }
+.sf-account-grid > * {
+  min-width: 0;
+}
+.sf-account-address,
+.sf-account-address p,
+.sf-account-cards {
+  overflow-wrap: anywhere;
+}
 .sf-account-form {
   display: grid;
   gap: 18px;
