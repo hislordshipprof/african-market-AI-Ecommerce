@@ -10,6 +10,7 @@ import {
   writeListingStock,
   type ListingStock,
 } from "./listing-db";
+import { BROWSER_COOKIE } from "../src/lib/cart/browser";
 import { storeUrl } from "./urls";
 
 /**
@@ -111,6 +112,12 @@ async function cartCookie(page: Page) {
   const cookie = cookies.find((item) => item.name === "cart_id");
   if (!cookie) throw new Error("cart cookie missing");
   return cookie.value;
+}
+
+/** A guest browser id finds the same cart again after cart_id is removed. */
+async function dropShopperCart(page: Page) {
+  await page.context().clearCookies({ name: "cart_id" });
+  await page.context().clearCookies({ name: BROWSER_COOKIE });
 }
 
 async function openGrains(page: Page) {
@@ -1887,7 +1894,7 @@ test.describe("cart recovery after a failed write", () => {
         const response = await fetchAction(route);
         const bodyText = await response.text();
         expect(bodyText).toContain("CART_NOT_FOUND");
-        await page.context().clearCookies({ name: "cart_id" });
+        await dropShopperCart(page);
         await route.fulfill({ response, body: bodyText });
         return;
       }
@@ -2098,7 +2105,7 @@ test.describe("cart recovery after a failed write", () => {
       const request = route.request();
       const body = request.postData() ?? "";
       if (isAction(request) && body.includes(row!.id) && quantitiesIn(body).length === 0) {
-        await page.context().clearCookies({ name: "cart_id" });
+        await dropShopperCart(page);
         await route.abort("failed");
         return;
       }
