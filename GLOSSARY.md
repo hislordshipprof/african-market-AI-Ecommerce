@@ -112,7 +112,28 @@ The message asking a customer to approve a swap or a refund for a short line bef
 The ordered list of lines staff collect for one or more orders, with frozen items last.
 
 **Ready**:
-The moment staff confirm every line is resolved and the order can be handed off. The final amount is charged at this point.
+The moment staff confirm every line is resolved and the order can be handed off. Marking it ready captures the final amount (goods picked, plus tip, plus delivery fee). Pickup orders then show Awaiting pickup. Delivery orders show Ready.
+
+**System actor**:
+The actor on audit rows written by timers and crons, when no person did the action.
+
+**Capture released**:
+The audit recorded when an unconfirmed card hold is released after capture does not settle. The store and the platform are both alerted.
+
+**Refund failed**:
+The capture still stands because the refund did not cover it. Staff see that the platform is resolving the refund and do not refund the customer themselves. There is no Capture failed status. The reconcile cron keeps checking until the capture is covered or an admin records the repayment. The queue shows the failed refund's id and when that failure was recorded. A later, different failure keeps its own time.
+
+**Resolved manually**:
+A platform admin recorded the amount they repaid outside the app. The order becomes Cancelled. The app moves no money. The record is the amount the admin entered, plus the refunded and captured cents. If that amount does not meet the capture, the store and the platform are alerted.
+
+**RefundRequest**:
+One refund the app asked Stripe for. The row stores the key, the amount and the fee flag. Stripe's refund object is the source of truth for what happened to the money.
+
+**Open request**:
+A RefundRequest that is still unanswered: reserved, unknown, or created at the provider but not yet succeeded, failed or canceled. Manual repayment waits until no request is open.
+
+**ABANDONED**:
+An open refund request that was still unknown 23 hours after it was created, and was not in the middle of a replay. The platform alert is written in the same locked transaction, so a failed insert does not leave the request abandoned. A refund that shows up later is still recorded, and the reconcile cron keeps matching it without sending the request again. A replay stays open until the provider answers, including on another server. Abandonment re-reads the current row under the store lock and does not overwrite a live reservation. This window is a coordinator default, pending owner confirmation.
 
 **Fulfillment option**:
 How a customer gets an order: store delivery, courier delivery, or pickup.

@@ -69,9 +69,9 @@ export default defineConfig({
           NEXT_PUBLIC_DEMO_FLOWS: "1",
           E2E_STORE_OVERRIDE: "1",
           E2E_FAKE_STRIPE: "1",
-          // `next start` is production. The fake is allowed there only when CI=true
-          // and VERCEL is unset, which is how GitHub Actions runs this suite.
-          // An empty key stops .env.local from hiding a missing-secret failure.
+          // `next start` is production. CI=true selects the fake Stripe provider and
+          // the in-memory email sender. VERCEL must stay unset. An empty key stops
+          // .env.local from hiding a missing-secret failure.
           CI: "true",
           ASSISTANT_CHAT_ENABLED: "1",
           E2E_FAKE_ASSISTANT: "1",

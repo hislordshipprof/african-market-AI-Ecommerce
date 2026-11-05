@@ -44,6 +44,7 @@ model Store {
   carts        Cart[]
   customers    Customer[]
   orders          Order[]
+  refundRequests  RefundRequest[]
   listingImports  ListingImport[]
   aiConversations AiConversation[]
   aiActions       AiAction[]
@@ -626,6 +627,7 @@ model Order {
   store    Store      @relation(fields: [storeId], references: [id])
   customer Customer   @relation(fields: [customerId, storeId], references: [id, storeId])
   lines    OrderLine[]
+  refundRequests RefundRequest[]
 
   @@unique([id, storeId])
   @@unique([storeId, number])
@@ -633,6 +635,30 @@ model Order {
   @@index([storeId, status])
   @@index([customerId])
   @@map("orders")
+}
+
+/// One refund the app asked Stripe for. Stripe owns the outcome; this row owns the request.
+model RefundRequest {
+  id                   String   @id @default(cuid())
+  storeId              String   @map("store_id")
+  orderId              String   @map("order_id")
+  paymentIntentId      String   @map("payment_intent_id")
+  key                  String   @unique
+  amountCents          Int      @map("amount_cents")
+  refundApplicationFee Boolean  @map("refund_application_fee")
+  state                String
+  providerRefundId     String?  @map("provider_refund_id")
+  providerStatus       String?  @map("provider_status")
+  createdAt            DateTime @default(now()) @map("created_at")
+  lastCheckedAt        DateTime @default(now()) @map("last_checked_at")
+
+  store Store @relation(fields: [storeId], references: [id])
+  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([orderId])
+  @@index([storeId, state])
+  @@map("refund_requests")
 }
 
 model OrderLine {

@@ -1,10 +1,10 @@
 import { after } from "next/server";
 
-function deliveryFailureLog(error: unknown): string {
+function deliveryFailureLog(eventName: string, error: unknown): string {
   const raw = error instanceof Error ? error.message : "delivery failed";
   const message = raw.replace(/[^\s<>"]+@[^\s<>"]+/g, "[redacted]");
   return JSON.stringify({
-    event: "magic_link_delivery_failed",
+    event: eventName,
     message,
   });
 }
@@ -15,13 +15,16 @@ function deliveryFailureLog(error: unknown): string {
  * (auth.handler in vitest) the task still starts without being awaited.
  * Rejections are logged and never include an email address.
  */
-export function scheduleAfterResponse(task: () => Promise<unknown>): void {
+export function scheduleAfterResponse(
+  task: () => Promise<unknown>,
+  eventName = "magic_link_delivery_failed",
+): void {
   // Start the send during the request, and hand that same promise to
   // after() so waitUntil keeps the invocation alive until it settles.
   // A callback that does not return the promise lets the runtime freeze
   // while the send is still in flight.
   const pending = task().catch((error: unknown) => {
-    console.error(deliveryFailureLog(error));
+    console.error(deliveryFailureLog(eventName, error));
   });
 
   try {

@@ -20,6 +20,7 @@ export interface WebhookRefund {
   id: string;
   status: string;
   paymentIntentId: string;
+  reservationKey?: string;
 }
 
 export interface WebhookEvent {
@@ -52,6 +53,10 @@ export interface RefundResult {
   refundId: string;
   amountRefunded: number;
   status: string;
+  /** Set when this refund was created for a reserved application request. */
+  reservationKey?: string;
+  /** The order this refund was created for, when the app sent one. */
+  orderId?: string;
 }
 
 export interface StripeProvider {
@@ -94,7 +99,7 @@ export interface StripeProvider {
     paymentIntentId: string,
     amountCents: number,
     idempotencyKey?: string,
-    options?: { refundApplicationFee?: boolean },
+    options?: { refundApplicationFee?: boolean; reservationKey?: string; orderId?: string },
   ): Promise<RefundResult>;
 
   /** Refunds on this PaymentIntent. Pending refunds stay pending. */

@@ -4,9 +4,19 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import * as dbModule from "../db";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, reset as resetFakeStripe, setAuthorizedAmount } from "../stripe/fake";
+import { fakeStripeProvider, reset as resetFakeStripe, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
 
 const hasDb = !!process.env.DATABASE_URL;
+
+const WEEKDAY_HOURS = {
+  mon: { open: "09:00", close: "20:00" },
+  tue: { open: "09:00", close: "20:00" },
+  wed: { open: "09:00", close: "20:00" },
+  thu: { open: "09:00", close: "20:00" },
+  fri: { open: "09:00", close: "20:00" },
+  sat: { open: "09:00", close: "20:00" },
+  sun: { open: "09:00", close: "20:00" },
+};
 
 function makeFakeStep() {
   const sleeps: Array<{ name: string; duration: string }> = [];
@@ -28,6 +38,14 @@ function makeFakeStep() {
 }
 
 type HandlerCtx = { event: { data: { orderId: string; storeId: string; authorizedAt?: string } }; step: ReturnType<typeof makeFakeStep> };
+
+describe("sweep configuration", () => {
+  it("both sweeps are singletons that skip overlapping runs", async () => {
+    const { sweepOrphanedAuthorized, reconcileStuckTransitional } = await import("./functions");
+    expect(sweepOrphanedAuthorized.opts.singleton).toEqual({ mode: "skip" });
+    expect(reconcileStuckTransitional.opts.singleton).toEqual({ mode: "skip" });
+  });
+});
 type Handler = (ctx: HandlerCtx) => Promise<void>;
 
 function getHandler(inngestFn: unknown): Handler {
@@ -50,7 +68,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       where: { slug: "inngest-fn-test" },
       update: {
         stripeAccountId: "acct_test_inngest",
-        hours: { mon: { open: "09:00", close: "20:00" }, tue: { open: "09:00", close: "20:00" }, wed: { open: "09:00", close: "20:00" }, thu: { open: "09:00", close: "20:00" }, fri: { open: "09:00", close: "20:00" }, sat: { open: "09:00", close: "20:00" }, sun: { open: "09:00", close: "20:00" } },
+        hours: WEEKDAY_HOURS,
         timezone: "America/New_York",
       },
       create: {
@@ -59,7 +77,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         themePreset: "palm-and-shea",
         prepTimeMinutes: 25,
         stripeAccountId: "acct_test_inngest",
-        hours: { mon: { open: "09:00", close: "20:00" }, tue: { open: "09:00", close: "20:00" }, wed: { open: "09:00", close: "20:00" }, thu: { open: "09:00", close: "20:00" }, fri: { open: "09:00", close: "20:00" }, sat: { open: "09:00", close: "20:00" }, sun: { open: "09:00", close: "20:00" } },
+        hours: WEEKDAY_HOURS,
         timezone: "America/New_York",
       },
     });
@@ -629,6 +647,28 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       } finally {
         spy.mockRestore();
       }
+    });
+
+    it("a refund-failed order the finder returns is cancelled by the cron", async () => {
+      const { reconcileStuckTransitional } = await import("./functions");
+      const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+
+      const order = await createTestOrder();
+      await fakeStripeProvider.capturePaymentIntent(order.paymentIntentId!, 1000, `cron-cover-cap-${order.id}`);
+      const failed = await fakeStripeProvider.refundPayment(order.paymentIntentId!, 1000, `cron-cover-fail-${order.id}`);
+      setRefundStatus(failed.refundId, "failed");
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "REFUND_FAILED", capturedAmountCents: 1000, refundId: failed.refundId },
+        });
+      });
+      await fakeStripeProvider.refundPayment(order.paymentIntentId!, 1000, `cron-cover-ok-${order.id}`);
+
+      await handler({ step: makeFakeStep() });
+
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLED");
     });
   });
 });

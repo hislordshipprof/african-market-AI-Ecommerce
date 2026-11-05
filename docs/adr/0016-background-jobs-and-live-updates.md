@@ -14,5 +14,5 @@ Not chosen: pg-boss (free, but needs an always-on worker that keeps Neon awake, 
 
 ## Consequences
 - Estimated Inngest cost: $0 through the pilot, ~$50–100 a month around 1,000 stores. Set a usage alert at 70% of the free tier.
-- Every job step must be idempotent (safe to retry), keyed by order or delivery ID.
+- Every job step must be idempotent (safe to retry), keyed by order or delivery ID. `order/authorized` uses the event id `order-authorized-<orderId>` (Inngest dedupes that id for 24 hours). The orphan and reconcile sweeps use `singleton: { mode: "skip" }`. `INNGEST_DEV=1` sends events to the local Dev Server and needs no event key. A missing event key in production logs `inngest_event_key_missing` once per process and does not fail checkout.
 - Polling load at target is modest (1,000 stores × a few open boards ÷ 10 s ≈ a few hundred requests a second at peak). Serve it from a cheap, cached endpoint, and switch boards to Centrifugo if it becomes costly.

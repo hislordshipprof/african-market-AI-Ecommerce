@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { findOrderByPaymentIntent } from "@/lib/db";
 import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
 import { markTerminalRefundFailure } from "@/lib/order/service";
+import { applyProviderRefund, evaluateOrderRefundState } from "@/lib/order/refund-requests";
+import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
+import type { RefundResult } from "@/lib/stripe/types";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +20,15 @@ export async function POST(req: NextRequest) {
 
   const rawBody = await req.text();
 
+  const production = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+  if (production && !process.env.STRIPE_WEBHOOK_SECRET?.trim()) {
+    console.error("STRIPE_WEBHOOK_SECRET");
+    return NextResponse.json(
+      { error: "Webhook secret is not configured" },
+      { status: 500 },
+    );
+  }
+
   let event;
   try {
     const provider = getStripeProvider();
@@ -23,7 +36,15 @@ export async function POST(req: NextRequest) {
       payload: rawBody,
       signature,
     });
-  } catch {
+  } catch (err) {
+    const production = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+    if (production && err instanceof WebhookSecretMissingError) {
+      console.error("STRIPE_WEBHOOK_SECRET");
+      return NextResponse.json(
+        { error: "Webhook secret is not configured" },
+        { status: 500 },
+      );
+    }
     return NextResponse.json(
       { error: "Invalid webhook signature" },
       { status: 400 },
@@ -41,15 +62,39 @@ export async function POST(req: NextRequest) {
     await updateStoreOnboardingStatus(event.accountId);
   }
 
-  if (
-    event.refund &&
-    (event.refund.status === "failed" || event.refund.status === "canceled")
-  ) {
-    await markTerminalRefundFailure({
-      paymentIntentId: event.refund.paymentIntentId,
-      refundId: event.refund.id,
-      refundStatus: event.refund.status,
-    });
+  if (event.refund) {
+    const provider = getStripeProvider();
+    let refund: RefundResult;
+    try {
+      refund = await provider.retrieveRefund(event.refund.id);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "resource_missing") {
+        refund = {
+          refundId: event.refund.id,
+          amountRefunded: 0,
+          status: event.refund.status,
+          ...(event.refund.reservationKey ? { reservationKey: event.refund.reservationKey } : {}),
+        };
+      } else if (isRetryableProviderError(err)) {
+        return NextResponse.json({ error: "Refund could not be read" }, { status: 500 });
+      } else {
+        throw err;
+      }
+    }
+    await applyProviderRefund({ ...refund, paymentIntentId: event.refund.paymentIntentId });
+    const refundedOrder = await findOrderByPaymentIntent(event.refund.paymentIntentId);
+    if (refundedOrder) await evaluateOrderRefundState(refundedOrder.id);
+    if (refund.status === "failed" || refund.status === "canceled") {
+      const settled = await markTerminalRefundFailure({
+        paymentIntentId: event.refund.paymentIntentId,
+        refundId: refund.refundId,
+        refundStatus: refund.status,
+      });
+      if (!settled.ok && settled.retry) {
+        return NextResponse.json({ error: settled.error }, { status: 500 });
+      }
+    }
   }
 
   return NextResponse.json({ received: true }, { status: 200 });
