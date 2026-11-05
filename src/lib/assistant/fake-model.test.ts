@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { E2E_FAKE_ANTHROPIC_KEY, assistantFakeAllowed } from "./contract";
-import { scriptStep, scriptedAssistantFetch } from "./fake-model";
+import { scriptStep, scriptedAssistantFetch, wideLayoutText } from "./fake-model";
 import { judgeMessagesRequest } from "./messages-api-double";
 
 const base = {
@@ -53,6 +53,21 @@ describe("assistant e2e fake", () => {
     expect(scriptStep(egusi)).toMatchObject({ kind: "tool", name: "search_catalog" });
     expect(scriptStep(summary)).toMatchObject({ kind: "tool", name: "get_cart_summary" });
     expect(scriptStep(egusi)).toMatchObject({ kind: "tool", name: "search_catalog" });
+  });
+
+  it("ends a wide-layout picture turn with the url, token, and store name", () => {
+    const shown = [
+      user("wide layout show me pictures of egusi"),
+      { role: "assistant", content: [{ type: "tool_use", id: "toolu_show", name: "show_products", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_show", content: "{}" }] },
+    ];
+    expect(scriptStep(shown)).toMatchObject({ kind: "text", text: wideLayoutText() });
+    const plain = [
+      user("show me pictures of egusi"),
+      { role: "assistant", content: [{ type: "tool_use", id: "toolu_show", name: "show_products", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_show", content: "{}" }] },
+    ];
+    expect(scriptStep(plain)).toMatchObject({ kind: "text", text: "Here is what I found." });
   });
 
   it("retries a scripted mid-stream failure once the failed attempt is in the history", () => {

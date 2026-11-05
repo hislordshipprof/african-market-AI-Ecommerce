@@ -24,6 +24,8 @@
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .log {
@@ -31,13 +33,27 @@
   flex-direction: column;
   gap: 12px;
   max-height: min(62dvh, 640px);
+  min-width: 0;
+  max-width: 100%;
   overflow-y: auto;
   padding-right: 2px;
   scrollbar-color: var(--color-line) transparent;
 }
 
+.message,
+.cards,
+.summary,
+.notice,
+.composer,
+.starters,
+.copy {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .bubble {
-  max-width: 38rem;
+  max-width: min(38rem, 100%);
+  min-width: 0;
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -47,6 +63,7 @@
 
 .user {
   align-self: flex-end;
+  max-width: min(38rem, 100%);
   padding: 10px 14px;
   border-radius: 16px 16px 8px 16px;
   background: var(--color-soft);
@@ -60,9 +77,11 @@
 .card,
 .choiceRow {
   display: grid;
-  grid-template-columns: 64px 1fr;
+  grid-template-columns: 64px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   padding: 8px;
   border: 1px solid var(--color-line);
   border-radius: 12px;
@@ -71,7 +90,7 @@
 }
 
 .choiceRow {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .photo,
@@ -86,32 +105,43 @@
 .placeholder {
   display: grid;
   place-items: center;
+  overflow-wrap: anywhere;
   color: var(--color-muted);
   font: 600 11px/1.2 Figtree, "Segoe UI", system-ui, sans-serif;
   text-align: center;
   padding: 4px;
 }
 
+.photo :global(.sf-product-image) {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+}
+
 .card h3,
 .summary h3 {
   margin: 0;
+  overflow-wrap: anywhere;
   font: 600 16px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
 .meta {
   margin: 2px 0 0;
+  overflow-wrap: anywhere;
   color: var(--color-muted);
   font: 400 14px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
 .price {
   margin: 4px 0 0;
+  overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
 .flag {
   margin: 4px 0 0;
+  overflow-wrap: anywhere;
   color: var(--color-deal);
   font: 600 13px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
 }
@@ -140,7 +170,17 @@
   display: flex;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
+}
+
+.summary li span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.summary li span:last-child {
+  flex-shrink: 0;
 }
 
 .actions {
@@ -152,10 +192,21 @@
 .primary,
 .send,
 .chip,
+.ghost,
+.undo {
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.primary,
+.send,
+.chip,
 .ghost {
   min-height: 44px;
   border-radius: 999px;
-  font: 600 14px/1 Figtree, "Segoe UI", system-ui, sans-serif;
+  font: 600 14px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
   cursor: pointer;
 }
 
@@ -185,15 +236,18 @@
 
 .composer {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: end;
 }
 
 .composer textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 48px;
   max-height: 140px;
+  overflow-wrap: anywhere;
   resize: vertical;
   padding: 12px 14px;
   border: 1px solid var(--color-line);
@@ -218,6 +272,9 @@
 .notice {
   display: grid;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 12px;
   border-radius: 12px;
   background: var(--color-soft);

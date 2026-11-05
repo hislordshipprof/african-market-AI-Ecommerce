@@ -79,6 +79,13 @@ function itemsOf(output: unknown): Array<{ listingId?: string; variantId?: strin
   return output.items.filter(isRecord);
 }
 
+export const WIDE_LAYOUT_TOKEN = "W".repeat(60);
+export const WIDE_LAYOUT_STORE = `MamaNgozi${"S".repeat(48)}`;
+
+export function wideLayoutText(): string {
+  return `See https://example.com/assistant/wide-layout and ${WIDE_LAYOUT_TOKEN} at ${WIDE_LAYOUT_STORE}.`;
+}
+
 export function scriptStep(messages: unknown): ScriptStep {
   const turn = currentTurn(messages);
   const text = turn.text.toLowerCase();
@@ -110,6 +117,7 @@ export function scriptStep(messages: unknown): ScriptStep {
   if (last.name === "offer_choices") return { kind: "text", text: "Pick one." };
   if (last.name === "get_cart_summary") return { kind: "text", text: "Here is your basket." };
   if (last.name === "show_products" || last.name === "add_to_cart") {
+    if (text.includes("wide layout")) return { kind: "text", text: wideLayoutText() };
     return { kind: "text", text: "Here is what I found." };
   }
   return { kind: "text", text: "Here is what I found." };

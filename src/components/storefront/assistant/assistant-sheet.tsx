@@ -306,7 +306,7 @@ function MessageView({
     return <p className={`${styles.bubble} ${styles.user}`}>{textOf(message)}</p>;
   }
   return (
-    <div>
+    <div className={styles.message}>
       {message.parts.map((part, index) => {
         if (part.type === "text") {
           return part.text ? <p key={`${message.id}-text-${index}`} className={styles.bubble}>{part.text}</p> : null;
@@ -360,7 +360,7 @@ function CardView({
         ) : (
           <div className={styles.placeholder}>No photo yet</div>
         )}
-        <div>
+        <div className={styles.copy}>
           <h3>{card.name}</h3>
           <p className={styles.meta}>{card.packLabel}</p>
           <p className={styles.price}>{card.priceLabel}</p>
@@ -374,7 +374,7 @@ function CardView({
     return (
       <article className={styles.card}>
         <div className={styles.placeholder}>Added</div>
-        <div>
+        <div className={styles.copy}>
           <h3>{card.name}</h3>
           <p className={styles.meta}>{[card.packLabel, `Qty ${card.qtyAdded}`].filter(Boolean).join(" · ")}</p>
           {card.limitedTo != null ? <p className={styles.flag}>Limited to {card.limitedTo}</p> : null}
