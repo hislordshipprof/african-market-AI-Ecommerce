@@ -460,6 +460,7 @@ async function persistRefundFailure(
   }
   let alreadyResolved = false;
   let wrote = false;
+  let recordedFailure = false;
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
@@ -482,10 +483,15 @@ async function persistRefundFailure(
           : {}),
       },
     });
-    const existing = await tx.auditLog.findFirst({
+    const prior = await tx.auditLog.findMany({
       where: { entityId: orderId, action: "refund_failed" },
     });
-    if (existing) return;
+    const duplicate = prior.some((log) => {
+      const after = log.after as { refundId?: string } | null;
+      return after?.refundId === refundId;
+    });
+    if (duplicate) return;
+    recordedFailure = true;
     await tx.auditLog.create({
       data: systemAuditData(storeId, orderId, "refund_failed", {
         refundId,
@@ -497,7 +503,7 @@ async function persistRefundFailure(
   if ((wrote || alreadyResolved) && preview?.paymentIntentId) {
     await syncProviderRefund(preview.paymentIntentId, refundId, refundStatus);
   }
-  if (alreadyResolved) return;
+  if (alreadyResolved || !recordedFailure) return;
   console.error(
     `Refund ${refundStatus} for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,
   );
@@ -623,6 +629,39 @@ function refundStillCovers(refunds: RefundResult[], capturedCents: number): bool
   return covering >= capturedCents;
 }
 
+/** One failure record per refund. A repeat of the same refund does not alert again. */
+async function recordDistinctRefundFailure(
+  storeId: string,
+  orderId: string,
+  refundId: string,
+  refundStatus: string,
+): Promise<void> {
+  let recorded = false;
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const prior = await tx.auditLog.findMany({
+      where: { entityId: orderId, action: "refund_failed" },
+    });
+    const duplicate = prior.some((log) => {
+      const after = log.after as { refundId?: string } | null;
+      return after?.refundId === refundId;
+    });
+    if (duplicate) return;
+    recorded = true;
+    await tx.auditLog.create({
+      data: systemAuditData(storeId, orderId, "refund_failed", {
+        refundId,
+        refundStatus,
+        alert: "store_and_platform",
+      }),
+    });
+  });
+  if (!recorded) return;
+  console.error(
+    `Refund ${refundStatus} for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,
+  );
+}
+
 export async function markTerminalRefundFailure(input: {
   paymentIntentId: string;
   refundId: string;
@@ -636,6 +675,7 @@ export async function markTerminalRefundFailure(input: {
   }
   if (order.status === "REFUND_FAILED") {
     await syncProviderRefund(input.paymentIntentId, input.refundId, input.refundStatus);
+    await recordDistinctRefundFailure(order.storeId, order.id, input.refundId, input.refundStatus);
     return { ok: true, action: "already_recorded" };
   }
   if (order.status !== "CANCELLING" && order.status !== "CANCELLED") {

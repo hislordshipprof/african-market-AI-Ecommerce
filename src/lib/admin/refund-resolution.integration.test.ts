@@ -27,7 +27,7 @@ import { recordReconcileResult } from "../inngest/functions";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundCreatedLate, setRefundStatus } from "../stripe/fake";
 import { RefundNotCreatedError } from "../stripe/errors";
-import { applyProviderRefund } from "../order/refund-requests";
+import { applyProviderRefund, evaluateOrderRefundState } from "../order/refund-requests";
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { listRefundFailedOrders, resolveRefundFailed } from "./refund-resolution";
 
@@ -1705,5 +1705,183 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       where: { entityId: order.id, action: "refund_after_manual_resolution" },
     })).toBeNull();
     expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+  });
+
+  it("a later distinct refund failure keeps its own audit and the admin failure date", async () => {
+    asAdmin(cookiesAdmin);
+    const sessionUser = await storeScopedTransaction(storeAId, async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ user: string }>>`SELECT session_user AS user`;
+      return rows[0]?.user;
+    });
+    expect(sessionUser).toBe("app_runtime");
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Second failure" },
+    });
+    const pi = `pi_second_failure_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "second-failure-cap");
+    const first = await fakeStripeProvider.refundPayment(pi, 1000, "second-failure-r1");
+    setRefundStatus(first.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26610,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: first.refundId,
+      },
+    });
+    await storeScoped(storeAId).auditLog.create({
+      data: {
+        storeId: storeAId,
+        actorId: adminId,
+        actorEmail: emailAdmin,
+        action: "refund_failed",
+        entityType: "order",
+        entityId: order.id,
+        after: { refundId: first.refundId, refundStatus: "failed", alert: "store_and_platform" },
+        createdAt: new Date("2026-11-01T12:00:00.000Z"),
+      },
+    });
+    const second = await fakeStripeProvider.refundPayment(pi, 1000, "second-failure-r2");
+    await evaluateOrderRefundState(order.id);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+    setRefundStatus(second.refundId, "failed");
+    await applyProviderRefund({ ...second, status: "failed", paymentIntentId: pi });
+    expect(await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: second.refundId,
+      refundStatus: "failed",
+    })).toEqual({ ok: true, action: "already_recorded" });
+    const audits = await storeScoped(storeAId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_failed" },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(audits.map((row) => (row.after as { refundId?: string }).refundId)).toEqual([
+      first.refundId,
+      second.refundId,
+    ]);
+    const row = (await listRefundFailedOrders()).find((item) => item.orderId === order.id);
+    expect(row?.failedRefundId).toBe(second.refundId);
+    expect(row?.failedAtLabel).not.toContain("Nov 1");
+    await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: second.refundId,
+      refundStatus: "failed",
+    });
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_failed" },
+    })).toBe(2);
+    await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: first.refundId,
+      refundStatus: "failed",
+    });
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_failed" },
+    })).toBe(2);
+    const still = (await listRefundFailedOrders()).find((item) => item.orderId === order.id);
+    expect(still?.failedRefundId).toBe(second.refundId);
+    expect(still?.failedAtLabel).not.toContain("Nov 1");
+  });
+
+  it("two uncovered failures found together each keep a record and the queue shows the newest", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Two failures" },
+    });
+    const pi = `pi_two_failures_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "two-failures-cap");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "two-failures-old");
+    setRefundStatus(older.refundId, "failed");
+    const newer = await fakeStripeProvider.refundPayment(pi, 600, "two-failures-new");
+    setRefundStatus(newer.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26611,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    await evaluateOrderRefundState(order.id);
+    const audits = await storeScoped(storeAId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_failed" },
+    });
+    expect(audits.map((row) => (row.after as { refundId?: string }).refundId).sort()).toEqual(
+      [older.refundId, newer.refundId].sort(),
+    );
+    const row = (await listRefundFailedOrders()).find((item) => item.orderId === order.id);
+    expect(row?.failedRefundId).toBe(newer.refundId);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("REFUND_FAILED");
+  });
+
+  it("a failed refund that arrives while an older failure is already recorded replaces the queue date", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Out of order failure" },
+    });
+    const pi = `pi_ooo_failure_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "ooo-failure-cap");
+    const first = await fakeStripeProvider.refundPayment(pi, 1000, "ooo-failure-r1");
+    setRefundStatus(first.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26612,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: first.refundId,
+      },
+    });
+    await storeScoped(storeAId).auditLog.create({
+      data: {
+        storeId: storeAId,
+        actorId: adminId,
+        actorEmail: emailAdmin,
+        action: "refund_failed",
+        entityType: "order",
+        entityId: order.id,
+        after: { refundId: first.refundId, refundStatus: "failed", alert: "store_and_platform" },
+        createdAt: new Date("2026-11-01T12:00:00.000Z"),
+      },
+    });
+    const second = await fakeStripeProvider.refundPayment(pi, 1000, "ooo-failure-r2");
+    setRefundStatus(second.refundId, "failed");
+    await applyProviderRefund({ ...second, status: "failed", paymentIntentId: pi });
+    expect(await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: second.refundId,
+      refundStatus: "failed",
+    })).toEqual({ ok: true, action: "already_recorded" });
+    const row = (await listRefundFailedOrders()).find((item) => item.orderId === order.id);
+    expect(row?.failedRefundId).toBe(second.refundId);
+    expect(row?.failedAtLabel).not.toContain("Nov 1");
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_failed" },
+    })).toBe(2);
   });
 });

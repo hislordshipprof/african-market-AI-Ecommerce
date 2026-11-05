@@ -118,7 +118,7 @@ The actor on audit rows written by timers and crons, when no person did the acti
 The audit recorded when an unconfirmed card hold is released after capture does not settle. The store and the platform are both alerted.
 
 **Refund failed**:
-The capture still stands because the refund did not cover it. Staff see that the platform is resolving the refund and do not refund the customer themselves. There is no Capture failed status. The reconcile cron keeps checking until the capture is covered or an admin records the repayment.
+The capture still stands because the refund did not cover it. Staff see that the platform is resolving the refund and do not refund the customer themselves. There is no Capture failed status. The reconcile cron keeps checking until the capture is covered or an admin records the repayment. The queue shows the failed refund's id and when that failure was recorded. A later, different failure keeps its own time.
 
 **Resolved manually**:
 A platform admin recorded how a failed refund was repaid outside the app. The order becomes Cancelled. The app moves no money. The record includes the repaid, refunded and captured cents.

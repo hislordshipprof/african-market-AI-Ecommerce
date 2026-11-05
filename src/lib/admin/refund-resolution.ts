@@ -18,6 +18,12 @@ export type RefundFailedRow = {
   bankRefundPending: boolean;
 };
 
+function recordedRefundId(after: unknown): string | undefined {
+  if (!after || typeof after !== "object" || Array.isArray(after)) return undefined;
+  const id = (after as { refundId?: unknown }).refundId;
+  return typeof id === "string" ? id : undefined;
+}
+
 function failedAtLabel(at: Date, timeZone: string): string {
   const formatted = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -115,7 +121,10 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
   }
   const rows: RefundFailedRow[] = [];
   for (const order of orders) {
-    const failure = failureByOrder.get(order.id);
+    const failureRows = failures.filter(
+      (row) => row.entityId === order.id && recordedRefundId(row.after) === order.refundId,
+    );
+    const failure = failureRows[failureRows.length - 1] ?? failureByOrder.get(order.id);
     const capturedCents = await capturedCentsFor(order);
     const balance = await refundBalance(order.paymentIntentId);
     const reservation = await findOpenRefundRequest(order.storeId, order.id);

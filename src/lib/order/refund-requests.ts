@@ -74,14 +74,15 @@ async function writeAuditOnce(
   action: string,
   refundId: string,
   after: Prisma.InputJsonValue,
-): Promise<void> {
+): Promise<boolean> {
   const prior = await tx.auditLog.findMany({ where: { entityId: orderId, action } });
   const duplicate = prior.some((row) => {
     const body = row.after as { refundId?: string } | null;
     return body?.refundId === refundId;
   });
-  if (duplicate) return;
+  if (duplicate) return false;
   await tx.auditLog.create({ data: systemAudit(storeId, orderId, action, after) });
+  return true;
 }
 
 function isNotCreated(err: unknown): boolean {
@@ -336,7 +337,8 @@ function baselineBody(after: Prisma.JsonValue): { refundedCents: number; counted
 export async function evaluateOrderRefundState(orderId: string): Promise<void> {
   const located = await platformAdminTransaction((tx) => tx.order.findUnique({ where: { id: orderId } }));
   if (!located?.paymentIntentId) return;
-  await storeScopedTransaction(located.storeId, async (tx) => {
+  const recorded = await storeScopedTransaction(located.storeId, async (tx) => {
+    const fresh: string[] = [];
     await lockStoreRow(tx, located.storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order?.paymentIntentId) return;
@@ -432,28 +434,36 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
       }
       return;
     }
-    const failed = listed.find((refund) => refund.status === "failed" || refund.status === "canceled");
-    if (failed && settled + pending < captured && (order.status === "CANCELLING" || order.status === "CANCELLED")) {
-      await tx.order.update({
-        where: { id: orderId },
-        data: {
-          status: "REFUND_FAILED",
-          refundId: failed.refundId,
-          ...(order.capturedAmountCents == null ? { capturedAmountCents: captured } : {}),
-        },
-      });
-      const existing = await tx.auditLog.findFirst({ where: { entityId: orderId, action: "refund_failed" } });
-      if (!existing) {
-        await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "refund_failed", {
-            refundId: failed.refundId,
-            refundStatus: failed.status,
-            alert: "store_and_platform",
-          }),
+    const failedRefunds = listed.filter((refund) => refund.status === "failed" || refund.status === "canceled");
+    const failed = failedRefunds[0];
+    if (
+      failed
+      && settled + pending < captured
+      && (order.status === "CANCELLING" || order.status === "CANCELLED" || order.status === "REFUND_FAILED")
+    ) {
+      const data: Prisma.OrderUpdateInput = {};
+      if (order.status !== "REFUND_FAILED") data.status = "REFUND_FAILED";
+      if (order.refundId !== failed.refundId) data.refundId = failed.refundId;
+      if (order.capturedAmountCents == null) data.capturedAmountCents = captured;
+      if (Object.keys(data).length > 0) {
+        await tx.order.update({ where: { id: orderId }, data });
+      }
+      for (const item of failedRefunds) {
+        const wrote = await writeAuditOnce(tx, order.storeId, orderId, "refund_failed", item.refundId, {
+          refundId: item.refundId,
+          refundStatus: item.status,
+          alert: "store_and_platform",
         });
+        if (wrote) fresh.push(item.refundId);
       }
     }
+    return fresh;
   }, { timeout: 20_000 });
+  for (const refundId of recorded ?? []) {
+    console.error(
+      `Refund failed for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,
+    );
+  }
 }
 
 /** Match a provider refund to its request. The evaluator decides the order. */
