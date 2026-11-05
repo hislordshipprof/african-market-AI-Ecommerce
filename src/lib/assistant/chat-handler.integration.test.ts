@@ -664,6 +664,90 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(body).toContain("I've done as much as I can in one go");
   });
 
+  it("adds 20 items and then 10 more distinct items with structured tool results", async () => {
+    const variants: string[] = [];
+    await Promise.all(Array.from({ length: 30 }, async (_, index) => {
+      const listing = await storeScoped(storeId).listing.create({
+        data: {
+          storeId,
+          customName: `Batch item ${index}`,
+          price: 100 + index,
+          stockMode: "unlimited",
+          frozen: false,
+          perishable: false,
+        },
+      });
+      const variant = await storeScoped(storeId).listingVariant.create({
+        data: { listingId: listing.id, label: "Each", price: 100 + index, weightG: 100 },
+      });
+      variants[index] = variant.id;
+    }));
+    const batchOf = (ids: string[]) => ids.map((variantId) => ({ variant_id: variantId, qty: 1 }));
+    const { model, calls } = strictModel((call) => {
+      if (call === 1) {
+        return [
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "call-add-20",
+            toolName: "add_to_cart",
+            input: JSON.stringify({ items: batchOf(variants.slice(0, 20)) }),
+          },
+          { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+        ];
+      }
+      if (call === 2) {
+        return [
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "call-add-10",
+            toolName: "add_to_cart",
+            input: JSON.stringify({ items: batchOf(variants.slice(20)) }),
+          },
+          { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+        ];
+      }
+      return [
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "text-1" },
+        { type: "text-delta", id: "text-1", delta: "Added thirty items." },
+        { type: "text-end", id: "text-1" },
+        { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+      ];
+    });
+    const handler = createChatHandler({ model });
+    const response = await handler(request("add thirty distinct items", { ip: "198.51.100.30" }));
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(calls()).toBe(3);
+    expect(body).not.toContain("data-step-limit");
+    expect(body).toContain("Added thirty items.");
+    const outputs = uiParts(body).filter((part) => part.type === "tool-output-available");
+    expect(outputs.map((part) => part.toolCallId)).toEqual(["call-add-20", "call-add-10"]);
+    const batches = outputs.map((part) => part.output as {
+      ok: boolean;
+      items: Array<{ ok: boolean; lineId: string; qty: number }>;
+    });
+    expect(batches[0]?.items).toHaveLength(20);
+    expect(batches[1]?.items).toHaveLength(10);
+    const lineIds = batches.flatMap((batch) => {
+      expect(batch.ok).toBe(true);
+      return batch.items.map((item) => {
+        expect(item).toMatchObject({ ok: true, qty: 1 });
+        return item.lineId;
+      });
+    });
+    expect(new Set(lineIds).size).toBe(30);
+    const cookie = response.headers.get("set-cookie") ?? "";
+    const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
+    const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId } });
+    expect(lines).toHaveLength(30);
+    expect(lines.map((line) => line.variantId).toSorted()).toEqual([...variants].toSorted());
+    expect(lines.every((line) => line.qty === 1 && line.source === "ai")).toBe(true);
+    expect(new Set(lines.map((line) => line.id))).toEqual(new Set(lineIds));
+  }, 30_000);
+
   it("a 30-item gather is capped at 20 ids per call and then the step limit", async () => {
     const ids = Array.from({ length: 20 }, (_, index) => `listing-${index}`);
     let n = 0;
