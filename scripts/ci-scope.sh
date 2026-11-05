@@ -37,6 +37,8 @@ rebase_is_safe() {
   a=$(git diff "$old_base" "$old" | git patch-id --stable | cut -d' ' -f1)
   b=$(git diff "$new_base" "$new" | git patch-id --stable | cut -d' ' -f1)
   [ -n "$a" ] && [ "$a" = "$b" ] || return 1
+  # The rebase tier reruns tests related to source files, so a change touching anything else needs a full run.
+  git diff --name-only "$new_base" "$new" | grep -qvE '^(src/.*\.tsx?|e2e/.*|docs/.*|screenshots/.*|.*\.md)$' && return 1
   ! git diff --name-only "$old_base" "$new_base" \
     | grep -qE '^(prisma/|package\.json$|pnpm-lock\.yaml$|patches/|next\.config\.|playwright\.config\.|vitest\.config\.|tsconfig|\.github/|src/proxy\.ts$|src/app/layout\.tsx$|src/lib/test-setup\.ts$|e2e/global-(setup|teardown)\.ts$)'
 }

@@ -78,5 +78,6 @@ else
     echo "The rebase has conflicts."
   fi
   echo "PR #$PR is $CMP commit(s) behind main or has $PENDING_OR_FAILED non-green check(s); using ship-ticket.sh."
-  exec "$(dirname "$0")/ship-ticket.sh" "$N" "$VERDICT"
+  "$(dirname "$0")/ship-ticket.sh" "$N" "$VERDICT"
+  start_main_run_if_due
 fi
