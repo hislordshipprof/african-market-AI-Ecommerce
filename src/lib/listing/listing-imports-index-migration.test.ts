@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import { Client } from "pg";
+import { affectedTablesInMigrateDiff } from "./migrate-diff-tables";
 
 const execFileAsync = promisify(execFile);
 
@@ -105,8 +106,18 @@ describe.skipIf(!connectionString)("listing_imports index matches the live lane"
       { cwd: path.resolve(__dirname, "../../.."), env: process.env, maxBuffer: 10 * 1024 * 1024 },
     );
     expect(stdout).not.toMatch(/listing_imports/);
-    for (const table of DRIFT_TABLES) {
-      expect(stdout).toContain(table);
+    const client = new Client({ connectionString });
+    await client.connect();
+    try {
+      const { rows } = await client.query<{ indexname: string; tablename: string }>(
+        `SELECT indexname, tablename
+         FROM pg_indexes
+         WHERE schemaname = 'public'`,
+      );
+      const indexToTable = new Map(rows.map((row) => [row.indexname, row.tablename]));
+      expect(affectedTablesInMigrateDiff(stdout, indexToTable)).toEqual([...DRIFT_TABLES]);
+    } finally {
+      await client.end();
     }
   }, 60_000);
 });
