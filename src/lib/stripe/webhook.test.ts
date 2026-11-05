@@ -209,6 +209,23 @@ describe("Stripe webhook signatures", () => {
     expect(res.status).toBe(400);
   });
 
+  it.each([
+    { NODE_ENV: "production", VERCEL: "" },
+    { NODE_ENV: "test", VERCEL: "1" },
+  ])("both missing Stripe secrets return 500 and log the webhook key: %j", async (runtime) => {
+    vi.stubEnv("NODE_ENV", runtime.NODE_ENV);
+    vi.stubEnv("VERCEL", runtime.VERCEL);
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "");
+    vi.stubEnv("E2E_FAKE_STRIPE", "");
+    setStripeProvider(null);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await post("{}", "t=1,v1=dead");
+    expect(response.status).toBe(500);
+    expect(log.mock.calls.flat().join(" ")).toContain("STRIPE_WEBHOOK_SECRET");
+    log.mockRestore();
+  });
+
   it("a missing webhook secret in production returns 500 and logs the key", async () => {
     vi.stubEnv("NODE_ENV", "production");
     delete process.env.VERCEL;

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { lockStoreRow, platformAdminTransaction, storeScopedTransaction } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { getStripeProvider } from "../stripe";
+import { refundReservationStillOpen } from "../order/service";
 
 export type RefundFailedRow = {
   orderId: string;
@@ -93,6 +94,7 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
     const failure = failureByOrder.get(order.id);
     const capturedCents = await capturedCentsFor(order);
     const balance = await refundBalance(order.paymentIntentId);
+    const reservationOpen = await refundReservationStillOpen(order.storeId, order.id, order.paymentIntentId);
     rows.push({
       orderId: order.id,
       storeName: order.store.name,
@@ -102,7 +104,7 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
       owedCents: capturedCents - balance.refundedCents,
       failedRefundId: order.refundId ?? "",
       failedAtLabel: failedAtLabel(failure?.createdAt ?? order.updatedAt, order.store.timezone),
-      bankRefundPending: balance.bankRefundPending,
+      bankRefundPending: balance.bankRefundPending || reservationOpen,
     });
   }
   return rows;
@@ -123,6 +125,7 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
   if (!order || order.status !== "REFUND_FAILED") {
     return { ok: false, error: "already resolved" };
   }
+  const reservationOpen = await refundReservationStillOpen(order.storeId, order.id, order.paymentIntentId);
 
   return storeScopedTransaction(order.storeId, async (tx) => {
     await lockStoreRow(tx, order.storeId);
@@ -131,7 +134,7 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
       return { ok: false as const, error: "already resolved" };
     }
     const balance = await refundBalance(current.paymentIntentId);
-    if (balance.bankRefundPending) {
+    if (balance.bankRefundPending || reservationOpen) {
       return { ok: false as const, error: "A refund is still confirming with the bank" };
     }
     if (!current.paymentIntentId) {

@@ -46,7 +46,7 @@ export default async function RefundFailedOrdersPage() {
                   <td className="px-4 py-3 tabular-nums" data-testid="amount-owed">
                     {formatRefundCents(row.owedCents)}
                     {row.bankRefundPending ? (
-                      <span className="mt-1 block text-xs text-muted-foreground">Bank refund still pending</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">Bank refund still open</span>
                     ) : null}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs">{row.failedRefundId}</td>
@@ -61,7 +61,7 @@ export default async function RefundFailedOrdersPage() {
               <div key={row.orderId}>
                 {row.bankRefundPending ? (
                   <p className="text-sm text-foreground" data-testid="bank-refund-pending">
-                    A refund of order #{row.orderNumber} is still pending with the bank. Do not repay this order until it finishes.
+                    A refund for order #{row.orderNumber} is still with the bank. Do not repay this order until it finishes.
                   </p>
                 ) : (
                   <>

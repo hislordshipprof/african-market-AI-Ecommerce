@@ -17,6 +17,15 @@ export async function POST(req: NextRequest) {
 
   const rawBody = await req.text();
 
+  const production = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+  if (production && !process.env.STRIPE_WEBHOOK_SECRET?.trim()) {
+    console.error("STRIPE_WEBHOOK_SECRET");
+    return NextResponse.json(
+      { error: "Webhook secret is not configured" },
+      { status: 500 },
+    );
+  }
+
   let event;
   try {
     const provider = getStripeProvider();

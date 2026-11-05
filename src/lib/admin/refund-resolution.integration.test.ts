@@ -742,6 +742,69 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(stored?.status).toBe("CANCELLED");
   });
 
+  it("adversarial late bank write after manual repayment", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Adversarial late bank write" },
+    });
+    const pi = `pi_adversarial_late_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "adversarial-cap");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "adversarial-old");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26494,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const enteredGate = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (...args) => {
+      entered();
+      await gate;
+      return original(...args);
+    });
+    const cancel = autoCancelOrder(storeAId, order.id);
+    try {
+      await enteredGate;
+      setRefundStatus(older.refundId, "failed");
+      const webhook = await markTerminalRefundFailure({
+        paymentIntentId: pi,
+        refundId: older.refundId,
+        refundStatus: "failed",
+      });
+      const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
+      const manual = await resolveRefundFailed(order.id, "Paid displayed 1000 cents by Zelle");
+      expect(webhook).toEqual({ ok: true, action: "refund_failed" });
+      expect(queue?.owedCents).toBe(1000);
+      expect(queue?.bankRefundPending).toBe(true);
+      expect(manual.ok).toBe(false);
+      const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+      expect(stored?.status).toBe("REFUND_FAILED");
+    } finally {
+      release();
+      await cancel.catch(() => {});
+      spy.mockRestore();
+      setStripeProvider(fakeStripeProvider);
+    }
+  });
+
   it("a failed refund found by the sweep can be repaid", async () => {
     asAdmin(cookiesAdmin);
     const customer = await storeScoped(storeAId).customer.create({

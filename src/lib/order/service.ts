@@ -109,8 +109,15 @@ async function refundCapturedBalance(
     }
     const uncovered = await failedRefundLeavingCaptureUncovered(paymentIntentId, pi.amountReceived);
     if (uncovered) return uncovered;
+    let knownRefundIds: string[] | undefined;
+    try {
+      knownRefundIds = (await stripe.listRefunds(paymentIntentId)).map((refund) => refund.refundId);
+    } catch {
+      knownRefundIds = undefined;
+    }
     const reservedRefund = await reserveAttempt(storeId, orderId, "refund_retry", {
       alreadyRefundedCents: already,
+      ...(knownRefundIds ? { knownRefundIds } : {}),
     });
     if (!reservedRefund.ok) {
       if (reservedRefund.blocked) return { blocked: true };
@@ -290,21 +297,44 @@ function refundStillOpen(status: string): boolean {
   return status === "pending" || status === "requires_action";
 }
 
+/**
+ * An in-flight refund request is still reserved until a refund it created is finished.
+ * An older refund failing, or an empty pending list, does not prove this request finished.
+ */
+export async function refundReservationStillOpen(
+  storeId: string,
+  orderId: string,
+  paymentIntentId: string | null,
+): Promise<boolean> {
+  const prior = await storeScoped(storeId).auditLog.findMany({
+    where: { entityId: orderId, action: "refund_retry" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  });
+  const newest = prior[0]?.after as { attempt?: number; inFlight?: boolean } | null;
+  if (newest?.inFlight !== true || typeof newest.attempt !== "number") return false;
+  const reservation = prior.find((row) => {
+    const after = row.after as { attempt?: number; inFlight?: boolean } | null;
+    return after?.attempt === newest.attempt && typeof after?.inFlight !== "boolean";
+  });
+  const known = (reservation?.after as { knownRefundIds?: string[] } | null)?.knownRefundIds;
+  if (!paymentIntentId || !known) return true;
+  try {
+    const listed = await getStripeProvider().listRefunds(paymentIntentId);
+    const created = listed.filter((refund) => !known.includes(refund.refundId));
+    if (created.length === 0) return true;
+    return created.some((refund) => refundStillOpen(refund.status));
+  } catch {
+    return true;
+  }
+}
+
 /** The provider has a finished refund, so the in-flight reservation no longer blocks repayment. */
 async function releaseSettledRefundAttempt(
   storeId: string,
   orderId: string,
   paymentIntentId?: string,
 ): Promise<void> {
-  if (paymentIntentId) {
-    try {
-      const listed = await getStripeProvider().listRefunds(paymentIntentId);
-      if (listed.some((refund) => refundStillOpen(refund.status))) return;
-    } catch (err) {
-      const code = (err as { code?: string }).code;
-      if (code !== "resource_missing") return;
-    }
-  }
+  if (paymentIntentId && await refundReservationStillOpen(storeId, orderId, paymentIntentId)) return;
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findFirst({
