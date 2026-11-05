@@ -46,7 +46,8 @@ export function Sheet({
     document.body.style.overflow = "hidden";
     restore.current = () => {
       document.body.style.overflow = overflow;
-      previous?.focus();
+      if (previous?.isConnected) previous.focus();
+      else document.getElementById("storefront-search")?.focus();
       restore.current = null;
     };
   }, [open]);

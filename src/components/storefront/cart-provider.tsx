@@ -32,6 +32,7 @@ import { Sheet } from "./sheet";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { toast } from "sonner";
 import { money } from "@/lib/format";
+import { bindCartRefresh } from "@/lib/assistant/ui/cart-bridge";
 import styles from "./cart.module.css";
 
 const OFFLINE = "Couldn't update your cart. Check your connection and try again.";
@@ -77,6 +78,7 @@ interface CartContextValue {
   loading: boolean;
   syncing: boolean;
   attention: boolean;
+  cartId: string | null;
   refreshCart: () => Promise<void>;
 }
 const Context = createContext<CartContextValue | null>(null);
@@ -106,6 +108,7 @@ export function CartProvider({
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [attention, setAttention] = useState(false);
+  const [cartId, setCartId] = useState<string | null>(null);
   const mounted = useRef(true);
   const linesRef = useRef<CartLine[]>([]);
   const revs = useRef(new Map<string, number>());
@@ -237,7 +240,11 @@ export function CartProvider({
     try {
       const cart = await getServerCart();
       if (!mounted.current) return "failed";
-      if (!cart) return "empty";
+      if (!cart) {
+        setCartId(null);
+        return "empty";
+      }
+      setCartId(cart.id);
       merge(cart.lines.map(serverLineToClient), stamp, mode);
       return "ok";
     } catch (error) {
@@ -623,6 +630,12 @@ export function CartProvider({
       }
     }, true);
 
+  const refreshBridge = useRef(refreshCart);
+  useEffect(() => {
+    refreshBridge.current = refreshCart;
+  });
+  useEffect(() => bindCartRefresh(storeId, () => refreshBridge.current()), [storeId]);
+
   const count = lines.reduce((sum, line) => sum + line.quantity, 0);
   const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.price, 0);
   const minimum = Math.max(0, minimumOrderCents);
@@ -638,6 +651,7 @@ export function CartProvider({
         loading,
         syncing,
         attention,
+        cartId,
         refreshCart,
       }}
     >
