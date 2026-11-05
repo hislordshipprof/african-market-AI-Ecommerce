@@ -1,3 +1,4 @@
+import { missingCsvCommitKeys } from "./csv-commit-prod-guard";
 import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -64,6 +65,7 @@ import * as db from "../db";
 import { authPrisma, healthQueryRaw, platformAdmin, storeScoped, withSessionTimeZone } from "../db";
 import { csvCommitAction, csvPreviewAction, type CommitActionResult } from "./csv-import-actions";
 import { commitImport, type CommitSelection, type CsvPreviewResult } from "./csv-import";
+import { isSingleIpv4, logAuthIdentityEvidence, WINDOW_RESET_PREFIX } from "./csv-commit-rate-limit-harness";
 
 // DATABASE_URL absent: the suite skips. Lane and hosted CI set it, so a real run skips 0.
 // APP_RUNTIME_PASSWORD absent is not a skip: under NODE_ENV=test the app falls back to the
@@ -71,21 +73,6 @@ import { commitImport, type CommitSelection, type CsvPreviewResult } from "./csv
 // (REQUIRE_CSV_COMMIT_ERRORS=1) fails closed before skipIf, with dotenv refill
 // blocked by an empty string already present in the environment.
 
-const REQUIRED_KEYS = ["DATABASE_URL", "DIRECT_URL", "APP_RUNTIME_PASSWORD", "BETTER_AUTH_SECRET"] as const;
-
-function missingRequiredKeys(): string[] {
-  return REQUIRED_KEYS.filter((key) => {
-    const value = process.env[key];
-    return value === undefined || value.trim() === "";
-  });
-}
-
-if (process.env.REQUIRE_CSV_COMMIT_ERRORS === "1") {
-  const missing = missingRequiredKeys();
-  if (missing.length > 0) {
-    throw new Error(`csv commit error suite requires ${missing.join(", ")}`);
-  }
-}
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `t223-${Date.now()}`;
@@ -102,7 +89,7 @@ const COMMIT_LOG = "[csv-import] commit error:";
 const REVALIDATE_LOG = "[csv-import] storefront revalidation failed:";
 const SYNONYM = `T223 Grain ${RUN}`;
 const EMPTY: CommitSelection = { matchedRows: [], newItemRows: [], ambiguousResolutions: [] };
-const hasDb = !missingRequiredKeys().includes("DATABASE_URL");
+const hasDb = !missingCsvCommitKeys().includes("DATABASE_URL");
 const commitImportMock = vi.mocked(commitImport);
 const revalidateTagMock = vi.mocked(revalidateTag);
 
@@ -345,9 +332,35 @@ async function expectRejectedRetryLeavesCommit(
 async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
   const requestHeaders: Record<string, string> = { "Content-Type": "application/json" };
   if (cookies) requestHeaders.cookie = cookies;
+  const authIp = process.env.CSV_COMMIT_AUTH_IP;
+  if (isSingleIpv4(authIp)) requestHeaders["x-forwarded-for"] = authIp;
   return auth.handler(
     new Request(`${BASE}${path}`, { method: "POST", headers: requestHeaders, body: JSON.stringify(body) }),
   );
+}
+
+async function proveRealIdentitySurvivesWindowReset(email: string): Promise<void> {
+  const ip = process.env.CSV_COMMIT_AUTH_IP;
+  if (!isSingleIpv4(ip)) throw new Error("csv commit error suite requires CSV_COMMIT_AUTH_IP");
+  const key = `${ip}|/sign-in/email`;
+  let row = await authPrisma.rateLimit.findUnique({ where: { key } });
+  if (!row) {
+    const created = await authPost("/sign-in/email", { email, password });
+    expect(created.status, await created.clone().text()).toBe(200);
+    row = await authPrisma.rateLimit.findUnique({ where: { key } });
+  }
+  expect(row, key).toBeTruthy();
+  await authPrisma.rateLimit.update({
+    where: { id: row!.id },
+    data: { lastRequest: BigInt(Date.now() - 61_000), count: 3 },
+  });
+  const started = Date.now();
+  const reset = await authPost("/sign-in/email", { email, password });
+  expect(reset.status, await reset.clone().text()).toBe(200);
+  const fresh = await authPrisma.rateLimit.findUnique({ where: { key } });
+  expect(fresh?.count).toBe(1);
+  expect(Number(fresh?.lastRequest)).toBeGreaterThanOrEqual(started - 2_000);
+  process.stdout.write(`${WINDOW_RESET_PREFIX}${key} ${fresh!.lastRequest.toString()}\n`);
 }
 
 const usedTotp = new Map<string, string>();
@@ -460,6 +473,9 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     });
     cookies.ownerA = (await enableVerified(emails.ownerA)).header();
     cookies.ownerB = (await enableVerified(emails.ownerB)).header();
+    if (isSingleIpv4(process.env.CSV_COMMIT_AUTH_IP)) {
+      await logAuthIdentityEvidence(process.env.CSV_COMMIT_AUTH_IP);
+    }
     const alpha = await platformAdmin.masterProduct.create({
       data: { name: `T223 Alpha ${RUN}`, status: "active" },
     });
@@ -523,7 +539,7 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     consoleSpy?.mockRestore();
   });
 
-  it("runs as app_runtime with a real owner session", async () => {
+  async function assertOwnerRuntime(): Promise<void> {
     const who = (await healthQueryRaw`SELECT current_user`) as Array<{ current_user: string }>;
     expect(who[0]?.current_user).toBe("app_runtime");
     asStore(storeASlug, cookies.ownerA);
@@ -533,6 +549,10 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     });
     expect(session?.user.id).toBe(ids.ownerA);
     expect(session?.user.twoFactorEnabled).toBe(true);
+  }
+
+  it("runs as app_runtime with a real owner session", async () => {
+    await assertOwnerRuntime();
   });
 
   it("unknown token returns the invalid-token message verbatim", async () => {
@@ -1185,6 +1205,9 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
       expect(logs[0]?.[0]).toBe(REVALIDATE_LOG);
       expect(logs[0]?.[1]).toBe(thrownCache);
       expect(ok.error ?? "").not.toContain("listing_imports");
-    }, 60_000);
+      await assertOwnerRuntime();
+      await isolateAfterCommit(`Prod Isolate ${crypto.randomUUID()}`);
+      await proveRealIdentitySurvivesWindowReset(emails.ownerA);
+    }, 180_000);
   }
 });
