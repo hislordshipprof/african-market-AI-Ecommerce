@@ -65,7 +65,13 @@ import * as db from "../db";
 import { authPrisma, healthQueryRaw, platformAdmin, storeScoped, withSessionTimeZone } from "../db";
 import { csvCommitAction, csvPreviewAction, type CommitActionResult } from "./csv-import-actions";
 import { commitImport, type CommitSelection, type CsvPreviewResult } from "./csv-import";
-import { isSingleIpv4, logAuthIdentityEvidence, WINDOW_RESET_PREFIX } from "./csv-commit-rate-limit-harness";
+import {
+  AUTH_PATHS,
+  isSingleIpv4,
+  logAuthIdentityEvidence,
+  rememberAuthPath,
+  WINDOW_RESET_PREFIX,
+} from "./csv-commit-rate-limit-harness";
 
 // DATABASE_URL absent: the suite skips. Lane and hosted CI set it, so a real run skips 0.
 // APP_RUNTIME_PASSWORD absent is not a skip: under NODE_ENV=test the app falls back to the
@@ -334,9 +340,11 @@ async function authPost(path: string, body: unknown, cookies?: string): Promise<
   if (cookies) requestHeaders.cookie = cookies;
   const authIp = process.env.CSV_COMMIT_AUTH_IP;
   if (isSingleIpv4(authIp)) requestHeaders["x-forwarded-for"] = authIp;
-  return auth.handler(
+  const response = await auth.handler(
     new Request(`${BASE}${path}`, { method: "POST", headers: requestHeaders, body: JSON.stringify(body) }),
   );
+  if (isSingleIpv4(authIp)) await rememberAuthPath(authIp, path);
+  return response;
 }
 
 async function proveRealIdentitySurvivesWindowReset(email: string): Promise<void> {
@@ -472,6 +480,15 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
       }
     });
     cookies.ownerA = (await enableVerified(emails.ownerA)).header();
+    const authIp = process.env.CSV_COMMIT_AUTH_IP;
+    if (isSingleIpv4(authIp)) {
+      // Owner B's sign-in resets the window and Better Auth sweeps rows older
+      // than 60s. Aging the real rows here is that sweep without a 61s sleep.
+      await authPrisma.rateLimit.updateMany({
+        where: { key: { in: AUTH_PATHS.map((authPath) => `${authIp}|${authPath}`) } },
+        data: { lastRequest: BigInt(Date.now() - 61_000) },
+      });
+    }
     cookies.ownerB = (await enableVerified(emails.ownerB)).header();
     if (isSingleIpv4(process.env.CSV_COMMIT_AUTH_IP)) {
       await logAuthIdentityEvidence(process.env.CSV_COMMIT_AUTH_IP);

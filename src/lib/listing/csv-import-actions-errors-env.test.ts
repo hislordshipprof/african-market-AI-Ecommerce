@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { CSV_COMMIT_REQUIRED_KEYS } from "./csv-commit-prod-guard";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { authPrisma } from "../db";
@@ -22,7 +24,6 @@ import {
   unscopedRateLimitDeletesInSources,
   WINDOW_RESET_PREFIX,
 } from "./csv-commit-rate-limit-harness";
-import { CSV_COMMIT_REQUIRED_KEYS } from "./csv-commit-prod-guard";
 
 const vitestEntry = path.join(process.cwd(), "node_modules", "vitest", "vitest.mjs");
 const suite = "src/lib/listing/csv-import-actions-errors.integration.test.ts";
@@ -173,10 +174,60 @@ describe("csv commit action error suite env", () => {
       readFileSync(new URL("./csv-import-actions-errors-env.test.ts", import.meta.url), "utf8"),
     );
     expect(findUnscopedRateLimitDeletes(ownSource)).toEqual([]);
+    const scratch = mkdtempSync(path.join(tmpdir(), "csv-commit-sql-"));
+    try {
+      const scanned: Array<[string, string, boolean]> = [
+        ["unsafe-call.test.ts", "await authPrisma.$executeRawUnsafe('DELETE FROM \"rate_limits\"');\n", true],
+        ["unsafe-tag.test.ts", "await authPrisma.$executeRaw`\nDELETE FROM \"rate_limits\"\n`;\n", true],
+        [
+          "keyed.test.ts",
+          "await authPrisma.rateLimit.deleteMany({ where: { key: { startsWith: \"10.1.2.3|\" } } });\n",
+          false,
+        ],
+        [
+          "where.test.ts",
+          "await authPrisma.$executeRawUnsafe('DELETE FROM rate_limits WHERE key = \\'kept\\'');\n",
+          false,
+        ],
+        ["comment.test.ts", "// DELETE FROM rate_limits\nconst note = 'DELETE FROM rate_limits';\n", false],
+      ];
+      for (const [name, body, unsafe] of scanned) {
+        const file = path.join(scratch, name);
+        writeFileSync(file, body);
+        const hits = unscopedRateLimitDeletesInSources([file]);
+        if (unsafe) expect(hits, body).not.toEqual([]);
+        else expect(hits, body).toEqual([]);
+      }
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
     expect(unscopedRateLimitDeletesInSources(rateLimitSourceFiles())).toEqual([]);
     const ticketEnv = readFileSync(path.join(process.cwd(), "scripts", "ticket-env.txt"), "utf8");
     expect(ticketEnv).toMatch(/^233 DATABASE_URL DIRECT_URL APP_RUNTIME_PASSWORD BETTER_AUTH_SECRET$/m);
   });
+
+  it("parent prerequisites fail before database clients start", async () => {
+    const envFile = "src/lib/listing/csv-import-actions-errors-env.test.ts";
+    const filter = ["-t", "no test deletes every rate_limits row"];
+    for (const value of ["   ", "\t", ""]) {
+      const result = await runProcess(
+        process.execPath,
+        [vitestEntry, "run", envFile, "--reporter=verbose", ...filter],
+        { cwd: process.cwd(), env: childEnv({ CI: "true", DATABASE_URL: value }), timeoutMs: 60_000 },
+      );
+      expect(result.status, result.output.slice(-1500)).not.toBe(0);
+      expect(result.output).toContain("csv commit error suite requires DATABASE_URL");
+      expect(result.output).not.toContain("Invalid URL");
+      expect(result.output).not.toMatch(/Tests\s+\d+\s+passed/);
+    }
+    const local = await runProcess(
+      process.execPath,
+      [vitestEntry, "run", envFile, "--reporter=verbose", ...filter],
+      { cwd: process.cwd(), env: childEnv({ CI: undefined, DATABASE_URL: "" }), timeoutMs: 60_000 },
+    );
+    expect(local.status, local.output.slice(-1500)).toBe(0);
+    expect(local.output).toMatch(/Tests\s+1\s+passed/);
+  }, 180_000);
 
   dbDescribe("lane database", () => {
     const leftoverKeys: string[] = [];

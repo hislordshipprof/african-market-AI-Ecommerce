@@ -241,16 +241,32 @@ export async function deleteRateLimitsForIdentity(identity: string): Promise<num
   return identityDeleter(identity);
 }
 
+const rememberedAuthPaths = new Map<string, Map<AuthPath, IdentityPathEvidence>>();
+
+export async function rememberAuthPath(ip: string, authPath: string): Promise<void> {
+  if (!isSingleIpv4(ip) || !(AUTH_PATHS as readonly string[]).includes(authPath)) return;
+  const key = `${ip}|${authPath}`;
+  const row = await authPrisma.rateLimit.findUnique({ where: { key } });
+  if (!row) return;
+  const paths = rememberedAuthPaths.get(ip) ?? new Map<AuthPath, IdentityPathEvidence>();
+  paths.set(authPath as AuthPath, { key, count: row.count, lastRequest: row.lastRequest.toString() });
+  rememberedAuthPaths.set(ip, paths);
+}
+
 export async function logAuthIdentityEvidence(ip: string): Promise<void> {
+  const remembered = rememberedAuthPaths.get(ip);
   const keys = AUTH_PATHS.map((authPath) => `${ip}|${authPath}`);
   const rows = await authPrisma.rateLimit.findMany({ where: { key: { in: keys } } });
   const evidence: Record<string, IdentityPathEvidence | null> = {};
   for (const authPath of AUTH_PATHS) {
     const key = `${ip}|${authPath}`;
     const row = rows.find((item) => item.key === key);
-    evidence[authPath] = row
+    const live = row
       ? { key, count: row.count, lastRequest: row.lastRequest.toString() }
       : null;
+    // A later window reset can sweep an earlier path. Keep the row recorded
+    // when that path succeeded, and refresh it when it is still present.
+    evidence[authPath] = live ?? remembered?.get(authPath) ?? null;
   }
   process.stdout.write(`${IDENTITY_EVIDENCE_PREFIX}${JSON.stringify({ ip, evidence })}\n`);
   const missing = AUTH_PATHS.filter((authPath) => evidence[authPath] === null);
@@ -306,7 +322,25 @@ function findBalancedParen(source: string, open: number): number {
   return -1;
 }
 
-export function stripCommentsAndStrings(source: string): string {
+function memberBefore(source: string, index: number): string {
+  let j = index - 1;
+  while (j >= 0 && /\s/.test(source[j] ?? "")) j -= 1;
+  if (j >= 0 && source[j] === "(") {
+    j -= 1;
+    while (j >= 0 && /\s/.test(source[j] ?? "")) j -= 1;
+  }
+  const end = j + 1;
+  while (j >= 0 && /[\w$.]/.test(source[j] ?? "")) j -= 1;
+  return source.slice(j + 1, end);
+}
+
+function isExecutableSqlCarrier(source: string, quoteIndex: number, quote: string): boolean {
+  const member = memberBefore(source, quoteIndex);
+  if (quote === "`") return /\$(?:execute|query)Raw$/.test(member) || member === "sql" || member.endsWith(".sql");
+  return /\$(?:execute|query)RawUnsafe$/.test(member);
+}
+
+export function stripCommentsAndStrings(source: string, preserveExecutableSql = false): string {
   let out = "";
   let i = 0;
   while (i < source.length) {
@@ -336,20 +370,36 @@ export function stripCommentsAndStrings(source: string): string {
     }
     if (char === "\"" || char === "'" || char === "`") {
       const quote = char;
-      out += " ";
+      const keep = preserveExecutableSql && isExecutableSqlCarrier(source, i, quote);
+      out += keep ? quote : " ";
       i += 1;
+      let expressionDepth = 0;
       while (i < source.length) {
         if (source[i] === "\\") {
-          out += "  ";
+          const escaped = source.slice(i, i + 2);
+          out += keep ? escaped : " ".repeat(escaped.length);
+          i += escaped.length;
+          continue;
+        }
+        if (quote === "`" && expressionDepth === 0 && source[i] === "$" && source[i + 1] === "{") {
+          out += keep ? "${" : "  ";
           i += 2;
+          expressionDepth = 1;
+          continue;
+        }
+        if (expressionDepth > 0) {
+          if (source[i] === "{") expressionDepth += 1;
+          else if (source[i] === "}") expressionDepth -= 1;
+          out += keep ? source[i] : source[i] === "\n" ? "\n" : " ";
+          i += 1;
           continue;
         }
         if (source[i] === quote) {
-          out += " ";
+          out += keep ? quote : " ";
           i += 1;
           break;
         }
-        out += source[i] === "\n" ? "\n" : " ";
+        out += keep ? source[i]! : source[i] === "\n" ? "\n" : " ";
         i += 1;
       }
       continue;
@@ -378,7 +428,7 @@ export function rateLimitSourceFiles(root = path.join(process.cwd(), "src")): st
 export function unscopedRateLimitDeletesInSources(files: string[]): Array<{ file: string; hits: string[] }> {
   const violations: Array<{ file: string; hits: string[] }> = [];
   for (const file of files) {
-    const hits = findUnscopedRateLimitDeletes(stripCommentsAndStrings(readFileSync(file, "utf8")));
+    const hits = findUnscopedRateLimitDeletes(stripCommentsAndStrings(readFileSync(file, "utf8"), true));
     if (hits.length > 0) violations.push({ file, hits });
   }
   return violations;

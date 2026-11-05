@@ -18,6 +18,14 @@ export function missingCsvCommitKeys(): string[] {
   });
 }
 
+const databaseUrl = process.env.DATABASE_URL;
+const databaseUrlMissing = databaseUrl === undefined || databaseUrl.trim() === "";
+// Whitespace is truthy, so db.ts would throw Invalid URL if this module did not.
+const databaseUrlWhitespace = typeof databaseUrl === "string" && databaseUrl.length > 0 && databaseUrl.trim() === "";
+if (databaseUrlWhitespace || (process.env.CI && databaseUrlMissing)) {
+  throw new Error("csv commit error suite requires DATABASE_URL");
+}
+
 const omittedKeys = (process.env.CSV_COMMIT_OMITTED_KEYS ?? "")
   .split(",")
   .map((key) => key.trim())
