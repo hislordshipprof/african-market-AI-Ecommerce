@@ -173,19 +173,6 @@ describe("cart reconcile", () => {
     expect(cleared?.confirmed.get(yellowKey)).toEqual({ qty: 0 });
     expect(cleared?.pendingDelete.has(yellowKey)).toBe(false);
 
-    const kept = clearKeyIdentity(
-      {
-        lines: [line({ listingId: "yellow", variantId: "yellow-v", quantity: 2 })],
-        confirmed: new Map([[yellowKey, { lineId: "row-yellow", qty: 1 }]]),
-        pendingDelete: new Map([[yellowKey, "row-yellow"]]),
-        dropAfterAdd: new Set(),
-      },
-      new Map([[yellowKey, 6]]),
-      yellowKey,
-      3,
-    );
-    expect(kept).toBeNull();
-
     const absent = mergeServerLines(
       base({
         lines: [],
@@ -199,6 +186,63 @@ describe("cart reconcile", () => {
     expect(absent.lines).toHaveLength(0);
     expect(absent.confirmed.get(yellowKey)).toEqual({ qty: 0 });
     expect(absent.pendingDelete.has(yellowKey)).toBe(false);
+  });
+
+  it("a null cart keeps a newer plus and drops the deleted row id", () => {
+    const kept = clearKeyIdentity(
+      {
+        lines: [
+          line({ listingId: "yellow", variantId: "yellow-v", quantity: 3, serverLineId: "row-yellow" }),
+          line({ listingId: "white", variantId: "white-v", quantity: 2, serverLineId: "row-white" }),
+        ],
+        confirmed: new Map([
+          [yellowKey, { lineId: "row-yellow", qty: 1 }],
+          [whiteKey, { lineId: "row-white", qty: 1 }],
+        ]),
+        pendingDelete: new Map(),
+        dropAfterAdd: new Set(),
+      },
+      new Map([
+        [yellowKey, 6],
+        [whiteKey, 4],
+      ]),
+      yellowKey,
+      3,
+    );
+    const yellow = kept?.lines.find((entry) => entry.listingId === "yellow");
+    const white = kept?.lines.find((entry) => entry.listingId === "white");
+    expect(yellow).toMatchObject({ quantity: 3, serverLineId: undefined });
+    expect(kept?.confirmed.get(yellowKey)).toEqual({ qty: 0 });
+    expect(kept?.pendingDelete.has(yellowKey)).toBe(false);
+    expect(white).toMatchObject({ quantity: 2, serverLineId: undefined });
+    expect(kept?.confirmed.get(whiteKey)).toEqual({ qty: 0 });
+  });
+
+  it("a null cart keeps a newer removal without the deleted row id", () => {
+    const kept = clearKeyIdentity(
+      {
+        lines: [
+          line({ listingId: "white", variantId: "white-v", quantity: 2, serverLineId: "row-white" }),
+        ],
+        confirmed: new Map([
+          [yellowKey, { lineId: "row-yellow", qty: 1 }],
+          [whiteKey, { lineId: "row-white", qty: 1 }],
+        ]),
+        pendingDelete: new Map([[yellowKey, "row-yellow"]]),
+        dropAfterAdd: new Set(),
+      },
+      new Map([[yellowKey, 6], [whiteKey, 4]]),
+      yellowKey,
+      3,
+    );
+    expect(kept?.lines.find((entry) => entry.listingId === "yellow")).toBeUndefined();
+    expect(kept?.confirmed.get(yellowKey)).toEqual({ qty: 0 });
+    expect(kept?.pendingDelete.has(yellowKey)).toBe(false);
+    expect(kept?.lines.find((entry) => entry.listingId === "white")).toMatchObject({
+      quantity: 2,
+      serverLineId: undefined,
+    });
+    expect(kept?.confirmed.get(whiteKey)).toEqual({ qty: 0 });
   });
 
   it("uses the confirmed quantity rather than a queued quantity", () => {

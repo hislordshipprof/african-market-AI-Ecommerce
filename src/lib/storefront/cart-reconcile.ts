@@ -54,22 +54,36 @@ function copyState(state: ReconcileState): MergeResult {
 }
 
 /**
- * No cart, or a cart that no longer holds this key. Clears the old row id
- * so the next gesture cannot update or remove a row the server does not have.
- * A newer gesture on this key is left alone.
+ * No cart. Every saved row id belonged to that cart, so a positive quantity
+ * is kept without its id and the next save is a fresh add. The rejected key
+ * stays absent when nothing newer asked for it, and a newer removal stays gone.
  */
 export function clearKeyIdentity(
   state: ReconcileState,
   revs: ReadonlyMap<string, number>,
   key: string,
   sinceRev: number,
-): MergeResult | null {
-  if ((revs.get(key) ?? 0) > sinceRev) return null;
+): MergeResult {
   const next = copyState(state);
-  next.confirmed.set(key, { qty: 0 });
-  next.pendingDelete.delete(key);
-  next.dropAfterAdd.delete(key);
-  next.lines = next.lines.filter((line) => cartItemKey(line) !== key);
+  const newer = (revs.get(key) ?? 0) > sinceRev;
+  const scoped = next.lines.find((line) => cartItemKey(line) === key);
+  const keepScoped = newer && !!scoped && scoped.quantity > 0;
+  next.lines = next.lines.flatMap((line) => {
+    const lineKey = cartItemKey(line);
+    if (lineKey === key && !keepScoped) return [];
+    if (line.quantity <= 0) return [];
+    const obsoleteId = next.confirmed.get(lineKey)?.lineId;
+    if (obsoleteId) {
+      next.confirmed.set(lineKey, { qty: 0 });
+      if (next.pendingDelete.get(lineKey) === obsoleteId) next.pendingDelete.delete(lineKey);
+    }
+    return [{ ...line, serverLineId: undefined }];
+  });
+  if (!keepScoped) {
+    next.confirmed.set(key, { qty: 0 });
+    next.pendingDelete.delete(key);
+    next.dropAfterAdd.delete(key);
+  }
   return next;
 }
 
