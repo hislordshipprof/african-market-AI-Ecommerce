@@ -158,6 +158,24 @@ status pending "scope $SCOPE: running (E2E_WORKERS=$E2E_WORKERS, VITEST_MAX_WORK
 # Every step has a timeout, so one hung run cannot hold the machine-wide lock for every lane.
 fail() { FAILED_AT="$1"; status failure "failed: $1"; echo "local-ci FAILED at $1 on $SHA ($2)"; exit 1; }
 step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
+# run_unit <vitest command...>: every tier's unit tests.
+# Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during slow tests even when every test passed.
+# That is the runner, not the code, so it gets one whole rerun. A real test failure does not, because --retry
+# already retried each failed test.
+# Vitest colours its summary even through a pipe on Windows, so strip ANSI codes before reading the counts.
+# Either a failed test or a test file that failed to load means a real failure.
+run_unit() {
+  TEST_OUT="$(mktemp)"
+  if ! step test "$@" 2>&1 | tee "$TEST_OUT"; then
+    if grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
+      && ! sed 's/\x1b\[[0-9;]*m//g' "$TEST_OUT" | grep -Eq '(Tests|Test Files) +[0-9]+ failed'; then
+      echo "== local-ci: every test passed but Vitest's worker RPC timed out; rerunning the unit tests once"
+      step test "$@" || fail test "failed again on the rerun after a Vitest RPC timeout"
+    else
+      fail test "each failed test already retried once, so not a one-off flake"
+    fi
+  fi
+}
 
 # Lighter tiers end here. Each one finishes with the same success status, which the merge gate reads.
 if [ "$SCOPE" = pipeline ]; then
@@ -169,7 +187,7 @@ if [ "$SCOPE" = pipeline ]; then
   SCRIPT_TESTS=$(git grep -lE 'scripts/[a-z-]+\.(sh|mjs)|"scripts"' -- 'src/*.test.ts' 'src/*.test.tsx' || true)
   if [ -n "$SCRIPT_TESTS" ]; then
     # shellcheck disable=SC2086
-    step test pnpm exec vitest run --retry=1 $SCRIPT_TESTS || fail test "each failed test already retried once"
+    run_unit pnpm exec vitest run --retry=1 $SCRIPT_TESTS
   fi
   status success "pipeline scripts: their tests passed"
   echo "local-ci PASSED on $SHA (pipeline scope)"
@@ -182,7 +200,7 @@ if [ "$SCOPE" = tests ]; then
   SPECS=$(printf '%s\n' "$PRESENT" | grep -E '^e2e/.*\.spec\.ts$' || true)
   if [ -n "$UNIT" ]; then
     # shellcheck disable=SC2086
-    step test pnpm exec vitest run --retry=1 $UNIT || fail test "each failed test already retried once"
+    run_unit pnpm exec vitest run --retry=1 $UNIT
   fi
   if [ -n "$SPECS" ]; then
     step build pnpm build || fail build "no retry"
@@ -197,27 +215,13 @@ if [ "$SCOPE" = rebase ]; then
   SOURCES=$(printf '%s\n' "$PRESENT" | grep -E '^src/.*\.tsx?$' || true)
   if [ -n "$SOURCES" ]; then
     # shellcheck disable=SC2086
-    step test pnpm exec vitest related --run --retry=1 --passWithNoTests $SOURCES || fail test "each failed test already retried once"
+    run_unit pnpm exec vitest related --run --retry=1 --passWithNoTests $SOURCES
   fi
   status success "clean rebase of a passing commit: typecheck, lint and related tests passed"
   echo "local-ci PASSED on $SHA (rebase scope)"
   exit 0
 fi
-TEST_OUT="$(mktemp)"
-if ! step test pnpm test --retry=1 2>&1 | tee "$TEST_OUT"; then
-  # Vitest's worker RPC can time out ("Timeout calling onTaskUpdate") during the slow Stripe sandbox tests even
-  # when every test passed. That is the runner, not the code, so it gets one whole rerun. A real test failure
-  # does not, because --retry already retried each failed test.
-  # Vitest colours its summary even through a pipe on Windows, so strip ANSI codes before reading the counts.
-  # Either a failed test or a test file that failed to load means a real failure.
-  if grep -q 'Timeout calling "onTaskUpdate"' "$TEST_OUT" \
-    && ! sed 's/\x1b\[[0-9;]*m//g' "$TEST_OUT" | grep -Eq '(Tests|Test Files) +[0-9]+ failed'; then
-    echo "== local-ci: every test passed but Vitest's worker RPC timed out; rerunning the unit tests once"
-    step test pnpm test --retry=1 || fail test "failed again on the rerun after a Vitest RPC timeout"
-  else
-    fail test "each failed test already retried once, so not a one-off flake"
-  fi
-fi
+run_unit pnpm test --retry=1
 step build pnpm build || { echo "== local-ci: build failed once; rerunning to rule out a load crash"
   step build pnpm build || fail build "failed twice in a row"; }
 if ! step e2e pnpm test:e2e --retries=1; then
