@@ -202,6 +202,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       active?: boolean;
       categoryId: string | null;
       variantPrices?: number[];
+      id?: string;
     },
   ) {
     const product = await platformAdmin.masterProduct.create({
@@ -210,6 +211,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     createdMasterProductIds.push(product.id);
     const listing = await storeScoped(storeId).listing.create({
       data: {
+        ...(options.id ? { id: options.id } : {}),
         storeId,
         masterProductId: product.id,
         customName: options.name,
@@ -523,8 +525,20 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       categoryId,
       variantPrices: [900, 150],
     });
-    const tiedLow = await makeCatalogListing(storeA, { name: "Tied Low", price: 200, confidence: 0.9, categoryId });
-    const tiedHigh = await makeCatalogListing(storeA, { name: "Tied High", price: 200, confidence: 0.9, categoryId });
+    const tiedLow = await makeCatalogListing(storeA, {
+      name: "Tied Low",
+      price: 200,
+      confidence: 0.9,
+      categoryId,
+      id: `z-${randomUUID()}`,
+    });
+    const tiedHigh = await makeCatalogListing(storeA, {
+      name: "Tied High",
+      price: 200,
+      confidence: 0.9,
+      categoryId,
+      id: `a-${randomUUID()}`,
+    });
     const pricey = await makeCatalogListing(storeA, { name: "Pricey Twin", price: 800, confidence: 0.9, categoryId });
     const soft = await makeCatalogListing(storeA, { name: "Soft Stock", price: 50, confidence: 0.55, categoryId });
     const dropped = await makeCatalogListing(storeA, { name: "Dropped Sixth", price: 10, confidence: 0.4, categoryId });
