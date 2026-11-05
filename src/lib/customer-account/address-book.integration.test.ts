@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { authPrisma, customerScoped } from "../db";
-import { addAddress, editAddress, removeAddress, saveAccountPhone } from "./address-book";
+import { addAddress, editAddress, removeAddress, saveAccountPhone, setDefaultAddress } from "./address-book";
 import { ADDRESS_CAP, ADDRESS_CAP_MESSAGE, ADDRESS_NOT_FOUND } from "./address-validation";
 import { getCheckoutProfile } from "./checkout-profile";
 
@@ -80,6 +80,31 @@ describe.skipIf(!hasDb)("address book and checkout profile", () => {
 
     expect(await saveAccountPhone(capUser, "   ")).toBeNull();
     await expect(saveAccountPhone(capUser, "123")).rejects.toThrow(/phone/i);
+  });
+
+  it("two concurrent adds at 19 keep the cap, and two set-defaults leave one default", async () => {
+    const capUser = `${userId}-race-cap`;
+    await authPrisma.user.create({ data: { id: capUser, name: "Cap", email: `${capUser}@example.test` } });
+    const input = { line1: "1 Market St", city: "Honolulu", state: "HI", zip: "96813" };
+    for (let i = 0; i < 19; i += 1) {
+      await addAddress(capUser, { ...input, label: `N${i}` });
+    }
+    const results = await Promise.allSettled([
+      addAddress(capUser, { ...input, label: "Twenty" }),
+      addAddress(capUser, { ...input, label: "Twenty one" }),
+    ]);
+    const stored = await customerScoped(capUser).customerAddress.count();
+    expect(stored).toBe(ADDRESS_CAP);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+
+    const rows = await customerScoped(capUser).customerAddress.findMany({ take: 2 });
+    const settled = await Promise.allSettled([
+      setDefaultAddress(capUser, rows[0]!.id),
+      setDefaultAddress(capUser, rows[1]!.id),
+    ]);
+    expect(settled.every((result) => result.status === "fulfilled")).toBe(true);
+    const defaults = await customerScoped(capUser).customerAddress.findMany({ where: { isDefault: true } });
+    expect(defaults).toHaveLength(1);
   });
 
   it("concurrent adds leave a single default", async () => {
