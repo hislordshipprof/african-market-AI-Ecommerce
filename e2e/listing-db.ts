@@ -80,7 +80,37 @@ export async function readCartLines(storeSlug: string, cartId: string) {
       qty: line.qty,
       price: line.variant.price,
       label: line.variant.label,
+      swapRule: line.swapRule,
+      substituteVariantId: line.substituteVariantId,
     }));
+  });
+}
+
+export async function deleteCartLine(storeSlug: string, lineId: string): Promise<boolean> {
+  return withStore(storeSlug, async (tx, storeId) => {
+    const line = await tx.cartLine.findFirst({
+      where: { id: lineId, storeId },
+      select: { id: true },
+    });
+    if (!line) return false;
+    await tx.cartLine.delete({ where: { id: line.id } });
+    return true;
+  });
+}
+
+export async function writeCartLine(
+  storeSlug: string,
+  lineId: string,
+  data: { qty?: number; swapRule?: string; substituteVariantId?: string | null },
+): Promise<boolean> {
+  return withStore(storeSlug, async (tx, storeId) => {
+    const line = await tx.cartLine.findFirst({
+      where: { id: lineId, storeId },
+      select: { id: true },
+    });
+    if (!line) return false;
+    await tx.cartLine.update({ where: { id: line.id }, data });
+    return true;
   });
 }
 
