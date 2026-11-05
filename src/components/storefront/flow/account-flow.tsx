@@ -434,8 +434,9 @@ export function AccountFlow(props: Props) {
           )}
           <FlowCard title={`Orders from ${props.settings.name}`}>
             <p>
-              Order history is limited to this market and browser. Your demo
-              profile is shared across markets.
+              {customer
+                ? "Orders you place at this market appear here."
+                : "Order history is limited to this market and browser. Your demo profile is shared across markets."}
             </p>
             {orders.length ? (
               <div className="sf-account-list">
@@ -468,7 +469,11 @@ export function AccountFlow(props: Props) {
             ) : (
               <EmptyState
                 title="Your first market haul awaits"
-                description="Your demo orders from this market will appear here."
+                description={
+                  customer
+                    ? "Orders you place at this market will appear here."
+                    : "Your demo orders from this market will appear here."
+                }
               >
                 <Link href="/" className="sf-button">
                   Explore the market

@@ -219,7 +219,7 @@
   font-weight: 600;
   margin: 18px 0;
 }
-.field :is(input, select, textarea) {
+.field :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
   background: var(--color-bg);
   border: 1px solid var(--color-line);
   color: var(--color-ink);
@@ -234,6 +234,25 @@
 .field textarea {
   min-height: 94px;
   resize: vertical;
+}
+.choice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 12px 0;
+  font-weight: 600;
+}
+.choice input {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  margin-top: 2px;
+  flex: none;
+}
+.choice small {
+  display: block;
+  margin-top: 4px;
+  font-weight: 400;
 }
 .field small {
   font-weight: 400;

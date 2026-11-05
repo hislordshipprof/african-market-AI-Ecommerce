@@ -356,19 +356,18 @@ function RealCheckoutForm({
         <>
           {prefill?.cardsUnavailable ? <p>Saved cards are unavailable right now</p> : null}
           {cardView.selectable.map((card) => (
-            <label className={styles.field} key={card.id}>
+            <label className={styles.choice} key={card.id}>
+              <input
+                type="radio"
+                name="saved-card"
+                checked={selectedCardId === card.id && !showCardForm}
+                onChange={() => {
+                  setSelectedCardId(card.id);
+                  setShowCardForm(false);
+                  setSaveCard(false);
+                }}
+              />
               <span>
-                <input
-                  type="radio"
-                  name="saved-card"
-                  checked={selectedCardId === card.id && !showCardForm}
-                  onChange={() => {
-                    setSelectedCardId(card.id);
-                    setShowCardForm(false);
-                    setSaveCard(false);
-                  }}
-                />
-                {" "}
                 {card.brand} ending in {card.last4}, expires {card.expMonth}/{card.expYear}
               </span>
             </label>
@@ -393,17 +392,16 @@ function RealCheckoutForm({
           ) : null}
           {showCardForm ? <StripeCardInput harness={stripeConfig.harness} /> : null}
           {cardView.showSaveTick && showCardForm ? (
-            <label className={styles.field}>
+            <label className={styles.choice}>
+              <input
+                type="checkbox"
+                checked={saveCard}
+                onChange={(event) => setSaveCard(event.target.checked)}
+              />
               <span>
-                <input
-                  type="checkbox"
-                  checked={saveCard}
-                  onChange={(event) => setSaveCard(event.target.checked)}
-                />
-                {" "}
                 Save this card
+                <small>{SAVED_CARD_PURPOSE}</small>
               </span>
-              <small>{SAVED_CARD_PURPOSE}</small>
             </label>
           ) : null}
           {prefill?.defaultAddress ? (
