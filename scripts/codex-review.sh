@@ -25,7 +25,13 @@ Report ALL findings in this single pass: do not hold any back for a later round,
 
 # shellcheck disable=SC1091
 [ -f "$ROOT/scripts/agent-engine.env" ] && . "$ROOT/scripts/agent-engine.env"
-codex exec --sandbox read-only --skip-git-repo-check \
-  -c model="${CODEX_REVIEW_MODEL:-gpt-6.1-sol}" -c model_reasoning_effort="${CODEX_REVIEW_EFFORT:-high}" \
-  -o "$OUT" "$PROMPT" > "$OUT.log" 2>&1 || true
+. "$ROOT/scripts/review-watch.sh"
+# Codex writes -o only when it exits, so only the REVIEW_TIMEOUT_MIN cap applies here (review-watch.sh).
+rm -f "$OUT"
+codex_review_run() {
+  codex exec --sandbox read-only --skip-git-repo-check \
+    -c model="${CODEX_REVIEW_MODEL:-gpt-6.1-sol}" -c model_reasoning_effort="${CODEX_REVIEW_EFFORT:-high}" \
+    -o "$OUT" "$PROMPT" > "$OUT.log" 2>&1
+}
+watch_run "$OUT.never" codex_review_run || true
 echo "Codex review written to $OUT"
