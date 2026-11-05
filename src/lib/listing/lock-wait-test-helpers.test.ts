@@ -150,10 +150,95 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
   );
 }
 
-async function connect(direct: string, name = SESSION): Promise<Client> {
-  const client = new Client({ connectionString: direct, application_name: name });
+async function connectInto(
+  bag: Client[],
+  direct: string,
+  name = SESSION,
+  options?: { connectionTimeoutMillis?: number },
+): Promise<Client> {
+  const client = new Client({
+    connectionString: direct,
+    application_name: name,
+    connectionTimeoutMillis: options?.connectionTimeoutMillis,
+  });
+  bag.push(client);
   await client.connect();
   return client;
+}
+
+function refusedDirectUrl(direct: string): string {
+  const refused = new URL(direct);
+  refused.hostname = "127.0.0.1";
+  refused.port = "1";
+  refused.username = "lock-wait-none";
+  refused.password = "invalid";
+  return refused.toString();
+}
+
+async function endBag(bag: readonly Client[]): Promise<void> {
+  const ended = new Set<Client>();
+  for (const client of bag) {
+    if (ended.has(client)) continue;
+    ended.add(client);
+    await client.end().catch(() => undefined);
+  }
+}
+
+async function deleteListingCode(direct: string, listingId: string): Promise<string> {
+  const client = new Client({ connectionString: direct, application_name: "lock-wait-probe" });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL lock_timeout = '200ms'");
+    await client.query("SET LOCAL ROLE app_user");
+    await client.query("SELECT set_config('app.is_platform_admin', 'true', true)");
+    await client.query("DELETE FROM listings WHERE id = $1", [listingId]);
+    await client.query("COMMIT");
+    return "";
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    return pgError(error).code;
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+const PRODUCTION_IMPORT_ENV_KEYS = [
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "SYSTEMROOT",
+  "SystemRoot",
+  "WINDIR",
+  "windir",
+  "TEMP",
+  "TMP",
+  "HOME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "COMSPEC",
+  "ComSpec",
+  "SystemDrive",
+  "PROGRAMFILES",
+  "ProgramFiles",
+  "ProgramFiles(x86)",
+  "ProgramW6432",
+  "CommonProgramFiles",
+  "CommonProgramFiles(x86)",
+  "PUBLIC",
+  "ALLUSERSPROFILE",
+] as const;
+
+function productionImportEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { NODE_ENV: "production", VERCEL: "1" };
+  for (const key of PRODUCTION_IMPORT_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 async function countSessions(direct: string, name: string): Promise<number> {
@@ -457,21 +542,31 @@ if (Date.now() - started > 20_000) {
   console.error("import did too much work");
   process.exit(1);
 }
+const denied = Object.keys(process.env).filter((key) =>
+  key === "DATABASE_URL"
+  || key === "DIRECT_URL"
+  || key === "DATABASE_URL_UNPOOLED"
+  || key === "APP_RUNTIME_PASSWORD"
+  || key.startsWith("STRIPE_")
+  || key.startsWith("R2_")
+  || key.startsWith("RESEND")
+  || key.startsWith("INNGEST")
+  || key.startsWith("TELNYX")
+  || key.startsWith("ANTHROPIC")
+  || key.includes("SECRET")
+  || key.includes("PASSWORD")
+  || key.includes("TOKEN")
+  || key.endsWith("_KEY")
+);
+if (denied.length > 0) {
+  console.error("provider keys present: " + denied.join(","));
+  process.exit(1);
+}
+console.log("provider-keys-absent");
 console.log("imported-clean");
 `,
     );
-    const env = { ...process.env };
-    for (const key of [
-      "DATABASE_URL",
-      "DIRECT_URL",
-      "DATABASE_URL_UNPOOLED",
-      "APP_RUNTIME_PASSWORD",
-      "NEXT_PHASE",
-    ]) {
-      delete env[key];
-    }
-    env.NODE_ENV = "production";
-    env.VERCEL = "1";
+    const env = productionImportEnv();
     try {
       const result = spawnSync(
         process.execPath,
@@ -480,6 +575,7 @@ console.log("imported-clean");
       );
       const output = `${result.stdout}\n${result.stderr}`;
       expect(result.status, output).toBe(0);
+      expect(result.stdout).toContain("provider-keys-absent");
       expect(result.stdout).toContain("imported-clean");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -576,14 +672,11 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
 
   async function openHeldInsert(listingId: string, name = SESSION): Promise<HeldDelete> {
     const acquired: Client[] = [];
-    const held: Partial<HeldDelete> = { extra: [] };
+    const held: Partial<HeldDelete> = {};
     try {
-      held.holder = await connect(directUrl, name);
-      acquired.push(held.holder);
-      held.waiter = await connect(directUrl, name);
-      acquired.push(held.waiter);
-      held.observer = await connect(directUrl, name);
-      acquired.push(held.observer);
+      held.holder = await connectInto(acquired, directUrl, name);
+      held.waiter = await connectInto(acquired, directUrl, name);
+      held.observer = await connectInto(acquired, directUrl, name);
       await beginAsStore(held.holder, storeAId);
       await held.holder.query(
         `INSERT INTO stock_events (id, store_id, listing_id, type, delta, actor_id)
@@ -650,9 +743,8 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
   it("late waiter cannot resolve an empty poll early", async () => {
     const listingId = await createListing("Empty poll");
     const held = await openHeldInsert(listingId);
-    const sampler = await connect(directUrl);
-    held.extra.push(sampler);
     try {
+      const sampler = await connectInto(held.extra, directUrl);
       let empty = false;
       let markEmpty = () => {};
       const emptySeen = new Promise<void>((resolve) => { markEmpty = resolve; });
@@ -717,9 +809,8 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
   it("observer polling preserves caller transaction and rollback", async () => {
     const listingId = await createListing("Caller sentinel");
     const held = await openHeldInsert(listingId);
-    const idle = await connect(directUrl);
-    held.extra.push(idle);
     try {
+      const idle = await connectInto(held.extra, directUrl);
       startDelete(held, listingId);
       await untilWaiting(held.observer, held.waiterPid);
       await held.observer.query("BEGIN");
@@ -757,9 +848,8 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
   it("polling only forwards the catalog query and target pid", async () => {
     const listingId = await createListing("Forwarded poll");
     const held = await openHeldInsert(listingId);
-    const sampler = await connect(directUrl);
-    held.extra.push(sampler);
     try {
+      const sampler = await connectInto(held.extra, directUrl);
       startDelete(held, listingId);
       await untilWaiting(sampler, held.waiterPid);
       const seen: Array<{ text: string; values: unknown[] | undefined }> = [];
@@ -778,9 +868,12 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
   }, 30_000);
 
   it("observer query errors propagate without transaction recovery", async () => {
-    const observer = await connect(directUrl);
-    const idle = await connect(directUrl);
+    const bag: Client[] = [];
+    let observer: Client | undefined;
+    let idle: Client | undefined;
     try {
+      observer = await connectInto(bag, directUrl);
+      idle = await connectInto(bag, directUrl);
       await observer.query("BEGIN");
       const divided = await rejection(observer.query("SELECT 1/0"));
       expect(pgError(divided).code).toBe("22012");
@@ -798,20 +891,22 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
       const recovered = await observer.query<{ ok: number }>("SELECT 1 AS ok");
       expect(recovered.rows[0].ok).toBe(1);
     } finally {
-      await observer.query("ROLLBACK").catch(() => undefined);
-      await observer.end().catch(() => undefined);
-      await idle.end().catch(() => undefined);
+      await observer?.query("ROLLBACK").catch(() => undefined);
+      await endBag(bag);
     }
   }, 15_000);
 
   it("waitForLockWait rejects for a statement that fails fast with NOWAIT", async () => {
     const listingId = await createListing("Nowait");
-    const holder = await connect(directUrl);
-    const waiter = await connect(directUrl);
-    const observer = await connect(directUrl);
-    const idle = await connect(directUrl);
-    const idleObserver = await connect(directUrl);
+    const bag: Client[] = [];
+    let holder: Client | undefined;
+    let waiter: Client | undefined;
     try {
+      holder = await connectInto(bag, directUrl);
+      waiter = await connectInto(bag, directUrl);
+      const observer = await connectInto(bag, directUrl);
+      const idle = await connectInto(bag, directUrl);
+      const idleObserver = await connectInto(bag, directUrl);
       await beginAsStore(holder, storeAId);
       await holder.query(`SELECT 1 FROM listings WHERE id = $1 FOR UPDATE`, [listingId]);
       await beginAsStore(waiter, storeAId);
@@ -830,22 +925,17 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
       expect((waiterPoll as Error).message).toBe(DEADLINE_ERROR);
       expect((idlePoll as Error).message).toBe(DEADLINE_ERROR);
     } finally {
-      await holder.query("ROLLBACK").catch(() => undefined);
-      await waiter.query("ROLLBACK").catch(() => undefined);
-      await holder.end().catch(() => undefined);
-      await waiter.end().catch(() => undefined);
-      await observer.end().catch(() => undefined);
-      await idle.end().catch(() => undefined);
-      await idleObserver.end().catch(() => undefined);
+      await holder?.query("ROLLBACK").catch(() => undefined);
+      await waiter?.query("ROLLBACK").catch(() => undefined);
+      await endBag(bag);
     }
   }, 30_000);
 
   it("waitForLockWait rejects for the holder pid", async () => {
     const listingId = await createListing("Holder pid");
     const held = await openHeldInsert(listingId);
-    const sampler = await connect(directUrl);
-    held.extra.push(sampler);
     try {
+      const sampler = await connectInto(held.extra, directUrl);
       expect(await sampleWaiting(sampler, held.holderPid)).toBe(false);
       const started = Date.now();
       const failed = await rejection(waitForLockWait(held.observer, held.holderPid));
@@ -860,10 +950,9 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
   it("waitForLockWait rejects for an idle pid while another session waits", async () => {
     const listingId = await createListing("Idle third");
     const held = await openHeldInsert(listingId);
-    const sampler = await connect(directUrl);
-    const idle = await connect(directUrl);
-    held.extra.push(sampler, idle);
     try {
+      const sampler = await connectInto(held.extra, directUrl);
+      const idle = await connectInto(held.extra, directUrl);
       const deleting = startDelete(held, listingId);
       await untilWaiting(sampler, held.waiterPid);
       const idlePid = await backendPid(idle);
@@ -882,11 +971,10 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
   it("overlapping polls keep their pid and deadline independent", async () => {
     const listingId = await createListing("Overlap polls");
     const held = await openHeldInsert(listingId);
-    const sampler = await connect(directUrl);
-    const idle = await connect(directUrl);
-    const idleObserver = await connect(directUrl);
-    held.extra.push(sampler, idle, idleObserver);
     try {
+      const sampler = await connectInto(held.extra, directUrl);
+      const idle = await connectInto(held.extra, directUrl);
+      const idleObserver = await connectInto(held.extra, directUrl);
       const deleting = startDelete(held, listingId);
       await untilWaiting(sampler, held.waiterPid);
       const idlePid = await backendPid(idle);
@@ -917,8 +1005,10 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
   }, 30_000);
 
   it("waitForLockWait rejects for a pid with no backend after the deadline", async () => {
-    const observer = await connect(directUrl);
+    const name = `lock-wait-missing-${randomUUID()}`;
+    const bag: Client[] = [];
     try {
+      const observer = await connectInto(bag, directUrl, name);
       const started = Date.now();
       const failed = await rejection(waitForLockWait(observer, 2_147_483_647));
       const elapsed = Date.now() - started;
@@ -930,15 +1020,16 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
       expect(ping.rows[0].ok).toBe(1);
       expect(observer.getTransactionStatus()).toBe("I");
     } finally {
-      await observer.end().catch(() => undefined);
+      await endBag(bag);
     }
-    expect(await countSessions(directUrl, SESSION)).toBe(0);
+    expect(await countSessions(directUrl, name)).toBe(0);
   }, 30_000);
 
   it("backendPid returns each supplied client session pid", async () => {
-    const first = await connect(directUrl);
-    const second = await connect(directUrl);
+    const bag: Client[] = [];
     try {
+      const first = await connectInto(bag, directUrl);
+      const second = await connectInto(bag, directUrl);
       const helperFirst = await backendPid(first);
       const rawFirst = await first.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
       const helperSecond = await backendPid(second);
@@ -948,8 +1039,7 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
       expect(helperFirst).not.toBe(helperSecond);
       expect(typeof helperFirst).toBe("number");
     } finally {
-      await first.end().catch(() => undefined);
-      await second.end().catch(() => undefined);
+      await endBag(bag);
     }
   }, 20_000);
 
@@ -957,48 +1047,42 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
     const name = `lock-wait-cleanup-${randomUUID()}`;
     const listingId = await createListing("Cleanup");
     const held = await openHeldInsert(listingId, name);
-    const sampler = await connect(directUrl, "lock-wait-probe");
     try {
+      const sampler = await connectInto(held.extra, directUrl, "lock-wait-probe");
       startDelete(held, listingId);
       await untilWaiting(sampler, held.waiterPid);
       throw new Error("forced failure");
     } catch (error) {
       expect((error as Error).message).toBe("forced failure");
     } finally {
-      await sampler.end().catch(() => undefined);
       const order = await finishCleanup(releaseHeldDelete(held));
       expect(order).toEqual(["holder-rollback", "waiter-drain", "clients-ended"]);
     }
     expect(await countSessions(directUrl, name)).toBe(0);
 
-    const partial = `lock-wait-partial-${randomUUID()}`;
-    const acquired: Client[] = [];
-    const refused = new URL(directUrl);
-    refused.hostname = "127.0.0.1";
-    refused.port = "1";
-    refused.username = "lock-wait-none";
-    refused.password = "invalid";
+    const refusedName = `lock-wait-refused-${randomUUID()}`;
+    const refusedListing = await createListing("Refused acquire");
+    const refusedHeld = await openHeldInsert(refusedListing, refusedName);
     try {
-      acquired.push(await connect(directUrl, partial));
-      const bad = new Client({
-        connectionString: refused.toString(),
+      await connectInto(refusedHeld.extra, refusedDirectUrl(directUrl), refusedName, {
         connectionTimeoutMillis: 800,
       });
-      await bad.connect();
-      acquired.push(bad);
-      throw new Error("bad connection should have failed");
+      throw new Error("refused connection should have failed");
     } catch (error) {
-      expect((error as Error).message).not.toBe("bad connection should have failed");
+      expect((error as Error).message).not.toBe("refused connection should have failed");
+      expect(refusedHeld.extra).toHaveLength(1);
     } finally {
-      for (const client of acquired) await client.end().catch(() => undefined);
+      await finishCleanup(releaseHeldDelete(refusedHeld));
     }
-    expect(await countSessions(directUrl, partial)).toBe(0);
+    expect(await countSessions(directUrl, refusedName)).toBe(0);
+    expect(await deleteListingCode(directUrl, refusedListing)).not.toBe("55P03");
   }, 30_000);
 
   it("pgError reads SQLSTATE and message from real pg rejections", async () => {
     const visible = await createListing("Rls visible");
-    const rlsClient = await connect(directUrl);
+    const rlsBag: Client[] = [];
     try {
+      const rlsClient = await connectInto(rlsBag, directUrl);
       await beginAsStore(rlsClient, storeBId);
       const rejected = await rejection(rlsClient.query(
         `INSERT INTO stock_events (id, store_id, listing_id, type, delta, actor_id)
@@ -1010,15 +1094,18 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
       expect(pgError(rejected).message).toBe((rejected as Error).message);
       expect(pgError(rejected).message).not.toMatch(/stock_events_listing_id_fkey/);
     } finally {
-      await rlsClient.query("ROLLBACK").catch(() => undefined);
-      await rlsClient.end().catch(() => undefined);
+      for (const client of rlsBag) await client.query("ROLLBACK").catch(() => undefined);
+      await endBag(rlsBag);
     }
 
     const doomed = await createListing("Delete wins");
-    const holder = await connect(directUrl);
-    const waiter = await connect(directUrl);
-    const observer = await connect(directUrl);
+    const heldBag: Client[] = [];
+    let holder: Client | undefined;
+    let waiter: Client | undefined;
     try {
+      holder = await connectInto(heldBag, directUrl);
+      waiter = await connectInto(heldBag, directUrl);
+      const observer = await connectInto(heldBag, directUrl);
       await beginAsStore(holder, storeAId);
       const removed = await holder.query(`DELETE FROM listings WHERE id = $1`, [doomed]);
       expect(removed.rowCount).toBe(1);
@@ -1038,17 +1125,18 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
       expect(pgError(insertError).message).toBe((insertError as Error).message);
       await waiter.query("ROLLBACK");
     } finally {
-      await holder.query("ROLLBACK").catch(() => undefined);
-      await waiter.query("ROLLBACK").catch(() => undefined);
-      await holder.end().catch(() => undefined);
-      await waiter.end().catch(() => undefined);
-      await observer.end().catch(() => undefined);
+      await holder?.query("ROLLBACK").catch(() => undefined);
+      await waiter?.query("ROLLBACK").catch(() => undefined);
+      await endBag(heldBag);
     }
 
     const lockedListing = await createListing("Lock timeout");
-    const locker = await connect(directUrl);
-    const blocked = await connect(directUrl);
+    const lockBag: Client[] = [];
+    let locker: Client | undefined;
+    let blocked: Client | undefined;
     try {
+      locker = await connectInto(lockBag, directUrl);
+      blocked = await connectInto(lockBag, directUrl);
       await beginAsStore(locker, storeAId);
       await locker.query(`SELECT 1 FROM listings WHERE id = $1 FOR UPDATE`, [lockedListing]);
       await beginAsStore(blocked, storeAId);
@@ -1060,10 +1148,9 @@ describe.skipIf(!dbEnabled)("lock-wait helper on the lane database", () => {
       expect(pgError(timedOut).message).toMatch(/lock timeout/i);
       expect(pgError(timedOut).message).toBe((timedOut as Error).message);
     } finally {
-      await locker.query("ROLLBACK").catch(() => undefined);
-      await blocked.query("ROLLBACK").catch(() => undefined);
-      await locker.end().catch(() => undefined);
-      await blocked.end().catch(() => undefined);
+      await locker?.query("ROLLBACK").catch(() => undefined);
+      await blocked?.query("ROLLBACK").catch(() => undefined);
+      await endBag(lockBag);
     }
   }, 30_000);
 
