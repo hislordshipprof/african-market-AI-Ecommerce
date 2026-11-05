@@ -15,7 +15,7 @@ ALTER TABLE "stores" ADD COLUMN "unexpected" TEXT;
 ALTER TABLE "two_factors" ADD COLUMN "unexpected" TEXT;
 `;
 
-const TWELVE_WITH_ORDERS = [
+const TWELVE = [
   "accounts",
   "audit_logs",
   "categories",
@@ -30,339 +30,133 @@ const TWELVE_WITH_ORDERS = [
   "two_factors",
 ];
 
-const ELEVEN_NAMES = [
-  "accounts",
-  "audit_logs",
-  "categories",
-  "listings",
-  "master_products",
-  "product_synonyms",
-  "sessions",
-  "store_banners",
-  "store_collections",
-  "stores",
-  "two_factors",
+const ordersMap = new Map([["idx", "orders"]]);
+
+const rows: Array<{
+  name: string;
+  script: string;
+  indexToTable?: ReadonlyMap<string, string>;
+  names?: string[];
+  error?: RegExp;
+}> = [
+  {
+    name: "eleven alters plus an orders alter",
+    script: `${ELEVEN}ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;\n`,
+    names: TWELVE,
+  },
+  {
+    name: "orders behind a continued escape string",
+    script: `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'prefix'
+'can\\'t';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`,
+    names: ["orders", "stores"],
+  },
+  {
+    name: "orders behind a unicode dollar tag",
+    script: `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT $é$can't$é$;
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`,
+    names: ["orders", "stores"],
+  },
+  {
+    name: "stores after a nested comment, and listing_imports inside it",
+    script: `/* ALTER TABLE "listing_imports" ADD COLUMN "x" TEXT;
+/* nested */
+' still comment
+*/
+ALTER TABLE "stores" ADD COLUMN "y" TEXT;
+`,
+    names: ["listing_imports", "stores"],
+  },
+  {
+    name: "a statement inside a string literal",
+    script: `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT 'ALTER TABLE "orders" ADD COLUMN "x" TEXT;';\n`,
+    names: ["orders", "stores"],
+  },
+  {
+    name: "a dash-dash header line",
+    script: `-- ALTER TABLE "orders" ADD COLUMN "x" TEXT;
+ALTER TABLE "stores" ADD COLUMN "y" TEXT;
+`,
+    names: ["stores"],
+  },
+  {
+    name: "create type",
+    script: `CREATE TYPE "mood" AS ENUM ('sad');\n`,
+    error: /unhandled statement: CREATE TYPE/,
+  },
+  {
+    name: "an unknown dropped index",
+    script: `DROP INDEX "orders_unexpected_idx";\n`,
+    error: /index has no table: orders_unexpected_idx/,
+  },
+  {
+    name: "an empty diff",
+    script: "",
+    names: [],
+  },
+  {
+    name: "create table",
+    script: `CREATE TABLE IF NOT EXISTS "orders" ("id" TEXT);\n`,
+    names: ["orders"],
+  },
+  {
+    name: "drop table",
+    script: `DROP TABLE IF EXISTS ONLY "orders";\n`,
+    names: ["orders"],
+  },
+  {
+    name: "truncate",
+    script: `TRUNCATE TABLE ONLY "orders";\n`,
+    names: ["orders"],
+  },
+  {
+    name: "comment on table",
+    script: `COMMENT ON TABLE "public"."orders" IS 'hi';\n`,
+    names: ["orders"],
+  },
+  {
+    name: "create index on a schema-qualified table",
+    script: `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "idx" ON ONLY "public"."orders"("status");\n`,
+    names: ["orders"],
+  },
+  {
+    name: "alter index mapped to its table",
+    script: `ALTER INDEX IF EXISTS "idx" RENAME TO "idx2";\n`,
+    indexToTable: ordersMap,
+    names: ["orders"],
+  },
+  {
+    name: "drop index mapped to its table",
+    script: `DROP INDEX CONCURRENTLY IF EXISTS "public"."idx";\n`,
+    indexToTable: ordersMap,
+    names: ["orders"],
+  },
+  {
+    name: "a referenced table",
+    script: `ALTER TABLE "accounts" ADD CONSTRAINT "c" FOREIGN KEY ("user_id") REFERENCES "users"("id");\n`,
+    names: ["accounts"],
+  },
+  {
+    name: "the same table twice",
+    script: `ALTER TABLE "stores" ADD COLUMN "a" TEXT;\nALTER TABLE "stores" ADD COLUMN "b" TEXT;\n`,
+    names: ["stores"],
+  },
+  {
+    name: "insert",
+    script: `INSERT INTO "orders" ("id") VALUES (1);\n`,
+    error: /unhandled statement: INSERT/,
+  },
 ];
 
-const ELEVEN_AND_ORDERS = `
-ALTER TABLE "accounts" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "audit_logs" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "categories" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "listings" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "master_products" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "product_synonyms" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "sessions" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "store_banners" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "store_collections" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "stores" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "two_factors" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-
 describe("affected tables in a migrate diff", () => {
-  it("counts an extra orders alter as a twelfth table", () => {
-    expect(affectedTablesInMigrateDiff(ELEVEN_AND_ORDERS)).toEqual([
-      "accounts",
-      "audit_logs",
-      "categories",
-      "listings",
-      "master_products",
-      "orders",
-      "product_synonyms",
-      "sessions",
-      "store_banners",
-      "store_collections",
-      "stores",
-      "two_factors",
-    ]);
-  });
-
-  it("ignores an alter that is only a comment", () => {
-    const script = `-- ALTER TABLE "listing_imports" ADD COLUMN "unexpected" TEXT;
-ALTER TABLE "stores" ADD COLUMN "unexpected" TEXT;`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
-  });
-
-  it("counts the table behind a dropped or renamed index", () => {
-    const script = `
-DROP INDEX "product_synonyms_term_trgm_idx";
-ALTER INDEX "store_banners_store_id_active_sort_idx" RENAME TO "store_banners_store_id_active_sort_order_idx";
-`;
-    const indexToTable = new Map([
-      ["product_synonyms_term_trgm_idx", "product_synonyms"],
-      ["store_banners_store_id_active_sort_idx", "store_banners"],
-    ]);
-    expect(affectedTablesInMigrateDiff(script, indexToTable)).toEqual([
-      "product_synonyms",
-      "store_banners",
-    ]);
-  });
-
-  it("keeps an index the database cannot map, so the exact set fails", () => {
-    expect(affectedTablesInMigrateDiff(`DROP INDEX "orders_unexpected_idx";`)).toEqual([
-      "unresolved index: orders_unexpected_idx",
-    ]);
-  });
-
-  it("counts the table a created index is on", () => {
-    const script = `CREATE UNIQUE INDEX "orders_unexpected_idx" ON "public"."orders"("unexpected");`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["orders"]);
-  });
-
-  it("counts a created or dropped table", () => {
-    const script = `
-CREATE TABLE "orders" (
-    "id" TEXT NOT NULL
-);
-DROP TABLE "carts";
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["carts", "orders"]);
-  });
-
-  it("does not count a table that is only referenced", () => {
-    const script = `ALTER TABLE "accounts" ADD CONSTRAINT "accounts_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["accounts"]);
-  });
-
-  it("reads a schema-qualified alter as the bare table", () => {
-    const script = `ALTER TABLE "public"."stores" ALTER COLUMN "delivery_radius_mi" SET DATA TYPE DECIMAL(65,30);`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
-  });
-
-  it("counts one table once when the script alters it twice", () => {
-    const script = `
-ALTER TABLE "stores" ALTER COLUMN "delivery_radius_mi" SET DATA TYPE DECIMAL(65,30);
-ALTER TABLE "public"."stores" ALTER COLUMN "updated_at" DROP DEFAULT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
-  });
-
-  it("omitting one expected table is not the eleven", () => {
-    const script = ELEVEN_AND_ORDERS
-      .replace('ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;\n', "")
-      .replace('ALTER TABLE "two_factors" ADD COLUMN "unexpected" TEXT;\n', "");
-    expect(affectedTablesInMigrateDiff(script)).toEqual([
-      "accounts",
-      "audit_logs",
-      "categories",
-      "listings",
-      "master_products",
-      "product_synonyms",
-      "sessions",
-      "store_banners",
-      "store_collections",
-      "stores",
-    ]);
-  });
-
-  it("maps a schema-qualified dropped index by its bare name", () => {
-    const script = `DROP INDEX "public"."product_synonyms_term_trgm_idx";`;
-    const indexToTable = new Map([["product_synonyms_term_trgm_idx", "product_synonyms"]]);
-    expect(affectedTablesInMigrateDiff(script, indexToTable)).toEqual(["product_synonyms"]);
-  });
-
-  it("keeps an unmapped index whose quoted name is a keyword", () => {
-    expect(affectedTablesInMigrateDiff(`${ELEVEN}\nDROP INDEX "ALTER";`)).toEqual([
-      ...ELEVEN_NAMES,
-      "unresolved index: ALTER",
-    ]);
-  });
-
-  it("counts the table of a mapped index whose quoted name is a keyword", () => {
-    expect(
-      affectedTablesInMigrateDiff(`${ELEVEN}\nDROP INDEX "ALTER";`, new Map([["ALTER", "orders"]])),
-    ).toEqual([
-      "accounts",
-      "audit_logs",
-      "categories",
-      "listings",
-      "master_products",
-      "orders",
-      "product_synonyms",
-      "sessions",
-      "store_banners",
-      "store_collections",
-      "stores",
-      "two_factors",
-    ]);
-  });
-
-  it("counts the table under a created index whose quoted name is a keyword", () => {
-    expect(
-      affectedTablesInMigrateDiff(`${ELEVEN}\nCREATE INDEX "ALTER" ON "orders"("status");`),
-    ).toEqual([
-      "accounts",
-      "audit_logs",
-      "categories",
-      "listings",
-      "master_products",
-      "orders",
-      "product_synonyms",
-      "sessions",
-      "store_banners",
-      "store_collections",
-      "stores",
-      "two_factors",
-    ]);
-  });
-
-  it("counts the table of a renamed index whose quoted name is a keyword", () => {
-    expect(
-      affectedTablesInMigrateDiff(`ALTER INDEX "ALTER" RENAME TO "DROP";`, new Map([["ALTER", "orders"]])),
-    ).toEqual(["orders"]);
-  });
-
-  it("keeps a schema-qualified quoted keyword index the database cannot map", () => {
-    expect(affectedTablesInMigrateDiff(`DROP INDEX "public"."ON";`)).toEqual(["unresolved index: ON"]);
-  });
-
-  it("counts a quoted keyword table under a quoted keyword index name", () => {
-    expect(affectedTablesInMigrateDiff(`CREATE INDEX "UNIQUE" ON "TABLE"("status");`)).toEqual(["TABLE"]);
-  });
-
-  it("counts a quoted keyword table name", () => {
-    expect(affectedTablesInMigrateDiff(`ALTER TABLE "ON" ADD COLUMN "unexpected" TEXT;`)).toEqual(["ON"]);
-  });
-
-  it("counts created and dropped tables whose names are keywords", () => {
-    const script = `
-CREATE TABLE "INDEX" ("id" TEXT NOT NULL);
-DROP TABLE "DROP";
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["DROP", "INDEX"]);
-  });
-
-  it("reads a quoted keyword index after the create-index preamble", () => {
-    const script = `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "ALTER" ON ONLY "orders"("status");`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["orders"]);
-  });
-
-  it("preserves the case of a quoted index name", () => {
-    expect(affectedTablesInMigrateDiff(`DROP INDEX "alter";`)).toEqual(["unresolved index: alter"]);
-  });
-
-  it("still treats an unquoted ON as syntax", () => {
-    expect(affectedTablesInMigrateDiff(`CREATE INDEX orders_status_idx ON orders(status);`)).toEqual(["orders"]);
-  });
-
-  it("does not count a quoted keyword that is only referenced", () => {
-    const script = `ALTER TABLE "accounts" ADD CONSTRAINT "c" FOREIGN KEY ("user_id") REFERENCES "ON"("id");`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["accounts"]);
-  });
-
-  it("ignores a commented drop of a keyword index", () => {
-    const script = `-- DROP INDEX "ALTER";
-ALTER TABLE "stores" ADD COLUMN "unexpected" TEXT;`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
-  });
-
-  it("does not count a column whose name is a keyword", () => {
-    expect(affectedTablesInMigrateDiff(`ALTER TABLE "stores" ADD COLUMN "ALTER" TEXT;`)).toEqual(["stores"]);
-  });
-
-  it("keeps a quote inside an unmapped index name", () => {
-    expect(affectedTablesInMigrateDiff(`DROP INDEX "AL""TER";`)).toEqual(['unresolved index: AL"TER']);
-  });
-
-  it("keeps an orders alter that follows an escape-string default", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'can\\'t';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("keeps an orders alter after a lowercase escape string", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT e'can\\'t';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("keeps an orders alter after a doubled quote in an escape string", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'can''t';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("keeps an orders alter after an escape string that ends with a backslash", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'c\\\\';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("keeps an orders alter after an escape string that holds a backslash and a quote", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'foo\\\\\\'';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("keeps an orders alter after an escape string that is one quote", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'\\'';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("keeps an orders alter after an ordinary doubled quote", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT 'can''t';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("does not treat a backslash as an escape in an ordinary string", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT 'can\\';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("counts a real orders alter once when an escape string mentions orders", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'ALTER TABLE "orders"';
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("does not count orders named only inside an ordinary string", () => {
-    const script = `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT 'ALTER TABLE "orders"';`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
-  });
-
-  it("counts a real orders alter once when a dollar quote mentions orders and a quote", () => {
-    const script = `${ELEVEN}
-ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT $$can't ALTER TABLE "orders"$$;
-ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
-`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
-  });
-
-  it("does not count orders named only inside a tagged dollar quote", () => {
-    const script = `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT $body$ALTER TABLE "orders"$body$;`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
-  });
-
-  it("still counts orders when a parameter marker sits beside the alter", () => {
-    expect(
-      affectedTablesInMigrateDiff(`ALTER TABLE "orders" ALTER COLUMN "n" SET DEFAULT $1;`),
-    ).toEqual(["orders"]);
-  });
-
-  it("still sees every later table when the first statement holds an escape string", () => {
-    const script = `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'can\\'t';
-${ELEVEN}`;
-    expect(affectedTablesInMigrateDiff(script)).toEqual(ELEVEN_NAMES);
+  it.each(rows)("$name", ({ script, indexToTable, names, error }) => {
+    const run = () => affectedTablesInMigrateDiff(script, indexToTable);
+    if (error) {
+      expect(run).toThrow(error);
+      return;
+    }
+    expect(run()).toEqual(names);
   });
 });

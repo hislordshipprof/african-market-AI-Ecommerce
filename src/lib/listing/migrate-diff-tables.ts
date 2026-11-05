@@ -1,217 +1,104 @@
-const KEYWORDS = new Set([
-  "CREATE",
-  "ALTER",
-  "DROP",
-  "TABLE",
-  "INDEX",
-  "UNIQUE",
-  "IF",
-  "NOT",
-  "EXISTS",
-  "ONLY",
-  "CONCURRENTLY",
-  "ON",
-]);
+const IDENT = String.raw`"(?:[^"]|"")*"|[A-Za-z_]\w*`;
+const QUAL = `(?:${IDENT})(?:\\s*\\.\\s*(?:${IDENT}))?`;
 
-/** A quoted identifier stays a name, even when its text is a keyword. Only an unquoted keyword is syntax. */
-type Token = { kind: "kw"; value: string } | { kind: "id"; value: string } | { kind: "dot" };
+const TABLE_FORMS = [
+  String.raw`\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(${QUAL})`,
+  String.raw`\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?(${QUAL})`,
+  String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(${QUAL})`,
+  String.raw`\bcreate\s+(?:unique\s+)?index\s+(?:concurrently\s+)?(?:if\s+not\s+exists\s+)?${QUAL}\s+on\s+(?:only\s+)?(${QUAL})`,
+  String.raw`\btruncate\s+(?:table\s+)?(?:only\s+)?(${QUAL})`,
+  String.raw`\bcomment\s+on\s+table\s+(${QUAL})`,
+];
 
-function isKw(token: Token | undefined, word: string): boolean {
-  return token?.kind === "kw" && token.value === word;
+const INDEX_FORMS = [
+  String.raw`\bdrop\s+index\s+(?:concurrently\s+)?(?:if\s+exists\s+)?(${QUAL})`,
+  String.raw`\balter\s+index\s+(?:if\s+exists\s+)?(${QUAL})`,
+];
+
+const UNHANDLED =
+  /\b(?:create|alter|drop|truncate|delete|update|insert|rename|do)\b|\bcomment\s+on\b/i;
+
+type Span = { start: number; end: number };
+
+function withoutLineComments(script: string): string {
+  return script
+    .split(/\r?\n/)
+    .filter((line) => !line.startsWith("--"))
+    .join("\n");
 }
 
-/** Ordinary '...' literal. A doubled quote is one quote; a backslash does not escape. */
-function skipStandardString(sql: string, i: number): number {
-  i += 1;
-  while (i < sql.length) {
-    if (sql[i] === "'" && sql[i + 1] === "'") {
-      i += 2;
-      continue;
-    }
-    if (sql[i] === "'") return i + 1;
-    i += 1;
-  }
-  return i;
+function bare(qualified: string): string {
+  const parts = qualified.match(/"(?:[^"]|"")*"|[A-Za-z_]\w*/g);
+  const last = parts?.at(-1);
+  if (!last) throw new Error(`migrate diff table name was not readable: ${qualified}`);
+  if (last.startsWith('"')) return last.slice(1, -1).replaceAll('""', '"');
+  return last;
 }
 
-/** E'...' / e'...' literal. A backslash and the next character stay inside, including \' and \\. */
-function skipEscapeString(sql: string, i: number): number {
-  i += 1;
-  while (i < sql.length) {
-    if (sql[i] === "\\") {
-      i += Math.min(2, sql.length - i);
-      continue;
-    }
-    if (sql[i] === "'" && sql[i + 1] === "'") {
-      i += 2;
-      continue;
-    }
-    if (sql[i] === "'") return i + 1;
-    i += 1;
+function statementEnd(text: string, start: number): number {
+  const semi = text.indexOf(";", start);
+  if (semi < 0) {
+    throw new Error(`migrate diff statement has no semicolon: ${text.slice(start, start + 160).trim()}`);
   }
-  return i;
+  return semi + 1;
 }
 
-/** $$...$$ or $tag$...$tag$. Returns null when `$` is not a dollar quote, as with `$1`. */
-function skipDollarString(sql: string, i: number): number | null {
-  let j = i + 1;
-  if (j < sql.length && /[A-Za-z_]/.test(sql[j])) {
-    j += 1;
-    while (j < sql.length && /[A-Za-z0-9_]/.test(sql[j])) j += 1;
+function matches(text: string, source: string): Array<{ name: string; start: number; end: number }> {
+  const found: Array<{ name: string; start: number; end: number }> = [];
+  for (const match of text.matchAll(new RegExp(source, "gi"))) {
+    const raw = match[1];
+    if (!raw || match.index === undefined) continue;
+    found.push({ name: bare(raw), start: match.index, end: statementEnd(text, match.index) });
   }
-  if (sql[j] !== "$") return null;
-  const tag = sql.slice(i, j + 1);
-  const closeAt = sql.indexOf(tag, j + 1);
-  if (closeAt < 0) return sql.length;
-  return closeAt + tag.length;
+  return found;
 }
 
-function tokenize(sql: string): Token[] {
-  const out: Token[] = [];
-  let i = 0;
-  while (i < sql.length) {
-    const c = sql[i];
-    if (c === "-" && sql[i + 1] === "-") {
-      i += 2;
-      while (i < sql.length && sql[i] !== "\n") i += 1;
-      continue;
-    }
-    if (c === "/" && sql[i + 1] === "*") {
-      i += 2;
-      while (i < sql.length && !(sql[i] === "*" && sql[i + 1] === "/")) i += 1;
-      i = Math.min(sql.length, i + 2);
-      continue;
-    }
-    if ((c === "E" || c === "e") && sql[i + 1] === "'") {
-      i = skipEscapeString(sql, i + 1);
-      continue;
-    }
-    if (c === "$") {
-      const next = skipDollarString(sql, i);
-      if (next !== null) {
-        i = next;
-        continue;
-      }
-    }
-    if (c === "'") {
-      i = skipStandardString(sql, i);
-      continue;
-    }
-    if (c === '"') {
-      i += 1;
-      let ident = "";
-      while (i < sql.length) {
-        if (sql[i] === '"' && sql[i + 1] === '"') {
-          ident += '"';
-          i += 2;
-          continue;
-        }
-        if (sql[i] === '"') {
-          i += 1;
-          break;
-        }
-        ident += sql[i];
-        i += 1;
-      }
-      out.push({ kind: "id", value: ident });
-      continue;
-    }
-    if (c === ".") {
-      out.push({ kind: "dot" });
-      i += 1;
-      continue;
-    }
-    if (/[A-Za-z_]/.test(c)) {
-      let word = "";
-      while (i < sql.length && /[A-Za-z0-9_]/.test(sql[i])) {
-        word += sql[i];
-        i += 1;
-      }
-      const upper = word.toUpperCase();
-      out.push(KEYWORDS.has(upper) ? { kind: "kw", value: upper } : { kind: "id", value: word });
-      continue;
-    }
-    i += 1;
+function blank(text: string, spans: Span[]): string {
+  const hidden = new Array<boolean>(text.length).fill(false);
+  for (const span of spans) {
+    for (let i = span.start; i < span.end && i < text.length; i += 1) hidden[i] = true;
   }
+  let out = "";
+  for (let i = 0; i < text.length; i += 1) out += hidden[i] ? " " : text[i];
   return out;
 }
 
-function skipIfExists(tokens: Token[], index: number): number {
-  if (isKw(tokens[index], "IF") && isKw(tokens[index + 1], "NOT") && isKw(tokens[index + 2], "EXISTS")) {
-    return index + 3;
-  }
-  if (isKw(tokens[index], "IF") && isKw(tokens[index + 1], "EXISTS")) return index + 2;
-  return index;
-}
-
-function readName(tokens: Token[], index: number): { name: string; next: number } | null {
-  const first = tokens[index];
-  if (first?.kind !== "id") return null;
-  let name = first.value;
-  let next = index + 1;
-  while (tokens[next]?.kind === "dot") {
-    const second = tokens[next + 1];
-    if (second?.kind !== "id") break;
-    name = second.value;
-    next += 2;
-  }
-  return { name, next };
-}
-
-function sorted(names: Set<string>): string[] {
-  return [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-}
-
-function rememberTable(found: Set<string>, tokens: Token[], index: number): number | null {
-  let j = skipIfExists(tokens, index);
-  if (isKw(tokens[j], "ONLY")) j += 1;
-  const table = readName(tokens, j);
-  if (!table) return null;
-  found.add(table.name);
-  return table.next;
-}
-
-/** Tables a Prisma migrate-diff script changes. A referenced table is not changed. */
+/**
+ * Tables a Prisma migrate-diff script might change.
+ * Strings and block comments are not skipped, so a table named inside one still counts.
+ * An unrecognized statement throws. A false alarm fails the exact-set check; a hidden table does not pass.
+ */
 export function affectedTablesInMigrateDiff(
   script: string,
   indexToTable: ReadonlyMap<string, string> = new Map(),
 ): string[] {
+  const text = withoutLineComments(script);
   const found = new Set<string>();
-  const tokens = tokenize(script);
-  for (let i = 0; i < tokens.length; i += 1) {
-    const action = tokens[i];
-    if (!isKw(action, "ALTER") && !isKw(action, "DROP") && !isKw(action, "CREATE")) continue;
-    let j = i + 1;
-    if (isKw(action, "CREATE") && isKw(tokens[j], "UNIQUE")) j += 1;
-    if (isKw(tokens[j], "TABLE")) {
-      const next = rememberTable(found, tokens, j + 1);
-      if (next !== null) i = next - 1;
-      continue;
+  const spans: Span[] = [];
+  for (const source of TABLE_FORMS) {
+    for (const match of matches(text, source)) {
+      found.add(match.name);
+      spans.push(match);
     }
-    if (!isKw(tokens[j], "INDEX")) continue;
-    j += 1;
-    if ((isKw(action, "DROP") || isKw(action, "CREATE")) && isKw(tokens[j], "CONCURRENTLY")) j += 1;
-    j = skipIfExists(tokens, j);
-    const index = readName(tokens, j);
-    if (!index) continue;
-    if (isKw(action, "CREATE")) {
-      let k = index.next;
-      while (
-        k < tokens.length &&
-        !isKw(tokens[k], "ON") &&
-        !isKw(tokens[k], "CREATE") &&
-        !isKw(tokens[k], "ALTER") &&
-        !isKw(tokens[k], "DROP")
-      ) {
-        k += 1;
-      }
-      if (!isKw(tokens[k], "ON")) continue;
-      const next = rememberTable(found, tokens, k + 1);
-      if (next !== null) i = next - 1;
-      continue;
-    }
-    found.add(indexToTable.get(index.name) ?? `unresolved index: ${index.name}`);
-    i = index.next - 1;
   }
-  return sorted(found);
+  for (const source of INDEX_FORMS) {
+    for (const match of matches(text, source)) {
+      const table = indexToTable.get(match.name);
+      if (!table) {
+        throw new Error(
+          `migrate diff index has no table: ${match.name}: ${text.slice(match.start, match.end).trim()}`,
+        );
+      }
+      found.add(table);
+      spans.push(match);
+    }
+  }
+  const rest = blank(text, spans);
+  const unhandled = UNHANDLED.exec(rest);
+  if (unhandled && unhandled.index !== undefined) {
+    throw new Error(
+      `migrate diff has an unhandled statement: ${rest.slice(unhandled.index, unhandled.index + 160).trim()}`,
+    );
+  }
+  return [...found].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
