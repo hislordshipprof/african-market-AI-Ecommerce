@@ -696,6 +696,52 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(stored?.status).toBe("REFUND_FAILED");
   });
 
+  it("a pending remainder that later succeeds can be repaid for what is still owed", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Pending then succeeded" },
+    });
+    const pi = `pi_review_pending_done_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "review-cap-done");
+    const older = await fakeStripeProvider.refundPayment(pi, 400, "review-old-done");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26493,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    setNextRefundStatus(pi, "pending");
+    expect((await autoCancelOrder(storeAId, order.id)).ok).toBe(false);
+    const pending = (await fakeStripeProvider.listRefunds(pi)).find((refund) => refund.status === "pending");
+    expect(pending?.amountRefunded).toBe(600);
+    setRefundStatus(older.refundId, "failed");
+    expect(
+      await markTerminalRefundFailure({
+        paymentIntentId: pi,
+        refundId: older.refundId,
+        refundStatus: "failed",
+      }),
+    ).toEqual({ ok: true, action: "refund_failed" });
+    expect((await resolveRefundFailed(order.id, "Too early")).ok).toBe(false);
+    setRefundStatus(pending!.refundId, "succeeded");
+    const queue = (await listRefundFailedOrders()).find((row) => row.orderId === order.id);
+    expect(queue?.bankRefundPending).toBe(false);
+    expect(queue?.owedCents).toBe(400);
+    expect(await resolveRefundFailed(order.id, "Paid the remaining 400 cents by Zelle")).toEqual({ ok: true });
+    const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(stored?.status).toBe("CANCELLED");
+  });
+
   it("a failed refund found by the sweep can be repaid", async () => {
     asAdmin(cookiesAdmin);
     const customer = await storeScoped(storeAId).customer.create({

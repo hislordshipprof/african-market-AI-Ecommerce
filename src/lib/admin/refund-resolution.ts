@@ -130,16 +130,19 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
     if (!current || current.status !== "REFUND_FAILED") {
       return { ok: false as const, error: "already resolved" };
     }
-    if (await refundBalance(current.paymentIntentId).then((balance) => balance.bankRefundPending)) {
+    const balance = await refundBalance(current.paymentIntentId);
+    if (balance.bankRefundPending) {
       return { ok: false as const, error: "A refund is still confirming with the bank" };
     }
-    const openRefund = await tx.auditLog.findFirst({
-      where: { entityId: orderId, action: "refund_retry" },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    });
-    const openAfter = openRefund?.after as { inFlight?: boolean } | null;
-    if (openAfter?.inFlight === true) {
-      return { ok: false as const, error: "A refund is still confirming with the bank" };
+    if (!current.paymentIntentId) {
+      const openRefund = await tx.auditLog.findFirst({
+        where: { entityId: orderId, action: "refund_retry" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
+      const openAfter = openRefund?.after as { inFlight?: boolean } | null;
+      if (openAfter?.inFlight === true) {
+        return { ok: false as const, error: "A refund is still confirming with the bank" };
+      }
     }
     const existing = current.notes?.trim();
     const notes = existing ? `${existing}\n${trimmed}` : trimmed;
