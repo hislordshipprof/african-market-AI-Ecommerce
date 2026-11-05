@@ -94,7 +94,7 @@ async function refundCapturedBalance(
   paymentIntentId: string,
   orderId: string,
   storeId: string,
-): Promise<RefundResult | { inFlight: true }> {
+): Promise<RefundResult | { inFlight: true } | { blocked: true }> {
   const stripe = getStripeProvider();
   let pi = await stripe.retrievePaymentIntent(paymentIntentId);
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -108,7 +108,10 @@ async function refundCapturedBalance(
     const reservedRefund = await reserveAttempt(storeId, orderId, "refund_retry", {
       alreadyRefundedCents: already,
     });
-    if (!reservedRefund.ok) throw new Error("Refund attempt is still in backoff");
+    if (!reservedRefund.ok) {
+      if (reservedRefund.blocked) return { blocked: true };
+      throw new Error("Refund attempt is still in backoff");
+    }
     const refundAttempt = reservedRefund.attempt;
     try {
       const refund = await stripe.refundPayment(
@@ -120,16 +123,25 @@ async function refundCapturedBalance(
       const after = await stripe.retrievePaymentIntent(paymentIntentId);
       const covered = after.amountRefunded ?? already + refund.amountRefunded;
       if (refund.status === "succeeded" && covered < after.amountReceived) {
+        await noteAttemptReleased(storeId, orderId, "refund_retry", refundAttempt);
         pi = after;
         continue;
       }
+      await noteAttemptReleased(storeId, orderId, "refund_retry", refundAttempt);
       return refund;
     } catch (err) {
       if (isIdempotencyKeyInUse(err)) {
-        await noteAttemptInFlight(storeId, orderId, "refund_retry", refundAttempt);
         return { inFlight: true };
       }
+      if (isRetryableProviderError(err)) {
+        const fresh = await stripe.retrievePaymentIntent(paymentIntentId);
+        if ((fresh.amountRefunded ?? 0) <= already) {
+          await noteAttemptReleased(storeId, orderId, "refund_retry", refundAttempt);
+        }
+        throw err;
+      }
       if (attempt === 0 && greaterThanUnrefunded(err)) {
+        await noteAttemptReleased(storeId, orderId, "refund_retry", refundAttempt);
         pi = await stripe.retrievePaymentIntent(paymentIntentId);
         continue;
       }
@@ -171,33 +183,53 @@ async function reserveAttempt(
   orderId: string,
   action: "capture_retry" | "cancel_retry" | "refund_retry",
   extra: Record<string, unknown> = {},
-): Promise<{ ok: true; attempt: number } | { ok: false; waitMs: number; exhausted?: boolean }> {
+): Promise<{ ok: true; attempt: number } | { ok: false; waitMs: number; exhausted?: boolean; blocked?: boolean }> {
   return storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
+    if (action === "refund_retry") {
+      const current = await tx.order.findUnique({ where: { id: orderId } });
+      const manual = await tx.auditLog.findFirst({
+        where: { entityId: orderId, action: "refund_resolved_manually" },
+      });
+      if (manual || !current || current.status !== "CANCELLING") {
+        return { ok: false, waitMs: 0, blocked: true };
+      }
+    }
     const prior = await tx.auditLog.findMany({
       where: { entityId: orderId, action },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
-    if (action === "refund_retry" || action === "cancel_retry") {
-      const after = prior[0]?.after as { attempt?: number; inFlight?: boolean } | null;
-      if (after?.inFlight === true && typeof after.attempt === "number") {
-        return { ok: true, attempt: after.attempt };
+    const newestAfter = prior[0]?.after as { attempt?: number; inFlight?: boolean } | null;
+    if (newestAfter?.inFlight === true && typeof newestAfter.attempt === "number") {
+      if (action === "capture_retry") {
+        const waitMs = captureBackoffMs(newestAfter.attempt) - (Date.now() - prior[0].createdAt.getTime());
+        if (waitMs > 0) return { ok: false, waitMs };
       }
+      return { ok: true, attempt: newestAfter.attempt };
     }
-    if (action === "capture_retry" && prior.length >= MAX_CAPTURE_ATTEMPTS) {
+    const reservations = prior.filter((row) => {
+      const after = row.after as { inFlight?: boolean } | null;
+      return typeof after?.inFlight !== "boolean";
+    });
+    if (action === "capture_retry" && reservations.length >= MAX_CAPTURE_ATTEMPTS) {
       return { ok: false, waitMs: 0, exhausted: true };
     }
-    if (action === "capture_retry" && prior.length > 0) {
-      const latest = prior[0];
+    if (action === "capture_retry" && reservations.length > 0) {
+      const latest = reservations[0];
       const after = latest.after as { attempt?: number } | null;
-      const previous = typeof after?.attempt === "number" ? after.attempt : prior.length;
+      const previous = typeof after?.attempt === "number" ? after.attempt : reservations.length;
       const waitMs = captureBackoffMs(previous) - (Date.now() - latest.createdAt.getTime());
       if (waitMs > 0) return { ok: false, waitMs };
     }
-    const attempt = prior.length + 1;
+    const attempt = reservations.length + 1;
     await tx.auditLog.create({
       data: systemAuditData(storeId, orderId, action, { attempt, ...extra } as Prisma.InputJsonValue),
     });
+    if (action === "refund_retry" || action === "cancel_retry") {
+      await tx.auditLog.create({
+        data: systemAuditData(storeId, orderId, action, { attempt, inFlight: true }),
+      });
+    }
     return { ok: true, attempt };
   });
 }
@@ -206,7 +238,7 @@ async function reserveAttempt(
 async function noteAttemptInFlight(
   storeId: string,
   orderId: string,
-  action: "cancel_retry" | "refund_retry",
+  action: "capture_retry" | "cancel_retry" | "refund_retry",
   attempt: number,
 ): Promise<void> {
   await storeScopedTransaction(storeId, async (tx) => {
@@ -217,8 +249,35 @@ async function noteAttemptInFlight(
   });
 }
 
-function refundInFlight(value: RefundResult | { inFlight: true }): value is { inFlight: true } {
+function refundInFlight(value: RefundResult | { inFlight: true } | { blocked: true }): value is { inFlight: true } {
   return "inFlight" in value;
+}
+
+function refundBlocked(value: RefundResult | { inFlight: true } | { blocked: true }): value is { blocked: true } {
+  return "blocked" in value;
+}
+
+/** A stored 500 is pinned to its key. The next attempt has to be a new number. */
+async function noteAttemptReleased(
+  storeId: string,
+  orderId: string,
+  action: "capture_retry" | "cancel_retry" | "refund_retry",
+  attempt: number,
+): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const prior = await tx.auditLog.findMany({
+      where: { entityId: orderId, action },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 1,
+    });
+    const after = prior[0]?.after as { attempt?: number; inFlight?: boolean } | null;
+    if (after?.inFlight === true && after.attempt === attempt) {
+      await tx.auditLog.create({
+        data: systemAuditData(storeId, orderId, action, { attempt, inFlight: false }),
+      });
+    }
+  });
 }
 
 function captureBackoffMs(attempt: number): number {
@@ -411,12 +470,17 @@ async function settleUnconfirmedCapture(
     const releaseAttempt = reservedRelease.attempt;
     try {
       await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, releaseAttempt));
+      await noteAttemptReleased(storeId, orderId, "cancel_retry", releaseAttempt);
     } catch (err) {
       if (isIdempotencyKeyInUse(err)) {
         await noteAttemptInFlight(storeId, orderId, "cancel_retry", releaseAttempt);
         return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
       }
       if (isRetryableProviderError(err)) {
+        const freshAttempt = await stripe.retrievePaymentIntent(order.paymentIntentId);
+        if (freshAttempt.status !== "canceled") {
+          await noteAttemptReleased(storeId, orderId, "cancel_retry", releaseAttempt);
+        }
         return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
       }
       if (err instanceof ProviderStateError) {
@@ -523,8 +587,11 @@ async function settleCapturedRefund(
   orderId: string,
   paymentIntentId: string,
   refund: RefundResult,
-): Promise<{ outcome: "refunded" } | { outcome: "failed" | "pending" | "waiting"; error: string }> {
+): Promise<{ outcome: "refunded" } | { outcome: "failed" | "pending" | "waiting" | "blocked"; error: string }> {
   const decision = await refundReadyToSettle(paymentIntentId, orderId, storeId, refund);
+  if (refundBlocked(decision)) {
+    return { outcome: "blocked", error: "Refund was resolved while the bank was working" };
+  }
   if (refundInFlight(decision)) {
     return { outcome: "waiting", error: "Refund is still confirming with the bank" };
   }
@@ -555,7 +622,7 @@ async function refundReadyToSettle(
   orderId: string,
   storeId: string,
   refund: RefundResult,
-): Promise<RefundResult | { inFlight: true }> {
+): Promise<RefundResult | { inFlight: true } | { blocked: true }> {
   if (refund.status !== "succeeded") return refund;
   const stripe = getStripeProvider();
   const open = (items: RefundResult[]) =>
@@ -569,7 +636,7 @@ async function refundReadyToSettle(
   if (settled) return settled;
 
   const gap = await refundCapturedBalance(paymentIntentId, orderId, storeId);
-  if (refundInFlight(gap)) return gap;
+  if (refundInFlight(gap) || refundBlocked(gap)) return gap;
   if (gap.status !== "succeeded") return gap;
   const again = await stripe.listRefunds(paymentIntentId);
   const stillPending = open(again);
@@ -812,17 +879,26 @@ export async function markReady(
         validation.paymentIntentId,
         cancelKey(orderId, reservedCancel.attempt),
       );
+      await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
     } catch (err) {
       if (isIdempotencyKeyInUse(err) && cancelAttempt !== undefined) {
         await noteAttemptInFlight(storeId, orderId, "cancel_retry", cancelAttempt);
         return { ok: false, error: "Cancellation is still confirming with the bank" };
       }
-      if (isRetryableProviderError(err)) {
+      if (isRetryableProviderError(err) && cancelAttempt !== undefined) {
+        const fresh = await stripe.retrievePaymentIntent(validation.paymentIntentId);
+        if (fresh.status !== "canceled") {
+          await noteAttemptReleased(storeId, orderId, "cancel_retry", cancelAttempt);
+        }
         return { ok: false, error: "Cancellation is still confirming with the bank" };
       }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
+        if (cancelAttempt !== undefined) {
+          await noteAttemptReleased(storeId, orderId, "cancel_retry", cancelAttempt);
+        }
         const refund = await refundCapturedBalance(validation.paymentIntentId, orderId, storeId);
+        if (refundBlocked(refund)) return { ok: false, error: "Order status changed during cancellation" };
         if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank" };
         const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
@@ -861,9 +937,14 @@ export async function markReady(
     );
   } catch (err) {
     if (isIdempotencyKeyInUse(err)) {
+      await noteAttemptInFlight(storeId, orderId, "capture_retry", captureAttempt);
       return { ok: false, error: "Card capture is still confirming with the bank" };
     }
     if (isRetryableProviderError(err)) {
+      const fresh = await stripe.retrievePaymentIntent(validation.paymentIntentId);
+      if (fresh.status !== "succeeded") {
+        await noteAttemptReleased(storeId, orderId, "capture_retry", captureAttempt);
+      }
       const settled = await noteCaptureServerError(storeId, orderId, captureAttempt);
       if (settled.ok) return { ok: true, capturedAmountCents: settled.capturedAmountCents };
       return { ok: false, error: settled.error };
@@ -982,19 +1063,26 @@ export async function autoCancelOrder(
         validation.paymentIntentId,
         cancelKey(orderId, reservedCancel.attempt),
       );
+      await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
     } catch (err) {
       if (isIdempotencyKeyInUse(err)) {
         await noteAttemptInFlight(storeId, orderId, "cancel_retry", reservedCancel.attempt);
         return { ok: false, error: "Cancellation is still confirming with the bank" };
       }
       if (isRetryableProviderError(err)) {
+        const fresh = await stripe.retrievePaymentIntent(validation.paymentIntentId);
+        if (fresh.status !== "canceled") {
+          await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
+        }
         return { ok: false, error: "Cancellation is still confirming with the bank" };
       }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
+        await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
         const refund = validation.refundId
           ? await stripe.retrieveRefund(validation.refundId)
           : await refundCapturedBalance(validation.paymentIntentId, orderId, storeId);
+        if (refundBlocked(refund)) return { ok: false, error: "Order status changed during cancellation" };
         if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank" };
         const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
@@ -1041,11 +1129,13 @@ export async function reconcileStuckOrder(
         refund = await stripe.retrieveRefund(order.refundId);
       } else {
         refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
+        if (refundBlocked(refund)) return { ok: true, action: "already_resolved" };
         if (refundInFlight(refund)) {
           return { ok: false, error: "Refund is still confirming with the bank", waiting: true };
         }
       }
       const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
+      if (settled.outcome === "blocked") return { ok: true, action: "already_resolved" };
       if (settled.outcome !== "refunded") {
         return {
           ok: false,
@@ -1090,9 +1180,14 @@ export async function reconcileStuckOrder(
         return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, retryCap.amountCaptured);
       } catch (err) {
         if (isIdempotencyKeyInUse(err)) {
+          await noteAttemptInFlight(storeId, orderId, "capture_retry", attempt);
           return { ok: false, error: "Card capture is still confirming with the bank", waiting: true };
         }
         if (isRetryableProviderError(err)) {
+          const fresh = await stripe.retrievePaymentIntent(order.paymentIntentId);
+          if (fresh.status !== "succeeded") {
+            await noteAttemptReleased(storeId, orderId, "capture_retry", attempt);
+          }
           const settled = await noteCaptureServerError(storeId, orderId, attempt);
           if (settled.ok) return { ok: true, action: "finalized_capture" };
           if (settled.resolved === "cancelled") return { ok: true, action: "finalized_cancel" };
@@ -1111,12 +1206,17 @@ export async function reconcileStuckOrder(
         }
         try {
           await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, reservedCancel.attempt));
+          await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
         } catch (err) {
           if (isIdempotencyKeyInUse(err)) {
             await noteAttemptInFlight(storeId, orderId, "cancel_retry", reservedCancel.attempt);
             return { ok: false, error: "Cancellation is still confirming with the bank", waiting: true };
           }
           if (isRetryableProviderError(err)) {
+            const fresh = await stripe.retrievePaymentIntent(order.paymentIntentId);
+            if (fresh.status !== "canceled") {
+              await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
+            }
             return { ok: false, error: "Cancellation is still confirming with the bank", waiting: true };
           }
           throw err;
@@ -1130,11 +1230,13 @@ export async function reconcileStuckOrder(
               refund = await stripe.retrieveRefund(order.refundId);
             } else {
               refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
+              if (refundBlocked(refund)) return { ok: true, action: "already_resolved" };
               if (refundInFlight(refund)) {
                 return { ok: false, error: "Refund is still confirming with the bank", waiting: true };
               }
             }
             const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
+            if (settled.outcome === "blocked") return { ok: true, action: "already_resolved" };
             if (settled.outcome !== "refunded") {
               return {
                 ok: false,

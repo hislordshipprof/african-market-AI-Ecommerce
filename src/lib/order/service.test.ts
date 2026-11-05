@@ -2175,7 +2175,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       await storeScoped(storeId).auditLog.count({
         where: { entityId: order.id, action: "capture_retry" },
       }),
-    ).toBe(1);
+    ).toBe(2);
     expect(
       await storeScoped(storeId).auditLog.count({
         where: { entityId: order.id, action: "reconcile_failed" },
@@ -2191,6 +2191,26 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
         where: { entityId: order.id, action: "reconcile_failed" },
       }),
     ).toBe(0);
+  });
+
+  it("a capture 409 keeps the same key after the backoff expires", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: order.totalCents },
+      });
+    });
+    setNextIdempotencyConflict(pi);
+    await recordReconcileResult(storeId, order.id);
+    await backdateCaptureAttempt(order.id, 31_000);
+    await recordReconcileResult(storeId, order.id);
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([
+      `capture:${order.id}:1`,
+      `capture:${order.id}:1`,
+    ]);
   });
 
   it("a capture 500 then a later attempt succeeds", async () => {
@@ -2714,6 +2734,69 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
           where: { entityId: order.id, action: "reconcile_failed" },
         }),
       ).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a refund 409 followed by a stored 500 uses the next key", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: 1000, refundId: null },
+      });
+    });
+    setNextRefundFailure(pi, 1);
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    const keys: string[] = [];
+    const spy = vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (paymentIntentId, amount, key, fee) => {
+      keys.push(key ?? "");
+      if (keys.length === 1) {
+        throw Object.assign(new Error("in flight"), { statusCode: 409, code: "idempotency_key_in_use" });
+      }
+      return original(paymentIntentId, amount, key, fee);
+    });
+    try {
+      for (let i = 0; i < 4; i++) {
+        try {
+          await reconcileStuckOrder(storeId, order.id);
+        } catch (err) {
+          expect(err).toBeInstanceOf(Error);
+        }
+      }
+      expect(keys).toContain(`refund:${order.id}:0:2`);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLED");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a cancel 409 followed by a stored 500 uses the next key", async () => {
+    const order = await createTestOrder("CANCELLING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    setNextCancelFailure(pi, 1);
+    const original = fakeStripeProvider.cancelPaymentIntent.bind(fakeStripeProvider);
+    const keys: string[] = [];
+    const spy = vi.spyOn(fakeStripeProvider, "cancelPaymentIntent").mockImplementation(async (paymentIntentId, key) => {
+      keys.push(key ?? "");
+      if (keys.length === 1) {
+        throw Object.assign(new Error("in flight"), { statusCode: 409, code: "idempotency_key_in_use" });
+      }
+      return original(paymentIntentId, key);
+    });
+    try {
+      for (let i = 0; i < 4; i++) {
+        await reconcileStuckOrder(storeId, order.id);
+      }
+      expect(keys).toContain(`cancel:${order.id}:2`);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLED");
     } finally {
       spy.mockRestore();
     }

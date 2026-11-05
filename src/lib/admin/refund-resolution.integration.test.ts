@@ -25,7 +25,7 @@ import { auth } from "../auth";
 import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
-import { markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
+import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { listRefundFailedOrders, resolveRefundFailed } from "./refund-resolution";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -505,5 +505,88 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       where: { entityId: order.id, action: "refund_resolved_manually" },
     });
     expect(resolutions).toHaveLength(1);
+  });
+
+  it("a stale empty refund list does not refund again after manual repayment", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Stale List Customer" },
+    });
+    const pi = `pi_stale_list_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-stale-list");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26407,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: null,
+      },
+    });
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const enteredGate = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const original = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    let listed = 0;
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id: string) => {
+      const live = await original(id);
+      const snapshot = live.map((refund) => ({ ...refund }));
+      listed += 1;
+      if (listed === 1) {
+        entered();
+        await gate;
+        return snapshot;
+      }
+      return original(id);
+    });
+
+    const reconcile = reconcileStuckOrder(storeAId, order.id);
+    try {
+      await enteredGate;
+      const cancelled = await autoCancelOrder(storeAId, order.id);
+      expect(cancelled.ok).toBe(true);
+      const first = (await original(pi)).find((refund) => refund.status === "succeeded");
+      expect(first).toBeTruthy();
+      setRefundStatus(first!.refundId, "failed");
+      expect(
+        await markTerminalRefundFailure({
+          paymentIntentId: pi,
+          refundId: first!.refundId,
+          refundStatus: "failed",
+        }),
+      ).toEqual({ ok: true, action: "refund_failed" });
+      expect(await resolveRefundFailed(order.id, "Paid customer by Zelle")).toEqual({ ok: true });
+      const before = (await original(pi))
+        .filter((refund) => refund.status === "succeeded")
+        .reduce((sum, refund) => sum + refund.amountRefunded, 0);
+      expect(before).toBe(0);
+      release();
+      await reconcile;
+    } finally {
+      release();
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
+
+    const after = (await fakeStripeProvider.listRefunds(pi))
+      .filter((refund) => refund.status === "succeeded")
+      .reduce((sum, refund) => sum + refund.amountRefunded, 0);
+    expect(after).toBe(0);
+    const updated = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(updated?.status).toBe("CANCELLED");
   });
 });

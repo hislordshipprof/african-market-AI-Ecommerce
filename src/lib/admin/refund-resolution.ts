@@ -121,6 +121,14 @@ export async function resolveRefundFailed(orderId: string, note: string): Promis
     if (!current || current.status !== "REFUND_FAILED") {
       return { ok: false as const, error: "already resolved" };
     }
+    const openRefund = await tx.auditLog.findFirst({
+      where: { entityId: orderId, action: "refund_retry" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    const openAfter = openRefund?.after as { inFlight?: boolean } | null;
+    if (openAfter?.inFlight === true) {
+      return { ok: false as const, error: "A refund is still confirming with the bank" };
+    }
     const existing = current.notes?.trim();
     const notes = existing ? `${existing}\n${trimmed}` : trimmed;
     const updated = await tx.order.updateMany({
