@@ -144,6 +144,7 @@ function guardFinishedStream(response: Response): Response {
   if (!type.includes("text/event-stream") || !response.body) return response;
   const reader = response.body.getReader();
   let sawFinish = false;
+  let pending = "";
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
@@ -153,8 +154,9 @@ function guardFinishedStream(response: Response): Response {
           else controller.close();
           return;
         }
-        const text = new TextDecoder().decode(value);
-        if (text.includes("[DONE]") || text.includes('"type":"finish"')) sawFinish = true;
+        pending += new TextDecoder().decode(value);
+        if (/\[[ \t]*DONE[ \t]*\]/.test(pending) || /"type":"finish"(?!-)/.test(pending)) sawFinish = true;
+        if (pending.length > 64) pending = pending.slice(-64);
         controller.enqueue(value);
       } catch (error) {
         if (isAbort(error)) controller.error(error);

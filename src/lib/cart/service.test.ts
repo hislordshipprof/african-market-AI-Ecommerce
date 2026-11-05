@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { healthQueryRaw, storeScoped, storeScopedTransaction } from "../db";
 import { customerRlsErrorText, isCustomerRlsRejection } from "../customer-rls-error";
 import { catalogFor } from "../storefront/catalog";
+import { cartBootstrapWaiting, holdCartBootstrap, releaseCartBootstrap, resetCartBootstrap } from "./bootstrap";
 import {
   getOrCreateCart,
   addLine,
@@ -183,6 +184,27 @@ describe.skipIf(!hasDb)("Cart service", () => {
   });
 
   describe("getOrCreateCart", () => {
+    it("gives unrelated guests different carts and keeps one browser's cart before the cookie arrives", async () => {
+      const [first, second] = await Promise.all([
+        getOrCreateCart(storeId, null, null, "browser-aaa-111111"),
+        getOrCreateCart(storeId, null, null, "browser-bbb-222222"),
+      ]);
+      expect(first).not.toBe(second);
+      const anonymousA = await getOrCreateCart(storeId, null, null);
+      const anonymousB = await getOrCreateCart(storeId, null, null);
+      expect(anonymousA).not.toBe(anonymousB);
+      const again = await getOrCreateCart(storeId, null, null, "browser-aaa-111111");
+      expect(again).toBe(first);
+      const key = `guest:${storeId}:browser-ccc-333333`;
+      holdCartBootstrap(key);
+      const pending = getOrCreateCart(storeId, null, null, "browser-ccc-333333");
+      await vi.waitFor(() => expect(cartBootstrapWaiting(key)).toBe(1));
+      const overlapped = getOrCreateCart(storeId, null, null, "browser-ccc-333333");
+      releaseCartBootstrap(key);
+      expect(await pending).toBe(await overlapped);
+      resetCartBootstrap();
+    });
+
     it("creates a new cart when no id given", async () => {
       const cartId = await getOrCreateCart(storeId, null, null);
       expect(cartId).toMatch(/^c[a-z0-9]{24}$/);

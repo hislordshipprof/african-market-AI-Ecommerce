@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
+import { money } from "../src/lib/format";
 import { storeUrl } from "./urls";
 
 const origin = storeUrl("mama-ngozi");
@@ -94,8 +95,23 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   const composer = page.getByTestId("assistant-composer");
   await composer.fill("show me choices of egusi");
   await composer.press("Enter");
-  await expect(page.getByLabel("Choice chips").getByRole("button").first()).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: "Close Shop with help" }).click();
+  const chip = page.getByLabel("Choice chips").getByRole("button").first();
+  await expect(chip).toBeVisible({ timeout: 20_000 });
+  await chip.focus();
+  await expect(chip).toBeFocused();
+  const label = (await chip.innerText()).trim();
+  const choicePosts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") {
+      choicePosts.push(request.postData() ?? "");
+    }
+  });
+  await chip.click();
+  await expect.poll(() => choicePosts.length).toBe(1);
+  expect(choicePosts[0]).toContain(label);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
+  await expect(page.getByTestId("assistant-launcher")).toBeVisible();
   await page.getByTestId("assistant-launcher").click();
   await page.getByTestId("assistant-composer").fill("show my basket");
   await page.getByTestId("assistant-composer").press("Enter");
@@ -103,6 +119,8 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await expect(page.getByText(/to reach the .+ minimum order/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
+  await page.getByRole("link", { name: "Looks good" }).click();
+  await expect(page).toHaveURL(/\/cart$/);
 });
 
 test("a stream cut after the tool starts shows an error and retry does not add again", async ({ page }) => {
@@ -139,14 +157,52 @@ test("a stream cut after the tool starts shows an error and retry does not add a
   await expect(count).toHaveText("2");
 });
 
+test("one submit is one request, and a rejected undo says what happened", async ({ page }) => {
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.getByTestId("assistant-composer").fill("add two egusi");
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.url());
+  });
+  await page.getByTestId("assistant-composer").evaluate((node) => {
+    const form = node.closest("form");
+    form?.requestSubmit();
+    form?.requestSubmit();
+  });
+  await expect(page.getByRole("dialog", { name: "Shop with help" }).getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
+  expect(posts).toHaveLength(1);
+  await page.context().addCookies([{ name: "e2e_undo", value: "reject", url: origin }]);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.getByText("Could not undo that")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
+});
+
 test("the open sheet is readable at phone and desktop in light and dark", async ({ page }) => {
   mkdirSync(shots, { recursive: true });
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "show me pictures of egusi");
   await expect(page.getByText("Here is what I found.")).toBeVisible({ timeout: 20_000 });
-  for (const width of [390, 1440]) {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  const catalog = await page.evaluate(async () => {
+    const response = await fetch("/api/storefront/search?q=egusi");
+    return response.json() as Promise<{ results: { name: string; price: number }[] }>;
+  });
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  expect(catalog.results.length).toBeGreaterThan(0);
+  let compared = 0;
+  for (const row of catalog.results) {
+    const articles = dialog.getByRole("article").filter({ has: page.getByRole("heading", { name: row.name, exact: true }) });
+    if (await articles.count() === 0) continue;
+    await expect(articles.first()).toContainText(money(row.price));
+    compared += 1;
+  }
+  expect(compared).toBeGreaterThan(0);
+  await page.setViewportSize({ width: 375, height: 812 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+  expect(overflow).toBe(false);
+  for (const width of [375, 390, 1440]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     for (const scheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: scheme });
       await page.screenshot({ path: `${shots}/sheet-${width}-${scheme}.png`, fullPage: false });

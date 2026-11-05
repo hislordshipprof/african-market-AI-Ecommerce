@@ -12,6 +12,17 @@ describe("assistant chat session", () => {
     expect(retainAction(store, { ...store, cartId: "cart-2", loading: false })).toBe("reset");
   });
 
+  it("resets as soon as the account changes, including while the next cart is loading", () => {
+    const signedIn = { storeId: "store-a", accountId: "user-a", cartId: "cart-1" };
+    expect(retainAction(signedIn, { ...signedIn, accountId: "user-b", loading: false })).toBe("reset");
+    expect(retainAction(signedIn, { ...signedIn, accountId: null, cartId: null, loading: true })).toBe("reset");
+  });
+
+  it("keeps a guest transcript only for a claim of that same cart", () => {
+    expect(retainAction(store, { ...store, accountId: "user-1", cartId: null, loading: true })).toBe("keep");
+    expect(retainAction(store, { ...store, accountId: "user-1", cartId: "cart-2", loading: false })).toBe("reset");
+  });
+
   it("adopts the first cart id and a guest claim of that same cart", () => {
     expect(retainAction(
       { storeId: "store-a", accountId: null, cartId: null },

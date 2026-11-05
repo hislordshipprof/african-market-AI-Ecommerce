@@ -12,6 +12,7 @@ import {
 } from "ai";
 import { Prisma } from "@prisma/client";
 import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
+import { readBrowserId } from "../cart/browser";
 import { CartError, getOrCreateCart } from "../cart/service";
 import { claimConversationLease, rateLimitUpsert, storeScoped, storeScopedTransaction } from "../db";
 import { findStore } from "../get-store";
@@ -23,7 +24,7 @@ import {
   ASSISTANT_DISABLED_STATUS,
   assistantChatEnabled,
 } from "./contract";
-import { assistantMessageFromActions, replayAssistantMessage } from "./replay";
+import { assistantMessageFromActions, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { clientIp } from "./client-ip";
 import { callCostMicros, type TokenUsage } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
@@ -96,7 +97,12 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     const cookieCart = readCookie(request.headers.get("cookie"), CART_COOKIE);
     let cartId: string;
     try {
-      cartId = await getOrCreateCart(store.id, cookieCart, userId);
+      cartId = await getOrCreateCart(
+        store.id,
+        cookieCart,
+        userId,
+        readBrowserId(request.headers.get("x-shop-browser"), request.headers.get("cookie")),
+      );
     } catch (error) {
       if (error instanceof CartError) return jsonError(400, "invalid_request", "The cart could not be opened.");
       throw error;
@@ -187,10 +193,17 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       onError: () => FIXED_ERROR,
       onFinish: async (event) => {
         const keptIds = new Set(event.messages.map((message) => message.id));
-        const messages = [
+        let status: "complete" | "failed" = "complete";
+        try {
+          const reason = await result.finishReason;
+          if (reason === "error" || reason === "other") status = "failed";
+        } catch {
+          status = "failed";
+        }
+        const messages = stampAssistant([
           ...withUser.filter((message) => !keptIds.has(message.id)),
           ...event.messages,
-        ];
+        ], status);
         await persistTurn({
           storeId: store.id,
           conversationId: turn.id,
@@ -422,8 +435,11 @@ async function replayCompletedTurn(
   const prior = asMessages(existing.messages);
   const index = prior.findIndex((message) => message.role === "user" && message.id === clientId);
   if (index < 0) return null;
-  const assistant = prior.slice(index + 1).find((message) => message.role === "assistant");
-  if (assistant) return replayAssistantMessage(assistant, headers);
+  const rest = prior.slice(index + 1);
+  const nextUser = rest.findIndex((message) => message.role === "user");
+  const span = nextUser === -1 ? rest : rest.slice(0, nextUser);
+  const assistant = span.find((message) => message.role === "assistant");
+  if (assistant && replyStatus(assistant) === "complete") return replayAssistantMessage(assistant, headers);
   if (existing.inFlightUntil && existing.inFlightUntil.getTime() > at.getTime()) return null;
   const actions = await storeScoped(storeId).aiAction.findMany({
     where: { conversationId: existing.id },

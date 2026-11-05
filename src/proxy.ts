@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { BROWSER_COOKIE } from "@/lib/cart/browser";
 import { slugFromHost, isSlugRoutable } from "@/lib/slug";
 
 const COOKIE_NAME = "store_override";
@@ -28,6 +29,7 @@ export function proxy(request: NextRequest) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.searchParams.delete("store");
       const response = NextResponse.redirect(redirectUrl, 307);
+      rememberBrowser(request, response, browserIdentity(request));
       response.cookies.set(COOKIE_NAME, paramSlug, {
         httpOnly: true,
         sameSite: "lax",
@@ -52,7 +54,29 @@ export function proxy(request: NextRequest) {
     headers.set("x-store-slug", slug);
   }
 
-  return NextResponse.next({ request: { headers } });
+  const browserId = browserIdentity(request);
+  headers.set("x-shop-browser", browserId);
+  const response = NextResponse.next({ request: { headers } });
+  rememberBrowser(request, response, browserId);
+  return response;
+}
+
+function browserIdentity(request: NextRequest): string {
+  const existing = request.cookies.get(BROWSER_COOKIE)?.value ?? "";
+  return /^[A-Za-z0-9_-]{8,80}$/.test(existing)
+    ? existing
+    : crypto.randomUUID().replace(/-/g, "");
+}
+
+function rememberBrowser(request: NextRequest, response: NextResponse, id: string) {
+  if (request.cookies.get(BROWSER_COOKIE)?.value === id) return;
+  response.cookies.set(BROWSER_COOKIE, id, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+    secure: request.nextUrl.protocol === "https:",
+  });
 }
 
 export const config = {

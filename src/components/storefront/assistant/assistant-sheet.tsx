@@ -10,7 +10,7 @@ import { ProductImage } from "../product-image";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
 import { retainSession } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
-import { outgoingMessage } from "@/lib/assistant/ui/send";
+import { createSendLock, outgoingMessage } from "@/lib/assistant/ui/send";
 import { planUndo, undoCardAfter, type UndoAck } from "@/lib/assistant/ui/undo";
 import { AssistantRouteError, mapRouteError, type RouteView } from "@/lib/assistant/ui/route-errors";
 import { undoAssistantAdditionAction } from "@/lib/cart/actions";
@@ -54,6 +54,7 @@ export function AssistantSheet({
   loading,
   attention,
   lines,
+  onCartFailure,
   onTerminal,
 }: {
   open: boolean;
@@ -64,6 +65,7 @@ export function AssistantSheet({
   loading: boolean;
   attention: boolean;
   lines: readonly CartLine[];
+  onCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
   onTerminal: () => void;
 }) {
   const chat = useMemo(
@@ -79,6 +81,7 @@ export function AssistantSheet({
         loading={loading}
         attention={attention}
         lines={lines}
+        onCartFailure={onCartFailure}
         onTerminal={onTerminal}
         open={open}
       />
@@ -92,6 +95,7 @@ function Thread({
   loading,
   attention,
   lines,
+  onCartFailure,
   onTerminal,
   open,
 }: {
@@ -100,6 +104,7 @@ function Thread({
   loading: boolean;
   attention: boolean;
   lines: readonly CartLine[];
+  onCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
   onTerminal: () => void;
   open: boolean;
 }) {
@@ -107,6 +112,8 @@ function Thread({
   const reduced = useReducedMotion();
   const composer = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
+  const sendLock = useRef(createSendLock());
+  const [localError, setLocalError] = useState<string | null>(null);
   const seenTools = useRef(new Set<string>());
   const announced = useRef(new Set<string>());
   const [lastSent, setLastSent] = useState<{ id: string; text: string } | null>(null);
@@ -144,21 +151,30 @@ function Thread({
 
   async function submit(text: string, id = messageId()) {
     if (loading || busy || routeError?.terminal) return;
-    const outgoing = outgoingMessage({ id, text });
-    if (!outgoing.ok) return;
-    const sent = outgoing.body.message.parts[0].text;
-    setLastSent({ id, text: sent });
-    clearError();
-    const exists = messages.some((message) => message.id === id);
-    if (exists) await sendMessage({ text: sent, messageId: id });
-    else await sendMessage({ id, role: "user", parts: [{ type: "text", text: sent }] });
+    if (!sendLock.current.tryBegin()) return;
+    try {
+      const outgoing = outgoingMessage({ id, text });
+      if (!outgoing.ok) {
+        if (outgoing.reason === "too_long") setLocalError("Couldn't send that.");
+        return;
+      }
+      setLocalError(null);
+      const sent = outgoing.body.message.parts[0].text;
+      setLastSent({ id, text: sent });
+      setDraft("");
+      clearError();
+      const exists = messages.some((message) => message.id === id);
+      if (exists) await sendMessage({ text: sent, messageId: id });
+      else await sendMessage({ id, role: "user", parts: [{ type: "text", text: sent }] });
+    } finally {
+      sendLock.current.end();
+    }
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey || composing.current || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void submit(draft);
-    setDraft("");
   }
 
   return (
@@ -173,7 +189,7 @@ function Thread({
             disabled={!!routeError?.terminal || busy}
             onChoice={(text) => { void submit(text); }}
             onUndo={(card) => {
-              void undoCard(card, lines, attention, storeId, undoState, setUndoState);
+              void undoCard(card, lines, attention, storeId, undoState, setUndoState, onCartFailure);
             }}
             onChange={() => composer.current?.focus()}
           />
@@ -200,6 +216,7 @@ function Thread({
           ))}
         </div>
       ) : null}
+      {localError ? <p className={styles.meta}>{localError}</p> : null}
       {routeError ? (
         <div className={styles.notice} role="status">
           <p>{routeError.title}</p>
@@ -222,7 +239,6 @@ function Thread({
         onSubmit={(event) => {
           event.preventDefault();
           void submit(draft);
-          setDraft("");
         }}
       >
         <label className="sr-only" htmlFor="assistant-composer">Message</label>
@@ -405,6 +421,7 @@ async function undoCard(
   storeId: string,
   undoState: Record<string, "undone" | "already_removed">,
   setUndoState: (value: (current: Record<string, "undone" | "already_removed">) => Record<string, "undone" | "already_removed">) => void,
+  onCartFailure: (failure: { error?: string; thrown?: unknown }) => void,
 ) {
   const line = lines.find((item) => item.serverLineId === card.lineId);
   const plan = planUndo({
@@ -427,9 +444,14 @@ async function undoCard(
       added: plan.added,
       additionId: plan.additionId,
     });
-    ack = result.ok ? result.result : { status: "rejected" };
-  } catch {
-    ack = { status: "failed" };
+    if (!result.ok) {
+      onCartFailure({ error: result.error });
+      return;
+    }
+    ack = result.result;
+  } catch (error) {
+    onCartFailure({ thrown: error });
+    return;
   }
   let refresh: "ok" | "failed" = "ok";
   try {

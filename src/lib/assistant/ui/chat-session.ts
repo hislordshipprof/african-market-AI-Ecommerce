@@ -3,7 +3,7 @@
 import { Chat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { createAssistantFetch } from "./route-errors";
-import { refreshStoreCart } from "./cart-bridge";
+import { reconcileStoreCart, settleStoreCart } from "./cart-bridge";
 import { retainAction } from "./session-retain";
 
 type Session = {
@@ -32,10 +32,10 @@ function createChat(storeId: string): Chat<UIMessage> {
     }),
     sendAutomaticallyWhen: () => false,
     onError: () => {
-      void refreshStoreCart(storeId);
+      reconcileStoreCart(storeId);
     },
     onFinish: () => {
-      void refreshStoreCart(storeId);
+      void settleStoreCart(storeId);
     },
   });
 }

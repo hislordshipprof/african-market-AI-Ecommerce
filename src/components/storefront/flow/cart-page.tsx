@@ -112,7 +112,7 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
     )
     .slice(0, 4);
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${styles.withAssistant}`}>
       <FlowHeading
         title="Your basket"
         description={`${count} ${count === 1 ? "item" : "items"} from ${settings.name}`}

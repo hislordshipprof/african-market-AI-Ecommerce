@@ -89,6 +89,13 @@ describe("Messages API double", () => {
         system: [{ type: "text", text: "a", cache_control: { type: "ephemeral", ttl: "9m" } }],
       })?.status,
     ).toBe(400);
+    expect(request({
+      tools: [{ name: "search_catalog", input_schema: { type: "object" } }],
+      messages: [
+        { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "search_catalog", input: {} }] },
+        { role: "user", content: [{ type: "text", text: "thanks" }, { type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] },
+      ],
+    })?.message).toMatch(/tool_result/);
     expect(request({ thinking: { type: "disabled" }, output_config: { effort: "medium" } })).toBeNull();
     expect(
       request({

@@ -12,10 +12,19 @@ export function retainAction(
   input: RetainInput,
 ): "keep" | "adopt" | "reset" | "create" {
   if (!existing || existing.storeId !== input.storeId) return "create";
+  if (existing.accountId !== input.accountId) {
+    const signingOut = existing.accountId != null && input.accountId == null;
+    const switching = existing.accountId != null && input.accountId != null;
+    if (signingOut || switching) return "reset";
+    const sameCart = existing.cartId != null && existing.cartId === input.cartId;
+    const pendingClaim = input.loading && existing.cartId != null && input.cartId == null;
+    if (sameCart) return "adopt";
+    if (pendingClaim) return "keep";
+    return "reset";
+  }
   if (input.loading) return "keep";
   const sameCart = existing.cartId === input.cartId;
   const firstCart = existing.cartId == null && input.cartId != null;
-  const claim = existing.accountId == null && input.accountId != null && (sameCart || firstCart);
-  if (sameCart || firstCart || claim) return firstCart || claim ? "adopt" : "keep";
+  if (sameCart || firstCart) return firstCart ? "adopt" : "keep";
   return "reset";
 }

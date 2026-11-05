@@ -2,20 +2,51 @@ import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } 
 
 type ActionRow = { id: string; tool: string; input: unknown; output: unknown };
 
+export function durableCallId(action: { id: string; input: unknown }): string {
+  const input = action.input;
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    const call = (input as { _call?: unknown })._call;
+    if (typeof call === "string" && call.length > 0) return call;
+  }
+  return action.id;
+}
+
 export function assistantMessageFromActions(actions: ActionRow[]): UIMessage {
   return {
     id: `replay-${actions[0]?.id ?? "empty"}`,
     role: "assistant",
+    metadata: { status: "complete" },
     parts: actions
       .filter((action) => action.tool !== "grounding_strip")
       .map((action) => ({
         type: `tool-${action.tool}`,
-        toolCallId: action.id,
+        toolCallId: durableCallId(action),
         state: "output-available" as const,
         input: action.input,
         output: action.output,
       })),
   };
+}
+
+export function replyStatus(message: UIMessage): "complete" | "failed" | null {
+  const meta = message.metadata;
+  if (!meta || typeof meta !== "object") return null;
+  const status = (meta as { status?: unknown }).status;
+  return status === "complete" || status === "failed" ? status : null;
+}
+
+export function stampAssistant(messages: UIMessage[], status: "complete" | "failed"): UIMessage[] {
+  let stamped = false;
+  const out = [...messages];
+  for (let index = out.length - 1; index >= 0; index -= 1) {
+    if (out[index].role !== "assistant" || stamped) continue;
+    out[index] = {
+      ...out[index],
+      metadata: { ...(out[index].metadata ?? {}), status },
+    };
+    stamped = true;
+  }
+  return out;
 }
 
 export function replayAssistantMessage(message: UIMessage, headers?: Headers): Response {

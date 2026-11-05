@@ -31,6 +31,7 @@ export interface AssistantContext {
   conversationId: string;
   actorUserId: string | null;
   turnMessageId?: string;
+  toolCallId?: string;
 }
 
 type ToolFailure = { ok: false; code: string; message: string; [key: string]: unknown };
@@ -56,8 +57,12 @@ function asJson(value: unknown): Prisma.InputJsonValue {
 }
 
 function auditedInput(ctx: AssistantContext, input: unknown): unknown {
-  if (!ctx.turnMessageId || !input || typeof input !== "object" || Array.isArray(input)) return input;
-  return { ...input, _turn: ctx.turnMessageId };
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  return {
+    ...input,
+    ...(ctx.turnMessageId ? { _turn: ctx.turnMessageId } : {}),
+    ...(ctx.toolCallId ? { _call: ctx.toolCallId } : {}),
+  };
 }
 
 async function recordRead(

@@ -68,10 +68,36 @@ export class CartError extends Error {
   }
 }
 
+async function claimGuestCart(storeId: string, browserId: string): Promise<string> {
+  const scoped = storeScoped(storeId);
+  const claim = await scoped.guestBrowserCart.findUnique({
+    where: { storeId_browserId: { storeId, browserId } },
+  });
+  if (claim) {
+    const cart = await scoped.cart.findUnique({ where: { id: claim.cartId } });
+    if (cart && cart.userId === null) return cart.id;
+  }
+  const cart = await scoped.cart.create({
+    data: { storeId, userId: null, customerId: null, source: "manual" },
+  });
+  try {
+    await scoped.guestBrowserCart.create({
+      data: { storeId, browserId, cartId: cart.id },
+    });
+  } catch {
+    const winner = await scoped.guestBrowserCart.findUnique({
+      where: { storeId_browserId: { storeId, browserId } },
+    });
+    if (winner) return winner.cartId;
+  }
+  return cart.id;
+}
+
 export async function getOrCreateCart(
   storeId: string,
   cartId: string | null,
   userId: string | null,
+  browserId: string | null = null,
 ): Promise<string> {
   const scoped = storeScoped(storeId);
 
@@ -82,12 +108,13 @@ export async function getOrCreateCart(
       const existing = await scoped.cart.findUnique({ where: { id: cartId } });
       if (existing && existing.userId === null) return existing.id;
     }
-    return shareFirstCart(`guest:${storeId}`, async () => {
+    if (!browserId) {
       const cart = await scoped.cart.create({
         data: { storeId, userId: null, customerId: null, source: "manual" },
       });
       return cart.id;
-    });
+    }
+    return shareFirstCart(`guest:${storeId}:${browserId}`, () => claimGuestCart(storeId, browserId));
   }
 
   const customerId = await customerIdForCartUser(storeId, userId);

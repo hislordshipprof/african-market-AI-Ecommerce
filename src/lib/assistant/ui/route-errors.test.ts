@@ -121,6 +121,25 @@ describe("assistant route errors", () => {
     });
   });
 
+  it("a finish event split across chunks is still a completed stream", async () => {
+    const chunks = [
+      'data: {"type":"fi',
+      'nish","finishReason":"stop"}\n\ndata: [DO',
+      "NE]\n\n",
+    ];
+    const fetch = createAssistantFetch(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+    const response = await fetch("/api/assistant/chat", { method: "POST" });
+    await expect(response.text()).resolves.toContain("[DONE]");
+  });
+
   it("a chat stream that ends before finish is an error the sheet can retry", async () => {
     const fetch = createAssistantFetch(async () => new Response(
       'data: {"type":"start"}\n\n',

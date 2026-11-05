@@ -3,18 +3,9 @@
 import { useCallback, useState } from "react";
 import { usePathname } from "next/navigation";
 import { launcherVisible } from "@/lib/assistant/ui/launcher-gate";
+import { assistantHiddenForStore, hideAssistantForStore } from "@/lib/assistant/ui/session-hide";
 import { useCart } from "../cart-provider";
 import styles from "./assistant.module.css";
-
-const HIDDEN_KEY = "assistant-session-hidden";
-
-function readHidden(): boolean {
-  try {
-    return sessionStorage.getItem(HIDDEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 export function AssistantLauncher({
   storeId,
@@ -26,16 +17,12 @@ export function AssistantLauncher({
   accountId: string | null;
 }) {
   const pathname = usePathname() || "/";
-  const { loading, attention, cartId, lines } = useCart();
-  const [hidden, setHidden] = useState(readHidden);
+  const { loading, attention, cartId, lines, reportCartFailure } = useCart();
+  const [hidden, setHidden] = useState(() => assistantHiddenForStore(storeId));
   const hideForSession = useCallback(() => {
-    try {
-      sessionStorage.setItem(HIDDEN_KEY, "1");
-    } catch {
-      /* private browsing */
-    }
+    hideAssistantForStore(storeId);
     setHidden(true);
-  }, []);
+  }, [storeId]);
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
   const [Sheet, setSheet] = useState<typeof import("./assistant-sheet").AssistantSheet | null>(null);
@@ -92,6 +79,7 @@ export function AssistantLauncher({
           loading={loading}
           attention={attention}
           lines={lines}
+          onCartFailure={reportCartFailure}
           onTerminal={hideForSession}
         />
       ) : null}

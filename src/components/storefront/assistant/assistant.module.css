@@ -271,7 +271,8 @@
   }
 
   .onCart {
-    bottom: calc(174px + env(safe-area-inset-bottom));
+    top: calc(124px + env(safe-area-inset-top));
+    bottom: auto;
   }
 }
 

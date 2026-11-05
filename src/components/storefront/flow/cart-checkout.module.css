@@ -385,6 +385,9 @@
     width: min(100% - 32px, 1160px);
     padding-top: 24px;
   }
+  .withAssistant {
+    padding-top: 72px;
+  }
   .line {
     gap: 10px;
   }

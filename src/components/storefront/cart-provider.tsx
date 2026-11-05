@@ -80,6 +80,7 @@ interface CartContextValue {
   attention: boolean;
   cartId: string | null;
   refreshCart: () => Promise<void>;
+  reportCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
 }
 const Context = createContext<CartContextValue | null>(null);
 export function useCart() {
@@ -636,6 +637,17 @@ export function CartProvider({
   });
   useEffect(() => bindCartRefresh(storeId, () => refreshBridge.current()), [storeId]);
 
+  function reportCartFailure(failure: { error?: string; thrown?: unknown }) {
+    if (!mounted.current) return;
+    if (failure.thrown !== undefined && isStaleAction(failure.thrown)) {
+      staleDeployment.current = true;
+      toast.error(STALE_PAGE);
+    } else {
+      toast.error(failure.error ?? OFFLINE);
+    }
+    setAttention(true);
+  }
+
   const count = lines.reduce((sum, line) => sum + line.quantity, 0);
   const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.price, 0);
   const minimum = Math.max(0, minimumOrderCents);
@@ -653,6 +665,7 @@ export function CartProvider({
         attention,
         cartId,
         refreshCart,
+        reportCartFailure,
       }}
     >
       {children}

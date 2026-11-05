@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { assistantFakeAllowed } from "../assistant/contract";
 import { auth } from "../auth";
 import { getStore } from "../get-store";
+import { readBrowserId } from "./browser";
 import { getCartIdFromCookie, setCartIdCookie } from "./cookies";
 import {
   getOrCreateCart,
@@ -35,12 +36,18 @@ async function ensureCartId(): Promise<{
   cartId: string;
   userId: string | null;
 }> {
+  const reqHeaders = await headers();
   const [store, cookieCartId, userId] = await Promise.all([
     getStore(),
     getCartIdFromCookie(),
     sessionUserId(),
   ]);
-  const cartId = await getOrCreateCart(store.id, cookieCartId, userId);
+  const cartId = await getOrCreateCart(
+    store.id,
+    cookieCartId,
+    userId,
+    readBrowserId(reqHeaders.get("x-shop-browser"), reqHeaders.get("cookie")),
+  );
   if (cartId !== cookieCartId) {
     await setCartIdCookie(cartId);
   }

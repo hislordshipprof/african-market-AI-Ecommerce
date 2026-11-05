@@ -3,6 +3,8 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { storeScoped } from "../db";
+import { assistantMessageFromActions } from "../assistant/replay";
+import { cardsFromParts } from "../assistant/ui/cards";
 import { addLine, CartError, getCartWithLines, undoAssistantAddition } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -66,6 +68,44 @@ describe.skipIf(!hasDb)("assistant addition undo", () => {
     const second = await undoAssistantAddition(storeA, cartA, line.id, 2, "add-once", null);
     expect(second).toEqual({ status: "already_consumed", subtracted: 2 });
     expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line.id } }))?.qty).toBe(1);
+  });
+
+  it("recovery keeps one addition identity so a second undo does not subtract again", async () => {
+    const cart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
+    await addLine(storeA, cart, variant, 5, null);
+    const line = (await getCartWithLines(storeA, cart))!.lines[0]!;
+    const message = assistantMessageFromActions([{
+      id: "audit-row-123",
+      tool: "add_to_cart",
+      input: { _call: "original-provider-call", items: [] },
+      output: { ok: true, items: [{ ok: true, lineId: line.id, added: 2, name: "Undo Yam" }] },
+    }]);
+    const added = cardsFromParts(message.parts).find((card) => card.kind === "added");
+    expect(added).toMatchObject({ additionId: "original-provider-call:0", lineId: line.id });
+    const first = await undoAssistantAddition(storeA, cart, line.id, 2, "original-provider-call:0", null);
+    expect(first).toEqual({ status: "confirmed", qty: 3, removed: false });
+    const replayed = await undoAssistantAddition(storeA, cart, line.id, 2, "original-provider-call:0", null);
+    expect(replayed).toEqual({ status: "already_consumed", subtracted: 2 });
+    expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line.id } }))?.qty).toBe(3);
+  });
+
+  it("a legacy action without a provider call id still undoes once under the audit id", async () => {
+    const cart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
+    await addLine(storeA, cart, variant, 4, null);
+    const line = (await getCartWithLines(storeA, cart))!.lines[0]!;
+    const message = assistantMessageFromActions([{
+      id: "audit-row-legacy",
+      tool: "add_to_cart",
+      input: { items: [] },
+      output: { ok: true, items: [{ ok: true, lineId: line.id, added: 1, name: "Undo Yam" }] },
+    }]);
+    const added = cardsFromParts(message.parts).find((card) => card.kind === "added");
+    expect(added).toMatchObject({ additionId: "audit-row-legacy:0" });
+    const first = await undoAssistantAddition(storeA, cart, line.id, 1, "audit-row-legacy:0", null);
+    expect(first.status).toBe("confirmed");
+    const second = await undoAssistantAddition(storeA, cart, line.id, 1, "audit-row-legacy:0", null);
+    expect(second.status).toBe("already_consumed");
+    expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line.id } }))?.qty).toBe(3);
   });
 
   it("Undo is bound to the original line and cannot touch another cart in the same store", async () => {

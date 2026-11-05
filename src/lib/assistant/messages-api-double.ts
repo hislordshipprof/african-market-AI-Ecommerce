@@ -260,6 +260,20 @@ function judgeToolHistory(body: Record<string, unknown>): MessagesVerdict | null
       }
     }
     if (message.role === "user") {
+      let sawOther = false;
+      for (const block of blocks) {
+        if (block.type === "tool_result") {
+          if (sawOther) {
+            return {
+              status: 400,
+              errorType: "invalid_request_error",
+              message: "tool_result blocks must come first",
+            };
+          }
+        } else {
+          sawOther = true;
+        }
+      }
       const results = blocks.filter((block) => block.type === "tool_result");
       if (results.length === 0) {
         if (pending.size > 0) {
