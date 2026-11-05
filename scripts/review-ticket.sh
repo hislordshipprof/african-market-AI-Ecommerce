@@ -33,7 +33,7 @@ ROUND="${REVIEW_ROUND:-$(( ${PRIOR:-0} + 1 ))}"
 if [ "$ROUND" -ge 3 ]; then
   ROUND_RULE="This is review round $ROUND. From round 3 on, a finding is blocking ONLY if it is a demonstrated security or secret exposure, a per-store isolation break, money or data loss, an acceptance criterion observed failing, or a broken build or CI. Weak, missing or flaky tests, doc drift, duplication, design tokens and anything outside the brief are non-blocking: list them for the follow-up issue."
 else
-  ROUND_RULE="This is review round $ROUND. Missing or vacuous tests are blocking only for the brief's Required tests and edge cases (including its 'Brief review' comment); other test-strength findings are non-blocking."
+  ROUND_RULE="This is review round $ROUND. Missing or vacuous tests are blocking only for the brief's Required tests (including its 'Brief review' comment); other test-strength findings are non-blocking. Never ask for a test per edge case or per input: the owner's rule is only necessary tests (docs/agents/builder.md, 'Which tests to write'). Tests that break that rule are a non-blocking finding."
 fi
 
 cd "$WT"
@@ -46,7 +46,7 @@ Hunt for what breaks in production:
 - every acceptance criterion: met or not, with evidence;
 - each edge case listed in the agent brief, and the ones it missed: retries and duplicates, failure partway through (an external call succeeds then the DB write fails), concurrency, cross-store access, timezones and overnight hours, empty and maximum inputs, money rounding and amounts above the authorization;
 - how each external provider actually works (read its official docs when unsure), for example which Stripe account owns a destination charge;
-- whether the tests would catch a regression: test doubles must enforce the provider's real rules, and each external path needs a real sandbox test.
+- whether the necessary tests would catch a regression: test doubles must enforce the provider's real rules, and each external path needs a real sandbox test. Judge test helpers by what real inputs produce, not by hypothetical input.
 $ROUND_RULE
 Reproduce what you can: run the affected unit, integration and sandbox tests yourself, and the affected e2e specs with E2E_PORT=$LANE_PORT; stop any server you start.
 Write your result to $TARGET. The FIRST line must be exactly 'VERDICT: PASS' (no blocking findings) or 'VERDICT: BLOCKING'. Then list every finding with: severity (blocking = security, data isolation, money or data loss, a failed acceptance criterion, or broken build/CI; otherwise non-blocking), file:line, the concrete failure scenario, and how to reproduce it."

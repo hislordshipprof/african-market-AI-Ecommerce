@@ -59,7 +59,8 @@ While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts 
 - Migrations work on an empty database (`prisma migrate reset`, or a fresh branch), the same way CI and new previews run them.
 - Your lane's database is local, not Neon: `scripts/build-ticket.sh` gives each ticket a fresh `lane_t<N>` database on a private Postgres at localhost:5434 (`scripts/local-pg.sh`), with CI's roles so row-level security is enforced. `.env.local` in the worktree already points at it. Reset it with `scripts/lane-db.sh t<N> .env.local`. Never point a lane at Neon; Neon is touched only by milestone deploys.
 
-- Every row of the agent brief's 'Edge cases' table has a test, and every 'Integration contracts' item is honoured in code.
+- Every row of the agent brief's 'Edge cases' table is handled in code, and every 'Integration contracts' item is honoured.
+- **Which tests to write (owner's rule: only necessary tests).** Write a test only for what would hurt if it broke unnoticed: money, auth, per-store isolation, data loss, a provider's contract, one happy path of a main user flow, and a regression test for a bug actually reproduced. One test per behaviour, not per input. Do not test helper internals, copy, styling, framework behaviour, or inputs real data cannot produce. Extend an existing test before adding a file. Do not write a parser or harness to serve a test: if a test needs one, the test is wrong. An edge case handled in code does not need its own test unless it falls in the list above.
 - Test doubles enforce the provider's real rules (wrong account, amount above the authorization, already captured or cancelled, signature checks). A fake that accepts anything hides bugs. Each external path also has at least one test against the real sandbox when the keys are in `.env.local`.
 
 If something fails and you cannot fix it, report it as failing with the output. Never report a check you did not run.
