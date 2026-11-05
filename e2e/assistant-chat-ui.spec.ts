@@ -352,7 +352,9 @@ test("long names, tokens, and the cart bar stay within a 375px screen", async ({
     await expectWithinScreen(page);
 
     await send(page, "wide layout choices of yam");
-    await expect(dialog.getByRole("button", { name: new RegExp(CHIP_A) })).toBeVisible({ timeout: 20_000 });
+    const longChips = dialog.getByRole("button", { name: new RegExp(CHIP_A) });
+    await expect(longChips).toHaveCount(2, { timeout: 20_000 });
+    await expect(longChips.first()).toBeVisible();
     await expectWithinScreen(page);
 
     await send(page, "add two egusi");
