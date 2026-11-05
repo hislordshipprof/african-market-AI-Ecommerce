@@ -352,6 +352,15 @@ describe("Fake Stripe state machine (K6)", () => {
     expect(replay).toEqual({ refundId: failed.refundId, amountRefunded: 300, status: "failed" });
   });
 
+  it("listing refunds for an unknown PaymentIntent is resource_missing", async () => {
+    await expect(fakeStripeProvider.listRefunds("pi_missing_review186")).rejects.toMatchObject({
+      code: "resource_missing",
+      statusCode: 404,
+      type: "StripeInvalidRequestError",
+      message: "No such payment_intent: 'pi_missing_review186'",
+    });
+  });
+
   it("lists refunds newest first", async () => {
     setAuthorizedAmount("pi_order", 1000);
     await fakeStripeProvider.capturePaymentIntent("pi_order", 1000);

@@ -2238,6 +2238,46 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect((released!.after as { alert: string }).alert).toBe("store_and_platform");
   });
 
+  it("a failed release after five captures does not charge a sixth time", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    setNextCaptureFailure(pi, 5);
+    setNextCancelFailure(pi, 1);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    for (const line of lines) await markLinePicked(storeId, line.id);
+
+    expect((await markReady(storeId, order.id)).ok).toBe(false);
+    for (let i = 0; i < 4; i++) {
+      await expireCaptureBackoff(order.id);
+      await markReady(storeId, order.id);
+    }
+    const stuck = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(stuck!.status).toBe("CAPTURING");
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([
+      `capture:${order.id}:1`,
+      `capture:${order.id}:2`,
+      `capture:${order.id}:3`,
+      `capture:${order.id}:4`,
+      `capture:${order.id}:5`,
+    ]);
+
+    await expireCaptureBackoff(order.id);
+    const again = await markReady(storeId, order.id);
+    expect(again.ok).toBe(false);
+    expect(captureCalls.filter((key) => key.startsWith(`capture:${order.id}:`))).toEqual([
+      `capture:${order.id}:1`,
+      `capture:${order.id}:2`,
+      `capture:${order.id}:3`,
+      `capture:${order.id}:4`,
+      `capture:${order.id}:5`,
+    ]);
+    expect(capturedPayments.has(pi)).toBe(false);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+  });
+
   it("two concurrent markReady calls reserve one attempt and capture once", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
@@ -2426,36 +2466,70 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("CANCELLED");
   });
 
-  it("webhook refund.failed moves CANCELLING to REFUND_FAILED", async () => {
+  it("webhook refund.failed moves a captured cancellation to REFUND_FAILED and restores the amount", async () => {
     const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await fakeStripeProvider.capturePaymentIntent(pi, order.totalAuthorizedCents, "cap-fail");
+    const refund = await fakeStripeProvider.refundPayment(pi, order.totalAuthorizedCents, "ref-fail");
+    setRefundStatus(refund.refundId, "failed");
     await storeScopedTransaction(storeId, async (tx) => {
-      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: null, refundId: refund.refundId },
+      });
     });
 
     const result = await markTerminalRefundFailure({
-      paymentIntentId: order.paymentIntentId!,
-      refundId: "re_webhook_failed",
+      paymentIntentId: pi,
+      refundId: refund.refundId,
       refundStatus: "failed",
     });
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: true, action: "refund_failed" });
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("REFUND_FAILED");
-    expect(updated!.refundId).toBe("re_webhook_failed");
+    expect(updated!.refundId).toBe(refund.refundId);
+    expect(updated!.capturedAmountCents).toBe(order.totalAuthorizedCents);
   });
 
-  it("webhook refund.canceled moves CANCELLING to REFUND_FAILED", async () => {
+  it("webhook refund.canceled moves a captured cancellation to REFUND_FAILED and restores the amount", async () => {
     const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await fakeStripeProvider.capturePaymentIntent(pi, order.totalAuthorizedCents, "cap-cancel");
+    const refund = await fakeStripeProvider.refundPayment(pi, order.totalAuthorizedCents, "ref-cancel");
+    setRefundStatus(refund.refundId, "canceled");
     await storeScopedTransaction(storeId, async (tx) => {
-      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: null },
+      });
     });
 
     await markTerminalRefundFailure({
-      paymentIntentId: order.paymentIntentId!,
-      refundId: "re_webhook_canceled",
+      paymentIntentId: pi,
+      refundId: refund.refundId,
       refundStatus: "canceled",
     });
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("REFUND_FAILED");
+    expect(updated!.capturedAmountCents).toBe(order.totalAuthorizedCents);
+  });
+
+  it("an uncaptured cancellation ignores refund.failed", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING", capturedAmountCents: null } });
+    });
+    const result = await markTerminalRefundFailure({
+      paymentIntentId: order.paymentIntentId!,
+      refundId: "re_never_captured",
+      refundStatus: "failed",
+    });
+    expect(result).toEqual({ ok: true, action: "ignored" });
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLING");
   });
 
   it("saves the newest succeeded refund id and the summed amount when two refunds cover the capture", async () => {
@@ -2501,6 +2575,48 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
       expect(updated!.status).toBe("AWAITING_PICKUP");
       expect(updated!.capturedAmountCents).toBe(5500);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("autoCancel registers a seeded hold before the first cancel", async () => {
+    const order = await createTestOrder();
+    const seeded = `pi_seed_cancel_${order.id}`;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { paymentIntentId: seeded } });
+    });
+    resetFakeStripe();
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("CI", "true");
+    try {
+      const result = await autoCancelOrder(storeId, order.id);
+      expect(result.ok).toBe(true);
+      expect(cancelledPayments.has(seeded)).toBe(true);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLED");
+      expect(updated!.capturedAmountCents).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a below-minimum markReady registers a seeded hold before the void cancel", async () => {
+    const order = await createTestOrder("PICKING");
+    const seeded = `pi_seed_void_${order.id}`;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { paymentIntentId: seeded } });
+      await tx.orderLine.updateMany({ where: { orderId: order.id }, data: { status: "refunded", qtyPicked: 0 } });
+    });
+    resetFakeStripe();
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("CI", "true");
+    try {
+      const result = await markReady(storeId, order.id);
+      expect(result).toEqual({ ok: true, capturedAmountCents: 0, voided: true });
+      expect(cancelledPayments.has(seeded)).toBe(true);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -2561,6 +2677,95 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(result).toEqual({ ok: true, action: "refund_failed" });
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("REFUND_FAILED");
+    expect(updated!.capturedAmountCents).toBe(5500);
+  });
+
+  it("a later refund.failed does not reopen a manually resolved order", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-two");
+    const first = await fakeStripeProvider.refundPayment(pi, 400, "first-fail");
+    setRefundStatus(first.refundId, "failed");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: null },
+      });
+    });
+    const opened = await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: first.refundId,
+      refundStatus: "failed",
+    });
+    expect(opened).toEqual({ ok: true, action: "refund_failed" });
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLED", cancelledAt: new Date(), notes: "Paid by Zelle" },
+      });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "refund_resolved_manually",
+          entityType: "order",
+          entityId: order.id,
+          after: { note: "Paid by Zelle", refundId: first.refundId, alert: "store" },
+        },
+      });
+    });
+    const second = await fakeStripeProvider.refundPayment(pi, 600, "second-fail");
+    setRefundStatus(second.refundId, "failed");
+    const again = await markTerminalRefundFailure({
+      paymentIntentId: pi,
+      refundId: second.refundId,
+      refundStatus: "failed",
+    });
+    expect(again).toEqual({ ok: true, action: "already_resolved" });
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(updated!.notes).toBe("Paid by Zelle");
+  });
+
+  it("a refund that lands before the cancellation write is not issued again", async () => {
+    const order = await createTestOrder();
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    capturedPayments.set(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLING", capturedAmountCents: order.totalAuthorizedCents },
+      });
+    });
+    const original = fakeStripeProvider.refundPayment.bind(fakeStripeProvider);
+    vi.spyOn(fakeStripeProvider, "refundPayment").mockImplementation(async (...args) => {
+      const result = await original(...args);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { status: "AUTHORIZED" } });
+      });
+      return result;
+    });
+    try {
+      const first = await reconcileStuckOrder(storeId, order.id);
+      expect(first.ok).toBe(true);
+      const mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(mid!.status).toBe("AUTHORIZED");
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+      });
+      vi.mocked(fakeStripeProvider.refundPayment).mockRestore();
+      const second = await reconcileStuckOrder(storeId, order.id);
+      expect(second.ok).toBe(true);
+      expect(refundRequests.filter((request) => request.paymentIntentId === pi)).toHaveLength(1);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLED");
+    } finally {
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
   });
 
   it("a transient refund list failure does not mark a covered cancellation REFUND_FAILED", async () => {

@@ -105,13 +105,16 @@ async function reserveAttempt(
   orderId: string,
   action: "capture_retry" | "cancel_retry" | "refund_retry",
   extra: Record<string, unknown> = {},
-): Promise<{ ok: true; attempt: number } | { ok: false; waitMs: number }> {
+): Promise<{ ok: true; attempt: number } | { ok: false; waitMs: number; exhausted?: boolean }> {
   return storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findMany({
       where: { entityId: orderId, action },
       orderBy: { createdAt: "desc" },
     });
+    if (action === "capture_retry" && prior.length >= MAX_CAPTURE_ATTEMPTS) {
+      return { ok: false, waitMs: 0, exhausted: true };
+    }
     if (action === "capture_retry" && prior.length > 0) {
       const latest = prior[0];
       const after = latest.after as { attempt?: number } | null;
@@ -357,13 +360,25 @@ async function persistRefundFailure(
   refundId: string,
   refundStatus: string,
 ): Promise<void> {
+  const preview = await storeScoped(storeId).order.findUnique({ where: { id: orderId } });
+  let restoredCapture: number | undefined;
+  if (preview && preview.capturedAmountCents == null && preview.paymentIntentId) {
+    const pi = await getStripeProvider().retrievePaymentIntent(preview.paymentIntentId);
+    if (pi.amountReceived > 0) restoredCapture = pi.amountReceived;
+  }
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || (current.status !== "CANCELLING" && current.status !== "CANCELLED")) return;
     await tx.order.update({
       where: { id: orderId },
-      data: { status: "REFUND_FAILED", refundId },
+      data: {
+        status: "REFUND_FAILED",
+        refundId,
+        ...(restoredCapture != null && current.capturedAmountCents == null
+          ? { capturedAmountCents: restoredCapture }
+          : {}),
+      },
     });
     const existing = await tx.auditLog.findFirst({
       where: { entityId: orderId, action: "refund_failed" },
@@ -513,10 +528,18 @@ export async function markTerminalRefundFailure(input: {
   const action = covered ? "refund_failed_while_covered" : "refund_failed";
 
   let wrote = false;
+  let alreadyResolved = false;
   await storeScopedTransaction(order.storeId, async (tx) => {
     await lockStoreRow(tx, order.storeId);
     const row = await tx.order.findUnique({ where: { id: order.id } });
     if (!row || (row.status !== "CANCELLING" && row.status !== "CANCELLED")) return;
+    const manual = await tx.auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    if (manual) {
+      alreadyResolved = true;
+      return;
+    }
     const prior = await tx.auditLog.findMany({ where: { entityId: order.id, action } });
     const duplicate = prior.some((log) => {
       const after = log.after as { refundId?: string } | null;
@@ -526,7 +549,11 @@ export async function markTerminalRefundFailure(input: {
     if (!covered) {
       await tx.order.update({
         where: { id: order.id },
-        data: { status: "REFUND_FAILED", refundId: input.refundId },
+        data: {
+          status: "REFUND_FAILED",
+          refundId: input.refundId,
+          capturedAmountCents: row.capturedAmountCents ?? captured,
+        },
       });
     }
     await tx.auditLog.create({
@@ -547,6 +574,7 @@ export async function markTerminalRefundFailure(input: {
     wrote = true;
   });
 
+  if (alreadyResolved) return { ok: true, action: "already_resolved" };
   if (!covered && wrote) {
     console.error(
       `Refund ${input.refundStatus} for order ${order.id} (${input.refundId}). Customer is still charged. Store and platform alerted.`,
@@ -664,6 +692,7 @@ export async function markReady(
     try {
       const reservedCancel = await reserveAttempt(storeId, orderId, "cancel_retry");
       if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank" };
+      await registerE2EPayment(validation.paymentIntentId, validation.totalAuthorizedCents);
       await stripe.cancelPaymentIntent(
         validation.paymentIntentId,
         cancelKey(orderId, reservedCancel.attempt),
@@ -719,6 +748,11 @@ export async function markReady(
     alert: "store_and_platform",
   });
   if (!reservedCapture.ok) {
+    if (reservedCapture.exhausted) {
+      const settled = await settleUnconfirmedCapture(storeId, orderId);
+      if (settled.ok) return { ok: true, capturedAmountCents: settled.capturedAmountCents };
+      return { ok: false, error: settled.error };
+    }
     const minutes = Math.max(1, Math.ceil(reservedCapture.waitMs / 60_000));
     return { ok: false, error: `Retrying in ${minutes} min` };
   }
@@ -840,6 +874,7 @@ export async function autoCancelOrder(
       return {
         ok: true as const,
         paymentIntentId: order.paymentIntentId,
+        totalAuthorizedCents: order.totalAuthorizedCents,
         alreadyClaiming: true,
         refundId: order.refundId,
       };
@@ -851,6 +886,7 @@ export async function autoCancelOrder(
     return {
       ok: true as const,
       paymentIntentId: order.paymentIntentId,
+      totalAuthorizedCents: order.totalAuthorizedCents,
       alreadyClaiming: false,
       refundId: null,
     };
@@ -864,6 +900,7 @@ export async function autoCancelOrder(
     const reservedCancel = await reserveAttempt(storeId, orderId, "cancel_retry");
     if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank" };
     try {
+      await registerE2EPayment(validation.paymentIntentId, validation.totalAuthorizedCents);
       await stripe.cancelPaymentIntent(
         validation.paymentIntentId,
         cancelKey(orderId, reservedCancel.attempt),
@@ -973,6 +1010,12 @@ export async function reconcileStuckOrder(
         alert: "store_and_platform",
       });
       if (!reservedCapture.ok) {
+        if (reservedCapture.exhausted) {
+          const settled = await settleUnconfirmedCapture(storeId, orderId);
+          if (settled.ok) return { ok: true, action: "finalized_capture" };
+          if (settled.resolved === "cancelled") return { ok: true, action: "finalized_cancel" };
+          return { ok: false, error: settled.error, waiting: true };
+        }
         return { ok: false, error: "capture_backoff", waiting: true };
       }
       const attempt = reservedCapture.attempt;

@@ -464,6 +464,12 @@ const fakeStripeProvider: StripeProvider = {
   },
 
   async listRefunds(paymentIntentId) {
+    const known =
+      authorizedAmounts.has(paymentIntentId) ||
+      capturedPayments.has(paymentIntentId) ||
+      cancelledPayments.has(paymentIntentId) ||
+      [...refunds.values()].some((entry) => entry.paymentIntentId === paymentIntentId);
+    if (!known) throw resourceMissing("payment_intent", paymentIntentId);
     return [...refunds.entries()]
       .filter(([, entry]) => entry.paymentIntentId === paymentIntentId)
       .sort((left, right) => right[1].seq - left[1].seq)

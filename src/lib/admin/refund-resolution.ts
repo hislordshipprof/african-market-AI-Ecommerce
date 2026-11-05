@@ -29,6 +29,22 @@ function failedAtLabel(at: Date, timeZone: string): string {
   return `${formatted} (${timeZone})`;
 }
 
+async function capturedCentsFor(order: {
+  capturedAmountCents: number | null;
+  paymentIntentId: string | null;
+}): Promise<number> {
+  if (order.capturedAmountCents != null) return order.capturedAmountCents;
+  if (!order.paymentIntentId) return 0;
+  try {
+    const pi = await getStripeProvider().retrievePaymentIntent(order.paymentIntentId);
+    return pi.amountReceived;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "resource_missing") return 0;
+    throw err;
+  }
+}
+
 async function succeededRefundCents(paymentIntentId: string | null): Promise<number> {
   if (!paymentIntentId) return 0;
   try {
@@ -52,15 +68,22 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
       orderBy: { updatedAt: "asc" },
     }),
   );
+  const failures = orders.length
+    ? await platformAdminTransaction((tx) =>
+        tx.auditLog.findMany({
+          where: { entityId: { in: orders.map((order) => order.id) }, action: "refund_failed" },
+          orderBy: { createdAt: "desc" },
+        }),
+      )
+    : [];
+  const failureByOrder = new Map<string, (typeof failures)[number]>();
+  for (const failure of failures) {
+    if (!failureByOrder.has(failure.entityId)) failureByOrder.set(failure.entityId, failure);
+  }
   const rows: RefundFailedRow[] = [];
   for (const order of orders) {
-    const failure = await platformAdminTransaction((tx) =>
-      tx.auditLog.findFirst({
-        where: { entityId: order.id, action: "refund_failed" },
-        orderBy: { createdAt: "desc" },
-      }),
-    );
-    const capturedCents = order.capturedAmountCents ?? 0;
+    const failure = failureByOrder.get(order.id);
+    const capturedCents = await capturedCentsFor(order);
     const refundedCents = await succeededRefundCents(order.paymentIntentId);
     rows.push({
       orderId: order.id,

@@ -4,10 +4,18 @@ vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
 });
 
-const { headerState } = vi.hoisted(() => ({ headerState: new Headers() }));
+const { headerState, headerQueue } = vi.hoisted(() => ({
+  headerState: new Headers(),
+  headerQueue: [] as Headers[],
+}));
 
 vi.mock("next/headers", () => ({
-  headers: async () => headerState,
+  headers: async () => headerQueue.shift() ?? headerState,
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: () => {},
+  revalidateTag: () => {},
 }));
 
 import { isRedirectError } from "next/dist/client/components/redirect-error";
@@ -17,6 +25,7 @@ import { auth } from "../auth";
 import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
+import { markTerminalRefundFailure } from "../order/service";
 import { listRefundFailedOrders, resolveRefundFailed } from "./refund-resolution";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -270,7 +279,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
 
   it("two concurrent resolves write one transition and one audit row", async () => {
     expect(cookiesAdmin2).toContain("better-auth");
-    asAdmin(cookiesAdmin);
+    headerQueue.push(new Headers({ cookie: cookiesAdmin }), new Headers({ cookie: cookiesAdmin2 }));
     const [first, second] = await Promise.all([
       resolveRefundFailed(orderId, "first admin"),
       resolveRefundFailed(orderId, "second admin"),
@@ -286,10 +295,117 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(updated?.status).toBe("CANCELLED");
   });
 
-  it("resolving changes only the targeted store's order", async () => {
-    const other = await storeScoped(storeBId).order.findFirst({ where: { storeId: storeAId } });
-    expect(other).toBeNull();
-    const unchanged = await storeScoped(storeBId).order.findMany();
-    expect(unchanged).toHaveLength(0);
+  it("a cancelled capture whose refund fails still shows the Stripe amount owed", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Owed Customer" },
+    });
+    const pi = `pi_owed_${RUN}`;
+    setAuthorizedAmount(pi, 2500);
+    await fakeStripeProvider.capturePaymentIntent(pi, 2500, "cap-owed");
+    const refund = await fakeStripeProvider.refundPayment(pi, 2500, "ref-owed");
+    setRefundStatus(refund.refundId, "failed");
+    const owed = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26402,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 2500,
+        bufferCents: 0,
+        totalAuthorizedCents: 2500,
+        totalCents: 2500,
+        capturedAmountCents: null,
+        paymentIntentId: pi,
+        refundId: refund.refundId,
+      },
+    });
+    expect(
+      await markTerminalRefundFailure({
+        paymentIntentId: pi,
+        refundId: refund.refundId,
+        refundStatus: "failed",
+      }),
+    ).toEqual({ ok: true, action: "refund_failed" });
+    const stored = await storeScoped(storeAId).order.findUnique({ where: { id: owed.id } });
+    expect(stored?.status).toBe("REFUND_FAILED");
+    expect(stored?.capturedAmountCents).toBe(2500);
+
+    const stalePi = `pi_stale_${RUN}`;
+    setAuthorizedAmount(stalePi, 1800);
+    await fakeStripeProvider.capturePaymentIntent(stalePi, 1800, "cap-stale");
+    const stale = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26403,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1800,
+        bufferCents: 0,
+        totalAuthorizedCents: 1800,
+        totalCents: 1800,
+        capturedAmountCents: null,
+        paymentIntentId: stalePi,
+      },
+    });
+    const rows = await listRefundFailedOrders();
+    expect(rows.find((item) => item.orderId === owed.id)).toMatchObject({
+      capturedCents: 2500,
+      refundedCents: 0,
+      owedCents: 2500,
+    });
+    expect(rows.find((item) => item.orderId === stale.id)).toMatchObject({
+      capturedCents: 1800,
+      owedCents: 1800,
+    });
+  });
+
+  it("resolving one store leaves the other store's refund-failed order unchanged", async () => {
+    const customerB = await storeScoped(storeBId).customer.create({
+      data: { storeId: storeBId, name: "Other Customer" },
+    });
+    const other = await storeScoped(storeBId).order.create({
+      data: {
+        storeId: storeBId,
+        number: 26404,
+        customerId: customerB.id,
+        status: "REFUND_FAILED",
+        fulfillment: "delivery",
+        subtotalCents: 700,
+        bufferCents: 0,
+        totalAuthorizedCents: 700,
+        totalCents: 700,
+        capturedAmountCents: 700,
+        notes: null,
+      },
+    });
+    const targetCustomer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Target Customer" },
+    });
+    const target = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26405,
+        customerId: targetCustomer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 900,
+        bufferCents: 0,
+        totalAuthorizedCents: 900,
+        totalCents: 900,
+        capturedAmountCents: 900,
+      },
+    });
+    asAdmin(cookiesAdmin);
+    const result = await resolveRefundFailed(target.id, "Repaid store A only");
+    expect(result).toEqual({ ok: true });
+    const resolved = await storeScoped(storeAId).order.findUnique({ where: { id: target.id } });
+    expect(resolved?.status).toBe("CANCELLED");
+    const untouched = await storeScoped(storeBId).order.findUnique({ where: { id: other.id } });
+    expect(untouched?.status).toBe("REFUND_FAILED");
+    expect(untouched?.notes).toBeNull();
+    expect(untouched?.capturedAmountCents).toBe(700);
   });
 });

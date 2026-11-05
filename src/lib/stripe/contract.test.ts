@@ -252,4 +252,17 @@ describe("Stripe contract: fake and sandbox", () => {
       after: { type: "StripeInvalidRequestError", code: null, statusCode: 400, uncaptured: true },
     });
   }, 60_000);
+
+  it("listing refunds for an unknown PaymentIntent is resource_missing on the fake and the sandbox", async () => {
+    const observed = await compare(async (world) => {
+      const missing = await errorOf(() => world.provider.listRefunds("pi_missing_review186"));
+      return { type: missing.type, code: missing.code, statusCode: missing.statusCode, message: missing.message };
+    });
+    expect(observed).toEqual({
+      type: "StripeInvalidRequestError",
+      code: "resource_missing",
+      statusCode: 404,
+      message: "No such payment_intent: 'pi_X'",
+    });
+  }, 60_000);
 });
