@@ -13,8 +13,15 @@ const KEYWORDS = new Set([
   "ON",
 ]);
 
-function tokenize(sql: string): string[] {
-  const out: string[] = [];
+/** A quoted identifier stays a name, even when its text is a keyword. Only an unquoted keyword is syntax. */
+type Token = { kind: "kw"; value: string } | { kind: "id"; value: string } | { kind: "dot" };
+
+function isKw(token: Token | undefined, word: string): boolean {
+  return token?.kind === "kw" && token.value === word;
+}
+
+function tokenize(sql: string): Token[] {
+  const out: Token[] = [];
   let i = 0;
   while (i < sql.length) {
     const c = sql[i];
@@ -60,11 +67,11 @@ function tokenize(sql: string): string[] {
         ident += sql[i];
         i += 1;
       }
-      out.push(ident);
+      out.push({ kind: "id", value: ident });
       continue;
     }
     if (c === ".") {
-      out.push(".");
+      out.push({ kind: "dot" });
       i += 1;
       continue;
     }
@@ -75,7 +82,7 @@ function tokenize(sql: string): string[] {
         i += 1;
       }
       const upper = word.toUpperCase();
-      out.push(KEYWORDS.has(upper) ? upper : word);
+      out.push(KEYWORDS.has(upper) ? { kind: "kw", value: upper } : { kind: "id", value: word });
       continue;
     }
     i += 1;
@@ -83,21 +90,23 @@ function tokenize(sql: string): string[] {
   return out;
 }
 
-function skipIfExists(tokens: string[], index: number): number {
-  if (tokens[index] === "IF" && tokens[index + 1] === "NOT" && tokens[index + 2] === "EXISTS") {
+function skipIfExists(tokens: Token[], index: number): number {
+  if (isKw(tokens[index], "IF") && isKw(tokens[index + 1], "NOT") && isKw(tokens[index + 2], "EXISTS")) {
     return index + 3;
   }
-  if (tokens[index] === "IF" && tokens[index + 1] === "EXISTS") return index + 2;
+  if (isKw(tokens[index], "IF") && isKw(tokens[index + 1], "EXISTS")) return index + 2;
   return index;
 }
 
-function readName(tokens: string[], index: number): { name: string; next: number } | null {
+function readName(tokens: Token[], index: number): { name: string; next: number } | null {
   const first = tokens[index];
-  if (!first || KEYWORDS.has(first) || first === ".") return null;
-  let name = first;
+  if (first?.kind !== "id") return null;
+  let name = first.value;
   let next = index + 1;
-  while (tokens[next] === "." && tokens[next + 1] && !KEYWORDS.has(tokens[next + 1]) && tokens[next + 1] !== ".") {
-    name = tokens[next + 1];
+  while (tokens[next]?.kind === "dot") {
+    const second = tokens[next + 1];
+    if (second?.kind !== "id") break;
+    name = second.value;
     next += 2;
   }
   return { name, next };
@@ -107,9 +116,9 @@ function sorted(names: Set<string>): string[] {
   return [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-function rememberTable(found: Set<string>, tokens: string[], index: number): number | null {
+function rememberTable(found: Set<string>, tokens: Token[], index: number): number | null {
   let j = skipIfExists(tokens, index);
-  if (tokens[j] === "ONLY") j += 1;
+  if (isKw(tokens[j], "ONLY")) j += 1;
   const table = readName(tokens, j);
   if (!table) return null;
   found.add(table.name);
@@ -125,31 +134,32 @@ export function affectedTablesInMigrateDiff(
   const tokens = tokenize(script);
   for (let i = 0; i < tokens.length; i += 1) {
     const action = tokens[i];
-    if (action !== "ALTER" && action !== "DROP" && action !== "CREATE") continue;
+    if (!isKw(action, "ALTER") && !isKw(action, "DROP") && !isKw(action, "CREATE")) continue;
     let j = i + 1;
-    if (action === "CREATE" && tokens[j] === "UNIQUE") j += 1;
-    if ((action === "DROP" || action === "CREATE") && tokens[j] === "CONCURRENTLY") j += 1;
-    if (tokens[j] === "TABLE") {
+    if (isKw(action, "CREATE") && isKw(tokens[j], "UNIQUE")) j += 1;
+    if (isKw(tokens[j], "TABLE")) {
       const next = rememberTable(found, tokens, j + 1);
       if (next !== null) i = next - 1;
       continue;
     }
-    if (tokens[j] !== "INDEX") continue;
-    j = skipIfExists(tokens, j + 1);
+    if (!isKw(tokens[j], "INDEX")) continue;
+    j += 1;
+    if ((isKw(action, "DROP") || isKw(action, "CREATE")) && isKw(tokens[j], "CONCURRENTLY")) j += 1;
+    j = skipIfExists(tokens, j);
     const index = readName(tokens, j);
     if (!index) continue;
-    if (action === "CREATE") {
+    if (isKw(action, "CREATE")) {
       let k = index.next;
       while (
         k < tokens.length &&
-        tokens[k] !== "ON" &&
-        tokens[k] !== "CREATE" &&
-        tokens[k] !== "ALTER" &&
-        tokens[k] !== "DROP"
+        !isKw(tokens[k], "ON") &&
+        !isKw(tokens[k], "CREATE") &&
+        !isKw(tokens[k], "ALTER") &&
+        !isKw(tokens[k], "DROP")
       ) {
         k += 1;
       }
-      if (tokens[k] !== "ON") continue;
+      if (!isKw(tokens[k], "ON")) continue;
       const next = rememberTable(found, tokens, k + 1);
       if (next !== null) i = next - 1;
       continue;

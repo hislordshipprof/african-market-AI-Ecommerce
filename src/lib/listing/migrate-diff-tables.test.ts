@@ -1,6 +1,34 @@
 import { describe, expect, it } from "vitest";
 import { affectedTablesInMigrateDiff } from "./migrate-diff-tables";
 
+const ELEVEN = `
+ALTER TABLE "accounts" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "audit_logs" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "categories" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "listings" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "master_products" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "product_synonyms" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "sessions" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "store_banners" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "store_collections" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "stores" ADD COLUMN "unexpected" TEXT;
+ALTER TABLE "two_factors" ADD COLUMN "unexpected" TEXT;
+`;
+
+const ELEVEN_NAMES = [
+  "accounts",
+  "audit_logs",
+  "categories",
+  "listings",
+  "master_products",
+  "product_synonyms",
+  "sessions",
+  "store_banners",
+  "store_collections",
+  "stores",
+  "two_factors",
+];
+
 const ELEVEN_AND_ORDERS = `
 ALTER TABLE "accounts" ADD COLUMN "unexpected" TEXT;
 ALTER TABLE "audit_logs" ADD COLUMN "unexpected" TEXT;
@@ -116,5 +144,108 @@ ALTER TABLE "public"."stores" ALTER COLUMN "updated_at" DROP DEFAULT;
     const script = `DROP INDEX "public"."product_synonyms_term_trgm_idx";`;
     const indexToTable = new Map([["product_synonyms_term_trgm_idx", "product_synonyms"]]);
     expect(affectedTablesInMigrateDiff(script, indexToTable)).toEqual(["product_synonyms"]);
+  });
+
+  it("keeps an unmapped index whose quoted name is a keyword", () => {
+    expect(affectedTablesInMigrateDiff(`${ELEVEN}\nDROP INDEX "ALTER";`)).toEqual([
+      ...ELEVEN_NAMES,
+      "unresolved index: ALTER",
+    ]);
+  });
+
+  it("counts the table of a mapped index whose quoted name is a keyword", () => {
+    expect(
+      affectedTablesInMigrateDiff(`${ELEVEN}\nDROP INDEX "ALTER";`, new Map([["ALTER", "orders"]])),
+    ).toEqual([
+      "accounts",
+      "audit_logs",
+      "categories",
+      "listings",
+      "master_products",
+      "orders",
+      "product_synonyms",
+      "sessions",
+      "store_banners",
+      "store_collections",
+      "stores",
+      "two_factors",
+    ]);
+  });
+
+  it("counts the table under a created index whose quoted name is a keyword", () => {
+    expect(
+      affectedTablesInMigrateDiff(`${ELEVEN}\nCREATE INDEX "ALTER" ON "orders"("status");`),
+    ).toEqual([
+      "accounts",
+      "audit_logs",
+      "categories",
+      "listings",
+      "master_products",
+      "orders",
+      "product_synonyms",
+      "sessions",
+      "store_banners",
+      "store_collections",
+      "stores",
+      "two_factors",
+    ]);
+  });
+
+  it("counts the table of a renamed index whose quoted name is a keyword", () => {
+    expect(
+      affectedTablesInMigrateDiff(`ALTER INDEX "ALTER" RENAME TO "DROP";`, new Map([["ALTER", "orders"]])),
+    ).toEqual(["orders"]);
+  });
+
+  it("keeps a schema-qualified quoted keyword index the database cannot map", () => {
+    expect(affectedTablesInMigrateDiff(`DROP INDEX "public"."ON";`)).toEqual(["unresolved index: ON"]);
+  });
+
+  it("counts a quoted keyword table under a quoted keyword index name", () => {
+    expect(affectedTablesInMigrateDiff(`CREATE INDEX "UNIQUE" ON "TABLE"("status");`)).toEqual(["TABLE"]);
+  });
+
+  it("counts a quoted keyword table name", () => {
+    expect(affectedTablesInMigrateDiff(`ALTER TABLE "ON" ADD COLUMN "unexpected" TEXT;`)).toEqual(["ON"]);
+  });
+
+  it("counts created and dropped tables whose names are keywords", () => {
+    const script = `
+CREATE TABLE "INDEX" ("id" TEXT NOT NULL);
+DROP TABLE "DROP";
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(["DROP", "INDEX"]);
+  });
+
+  it("reads a quoted keyword index after the create-index preamble", () => {
+    const script = `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "ALTER" ON ONLY "orders"("status");`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(["orders"]);
+  });
+
+  it("preserves the case of a quoted index name", () => {
+    expect(affectedTablesInMigrateDiff(`DROP INDEX "alter";`)).toEqual(["unresolved index: alter"]);
+  });
+
+  it("still treats an unquoted ON as syntax", () => {
+    expect(affectedTablesInMigrateDiff(`CREATE INDEX orders_status_idx ON orders(status);`)).toEqual(["orders"]);
+  });
+
+  it("does not count a quoted keyword that is only referenced", () => {
+    const script = `ALTER TABLE "accounts" ADD CONSTRAINT "c" FOREIGN KEY ("user_id") REFERENCES "ON"("id");`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(["accounts"]);
+  });
+
+  it("ignores a commented drop of a keyword index", () => {
+    const script = `-- DROP INDEX "ALTER";
+ALTER TABLE "stores" ADD COLUMN "unexpected" TEXT;`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
+  });
+
+  it("does not count a column whose name is a keyword", () => {
+    expect(affectedTablesInMigrateDiff(`ALTER TABLE "stores" ADD COLUMN "ALTER" TEXT;`)).toEqual(["stores"]);
+  });
+
+  it("keeps a quote inside an unmapped index name", () => {
+    expect(affectedTablesInMigrateDiff(`DROP INDEX "AL""TER";`)).toEqual(['unresolved index: AL"TER']);
   });
 });
