@@ -39,8 +39,10 @@ function spoken(message: UIMessage): string {
   const cards = cardsFromParts(message.parts);
   const products = cards.filter((card) => card.kind === "product").length;
   if (products > 0) return `${products} ${products === 1 ? "product" : "products"} shown`;
-  const text = textOf(message).trim();
-  return text.slice(0, 180) || "Reply ready";
+  if (cards.some((card) => card.kind === "added")) return "Added to cart";
+  if (cards.some((card) => card.kind === "choices")) return "Choices shown";
+  if (cards.some((card) => card.kind === "summary")) return "Basket summary shown";
+  return "Reply ready";
 }
 
 export function AssistantSheet({
@@ -142,12 +144,12 @@ function Thread({
     if (loading || busy || routeError?.terminal) return;
     const outgoing = outgoingMessage({ id, text });
     if (!outgoing.ok) return;
-    setLastSent({ id, text: outgoing.body.message.parts[0].text });
+    const sent = outgoing.body.message.parts[0].text;
+    setLastSent({ id, text: sent });
     clearError();
-    await sendMessage({
-      text: outgoing.body.message.parts[0].text,
-      messageId: id,
-    });
+    const exists = messages.some((message) => message.id === id);
+    if (exists) await sendMessage({ text: sent, messageId: id });
+    else await sendMessage({ id, role: "user", parts: [{ type: "text", text: sent }] });
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {

@@ -543,7 +543,7 @@ model AssistantUndoReceipt {
   store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
   cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
 
-  @@unique([storeId, additionId])
+  @@unique([storeId, cartId, additionId])
   @@index([storeId])
   @@index([cartId])
   @@map("assistant_undo_receipts")

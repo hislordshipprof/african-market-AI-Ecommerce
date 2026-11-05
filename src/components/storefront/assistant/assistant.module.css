@@ -48,7 +48,7 @@
 .user {
   align-self: flex-end;
   padding: 10px 14px;
-  border-radius: 16px 16px 4px 16px;
+  border-radius: 16px 16px 8px 16px;
   background: var(--color-soft);
 }
 

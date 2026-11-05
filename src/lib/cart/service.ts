@@ -437,7 +437,7 @@ export async function undoAssistantAddition(
   }
   return runCartMutation(storeId, cartId, actorUserId, async (tx) => {
     const prior = await tx.assistantUndoReceipt.findUnique({
-      where: { storeId_additionId: { storeId, additionId } },
+      where: { storeId_cartId_additionId: { storeId, cartId, additionId } },
     });
     if (prior) return { status: "already_consumed", subtracted: prior.subtracted };
     const line = await tx.cartLine.findUnique({ where: { id: lineId } });

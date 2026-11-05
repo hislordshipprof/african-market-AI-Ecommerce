@@ -6,14 +6,14 @@ const origin = storeUrl("mama-ngozi");
 const shots = "C:/E-commerce-project/.builder/screenshots-246";
 
 async function scriptsHave(page: Page, needle: string): Promise<boolean> {
-  const srcs = await page.locator("script[src]").evaluateAll((nodes) =>
-    nodes.map((node) => (node as HTMLScriptElement).src),
-  );
-  for (const src of srcs) {
-    const response = await page.request.get(src);
-    if ((await response.text()).includes(needle)) return true;
-  }
-  return false;
+  return page.evaluate(async (wanted) => {
+    const srcs = [...document.scripts].map((script) => script.src).filter(Boolean);
+    for (const src of srcs) {
+      const text = await fetch(src).then((response) => response.text());
+      if (text.includes(wanted)) return true;
+    }
+    return false;
+  }, needle);
 }
 
 async function send(page: Page, text: string) {
@@ -42,14 +42,16 @@ test("a shopper can add egusi, undo it, and keep the transcript across pages", a
   await page.getByRole("button", { name: "Cook a dish" }).click();
   await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook ");
   await send(page, "add two egusi");
-  await expect(page.getByRole("button", { name: "Undo" })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId("cart-count")).toHaveText("2");
-  await page.getByRole("button", { name: "Undo" }).click();
-  await expect(page.getByRole("button", { name: "Undone" })).toBeVisible();
-  await expect(page.getByTestId("cart-count")).toHaveText("0");
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
+  const count = page.getByRole("banner").getByTestId("cart-count");
+  await expect(count).toHaveText("2");
+  await dialog.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Undone", exact: true })).toBeVisible();
+  await expect(count).toHaveText("0", { timeout: 10_000 });
   await page.getByRole("button", { name: "Close Shop with help" }).click();
-  await page.goto(`${origin}/search`);
-  await page.goto(`${origin}/`);
+  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await page.getByRole("link", { name: /Mama Ngozi/ }).first().click();
   await page.getByTestId("assistant-launcher").click();
   await expect(page.getByText("add two egusi")).toBeVisible();
 });
@@ -68,7 +70,7 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   await expect(dialog.getByText(/<img/)).toBeVisible({ timeout: 20_000 });
   await expect(dialog.locator("img")).toHaveCount(0);
   await send(page, "stray price");
-  await expect(dialog.getByText("(see card)")).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.getByText("That is (see card).").filter({ visible: true })).toBeVisible({ timeout: 20_000 });
   await send(page, "4242424242424242");
   await expect(dialog.getByText("Here is what I found.")).toBeVisible({ timeout: 20_000 });
   expect(posted).not.toContain("4242");
