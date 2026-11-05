@@ -45,6 +45,8 @@ while ! mkdir "$LOCK" 2>/dev/null; do
   sleep 10
 done
 echo $$ > "$LOCK/pid"
+# build-ticket.sh greps for this line: a run that has not printed it is still queued and is safe to cancel.
+echo "== local-ci: lock acquired"
 FAILED_AT=""
 cleanup() {
   local rc=$?
@@ -86,24 +88,20 @@ fi
 
 status pending "typecheck, lint, test, build, e2e (E2E_WORKERS=$E2E_WORKERS, VITEST_MAX_WORKERS=$VITEST_MAX_WORKERS)"
 
-# Steps that can flake under load get one automatic retry, so a timeout never sends a builder on a hunt.
+# Retries rerun only what failed, never the whole suite again: a real failure used to cost two full runs while
+# every other lane waited for the lock. Vitest and Playwright retry a failed test in place (--retry/--retries);
+# a whole e2e run that still fails gets one rerun of just its failed tests (--last-failed), in case the web
+# server itself fell over. Only the build (silent next build crashes under load) reruns whole.
 # Every step has a timeout, so one hung run cannot hold the machine-wide lock for every lane.
-run() {
-  local name="$1" retry="$2"; shift 2
-  echo "== local-ci: $name"
-  timeout "$STEP_TIMEOUT" "$@" && return 0
-  if [ "$retry" = retry ]; then
-    echo "== local-ci: $name failed once; retrying to rule out a load flake"
-    timeout "$STEP_TIMEOUT" "$@" && { echo "== local-ci: $name passed on retry (flaky; worth a follow-up)"; return 0; }
-    FAILED_AT="$name"; status failure "failed twice: $name"; echo "local-ci FAILED at $name (twice in a row, not a one-off flake) on $SHA"; exit 1
-  fi
-  FAILED_AT="$name"; status failure "failed: $name"; echo "local-ci FAILED at $name on $SHA"; exit 1
-}
-run typecheck once pnpm typecheck
-run lint once pnpm lint
-run test retry pnpm test
-run build retry pnpm build
-run e2e retry pnpm test:e2e
+fail() { FAILED_AT="$1"; status failure "failed: $1"; echo "local-ci FAILED at $1 on $SHA ($2)"; exit 1; }
+step() { echo "== local-ci: $1"; shift; timeout "$STEP_TIMEOUT" "$@"; }
+step typecheck pnpm typecheck || fail typecheck "no retry"
+step lint pnpm lint || fail lint "no retry"
+step test pnpm test --retry=1 || fail test "each failed test already retried once, so not a one-off flake"
+step build pnpm build || { echo "== local-ci: build failed once; rerunning to rule out a load crash"
+  step build pnpm build || fail build "failed twice in a row"; }
+step e2e pnpm test:e2e --retries=1 || { echo "== local-ci: rerunning only the failed e2e tests"
+  step e2e pnpm test:e2e --retries=1 --last-failed || fail e2e "each failed test ran up to four times, so not a one-off flake"; }
 
 status success "typecheck, lint, test, build, e2e passed"
 echo "local-ci PASSED on $SHA"
