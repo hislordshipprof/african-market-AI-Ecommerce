@@ -133,7 +133,7 @@ One refund the app asked Stripe for. The row stores the key, the amount and the 
 A RefundRequest that is still unanswered: reserved, unknown, or created at the provider but not yet succeeded, failed or canceled. Manual repayment waits until no request is open.
 
 **ABANDONED**:
-An open refund request that was still unknown 23 hours after it was created, and was not in the middle of a replay. The platform is alerted. A refund that shows up later is still recorded, and the reconcile cron keeps matching it without sending the request again. A replay stays open until the provider answers, including on another server. Abandonment re-reads the current row under the store lock and does not overwrite a live reservation. This window is a coordinator default, pending owner confirmation.
+An open refund request that was still unknown 23 hours after it was created, and was not in the middle of a replay. The platform alert is written in the same locked transaction, so a failed insert does not leave the request abandoned. A refund that shows up later is still recorded, and the reconcile cron keeps matching it without sending the request again. A replay stays open until the provider answers, including on another server. Abandonment re-reads the current row under the store lock and does not overwrite a live reservation. This window is a coordinator default, pending owner confirmation.
 
 **Fulfillment option**:
 How a customer gets an order: store delivery, courier delivery, or pickup.

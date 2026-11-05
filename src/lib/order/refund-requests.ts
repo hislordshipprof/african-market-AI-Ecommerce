@@ -134,15 +134,7 @@ export async function classifyRefundRequest(
   return row;
 }
 
-async function alertAbandoned(storeId: string, orderId: string, key: string): Promise<void> {
-  const wrote = await storeScopedTransaction(storeId, async (tx) => {
-    await lockStoreRow(tx, storeId);
-    return writeAuditOnce(tx, storeId, orderId, "refund_request_unknown", key, {
-      key,
-      alert: "platform",
-    });
-  });
-  if (!wrote) return;
+function logAbandoned(orderId: string, key: string): void {
   console.error(`Refund request ${key} for order ${orderId} is still unknown. Platform alerted.`);
 }
 
@@ -154,31 +146,37 @@ function replayLeaseFresh(row: { state: string; lastCheckedAt: Date }, now = Dat
  * Abandonment decides from the current row, under the store lock.
  * A stale snapshot must not overwrite a live replay or a finished request.
  */
-async function abandonIfIdle(row: RefundRequestRow): Promise<{ row: RefundRequestRow; changed: boolean }> {
+async function abandonIfIdle(
+  row: RefundRequestRow,
+): Promise<{ row: RefundRequestRow; changed: boolean; alerted: boolean }> {
   return storeScopedTransaction(row.storeId, async (tx) => {
     await lockStoreRow(tx, row.storeId);
     const current = await tx.refundRequest.findUnique({ where: { id: row.id } });
-    if (!current) return { row, changed: false };
+    if (!current) return { row, changed: false, alerted: false };
     if (
       current.state === "CREATED"
       || current.state === "ABANDONED"
       || current.state === "NOT_CREATED"
       || replayLeaseFresh(current)
     ) {
-      return { row: current, changed: false };
+      return { row: current, changed: false, alerted: false };
     }
     const age = Date.now() - current.createdAt.getTime();
-    if (age < REFUND_REQUEST_ABANDON_MS) return { row: current, changed: false };
+    if (age < REFUND_REQUEST_ABANDON_MS) return { row: current, changed: false, alerted: false };
     const updated = await tx.refundRequest.updateMany({
       where: { id: current.id, state: current.state, lastCheckedAt: current.lastCheckedAt },
       data: { state: "ABANDONED", lastCheckedAt: new Date(Date.now()) },
     });
     if (updated.count !== 1) {
       const again = await tx.refundRequest.findUnique({ where: { id: current.id } });
-      return { row: again ?? current, changed: false };
+      return { row: again ?? current, changed: false, alerted: false };
     }
+    const alerted = await writeAuditOnce(tx, row.storeId, row.orderId, "refund_request_unknown", row.key, {
+      key: row.key,
+      alert: "platform",
+    });
     const abandoned = await tx.refundRequest.findUnique({ where: { id: current.id } });
-    return { row: abandoned ?? current, changed: true };
+    return { row: abandoned ?? current, changed: true, alerted };
   });
 }
 
@@ -249,8 +247,8 @@ export async function reconcileRefundRequest(row: RefundRequestRow): Promise<Ref
   }
   if (row.state === "ABANDONED" || row.state === "NOT_CREATED" || row.state === "CREATED") return row;
   const decision = await abandonIfIdle(row);
+  if (decision.alerted) logAbandoned(row.orderId, row.key);
   if (!decision.changed) return decision.row;
-  await alertAbandoned(row.storeId, row.orderId, row.key);
   await evaluateOrderRefundState(row.orderId);
   return decision.row;
 }

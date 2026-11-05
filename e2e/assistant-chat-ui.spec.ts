@@ -75,7 +75,7 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   await page.getByTestId("assistant-launcher").click();
   await send(page, "html please");
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
-  await expect(dialog.getByText(/<img/)).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "<img" })).toBeVisible({ timeout: 20_000 });
   await expect(dialog.locator("img")).toHaveCount(0);
   await send(page, "stray price");
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "That is (see card)." })).toBeVisible({ timeout: 20_000 });

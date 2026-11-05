@@ -8,6 +8,45 @@ import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount } from "
 import { autoCancelOrder, reconcileStuckOrder } from "./service";
 import { reconcileRefundRequest, REPLAY_LEASE_MS, submitRefund } from "./refund-requests";
 
+const reviewFault = vi.hoisted(() => ({ failAlert: false }));
+
+vi.mock("../db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../db")>();
+  return {
+    ...actual,
+    storeScopedTransaction: (async (
+      storeId: string,
+      callback: (tx: never) => Promise<unknown>,
+      options?: { timeout?: number; maxWait?: number },
+    ) =>
+      actual.storeScopedTransaction(
+        storeId,
+        async (tx) =>
+          callback(
+            new Proxy(tx, {
+              get(target, property, receiver) {
+                if (property !== "auditLog") return Reflect.get(target, property, receiver);
+                const audit = target.auditLog;
+                return new Proxy(audit, {
+                  get(auditTarget, method, auditReceiver) {
+                    if (method !== "create") return Reflect.get(auditTarget, method, auditReceiver);
+                    return async (args: { data: { action?: string } }) => {
+                      if (reviewFault.failAlert && args.data.action === "refund_request_unknown") {
+                        reviewFault.failAlert = false;
+                        throw new Error("review injected alert insert failure");
+                      }
+                      return auditTarget.create(args as never);
+                    };
+                  },
+                });
+              },
+            }) as never,
+          ),
+        options,
+      )) as typeof actual.storeScopedTransaction,
+  };
+});
+
 const hasDb = !!process.env.DATABASE_URL;
 
 describe.skipIf(!hasDb)("refund request ledger", () => {
@@ -397,5 +436,67 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     const saved = await reconcileRefundRequest(stale);
     expect(saved.state).toBe("REPLAYING");
     expect(refundRequests.filter((call) => call.paymentIntentId === pi)).toHaveLength(0);
+  });
+
+  it("review186 abandonment alert survives failed DB insert", async () => {
+    const { order, pi } = await cancellingOrder();
+    const key = `refund:${order.id}:1`;
+    const row = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "UNKNOWN",
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+    });
+    reviewFault.failAlert = true;
+    await expect(reconcileRefundRequest(row)).rejects.toThrow("review injected alert insert failure");
+    const current = await storeScoped(storeId).refundRequest.findUniqueOrThrow({ where: { id: row.id } });
+    expect(current.state).toBe("UNKNOWN");
+    await reconcileRefundRequest(current);
+    await reconcileStuckOrder(storeId, order.id);
+    const alerts = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_request_unknown" },
+    });
+    expect(alerts).toHaveLength(1);
+    const again = await storeScoped(storeId).refundRequest.findUniqueOrThrow({ where: { id: row.id } });
+    expect(again.state).toBe("ABANDONED");
+  });
+
+  it("a second failed alert insert still leaves a partial request unabandoned", async () => {
+    const { order, pi } = await cancellingOrder(400);
+    const key = `refund:${order.id}:1`;
+    const row = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 400,
+        refundApplicationFee: true,
+        state: "UNKNOWN",
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+    });
+    reviewFault.failAlert = true;
+    await expect(reconcileRefundRequest(row)).rejects.toThrow("review injected alert insert failure");
+    reviewFault.failAlert = true;
+    await expect(reconcileRefundRequest(row)).rejects.toThrow("review injected alert insert failure");
+    const open = await storeScoped(storeId).refundRequest.findUniqueOrThrow({ where: { id: row.id } });
+    expect(open.state).toBe("UNKNOWN");
+    await reconcileRefundRequest(open);
+    const alerts = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "refund_request_unknown" },
+    });
+    expect(alerts).toHaveLength(1);
+    expect((await storeScoped(storeId).refundRequest.findUniqueOrThrow({ where: { id: row.id } })).state).toBe("ABANDONED");
+    await reconcileRefundRequest(open);
+    expect(await storeScoped(storeId).auditLog.count({
+      where: { entityId: order.id, action: "refund_request_unknown" },
+    })).toBe(1);
   });
 });

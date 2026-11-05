@@ -30,7 +30,7 @@ export async function insertInboxOrder(input: {
     await tx.order.deleteMany({ where: { storeId, number: input.number } });
     const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
     const listing = await tx.listing.findFirstOrThrow({
-      where: { storeId },
+      where: { storeId, variants: { some: {} } },
       include: { variants: { take: 1 } },
     });
     const variant = listing.variants[0];
