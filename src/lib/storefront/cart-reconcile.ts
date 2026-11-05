@@ -149,6 +149,15 @@ export function mergeServerLines(input: MergeInput): MergeResult {
     }
     const lineMode: ReconcileMode = scope ? "keep-intent" : input.mode;
     if (moved || (lineMode === "keep-intent" && (outstanding || optimistic))) {
+      // The server no longer has this row. A newer positive intent must be
+      // saved as a new row; writing the old id again is rejected at the
+      // current revision and the next recovery then drops the intent.
+      if (moved && known?.lineId) {
+        confirmed.set(key, { qty: 0 });
+        if (pendingDelete.get(key) === known.lineId) pendingDelete.delete(key);
+        next.push({ ...local, serverLineId: undefined });
+        continue;
+      }
       next.push(local);
       continue;
     }

@@ -1811,6 +1811,53 @@ test.describe("cart recovery after a failed write", () => {
     await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
   });
 
+  test("a newer plus on a deleted row is saved as a fresh line", async ({ page }) => {
+    await openGrains(page);
+    await addGarri(page);
+    await whiteGarri(page).getByTestId("quick-add-btn").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("1");
+    await settle(page);
+    const before = await readCartLines("mama-ngozi", await cartCookie(page));
+    const yellow = before.find((line) => line.listingId === "mn_garri_yellow");
+    const white = before.find((line) => line.variantId === "mn_garri_w_v1");
+    expect(await deleteCartLine("mama-ngozi", yellow!.id)).toBe(true);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    let oldIdWrites = 0;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const body = request.postData() ?? "";
+      const writesOldId =
+        isAction(request) && body.includes(yellow!.id) && quantitiesIn(body).length > 0;
+      if (writesOldId) oldIdWrites += 1;
+      if (!held && writesOldId) {
+        held = true;
+        await gate;
+      }
+      await route.fallback();
+    });
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect.poll(() => held).toBe(true);
+    await garri(page).getByTestId("stepper-plus").click();
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("3");
+    await whiteGarri(page).getByTestId("stepper-plus").click();
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+    release();
+    await settle(page);
+    expect(oldIdWrites).toBe(1);
+    await expect(garri(page).getByTestId("stepper-qty")).toHaveText("3");
+    await expect(whiteGarri(page).getByTestId("stepper-qty")).toHaveText("2");
+    const lines = await readCartLines("mama-ngozi", await cartCookie(page));
+    const savedYellow = lines.find((line) => line.listingId === "mn_garri_yellow");
+    expect(savedYellow?.qty).toBe(3);
+    expect(savedYellow?.id).not.toBe(yellow!.id);
+    expect(lines.find((line) => line.id === yellow!.id)).toBeUndefined();
+    expect(lines.find((line) => line.id === white!.id)?.qty).toBe(2);
+  });
+
   test("a failed removal restores confirmed quantity rather than queued quantity", async ({ page }) => {
     await openGrains(page);
     await addGarri(page);

@@ -272,6 +272,59 @@ describe("cart reconcile", () => {
     expect(merged.lines).toHaveLength(0);
   });
 
+  it("an absent saved row forgets its id when a newer plus remains", () => {
+    const merged = mergeServerLines(
+      base({
+        lines: [
+          line({ listingId: "yellow", variantId: "yellow-v", quantity: 3, serverLineId: "row-yellow" }),
+          line({ listingId: "white", variantId: "white-v", quantity: 2, serverLineId: "row-white" }),
+        ],
+        confirmed: new Map([
+          [yellowKey, { lineId: "row-yellow", qty: 1 }],
+          [whiteKey, { lineId: "row-white", qty: 1 }],
+        ]),
+        revs: new Map([
+          [yellowKey, 5],
+          [whiteKey, 4],
+        ]),
+        serverLines: [
+          line({ listingId: "white", variantId: "white-v", quantity: 1, serverLineId: "row-white" }),
+        ],
+        stamp: {
+          revs: new Map([
+            [yellowKey, 3],
+            [whiteKey, 3],
+          ]),
+          identity: new Map(),
+        },
+        scope: { key: yellowKey, sinceRev: 3 },
+      }),
+    );
+    const yellow = merged.lines.find((entry) => entry.listingId === "yellow");
+    expect(yellow).toMatchObject({ quantity: 3, serverLineId: undefined });
+    expect(merged.confirmed.get(yellowKey)).toEqual({ qty: 0 });
+    expect(merged.pendingDelete.has(yellowKey)).toBe(false);
+    expect(merged.lines.find((entry) => entry.listingId === "white")?.quantity).toBe(2);
+    expect(merged.confirmed.get(whiteKey)).toEqual({ lineId: "row-white", qty: 1 });
+  });
+
+  it("an absent saved row with no newer gesture stays absent", () => {
+    const merged = mergeServerLines(
+      base({
+        lines: [
+          line({ listingId: "yellow", variantId: "yellow-v", quantity: 2, serverLineId: "row-yellow" }),
+        ],
+        confirmed: new Map([[yellowKey, { lineId: "row-yellow", qty: 1 }]]),
+        revs: new Map([[yellowKey, 3]]),
+        serverLines: [],
+        stamp: { revs: new Map([[yellowKey, 3]]), identity: new Map() },
+        scope: { key: yellowKey, sinceRev: 3 },
+      }),
+    );
+    expect(merged.lines).toHaveLength(0);
+    expect(merged.confirmed.get(yellowKey)).toEqual({ qty: 0 });
+  });
+
   it("keeps another line's optimistic first add during scoped recovery", () => {
     const merged = mergeServerLines(
       base({
