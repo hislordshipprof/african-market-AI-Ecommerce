@@ -20,6 +20,52 @@ function isKw(token: Token | undefined, word: string): boolean {
   return token?.kind === "kw" && token.value === word;
 }
 
+/** Ordinary '...' literal. A doubled quote is one quote; a backslash does not escape. */
+function skipStandardString(sql: string, i: number): number {
+  i += 1;
+  while (i < sql.length) {
+    if (sql[i] === "'" && sql[i + 1] === "'") {
+      i += 2;
+      continue;
+    }
+    if (sql[i] === "'") return i + 1;
+    i += 1;
+  }
+  return i;
+}
+
+/** E'...' / e'...' literal. A backslash and the next character stay inside, including \' and \\. */
+function skipEscapeString(sql: string, i: number): number {
+  i += 1;
+  while (i < sql.length) {
+    if (sql[i] === "\\") {
+      i += Math.min(2, sql.length - i);
+      continue;
+    }
+    if (sql[i] === "'" && sql[i + 1] === "'") {
+      i += 2;
+      continue;
+    }
+    if (sql[i] === "'") return i + 1;
+    i += 1;
+  }
+  return i;
+}
+
+/** $$...$$ or $tag$...$tag$. Returns null when `$` is not a dollar quote, as with `$1`. */
+function skipDollarString(sql: string, i: number): number | null {
+  let j = i + 1;
+  if (j < sql.length && /[A-Za-z_]/.test(sql[j])) {
+    j += 1;
+    while (j < sql.length && /[A-Za-z0-9_]/.test(sql[j])) j += 1;
+  }
+  if (sql[j] !== "$") return null;
+  const tag = sql.slice(i, j + 1);
+  const closeAt = sql.indexOf(tag, j + 1);
+  if (closeAt < 0) return sql.length;
+  return closeAt + tag.length;
+}
+
 function tokenize(sql: string): Token[] {
   const out: Token[] = [];
   let i = 0;
@@ -36,19 +82,19 @@ function tokenize(sql: string): Token[] {
       i = Math.min(sql.length, i + 2);
       continue;
     }
-    if (c === "'") {
-      i += 1;
-      while (i < sql.length) {
-        if (sql[i] === "'" && sql[i + 1] === "'") {
-          i += 2;
-          continue;
-        }
-        if (sql[i] === "'") {
-          i += 1;
-          break;
-        }
-        i += 1;
+    if ((c === "E" || c === "e") && sql[i + 1] === "'") {
+      i = skipEscapeString(sql, i + 1);
+      continue;
+    }
+    if (c === "$") {
+      const next = skipDollarString(sql, i);
+      if (next !== null) {
+        i = next;
+        continue;
       }
+    }
+    if (c === "'") {
+      i = skipStandardString(sql, i);
       continue;
     }
     if (c === '"') {

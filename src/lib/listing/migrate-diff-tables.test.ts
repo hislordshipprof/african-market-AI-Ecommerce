@@ -15,6 +15,21 @@ ALTER TABLE "stores" ADD COLUMN "unexpected" TEXT;
 ALTER TABLE "two_factors" ADD COLUMN "unexpected" TEXT;
 `;
 
+const TWELVE_WITH_ORDERS = [
+  "accounts",
+  "audit_logs",
+  "categories",
+  "listings",
+  "master_products",
+  "orders",
+  "product_synonyms",
+  "sessions",
+  "store_banners",
+  "store_collections",
+  "stores",
+  "two_factors",
+];
+
 const ELEVEN_NAMES = [
   "accounts",
   "audit_logs",
@@ -247,5 +262,107 @@ ALTER TABLE "stores" ADD COLUMN "unexpected" TEXT;`;
 
   it("keeps a quote inside an unmapped index name", () => {
     expect(affectedTablesInMigrateDiff(`DROP INDEX "AL""TER";`)).toEqual(['unresolved index: AL"TER']);
+  });
+
+  it("keeps an orders alter that follows an escape-string default", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'can\\'t';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("keeps an orders alter after a lowercase escape string", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT e'can\\'t';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("keeps an orders alter after a doubled quote in an escape string", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'can''t';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("keeps an orders alter after an escape string that ends with a backslash", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'c\\\\';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("keeps an orders alter after an escape string that holds a backslash and a quote", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'foo\\\\\\'';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("keeps an orders alter after an escape string that is one quote", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'\\'';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("keeps an orders alter after an ordinary doubled quote", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT 'can''t';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("does not treat a backslash as an escape in an ordinary string", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT 'can\\';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("counts a real orders alter once when an escape string mentions orders", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'ALTER TABLE "orders"';
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("does not count orders named only inside an ordinary string", () => {
+    const script = `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT 'ALTER TABLE "orders"';`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
+  });
+
+  it("counts a real orders alter once when a dollar quote mentions orders and a quote", () => {
+    const script = `${ELEVEN}
+ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT $$can't ALTER TABLE "orders"$$;
+ALTER TABLE "orders" ADD COLUMN "unexpected" TEXT;
+`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(TWELVE_WITH_ORDERS);
+  });
+
+  it("does not count orders named only inside a tagged dollar quote", () => {
+    const script = `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT $body$ALTER TABLE "orders"$body$;`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(["stores"]);
+  });
+
+  it("still counts orders when a parameter marker sits beside the alter", () => {
+    expect(
+      affectedTablesInMigrateDiff(`ALTER TABLE "orders" ALTER COLUMN "n" SET DEFAULT $1;`),
+    ).toEqual(["orders"]);
+  });
+
+  it("still sees every later table when the first statement holds an escape string", () => {
+    const script = `ALTER TABLE "stores" ADD COLUMN "probe" TEXT DEFAULT E'can\\'t';
+${ELEVEN}`;
+    expect(affectedTablesInMigrateDiff(script)).toEqual(ELEVEN_NAMES);
   });
 });
