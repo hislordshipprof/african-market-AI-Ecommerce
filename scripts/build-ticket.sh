@@ -155,7 +155,8 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
     # A blocked review means this commit will not merge, so a run still queued for the machine-wide lock only
     # makes every other lane wait longer: cancel it. A run that already holds the lock finishes, because its
     # failures go into this fix round.
-    if [ "$verdict" != "VERDICT: PASS" ] && kill -0 "$ci_pid" 2>/dev/null && ! grep -q "lock acquired" "$CI_LOG"; then
+    # Round 3 is never cancelled: the coordinator may accept its findings, and then needs the CI result.
+    if [ "$round" != "3" ] && [ "$verdict" != "VERDICT: PASS" ] && kill -0 "$ci_pid" 2>/dev/null && ! grep -q "lock acquired" "$CI_LOG"; then
       taskkill //F //T //PID "$(cat "/proc/$ci_pid/winpid" 2>/dev/null)" >/dev/null 2>&1 || kill "$ci_pid" 2>/dev/null || true
       wait "$ci_pid" 2>/dev/null || true
       gh api "repos/hislordshipprof/african-market-AI-Ecommerce/statuses/$(git -C "$WT" rev-parse HEAD)" -f state=error \

@@ -100,8 +100,16 @@ step lint pnpm lint || fail lint "no retry"
 step test pnpm test --retry=1 || fail test "each failed test already retried once, so not a one-off flake"
 step build pnpm build || { echo "== local-ci: build failed once; rerunning to rule out a load crash"
   step build pnpm build || fail build "failed twice in a row"; }
-step e2e pnpm test:e2e --retries=1 || { echo "== local-ci: rerunning only the failed e2e tests"
-  step e2e pnpm test:e2e --retries=1 --last-failed || fail e2e "each failed test ran up to four times, so not a one-off flake"; }
+if ! step e2e pnpm test:e2e --retries=1; then
+  if tr -d ' \r\n' 2>/dev/null < test-results/.last-run.json | grep -q '"failedTests":\["'; then
+    echo "== local-ci: rerunning only the failed e2e tests"
+    step e2e pnpm test:e2e --retries=1 --last-failed || fail e2e "each failed test ran up to four times, so not a one-off flake"
+  else
+    # No failed-test list: the run never reached its tests (web server crash, timeout), so rerun it whole.
+    echo "== local-ci: e2e stopped before reporting failed tests; rerunning it whole"
+    step e2e pnpm test:e2e --retries=1 || fail e2e "the whole run failed twice"
+  fi
+fi
 
 status success "typecheck, lint, test, build, e2e passed"
 echo "local-ci PASSED on $SHA"
