@@ -56,24 +56,68 @@ export function reservePort(preferred?: number): Promise<number> {
   });
 }
 
-/** LISTENING rows only. A remote address can also contain the port. */
+/**
+ * PIDs that own a listener on `port`.
+ * `netstat -ano` omits node sockets bound to 127.0.0.1 on this Windows host,
+ * so a detached listener survives `stop()`. Get-NetTCPConnection returns them.
+ * RemotePort 0 is the listener; established clients have a remote port.
+ */
 function pidsListeningOn(port: number): Promise<number[]> {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return Promise.resolve([]);
+  if (process.platform === "win32") return windowsListeners(port);
+  return ssListeners(port);
+}
+
+function windowsListeners(port: number): Promise<number[]> {
+  const script = [
+    `$rows = Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue`,
+    "$rows | Where-Object { $_.RemotePort -eq 0 -and $_.OwningProcess -gt 0 } | Select-Object -ExpandProperty OwningProcess",
+  ].join("; ");
   return new Promise((resolve) => {
-    execFile("netstat", ["-ano"], { windowsHide: true, encoding: "utf8" }, (error, stdout) => {
-      if (error || typeof stdout !== "string") {
-        resolve([]);
-        return;
-      }
-      const needle = new RegExp(`:${port}(?!\\d)`);
-      const pids = new Set<number>();
-      for (const line of stdout.split(/\r?\n/)) {
-        if (!line.includes("LISTENING") || !needle.test(line)) continue;
-        const pid = Number(line.trim().split(/\s+/).at(-1));
-        if (pid > 0) pids.add(pid);
-      }
-      resolve([...pids]);
-    });
+    execFile(
+      "powershell",
+      ["-NoProfile", "-Command", script],
+      { windowsHide: true, encoding: "utf8", timeout: 20_000 },
+      (error, stdout) => {
+        if (error || typeof stdout !== "string") {
+          resolve([]);
+          return;
+        }
+        resolve(pidsFromLines(stdout));
+      },
+    );
   });
+}
+
+function ssListeners(port: number): Promise<number[]> {
+  return new Promise((resolve) => {
+    execFile(
+      "ss",
+      ["-H", "-ltnp", `sport = :${port}`],
+      { encoding: "utf8", timeout: 5_000 },
+      (error, stdout) => {
+        if (error || typeof stdout !== "string") {
+          resolve([]);
+          return;
+        }
+        const pids = new Set<number>();
+        for (const match of stdout.matchAll(/pid=(\d+)/g)) {
+          const pid = Number(match[1]);
+          if (pid > 0) pids.add(pid);
+        }
+        resolve([...pids]);
+      },
+    );
+  });
+}
+
+function pidsFromLines(stdout: string): number[] {
+  const pids = new Set<number>();
+  for (const line of stdout.split(/\r?\n/)) {
+    const pid = Number(line.trim());
+    if (pid > 0) pids.add(pid);
+  }
+  return [...pids];
 }
 
 function forceKill(pid: number): Promise<void> {
@@ -97,11 +141,12 @@ async function releaseChild(child: ChildProcess): Promise<void> {
 
 /** Kills this child and any listener it left on the port (`pnpm exec` detaches `next`). */
 async function releaseOwned(child: ChildProcess, port: number): Promise<void> {
-  const pids = new Set<number>(await pidsListeningOn(port));
-  if (child.pid !== undefined) pids.add(child.pid);
-  await Promise.all([...pids].map((pid) => forceKill(pid)));
+  if (child.pid !== undefined) await forceKill(child.pid);
   const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline && (await pidsListeningOn(port)).length > 0) {
+  while (Date.now() < deadline) {
+    const pids = await pidsListeningOn(port);
+    if (pids.length === 0) return;
+    await Promise.all(pids.map((pid) => forceKill(pid)));
     await sleep(200);
   }
 }
@@ -123,6 +168,8 @@ export type StartSpawnedServerOptions = {
 
 export type RunningServer = {
   port: number;
+  /** Launcher PID. A detached listener is not this process. */
+  pid: number | undefined;
   stop: () => Promise<void>;
 };
 
@@ -230,6 +277,7 @@ export async function startSpawnedServer(options: StartSpawnedServerOptions): Pr
 
   return {
     port: options.port,
+    pid: child.pid,
     stop: () => releaseOwned(child, options.port),
   };
 }

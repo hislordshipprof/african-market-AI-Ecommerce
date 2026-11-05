@@ -1,7 +1,19 @@
+import { spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
+import path from "node:path";
 import { expect, it } from "vitest";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
+
+function killTree(pid: number): Promise<void> {
+  return new Promise((resolve) => {
+    const killer = process.platform === "win32"
+      ? spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true })
+      : spawn("kill", ["-TERM", String(pid)], { stdio: "ignore" });
+    killer.on("exit", () => resolve());
+    killer.on("error", () => resolve());
+  });
+}
 
 function listenOn(port: number): Promise<{ port: number; close: () => Promise<void> }> {
   return new Promise((resolve, reject) => {
@@ -131,6 +143,34 @@ it("waits until this child is ready and stop releases the port", async () => {
   await running.stop();
   await expect(fetch(`http://127.0.0.1:${port}/api/health`)).rejects.toThrow();
 });
+
+it("stop kills the listener pnpm exec leaves after the launcher is gone", async () => {
+  const port = await reservePort();
+  const token = "detached-listener";
+  const launcher = path.join(process.cwd(), "e2e/fixtures/detached-launcher.mjs").replaceAll("\\", "/");
+  const listener = path.join(process.cwd(), "e2e/fixtures/detached-listener.mjs").replaceAll("\\", "/");
+  const running = await startSpawnedServer({
+    command: `pnpm exec node "${launcher}" "${listener}" ${port} ${token}`,
+    shell: true,
+    port,
+    healthUrl: `http://127.0.0.1:${port}/`,
+    healthOk: (status) => status === 200,
+    timeoutMs: 20_000,
+  });
+  try {
+    expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toBe(token);
+    if (running.pid === undefined) throw new Error("launcher pid missing");
+    await killTree(running.pid);
+    expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toBe(token);
+    await running.stop();
+    await expect(fetch(`http://127.0.0.1:${port}/`)).rejects.toThrow();
+    const rebound = await listenOn(port);
+    expect(rebound.port).toBe(port);
+    await rebound.close();
+  } finally {
+    await running.stop();
+  }
+}, 40_000);
 
 it("fails when the child exits before it is ready", async () => {
   const port = await reservePort();
