@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
-import { acceptOrder, autoCancelOrder, completePickup, markLinePicked, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
+import { acceptOrder, autoCancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
@@ -32,6 +32,11 @@ describe("sortPickListLines (pure)", () => {
 
   it("returns empty array for empty input", () => {
     expect(sortPickListLines([])).toEqual([]);
+  });
+
+  it("pickup fulfills to awaiting pickup and delivery fulfills to ready", () => {
+    expect(fulfilledStatus("pickup")).toBe("AWAITING_PICKUP");
+    expect(fulfilledStatus("delivery")).toBe("READY");
   });
 
   it("does not mutate the original array", () => {
@@ -846,7 +851,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(final!.acceptedAt).toBeNull();
   });
 
-  it("markReady idempotent: second call after Stripe already captured succeeds", async () => {
+  it("markReady rejects a second call once the order has left picking", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
     await acceptOrder(storeId, order.id, 15);
@@ -1854,7 +1859,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
   });
 
-  it("B2: markReady void path failed refund stays CANCELLING for sweep retry", async () => {
+  it("B2: markReady void path failed refund moves to REFUND_FAILED", async () => {
     const num = ++orderSeq;
     const order = await storeScopedTransaction(storeId, async (tx) => {
       const o = await tx.order.create({
@@ -2578,6 +2583,49 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("the staff inbox keeps a resolved cancellation and hides a plain one", async () => {
+    const shown = await createTestOrder("CANCELLED");
+    const hidden = await createTestOrder("CANCELLED");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: shown.id }, data: { notes: "Paid by Zelle" } });
+    });
+    const ids = (await getStoreOrders(storeId)).map((row) => row.id);
+    expect(ids).toContain(shown.id);
+    expect(ids).not.toContain(hidden.id);
+  });
+
+  it("a second cancellation writes no extra audit and another store cannot finalize it", async () => {
+    const order = await createTestOrder();
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    const cancelled = await autoCancelOrder(storeId, order.id);
+    expect(cancelled.ok).toBe(true);
+    const once = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(once!.capturedAmountCents).toBeNull();
+    expect(
+      await storeScoped(storeId).auditLog.count({ where: { entityId: order.id, action: "auto_cancel" } }),
+    ).toBe(1);
+
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING", cancelledAt: null } });
+    });
+    const again = await autoCancelOrder(storeId, order.id);
+    expect(again.ok).toBe(true);
+    const settled = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(settled!.status).toBe("CANCELLED");
+    expect(settled!.capturedAmountCents).toBeNull();
+    expect(
+      await storeScoped(storeId).auditLog.count({ where: { entityId: order.id, action: "auto_cancel" } }),
+    ).toBe(1);
+
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+    });
+    const foreign = await reconcileStuckOrder(storeBId, order.id);
+    expect(foreign).toEqual({ ok: true, action: "already_resolved" });
+    const untouched = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(untouched!.status).toBe("CANCELLING");
   });
 
   it("autoCancel registers a seeded hold before the first cancel", async () => {

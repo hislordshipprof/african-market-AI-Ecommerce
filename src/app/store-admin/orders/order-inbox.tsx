@@ -60,6 +60,7 @@ const STATUS_CONFIG: Record<
   READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
   AWAITING_PICKUP: { label: "Awaiting pickup", variant: "outline", icon: ShoppingBag },
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
+  CANCELLED: { label: "Cancelled", variant: "outline", icon: CheckCircle2 },
 };
 
 interface Props {
@@ -312,6 +313,9 @@ export function OrderInbox({
                     {REFUND_FAILED_STAFF_COPY}
                   </p>
                 )}
+                {selectedOrder.status === "CANCELLED" && selectedOrder.notes ? (
+                  <p className="mt-2 text-sm text-foreground">The platform resolved this refund.</p>
+                ) : null}
               </CardHeader>
               <CardContent>
                 {selectedOrder.status === "AUTHORIZED" && (

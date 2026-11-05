@@ -29,6 +29,29 @@ async function createAuthorizedPI(amountCents: number): Promise<string> {
   return pi.id;
 }
 
+async function waitForRefundFailedEvent(refundId: string): Promise<Stripe.Event> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    let startingAfter: string | undefined;
+    for (let page = 0; page < 5; page += 1) {
+      const events = await stripe.events.list({
+        type: "refund.failed",
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+      const match = events.data.find((event) => {
+        const object = event.data.object as { id?: string };
+        return object.id === refundId;
+      });
+      if (match) return match;
+      if (!events.has_more || events.data.length === 0) break;
+      startingAfter = events.data[events.data.length - 1]?.id;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error(`refund.failed event for ${refundId} did not appear`);
+}
+
 afterAll(async () => {
   if (!hasKey || piToCleanup.length === 0) return;
   for (const id of piToCleanup) {
@@ -224,7 +247,7 @@ describe.skipIf(!hasKey)(
       const listed = await stripeProvider.listRefunds(piId);
       expect(listed).toHaveLength(101);
       expect(listed.reduce((sum, refund) => sum + refund.amountRefunded, 0)).toBe(101);
-    }, 180_000);
+    }, 300_000);
 
     it("retrieveRefund reports pending for pm_card_pendingRefund", async () => {
       const created = await stripe.paymentIntents.create({
@@ -264,12 +287,8 @@ describe.skipIf(!hasKey)(
       expect(refund.status).toBe("failed");
       const secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim();
       expect(secret).toBeTruthy();
-      const events = await stripe.events.list({ type: "refund.failed", limit: 20 });
-      const match = events.data.find((event) => {
-        const object = event.data.object as { id?: string };
-        return object.id === refund.id;
-      });
-      expect(match?.id).toBeTruthy();
+      const match = await waitForRefundFailedEvent(refund.id);
+      expect(match.id).toBeTruthy();
       const payload = JSON.stringify(match);
       const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: secret! });
       const parsed = stripeProvider.verifyWebhookSignature({ payload, signature });
@@ -302,6 +321,15 @@ describe.skipIf(!hasKey)(
         refund = await stripe.refunds.retrieve(refund.id);
       }
       expect(refund.status).toBe("failed");
+      const settled = await stripe.refunds.retrieve(refund.id, {
+        expand: ["transfer_reversal", "failure_balance_transaction", "balance_transaction"],
+      });
+      const reversal = settled.transfer_reversal;
+      const failureBalance = settled.failure_balance_transaction;
+      expect(reversal && typeof reversal === "object").toBe(true);
+      expect(failureBalance && typeof failureBalance === "object").toBe(true);
+      if (reversal && typeof reversal === "object") expect(reversal.amount).toBeGreaterThan(0);
+      if (failureBalance && typeof failureBalance === "object") expect(failureBalance.amount).not.toBe(0);
       const pi = await stripe.paymentIntents.retrieve(created.id, { expand: ["latest_charge"] });
       const charge = pi.latest_charge;
       if (!charge || typeof charge === "string") throw new Error("expected expanded latest_charge");

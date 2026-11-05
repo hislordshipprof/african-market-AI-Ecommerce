@@ -75,7 +75,15 @@ test.describe("Customer journey demo", () => {
   });
 
   test("failed payment keeps the cart and can be retried", async ({ page }) => {
-    await fillBasket(page);
+    await page.goto(`${base}/categories/spices-and-seasonings`);
+    const count = page.getByTestId("storefront-header").getByTestId("cart-count");
+    const card = page.getByTestId("listing-card").filter({ hasText: "Suya Spice" }).first();
+    await card.getByTestId("quick-add-btn").click();
+    await expect(card.getByTestId("stepper-qty")).toHaveText("1");
+    const plus = card.getByTestId("stepper-plus");
+    for (let i = 0; i < 9; i += 1) await plus.click();
+    await expect(count).toHaveText("10");
+    await page.goto(`${base}/cart`);
     await page
       .getByRole("link", { name: /^Checkout/ })
       .first()

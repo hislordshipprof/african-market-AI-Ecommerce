@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError, OverRefundError } from "../stripe/errors";
@@ -24,6 +25,65 @@ export type OrderStatus =
 const STRIPE_USD_MINIMUM_CENTS = 50;
 const MAX_CAPTURE_ATTEMPTS = 5;
 const REFUND_APPLICATION_FEE = { refundApplicationFee: true } as const;
+
+type TransitionalStatus = "CAPTURING" | "CANCELLING";
+
+export function fulfilledStatus(fulfillment: string): "AWAITING_PICKUP" | "READY" {
+  return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+}
+
+function systemAuditData(
+  storeId: string,
+  orderId: string,
+  action: string,
+  after: Prisma.InputJsonValue = {},
+) {
+  return {
+    storeId,
+    actorId: SYSTEM_ACTOR_ID,
+    actorEmail: SYSTEM_ACTOR_EMAIL,
+    action,
+    entityType: "order" as const,
+    entityId: orderId,
+    after,
+  };
+}
+
+async function finalizeCancelledOrder(
+  storeId: string,
+  orderId: string,
+  action: string,
+  options?: {
+    from?: TransitionalStatus[];
+    refundId?: string | null;
+    after?: Prisma.InputJsonValue;
+  },
+): Promise<{ wrote: boolean }> {
+  const from = options?.from ?? ["CAPTURING", "CANCELLING"];
+  return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const current = await tx.order.findUnique({ where: { id: orderId } });
+    if (!current || current.status === "CANCELLED" || !from.includes(current.status as TransitionalStatus)) {
+      return { wrote: false };
+    }
+    const existing = await tx.auditLog.findFirst({ where: { entityId: orderId, action } });
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: current.cancelledAt ?? new Date(),
+        capturedAmountCents: null,
+        ...(options?.refundId ? { refundId: options.refundId } : {}),
+      },
+    });
+    if (!existing) {
+      await tx.auditLog.create({
+        data: systemAuditData(storeId, orderId, action, options?.after ?? {}),
+      });
+    }
+    return { wrote: true };
+  });
+}
 
 function greaterThanUnrefunded(err: unknown): boolean {
   return err instanceof OverRefundError;
@@ -124,15 +184,7 @@ async function reserveAttempt(
     }
     const attempt = prior.length + 1;
     await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action,
-        entityType: "order",
-        entityId: orderId,
-        after: { attempt, ...extra },
-      },
+      data: systemAuditData(storeId, orderId, action, { attempt, ...extra } as Prisma.InputJsonValue),
     });
     return { ok: true, attempt };
   });
@@ -181,7 +233,12 @@ const ORDER_WITH_LINES = {
 export async function getStoreOrders(storeId: string) {
   return storeScopedTransaction(storeId, async (tx) => {
     return tx.order.findMany({
-      where: { status: { in: ACTIVE_STATUSES } },
+      where: {
+        OR: [
+          { status: { in: ACTIVE_STATUSES } },
+          { status: "CANCELLED", notes: { not: null } },
+        ],
+      },
       include: ORDER_WITH_LINES,
       orderBy: { createdAt: "desc" },
     });
@@ -255,7 +312,7 @@ export async function markLinePicked(
 
 type CaptureRetryResult =
   | { ok: true; capturedAmountCents: number }
-  | { ok: false; error: string; resolved: "cancelled" | "pending" };
+  | { ok: false; error: string; resolved: "cancelled" | "waiting" };
 
 async function noteCaptureServerError(
   storeId: string,
@@ -265,7 +322,7 @@ async function noteCaptureServerError(
   if (attempt >= MAX_CAPTURE_ATTEMPTS) {
     return settleUnconfirmedCapture(storeId, orderId);
   }
-  return { ok: false, error: "Card capture failed temporarily; we'll retry", resolved: "pending" };
+  return { ok: false, error: "Card capture failed temporarily; we'll retry", resolved: "waiting" };
 }
 
 async function settleUnconfirmedCapture(
@@ -276,7 +333,7 @@ async function settleUnconfirmedCapture(
     return tx.order.findUnique({ where: { id: orderId } });
   });
   if (!order || order.status !== "CAPTURING" || !order.paymentIntentId) {
-    return { ok: false, error: "Order status changed during capture", resolved: "pending" };
+    return { ok: false, error: "Order status changed during capture", resolved: "waiting" };
   }
 
   const stripe = getStripeProvider();
@@ -285,7 +342,7 @@ async function settleUnconfirmedCapture(
     pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
   } catch (err) {
     if (isRetryableProviderError(err)) {
-      return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+      return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
     }
     throw err;
   }
@@ -298,14 +355,14 @@ async function settleUnconfirmedCapture(
   if (pi.status === "requires_capture") {
     const reservedRelease = await reserveAttempt(storeId, orderId, "cancel_retry", { releaseHold: true });
     if (!reservedRelease.ok) {
-      return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+      return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
     }
     const releaseAttempt = reservedRelease.attempt;
     try {
       await stripe.cancelPaymentIntent(order.paymentIntentId, cancelKey(orderId, releaseAttempt));
     } catch (err) {
       if (isRetryableProviderError(err)) {
-        return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+        return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
       }
       if (err instanceof ProviderStateError) {
         let fresh;
@@ -313,7 +370,7 @@ async function settleUnconfirmedCapture(
           fresh = await stripe.retrievePaymentIntent(order.paymentIntentId);
         } catch (retrieveErr) {
           if (isRetryableProviderError(retrieveErr)) {
-            return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+            return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
           }
           throw retrieveErr;
         }
@@ -322,7 +379,7 @@ async function settleUnconfirmedCapture(
           return { ok: true, capturedAmountCents: fresh.amountReceived };
         }
         if (fresh.status !== "canceled") {
-          return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+          return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
         }
       } else {
         throw err;
@@ -345,7 +402,7 @@ async function settleUnconfirmedCapture(
     };
   }
 
-  return { ok: false, error: "Card capture is still confirming with the bank", resolved: "pending" };
+  return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
 }
 
 async function registerE2EPayment(paymentIntentId: string, authorizedCents: number): Promise<void> {
@@ -385,15 +442,11 @@ async function persistRefundFailure(
     });
     if (existing) return;
     await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action: "refund_failed",
-        entityType: "order",
-        entityId: orderId,
-        after: { refundId, refundStatus, alert: "store_and_platform" },
-      },
+      data: systemAuditData(storeId, orderId, "refund_failed", {
+        refundId,
+        refundStatus,
+        alert: "store_and_platform",
+      }),
     });
   });
   console.error(
@@ -409,30 +462,10 @@ async function settleCapturedRefund(
 ): Promise<{ outcome: "refunded" } | { outcome: "failed" | "pending"; error: string }> {
   const decision = await refundReadyToSettle(paymentIntentId, orderId, storeId, refund);
   if (decision.status === "succeeded") {
-    await storeScopedTransaction(storeId, async (tx) => {
-      await lockStoreRow(tx, storeId);
-      const current = await tx.order.findUnique({ where: { id: orderId } });
-      if (!current || current.status !== "CANCELLING") return;
-      await tx.order.update({
-        where: { id: orderId },
-        data: {
-          status: "CANCELLED",
-          cancelledAt: new Date(),
-          capturedAmountCents: null,
-          refundId: decision.refundId,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          storeId,
-          actorId: SYSTEM_ACTOR_ID,
-          actorEmail: SYSTEM_ACTOR_EMAIL,
-          action: "anomaly_refund",
-          entityType: "order",
-          entityId: orderId,
-          after: { refundId: decision.refundId, amountRefunded: decision.amountRefunded },
-        },
-      });
+    await finalizeCancelledOrder(storeId, orderId, "anomaly_refund", {
+      from: ["CANCELLING"],
+      refundId: decision.refundId,
+      after: { refundId: decision.refundId, amountRefunded: decision.amountRefunded },
     });
     return { outcome: "refunded" };
   }
@@ -557,19 +590,11 @@ export async function markTerminalRefundFailure(input: {
       });
     }
     await tx.auditLog.create({
-      data: {
-        storeId: order.storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action,
-        entityType: "order",
-        entityId: order.id,
-        after: {
-          refundId: input.refundId,
-          refundStatus: input.refundStatus,
-          alert: covered ? "store" : "store_and_platform",
-        },
-      },
+      data: systemAuditData(order.storeId, order.id, action, {
+        refundId: input.refundId,
+        refundStatus: input.refundStatus,
+        alert: covered ? "store" : "store_and_platform",
+      }),
     });
     wrote = true;
   });
@@ -601,7 +626,7 @@ export async function markReady(
         applicationFeeAmount: fee > 0 ? fee : undefined,
         paymentIntentId: order.paymentIntentId!,
         totalAuthorizedCents: order.totalAuthorizedCents,
-        newStatus: (order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY") as OrderStatus,
+        newStatus: fulfilledStatus(order.fulfillment),
         alreadyClaiming: true,
       };
     }
@@ -656,8 +681,7 @@ export async function markReady(
       };
     }
 
-    const newStatus: OrderStatus =
-      order.fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+    const newStatus: OrderStatus = fulfilledStatus(order.fulfillment);
 
     const fee = applicationFeeForCapture(capturedAmountCents, order.deliveryFeeCents);
 
@@ -710,34 +734,7 @@ export async function markReady(
       }
       throw err;
     }
-    await storeScopedTransaction(storeId, async (tx) => {
-      await lockStoreRow(tx, storeId);
-      const current = await tx.order.findUnique({ where: { id: orderId } });
-      if (!current || current.status !== "CANCELLING") {
-        return;
-      }
-      await tx.order.update({
-        where: { id: orderId },
-        data: {
-          status: "CANCELLED",
-          cancelledAt: new Date(),
-          capturedAmountCents: null,
-        },
-      });
-
-      // Stock restore deferred to #141 (order-triggered reservation as a matched pair)
-
-      await tx.auditLog.create({
-        data: {
-          storeId,
-          actorId: SYSTEM_ACTOR_ID,
-          actorEmail: SYSTEM_ACTOR_EMAIL,
-          action: "void_zero_amount",
-          entityType: "order",
-          entityId: orderId,
-        },
-      });
-    });
+    await finalizeCancelledOrder(storeId, orderId, "void_zero_amount", { from: ["CANCELLING"] });
     return { ok: true, capturedAmountCents: 0, voided: true };
   }
 
@@ -776,25 +773,9 @@ export async function markReady(
       return { ok: false, error: settled.error };
     }
     if (err instanceof ProviderStateError) {
-      await storeScopedTransaction(storeId, async (tx) => {
-        await lockStoreRow(tx, storeId);
-        const current = await tx.order.findUnique({ where: { id: orderId } });
-        if (!current || current.status !== "CAPTURING") return;
-        await tx.order.update({
-          where: { id: orderId },
-          data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
-        });
-        await tx.auditLog.create({
-          data: {
-            storeId,
-            actorId: SYSTEM_ACTOR_ID,
-            actorEmail: SYSTEM_ACTOR_EMAIL,
-            action: "capture_on_canceled_pi",
-            entityType: "order",
-            entityId: orderId,
-            after: { actualStatus: err.actualStatus },
-          },
-        });
+      await finalizeCancelledOrder(storeId, orderId, "capture_on_canceled_pi", {
+        from: ["CAPTURING"],
+        after: { actualStatus: err.actualStatus },
       });
       return { ok: false, error: "Payment authorization expired or was voided — order cancelled; contact the customer" };
     }
@@ -922,40 +903,9 @@ export async function autoCancelOrder(
     }
   }
 
-  // Phase 3: finalize in transaction (verify still CANCELLING)
-  const finalize = await storeScopedTransaction(storeId, async (tx) => {
-    await lockStoreRow(tx, storeId);
-    const order = await tx.order.findUnique({ where: { id: orderId } });
-    if (!order || order.status !== "CANCELLING") {
-      return { ok: false as const, error: "Order status changed during cancellation" };
-    }
-
-    await tx.order.update({
-      where: { id: orderId },
-      data: {
-        status: "CANCELLED",
-        cancelledAt: new Date(),
-        capturedAmountCents: null,
-      },
-    });
-
-    // Stock restore deferred to #141 (order-triggered reservation as a matched pair)
-
-    await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action: "auto_cancel",
-        entityType: "order",
-        entityId: orderId,
-      },
-    });
-
-    return { ok: true as const };
-  });
-
-  if (!finalize.ok) return finalize;
+  // Phase 3: one cancellation write. Stock restore stays deferred to #141.
+  const finalize = await finalizeCancelledOrder(storeId, orderId, "auto_cancel", { from: ["CANCELLING"] });
+  if (!finalize.wrote) return { ok: false, error: "Order status changed during cancellation" };
 
   return { ok: true };
 }
@@ -1091,8 +1041,7 @@ async function finalizeCaptureFromSweep(
   fulfillment: string,
   capturedAmountCents: number,
 ): Promise<{ ok: true; action: string }> {
-  const newStatus: OrderStatus =
-    fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+  const newStatus: OrderStatus = fulfilledStatus(fulfillment);
 
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
@@ -1108,14 +1057,7 @@ async function finalizeCaptureFromSweep(
       },
     });
     await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action: "reconcile_capture",
-        entityType: "order",
-        entityId: orderId,
-      },
+      data: systemAuditData(storeId, orderId, "reconcile_capture"),
     });
   });
 
@@ -1127,29 +1069,9 @@ async function finalizeCancelFromSweep(
   orderId: string,
   action: "reconcile_cancel" | "capture_released" = "reconcile_cancel",
 ): Promise<{ ok: true; action: string }> {
-  await storeScopedTransaction(storeId, async (tx) => {
-    await lockStoreRow(tx, storeId);
-    const current = await tx.order.findUnique({ where: { id: orderId } });
-    if (!current || (current.status !== "CAPTURING" && current.status !== "CANCELLING")) return;
-
-    await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action,
-        entityType: "order",
-        entityId: orderId,
-        after: action === "capture_released" ? { alert: "store_and_platform" } : {},
-      },
-    });
-
-    await tx.order.update({
-      where: { id: orderId },
-      data: { status: "CANCELLED", cancelledAt: new Date(), capturedAmountCents: null },
-    });
+  await finalizeCancelledOrder(storeId, orderId, action, {
+    after: action === "capture_released" ? { alert: "store_and_platform" } : {},
   });
-
   return { ok: true, action: "finalized_cancel" };
 }
 

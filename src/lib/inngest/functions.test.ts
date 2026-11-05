@@ -8,6 +8,16 @@ import { fakeStripeProvider, reset as resetFakeStripe, setAuthorizedAmount } fro
 
 const hasDb = !!process.env.DATABASE_URL;
 
+const WEEKDAY_HOURS = {
+  mon: { open: "09:00", close: "20:00" },
+  tue: { open: "09:00", close: "20:00" },
+  wed: { open: "09:00", close: "20:00" },
+  thu: { open: "09:00", close: "20:00" },
+  fri: { open: "09:00", close: "20:00" },
+  sat: { open: "09:00", close: "20:00" },
+  sun: { open: "09:00", close: "20:00" },
+};
+
 function makeFakeStep() {
   const sleeps: Array<{ name: string; duration: string }> = [];
   const sleepNames: string[] = [];
@@ -58,7 +68,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       where: { slug: "inngest-fn-test" },
       update: {
         stripeAccountId: "acct_test_inngest",
-        hours: { mon: { open: "09:00", close: "20:00" }, tue: { open: "09:00", close: "20:00" }, wed: { open: "09:00", close: "20:00" }, thu: { open: "09:00", close: "20:00" }, fri: { open: "09:00", close: "20:00" }, sat: { open: "09:00", close: "20:00" }, sun: { open: "09:00", close: "20:00" } },
+        hours: WEEKDAY_HOURS,
         timezone: "America/New_York",
       },
       create: {
@@ -67,7 +77,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         themePreset: "palm-and-shea",
         prepTimeMinutes: 25,
         stripeAccountId: "acct_test_inngest",
-        hours: { mon: { open: "09:00", close: "20:00" }, tue: { open: "09:00", close: "20:00" }, wed: { open: "09:00", close: "20:00" }, thu: { open: "09:00", close: "20:00" }, fri: { open: "09:00", close: "20:00" }, sat: { open: "09:00", close: "20:00" }, sun: { open: "09:00", close: "20:00" } },
+        hours: WEEKDAY_HOURS,
         timezone: "America/New_York",
       },
     });

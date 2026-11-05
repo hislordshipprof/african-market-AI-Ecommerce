@@ -109,11 +109,14 @@ test.describe("Order inbox", () => {
     await expect(page.getByRole("button", { name: "Pick" }).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("picking every line marks the order ready and captures the seed total", async ({ page }) => {
+  test("picking every line marks the order ready and captures the seed total", async ({ page }, testInfo) => {
+    const number = 18680 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    await insertInboxOrder({ number, status: "PICKING", capturedAmountCents: null, seedHold: true });
+    try {
     await storeOwnerSignIn(page);
     await page.goto(ORDERS_URL);
 
-    const orderCard = page.locator("button", { hasText: "#1005" });
+    const orderCard = page.locator("button", { hasText: `#${number}` });
     await expect(orderCard).toBeVisible();
     await orderCard.click();
     await expect(page.locator("text=Pick list")).toBeVisible();
@@ -143,8 +146,11 @@ test.describe("Order inbox", () => {
     const handOffBtn = page.getByRole("button", { name: "Hand off" });
     await expect(handOffBtn).toBeVisible({ timeout: 10000 });
 
-    const seedTotal = await seedCaptureLabel(1005);
+    const seedTotal = await seedCaptureLabel(number);
     await expect(page.getByTestId("order-captured")).toHaveText(seedTotal);
+    } finally {
+      await deleteInboxOrder(number);
+    }
   });
 
   test("the Captured line appears only after the order is ready", async ({ page }) => {
@@ -176,6 +182,26 @@ test.describe("Order inbox", () => {
       await expect(page.getByText("The platform team is resolving this refund. Do not refund the customer yourself.")).toBeVisible();
       await expect(page.getByTestId("order-captured")).toHaveText("$18.00");
       await expect(page.getByText("refund them another way")).toHaveCount(0);
+    } finally {
+      await deleteInboxOrder(number);
+    }
+  });
+
+  test("a resolved cancellation stays in the inbox with the platform note", async ({ page }, testInfo) => {
+    const number = 18691 + testInfo.parallelIndex * 20 + testInfo.repeatEachIndex;
+    await insertInboxOrder({
+      number,
+      status: "CANCELLED",
+      capturedAmountCents: 2500,
+      notes: "Paid customer by Zelle 11/05",
+    });
+    try {
+      await storeOwnerSignIn(page);
+      await page.goto(ORDERS_URL);
+      await page.locator("button", { hasText: `#${number}` }).click();
+      await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+      await expect(page.getByText("Paid customer by Zelle 11/05")).toBeVisible();
+      await expect(page.getByText("The platform resolved this refund.")).toBeVisible();
     } finally {
       await deleteInboxOrder(number);
     }
