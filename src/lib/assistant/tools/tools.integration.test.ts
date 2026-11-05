@@ -157,6 +157,33 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     return storeScoped(storeA).cartLine.count({ where: { cartId: cartA } });
   }
 
+  async function substituteActionIds() {
+    const rows = await storeScoped(storeA).aiAction.findMany({
+      where: { conversationId: conversation, tool: "suggest_substitutes" },
+      select: { id: true },
+    });
+    return new Set(rows.map((row) => row.id));
+  }
+
+  async function expectOneNewSubstituteAction(
+    before: Set<string>,
+    listingId: string,
+    result: { ok: boolean },
+  ) {
+    const rows = await storeScoped(storeA).aiAction.findMany({
+      where: { conversationId: conversation, tool: "suggest_substitutes" },
+    });
+    const created = rows.filter((row) => !before.has(row.id));
+    expect(rows).toHaveLength(before.size + 1);
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({
+      ok: result.ok,
+      input: { listing_id: listingId },
+      output: result,
+    });
+    expect(await storeScoped(storeB).aiAction.findFirst({ where: { id: created[0]?.id } })).toBeNull();
+  }
+
   async function makeCategory(label: string) {
     const suffix = randomUUID().slice(0, 8);
     const category = await platformAdmin.category.create({
@@ -516,6 +543,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       select: { id: true, customName: true },
     });
 
+    const beforeActions = await substituteActionIds();
     const result = await suggestSubstitutes(ctx(), { listing_id: source.listingId });
     expect(result).toEqual({
       ok: true,
@@ -528,18 +556,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       ],
     });
 
-    const action = await storeScoped(storeA).aiAction.findFirst({
-      where: { conversationId: conversation, tool: "suggest_substitutes" },
-      orderBy: { createdAt: "desc" },
-    });
-    expect(action).toMatchObject({
-      ok: true,
-      input: { listing_id: source.listingId },
-      output: result,
-    });
-    expect(await storeScoped(storeB).aiAction.findFirst({
-      where: { id: action?.id },
-    })).toBeNull();
+    await expectOneNewSubstituteAction(beforeActions, source.listingId, result);
     const returnedIds = (result.ok ? result.items as Array<{ listingId: string }> : []).map((item) => item.listingId);
     for (const excluded of [source.listingId, dropped.listingId, quieter.listingId, inactive.listingId, foreign.listingId]) {
       expect(returnedIds).not.toContain(excluded);
@@ -547,8 +564,10 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   });
 
   it("suggest_substitutes returns nothing when the listing has no category or no active sibling", async () => {
+    const beforeBare = await substituteActionIds();
     const bare = await suggestSubstitutes(ctx(), { listing_id: listingA });
     expect(bare).toEqual({ ok: true, items: [], reason: "no_category" });
+    await expectOneNewSubstituteAction(beforeBare, listingA, bare);
 
     const categoryId = await makeCategory("alone");
     const only = await makeCatalogListing(storeA, { name: "Only Grain", price: 300, categoryId });
@@ -559,29 +578,23 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       categoryId,
       active: false,
     });
+    const beforeEmpty = await substituteActionIds();
     const empty = await suggestSubstitutes(ctx(), { listing_id: only.listingId });
     expect(empty).toEqual({ ok: true, items: [] });
+    await expectOneNewSubstituteAction(beforeEmpty, only.listingId, empty);
     expect(JSON.stringify(empty)).not.toContain(inactive.listingId);
   });
 
   it("suggest_substitutes reports another store's listing as not found and records the action", async () => {
     const foreign = await storeScoped(storeB).listing.findFirstOrThrow({ where: { storeId: storeB } });
+    const beforeActions = await substituteActionIds();
     const result = await suggestSubstitutes(ctx(), { listing_id: foreign.id });
     expect(result).toMatchObject({
       ok: false,
       code: "listing_not_found",
       message: "That product is not in this store.",
     });
-    const action = await storeScoped(storeA).aiAction.findFirst({
-      where: { conversationId: conversation, tool: "suggest_substitutes", ok: false },
-      orderBy: { createdAt: "desc" },
-    });
-    expect(action).toMatchObject({
-      ok: false,
-      input: { listing_id: foreign.id },
-      output: { ok: false, code: "listing_not_found" },
-    });
-    expect(await storeScoped(storeB).aiAction.findFirst({ where: { id: action?.id } })).toBeNull();
+    await expectOneNewSubstituteAction(beforeActions, foreign.id, result);
   });
 
   it("prices 199 cents times 3 as an exact line total", async () => {
