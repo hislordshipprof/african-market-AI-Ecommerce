@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -9,6 +9,17 @@ import { storeUrl } from "./urls";
 
 const origin = storeUrl("mama-ngozi");
 const shots = "C:/E-commerce-project/.builder/screenshots-246";
+/** Fake-model reply for "html please". The live region must announce this string, not an image. */
+const HTML_REPLY = 'See <img onerror="alert(1)"> and [a](http://evil.test).';
+const ROUTE_ERROR = "Sorry, something went wrong. Please try again.";
+
+function bubbles(root: Locator) {
+  return root.locator('[class*="bubble"]');
+}
+
+function liveRegion(root: Locator) {
+  return root.locator('[aria-live="polite"]');
+}
 
 async function scriptsHave(page: Page, needle: string): Promise<boolean> {
   return page.evaluate(async (wanted) => {
@@ -60,8 +71,9 @@ test("a shopper can add egusi, undo it, and keep the transcript across pages", a
   await page.getByRole("link", { name: /Mama Ngozi/ }).first().click();
   await page.getByRole("link", { name: /Tubers/ }).first().click();
   await page.getByTestId("assistant-launcher").click();
-  await expect(page.getByText("add two egusi")).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Shop with help" }).getByRole("button", { name: "Undone", exact: true })).toBeVisible();
+  const again = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(bubbles(again).filter({ hasText: "add two egusi" })).toBeVisible();
+  await expect(again.getByRole("button", { name: "Undone", exact: true })).toBeVisible();
 });
 
 test("markup and stray prices stay plain text, and a card number never leaves the browser", async ({ page }) => {
@@ -75,7 +87,8 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   await page.getByTestId("assistant-launcher").click();
   await send(page, "html please");
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
-  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "<img" })).toBeVisible({ timeout: 20_000 });
+  await expect(bubbles(dialog).filter({ hasText: HTML_REPLY })).toBeVisible({ timeout: 20_000 });
+  await expect(liveRegion(dialog)).toHaveText(HTML_REPLY, { timeout: 20_000 });
   await expect(dialog.locator("img")).toHaveCount(0);
   await send(page, "stray price");
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "That is (see card)." })).toBeVisible({ timeout: 20_000 });
@@ -123,8 +136,9 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await page.getByTestId("assistant-launcher").click();
   await page.getByTestId("assistant-composer").fill("show my basket");
   await page.getByTestId("assistant-composer").press("Enter");
-  await expect(page.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(/to reach the .+ minimum order/)).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(dialog.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="summary"]').getByText(/to reach the .+ minimum order/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
   await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
@@ -159,7 +173,7 @@ test("a fake mid-stream failure recovers when the shopper retries", async ({ pag
   await page.getByTestId("assistant-launcher").click();
   await send(page, "mid-stream");
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
-  await expect(dialog.getByText("Sorry, something went wrong. Please try again.")).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
   await dialog.getByRole("button", { name: "Retry" }).click();
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
 });
@@ -189,7 +203,7 @@ test("a stream cut after the tool starts shows an error and retry does not add a
   });
   await send(page, "add two egusi");
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
-  await expect(dialog.getByText("Sorry, something went wrong. Please try again.")).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
   const count = page.getByRole("banner").getByTestId("cart-count");
   await expect(count).toHaveText("2", { timeout: 10_000 });
   await page.unroute("**/api/assistant/chat");
@@ -349,7 +363,7 @@ test("long names, tokens, and the cart bar stay within a 375px screen", async ({
     await expectWithinScreen(page);
 
     await send(page, `${WIDE_LAYOUT_TOKEN} overload https://example.com/assistant/wide-layout`);
-    await expect(dialog.getByText("Sorry, something went wrong. Please try again.")).toBeVisible({ timeout: 20_000 });
+    await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
     await expect(dialog.getByRole("button", { name: "Retry" })).toBeVisible();
     await expectWithinScreen(page);
 
