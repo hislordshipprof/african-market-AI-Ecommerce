@@ -156,7 +156,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 
 ## 8. AI assistants
 
-Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant defaults to Haiku 5.5 and moves to Sonnet 5.5 only if Haiku fails the #146 eval; the model id is a config setting. Build-phase spend cap: $10 total ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)). All tools are server-side, tenant-scoped, and permission-checked; the model never sees other tenants' data.
+Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant defaults to Haiku 5.5 and moves to Sonnet 5.5 only if Haiku fails the #146 eval; the model id is a config setting. Build-phase spend cap: $10 total ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)). The cap is measured from a platform spend ledger, by UTC day, that retention never deletes. All tools are server-side, tenant-scoped, and permission-checked; the model never sees other tenants' data.
 
 ### 8.1 Shopper assistant
 **Tools**
@@ -335,7 +335,7 @@ Listing(id, tenant_id, master_product_id?, custom_name, price, stock_mode, qty, 
 ListingVariant(id, listing_id, label, price, weight_g, weight_placeholder, sku, barcode)
 StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|short|adjust], delta, actor, at)
 
-Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id)
+Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id, source[manual|ai])
 Order(id, tenant_id, number, customer_id, status, fulfillment[delivery|pickup], address, totals..., 
       payment_intent_id, captured_amount, tip, platform_fee, delivery_fee, notes)
 OrderLine(id, order_id, variant_id, qty_ordered, qty_picked, unit_price, swap_rule, status, substituted_variant_id)
@@ -344,7 +344,9 @@ Delivery(id, order_id, provider, external_id, status, quote_fee, actual_fee, tra
 DeliveryEvent(id, delivery_id, type, payload, at)
 Refund(id, order_id, amount, reason, lines, stripe_refund_id, initiated_by)
 Issue(id, order_id, type, photos, status, resolution)
-AiConversation(id, tenant_id, user_id, side[shopper|store], messages_ref) / AiAction(id, conversation_id, tool, input, proposed, confirmed_by, at)
+AiConversation(id, store_id, cart_id unique, customer_id?, model, tokens_in, tokens_out, cost_micros, messages, in_flight_until, created_at, last_message_at) — one shopper conversation per cart. Store copilot records stay in #142/#144.
+AiAction(id, store_id, conversation_id, tool, input, output, ok, created_at)
+AssistantSpendDay(day, cost_micros, cap_alerted_at) — platform ledger, no store id; retention never deletes it
 AuditLog(id, tenant_id, actor, action, entity, before, after, at)
 ```
 

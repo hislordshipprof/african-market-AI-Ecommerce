@@ -104,6 +104,8 @@ export function storeScoped(storeId: string) {
     customer: wrapDelegate(storeId, prisma.customer),
     order: wrapDelegate(storeId, prisma.order),
     orderLine: wrapDelegate(storeId, prisma.orderLine),
+    aiConversation: wrapDelegate(storeId, prisma.aiConversation),
+    aiAction: wrapDelegate(storeId, prisma.aiAction),
   };
 }
 
@@ -142,13 +144,43 @@ export const platformAdmin = {
   listingImport: wrapPlatformAdminDelegate(prisma.listingImport),
 };
 
+/** A transaction as app_user, with the test session time zone applied when one is set. */
+export async function appUserQuery<T>(
+  fn: (tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    const zone = sessionTimeZone.getStore();
+    if (zone) {
+      await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
+    }
+    return fn(tx);
+  });
+}
+
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "$queryRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
     await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-    return fn({ store: tx.store, auditLog: tx.auditLog, storeMembership: tx.storeMembership, storeInvite: tx.storeInvite, masterProduct: tx.masterProduct, category: tx.category, productSynonym: tx.productSynonym, $queryRaw: tx.$queryRaw.bind(tx) });
+    const zone = sessionTimeZone.getStore();
+    if (zone) {
+      await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
+    }
+    return fn({
+      store: tx.store,
+      auditLog: tx.auditLog,
+      storeMembership: tx.storeMembership,
+      storeInvite: tx.storeInvite,
+      masterProduct: tx.masterProduct,
+      category: tx.category,
+      productSynonym: tx.productSynonym,
+      aiConversation: tx.aiConversation,
+      aiAction: tx.aiAction,
+      $queryRaw: tx.$queryRaw.bind(tx),
+      $executeRaw: tx.$executeRaw.bind(tx),
+    });
   });
 }
 
@@ -159,7 +191,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -180,6 +212,8 @@ export async function storeScopedTransaction<T>(
       customer: tx.customer,
       order: tx.order,
       orderLine: tx.orderLine,
+      aiConversation: tx.aiConversation,
+      aiAction: tx.aiAction,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -389,8 +423,8 @@ export async function rateLimitUpsert(
   key: string,
   now: bigint,
   windowStart: bigint,
-): Promise<{ count: number }> {
-  const rows = await prisma.$queryRaw<Array<{ count: number }>>`
+): Promise<{ count: number; lastRequest: bigint }> {
+  const rows = await prisma.$queryRaw<Array<{ count: number; last_request: bigint }>>`
     INSERT INTO rate_limits (id, key, count, last_request)
     VALUES (gen_random_uuid()::text, ${key}, 1, ${now})
     ON CONFLICT (key) DO UPDATE SET
@@ -404,9 +438,9 @@ export async function rateLimitUpsert(
         THEN ${now}
         ELSE rate_limits.last_request
       END
-    RETURNING count
+    RETURNING count, last_request
   `;
-  return { count: Number(rows[0].count) };
+  return { count: Number(rows[0].count), lastRequest: BigInt(rows[0].last_request) };
 }
 
 /**
@@ -424,3 +458,161 @@ export function withStatementTimeout(client: TransactionalClient): QueryRawFn {
 
 // No RLS wrapper: health checks read only system catalogs, not store-scoped tables.
 export const healthQueryRaw = withStatementTimeout(prisma);
+
+/** Takes the conversation lease only when it is free. Same transaction as the upsert. */
+export async function claimConversationLease(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  cartId: string,
+  until: Date,
+  at: Date,
+): Promise<{ id: string; messages: unknown } | null> {
+  const rows = await tx.$queryRaw<Array<{ id: string; messages: unknown }>>`
+    UPDATE ai_conversations
+    SET in_flight_until = ${until}
+    WHERE store_id = ${storeId} AND cart_id = ${cartId}
+      AND (in_flight_until IS NULL OR in_flight_until < ${at})
+    RETURNING id, messages
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Deletes one batch of actions older than the naive timestamp.
+ * The batch key is written in the same transaction, so a replay returns the
+ * committed count instead of deleting the next batch.
+ */
+export function deleteExpiredAssistantActions(
+  cutoff: string,
+  batchSize: number,
+  batchKey: string,
+): Promise<number> {
+  return deleteExpiredBatch(batchKey, (tx) =>
+    tx.$queryRaw<Array<{ deleted: number }>>`
+      WITH doomed AS (
+        SELECT id FROM ai_actions
+        WHERE created_at < ${cutoff}
+        ORDER BY created_at, id
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      ),
+      removed AS (
+        DELETE FROM ai_actions
+        WHERE id IN (SELECT id FROM doomed)
+        RETURNING id
+      )
+      SELECT count(*)::int AS deleted FROM removed
+    `,
+  );
+}
+
+/**
+ * Deletes one batch of idle conversations older than the naive timestamp.
+ * A row locked by a live lease is skipped, and the lease is checked again
+ * on the row being deleted.
+ */
+export function deleteExpiredAssistantConversations(
+  cutoff: string,
+  now: string,
+  batchSize: number,
+  batchKey: string,
+): Promise<number> {
+  return deleteExpiredBatch(batchKey, (tx) =>
+    tx.$queryRaw<Array<{ deleted: number }>>`
+      WITH doomed AS (
+        SELECT id FROM ai_conversations
+        WHERE created_at < ${cutoff}
+          AND (in_flight_until IS NULL OR in_flight_until <= ${now})
+        ORDER BY created_at, id
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      ),
+      removed AS (
+        DELETE FROM ai_conversations
+        WHERE id IN (SELECT id FROM doomed)
+          AND (in_flight_until IS NULL OR in_flight_until <= ${now})
+        RETURNING id
+      )
+      SELECT count(*)::int AS deleted FROM removed
+    `,
+  );
+}
+
+async function deleteExpiredBatch(
+  batchKey: string,
+  remove: (tx: Pick<PrismaClient, "$queryRaw" | "$executeRaw">) => Promise<Array<{ deleted: number }>>,
+): Promise<number> {
+  return platformAdminTransaction(async (tx) => {
+    const existing = await tx.$queryRaw<Array<{ deleted: number }>>`
+      SELECT deleted FROM assistant_retention_batches WHERE id = ${batchKey}
+    `;
+    const prior = existing[0];
+    if (prior) return Number(prior.deleted);
+    const rows = await remove(tx);
+    const deleted = Number(rows[0]?.deleted ?? 0);
+    await tx.$executeRaw`
+      INSERT INTO assistant_retention_batches (id, deleted)
+      VALUES (${batchKey}, ${deleted})
+      ON CONFLICT (id) DO NOTHING
+    `;
+    return deleted;
+  });
+}
+
+let spendAckLosses = 0;
+
+/** Test hook: the next n committed ledger writes throw after commit. */
+export function loseNextSpendAcks(count: number): void {
+  spendAckLosses = count;
+}
+
+/** Adds the call cost to the UTC day. The day is a YYYY-MM-DD string, cast in SQL. */
+export async function insertAssistantSpend(day: string, amount: bigint, callId: string): Promise<void> {
+  await appUserQuery((tx) =>
+    tx.$executeRaw`
+      WITH claimed AS (
+        INSERT INTO assistant_spend_calls (id, day, cost_micros)
+        VALUES (${callId}, CAST(${day} AS date), ${amount})
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id
+      )
+      INSERT INTO assistant_spend_days (day, cost_micros, updated_at)
+      SELECT CAST(${day} AS date), ${amount}, now()
+      FROM claimed
+      ON CONFLICT (day) DO UPDATE
+      SET cost_micros = assistant_spend_days.cost_micros + EXCLUDED.cost_micros,
+          updated_at = now()
+    `,
+  );
+  if (spendAckLosses > 0) {
+    spendAckLosses -= 1;
+    throw new Error("ack lost");
+  }
+}
+
+export async function sumAssistantSpend(): Promise<bigint> {
+  const rows = await appUserQuery((tx) =>
+    tx.$queryRaw<Array<{ spent: bigint }>>`
+      SELECT COALESCE(SUM(cost_micros), 0) AS spent FROM assistant_spend_days
+    `,
+  );
+  return BigInt(rows[0]?.spent ?? 0);
+}
+
+/** Inserts the day if needed, then claims the once-per-day alert. */
+export async function claimAssistantCapDay(day: string): Promise<boolean> {
+  return appUserQuery(async (tx) => {
+    await tx.$executeRaw`
+      INSERT INTO assistant_spend_days (day, cost_micros, updated_at)
+      VALUES (CAST(${day} AS date), 0, now())
+      ON CONFLICT (day) DO NOTHING
+    `;
+    const rows = await tx.$queryRaw<Array<{ day: Date }>>`
+      UPDATE assistant_spend_days
+      SET cap_alerted_at = now(), updated_at = now()
+      WHERE day = CAST(${day} AS date) AND cap_alerted_at IS NULL
+      RETURNING day
+    `;
+    return rows.length > 0;
+  });
+}
