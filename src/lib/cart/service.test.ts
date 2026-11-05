@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { healthQueryRaw, storeScoped, storeScopedTransaction } from "../db";
 import { customerRlsErrorText, isCustomerRlsRejection } from "../customer-rls-error";
 import { catalogFor } from "../storefront/catalog";
+import type { SwapRuleValue } from "../storefront/cart-store";
 import { cartBootstrapWaiting, holdCartBootstrap, releaseCartBootstrap, resetCartBootstrap } from "./bootstrap";
 import {
   getOrCreateCart,
@@ -742,6 +743,20 @@ describe.skipIf(!hasDb)("Cart service", () => {
         updateLineQty(storeId, cartId, cart!.lines[0].id, 10),
       ).rejects.toThrow(CartError);
     });
+
+    it("allows 99 and refuses 100 when the listing has no max", async () => {
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, imageVariantId, 1);
+      const cart = await getCartWithLines(storeId, cartId);
+      const lineId = cart!.lines[0].id;
+      await updateLineQty(storeId, cartId, lineId, 99);
+      expect((await getCartWithLines(storeId, cartId))!.lines[0].qty).toBe(99);
+      await expect(updateLineQty(storeId, cartId, lineId, 100)).rejects.toMatchObject({
+        code: "MAX_PER_ORDER",
+      });
+      const row = await storeScoped(storeId).cartLine.findUniqueOrThrow({ where: { id: lineId } });
+      expect(row.qty).toBe(99);
+    });
   });
 
   describe("updateLineSwapRule", () => {
@@ -783,6 +798,74 @@ describe.skipIf(!hasDb)("Cart service", () => {
       await expect(
         updateLineSwapRule(storeId, cartId, cart!.lines[0].id, "named_substitute", null),
       ).rejects.toThrow(CartError);
+    });
+
+    it("rejects a swap rule the cart does not know", async () => {
+      await expect(
+        updateLineSwapRule(
+          storeId,
+          "unused-cart",
+          "unused-line",
+          "free_for_all" as SwapRuleValue,
+          null,
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_SWAP_RULE" });
+    });
+
+    it("rejects another store's substitute and leaves the line", async () => {
+      const foreignListing = await storeScoped(storeBId).listing.create({
+        data: {
+          storeId: storeBId,
+          customName: "Foreign Substitute",
+          price: 400,
+          stockMode: "unlimited",
+          frozen: false,
+          perishable: false,
+        },
+      });
+      const foreign = await storeScoped(storeBId).listingVariant.create({
+        data: { listingId: foreignListing.id, label: "Each", price: 400, weightG: 100 },
+      });
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, variantId, 1);
+      const cart = await getCartWithLines(storeId, cartId);
+      const lineId = cart!.lines[0].id;
+      await expect(
+        updateLineSwapRule(storeId, cartId, lineId, "named_substitute", foreign.id),
+      ).rejects.toMatchObject({ code: "INVALID_SUBSTITUTE" });
+      const row = await storeScoped(storeId).cartLine.findUniqueOrThrow({ where: { id: lineId } });
+      expect(row.swapRule).toBe("exact_only");
+      expect(row.substituteVariantId).toBeNull();
+    });
+
+    it("accepts an inactive substitute from this store", async () => {
+      const listing = await storeScoped(storeId).listing.create({
+        data: {
+          storeId,
+          customName: "Inactive Substitute",
+          price: 100,
+          stockMode: "unlimited",
+          frozen: false,
+          perishable: false,
+          active: false,
+        },
+      });
+      const inactive = await storeScoped(storeId).listingVariant.create({
+        data: { listingId: listing.id, label: "Each", price: 100, weightG: 100 },
+      });
+      const cartId = await getOrCreateCart(storeId, null, null);
+      await addLine(storeId, cartId, variantId, 1);
+      const cart = await getCartWithLines(storeId, cartId);
+      await updateLineSwapRule(
+        storeId,
+        cartId,
+        cart!.lines[0].id,
+        "named_substitute",
+        inactive.id,
+      );
+      const updated = await getCartWithLines(storeId, cartId);
+      expect(updated!.lines[0].swapRule).toBe("named_substitute");
+      expect(updated!.lines[0].substituteVariantId).toBe(inactive.id);
     });
 
     it("clears substituteVariantId when switching back to exact_only", async () => {
