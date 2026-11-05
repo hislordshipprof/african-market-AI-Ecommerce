@@ -1,4 +1,4 @@
-import { customerScoped, customerScopedTransaction, lockCustomerProfileRow } from "../db";
+import { customerScoped, customerScopedTransaction, lockCustomerAccount, lockCustomerProfileRow } from "../db";
 import {
   CARDS_UNAVAILABLE,
   CUSTOMER_AMBIGUOUS,
