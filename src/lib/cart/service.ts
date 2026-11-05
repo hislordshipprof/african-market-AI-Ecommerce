@@ -10,13 +10,16 @@ import {
 import { catalogFor } from "../storefront/catalog";
 import type { SwapRuleValue } from "../storefront/cart-store";
 import { shareFirstCart } from "./bootstrap";
+import {
+  decideAddQty,
+  decideLineQty,
+  decideNamedSubstitute,
+  isCartSwapRule,
+  substituteIdForSwap,
+  UNSET_MAX_PER_ORDER,
+} from "./limits";
 
 export type { SwapRuleValue };
-const VALID_SWAP_RULES: readonly SwapRuleValue[] = [
-  "exact_only",
-  "store_suggests",
-  "named_substitute",
-];
 
 export interface CartWithLines {
   id: string;
@@ -244,22 +247,19 @@ export async function applyAddLine(
     return { ok: false, code: "unavailable" };
   }
 
-  const maxPerOrder = variant.listing.maxPerOrder ?? 99;
   // The cart row is already locked. FOR UPDATE cannot lock a missing line, so
   // concurrent first-adds serialize on that cart lock.
   const existing = await lockCartLineByVariant(tx, cartId, variantId);
-  const totalQty = (existing?.qty ?? 0) + qty;
-  let nextQty = totalQty;
-  let added = qty;
-  let limitedTo: number | undefined;
-  if (totalQty > maxPerOrder) {
-    if (!options?.clampToMax) return { ok: false, code: "max_per_order", maxPerOrder };
-    const room = maxPerOrder - (existing?.qty ?? 0);
-    if (room <= 0) return { ok: false, code: "max_per_order", maxPerOrder };
-    nextQty = maxPerOrder;
-    added = room;
-    limitedTo = maxPerOrder;
+  const decision = decideAddQty({
+    existingQty: existing?.qty ?? 0,
+    addQty: qty,
+    maxPerOrder: variant.listing.maxPerOrder,
+    clampToMax: options?.clampToMax === true,
+  });
+  if (!decision.ok) {
+    return { ok: false, code: "max_per_order", maxPerOrder: decision.maxPerOrder };
   }
+  const { nextQty, added, limitedTo } = decision;
 
   const listing = {
     id: variant.listing.id,
@@ -337,7 +337,7 @@ export async function addLine(
     }
     if (!result.ok) {
       throw new CartError(
-        `Maximum ${result.maxPerOrder ?? 99} per order for this item`,
+        `Maximum ${result.maxPerOrder ?? UNSET_MAX_PER_ORDER} per order for this item`,
         "MAX_PER_ORDER",
       );
     }
@@ -366,10 +366,10 @@ export async function updateLineQty(
       throw new CartError("Cart line not found", "CART_NOT_FOUND");
     }
 
-    const maxPerOrder = line.variant.listing.maxPerOrder ?? 99;
-    if (qty > maxPerOrder) {
+    const decision = decideLineQty(qty, line.variant.listing.maxPerOrder);
+    if (!decision.ok) {
       throw new CartError(
-        `Maximum ${maxPerOrder} per order for this item`,
+        `Maximum ${decision.maxPerOrder} per order for this item`,
         "MAX_PER_ORDER",
       );
     }
@@ -389,7 +389,7 @@ export async function updateLineSwapRule(
   substituteVariantId: string | null,
   actorUserId: string | null = null,
 ): Promise<void> {
-  if (!VALID_SWAP_RULES.includes(swapRule)) {
+  if (!isCartSwapRule(swapRule)) {
     throw new CartError("Invalid swap rule", "INVALID_SWAP_RULE");
   }
 
@@ -410,7 +410,17 @@ export async function updateLineSwapRule(
         where: { id: substituteVariantId },
         include: { listing: true },
       });
-      if (!substitute || substitute.listing.storeId !== storeId) {
+      const decision = decideNamedSubstitute(
+        substitute
+          ? {
+              id: substitute.id,
+              storeId: substitute.listing.storeId,
+              active: substitute.listing.active,
+            }
+          : null,
+        storeId,
+      );
+      if (!decision.ok) {
         throw new CartError(
           "Substitute variant does not belong to this store",
           "INVALID_SUBSTITUTE",
@@ -418,7 +428,7 @@ export async function updateLineSwapRule(
       }
       await tx.cartLine.update({
         where: { id: lineId },
-        data: { swapRule, substituteVariantId },
+        data: { swapRule, substituteVariantId: decision.substituteVariantId },
       });
     });
   } else {
@@ -430,7 +440,7 @@ export async function updateLineSwapRule(
       }
       await tx.cartLine.update({
         where: { id: lineId },
-        data: { swapRule, substituteVariantId: null },
+        data: { swapRule, substituteVariantId: substituteIdForSwap(swapRule, null) },
       });
     });
   }

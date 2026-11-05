@@ -5,6 +5,7 @@ import { stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge
 import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
+import { effectiveMaxPerOrder } from "../cart/limits";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
@@ -41,7 +42,7 @@ async function readGetFlowCatalog(
       imageUrl: item.imageUrl,
       categoryId: listing.masterProduct?.categoryId ?? "uncategorized",
       frozen: listing.frozen,
-      maxPerOrder: listing.maxPerOrder ?? 99,
+      maxPerOrder: effectiveMaxPerOrder(listing.maxPerOrder),
       available:
         !(listing.stockMode === "counted" && (listing.qty ?? 0) <= 0) &&
         !(listing.stockMode === "status" && listing.status === "out_of_stock"),

@@ -495,6 +495,65 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(shown).toMatchObject({ ok: true, cards: [{ imageUrl: null }] });
   });
 
+  it("update_cart with quantity zero removes the line", async () => {
+    const item = await makeListing(storeA, { name: "Remove By Zero", price: 55 });
+    await addLine(storeA, cartA, item.variantId, 2, null);
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const result = await updateCart(ctx(), { line_id: line!.id, qty: 0 });
+    expect(result).toMatchObject({ ok: true, removed: true, qty: 0 });
+    expect(await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } })).toBeNull();
+  });
+
+  it("update_cart accepts a quantity equal to the listing max", async () => {
+    const item = await makeListing(storeA, { name: "Exact Cap", price: 70, maxPerOrder: 3 });
+    await addLine(storeA, cartA, item.variantId, 1, null);
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const result = await updateCart(ctx(), { line_id: line!.id, qty: 3 });
+    expect(result).toMatchObject({ ok: true, qty: 3 });
+    expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } }))?.qty).toBe(3);
+  });
+
+  it("update_cart allows a quantity when the listing sets no max", async () => {
+    const item = await makeListing(storeA, { name: "No Cap Pack", price: 80 });
+    await addLine(storeA, cartA, item.variantId, 1, null);
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const result = await updateCart(ctx(), { line_id: line!.id, qty: 2 });
+    expect(result).toMatchObject({ ok: true, qty: 2 });
+  });
+
+  it("set_swap_rule rejects an inactive substitute and leaves the line", async () => {
+    const item = await makeListing(storeA, { name: "Needs Swap", price: 40 });
+    const inactive = await makeListing(storeA, { name: "Dead Swap", price: 41, active: false });
+    await addLine(storeA, cartA, item.variantId, 1, null);
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const result = await setSwapRule(ctx(), {
+      line_id: line!.id,
+      rule: "named_substitute",
+      substitute_variant_id: inactive.variantId,
+    });
+    expect(result).toMatchObject({ ok: false, code: "unavailable" });
+    const still = await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } });
+    expect(still?.swapRule).toBe("exact_only");
+    expect(still?.substituteVariantId).toBeNull();
+  });
+
+  it("set_swap_rule clears the substitute when the rule is no longer named", async () => {
+    const item = await makeListing(storeA, { name: "Named Then Exact", price: 42 });
+    const backup = await makeListing(storeA, { name: "Named Backup", price: 43 });
+    await addLine(storeA, cartA, item.variantId, 1, null);
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const named = await setSwapRule(ctx(), {
+      line_id: line!.id,
+      rule: "named_substitute",
+      substitute_variant_id: backup.variantId,
+    });
+    expect(named).toMatchObject({ ok: true, swapRule: "named_substitute", substituteVariantId: backup.variantId });
+    const cleared = await setSwapRule(ctx(), { line_id: line!.id, rule: "exact_only" });
+    expect(cleared).toMatchObject({ ok: true, swapRule: "exact_only" });
+    const still = await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } });
+    expect(still?.substituteVariantId).toBeNull();
+  });
+
   it("update_cart above the max leaves the line unchanged", async () => {
     const item = await makeListing(storeA, { name: "Qty Cap", price: 70, maxPerOrder: 3 });
     await addLine(storeA, cartA, item.variantId, 2, null);

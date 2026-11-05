@@ -41,8 +41,9 @@ describe("sendEmail (test double)", () => {
 });
 
 describe("createSender", () => {
-  it("throws in production when RESEND_API_KEY is missing", () => {
-    expect(() => createSender({ NODE_ENV: "production" })).toThrow(
+  it("throws in production when RESEND_API_KEY is missing", async () => {
+    const sender = createSender({ NODE_ENV: "production" });
+    await expect(sender.send({ to: "a@example.com", subject: "Hi", html: "" })).rejects.toThrow(
       /RESEND_API_KEY/,
     );
   });

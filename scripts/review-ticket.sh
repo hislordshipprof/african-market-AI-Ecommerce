@@ -11,6 +11,7 @@ REPO="hislordshipprof/african-market-AI-Ecommerce"
 ROOT="$(git rev-parse --show-toplevel)"
 N="${1:?usage: scripts/review-ticket.sh <issue>}"
 . "$ROOT/scripts/agent-cli.sh"
+. "$ROOT/scripts/review-watch.sh"
 WT="$(dirname "$ROOT")/E-commerce-worktrees/ticket-$N"
 OUT="$ROOT/.builder/review-$N.md"
 LOG="$ROOT/.builder/logs/review-$N-$(date +%Y%m%d-%H%M%S).json"
@@ -50,7 +51,9 @@ $ROUND_RULE
 Reproduce what you can: run the affected unit, integration and sandbox tests yourself, and the affected e2e specs with E2E_PORT=$LANE_PORT; stop any server you start.
 Write your result to $TARGET. The FIRST line must be exactly 'VERDICT: PASS' (no blocking findings) or 'VERDICT: BLOCKING'. Then list every finding with: severity (blocking = security, data isolation, money or data loss, a failed acceptance criterion, or broken build/CI; otherwise non-blocking), file:line, the concrete failure scenario, and how to reproduce it."
 
-agent_run review "$LOG" "$PROMPT" || true
+# The watchdog stops a reviewer that wrote its verdict but never exited, or ran too long (review-watch.sh).
+watch_run "$TARGET" agent_run review "$LOG" "$PROMPT" || true
+stop_worktree_servers "$WT"
 if [ "$TARGET" != "$OUT" ] && [ -s "$TARGET" ]; then mv -f "$TARGET" "$OUT"; fi
 # Codex may return the review as its final message instead of writing the file (often as **VERDICT: X**).
 if [ ! -s "$OUT" ] && grep -qE '^\**VERDICT: ' "$LOG.last.md" 2>/dev/null; then
@@ -62,7 +65,8 @@ fi
 if [ "${RISK:-0}" = "1" ] && [ "$REVIEW_ENGINE" = codex ]; then
   # Codex already did the main review: the second RISK reviewer is another family on AGENT_ENGINE.
   OUT2="$ROOT/.builder/review-$N.second.md"; rm -f "$OUT2"
-  agent_run review2 "$LOG.second.json" "${PROMPT//$TARGET/$OUT2}" || true
+  watch_run "$OUT2" agent_run review2 "$LOG.second.json" "${PROMPT//$TARGET/$OUT2}" || true
+  stop_worktree_servers "$WT"
   [ -s "$OUT2" ] || printf 'VERDICT: BLOCKING\nThe second review wrote no result; see %s\n' "$LOG.second.json" > "$OUT2"
   head -1 "$OUT2" | grep -q '^VERDICT: PASS' || sed -i '1s/^VERDICT: PASS/VERDICT: BLOCKING/' "$OUT"
   printf '\n\n## Second review (independent, %s)\n\n' "${CURSOR_REVIEW_MODEL:-$AGENT_ENGINE}" >> "$OUT"

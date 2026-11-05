@@ -20,6 +20,13 @@ import {
 } from "@/lib/storefront/cart-store";
 import { stepCartQuantity } from "@/lib/storefront/cart-quantity";
 import {
+  clearKeyIdentity,
+  confirmedSnapshot,
+  mergeServerLines,
+  removalResultAction,
+  type ReconcileScope,
+} from "@/lib/storefront/cart-reconcile";
+import {
   getServerCart,
   addToCart,
   setLineQty as serverSetLineQty,
@@ -55,6 +62,20 @@ function serverLineToClient(sl: CartLineView): CartLine {
     swapRule: sl.swapRule,
     substituteVariantId: sl.substituteVariantId,
   };
+}
+
+function e2eRemovalOverride(): Promise<{ ok: false; error: string; code: string } | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  const host = window.location.hostname;
+  if (host !== "localhost" && !host.endsWith(".localhost")) return Promise.resolve(null);
+  const hooked = (window as Window & {
+    __e2eRemovalResult?:
+      | { ok: false; error: string; code: string }
+      | (() => Promise<{ ok: false; error: string; code: string }>);
+  }).__e2eRemovalResult;
+  if (!hooked) return Promise.resolve(null);
+  if (typeof hooked === "function") return hooked();
+  return Promise.resolve(hooked);
 }
 
 function isStaleAction(error: unknown) {
@@ -117,6 +138,8 @@ export function CartProvider({
   const confirmed = useRef(new Map<string, Confirmed>());
   const pendingDelete = useRef(new Map<string, string>());
   const paused = useRef(new Set<string>());
+  const fallback = useRef(new Map<string, CartLine>());
+  const failedKeys = useRef(new Set<string>());
   const addAccepted = useRef(new Set<string>());
   const dropAfterAdd = useRef(new Set<string>());
   const clock = useRef(0);
@@ -152,10 +175,82 @@ export function CartProvider({
       ),
     );
   }
+  function rememberFallback(key: string, line: CartLine | undefined) {
+    const prior = fallback.current.get(key);
+    const lineId = line?.serverLineId ?? confirmed.current.get(key)?.lineId ?? prior?.serverLineId;
+    if ((!line && !prior) || !lineId) return;
+    const base = line ?? prior;
+    if (!base) return;
+    fallback.current.set(
+      key,
+      confirmedSnapshot(
+        {
+          ...base,
+          serverLineId: lineId,
+          swapRule: line?.swapRule ?? prior?.swapRule,
+          substituteVariantId: line?.substituteVariantId ?? prior?.substituteVariantId,
+        },
+        confirmed.current.get(key)?.qty ?? prior?.quantity ?? 0,
+      ),
+    );
+  }
+  function restoreFallback(key: string) {
+    const snap = fallback.current.get(key);
+    pendingDelete.current.delete(key);
+    if (!snap || snap.quantity <= 0) return;
+    const without = linesRef.current.filter((line) => cartItemKey(line) !== key);
+    publish([...without, snap]);
+    confirmed.current.set(key, { lineId: snap.serverLineId, qty: snap.quantity });
+  }
+  function clearFailure(key: string) {
+    failedKeys.current.delete(key);
+    if (pendingDelete.current.has(key)) {
+      const snap = fallback.current.get(key);
+      const known = confirmed.current.get(key);
+      if (snap && known?.lineId && known.qty > 0) {
+        fallback.current.set(key, {
+          ...snap,
+          quantity: known.qty,
+          serverLineId: known.lineId,
+        });
+      }
+    } else {
+      fallback.current.delete(key);
+    }
+    if (failedKeys.current.size === 0 && mounted.current) setAttention(false);
+  }
+  function applyMerged(
+    merged: {
+      lines: CartLine[];
+      confirmed: Map<string, { lineId?: string; qty: number }>;
+      pendingDelete: Map<string, string>;
+      dropAfterAdd: Set<string>;
+    },
+    scope?: ReconcileScope,
+  ) {
+    confirmed.current = merged.confirmed;
+    pendingDelete.current = merged.pendingDelete;
+    dropAfterAdd.current = merged.dropAfterAdd;
+    if (scope && (revs.current.get(scope.key) ?? 0) <= scope.sinceRev) {
+      fallback.current.delete(scope.key);
+    } else if (!scope) {
+      for (const line of merged.lines) {
+        const key = cartItemKey(line);
+        if (!fallback.current.has(key) || pendingDelete.current.has(key)) continue;
+        const known = merged.confirmed.get(key);
+        fallback.current.set(
+          key,
+          confirmedSnapshot(line, known?.qty ?? line.quantity),
+        );
+      }
+    }
+    publish(merged.lines);
+  }
   function put(item: CartItem, qty: number) {
     const key = cartItemKey(item);
     const previous = linesRef.current.find((line) => cartItemKey(line) === key);
     if (qty <= 0) {
+      rememberFallback(key, previous);
       const id = previous?.serverLineId ?? confirmed.current.get(key)?.lineId;
       if (id) pendingDelete.current.set(key, id);
       else dropAfterAdd.current.add(key);
@@ -184,58 +279,42 @@ export function CartProvider({
     }
     publish(linesRef.current.map((entry) => (cartItemKey(entry) === key ? line : entry)));
   }
-  function merge(serverLines: CartLine[], stamp: Stamp, mode: PullMode) {
-    const next: CartLine[] = [];
-    const seen = new Set<string>();
+  function merge(serverLines: CartLine[], stamp: Stamp, mode: PullMode, scope?: ReconcileScope) {
+    const merged = mergeServerLines({
+      lines: linesRef.current,
+      confirmed: confirmed.current,
+      pendingDelete: pendingDelete.current,
+      dropAfterAdd: dropAfterAdd.current,
+      revs: revs.current,
+      identity: identity.current,
+      serverLines,
+      stamp,
+      mode,
+      scope,
+    });
+    applyMerged(merged, scope);
     for (const server of serverLines) {
       const key = cartItemKey(server);
-      seen.add(key);
-      const local = linesRef.current.find((line) => cartItemKey(line) === key);
-      const moved = (revs.current.get(key) ?? 0) > (stamp.revs.get(key) ?? 0);
-      const identityMoved = (identity.current.get(key) ?? 0) > (stamp.identity.get(key) ?? 0);
-      const acked = confirmed.current.get(key)?.qty ?? 0;
-      // A click that landed before this read was stamped is still outstanding.
-      // Decreases count: a higher server quantity must not erase them.
-      const outstanding = !!local && local.quantity !== acked;
-      confirmed.current.set(key, { lineId: server.serverLineId, qty: server.quantity });
-      if (!local) {
-        if (moved || pendingDelete.current.has(key) || dropAfterAdd.current.has(key)) {
-          if (server.serverLineId) pendingDelete.current.set(key, server.serverLineId);
-          dropAfterAdd.current.delete(key);
-          continue;
-        }
-        next.push(server);
-        continue;
-      }
-      const keepQty =
-        moved ||
-        (mode === "keep-intent" && (outstanding || local.quantity > server.quantity));
-      next.push({
-        ...server,
-        quantity: keepQty ? local.quantity : server.quantity,
-        swapRule: identityMoved ? local.swapRule : server.swapRule,
-        substituteVariantId: identityMoved ? local.substituteVariantId : server.substituteVariantId,
-      });
-    }
-    for (const local of linesRef.current) {
-      const key = cartItemKey(local);
-      if (seen.has(key)) continue;
-      const moved = (revs.current.get(key) ?? 0) > (stamp.revs.get(key) ?? 0);
+      if (!pendingDelete.current.has(key)) continue;
+      if (scope && scope.key === key && (revs.current.get(key) ?? 0) <= scope.sinceRev) continue;
       const known = confirmed.current.get(key);
-      const outstanding = local.quantity !== (known?.qty ?? 0);
-      const optimistic = !known?.lineId && local.quantity > 0;
-      // server-wins drops an optimistic line the server does not have.
-      // A click during this read is `moved` and is kept.
-      if (moved || (mode === "keep-intent" && (outstanding || optimistic))) {
-        next.push(local);
-        continue;
-      }
-      confirmed.current.set(key, { qty: 0 });
-      pendingDelete.current.delete(key);
+      if (!known?.lineId || known.qty <= 0) continue;
+      const prior = fallback.current.get(key);
+      fallback.current.set(
+        key,
+        confirmedSnapshot(
+          {
+            ...server,
+            serverLineId: known.lineId,
+            swapRule: server.swapRule ?? prior?.swapRule,
+            substituteVariantId: server.substituteVariantId ?? prior?.substituteVariantId,
+          },
+          known.qty,
+        ),
+      );
     }
-    publish(next);
   }
-  async function pullServer(mode: PullMode): Promise<"ok" | "empty" | "failed"> {
+  async function pullServer(mode: PullMode, scope?: ReconcileScope): Promise<"ok" | "empty" | "failed"> {
     if (!mounted.current || staleDeployment.current) return "failed";
     const stamp = takeStamp();
     try {
@@ -243,10 +322,24 @@ export function CartProvider({
       if (!mounted.current) return "failed";
       if (!cart) {
         setCartId(null);
+        if (scope) {
+          const cleared = clearKeyIdentity(
+            {
+              lines: linesRef.current,
+              confirmed: confirmed.current,
+              pendingDelete: pendingDelete.current,
+              dropAfterAdd: dropAfterAdd.current,
+            },
+            revs.current,
+            scope.key,
+            scope.sinceRev,
+          );
+          if (cleared) applyMerged(cleared, scope);
+        }
         return "empty";
       }
       setCartId(cart.id);
-      merge(cart.lines.map(serverLineToClient), stamp, mode);
+      merge(cart.lines.map(serverLineToClient), stamp, mode, scope);
       return "ok";
     } catch (error) {
       if (isStaleAction(error) && mounted.current) {
@@ -274,6 +367,7 @@ export function CartProvider({
   }
   async function onThrown(error: unknown, key: string, uncertainAdd: boolean, revAtSend?: number) {
     const failedRev = revAtSend ?? revs.current.get(key) ?? 0;
+    const removing = pendingDelete.current.has(key);
     paused.current.add(key);
     if (isStaleAction(error)) {
       staleDeployment.current = true;
@@ -288,14 +382,27 @@ export function CartProvider({
       setAttention(true);
     }
     if (uncertainAdd) addAccepted.current.add(key);
-    let pulled = await pullServer("keep-intent");
+    const scope = removing ? { key, sinceRev: failedRev } : undefined;
+    let pulled = await pullServer("keep-intent", scope);
     if (pulled === "failed" && !staleDeployment.current && readFailures.current < 1) {
       readFailures.current = 1;
-      pulled = await pullServer("keep-intent");
+      pulled = await pullServer("keep-intent", scope);
     }
-    if (!mounted.current) return;
+    if (!mounted.current || staleDeployment.current) return;
     const newer = (revs.current.get(key) ?? 0) > failedRev;
     if (newer) {
+      paused.current.delete(key);
+      return;
+    }
+    if (removing) {
+      if (pulled === "failed") {
+        readFailures.current = 2;
+        restoreFallback(key);
+        failedKeys.current.add(key);
+        return;
+      }
+      readFailures.current = 0;
+      failedKeys.current.add(key);
       paused.current.delete(key);
       return;
     }
@@ -321,6 +428,43 @@ export function CartProvider({
     }
     paused.current.delete(key);
   }
+  async function recoverRejected(key: string, sinceRev: number, kind: "remove" | "qty" | "add") {
+    const scope = { key, sinceRev };
+    let pulled = await pullServer("keep-intent", scope);
+    if (pulled === "failed" && !staleDeployment.current && readFailures.current < 1) {
+      readFailures.current = 1;
+      pulled = await pullServer("keep-intent", scope);
+    }
+    if (!mounted.current || staleDeployment.current) return;
+    if ((revs.current.get(key) ?? 0) > sinceRev) {
+      paused.current.delete(key);
+      return;
+    }
+    if (pulled === "failed") {
+      readFailures.current = 2;
+      paused.current.add(key);
+      failedKeys.current.add(key);
+      if (mounted.current) setAttention(true);
+      if (kind === "remove") restoreFallback(key);
+      else showQty(key, confirmed.current.get(key)?.qty ?? 0);
+      return;
+    }
+    readFailures.current = 0;
+    if (kind === "remove") {
+      failedKeys.current.add(key);
+      if (mounted.current) setAttention(true);
+      paused.current.delete(key);
+      return;
+    }
+    if (kind === "add" && !confirmed.current.get(key)?.lineId) {
+      showQty(key, 0);
+      confirmed.current.set(key, { qty: 0 });
+      addAccepted.current.delete(key);
+      paused.current.add(key);
+      return;
+    }
+    paused.current.delete(key);
+  }
   async function confirmPull(key: string) {
     const pulled = await pullServer("keep-intent");
     if (!mounted.current) return;
@@ -328,11 +472,12 @@ export function CartProvider({
       if (!staleDeployment.current) {
         toast.error(OFFLINE);
         setAttention(true);
+        failedKeys.current.add(key);
       }
       paused.current.add(key);
       return;
     }
-    setAttention(false);
+    if (failedKeys.current.size === 0) setAttention(false);
   }
   async function stepServer(key: string) {
     if (!mounted.current || staleDeployment.current || paused.current.has(key)) return;
@@ -340,13 +485,14 @@ export function CartProvider({
     if (doomed) {
       const revAtSend = revs.current.get(key) ?? 0;
       try {
-        const result = await removeCartLine(doomed);
-        if (!result.ok && result.code !== "CART_NOT_FOUND") {
+        const override = await e2eRemovalOverride();
+        const result = override ?? (await removeCartLine(doomed));
+        if (!result.ok && removalResultAction(result.code) === "rejected") {
           if (mounted.current) {
             toast.error(result.error);
             setAttention(true);
           }
-          await pullServer("server-wins");
+          await recoverRejected(key, revAtSend, "remove");
           return;
         }
       } catch (error) {
@@ -355,7 +501,7 @@ export function CartProvider({
       }
       pendingDelete.current.delete(key);
       confirmed.current.set(key, { qty: 0 });
-      if (mounted.current) setAttention(false);
+      clearFailure(key);
       return;
     }
     const target = intentQty(key);
@@ -403,21 +549,14 @@ export function CartProvider({
           toast.error(added.error);
           setAttention(true);
         }
-        const revAtReject = revs.current.get(key) ?? 0;
         if (added.code === "MAX_PER_ORDER") {
           showQty(key, 0);
           confirmed.current.set(key, { qty: 0 });
+          if ((revs.current.get(key) ?? 0) > revAtSend) paused.current.delete(key);
+          else paused.current.add(key);
         } else {
-          await pullServer("server-wins");
-          const newer = (revs.current.get(key) ?? 0) > revAtReject;
-          if (!newer && !confirmed.current.get(key)?.lineId) {
-            showQty(key, 0);
-            confirmed.current.set(key, { qty: 0 });
-            addAccepted.current.delete(key);
-          }
+          await recoverRejected(key, revAtSend, "add");
         }
-        if ((revs.current.get(key) ?? 0) > revAtReject) paused.current.delete(key);
-        else paused.current.add(key);
         return;
       }
       const pulled = await pullServer("keep-intent");
@@ -441,7 +580,7 @@ export function CartProvider({
         return;
       }
       addAccepted.current.delete(key);
-      if (mounted.current) setAttention(false);
+      clearFailure(key);
       return;
     }
     const lineId = known.lineId;
@@ -465,10 +604,11 @@ export function CartProvider({
           if (intentQty(key) > known.qty) showQty(key, known.qty);
           return;
         }
-        await pullServer("server-wins");
+        await recoverRejected(key, revAtSend, "qty");
         return;
       }
       confirmed.current.set(key, { lineId, qty: known.qty + 1 });
+      clearFailure(key);
       return;
     }
     let result: { ok: true } | { ok: false; error: string; code: string };
@@ -484,10 +624,11 @@ export function CartProvider({
         toast.error(result.error);
         setAttention(true);
       }
-      await pullServer("server-wins");
+      await recoverRejected(key, revAtSend, "qty");
       return;
     }
     confirmed.current.set(key, { lineId, qty: liveTarget });
+    clearFailure(key);
   }
   async function drain() {
     for (let i = 0; i < 200; i += 1) {
@@ -615,6 +756,7 @@ export function CartProvider({
       if (rejectStale()) return;
       noteGesture(key);
       bump(key, true);
+      rememberFallback(key, current);
       const id = current?.serverLineId ?? confirmed.current.get(key)?.lineId;
       if (id) pendingDelete.current.set(key, id);
       else dropAfterAdd.current.add(key);
