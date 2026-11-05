@@ -108,6 +108,19 @@ describe.skipIf(!hasDb)("assistant addition undo", () => {
     expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line.id } }))?.qty).toBe(3);
   });
 
+  it("two overlapping undos consume one addition once", async () => {
+    const cart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
+    await addLine(storeA, cart, variant, 5, null);
+    const line = (await getCartWithLines(storeA, cart))!.lines[0]!;
+    const [first, second] = await Promise.all([
+      undoAssistantAddition(storeA, cart, line.id, 2, "overlap-once", null),
+      undoAssistantAddition(storeA, cart, line.id, 2, "overlap-once", null),
+    ]);
+    const statuses = [first.status, second.status].toSorted();
+    expect(statuses).toEqual(["already_consumed", "confirmed"]);
+    expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line.id } }))?.qty).toBe(3);
+  });
+
   it("Undo is bound to the original line and cannot touch another cart in the same store", async () => {
     await addLine(storeA, cartOther, variant, 4, null);
     const other = (await getCartWithLines(storeA, cartOther))!.lines[0]!;

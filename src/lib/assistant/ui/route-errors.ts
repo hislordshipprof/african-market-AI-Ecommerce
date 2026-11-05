@@ -155,8 +155,17 @@ function guardFinishedStream(response: Response): Response {
           return;
         }
         pending += new TextDecoder().decode(value);
-        if (/\[[ \t]*DONE[ \t]*\]/.test(pending) || /"type":"finish"(?!-)/.test(pending)) sawFinish = true;
-        if (pending.length > 64) pending = pending.slice(-64);
+        let boundary = pending.indexOf("\n\n");
+        while (boundary >= 0) {
+          const frame = pending.slice(0, boundary);
+          pending = pending.slice(boundary + 2);
+          if (frameMarksFinish(frame)) sawFinish = true;
+          boundary = pending.indexOf("\n\n");
+        }
+        if (pending.length > 1_000_000) {
+          controller.error(new AssistantRouteError({ status: response.status, parsed: false }));
+          return;
+        }
         controller.enqueue(value);
       } catch (error) {
         if (isAbort(error)) controller.error(error);
@@ -165,6 +174,19 @@ function guardFinishedStream(response: Response): Response {
     },
   });
   return new Response(stream, { status: response.status, headers: response.headers });
+}
+
+function frameMarksFinish(frame: string): boolean {
+  const line = frame.split("\n").find((item) => item.startsWith("data:"));
+  if (!line) return false;
+  const data = line.slice("data:".length).trim();
+  if (data === "[DONE]") return true;
+  try {
+    const json = JSON.parse(data) as { type?: unknown };
+    return json?.type === "finish";
+  } catch {
+    return false;
+  }
 }
 
 function isAbort(error: unknown): boolean {

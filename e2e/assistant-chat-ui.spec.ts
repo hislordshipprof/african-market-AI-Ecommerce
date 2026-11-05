@@ -74,9 +74,9 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   await expect(dialog.getByText(/<img/)).toBeVisible({ timeout: 20_000 });
   await expect(dialog.locator("img")).toHaveCount(0);
   await send(page, "stray price");
-  await expect(dialog.getByText("That is (see card).").filter({ visible: true })).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "That is (see card)." })).toBeVisible({ timeout: 20_000 });
   await send(page, "4242424242424242");
-  await expect(dialog.getByText("Here is what I found.")).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
   expect(posted).not.toContain("4242");
 });
 
@@ -98,7 +98,10 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await composer.press("Enter");
   const chip = page.getByLabel("Choice chips").getByRole("button").first();
   await expect(chip).toBeVisible({ timeout: 20_000 });
-  await chip.focus();
+  for (let step = 0; step < 8; step += 1) {
+    if (await chip.evaluate((element) => element === document.activeElement)) break;
+    await page.keyboard.press("Shift+Tab");
+  }
   await expect(chip).toBeFocused();
   const label = (await chip.innerText()).trim();
   const choicePosts: string[] = [];
@@ -107,7 +110,7 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
       choicePosts.push(request.postData() ?? "");
     }
   });
-  await chip.click();
+  await page.keyboard.press("Enter");
   await expect.poll(() => choicePosts.length).toBe(1);
   expect(choicePosts[0]).toContain(label);
   await page.keyboard.press("Escape");
@@ -122,6 +125,16 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
   await page.getByRole("link", { name: "Looks good" }).click();
   await expect(page).toHaveURL(/\/cart$/);
+});
+
+test("a fake mid-stream failure recovers when the shopper retries", async ({ page }) => {
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await send(page, "mid-stream");
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(dialog.getByText("Sorry, something went wrong. Please try again.")).toBeVisible({ timeout: 20_000 });
+  await dialog.getByRole("button", { name: "Retry" }).click();
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
 });
 
 test("a stream cut after the tool starts shows an error and retry does not add again", async ({ page }) => {
@@ -184,7 +197,7 @@ test("the open sheet is readable at phone and desktop in light and dark", async 
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "show me pictures of egusi");
-  await expect(page.getByText("Here is what I found.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
   const catalog = await page.evaluate(async () => {
     const response = await fetch("/api/storefront/search?q=egusi");
     return response.json() as Promise<{ results: { name: string; price: number }[] }>;

@@ -17,6 +17,11 @@ export function refreshStoreCart(storeId: string): Promise<void> {
   return current.get(storeId)?.() ?? Promise.resolve();
 }
 
+/** Only a finished reply drops the late reads. An error, abort, or disconnect may still commit. */
+export function shouldSettleTurn(flags: { isAbort: boolean; isDisconnect: boolean; isError: boolean }): boolean {
+  return !flags.isAbort && !flags.isDisconnect && !flags.isError;
+}
+
 /** A turn ended cleanly. Drop any late reads still queued for it. */
 export function settleStoreCart(storeId: string): Promise<void> {
   for (const timer of pending.get(storeId) ?? []) clearTimeout(timer);

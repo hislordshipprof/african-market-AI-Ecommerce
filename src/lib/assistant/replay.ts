@@ -28,6 +28,16 @@ export function assistantMessageFromActions(actions: ActionRow[]): UIMessage {
   };
 }
 
+/** Replace this turn's assistant span. A later user message stays put. */
+export function replaceRecoveredTurn(messages: UIMessage[], clientId: string, synthetic: UIMessage): UIMessage[] | null {
+  const index = messages.findIndex((message) => message.role === "user" && message.id === clientId);
+  if (index < 0) return null;
+  const rest = messages.slice(index + 1);
+  const nextUser = rest.findIndex((message) => message.role === "user");
+  const after = nextUser === -1 ? [] : rest.slice(nextUser);
+  return [...messages.slice(0, index + 1), synthetic, ...after];
+}
+
 export function replyStatus(message: UIMessage): "complete" | "failed" | null {
   const meta = message.metadata;
   if (!meta || typeof meta !== "object") return null;

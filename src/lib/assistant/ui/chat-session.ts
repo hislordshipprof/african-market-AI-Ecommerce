@@ -3,7 +3,7 @@
 import { Chat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { createAssistantFetch } from "./route-errors";
-import { reconcileStoreCart, settleStoreCart } from "./cart-bridge";
+import { reconcileStoreCart, settleStoreCart, shouldSettleTurn } from "./cart-bridge";
 import { retainAction } from "./session-retain";
 
 type Session = {
@@ -34,7 +34,8 @@ function createChat(storeId: string): Chat<UIMessage> {
     onError: () => {
       reconcileStoreCart(storeId);
     },
-    onFinish: () => {
+    onFinish: (event) => {
+      if (!shouldSettleTurn(event)) return;
       void settleStoreCart(storeId);
     },
   });

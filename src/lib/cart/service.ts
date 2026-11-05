@@ -81,14 +81,24 @@ async function claimGuestCart(storeId: string, browserId: string): Promise<strin
     data: { storeId, userId: null, customerId: null, source: "manual" },
   });
   try {
-    await scoped.guestBrowserCart.create({
-      data: { storeId, browserId, cartId: cart.id },
-    });
+    if (claim) {
+      await scoped.guestBrowserCart.update({
+        where: { storeId_browserId: { storeId, browserId } },
+        data: { cartId: cart.id },
+      });
+    } else {
+      await scoped.guestBrowserCart.create({
+        data: { storeId, browserId, cartId: cart.id },
+      });
+    }
   } catch {
     const winner = await scoped.guestBrowserCart.findUnique({
       where: { storeId_browserId: { storeId, browserId } },
     });
-    if (winner) return winner.cartId;
+    if (winner) {
+      const won = await scoped.cart.findUnique({ where: { id: winner.cartId } });
+      if (won && won.userId === null) return won.id;
+    }
   }
   return cart.id;
 }
@@ -133,6 +143,7 @@ export async function getOrCreateCart(
         where: { id: existing.id },
         data: { userId, customerId },
       });
+      await tx.guestBrowserCart.deleteMany({ where: { storeId, cartId } });
       return true;
     });
     if (claimed) return cartId;

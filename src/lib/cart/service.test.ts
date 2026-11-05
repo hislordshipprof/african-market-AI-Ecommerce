@@ -184,6 +184,22 @@ describe.skipIf(!hasDb)("Cart service", () => {
   });
 
   describe("getOrCreateCart", () => {
+    it("does not hand an account cart back to the browser after sign-out", async () => {
+      const browserId = "browser-signout-1111";
+      const guest = await getOrCreateCart(storeId, null, null, browserId);
+      await addLine(storeId, guest, variantId, 2, null);
+      const claimed = await getOrCreateCart(storeId, guest, buyerId, browserId);
+      expect(claimed).toBe(guest);
+      const signedOut = await getOrCreateCart(storeId, claimed, null, browserId);
+      expect(signedOut).not.toBe(claimed);
+      const visible = await getCartWithLines(storeId, signedOut);
+      expect(visible?.lines ?? []).toHaveLength(0);
+      const kept = await getCartWithLines(storeId, claimed);
+      expect(kept?.lines[0]?.qty).toBe(2);
+      const owner = await storeScoped(storeId).cart.findUnique({ where: { id: signedOut } });
+      expect(owner?.userId).toBeNull();
+    });
+
     it("gives unrelated guests different carts and keeps one browser's cart before the cookie arrives", async () => {
       const [first, second] = await Promise.all([
         getOrCreateCart(storeId, null, null, "browser-aaa-111111"),

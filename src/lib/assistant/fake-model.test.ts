@@ -55,6 +55,18 @@ describe("assistant e2e fake", () => {
     expect(scriptStep(egusi)).toMatchObject({ kind: "tool", name: "search_catalog" });
   });
 
+  it("retries a scripted mid-stream failure once the failed attempt is in the history", () => {
+    expect(scriptStep([user("mid-stream")])).toMatchObject({ kind: "error" });
+    expect(scriptStep([
+      user("mid-stream"),
+      { role: "assistant", content: [{ type: "text", text: "" }] },
+    ])).toMatchObject({ kind: "text", text: "Recovered after the interruption." });
+    expect(scriptStep([
+      { role: "assistant", content: [{ type: "text", text: "earlier" }] },
+      user("mid-stream"),
+    ])).toMatchObject({ kind: "error" });
+  });
+
   it("script follows only current-turn results and emits unique valid tool-call histories", async () => {
     const first = await scriptedAssistantFetch(base.url, {
       method: "POST",

@@ -140,6 +140,15 @@ describe("assistant route errors", () => {
     await expect(response.text()).resolves.toContain("[DONE]");
   });
 
+  it("a reply that contains the completion marker is not a finished stream", async () => {
+    const fetch = createAssistantFetch(async () => new Response(
+      'data: {"type":"text-delta","id":"t","delta":"[DONE]"}\n\ndata: {"type":"finish-step"}\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    ));
+    const response = await fetch("/api/assistant/chat", { method: "POST" });
+    await expect(response.text()).rejects.toBeInstanceOf(AssistantRouteError);
+  });
+
   it("a chat stream that ends before finish is an error the sheet can retry", async () => {
     const fetch = createAssistantFetch(async () => new Response(
       'data: {"type":"start"}\n\n',

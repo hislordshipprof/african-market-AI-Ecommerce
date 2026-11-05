@@ -14,7 +14,7 @@ import { Prisma } from "@prisma/client";
 import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
 import { readBrowserId } from "../cart/browser";
 import { CartError, getOrCreateCart } from "../cart/service";
-import { claimConversationLease, rateLimitUpsert, storeScoped, storeScopedTransaction } from "../db";
+import { claimConversationLease, lockConversationRow, rateLimitUpsert, storeScoped, storeScopedTransaction } from "../db";
 import { findStore } from "../get-store";
 import { auth } from "../auth";
 import { scrubCardNumbers } from "./card-scrub";
@@ -24,7 +24,7 @@ import {
   ASSISTANT_DISABLED_STATUS,
   assistantChatEnabled,
 } from "./contract";
-import { assistantMessageFromActions, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
+import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { clientIp } from "./client-ip";
 import { callCostMicros, type TokenUsage } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
@@ -147,7 +147,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       turnMessageId: parsed.id,
     });
     const history = (await usableHistory(withUser, tools)).slice(-30);
-    const modelMessages = await convertToModelMessages(history);
+    const modelMessages = await convertToModelMessages(retryVisible(history, parsed.id, alreadyThere));
 
     const result = streamText({
       model,
@@ -316,6 +316,24 @@ function normalizeUsage(usage: unknown): TokenUsage {
   };
 }
 
+function retryVisible(messages: UIMessage[], clientId: string, alreadyThere: boolean): UIMessage[] {
+  if (!alreadyThere) return messages;
+  const index = messages.findIndex((message) => message.role === "user" && message.id === clientId);
+  if (index < 0) return messages;
+  const rest = messages.slice(index + 1);
+  const nextUser = rest.findIndex((message) => message.role === "user");
+  const span = nextUser === -1 ? rest : rest.slice(0, nextUser);
+  const visible = span.some((message) => message.role === "assistant" && message.parts.some((part) => part.type === "text" && part.text.trim() !== ""));
+  if (visible) return messages;
+  const marker: UIMessage = {
+    id: `${clientId}-failed`,
+    role: "assistant",
+    metadata: { status: "failed" },
+    parts: [{ type: "text", text: "partial" }],
+  };
+  return [...messages.slice(0, index + 1), marker, ...rest];
+}
+
 async function usableHistory(messages: UIMessage[], tools: ReturnType<typeof assistantTools>): Promise<UIMessage[]> {
   const first = await safeValidateUIMessages({ messages, tools });
   if (first.success) return first.data;
@@ -440,28 +458,36 @@ async function replayCompletedTurn(
   const span = nextUser === -1 ? rest : rest.slice(0, nextUser);
   const assistant = span.find((message) => message.role === "assistant");
   if (assistant && replyStatus(assistant) === "complete") return replayAssistantMessage(assistant, headers);
-  if (existing.inFlightUntil && existing.inFlightUntil.getTime() > at.getTime()) return null;
-  const actions = await storeScoped(storeId).aiAction.findMany({
-    where: { conversationId: existing.id },
-    orderBy: { createdAt: "asc" },
+  const recovered = await storeScopedTransaction(storeId, async (tx) => {
+    await lockConversationRow(tx, existing.id);
+    const fresh = await tx.aiConversation.findUnique({ where: { id: existing.id } });
+    if (!fresh) return null;
+    if (fresh.inFlightUntil && fresh.inFlightUntil.getTime() > at.getTime()) return null;
+    const actions = await tx.aiAction.findMany({
+      where: { conversationId: fresh.id },
+      orderBy: { createdAt: "asc" },
+    });
+    const mine = actions.filter((action) => {
+      const input = action.input;
+      return !!input && typeof input === "object" && !Array.isArray(input)
+        && (input as { _turn?: unknown })._turn === clientId;
+    });
+    if (mine.length === 0) return null;
+    const synthetic = assistantMessageFromActions(mine.map((action) => ({
+      id: action.id,
+      tool: action.tool,
+      input: action.input,
+      output: action.output,
+    })));
+    const next = replaceRecoveredTurn(asMessages(fresh.messages), clientId, synthetic);
+    if (!next) return null;
+    await tx.aiConversation.update({
+      where: { id: fresh.id },
+      data: { messages: next as unknown as Prisma.InputJsonValue, inFlightUntil: null },
+    });
+    return synthetic;
   });
-  const mine = actions.filter((action) => {
-    const input = action.input;
-    return !!input && typeof input === "object" && !Array.isArray(input)
-      && (input as { _turn?: unknown })._turn === clientId;
-  });
-  if (mine.length === 0) return null;
-  const synthetic = assistantMessageFromActions(mine.map((action) => ({
-    id: action.id,
-    tool: action.tool,
-    input: action.input,
-    output: action.output,
-  })));
-  await storeScoped(storeId).aiConversation.update({
-    where: { id: existing.id },
-    data: { messages: [...prior, synthetic] as unknown as Prisma.InputJsonValue, inFlightUntil: null },
-  });
-  return replayAssistantMessage(synthetic, headers);
+  return recovered ? replayAssistantMessage(recovered, headers) : null;
 }
 
 async function readUserMessage(request: Request): Promise<{ ok: true; text: string; id: string } | { ok: false; message: string }> {

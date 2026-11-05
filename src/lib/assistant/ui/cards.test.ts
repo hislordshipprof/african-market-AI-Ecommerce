@@ -4,6 +4,17 @@ import { cardsFromParts } from "./cards";
 const text = { type: "text", text: "The palm oil is $1.00 and <img onerror=x> [buy](http://evil)" };
 
 describe("assistant cards", () => {
+  it("turns an unfinished tool into an error when the turn failed", () => {
+    expect(cardsFromParts([
+      { type: "tool-add_to_cart", toolCallId: "blocked-tool", state: "input-available", input: {} },
+    ], { turnFailed: true })).toEqual([
+      expect.objectContaining({ kind: "tool-error", key: "blocked-tool:error" }),
+    ]);
+    expect(cardsFromParts([
+      { type: "tool-add_to_cart", toolCallId: "done", state: "output-available", output: { ok: false, message: "Gone" } },
+    ], { turnFailed: true })[0]?.kind).not.toBe("skeleton");
+  });
+
   it("maps every tool part state to exactly one card kind", () => {
     const cards = cardsFromParts([
       text,

@@ -83,7 +83,7 @@ export function scriptStep(messages: unknown): ScriptStep {
   const turn = currentTurn(messages);
   const text = turn.text.toLowerCase();
   const last = turn.results.at(-1);
-  if (!last) return openingStep(text, turn.text);
+  if (!last) return openingStep(text, turn.text, messages);
   if (last.name === "search_catalog") {
     const items = itemsOf(last.output);
     if (text.includes("choices")) {
@@ -115,8 +115,26 @@ export function scriptStep(messages: unknown): ScriptStep {
   return { kind: "text", text: "Here is what I found." };
 }
 
-function openingStep(lower: string, raw: string): ScriptStep {
-  if (lower.includes("overload") || lower.includes("mid-stream")) return { kind: "error" };
+function retriedFailure(messages: unknown, needle: string): boolean {
+  const list = Array.isArray(messages) ? messages : [];
+  let lastUser = -1;
+  list.forEach((message, index) => {
+    if (!isRecord(message) || message.role !== "user") return;
+    const text = typeof message.content === "string"
+      ? message.content
+      : blocksOf(message.content).map(textOf).join("");
+    if (text.toLowerCase().includes(needle)) lastUser = index;
+  });
+  if (lastUser < 0) return false;
+  return list.slice(lastUser + 1).some((message) => isRecord(message) && message.role === "assistant");
+}
+
+function openingStep(lower: string, raw: string, messages: unknown): ScriptStep {
+  if (lower.includes("overload") || lower.includes("mid-stream")) {
+    const needle = lower.includes("mid-stream") ? "mid-stream" : "overload";
+    if (retriedFailure(messages, needle)) return { kind: "text", text: "Recovered after the interruption." };
+    return { kind: "error" };
+  }
   if (lower.includes("cut the stream")) return { kind: "cut" };
   if (lower.includes("hold please")) return { kind: "text", text: "Finished waiting.", delayMs: 2500 };
   if (lower.includes("$1.00") || lower.includes("stray price")) return { kind: "text", text: "That is $1.00." };

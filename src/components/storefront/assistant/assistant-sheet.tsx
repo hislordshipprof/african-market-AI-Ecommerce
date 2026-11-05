@@ -7,6 +7,7 @@ import type { UIMessage } from "ai";
 import { useReducedMotion } from "motion/react";
 import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
+import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
 import { retainSession } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
@@ -37,13 +38,7 @@ function textOf(message: UIMessage): string {
 }
 
 function spoken(message: UIMessage): string {
-  const cards = cardsFromParts(message.parts);
-  const products = cards.filter((card) => card.kind === "product").length;
-  if (products > 0) return `${products} ${products === 1 ? "product" : "products"} shown`;
-  if (cards.some((card) => card.kind === "added")) return "Added to cart";
-  if (cards.some((card) => card.kind === "choices")) return "Choices shown";
-  if (cards.some((card) => card.kind === "summary")) return "Basket summary shown";
-  return "Reply ready";
+  return completionAnnouncement(message);
 }
 
 export function AssistantSheet({
@@ -73,6 +68,7 @@ export function AssistantSheet({
     () => retainSession({ storeId, accountId, cartId, loading }),
     [storeId, accountId, cartId, loading],
   );
+  void attention;
   return (
     <Sheet open={open} onClose={onClose} title="Shop with help">
       <Thread
@@ -80,7 +76,6 @@ export function AssistantSheet({
         chat={chat}
         storeId={storeId}
         loading={loading}
-        attention={attention}
         lines={lines}
         onCartFailure={onCartFailure}
         onTerminal={onTerminal}
@@ -94,7 +89,6 @@ function Thread({
   chat,
   storeId,
   loading,
-  attention,
   lines,
   onCartFailure,
   onTerminal,
@@ -103,7 +97,6 @@ function Thread({
   chat: ReturnType<typeof retainSession>;
   storeId: string;
   loading: boolean;
-  attention: boolean;
   lines: readonly CartLine[];
   onCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
   onTerminal: () => void;
@@ -194,15 +187,16 @@ function Thread({
     <div className={styles.thread} data-chunk={ASSISTANT_CHUNK}>
       <p className={styles.live} aria-live="polite" ref={liveRef} />
       <div className={styles.log}>
-        {messages.map((message) => (
+        {messages.map((message, index) => (
           <MessageView
             key={message.id}
             message={message}
             undoState={undoState}
             disabled={!!routeError?.terminal || busy}
+            turnFailed={status === "error" && message.role === "assistant" && index === messages.length - 1}
             onChoice={(text) => { void submit(text); }}
             onUndo={(card) => {
-              void undoCard(card, lines, attention, storeId, undoState, rememberUndoState, onCartFailure);
+              void undoCard(card, lines, storeId, undoState, rememberUndoState, onCartFailure);
             }}
             onChange={() => composer.current?.focus()}
           />
@@ -295,6 +289,7 @@ function MessageView({
   message,
   undoState,
   disabled,
+  turnFailed,
   onChoice,
   onUndo,
   onChange,
@@ -302,6 +297,7 @@ function MessageView({
   message: UIMessage;
   undoState: Record<string, "undone" | "already_removed">;
   disabled: boolean;
+  turnFailed: boolean;
   onChoice: (text: string) => void;
   onUndo: (card: Extract<AssistantCard, { kind: "added" }>) => void;
   onChange: () => void;
@@ -315,7 +311,7 @@ function MessageView({
         if (part.type === "text") {
           return part.text ? <p key={`${message.id}-text-${index}`} className={styles.bubble}>{part.text}</p> : null;
         }
-        const cards = cardsFromParts([part]);
+        const cards = cardsFromParts([part], { turnFailed });
         if (cards.length === 0) return null;
         return (
           <div key={`${message.id}-cards-${index}`} className={styles.cards}>
@@ -430,7 +426,6 @@ function CardView({
 async function undoCard(
   card: Extract<AssistantCard, { kind: "added" }>,
   lines: readonly CartLine[],
-  attention: boolean,
   storeId: string,
   undoState: Record<string, "undone" | "already_removed">,
   setUndoState: (value: (current: Record<string, "undone" | "already_removed">) => Record<string, "undone" | "already_removed">) => void,
@@ -438,8 +433,8 @@ async function undoCard(
 ) {
   const line = lines.find((item) => item.serverLineId === card.lineId);
   const plan = planUndo({
-    read: !line && attention ? "failed" : "confirmed",
-    line: line?.serverLineId ? { lineId: line.serverLineId, qty: line.quantity } : null,
+    read: "confirmed",
+    line: { lineId: card.lineId, qty: line?.quantity ?? card.qtyAdded },
     added: card.qtyAdded,
     additionId: card.additionId,
     consumed: undoState[card.additionId] === "undone",

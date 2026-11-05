@@ -92,7 +92,7 @@ type Part = {
 
 const CART_TOOLS = new Set(["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"]);
 
-export function cardsFromParts(parts: readonly Part[]): AssistantCard[] {
+export function cardsFromParts(parts: readonly Part[], options?: { turnFailed?: boolean }): AssistantCard[] {
   const cards: AssistantCard[] = [];
   parts.forEach((part, index) => {
     const type = typeof part.type === "string" ? part.type : "";
@@ -102,7 +102,9 @@ export function cardsFromParts(parts: readonly Part[]): AssistantCard[] {
     const callId = typeof part.toolCallId === "string" ? part.toolCallId : `part-${index}`;
     const state = typeof part.state === "string" ? part.state : "";
     if (state === "input-streaming" || state === "input-available") {
-      cards.push({ kind: "skeleton", key: `${callId}:skeleton` });
+      cards.push(options?.turnFailed
+        ? { kind: "tool-error", key: `${callId}:error`, message: CARD_TOOL_ERROR }
+        : { kind: "skeleton", key: `${callId}:skeleton` });
       return;
     }
     if (state === "output-error") {
