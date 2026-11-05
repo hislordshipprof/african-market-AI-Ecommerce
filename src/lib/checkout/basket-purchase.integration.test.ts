@@ -270,6 +270,24 @@ describe.skipIf(!hasDb)("one basket purchase", () => {
     expect((await getCheckoutPayments().retrievePaymentIntent(next.id)).status).toBe("requires_capture");
   });
 
+  it("refuses an unstamped intent after the basket was refilled", async () => {
+    const cart = await cartWith(1, null);
+    const hold = holdFor(1);
+    const firstPi = await authorize(cart.id, hold, { purchase_epoch: "0" });
+    const first = await place(cart.id, firstPi.id, null);
+    await storeScoped(storeId).cartLine.create({
+      data: { storeId, cartId: cart.id, variantId, qty: 1, swapRule: "exact_only" },
+    });
+    const omitted = await authorize(cart.id, hold);
+    const blank = await authorize(cart.id, hold, { purchase_epoch: "" });
+    for (const stale of [omitted, blank]) {
+      const again = await place(cart.id, stale.id, null);
+      expect(again.token).toBe(first.token);
+      expect((await getCheckoutPayments().retrievePaymentIntent(stale.id)).status).toBe("canceled");
+    }
+    expect(await storeScoped(storeId).order.count({ where: { sourceCartId: cart.id } })).toBe(1);
+  });
+
   it("places an intent that has no purchase epoch while the basket is intact", async () => {
     const cart = await cartWith(1, null);
     const pi = await authorize(cart.id, holdFor(1));

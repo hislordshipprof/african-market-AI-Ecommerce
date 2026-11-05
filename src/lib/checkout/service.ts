@@ -49,8 +49,8 @@ function epochStamp(metadata: Record<string, string> | null | undefined): {
   present: boolean;
   epoch: number | null;
 } {
-  const raw = metadata?.purchase_epoch;
-  if (raw == null || raw === "") return { present: false, epoch: null };
+  if (!metadata || metadata.purchase_epoch == null) return { present: false, epoch: null };
+  const raw = metadata.purchase_epoch;
   if (!/^\d+$/.test(raw)) return { present: true, epoch: null };
   return { present: true, epoch: Number(raw) };
 }
@@ -398,7 +398,10 @@ export async function recordAuthorizedOrder(
       if (input.actorUserId !== undefined && cart.userId !== input.actorUserId) {
         throw new Error("Cart not found");
       }
-      if (input.epochPresent && input.purchaseEpoch !== cart.purchaseEpoch) {
+      if (input.epochPresent === true && input.purchaseEpoch !== cart.purchaseEpoch) {
+        throw new BasketAlreadyOrderedError();
+      }
+      if (input.epochPresent === false && cart.purchaseEpoch > 0) {
         throw new BasketAlreadyOrderedError();
       }
 
