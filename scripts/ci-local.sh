@@ -9,6 +9,9 @@
 # builders do not run it. CI_DB=<name> runs on a fresh private database, and CI_RUNNER=<dir> runs in a separate
 # checkout of HEAD, so the reviewer working in the ticket worktree at the same time is never disturbed.
 set -euo pipefail
+# The whole script sits in one { } block, so bash parses all of it before running any of it. A run then cannot
+# break when this file changes underneath it (a git pull on main, or an edit) while a lane's suite is running.
+{
 REPO="hislordshipprof/african-market-AI-Ecommerce"
 SHA=$(git rev-parse HEAD)
 SRC="$(git rev-parse --show-toplevel)"
@@ -129,3 +132,5 @@ fi
 
 status success "typecheck, lint, test, build, e2e passed"
 echo "local-ci PASSED on $SHA"
+exit 0
+}
