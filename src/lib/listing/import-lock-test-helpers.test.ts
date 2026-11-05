@@ -61,17 +61,21 @@ function installCallThrough() {
 }
 
 function trackedCallback(label: string) {
-  const calls: string[] = [];
-  let settle: (line: string) => void = () => undefined;
-  const done = new Promise<string>((resolve) => {
+  const calls: unknown[] = [];
+  let settle: (err: unknown) => void = () => undefined;
+  const done = new Promise<unknown>((resolve) => {
     settle = resolve;
   });
   const fn = (err: unknown) => {
-    const line = `${label}:${err instanceof Error ? err.message : String(err)}`;
-    calls.push(line);
-    settle(line);
+    calls.push(err);
+    settle(err);
   };
-  return { fn, done, calls };
+  return { label, fn, done, calls };
+}
+
+function expectDriverError(err: unknown) {
+  expect(err).toBeInstanceOf(Error);
+  expect((err as Error).message).toBe(CLOSED_CLIENT);
 }
 
 function expectClosedClient(result: unknown): Promise<void> {
@@ -87,14 +91,13 @@ function expectClosedClient(result: unknown): Promise<void> {
   });
 }
 
-async function awaitCallback(done: Promise<string>, label: string): Promise<string> {
-  const line = await Promise.race([
+async function awaitCallback(done: Promise<unknown>, label: string): Promise<unknown> {
+  return Promise.race([
     done,
-    new Promise<string>((_, reject) => {
+    new Promise<unknown>((_, reject) => {
       setTimeout(() => reject(new Error(`callback ${label} was not called`)), 500);
     }),
   ]);
-  return line;
 }
 
 function listingConfig(values: string[], extra?: Record<string, unknown>) {
@@ -812,8 +815,7 @@ describe("import lock test helpers", () => {
         expect(spy.seen[0]?.self).toBe(client);
         expect(spy.seen[0]?.args).toEqual([config]);
         expect(spy.seen[0]?.args[0]).toBe(config);
-        const line = await awaitCallback(callback.done, "config");
-        expect(line).toBe(`config:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(callback.done, "config"));
         expect(Date.now() - started).toBeLessThan(150);
         expect(delay.fired()).toBe(false);
       } finally {
@@ -832,7 +834,7 @@ describe("import lock test helpers", () => {
       const promiseConfig = listingConfig(["token"]);
       try {
         expect(queryAs(client, callbackConfig)).toBeUndefined();
-        await awaitCallback(callback.done, "config");
+        expectDriverError(await awaitCallback(callback.done, "config"));
         expect(delay.fired()).toBe(false);
         const started = Date.now();
         const pending = queryAs(client, promiseConfig);
@@ -868,7 +870,7 @@ describe("import lock test helpers", () => {
         const result = queryAs(client, config);
         expect(result).toBeUndefined();
         expect(spy.seen[0]?.args[0]).toBe(config);
-        expect(await awaitCallback(callback.done, "inherited")).toBe(`inherited:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(callback.done, "inherited"));
         expect(delay.fired()).toBe(false);
       } finally {
         await delay.restore();
@@ -891,7 +893,7 @@ describe("import lock test helpers", () => {
         expect(spy.seen[0]?.args[0]).toBe(config);
         expect(spy.seen[0]?.args[1]).toBe(callback.fn);
         expect(spy.seen[0]?.args[2]).toBeUndefined();
-        expect(await awaitCallback(callback.done, "second")).toBe(`second:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(callback.done, "second"));
         expect(delay.fired()).toBe(false);
       } finally {
         await delay.restore();
@@ -977,7 +979,7 @@ describe("import lock test helpers", () => {
         const positional = queryAs(client, LISTING_SQL, positionalValues, callback.fn);
         expect(positional).toBeUndefined();
         expect(spy.seen[0]?.args[2]).toBe(callback.fn);
-        expect(await awaitCallback(callback.done, "positional")).toBe(`positional:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(callback.done, "positional"));
         const returned = client.query(submittable);
         expect(returned).toBe(submittable);
         expect(delay.fired()).toBe(false);
@@ -1024,7 +1026,7 @@ describe("import lock test helpers", () => {
       const secondConfig = listingConfig(["token"]);
       try {
         expect(queryAs(client, callbackConfig)).toBeUndefined();
-        await awaitCallback(callback.done, "stacked");
+        expectDriverError(await awaitCallback(callback.done, "stacked"));
         expect(first.fired()).toBe(false);
         expect(second.fired()).toBe(false);
         const started = Date.now();
@@ -1073,7 +1075,7 @@ describe("import lock test helpers", () => {
         expect(spy.seen[0]?.self).toBe(client);
         expect(spy.seen[0]?.args[0]).toBe(callbackConfig);
         expect(spy.seen[0]!.at - started).toBeLessThan(40);
-        expect(await awaitCallback(callback.done, "interleaved")).toBe(`interleaved:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(callback.done, "interleaved"));
         expect(spy.seen.filter((row) => row.args[0] === promiseConfig)).toHaveLength(0);
         await rejection;
         expect(spy.seen.map((row) => row.args[0])).toEqual([callbackConfig, promiseConfig]);
@@ -1102,7 +1104,7 @@ describe("import lock test helpers", () => {
         expect(proto.query).not.toBe(spy.wrapped);
         const started = Date.now();
         expect(queryAs(client, listingConfig(["token"], { callback: callback.fn }))).toBeUndefined();
-        await awaitCallback(callback.done, "restore");
+        expectDriverError(await awaitCallback(callback.done, "restore"));
         expect(delay.fired()).toBe(false);
         await delay.restore();
         expect(Date.now() - started).toBeLessThan(150);
@@ -1211,8 +1213,8 @@ describe("import lock test helpers", () => {
         expect(Object.getPrototypeOf(bareConfig)).toBeNull();
         expect(queryAs(client, hiddenConfig)).toBeUndefined();
         expect(queryAs(client, bareConfig)).toBeUndefined();
-        expect(await awaitCallback(hidden.done, "hidden")).toBe(`hidden:${CLOSED_CLIENT}`);
-        expect(await awaitCallback(bare.done, "bare")).toBe(`bare:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(hidden.done, "hidden"));
+        expectDriverError(await awaitCallback(bare.done, "bare"));
         expect(spy.seen.map((row) => row.args[0])).toEqual([hiddenConfig, bareConfig]);
         expect(delay.fired()).toBe(false);
       } finally {
@@ -1232,7 +1234,7 @@ describe("import lock test helpers", () => {
         const loserB = trackedCallback("second");
         const config = listingConfig(["token"], { callback: loserA.fn });
         expect(queryAs(client, config, loserB.fn, winner.fn)).toBeUndefined();
-        expect(await awaitCallback(winner.done, "third")).toBe(`third:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(winner.done, "third"));
         await new Promise((resolve) => setTimeout(resolve, 20));
         expect(loserA.calls).toEqual([]);
         expect(loserB.calls).toEqual([]);
@@ -1260,7 +1262,7 @@ describe("import lock test helpers", () => {
             secondCallback.fn,
             third,
           )).toBeUndefined();
-          expect(await awaitCallback(secondCallback.done, "fallback-second")).toBe(`fallback-second:${CLOSED_CLIENT}`);
+          expectDriverError(await awaitCallback(secondCallback.done, "fallback-second"));
           await new Promise((resolve) => setTimeout(resolve, 15));
           expect(configCallback.calls).toEqual([]);
         }
@@ -1397,7 +1399,7 @@ describe("import lock test helpers", () => {
         expect(spy.seen).toHaveLength(1);
         expect(spy.seen[0]?.self).toBe(clientB);
         expect(spy.seen[0]?.args).toEqual([callbackConfig]);
-        expect(await awaitCallback(callback.done, "other")).toBe(`other:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(callback.done, "other"));
         expect(spy.seen.filter((row) => row.self === clientA)).toHaveLength(0);
         await rejection;
         const forwarded = spy.seen.find((row) => row.args[0] === promiseConfig);
@@ -1523,8 +1525,8 @@ describe("import lock test helpers", () => {
         expect(spy.seen[1]?.args[0]).toBe(LISTING_SQL);
         expect(spy.seen[1]?.args[1]).toBe(positionalValues);
         expect(spy.seen[1]?.args[2]).toBe(positional.fn);
-        expect(await awaitCallback(callback.done, "identity")).toBe(`identity:${CLOSED_CLIENT}`);
-        expect(await awaitCallback(positional.done, "positional-identity")).toBe(`positional-identity:${CLOSED_CLIENT}`);
+        expectDriverError(await awaitCallback(callback.done, "identity"));
+        expectDriverError(await awaitCallback(positional.done, "positional-identity"));
         expect(Object.getOwnPropertyDescriptors(config)).toEqual(before);
         expect(delay.fired()).toBe(false);
       } finally {
