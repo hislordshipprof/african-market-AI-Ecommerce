@@ -4,6 +4,7 @@ import { Chat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { createAssistantFetch } from "./route-errors";
 import { refreshStoreCart } from "./cart-bridge";
+import { retainAction } from "./session-retain";
 
 type Session = {
   key: string;
@@ -30,6 +31,9 @@ function createChat(storeId: string): Chat<UIMessage> {
       }),
     }),
     sendAutomaticallyWhen: () => false,
+    onError: () => {
+      void refreshStoreCart(storeId);
+    },
     onFinish: () => {
       void refreshStoreCart(storeId);
     },
@@ -45,23 +49,23 @@ export function retainSession(input: {
   storeId: string;
   accountId: string | null;
   cartId: string | null;
+  loading: boolean;
 }): Chat<UIMessage> {
   const existing = [...sessions.values()].find((session) => session.storeId === input.storeId);
-  if (existing) {
-    const sameCart = existing.cartId === input.cartId;
-    const firstCart = existing.cartId == null && input.cartId != null;
-    const claim = existing.accountId == null && input.accountId != null && (sameCart || firstCart);
-    if (sameCart || firstCart || claim) {
+  const action = retainAction(existing ?? null, input);
+  if (existing && (action === "keep" || action === "adopt")) {
+    if (action === "adopt") {
+      const claim = existing.accountId == null && input.accountId != null;
       const key = sessionKey(input.storeId, claim ? input.accountId : existing.accountId, input.cartId ?? existing.cartId);
-      if (existing.key !== key) {
-        sessions.delete(existing.key);
-        existing.key = key;
-        existing.accountId = claim ? input.accountId : existing.accountId;
-        existing.cartId = input.cartId ?? existing.cartId;
-        sessions.set(key, existing);
-      }
-      return existing.chat;
+      sessions.delete(existing.key);
+      existing.key = key;
+      existing.accountId = claim ? input.accountId : existing.accountId;
+      existing.cartId = input.cartId ?? existing.cartId;
+      sessions.set(key, existing);
     }
+    return existing.chat;
+  }
+  if (existing && action === "reset") {
     void existing.chat.stop?.();
     sessions.delete(existing.key);
   }

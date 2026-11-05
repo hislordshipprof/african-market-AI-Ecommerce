@@ -67,8 +67,8 @@ export function AssistantSheet({
   onTerminal: () => void;
 }) {
   const chat = useMemo(
-    () => retainSession({ storeId, accountId, cartId }),
-    [storeId, accountId, cartId],
+    () => retainSession({ storeId, accountId, cartId, loading }),
+    [storeId, accountId, cartId, loading],
   );
   return (
     <Sheet open={open} onClose={onClose} title="Shop with help">
@@ -137,7 +137,9 @@ function Thread({
   }, [messages, busy]);
 
   useEffect(() => {
-    if (open) composer.current?.focus();
+    if (!open) return;
+    const timer = window.setTimeout(() => composer.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   async function submit(text: string, id = messageId()) {
@@ -387,6 +389,7 @@ function CardView({
         ))}
       </ul>
       <p className={styles.price}>{card.subtotalLabel}</p>
+      {card.gapLabel ? <p className={styles.meta}>{card.gapLabel}</p> : null}
       <div className={styles.actions}>
         <Link className={styles.primary} href="/cart">Looks good</Link>
         <button type="button" className={styles.ghost} onClick={onChange}>Change something</button>

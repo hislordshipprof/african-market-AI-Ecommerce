@@ -32,6 +32,7 @@ test("the launcher stays out of the first load and the chat chunk arrives on ope
   expect(await scriptsHave(page, "assistant-chat-chunk-v1")).toBe(false);
   await page.getByTestId("assistant-launcher").click();
   await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
+  await expect(page.getByTestId("assistant-composer")).toBeFocused();
   await expect.poll(() => scriptsHave(page, "assistant-chat-chunk-v1")).toBe(true);
   expect(chat).toEqual([]);
 });
@@ -52,6 +53,7 @@ test("a shopper can add egusi, undo it, and keep the transcript across pages", a
   await page.getByRole("button", { name: "Close Shop with help" }).click();
   await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.getByRole("link", { name: /Mama Ngozi/ }).first().click();
+  await page.getByRole("link", { name: /Tubers/ }).first().click();
   await page.getByTestId("assistant-launcher").click();
   await expect(page.getByText("add two egusi")).toBeVisible();
 });
@@ -98,8 +100,43 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await page.getByTestId("assistant-composer").fill("show my basket");
   await page.getByTestId("assistant-composer").press("Enter");
   await expect(page.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/to reach the .+ minimum order/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
+});
+
+test("a stream cut after the tool starts shows an error and retry does not add again", async ({ page }) => {
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.route("**/api/assistant/chat", async (route) => {
+    if (route.request().headers()["x-e2e-full"] === "1") {
+      await route.continue();
+      return;
+    }
+    const request = route.request();
+    const full = await page.evaluate(async ({ url, body, headers }) => {
+      const response = await fetch(url, { method: "POST", headers, body, credentials: "include" });
+      return { status: response.status, type: response.headers.get("content-type"), text: await response.text() };
+    }, {
+      url: request.url(),
+      body: request.postData(),
+      headers: { ...request.headers(), "x-e2e-full": "1" },
+    });
+    await route.fulfill({
+      status: full.status,
+      contentType: full.type ?? "text/event-stream",
+      body: full.text.slice(0, 220),
+    });
+  });
+  await send(page, "add two egusi");
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(dialog.getByText("Sorry, something went wrong. Please try again.")).toBeVisible({ timeout: 20_000 });
+  const count = page.getByRole("banner").getByTestId("cart-count");
+  await expect(count).toHaveText("2", { timeout: 10_000 });
+  await page.unroute("**/api/assistant/chat");
+  await dialog.getByRole("button", { name: "Retry" }).click();
+  await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(count).toHaveText("2");
 });
 
 test("the open sheet is readable at phone and desktop in light and dark", async ({ page }) => {

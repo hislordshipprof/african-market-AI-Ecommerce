@@ -120,4 +120,13 @@ describe("assistant route errors", () => {
       message: { id: "m", role: "user", parts: [{ type: "text", text: "egusi" }] },
     });
   });
+
+  it("a chat stream that ends before finish is an error the sheet can retry", async () => {
+    const fetch = createAssistantFetch(async () => new Response(
+      'data: {"type":"start"}\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    ));
+    const response = await fetch("/api/assistant/chat", { method: "POST" });
+    await expect(response.text()).rejects.toBeInstanceOf(AssistantRouteError);
+  });
 });

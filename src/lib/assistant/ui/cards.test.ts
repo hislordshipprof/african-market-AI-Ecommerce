@@ -263,4 +263,24 @@ describe("assistant cards", () => {
       "Rice (Bag) · bbbb",
     ]);
   });
+
+  it("a summary names the gap to the store minimum", () => {
+    const cards = cardsFromParts([{
+      type: "tool-get_cart_summary",
+      toolCallId: "g1",
+      state: "output-available",
+      output: {
+        ok: true,
+        lines: [{ lineId: "l", name: "Egusi", qty: 1, lineTotalCents: 1099, packLabel: "8 oz" }],
+        subtotalCents: 1099,
+        minimumOrderCents: 3500,
+        missingCents: 2401,
+        minimumMet: false,
+      },
+    }]);
+    expect(cards[0]).toMatchObject({
+      kind: "summary",
+      gapLabel: "$24.01 to reach the $35.00 minimum order",
+    });
+  });
 });

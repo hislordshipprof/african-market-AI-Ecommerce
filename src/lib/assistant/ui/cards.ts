@@ -51,6 +51,7 @@ export type SummaryCard = {
   minimumMet: boolean;
   missingCents: number;
   missingLabel: string;
+  gapLabel: string | null;
 };
 
 export type ChoiceOption = {
@@ -340,6 +341,9 @@ function summaryCards(callId: string, output: unknown): AssistantCard[] {
     minimumMet: body.minimumMet === true,
     missingCents,
     missingLabel: money(missingCents),
+    gapLabel: missingCents > 0
+      ? `${money(missingCents)} to reach the ${money(typeof body.minimumOrderCents === "number" ? body.minimumOrderCents : 0)} minimum order`
+      : null,
   }];
 }
 

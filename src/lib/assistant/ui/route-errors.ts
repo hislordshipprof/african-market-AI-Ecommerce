@@ -120,7 +120,7 @@ export function createAssistantFetch(base: typeof fetch = fetch): typeof fetch {
       if (isAbort(error)) throw error;
       throw new AssistantRouteError({ status: 0, parsed: false });
     }
-    if (response.ok) return response;
+    if (response.ok) return guardFinishedStream(response);
     const retryAfter = response.headers.get("retry-after");
     const text = await response.text();
     let code: string | undefined;
@@ -137,6 +137,32 @@ export function createAssistantFetch(base: typeof fetch = fetch): typeof fetch {
     }
     throw new AssistantRouteError({ code, status: response.status, retryAfter, parsed });
   };
+}
+
+function guardFinishedStream(response: Response): Response {
+  const type = response.headers.get("content-type") ?? "";
+  if (!type.includes("text/event-stream") || !response.body) return response;
+  const reader = response.body.getReader();
+  let sawFinish = false;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (!sawFinish) controller.error(new AssistantRouteError({ status: response.status, parsed: false }));
+          else controller.close();
+          return;
+        }
+        const text = new TextDecoder().decode(value);
+        if (text.includes("[DONE]") || text.includes('"type":"finish"')) sawFinish = true;
+        controller.enqueue(value);
+      } catch (error) {
+        if (isAbort(error)) controller.error(error);
+        else controller.error(new AssistantRouteError({ status: response.status, parsed: false }));
+      }
+    },
+  });
+  return new Response(stream, { status: response.status, headers: response.headers });
 }
 
 function isAbort(error: unknown): boolean {
