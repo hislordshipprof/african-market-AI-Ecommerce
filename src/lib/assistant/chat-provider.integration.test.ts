@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -164,5 +165,68 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
     const rows = await storeScoped(storeA).aiConversation.findMany({ where: { storeId: storeA } });
     const saved = rows.find((row) => JSON.stringify(row.messages).includes("keep the question"));
     expect(saved?.inFlightUntil).toBeNull();
+  });
+
+  it("keeps the file breakpoint after every current file and drops it on the next text turn", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", KEY);
+    vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const fake = createFakeAnthropicFetch({
+      expectedKey: KEY,
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "rice" } },
+        { kind: "text", text: "I found some of the list and a few gaps." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const headers = {
+      "content-type": "application/json",
+      host: "prov.test",
+      origin: "http://prov.test",
+      "x-store-slug": slugA,
+      "x-forwarded-for": "203.0.113.110",
+    };
+    const fileResponse = await handler(new Request("http://prov.test/api/assistant/chat", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        message: {
+          id: "file-cache-turn-01",
+          role: "user",
+          parts: [
+            { type: "text", text: "rice from the photo" },
+            { type: "file", mediaType: "image/jpeg", filename: "list.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    expect(fileResponse.status).toBe(200);
+    const cookie = fileResponse.headers.get("set-cookie")?.split(";")[0];
+    await fileResponse.text();
+    expect(fake.requests.length).toBeGreaterThan(1);
+    for (const request of fake.requests) {
+      const raw = JSON.stringify(request.body);
+      expect(raw.split("cache_control").length - 1).toBe(2);
+      const messages = request.body?.messages as Array<{ role: string; content: Array<{ type?: string; cache_control?: { type?: string } }> }>;
+      const user = messages.find((message) => message.role === "user" && message.content.some((part) => part.type === "image"));
+      expect(user).toBeTruthy();
+      const imageAt = user!.content.findIndex((part) => part.type === "image");
+      const breakAt = user!.content.findIndex((part) => part.cache_control);
+      expect(breakAt).toBeGreaterThanOrEqual(imageAt);
+      expect(user!.content.at(-1)?.cache_control).toEqual({ type: "ephemeral" });
+    }
+    const textResponse = await handler(new Request("http://prov.test/api/assistant/chat", {
+      method: "POST",
+      headers: { ...headers, cookie: cookie ?? "" },
+      body: JSON.stringify({
+        message: { id: "text-cache-turn-02", role: "user", parts: [{ type: "text", text: "plantain on the side" }] },
+      }),
+    }));
+    expect(textResponse.status).toBe(200);
+    await textResponse.text();
+    const textBody = JSON.stringify(fake.requests.at(-1)?.body);
+    expect(textBody.split("cache_control").length - 1).toBe(1);
+    expect(textBody).not.toContain("\"type\":\"image\"");
+    expect(textBody).not.toContain("\"type\":\"document\"");
   });
 });
