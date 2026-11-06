@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import sharp from "sharp";
 import { money } from "../src/lib/format";
 import { storeUrl } from "./urls";
@@ -629,16 +629,32 @@ test("a text turn failing after navigation retains its original Retry", async ({
   await expect(returned.getByRole("button", { name: "Retry" })).toHaveCount(0);
 });
 
+async function holdChat(page: Page, settle: (route: Route) => Promise<void>) {
+  let release = () => {};
+  let finish = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const finished = new Promise<void>((resolve) => { finish = resolve; });
+  await page.route("**/api/assistant/chat", async (route) => {
+    await gate;
+    try {
+      await settle(route);
+    } finally {
+      finish();
+    }
+  });
+  return async function letGo() {
+    release();
+    await finished;
+    await page.unroute("**/api/assistant/chat");
+  };
+}
+
 test("closing a failed file turn removes Retry without turning it into a text turn", async ({ page }) => {
   const posts: string[] = [];
   page.on("request", (request) => {
     if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
   });
-  let release = () => {};
-  await page.route("**/api/assistant/chat", async (route) => {
-    await new Promise<void>((resolve) => { release = resolve; });
-    await route.continue();
-  });
+  let letGo = await holdChat(page, (route) => route.continue());
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
@@ -647,8 +663,7 @@ test("closing a failed file turn removes Retry without turning it into a text tu
   await page.getByTestId("assistant-send").click();
   await expect.poll(() => posts.length).toBe(1);
   await page.keyboard.press("Escape");
-  release();
-  await page.unroute("**/api/assistant/chat");
+  await letGo();
   await page.getByTestId("assistant-launcher").click();
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
   await expect(dialog.getByRole("status")).toBeVisible({ timeout: 20_000 });
@@ -662,19 +677,16 @@ test("closing a failed file turn removes Retry without turning it into a text tu
   expect(JSON.stringify(next.parts)).not.toContain("image/jpeg");
 
   await page.goto(`${origin}/`);
-  release = () => {};
-  await page.route("**/api/assistant/chat", async (route) => {
-    await new Promise<void>((resolve) => { release = resolve; });
-    await route.fulfill({ status: 500, contentType: "text/plain", body: "no" });
-  });
+  const beforePdf = posts.length;
+  letGo = await holdChat(page, (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
   await page.getByTestId("assistant-launcher").click();
   await page.locator('input[accept="application/pdf"]').setInputFiles("src/lib/assistant/fixtures/two-page.pdf");
   await expect(page.getByRole("button", { name: "Remove two-page.pdf" })).toBeVisible();
   await page.getByTestId("assistant-composer").fill("recipe");
   await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(beforePdf + 1);
   await page.keyboard.press("Escape");
-  release();
-  await page.unroute("**/api/assistant/chat");
+  await letGo();
   await page.getByTestId("assistant-launcher").click();
   const pdfDialog = page.getByRole("dialog", { name: "Shop with help" });
   await expect(pdfDialog.getByRole("status")).toBeVisible({ timeout: 20_000 });
@@ -682,18 +694,15 @@ test("closing a failed file turn removes Retry without turning it into a text tu
   await expect(pdfDialog.getByRole("button", { name: /Remove / })).toHaveCount(0);
 
   await page.goto(`${origin}/`);
-  release = () => {};
-  await page.route("**/api/assistant/chat", async (route) => {
-    await new Promise<void>((resolve) => { release = resolve; });
-    await route.fulfill({ status: 500, contentType: "text/plain", body: "no" });
-  });
+  const beforeFiles = posts.length;
+  letGo = await holdChat(page, (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
   await page.getByTestId("assistant-launcher").click();
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
   await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
   await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(beforeFiles + 1);
   await page.keyboard.press("Escape");
-  release();
-  await page.unroute("**/api/assistant/chat");
+  await letGo();
   await page.getByTestId("assistant-launcher").click();
   const filesOnly = page.getByRole("dialog", { name: "Shop with help" });
   await expect(filesOnly.getByRole("status")).toBeVisible({ timeout: 20_000 });
