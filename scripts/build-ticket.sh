@@ -1,8 +1,58 @@
 #!/usr/bin/env bash
 # Stage A (build) and Fix rounds. See docs/agents/orchestration.md.
+# Round-cap helpers live above the orchestrator so tests can source this file.
+# ticket_review_count matches review-ticket.sh: review-<n>-*.json, excluding *.second.json.
+
+# ticket_review_count <logs-dir> <issue>: review logs for one ticket.
+# Same count as review-ticket.sh (PRIOR): review-<n>-*.json, excluding *.second.json.
+ticket_review_count() {
+  local dir="$1" n="$2" count
+  count=$(ls "$dir"/review-"$n"-*.json 2>/dev/null | grep -vc '\.second\.json$' || true)
+  case "$count" in
+    ''|*[!0-9]*) count=0 ;;
+  esac
+  printf '%s\n' "$count"
+}
+
+# ticket_resume_allowed <count>: no once 3 review rounds already exist. No override.
+ticket_resume_allowed() {
+  local count="$1"
+  if [ "$count" -ge 3 ]; then printf '%s\n' no; else printf '%s\n' yes; fi
+}
+
+# ticket_round_is_last <mode> <prior>: yes when this review must let local-ci finish.
+# --resume never auto-fixes. A review that already has a predecessor is the round that stops.
+ticket_round_is_last() {
+  local mode="$1" prior="$2"
+  if [ "$mode" = "--resume" ] || [ "$prior" -ge 1 ]; then
+    printf '%s\n' yes
+  else
+    printf '%s\n' no
+  fi
+}
+
+# ticket_round_after_review <mode> <prior> <count>: autofix, stop, or unrecorded.
+# Automatic fix only after the first recorded review of a non-resume run.
+ticket_round_after_review() {
+  local mode="$1" prior="$2" count="$3"
+  if [ "$count" -le "$prior" ]; then
+    printf '%s\n' unrecorded
+    return 0
+  fi
+  if [ "$mode" = "--resume" ] || [ "$count" -ge 2 ]; then
+    printf '%s\n' stop
+    return 0
+  fi
+  printf '%s\n' autofix
+}
+
+# Sourced by scripts/ticket-rounds.test.sh. Executing the file runs the orchestrator below.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
 # Usage:
 #   scripts/build-ticket.sh <issue>                      # build with /supermatt:implement
-#   scripts/build-ticket.sh <issue> --resume "<findings>"  # fix round in the same session
+#   scripts/build-ticket.sh <issue> --resume "<findings>"  # coordinator's round 3; refused at 3 review logs
 #   scripts/build-ticket.sh <issue> --continue            # resume a killed run
 #   NO_KEYS=1 scripts/build-ticket.sh <issue>             # build against fakes; real-key testing later, PR stays unmerged
 # Writes: .builder/logs/ticket-<n>-<time>.json, .builder/session-<n>.txt, .builder/report-<n>.md
@@ -157,6 +207,11 @@ $FAST_RULE}"
     agent_run "$ROLE" "$LOG" "$PROMPT" || status=$?
     ;;
   --resume)
+    prior=$(ticket_review_count "$ROOT/.builder/logs" "$N")
+    if [ "$(ticket_resume_allowed "$prior")" != yes ]; then
+      echo "Refusing --resume for #$N: $prior review rounds already exist (review-$N-*.json, excluding .second.json). A ticket stops at 3 rounds. There is no override."
+      exit 1
+    fi
     [ -n "$FINDINGS" ] || { echo "--resume needs the finding text"; exit 1; }
     run_fix "$FINDINGS"
     ;;
@@ -181,13 +236,20 @@ if [ "$FAST" = "1" ] && [ -z "${status:-}" ]; then
 fi
 
 # Independent review loop: a fresh session reviews the branch while local-ci runs on the same pushed HEAD
-# (in parallel: the builder never runs the full suite). Blocking findings and real CI failures go back to the
-# builder; the fix is re-reviewed fresh. At most 2 fix rounds, then the coordinator decides.
-# SKIP_REVIEW=1 skips it (e.g. when the coordinator runs the review by hand).
+# (in parallel: the builder never runs the full suite). One automatic fix follows the first blocking review.
+# After the ticket has 2 review logs, or after --resume's review, stop before run_fix. The count is the
+# ticket's review logs across runs, not this process's loop index. SKIP_REVIEW=1 skips the loop.
 CI_LOCAL="${CI_LOCAL:-$ROOT/scripts/ci-local.sh}"
 if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
   cd "$ROOT"
-  for round in 1 2 3; do
+  while true; do
+    prior=$(ticket_review_count "$ROOT/.builder/logs" "$N")
+    if [ "$prior" -ge 3 ]; then
+      echo "Ticket #$N already has $prior review rounds (cap is 3). No further review or automatic fix. The coordinator decides."
+      break
+    fi
+    last=$(ticket_round_is_last "$MODE" "$prior")
+    round=$((prior + 1))
     CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
     # Own checkout, e2e port and database, so it never collides with the reviewer working in $WT on the lane's
     # port and database. One runner checkout serves every lane: the machine-wide lock runs one suite at a time.
@@ -197,11 +259,12 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
     REVIEW_TICKET="${REVIEW_TICKET:-$ROOT/scripts/review-ticket.sh}"
     verdict=$(E2E_PORT="$LANE_PORT" bash "$REVIEW_TICKET" "$N" | tail -1)
     echo "Independent review $round: $verdict"
+    count=$(ticket_review_count "$ROOT/.builder/logs" "$N")
     # A blocked review means this commit will not merge, so a run still queued for the machine-wide lock only
     # makes every other lane wait longer: cancel it. A run that already holds the lock finishes, because its
     # failures go into this fix round.
-    # Round 3 is never cancelled: the coordinator may accept its findings, and then needs the CI result.
-    if [ "$round" != "3" ] && [ "$verdict" != "VERDICT: PASS" ] && kill -0 "$ci_pid" 2>/dev/null && ! grep -q "lock acquired" "$CI_LOG"; then
+    # The last round is never cancelled: the coordinator may accept its findings, and then needs the CI result.
+    if [ "$last" != yes ] && [ "$verdict" != "VERDICT: PASS" ] && kill -0 "$ci_pid" 2>/dev/null && ! grep -q "lock acquired" "$CI_LOG"; then
       taskkill //F //T //PID "$(cat "/proc/$ci_pid/winpid" 2>/dev/null)" >/dev/null 2>&1 || kill "$ci_pid" 2>/dev/null || true
       wait "$ci_pid" 2>/dev/null || true
       gh api "repos/hislordshipprof/african-market-AI-Ecommerce/statuses/$(git -C "$WT" rev-parse HEAD)" -f state=error \
@@ -216,7 +279,17 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
       echo "A newer push superseded this run of #$N; the coordinator decides. See $CI_LOG"; break
     fi
     [ "$verdict" = "VERDICT: PASS" ] && [ "$ci" = pass ] && break
-    [ "$round" = "3" ] && { echo "Still blocking after 2 fix rounds; the coordinator decides. See .builder/review-$N.md and $CI_LOG"; break; }
+    action=$(ticket_round_after_review "$MODE" "$prior" "$count")
+    if [ "$action" != autofix ]; then
+      if [ "$action" = unrecorded ]; then
+        echo "Review round for #$N was not recorded (still $count review logs). No automatic fix. The coordinator must diagnose. See .builder/review-$N.md and $CI_LOG"
+      elif [ "$MODE" = "--resume" ]; then
+        echo "Review round $count for #$N (--resume): no automatic fix. The coordinator decides. See .builder/review-$N.md and $CI_LOG"
+      else
+        echo "Review round $count for #$N: no automatic fix. The coordinator must diagnose. See .builder/review-$N.md and $CI_LOG"
+      fi
+      break
+    fi
     findings=""
     [ "$verdict" = "VERDICT: PASS" ] || findings="$(cat "$ROOT/.builder/review-$N.md")"
     if [ "$ci" = fail ]; then
