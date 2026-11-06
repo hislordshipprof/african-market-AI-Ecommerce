@@ -174,7 +174,7 @@ run_unit() {
     codes=("${PIPESTATUS[@]}")
     rc="${codes[0]}"
     # A failed tee means the output cannot be trusted, so it is never exit code 1.
-    if [ "$rc" = 0 ]; then rc=2; fi
+    if [ "${codes[1]:-0}" != 0 ]; then rc=2; fi
   }
   if [ "$rc" != 0 ]; then
     if bash "$SCRIPTS/vitest-rpc-only.sh" "$TEST_OUT" "$rc"; then
