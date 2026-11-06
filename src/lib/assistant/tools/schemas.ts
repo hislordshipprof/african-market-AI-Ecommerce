@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { UNSET_MAX_PER_ORDER } from "../../cart/limits";
 import { scrubKnownStrings } from "../card-scrub";
+import { exactAssistantKeys } from "../contract";
 
 const listingIds = (max: number) =>
   z.array(z.string().min(1)).min(1).max(max);
@@ -57,7 +58,7 @@ export const offerChoicesInput = z.object({
 
 export const cartSummaryInput = z.object({});
 
-export const toolInputSchemas = {
+export const toolInputSchemas = exactAssistantKeys({
   search_catalog: searchCatalogInput,
   show_products: showProductsInput,
   check_availability: checkAvailabilityInput,
@@ -68,7 +69,7 @@ export const toolInputSchemas = {
   set_swap_rule: setSwapRuleInput,
   get_cart_summary: cartSummaryInput,
   offer_choices: offerChoicesInput,
-} as const;
+});
 
 function toolInput(input: unknown): unknown {
   if (typeof input !== "string") return scrubKnownStrings(input);

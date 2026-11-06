@@ -131,12 +131,24 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       status?: string | null;
       maxPerOrder?: number | null;
       active?: boolean;
+      label?: string;
+      customName?: string | null;
+      master?: { name: string; imageUrl: string | null };
     },
   ) {
+    let masterProductId: string | undefined;
+    if (options.master) {
+      const product = await platformAdmin.masterProduct.create({
+        data: { name: options.master.name, imageUrl: options.master.imageUrl },
+      });
+      createdMasterProductIds.push(product.id);
+      masterProductId = product.id;
+    }
     const listing = await storeScoped(storeId).listing.create({
       data: {
         storeId,
-        customName: options.name,
+        ...(masterProductId ? { masterProductId } : {}),
+        customName: options.customName === undefined ? options.name : options.customName,
         price: options.price,
         stockMode: options.stockMode ?? "unlimited",
         qty: options.qty ?? null,
@@ -149,9 +161,17 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       },
     });
     const variant = await storeScoped(storeId).listingVariant.create({
-      data: { listingId: listing.id, label: "Each", price: options.price, weightG: 100 },
+      data: { listingId: listing.id, label: options.label ?? "Each", price: options.price, weightG: 100 },
     });
     return { listingId: listing.id, variantId: variant.id };
+  }
+
+  async function freshCart() {
+    const cart = await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } });
+    const talk = await storeScoped(storeA).aiConversation.create({
+      data: { storeId: storeA, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
+    });
+    return { cartId: cart.id, conversationId: talk.id };
   }
 
   async function lineCount() {
@@ -792,24 +812,204 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   });
 
   it("add_to_cart output carries this store's variant, name, pack, price and photo", async () => {
-    const item = await makeListing(storeA, { name: "Enriched Egusi", price: 640 });
-    const result = await addToCart(ctx(), { items: [{ variant_id: item.variantId, qty: 2 }] });
-    expect(result).toMatchObject({
-      ok: true,
-      items: [{
+    const previousHost = process.env.R2_PUBLIC_URL;
+    delete process.env.R2_PUBLIC_URL;
+    try {
+      const talk = await freshCart();
+      const plain = await makeListing(storeA, { name: "Zzq Basket Only", price: 640, label: "4 kg" });
+      const pictured = await makeListing(storeA, {
+        name: "unused",
+        customName: null,
+        price: 1250,
+        label: "800 g",
+        master: { name: "Photo Yam Master", imageUrl: "catalog/ac1-photo.jpg" },
+      });
+      const beforeForeign = await storeScoped(storeB).cartLine.findMany({
+        orderBy: { id: "asc" },
+        select: { id: true, cartId: true, variantId: true, qty: true },
+      });
+      const result = await addToCart(ctx(talk), {
+        items: [
+          { variant_id: plain.variantId, qty: 2 },
+          { variant_id: variantB, qty: 1 },
+          { variant_id: pictured.variantId, qty: 3 },
+        ],
+      });
+      expect(result).toEqual({
         ok: true,
-        added: 2,
-        variantId: item.variantId,
-        listingId: item.listingId,
-        name: "Enriched Egusi",
-        packLabel: "Each",
-        unitPriceCents: 640,
-        created: true,
-      }],
-    });
-    const foreign = await addToCart(ctx(), { items: [{ variant_id: variantB, qty: 1 }] });
-    expect(foreign).toMatchObject({ ok: false, code: "variant_not_found" });
-    expect(await storeScoped(storeB).cartLine.count()).toBe(0);
+        subtotalCents: 5030,
+        items: [
+          {
+            ok: true,
+            added: 2,
+            lineId: expect.any(String),
+            qty: 2,
+            created: true,
+            variantId: plain.variantId,
+            listingId: plain.listingId,
+            name: "Zzq Basket Only",
+            packLabel: "4 kg",
+            unitPriceCents: 640,
+            lineTotalCents: 1280,
+            addedTotalCents: 1280,
+            imageUrl: null,
+            swapRule: "exact_only",
+            mayBeUnavailable: false,
+          },
+          { ok: false, code: "variant_not_found", message: "That item is not in this store." },
+          {
+            ok: true,
+            added: 3,
+            lineId: expect.any(String),
+            qty: 3,
+            created: true,
+            variantId: pictured.variantId,
+            listingId: pictured.listingId,
+            name: "Photo Yam Master",
+            packLabel: "800 g",
+            unitPriceCents: 1250,
+            lineTotalCents: 3750,
+            addedTotalCents: 3750,
+            imageUrl: "/api/catalog-image/catalog/ac1-photo.jpg",
+            swapRule: "exact_only",
+            mayBeUnavailable: false,
+          },
+        ],
+      });
+      const body = JSON.stringify(result);
+      expect(body).not.toContain(variantB);
+      expect(body).not.toContain("Foreign Rice");
+      const lines = await storeScoped(storeA).cartLine.findMany({
+        where: { cartId: talk.cartId },
+        select: { variantId: true, qty: true, storeId: true },
+      });
+      expect(lines).toHaveLength(2);
+      expect(lines).toEqual(expect.arrayContaining([
+        { variantId: plain.variantId, qty: 2, storeId: storeA },
+        { variantId: pictured.variantId, qty: 3, storeId: storeA },
+      ]));
+      expect(lines.map((line) => line.variantId)).not.toContain(variantB);
+      const afterForeign = await storeScoped(storeB).cartLine.findMany({
+        orderBy: { id: "asc" },
+        select: { id: true, cartId: true, variantId: true, qty: true },
+      });
+      expect(afterForeign).toEqual(beforeForeign);
+      const actions = await storeScoped(storeA).aiAction.findMany({
+        where: { conversationId: talk.conversationId, tool: "add_to_cart" },
+      });
+      expect(actions).toHaveLength(1);
+      expect(actions[0]?.output).toEqual(result);
+      expect(JSON.stringify(actions[0]?.output)).not.toContain(variantB);
+      expect(JSON.stringify(actions[0]?.output)).not.toContain("Foreign Rice");
+      expect(await storeScoped(storeB).aiAction.findFirst({ where: { id: actions[0]?.id } })).toBeNull();
+    } finally {
+      if (previousHost === undefined) delete process.env.R2_PUBLIC_URL;
+      else process.env.R2_PUBLIC_URL = previousHost;
+    }
+  });
+
+  it("add_to_cart preserves image precedence with and without the public host", async () => {
+    const saved = {
+      R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
+      NODE_ENV: process.env.NODE_ENV,
+      VERCEL: process.env.VERCEL,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+      R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+      R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+      R2_BUCKET: process.env.R2_BUCKET,
+    };
+    const restore = () => {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    };
+    try {
+      delete process.env.R2_PUBLIC_URL;
+      const unmapped = await freshCart();
+      const bare = await makeListing(storeA, { name: "Zzq Unmapped Basket", price: 100 });
+      const bareResult = await addToCart(ctx(unmapped), { items: [{ variant_id: bare.variantId, qty: 1 }] });
+      expect(bareResult).toMatchObject({ items: [{ name: "Zzq Unmapped Basket", imageUrl: null }] });
+
+      const cutoutCart = await freshCart();
+      const yam = await makeListing(storeA, { name: "Yam", price: 200 });
+      const yamResult = await addToCart(ctx(cutoutCart), { items: [{ variant_id: yam.variantId, qty: 1 }] });
+      expect(yamResult).toMatchObject({
+        items: [{ name: "Yam", imageUrl: "/images/products/yam-white-puna.webp" }],
+      });
+
+      const masterCart = await freshCart();
+      const masterOnly = await makeListing(storeA, {
+        name: "unused",
+        customName: null,
+        price: 300,
+        master: { name: "Zzq Master Only", imageUrl: "catalog/master-only.jpg" },
+      });
+      const masterResult = await addToCart(ctx(masterCart), { items: [{ variant_id: masterOnly.variantId, qty: 1 }] });
+      expect(masterResult).toMatchObject({
+        items: [{ name: "Zzq Master Only", imageUrl: "/api/catalog-image/catalog/master-only.jpg" }],
+      });
+
+      process.env.R2_PUBLIC_URL = "https://images.example.test";
+      const customCart = await freshCart();
+      const customOver = await makeListing(storeA, {
+        name: "Yam",
+        price: 400,
+        master: { name: "Master Yam Hidden", imageUrl: "https://cdn.example.test/catalog/legacy-photo.png" },
+      });
+      const customResult = await addToCart(ctx(customCart), { items: [{ variant_id: customOver.variantId, qty: 1 }] });
+      expect(customResult).toMatchObject({
+        items: [{ name: "Yam", imageUrl: "https://images.example.test/catalog/legacy-photo.png" }],
+      });
+      expect(JSON.stringify(customResult)).not.toContain("cdn.example.test");
+      expect(JSON.stringify(customResult)).not.toContain("Master Yam Hidden");
+
+      delete process.env.R2_PUBLIC_URL;
+      const rejectedCart = await freshCart();
+      const rejected = await makeListing(storeA, {
+        name: "Yam",
+        price: 500,
+        master: { name: "Rejected Photo", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/a/a.jpg" },
+      });
+      const rejectedResult = await addToCart(ctx(rejectedCart), { items: [{ variant_id: rejected.variantId, qty: 1 }] });
+      expect(rejectedResult).toMatchObject({
+        items: [{ name: "Yam", imageUrl: "/images/products/yam-white-puna.webp" }],
+      });
+      expect(JSON.stringify(rejectedResult)).not.toContain("wikimedia.org");
+
+      const absentCart = await freshCart();
+      const absent = await makeListing(storeA, {
+        name: "unused",
+        customName: null,
+        price: 600,
+        master: { name: "Zzq No Photo", imageUrl: null },
+      });
+      const absentResult = await addToCart(ctx(absentCart), { items: [{ variant_id: absent.variantId, qty: 1 }] });
+      expect(absentResult).toMatchObject({ items: [{ name: "Zzq No Photo", imageUrl: null }] });
+
+      (process.env as { NODE_ENV?: string }).NODE_ENV = "production";
+      process.env.VERCEL = "1";
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.R2_ACCOUNT_ID;
+      delete process.env.R2_ACCESS_KEY_ID;
+      delete process.env.R2_SECRET_ACCESS_KEY;
+      delete process.env.R2_BUCKET;
+      delete process.env.R2_PUBLIC_URL;
+      const hostedCart = await freshCart();
+      const hosted = await makeListing(storeA, {
+        name: "unused",
+        customName: null,
+        price: 700,
+        master: { name: "Zzq Hosted Photo", imageUrl: "catalog/hosted-photo.webp" },
+      });
+      const hostedResult = await addToCart(ctx(hostedCart), { items: [{ variant_id: hosted.variantId, qty: 1 }] });
+      expect(hostedResult).toMatchObject({
+        items: [{ name: "Zzq Hosted Photo", imageUrl: "/api/catalog-image/catalog/hosted-photo.webp" }],
+      });
+    } finally {
+      restore();
+    }
   });
 
   it("offer_choices returns only this store's active listings and records one action in this store", async () => {

@@ -1,5 +1,5 @@
 import { money } from "@/lib/format";
-import { ASSISTANT_FIXED_ERROR } from "../contract";
+import { ASSISTANT_FIXED_ERROR, ASSISTANT_TOOL_NAMES, type AssistantToolName } from "../contract";
 
 export const CARD_TOOL_ERROR = ASSISTANT_FIXED_ERROR;
 
@@ -90,7 +90,8 @@ type Part = {
   data?: unknown;
 };
 
-const CART_TOOLS = new Set(["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"]);
+const SUPPORTED_TOOLS: ReadonlySet<string> = new Set(ASSISTANT_TOOL_NAMES);
+const CART_TOOLS = new Set<string>(["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"] satisfies readonly AssistantToolName[]);
 
 export function cardsFromParts(parts: readonly Part[], options?: { turnFailed?: boolean }): AssistantCard[] {
   const cards: AssistantCard[] = [];
@@ -98,7 +99,7 @@ export function cardsFromParts(parts: readonly Part[], options?: { turnFailed?: 
     const type = typeof part.type === "string" ? part.type : "";
     if (type === "data-step-limit" || type === "text" || type === "step-start") return;
     const tool = toolNameOf(part, type);
-    if (!tool) return;
+    if (!tool || !SUPPORTED_TOOLS.has(tool)) return;
     const callId = typeof part.toolCallId === "string" ? part.toolCallId : `part-${index}`;
     const state = typeof part.state === "string" ? part.state : "";
     if (state === "input-streaming" || state === "input-available") {

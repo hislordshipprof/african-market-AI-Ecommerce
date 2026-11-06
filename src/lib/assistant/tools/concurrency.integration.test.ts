@@ -127,4 +127,87 @@ describe.skipIf(!hasDb)("assistant cart tool concurrency", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]?.qty).toBe(4);
   });
+
+  it("a price committed after add hydration is used by every returned and audited money field", async () => {
+    const row = await storeScoped(storeId).listing.create({
+      data: {
+        storeId,
+        customName: "Early Name",
+        price: 100,
+        stockMode: "unlimited",
+        frozen: false,
+        perishable: false,
+      },
+    });
+    const variant = await storeScoped(storeId).listingVariant.create({
+      data: { listingId: row.id, label: "Each", price: 100, weightG: 100 },
+    });
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const talk = await storeScoped(storeId).aiConversation.create({
+      data: { storeId, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
+    });
+    const client = new Client({ connectionString: process.env.DIRECT_URL ?? process.env.DATABASE_URL });
+    await client.connect();
+    let released = false;
+    const release = async () => {
+      if (released) return;
+      released = true;
+      await client.query("COMMIT").catch(() => undefined);
+      await client.end().catch(() => undefined);
+    };
+    let adding: ReturnType<typeof addToCart> | undefined;
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE app_user");
+      await client.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
+      const locked = await client.query("SELECT id FROM listing_variants WHERE id = $1 FOR UPDATE", [variant.id]);
+      if ((locked.rowCount ?? 0) !== 1) throw new Error("variant row not locked");
+      const who = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      adding = addToCart({
+        storeId,
+        cartId: cart.id,
+        conversationId: talk.id,
+        actorUserId: null,
+      }, { items: [{ variant_id: variant.id, qty: 2 }] });
+      await waitForLockWaiters(Number(who.rows[0]?.pid), 1, {
+        label: "cart line insert waits on the variant",
+        timeoutMs: 3000,
+        settled: [adding],
+      });
+      await client.query("UPDATE listing_variants SET price = $1 WHERE id = $2", [440, variant.id]);
+      await client.query("UPDATE listings SET custom_name = $1 WHERE id = $2", ["Late Name", row.id]);
+      await release();
+      const added = await adding;
+      expect(added).toMatchObject({
+        ok: true,
+        name: "Early Name",
+        packLabel: "Each",
+        unitPriceCents: 440,
+        lineTotalCents: 880,
+        addedTotalCents: 880,
+        qty: 2,
+        added: 2,
+        subtotalCents: 880,
+        imageUrl: null,
+        items: [{
+          name: "Early Name",
+          unitPriceCents: 440,
+          lineTotalCents: 880,
+          addedTotalCents: 880,
+          qty: 2,
+          added: 2,
+          imageUrl: null,
+        }],
+      });
+      expect(JSON.stringify(added)).not.toContain("Late Name");
+      const action = await storeScoped(storeId).aiAction.findFirst({
+        where: { conversationId: talk.id, tool: "add_to_cart" },
+      });
+      expect(action?.output).toEqual(added);
+      expect(JSON.stringify(action?.output)).not.toContain("Late Name");
+    } finally {
+      await release();
+      await adding?.catch(() => undefined);
+    }
+  }, 20_000);
 });

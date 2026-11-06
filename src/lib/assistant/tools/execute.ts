@@ -10,6 +10,7 @@ import {
   cartLineSubtotalCents,
   checkMinimumOrder,
   runCartMutation,
+  type AppliedAddLine,
   type CartWriteTx,
   type SwapRuleValue,
 } from "../../cart/service";
@@ -361,24 +362,17 @@ function withLineMoney<T extends { ok: true; lineId: string; qty: number; added:
   };
 }
 
-async function enrichAdded(tx: CartWriteTx, variantId: string) {
-  const variant = await tx.listingVariant.findUnique({
-    where: { id: variantId },
-    include: { listing: { include: { masterProduct: true } } },
-  });
-  if (!variant) return null;
+function describedAdd(applied: AppliedAddLine) {
+  const master = applied.listing.masterProduct;
   const photo = listingImage({
-    customName: variant.listing.customName,
-    masterProduct: variant.listing.masterProduct
-      ? { name: variant.listing.masterProduct.name, imageUrl: variant.listing.masterProduct.imageUrl }
-      : null,
+    customName: applied.listing.customName,
+    masterProduct: master,
   });
   return {
-    variantId: variant.id,
-    listingId: variant.listing.id,
-    name: variant.listing.customName || variant.listing.masterProduct?.name || "Unnamed",
-    packLabel: variant.label,
-    unitPriceCents: variant.price,
+    variantId: applied.variant.id,
+    listingId: applied.listing.id,
+    name: applied.listing.customName || master?.name || "Unnamed",
+    packLabel: applied.variant.label,
     imageUrl: photo ?? null,
   };
 }
@@ -409,15 +403,13 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
           data: { swapRule, substituteVariantId },
         });
       }
-      const enriched = await enrichAdded(tx, item.variant_id);
-      if (!enriched) throw new Error("add enrichment failed");
       items.push({
         ok: true as const,
         added: applied.added,
         lineId: applied.lineId,
         qty: applied.qty,
         created: applied.created,
-        ...enriched,
+        ...describedAdd(applied),
         ...(applied.limitedTo != null ? { limitedTo: applied.limitedTo, code: "max_per_order" } : {}),
         swapRule,
         mayBeUnavailable: flagged,

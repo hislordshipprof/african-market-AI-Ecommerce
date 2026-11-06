@@ -1,4 +1,5 @@
-import { tool, type ToolSet } from "ai";
+import { tool } from "ai";
+import { exactAssistantKeys } from "../contract";
 import {
   addToCart,
   checkAvailability,
@@ -28,8 +29,8 @@ import {
 export type { AssistantContext, ToolResult } from "./execute";
 export { toolInputSchemas } from "./schemas";
 
-export function assistantTools(ctx: AssistantContext): ToolSet {
-  return {
+export function assistantTools(ctx: AssistantContext) {
+  return exactAssistantKeys({
     search_catalog: tool({
       description: "Search this store's catalog.",
       inputSchema: searchCatalogInput,
@@ -80,5 +81,5 @@ export function assistantTools(ctx: AssistantContext): ToolSet {
       inputSchema: offerChoicesInput,
       execute: (input, options) => offerChoices({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
-  };
+  });
 }
