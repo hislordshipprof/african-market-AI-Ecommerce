@@ -7,6 +7,7 @@ import {
   generatePreview,
   commitImport,
   validateFileSize,
+  MAX_FILE_BYTES,
   type CsvPreviewResult,
   type CommitSelection,
   type CommitResult,
@@ -28,14 +29,17 @@ export async function csvPreviewAction(
 ): Promise<PreviewActionResult> {
   const session = await requireStoreOwner();
   const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) {
-    return { error: "Please select a CSV file." };
+  const selected = parseInput(
+    z.custom<File>((value) => value instanceof File && value.size > 0),
+    file,
+  );
+  if (!selected.ok) return { error: "Please select a CSV file." };
+  const sized = parseInput(z.number().int().nonnegative().max(MAX_FILE_BYTES), selected.data.size);
+  if (!sized.ok) {
+    return { error: validateFileSize(selected.data.size) ?? "Please select a CSV file." };
   }
 
-  const sizeError = validateFileSize(file.size);
-  if (sizeError) return { error: sizeError };
-
-  const csvText = await file.text();
+  const csvText = await selected.data.text();
   const preview = await generatePreview(session.store.id, csvText, session.user.id);
 
   const hasContent =

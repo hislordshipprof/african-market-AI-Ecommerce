@@ -25,13 +25,21 @@ function rel(file: string): string {
   return path.relative(root, file).replaceAll("\\", "/");
 }
 
+/** Function declarations and `export const name = async` arrows. Both are public actions. */
+export function actionNames(source: string): string[] {
+  const names = new Set<string>();
+  for (const match of source.matchAll(/export (?:async )?function (\w+)/g)) names.add(match[1]);
+  for (const match of source.matchAll(/export const (\w+)\s*=\s*async\b/g)) names.add(match[1]);
+  return [...names];
+}
+
 function actions(): Array<{ file: string; name: string; source: string }> {
   const found = [];
   for (const file of walk(path.join(root, "src"))) {
     const source = readFileSync(file, "utf8");
     if (!source.startsWith('"use server"') && !source.startsWith("'use server'")) continue;
-    for (const match of source.matchAll(/export (?:async )?function (\w+)/g)) {
-      found.push({ file: rel(file), name: match[1], source });
+    for (const name of actionNames(source)) {
+      found.push({ file: rel(file), name, source });
     }
   }
   return found;
@@ -52,8 +60,20 @@ function routes(): Array<{ file: string; name: string; source: string }> {
   return found;
 }
 
+function declarationAt(source: string, name: string): number {
+  const patterns = [
+    new RegExp(`export (?:async )?function ${name}\\b`),
+    new RegExp(`export const ${name}\\s*=\\s*async\\b`),
+  ];
+  for (const pattern of patterns) {
+    const at = source.search(pattern);
+    if (at >= 0) return at;
+  }
+  return -1;
+}
+
 function takesArguments(source: string, name: string): boolean {
-  const start = source.search(new RegExp(`export (?:async )?function ${name}\\s*\\(`));
+  const start = declarationAt(source, name);
   if (start < 0) return false;
   const open = source.indexOf("(", start);
   let depth = 0;
@@ -68,7 +88,7 @@ function takesArguments(source: string, name: string): boolean {
 }
 
 function functionBody(source: string, name: string): string {
-  const start = source.search(new RegExp(`export (?:async )?function ${name}\\b`));
+  const start = declarationAt(source, name);
   const rest = source.slice(start + 1);
   const next = rest.search(/\nexport /);
   return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
@@ -136,5 +156,11 @@ describe("endpoint inventory", () => {
       if (!implementation.includes("parse-input")) missing.push(`${item.file} ${item.name}`);
     }
     expect(missing).toEqual([]);
+  });
+
+  it("counts an exported async arrow as an endpoint", () => {
+    const source = `"use server";\nexport const unauditedAction = async (input: unknown) => input;\n`;
+    expect(actionNames(source)).toEqual(["unauditedAction"]);
+    expect(takesArguments(source, "unauditedAction")).toBe(true);
   });
 });

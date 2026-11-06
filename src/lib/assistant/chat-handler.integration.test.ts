@@ -21,7 +21,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { createChatHandler } from "./chat-handler";
-import { takeRateLimit } from "../rate-limit/app-limiter";
 import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
 import { scriptedAssistantFetch } from "./fake-model";
 import { createAssistantModel } from "./model";
@@ -1370,19 +1369,4 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(calls()).toBe(2);
   });
 
-  it("assistant IP and cart limits survive an auth reset", async () => {
-    const run = randomUUID();
-    const now = Date.now() - 90_000;
-    const ipKey = `assistant:ip:${run}`;
-    const cartKey = `assistant:cart:${run}`;
-    expect((await takeRateLimit(ipKey, 60, 60 * 60 * 1000, now)).count).toBe(1);
-    expect((await takeRateLimit(cartKey, 30, 60 * 60 * 1000, now)).count).toBe(1);
-    const sacrificial = `sacrificial-chat-${run}`;
-    await authPrisma.rateLimit.create({ data: { key: sacrificial, count: 1, lastRequest: BigInt(now) } });
-    await authPrisma.rateLimit.deleteMany({ where: { lastRequest: { lt: BigInt(Date.now() - 60_000) } } });
-    expect(await authPrisma.rateLimit.findUnique({ where: { key: sacrificial } })).toBeNull();
-    expect((await authPrisma.appRateLimit.findUnique({ where: { key: ipKey } }))?.count).toBe(1);
-    expect((await authPrisma.appRateLimit.findUnique({ where: { key: cartKey } }))?.count).toBe(1);
-    await authPrisma.appRateLimit.deleteMany({ where: { key: { in: [ipKey, cartKey] } } });
-  });
 });

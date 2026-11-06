@@ -428,11 +428,12 @@ describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
       },
     });
     const refund = await fakeStripeProvider.refundPayment(pi, 1000, key, { reservationKey: key, orderId: order.id });
-    await raw.$executeRaw`REVOKE UPDATE ON refund_requests FROM app_user`;
+    const refunds = await import("../order/refund-requests");
+    const failedWrite = vi.spyOn(refunds, "applyProviderRefund").mockRejectedValueOnce(new Error("db down"));
     try {
       expect((await postRefund("refund.created", refund.refundId, pi, "succeeded", key)).status).toBe(500);
     } finally {
-      await raw.$executeRaw`GRANT UPDATE ON refund_requests TO app_user`;
+      failedWrite.mockRestore();
     }
     const midway = await storeScoped(storeA).refundRequest.findMany({ where: { orderId: order.id } });
     expect(midway).toHaveLength(1);

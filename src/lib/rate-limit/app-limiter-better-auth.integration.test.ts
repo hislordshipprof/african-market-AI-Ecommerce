@@ -83,8 +83,29 @@ describe.skipIf(!child)("production child prune", () => {
       await GET(new NextRequest("http://localhost/api/storefront/search?q=prune", { headers: searchHeaders }));
 
       const { createChatHandler } = await import("../assistant/chat-handler");
-      const chat = createChatHandler();
-      await chat(new Request("http://localhost:3000/api/assistant/chat", {
+      const { MockLanguageModelV4 } = await import("ai/test");
+      const model = new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] });
+              controller.enqueue({ type: "text-start", id: "t" });
+              controller.enqueue({ type: "text-delta", id: "t", delta: "ok" });
+              controller.enqueue({ type: "text-end", id: "t" });
+              controller.enqueue({
+                type: "finish",
+                finishReason: { unified: "stop", raw: "end_turn" },
+                usage: {
+                  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+                  outputTokens: { total: 1, text: 1, reasoning: 0 },
+                },
+              });
+              controller.close();
+            },
+          }),
+        }),
+      });
+      const chat = await createChatHandler({ model })(new Request("http://localhost:3000/api/assistant/chat", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -97,12 +118,17 @@ describe.skipIf(!child)("production child prune", () => {
           message: { id: "pruneMsg1", role: "user", parts: [{ type: "text", text: "hello" }] },
         }),
       }));
+      const chatBody = await chat.text();
+      expect(chat.status, chatBody.slice(0, 180)).toBe(200);
+      const cartId = decodeURIComponent(/cart_id=([^;]+)/.exec(chat.headers.get("set-cookie") ?? "")?.[1] ?? "");
+      expect(cartId).not.toBe("");
 
       keys.push(
         `invite:${store.id}`,
         "search:browser:browserprune",
         `search:ip:${searchIp}`,
         `assistant:ip:${assistantIp}`,
+        `assistant:cart:${cartId}`,
       );
       const before = new Map<string, number>();
       for (const key of keys) {
@@ -136,8 +162,14 @@ describe.skipIf(!child)("production child prune", () => {
       });
     } finally {
       if (keys.length) await authPrisma.appRateLimit.deleteMany({ where: { key: { in: keys } } });
-      await owner.$executeRaw`DELETE FROM carts WHERE store_id = ${store.id}`;
-      await owner.store.delete({ where: { id: store.id } }).catch(() => {});
+      await owner.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRaw`DELETE FROM ai_actions WHERE conversation_id IN (SELECT id FROM ai_conversations WHERE store_id = ${store.id})`;
+        await tx.$executeRaw`DELETE FROM ai_conversations WHERE store_id = ${store.id}`;
+        await tx.$executeRaw`DELETE FROM carts WHERE store_id = ${store.id}`;
+        await tx.store.delete({ where: { id: store.id } });
+      }).catch(() => {});
       await owner.$disconnect();
     }
   }, 90_000);
