@@ -214,6 +214,7 @@ export interface AppliedAddLine {
     status: string | null;
     customName: string | null;
     maxPerOrder: number | null;
+    masterProduct: { name: string; imageUrl: string | null } | null;
   };
   variant: { id: string; label: string; price: number };
 }
@@ -245,7 +246,11 @@ export async function applyAddLine(
 ): Promise<ApplyAddLineResult> {
   const variant = await tx.listingVariant.findUnique({
     where: { id: variantId },
-    include: { listing: true },
+    include: {
+      listing: {
+        include: { masterProduct: { select: { name: true, imageUrl: true } } },
+      },
+    },
   });
   if (!variant || variant.listing.storeId !== storeId) {
     return { ok: false, code: "variant_not_found" };
@@ -277,6 +282,9 @@ export async function applyAddLine(
     status: variant.listing.status,
     customName: variant.listing.customName,
     maxPerOrder: variant.listing.maxPerOrder,
+    masterProduct: variant.listing.masterProduct
+      ? { name: variant.listing.masterProduct.name, imageUrl: variant.listing.masterProduct.imageUrl }
+      : null,
   };
   const variantView = { id: variant.id, label: variant.label, price: variant.price };
 
