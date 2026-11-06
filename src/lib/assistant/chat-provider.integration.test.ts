@@ -406,22 +406,34 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
           { kind: "text", text: "Both are $10.99." },
           { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [egusi.listingId] } },
           { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [egusi.listingId] } },
-          { kind: "text", text: "Egusi is $8.99. Earlier it was $10.99. Palm is $10.99." },
+          { kind: "text", text: "Egusi is $8.99. Earlier it was $7.50. Palm is $10.99." },
           { kind: "tool", toolName: "check_availability", toolInput: { listing_ids: [bark.listingId] } },
           { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [palm.listingId] } },
-          { kind: "text", text: "Palm is $7.99. Bark is $14.99. The shared price was $10.99." },
+          { kind: "text", text: "Palm is $5.00. Bark is $14.99. The shared price was $10.99." },
+          { kind: "tool", toolName: "show_products", toolInput: { listing_ids: [palm.listingId] } },
+          { kind: "text", text: "Palm is $7.99. The minimum is $5.00. Invented is $6.66." },
           { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: egusi.variantId, qty: 1 }] } },
           { kind: "tool", toolName: "get_cart_summary", toolInput: {} },
-          { kind: "text", text: "Egusi is $8.99. The minimum is $5.00. Invented is $6.66." },
+          { kind: "text", text: "In the cart." },
+          { kind: "text", text: "The summary price is $6.40. Egusi used to be $8.99." },
         ],
       });
       const fetchImpl: typeof fetch = async (input, init) => {
         seen += 1;
+        if (seen === 3) {
+          await storeScoped(store.id).listingVariant.update({ where: { id: egusi.variantId }, data: { price: 750 } });
+        }
         if (seen === 4) {
           await storeScoped(store.id).listingVariant.update({ where: { id: egusi.variantId }, data: { price: 899 } });
         }
         if (seen === 7) {
+          await storeScoped(store.id).listingVariant.update({ where: { id: palm.variantId }, data: { price: 500 } });
+        }
+        if (seen === 9) {
           await storeScoped(store.id).listingVariant.update({ where: { id: palm.variantId }, data: { price: 799 } });
+        }
+        if (seen === 12) {
+          await storeScoped(store.id).listingVariant.update({ where: { id: egusi.variantId }, data: { price: 640 } });
         }
         return inner.fetch(input, init);
       };
@@ -434,29 +446,37 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       await settled(store.id, cartId);
       const turn2 = await (await handler(message("reprice-turn-2", "reprice egusi", cookie, store.slug, "203.0.113.191"))).text();
       expect(turn2).toContain("$8.99");
+      expect(turn2).toContain("$7.50");
       expect(turn2).toContain("$10.99");
       await settled(store.id, cartId);
       const turn3 = await (await handler(message("reprice-turn-3", "reprice palm", cookie, store.slug, "203.0.113.191"))).text();
-      expect(turn3).toContain("$7.99");
       expect(turn3).toContain("$14.99");
       expect(turn3).toContain("I couldn't confirm that price.");
       expect(turn3).not.toContain("10.99");
       await settled(store.id, cartId);
-      const turn4 = await (await handler(message("reprice-turn-4", "totals", cookie, store.slug, "203.0.113.191"))).text();
-      expect(turn4).toContain("$8.99");
+      const turn4 = await (await handler(message("reprice-turn-4", "minimum", cookie, store.slug, "203.0.113.191"))).text();
+      expect(turn4).toContain("$7.99");
       expect(turn4).toContain("$5.00");
       expect(turn4).toContain("I couldn't confirm that price.");
       expect(turn4).not.toContain("6.66");
+      await settled(store.id, cartId);
+      const turn5 = await (await handler(message("reprice-turn-5", "summary", cookie, store.slug, "203.0.113.191"))).text();
+      expect(turn5).toContain("In the cart.");
+      await settled(store.id, cartId);
       const summary = await storeScoped(store.id).aiAction.findFirst({
         where: { tool: "get_cart_summary", conversation: { cartId } },
       });
       expect(JSON.stringify(summary?.output)).toContain(egusi.variantId);
+      const turn6 = await (await handler(message("reprice-turn-6", "quote summary", cookie, store.slug, "203.0.113.191"))).text();
+      expect(turn6).toContain("$6.40");
+      expect(turn6).toContain("I couldn't confirm that price.");
+      expect(turn6).not.toContain("8.99");
     } finally {
       await storeScoped(store.id).cart.deleteMany({});
       await storeScoped(store.id).listing.deleteMany({});
       await raw.store.delete({ where: { id: store.id } });
     }
-  }, 30_000);
+  }, 45_000);
 
   it("simultaneous conversations do not share prices or minimums", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", KEY);

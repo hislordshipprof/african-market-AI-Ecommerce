@@ -263,6 +263,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   it("add_to_cart returns the line total, the added total and the cart subtotal after the write", async () => {
     const cart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
     const decoy = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
+    const foreignCart = (await storeScoped(storeB).cart.create({ data: { storeId: storeB, source: "manual" } })).id;
     const talk = (await storeScoped(storeA).aiConversation.create({
       data: { storeId: storeA, cartId: cart, model: "claude-haiku-5-5", messages: [] },
     })).id;
@@ -273,6 +274,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     await addLine(storeA, cart, other.variantId, 1, null);
     await addLine(storeA, cart, item.variantId, 1, null);
     await addLine(storeA, decoy, other.variantId, 4, null);
+    await addLine(storeB, foreignCart, variantB, 3, null);
     const result = await addToCart(ctx({ cartId: cart, conversationId: talk }), {
       items: [{ variant_id: item.variantId, qty: 2 }],
     });
@@ -308,6 +310,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(rows[2]).toMatchObject({ ok: false, code: "variant_not_found" });
     expect(rows[2]).not.toHaveProperty("lineTotalCents");
     expect(await storeScoped(storeA).cartLine.findFirst({ where: { cartId: decoy, variantId: other.variantId } })).toMatchObject({ qty: 4 });
+    expect(await storeScoped(storeB).cartLine.findFirst({ where: { cartId: foreignCart, variantId: variantB } })).toMatchObject({ qty: 3 });
+    await storeScoped(storeB).cartLine.deleteMany({ where: { cartId: foreignCart } });
+    await storeScoped(storeB).cart.delete({ where: { id: foreignCart } });
   });
 
   it("set_swap_rule rejects another store's substitute", async () => {

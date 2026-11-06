@@ -1,33 +1,21 @@
 const PHRASE = "I couldn't confirm that price.";
 const LIST_PRICE = "price not confirmed";
 
-const NUMBER = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?`;
-const INTEGER = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)`;
-const FOREIGN_CODES = "NGN|GHS|EUR|GBP|XOF|CFA|CAD";
-
-/**
- * Non-USD forms come first so `CAD $10.99` is one token, not an allowed dollar amount.
- * 3+ decimal places stay inside the token and are rejected whole.
- */
-const MONEY_SOURCE = [
-  String.raw`\b(?:${FOREIGN_CODES})\s+\$?\s?${NUMBER}`,
-  String.raw`(?:US\$|\$)\s?${NUMBER}\s+(?:${FOREIGN_CODES})\b`,
-  String.raw`${NUMBER}\s+(?:${FOREIGN_CODES})\b`,
-  String.raw`[€£₦₵₹¥]\s?${NUMBER}`,
-  String.raw`\bUSD\s+${NUMBER}`,
-  String.raw`US\$\s?${NUMBER}`,
-  String.raw`\$\s?${NUMBER}`,
-  String.raw`${NUMBER}\s+USD\b`,
-  String.raw`${NUMBER}\s+dollars\b`,
-  String.raw`${INTEGER}\s*¢`,
-  String.raw`${INTEGER}\s+cents\b`,
-].join("|");
+/** Decision-5 codes, plus AUD. Matched in either case. Other ISO codes must be capitals or glued to the number. */
+const LOOSE_CODES = new Set(["ngn", "ghs", "eur", "gbp", "xof", "cfa", "cad", "aud", "usd"]);
+const CODES = new Set(
+  `${[...LOOSE_CODES].join(" ")} aed afn all amd ang aoa ars awg azn bam bbd bdt bgn bhd bif bmd bnd bob brl bsd btn bwp byn bzd cdf chf clf clp cny cop crc cup cve czk djf dkk dop dzd egp ern etb fjd fkp gel gip gmd gnf gtq gyd hkd hnl htg huf idr ils inr iqd irr isk jmd jod jpy kes kgs khr kmf kpw krw kwd kyd kzt lak lbp lkr lrd lsl lyd mad mdl mga mkd mmk mnt mop mru mur mvr mwk mxn myr mzn nad nio nok npr nzd omr pab pen pgk php pkr pln pyg qar ron rsd rub rwf sar sbd scr sdg sek sgd shp sle sll sos srd ssp stn svc syp szl thb tjs tmt tnd top try ttd twd tzs uah ugx uyu uzs ves vnd vuv wst xaf xcd xof xpf yer zar zmw zwl`
+    .split(/\s+/),
+);
+const FOREIGN_SYMBOLS = new Set(["€", "£", "₦", "₵", "₹", "¥", "₩", "₽", "₺", "₱", "₫", "₪", "₴", "₡", "৳", "₭", "₮", "₲", "₼"]);
+const USD_WORDS = new Set(["dollar", "dollars"]);
+const CENT_WORDS = new Set(["cent", "cents"]);
+const FOREIGN_WORDS = new Set(["naira", "cedi", "cedis", "euro", "euros", "pound", "pounds"]);
+const NUMBER_RE = /^(?:(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?|\.(\d+))/;
 
 const LIST_LINE = /^[ \t]*(?:[-*•][ \t]+|\d+[.)][ \t]+)/;
-const ABBREVIATIONS = new Set([
-  "oz", "lb", "lbs", "g", "kg", "ml", "fl", "dr", "mr", "mrs", "ms", "st",
-  "etc", "vs", "no", "vol", "eg", "ie", "jr", "sr", "am", "pm", "us",
-]);
+const TITLES = new Set(["dr", "mr", "mrs", "ms", "st"]);
+const CONDITIONAL_ENDS = new Set(["oz", "lb", "lbs", "g", "kg", "ml", "fl", "am", "pm", "us", "no"]);
 
 const UNIT_PRICE_FIELDS = ["priceCents", "unitPriceCents"] as const;
 
@@ -48,63 +36,266 @@ export function groundAmounts(
   allowedCents: Set<number>,
 ): { text: string; stripped: string[] } {
   const stripped: string[] = [];
-  const lines = text.split("\n");
-  const next = lines.map((line) =>
-    LIST_LINE.test(line)
-      ? replaceListAmounts(line, allowedCents, stripped)
-      : replaceSentences(line, allowedCents, stripped),
-  );
-  return { text: collapsePhrases(next.join("\n")), stripped };
-}
-
-function amountToCents(match: string): number | null {
-  const body = match
-    .replace(/US\$|USD|dollars/gi, "")
-    .replace(/\$/g, "")
-    .replace(/,/g, "")
-    .trim();
-  const [whole, frac = ""] = body.split(".");
-  if (frac.length > 2) return null;
-  if (!/^\d+$/.test(whole)) return null;
-  const dollars = Number(whole);
-  if (!Number.isInteger(dollars)) return null;
-  if (frac.length === 0) return dollars * 100;
-  if (!/^\d+$/.test(frac)) return null;
-  if (frac.length === 1) return dollars * 100 + Number(frac) * 10;
-  return dollars * 100 + Number(frac);
-}
-
-function isForeign(raw: string): boolean {
-  return new RegExp(String.raw`[€£₦₵₹¥]|\b(?:${FOREIGN_CODES})\b`, "i").test(raw);
-}
-
-function tokenToCents(raw: string): number | null {
-  if (isForeign(raw)) return null;
-  const cents = raw.match(new RegExp(String.raw`(${INTEGER})\s*(?:¢|cents\b)`, "i"));
-  if (cents && !raw.includes("$") && !/USD/i.test(raw)) {
-    const value = Number(cents[1].replace(/,/g, ""));
-    return Number.isInteger(value) ? value : null;
+  const tokens = findMoney(text);
+  const lines = lineSpans(text);
+  let out = "";
+  let index = 0;
+  while (index < lines.length) {
+    let last = index;
+    let grew = true;
+    while (grew) {
+      grew = false;
+      const contentEnd = lines[last].contentEnd;
+      if (last + 1 < lines.length && tokens.some((token) => token.start < contentEnd && token.end > contentEnd)) {
+        last += 1;
+        grew = true;
+      }
+    }
+    const start = lines[index].start;
+    const end = lines[last].contentEnd;
+    const chunk = text.slice(start, end);
+    const local = tokens
+      .filter((token) => token.start >= start && token.end <= end)
+      .map((token) => ({ ...token, start: token.start - start, end: token.end - start }));
+    const firstLine = chunk.split("\n")[0] ?? chunk;
+    out += LIST_LINE.test(firstLine)
+      ? replaceListAmounts(chunk, local, allowedCents, stripped)
+      : replaceSentences(chunk, local, allowedCents, stripped);
+    out += lines[last].breakAfter;
+    index = last + 1;
   }
-  return amountToCents(raw);
+  return { text: collapsePhrases(out), stripped };
+}
+
+interface ParsedNumber {
+  end: number;
+  whole: string;
+  frac: string;
+}
+
+function lineSpans(text: string): Array<{ start: number; contentEnd: number; breakAfter: string }> {
+  const spans: Array<{ start: number; contentEnd: number; breakAfter: string }> = [];
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "\n") continue;
+    const contentEnd = index > start && text[index - 1] === "\r" ? index - 1 : index;
+    spans.push({ start, contentEnd, breakAfter: "\n" });
+    start = index + 1;
+  }
+  spans.push({ start, contentEnd: text.length, breakAfter: "" });
+  return spans;
+}
+
+/** One soft break may sit between a prefix, a number, and a suffix. A blank line may not. */
+function skipSoft(text: string, index: number): number {
+  let cursor = index;
+  while (text[cursor] === " " || text[cursor] === "\t") cursor += 1;
+  if (text[cursor] !== "\n" && text[cursor] !== "\r") return cursor;
+  let next = cursor;
+  if (text[next] === "\r") next += 1;
+  if (text[next] === "\n") next += 1;
+  if (text[next] === "\n" || text[next] === "\r") return index;
+  while (text[next] === " " || text[next] === "\t") next += 1;
+  return next;
+}
+
+function skipInline(text: string, index: number): number {
+  let cursor = index;
+  while (text[cursor] === " " || text[cursor] === "\t") cursor += 1;
+  return cursor;
+}
+
+function readWord(text: string, index: number): { raw: string; end: number } | null {
+  const match = /^[A-Za-z]+/.exec(text.slice(index));
+  if (!match) return null;
+  return { raw: match[0], end: index + match[0].length };
+}
+
+function readNumber(text: string, index: number): ParsedNumber | null {
+  const match = NUMBER_RE.exec(text.slice(index));
+  if (!match) return null;
+  const whole = (match[1] ?? "0").replace(/,/g, "");
+  const frac = match[2] ?? match[3] ?? "";
+  if (!/^\d+$/.test(whole) || (frac.length > 0 && !/^\d+$/.test(frac))) return null;
+  return { end: index + match[0].length, whole, frac };
+}
+
+function dollarCents(num: ParsedNumber): number | null {
+  if (num.frac.length > 2) return null;
+  const dollars = Number(num.whole);
+  if (!Number.isInteger(dollars)) return null;
+  if (num.frac.length === 0) return dollars * 100;
+  if (num.frac.length === 1) return dollars * 100 + Number(num.frac) * 10;
+  return dollars * 100 + Number(num.frac);
+}
+
+function centValue(num: ParsedNumber): number | null {
+  if (num.frac.length > 0) return null;
+  const value = Number(num.whole);
+  return Number.isInteger(value) ? value : null;
+}
+
+function codeKind(raw: string, glued: boolean): "usd" | "foreign" | null {
+  const lower = raw.toLowerCase();
+  if (!/^[a-z]{3}$/.test(lower) || !CODES.has(lower)) return null;
+  if (!LOOSE_CODES.has(lower) && !glued && raw !== raw.toUpperCase()) return null;
+  return lower === "usd" ? "usd" : "foreign";
+}
+
+function wordKind(raw: string, glued: boolean): "usd" | "cent" | "foreign" | null {
+  const lower = raw.toLowerCase();
+  if (USD_WORDS.has(lower)) return "usd";
+  if (CENT_WORDS.has(lower)) return "cent";
+  if (FOREIGN_WORDS.has(lower)) return "foreign";
+  return codeKind(raw, glued);
+}
+
+interface Suffix {
+  end: number;
+  foreign: boolean;
+  cent: boolean;
+}
+
+function readSuffix(text: string, index: number): Suffix | null {
+  const start = skipSoft(text, index);
+  if (start >= text.length) return null;
+  const symbol = text[start];
+  if (symbol === "¢") return { end: start + 1, foreign: false, cent: true };
+  if (symbol === "$" || FOREIGN_SYMBOLS.has(symbol)) {
+    return { end: start + 1, foreign: symbol !== "$", cent: false };
+  }
+  if (!/[A-Za-z]/.test(symbol)) return null;
+  const word = readWord(text, start);
+  if (!word) return null;
+  if (word.raw.toLowerCase() === "us") {
+    const next = readWord(text, skipInline(text, word.end));
+    if (!next || !USD_WORDS.has(next.raw.toLowerCase())) return null;
+    return { end: next.end, foreign: false, cent: false };
+  }
+  const kind = wordKind(word.raw, start === index);
+  if (!kind) return null;
+  let end = word.end;
+  let foreign = kind === "foreign";
+  let cent = kind === "cent";
+  if (kind !== "cent") {
+    const next = readWord(text, skipInline(text, end));
+    if (next) {
+      const nextKind = wordKind(next.raw, false);
+      if (nextKind === "usd" || nextKind === "foreign" || nextKind === "cent") {
+        end = next.end;
+        if (nextKind === "foreign") foreign = true;
+        if (nextKind === "cent") cent = true;
+      }
+    }
+  }
+  return { end, foreign, cent };
+}
+
+function centsOf(num: ParsedNumber, foreign: boolean, cent: boolean): number | null {
+  if (foreign) return null;
+  return cent ? centValue(num) : dollarCents(num);
+}
+
+function atBoundary(text: string, index: number): boolean {
+  if (index === 0) return true;
+  const prev = text[index - 1];
+  const current = text[index];
+  if (/[A-Za-z]/.test(current) && /[A-Za-z]/.test(prev)) return false;
+  if (/[0-9]/.test(current) && /[0-9.,]/.test(prev)) return false;
+  return true;
+}
+
+function pushToken(text: string, start: number, end: number, cents: number | null, into: MoneyToken[]) {
+  if (end <= start) return;
+  into.push({ start, end, raw: text.slice(start, end), cents });
 }
 
 function findMoney(text: string): MoneyToken[] {
-  const re = new RegExp(MONEY_SOURCE, "gi");
   const tokens: MoneyToken[] = [];
-  for (const match of text.matchAll(re)) {
-    const raw = match[0];
-    const start = match.index ?? 0;
-    tokens.push({ start, end: start + raw.length, raw, cents: tokenToCents(raw) });
+  let index = 0;
+  while (index < text.length) {
+    const consumed = matchMoney(text, index, tokens);
+    index = consumed != null && consumed > index ? consumed : index + 1;
   }
   return tokens;
+}
+
+function matchMoney(text: string, index: number, into: MoneyToken[]): number | null {
+  if (!atBoundary(text, index)) return null;
+  const letterDollar = /^([A-Za-z]{1,3})\$/.exec(text.slice(index));
+  if (letterDollar) {
+    const num = readNumber(text, skipSoft(text, index + letterDollar[0].length));
+    if (!num) return null;
+    const suffix = readSuffix(text, num.end);
+    const letters = letterDollar[1].toLowerCase();
+    const foreign = (letters !== "us" && letters !== "usd") || (suffix?.foreign ?? false);
+    const end = suffix?.end ?? num.end;
+    pushToken(text, index, end, centsOf(num, foreign, suffix?.cent ?? false), into);
+    return end;
+  }
+  const symbol = text[index];
+  if (symbol === "$" || FOREIGN_SYMBOLS.has(symbol)) {
+    const num = readNumber(text, skipSoft(text, index + 1));
+    if (!num) return null;
+    const suffix = readSuffix(text, num.end);
+    const foreign = symbol !== "$" || (suffix?.foreign ?? false);
+    const end = suffix?.end ?? num.end;
+    pushToken(text, index, end, centsOf(num, foreign, suffix?.cent ?? false), into);
+    return end;
+  }
+  const word = readWord(text, index);
+  if (word?.raw.toLowerCase() === "us") {
+    const dollars = readWord(text, skipInline(text, word.end));
+    if (dollars && USD_WORDS.has(dollars.raw.toLowerCase())) {
+      const prefixed = readPrefixedNumber(text, dollars.end);
+      if (prefixed) {
+        const suffix = readSuffix(text, prefixed.end);
+        const foreign = prefixed.symbolForeign || (suffix?.foreign ?? false);
+        const end = suffix?.end ?? prefixed.end;
+        pushToken(text, index, end, centsOf(prefixed.num, foreign, suffix?.cent ?? false), into);
+        return end;
+      }
+    }
+  }
+  if (word) {
+    const prefixed = readPrefixedNumber(text, word.end);
+    if (prefixed) {
+      const kind = wordKind(word.raw, prefixed.glued);
+      if (kind) {
+        const suffix = readSuffix(text, prefixed.end);
+        const foreign = kind === "foreign" || prefixed.symbolForeign || (suffix?.foreign ?? false);
+        const end = suffix?.end ?? prefixed.end;
+        pushToken(text, index, end, centsOf(prefixed.num, foreign, (suffix?.cent ?? false) || kind === "cent"), into);
+        return end;
+      }
+    }
+  }
+  const num = readNumber(text, index);
+  if (!num) return null;
+  const suffix = readSuffix(text, num.end);
+  if (!suffix) return null;
+  pushToken(text, index, suffix.end, centsOf(num, suffix.foreign, suffix.cent), into);
+  return suffix.end;
+}
+
+function readPrefixedNumber(text: string, index: number): { end: number; num: ParsedNumber; symbolForeign: boolean; glued: boolean } | null {
+  const start = skipSoft(text, index);
+  let cursor = start;
+  let symbolForeign = false;
+  if (cursor < text.length && (text[cursor] === "$" || FOREIGN_SYMBOLS.has(text[cursor]))) {
+    symbolForeign = text[cursor] !== "$";
+    cursor = skipSoft(text, cursor + 1);
+  }
+  const num = readNumber(text, cursor);
+  if (!num) return null;
+  return { end: num.end, num, symbolForeign, glued: start === index && !symbolForeign && cursor === start };
 }
 
 function allowedToken(token: MoneyToken, allowedCents: Set<number>): boolean {
   return token.cents != null && allowedCents.has(token.cents);
 }
 
-function replaceListAmounts(line: string, allowedCents: Set<number>, stripped: string[]): string {
-  const tokens = findMoney(line);
+function replaceListAmounts(line: string, tokens: MoneyToken[], allowedCents: Set<number>, stripped: string[]): string {
   if (tokens.length === 0) return line;
   let out = "";
   let cursor = 0;
@@ -120,6 +311,16 @@ function replaceListAmounts(line: string, allowedCents: Set<number>, stripped: s
   return out + line.slice(cursor);
 }
 
+function endsOnCapital(text: string, period: number): boolean {
+  let cursor = period + 1;
+  if (cursor >= text.length || !/\s/.test(text[cursor])) return false;
+  while (cursor < text.length && /[ \t]/.test(text[cursor])) cursor += 1;
+  if (text[cursor] === "\r") cursor += 1;
+  if (text[cursor] === "\n") cursor += 1;
+  while (cursor < text.length && /[ \t]/.test(text[cursor])) cursor += 1;
+  return /[A-Z]/.test(text[cursor] ?? "");
+}
+
 function isSentenceEnd(text: string, index: number, tokens: MoneyToken[]): boolean {
   const ch = text[index];
   if (ch !== "." && ch !== "!" && ch !== "?") return false;
@@ -128,14 +329,17 @@ function isSentenceEnd(text: string, index: number, tokens: MoneyToken[]): boole
     const before = text.slice(0, index);
     if (/\d$/.test(before) && /\d/.test(text[index + 1] ?? "")) return false;
     const word = /([A-Za-z]+)$/.exec(before);
-    if (word && (word[1].length === 1 || ABBREVIATIONS.has(word[1].toLowerCase()))) return false;
+    if (word) {
+      const lower = word[1].toLowerCase();
+      if (word[1].length === 1 || TITLES.has(lower)) return false;
+      if (CONDITIONAL_ENDS.has(lower)) return endsOnCapital(text, index);
+    }
   }
   const next = text[index + 1];
   return next === undefined || /\s/.test(next);
 }
 
-function replaceSentences(line: string, allowedCents: Set<number>, stripped: string[]): string {
-  const tokens = findMoney(line);
+function replaceSentences(line: string, tokens: MoneyToken[], allowedCents: Set<number>, stripped: string[]): string {
   if (tokens.length === 0) return line;
   const ends: number[] = [];
   for (let index = 0; index < line.length; index += 1) {

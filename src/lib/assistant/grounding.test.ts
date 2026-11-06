@@ -75,6 +75,18 @@ describe("price grounding", () => {
     expect(groundAmounts("EUR 10.99", usd).stripped).toEqual(["EUR 10.99"]);
     expect(groundAmounts("10.99 EUR", usd).stripped).toEqual(["10.99 EUR"]);
 
+    const spoken = groundAmounts(
+      "Egusi is $10.99 per lb. It costs 10.99€, AUD $10.99, C$10.99, $10.99CAD and 16,500 naira.\nUSD\n7.77.",
+      usd,
+    );
+    expect(spoken.text).toBe(`Egusi is $10.99 per lb. ${PHRASE}`);
+    expect(spoken.stripped).toEqual(["10.99€", "AUD $10.99", "C$10.99", "$10.99CAD", "16,500 naira", "USD\n7.77"]);
+    expect(groundAmounts("7.77\nUSD", new Set()).stripped).toEqual(["7.77\nUSD"]);
+    expect(groundAmounts("We close at 9 PM. Ogbono is $7.77.", usd).text).toBe(`We close at 9 PM. ${PHRASE}`);
+    const fractional = groundAmounts("- A: 1.99 cents\n- B: 4.505 cents", new Set([99, 505]));
+    expect(fractional.text).toBe("- A: price not confirmed\n- B: price not confirmed");
+    expect(fractional.stripped).toEqual(["1.99 cents", "4.505 cents"]);
+
     const bare = "2 tins, 8 oz, 9:00 PM, 22:00-02:00, exp 12/30";
     expect(groundAmounts(bare, usd)).toEqual({ text: bare, stripped: [] });
 
