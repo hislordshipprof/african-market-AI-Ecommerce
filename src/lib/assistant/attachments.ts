@@ -183,18 +183,28 @@ export async function prepareAttachments(files: IncomingFile[]): Promise<
   return { ok: true, files: prepared };
 }
 
+function keepExtension(name: string, mediaType: string): string {
+  const fallbackExt = mediaType === "application/pdf" ? ".pdf" : ".jpg";
+  const dot = name.lastIndexOf(".");
+  const rawExt = dot > 0 ? name.slice(dot).toLowerCase() : fallbackExt;
+  const ext = /^\.[a-z0-9]{1,8}$/.test(rawExt) ? rawExt : fallbackExt;
+  const stem = (dot > 0 ? name.slice(0, dot) : name).replace(/\s+/g, " ").trim();
+  const room = Math.max(1, 80 - ext.length);
+  return `${stem.slice(0, room).trim()}${ext}`;
+}
+
 export function safeAttachmentName(filename: string, index: number, mediaType: string): string {
   const base = filename.split(/[/\\]/).pop() ?? "";
   const cleaned = base
     .normalize("NFKC")
     .replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "")
     .replace(/[^0-9A-Za-z ._()\-]/g, "")
-    .trim()
-    .slice(0, 80);
+    .trim();
   const fallback = mediaType === "application/pdf" ? `document-${index}.pdf` : `photo-${index}.jpg`;
   const named = cleaned.length > 0 ? cleaned : fallback;
-  const scrubbed = scrubCardNumbers(named).text.replace(/\s+/g, " ").trim().slice(0, 80);
-  return scrubbed.length > 0 ? scrubbed : fallback;
+  const scrubbed = scrubCardNumbers(keepExtension(named, mediaType)).text.replace(/\s+/g, " ").trim();
+  const capped = keepExtension(scrubbed.length > 0 ? scrubbed : fallback, mediaType);
+  return capped.length > 0 ? capped : fallback;
 }
 
 export function descriptorsMatch(stored: AttachmentDescriptor[], files: IncomingFile[]): boolean {

@@ -4,6 +4,8 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
 import { auth } from "../auth";
 import { authPrisma, storeScoped, storeScopedTransaction } from "../db";
 
@@ -555,6 +557,66 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const stored = await storeScoped(storeId).aiConversation.findMany({ where: { storeId } });
     expect(JSON.stringify(stored.map((row) => row.messages))).toContain("[card number removed]");
     expect(logs.join("\n")).not.toContain("4242");
+
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: 4242424242424242 } },
+        { kind: "text", text: "I cannot search that." },
+      ],
+    });
+    const sensitive = await createChatHandler({
+      model: createAssistantModel({ fetch: fake.fetch }),
+    })(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.71",
+      },
+      body: JSON.stringify({
+        message: {
+          id: "card-file-turn1",
+          role: "user",
+          parts: [
+            { type: "text", text: "read this" },
+            {
+              type: "file",
+              mediaType: "image/jpeg",
+              filename: "4242424242424242.jpg",
+              url: `data:image/jpeg;base64,${jpeg.toString("base64")}`,
+            },
+          ],
+        },
+      }),
+    }));
+    const stream = await sensitive.text();
+    expect(stream).not.toContain("4242424242424242");
+    expect(stream).not.toContain("4242");
+    const again = await storeScoped(storeId).aiConversation.findMany({ where: { storeId } });
+    const savedText = JSON.stringify(again.map((row) => row.messages));
+    expect(savedText).not.toContain("4242424242424242");
+    expect(JSON.stringify(fake.requests)).not.toContain("4242424242424242");
+    const audits = await storeScoped(storeId).aiAction.findMany({ where: { storeId } });
+    expect(JSON.stringify(audits)).not.toContain("4242424242424242");
+    expect(logs.join("\n")).not.toContain("4242");
+
+    const split = strictModel(() => [
+      { type: "stream-start", warnings: [] },
+      { type: "text-start", id: "split" },
+      { type: "text-delta", id: "split", delta: "4242 42" },
+      { type: "text-delta", id: "split", delta: "42 4242 4242" },
+      { type: "text-end", id: "split" },
+      { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+    ]);
+    const splitResponse = await createChatHandler({ model: split.model })(request("plain rice", { ip: "203.0.113.72" }));
+    const splitBody = await splitResponse.text();
+    expect(splitBody).not.toContain("4242");
+    expect(splitBody).toContain("[card number removed]");
   });
 
   it("an expired lease is taken over", async () => {
@@ -1437,7 +1499,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       }),
     }));
     expect(fileTurn.status).toBe(200);
-    await fileTurn.text();
+    const fileBody = await fileTurn.text();
+    expect(fileBody).toContain("I found some of the list");
     const fileRequests = requests.splice(0, requests.length);
     expect(fileRequests.length).toBeGreaterThan(0);
     for (const sent of fileRequests) {
@@ -1457,7 +1520,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       }),
     }));
     expect(textTurn.status).toBe(200);
-    await textTurn.text();
+    const textBody = await textTurn.text();
+    expect(textBody).toContain("Here is what I found.");
     expect(requests.length).toBeGreaterThan(0);
     for (const sent of requests) {
       const blocks = (sent.messages ?? []).flatMap((message) => Array.isArray(message.content) ? message.content : []);
@@ -1683,6 +1747,31 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       body: JSON.stringify({ email: "quota-nobody@example.com", password: "not-a-real-password" }),
     }));
     expect(await countRows()).toBe(10);
+    const productionAuth = betterAuth({
+      baseURL: "http://localhost:3000",
+      secret: process.env.BETTER_AUTH_SECRET,
+      database: prismaAdapter(raw, { provider: "postgresql" }),
+      emailAndPassword: { enabled: true },
+      rateLimit: {
+        enabled: true,
+        storage: "database",
+        modelName: "rateLimit",
+        window: 60,
+        max: 5,
+        customRules: { "/sign-in/email": { window: 60, max: 5 } },
+      },
+    });
+    await productionAuth.handler(new Request("http://localhost:3000/api/auth/sign-in/email", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost:3000",
+        "x-forwarded-for": authIp,
+      },
+      body: JSON.stringify({ email: "quota-nobody@example.com", password: "not-a-real-password" }),
+    }));
+    expect(await raw.rateLimit.findUnique({ where: { key: staleKey } })).toBeNull();
+    expect(await countRows()).toBe(10);
     await raw.rateLimit.deleteMany({ where: { key: { in: [authKey, staleKey] } } });
     const callsAtCap = calls;
     clock = new Date(clock.getTime() + 30 * 60 * 1000);
@@ -1708,7 +1797,192 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const later = await send("quota-later-abcd", [photo("list.jpg")], "198.51.100.27");
     expect(later.status).toBe(200);
     await later.text();
+
+    const rolling = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const rollingCookie = `cart_id=${encodeURIComponent(rolling.id)}`;
+    const rollingKey = `assistant:files:cart:${rolling.id}`;
+    const rollingHeaders = { ...headers, cookie: rollingCookie };
+    async function rollingSend(id: string, ip: string) {
+      return handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: { ...rollingHeaders, "x-forwarded-for": ip },
+        body: JSON.stringify({ message: { id, role: "user", parts: [photo("list.jpg")] } }),
+      }));
+    }
+    clock = new Date("2032-07-01T00:00:00.000Z");
+    for (let i = 0; i < 6; i += 1) {
+      const ok = await rollingSend(`roll-early-${i}-abcd`, `198.51.100.${30 + i}`);
+      expect(ok.status, `early ${i}`).toBe(200);
+      await ok.text();
+    }
+    clock = new Date("2032-07-01T00:50:00.000Z");
+    for (let i = 0; i < 4; i += 1) {
+      const ok = await rollingSend(`roll-late-${i}-abcd`, `198.51.100.${40 + i}`);
+      expect(ok.status, `late ${i}`).toBe(200);
+      await ok.text();
+    }
+    clock = new Date("2032-07-01T01:01:00.000Z");
+    for (let i = 0; i < 6; i += 1) {
+      const ok = await rollingSend(`roll-next-${i}-abcd`, `198.51.100.${50 + i}`);
+      expect(ok.status, `next ${i}`).toBe(200);
+      await ok.text();
+    }
+    const still = await rollingSend("roll-over-limit-abcd", "198.51.100.60");
+    expect(still.status).toBe(429);
+    expect((await still.json()).error.code).toBe("attachment_rate_limited");
+    const rollingRows = await raw.$queryRaw<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count FROM assistant_file_turns WHERE key = ${rollingKey} AND at_ms > ${BigInt(clock.getTime() - 60 * 60 * 1000)}`;
+    expect(Number(rollingRows[0]?.count ?? 0)).toBe(10);
   }, 90_000);
+
+  it("a files-only retry resends its files once and a completed id replays without bytes", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    const requests: Array<{ messages?: Array<{ role?: string; content?: unknown }> }> = [];
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const handler = createChatHandler({
+      model: createAssistantModel({
+        fetch: async (input, init) => {
+          const rawBody = typeof init?.body === "string" ? init.body : "";
+          if (rawBody) requests.push(JSON.parse(rawBody));
+          return scriptedAssistantFetch(input, init);
+        },
+      }),
+    });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie,
+    };
+    const photo = {
+      type: "file",
+      mediaType: "image/jpeg",
+      filename: "list.jpg",
+      url: `data:image/jpeg;base64,${jpeg.toString("base64")}`,
+    };
+    const failed = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.210" },
+      body: JSON.stringify({
+        message: { id: "retry-file-a1", role: "user", parts: [{ type: "text", text: "file overload" }, photo] },
+      }),
+    }));
+    expect(failed.status).toBe(200);
+    await failed.text();
+    const stored = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId: cart.id } });
+    const prior = Array.isArray(stored?.messages) ? stored.messages : [];
+    const fillers = Array.from({ length: 40 }, (_, index) => ([
+      { id: `filler-user-${index}-abcd`, role: "user", parts: [{ type: "text", text: `filler note ${index}` }] },
+      { id: `filler-assistant-${index}-ab`, role: "assistant", parts: [{ type: "text", text: "noted" }] },
+    ])).flat();
+    await storeScoped(storeId).aiConversation.update({
+      where: { id: stored!.id },
+      data: { messages: [...prior, ...fillers] as unknown as never },
+    });
+    const later = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.211" },
+      body: JSON.stringify({
+        message: { id: "later-text-b2", role: "user", parts: [{ type: "text", text: "plantain on the side" }] },
+      }),
+    }));
+    expect(later.status).toBe(200);
+    expect(await later.text()).toContain("Here is what I found.");
+    const beforeRetry = requests.length;
+    const retry = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.212" },
+      body: JSON.stringify({
+        message: { id: "retry-file-a1", role: "user", parts: [{ type: "text", text: "rice from the photo" }, photo] },
+      }),
+    }));
+    const retryBody = await retry.text();
+    expect(retry.status).toBe(200);
+    expect(retryBody).toContain("I found some of the list");
+    const retryRequests = requests.slice(beforeRetry);
+    expect(retryRequests.length).toBeGreaterThan(0);
+    for (const sent of retryRequests) {
+      const serialized = JSON.stringify(sent.messages);
+      expect(serialized).toContain("plantain on the side");
+      const imageMessage = (sent.messages ?? []).find((message) => JSON.stringify(message.content).includes('"type":"image"'));
+      expect(JSON.stringify(imageMessage?.content)).toContain("rice from the photo");
+      expect(JSON.stringify(imageMessage?.content)).not.toContain("plantain on the side");
+    }
+    const callsBeforeReplay = requests.length;
+    const replay = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.213" },
+      body: JSON.stringify({ message: { id: "later-text-b2", role: "user", parts: [] } }),
+    }));
+    expect(replay.status).toBe(200);
+    expect(await replay.text()).toContain("Here is what I found.");
+    expect(requests.length).toBe(callsBeforeReplay);
+  }, 60_000);
+
+  it("overlapping requests cannot infer twice for one completed file id", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    await storeScoped(storeId).cartLine.create({
+      data: { storeId, cartId: cart.id, variantId, qty: 1, swapRule: "exact_only", source: "manual" },
+    });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    let releaseSnapshot: () => void = () => {};
+    const snapshotHeld = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    let seenSnapshot = false;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const model = createAssistantModel({ fetch: scriptedAssistantFetch });
+    const handlerA = createChatHandler({ model });
+    const handlerB = createChatHandler({
+      model,
+      afterSnapshot: async () => {
+        if (seenSnapshot) return;
+        seenSnapshot = true;
+        await snapshotHeld;
+      },
+    });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie,
+    };
+    const textOnly = handlerB(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.230" },
+      body: JSON.stringify({
+        message: { id: "race-same-id1", role: "user", parts: [{ type: "text", text: "add two egusi" }] },
+      }),
+    }));
+    await vi.waitFor(() => expect(seenSnapshot).toBe(true));
+    const fileFail = await handlerA(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.231" },
+      body: JSON.stringify({
+        message: {
+          id: "race-same-id1",
+          role: "user",
+          parts: [
+            { type: "text", text: "file overload" },
+            { type: "file", mediaType: "image/jpeg", filename: "list.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    await fileFail.text();
+    releaseSnapshot();
+    const textResult = await textOnly;
+    const textBody = await textResult.text();
+    expect(textResult.status).toBe(400);
+    expect(textBody).toContain("attachment_missing");
+    const line = await storeScoped(storeId).cartLine.findFirst({ where: { cartId: cart.id, variantId } });
+    expect(line?.qty).toBe(1);
+  });
 });
 
 function padJpeg(jpeg: Buffer, target: number): Buffer {

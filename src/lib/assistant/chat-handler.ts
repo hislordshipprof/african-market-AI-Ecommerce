@@ -56,6 +56,8 @@ const RESTING_MESSAGE = "The helper is resting right now. You can still shop and
 export interface ChatHandlerOptions {
   model?: LanguageModel;
   now?: () => Date;
+  /** Test seam. Runs after the unlocked transcript read and before classification. */
+  afterSnapshot?: (messages: UIMessage[]) => Promise<void>;
 }
 
 export function createChatHandler(options: ChatHandlerOptions = {}) {
@@ -128,6 +130,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       where: { storeId_cartId: { storeId: store.id, cartId } },
     });
     const storedMessages = asMessages(lookedUp?.messages);
+    if (options.afterSnapshot) await options.afterSnapshot(storedMessages);
     const storedUser = storedMessages.find((message) => message.role === "user" && message.id === parsed.id);
     const storedFiles = storedUser ? attachmentDescriptors(storedUser) : [];
     const sameFiles = parsed.files.length === 0 || (storedFiles.length > 0 && descriptorsMatch(storedFiles, parsed.files));
@@ -141,7 +144,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       if (storedFiles.length > 0) return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
       return jsonError(400, "invalid_request", "Write between 1 and 2000 characters.");
     }
-    const fileTurn = parsed.files.length > 0 || storedFiles.length > 0;
+    let fileTurn = parsed.files.length > 0 || storedFiles.length > 0;
     if (fileTurn && parsed.files.length === 0) {
       return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
     }
@@ -165,9 +168,20 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     }
 
     const leasedAt = now();
-    const turn = await takeTurn(store.id, cartId, userId, leasedAt, modelId, parsed.id);
+    const turn = await takeTurn(
+      store.id,
+      cartId,
+      userId,
+      leasedAt,
+      modelId,
+      parsed.id,
+      prepared.map((file) => file.descriptor.digest),
+    );
     if (!turn) return jsonError(409, "assistant_busy", "The helper is still working on the previous message.");
+    if ("missing" in turn) return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
+    if ("conflict" in turn) return jsonError(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
     if ("replay" in turn) return replayAssistantMessage(turn.replay as UIMessage, headers);
+    fileTurn = turn.fileTurn;
 
     const scrubbed = scrubCardNumbers(parsed.text).text;
     const userMessage: UIMessage = {
@@ -210,16 +224,28 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     let modelMessages: ModelMessage[];
     try {
       let attachmentIndex = 0;
-      modelMessages = await convertToModelMessages(retryVisible(history, parsed.id, alreadyThere), {
+      const visible = retryVisible(history, parsed.id, alreadyThere).map((message) => {
+        if (message.id !== parsed.id) return message;
+        return {
+          ...message,
+          parts: message.parts.map((part) => {
+            if (part.type !== "data-attachment") return part;
+            const data = part.data as Record<string, unknown>;
+            return { ...part, data: { ...data, turnId: parsed.id } };
+          }),
+        };
+      });
+      modelMessages = await convertToModelMessages(visible, {
         tools,
         convertDataPart: (part) => {
           if (part.type !== "data-attachment") return undefined;
-          const data = part.data as AttachmentDescriptor & { index?: number };
+          const data = part.data as AttachmentDescriptor & { index?: number; turnId?: string };
           attachmentIndex += 1;
-          return { type: "text", text: attachmentNote(data, data.index ?? attachmentIndex) };
+          const note = attachmentNote(data, data.index ?? attachmentIndex);
+          return { type: "text", text: data.turnId === parsed.id ? `${note}\nTURN:${parsed.id}` : note };
         },
       });
-      if (prepared.length > 0) overlayCurrentFiles(modelMessages, scrubbed, prepared);
+      if (prepared.length > 0) overlayCurrentFiles(modelMessages, parsed.id, scrubbed, prepared);
     } catch {
       console.error("[assistant] message could not be prepared", turn.id);
       await releaseLease(store.id, turn.id);
@@ -246,6 +272,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       maxRetries: 0,
       streamRetries: 0,
       timeout: { totalMs: fileTurn ? 45_000 : 55_000 },
+      prepareStep: ({ messages }) => ({ messages: scrubKnownStrings(messages) as typeof messages }),
       providerOptions: assistantProviderOptions(modelId),
       experimental_transform: groundingTransform({
         onStrip: (amount) => {
@@ -432,12 +459,13 @@ async function takeTurn(
   at: Date,
   modelId: ReturnType<typeof assistantModelId>,
   clientId: string,
+  incomingDigests: string[],
 ) {
   try {
-    return await claimFirstTurn(storeId, cartId, userId, at, modelId, clientId);
+    return await claimFirstTurn(storeId, cartId, userId, at, modelId, clientId, incomingDigests);
   } catch (error) {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
-    return claimFirstTurn(storeId, cartId, userId, at, modelId, clientId);
+    return claimFirstTurn(storeId, cartId, userId, at, modelId, clientId, incomingDigests);
   }
 }
 
@@ -449,6 +477,7 @@ async function claimFirstTurn(
   at: Date,
   modelId: ReturnType<typeof assistantModelId>,
   clientId: string,
+  incomingDigests: string[],
 ) {
   const until = new Date(at.getTime() + LEASE_MS);
   const cart = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
@@ -469,14 +498,25 @@ async function claimFirstTurn(
     await lockConversationRow(tx, row.id);
     const fresh = await tx.aiConversation.findUnique({ where: { id: row.id } });
     if (!fresh) return null;
-    const finished = completedAssistant(asMessages(fresh.messages), clientId);
-    if (finished) return { replay: finished };
+    const freshMessages = asMessages(fresh.messages);
+    const storedNow = freshMessages.find((message) => message.role === "user" && message.id === clientId);
+    const storedNowFiles = storedNow ? attachmentDescriptors(storedNow) : [];
+    const digestsMatch = storedNowFiles.length === incomingDigests.length
+      && storedNowFiles.every((descriptor, index) => descriptor.digest === incomingDigests[index]);
+    const finished = completedAssistant(freshMessages, clientId);
+    if (finished && (incomingDigests.length === 0 || digestsMatch)) return { replay: finished };
+    if (storedNowFiles.length > 0 && incomingDigests.length > 0 && !digestsMatch) return { conflict: true as const };
+    if (storedNowFiles.length > 0 && incomingDigests.length === 0) return { missing: true as const };
     if (fresh.inFlightUntil && fresh.inFlightUntil.getTime() > at.getTime()) return null;
     await tx.aiConversation.update({
       where: { id: fresh.id },
       data: { inFlightUntil: until },
     });
-    return { id: fresh.id, messages: fresh.messages };
+    return {
+      id: fresh.id,
+      messages: fresh.messages,
+      fileTurn: incomingDigests.length > 0 || storedNowFiles.length > 0,
+    };
   });
 }
 
@@ -495,12 +535,10 @@ function scrubOutboundChunk(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const part = value as { type?: string; input?: unknown; output?: unknown; errorText?: unknown };
   if (part.type === "tool-input-delta") return null;
+  if (typeof part.type === "string" && part.type.includes("error")) return scrubKnownStrings(part);
   if (part.type === "tool-input-available") return { ...part, input: scrubKnownStrings(part.input) };
   if (part.type === "tool-output-available" || part.type === "tool-result") {
     return { ...part, output: scrubKnownStrings(part.output) };
-  }
-  if (typeof part.errorText === "string") {
-    return { ...part, errorText: scrubCardNumbers(part.errorText).text };
   }
   return value;
 }
@@ -516,12 +554,12 @@ function scrubUiMessages(messages: UIMessage[]): UIMessage[] {
   }));
 }
 
-function overlayCurrentFiles(messages: ModelMessage[], text: string, files: PreparedAttachment[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
+function overlayCurrentFiles(messages: ModelMessage[], turnId: string, text: string, files: PreparedAttachment[]) {
+  const marker = `TURN:${turnId}`;
+  for (const message of messages) {
     if (message.role !== "user" || !Array.isArray(message.content)) continue;
-    const blocks = message.content as Array<{ type: string }>;
-    if (blocks.every((part) => part.type === "tool-result")) continue;
+    const marked = message.content.some((part) => part.type === "text" && part.text.includes(marker));
+    if (!marked) continue;
     message.content = [
       ...files.map((file) => ({ type: "file" as const, data: file.modelBytes, mediaType: file.modelMediaType })),
       ...(text ? [{ type: "text" as const, text }] : []),

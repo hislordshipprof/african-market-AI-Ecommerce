@@ -93,6 +93,10 @@ const OPAQUE_KEYS = new Set([
 /** Card numbers in customer-visible or audited strings. Opaque ids are left as they are. */
 export function scrubKnownStrings(value: unknown): unknown {
   if (typeof value === "string") return scrubCardNumbers(value).text;
+  if (typeof value === "number" && Number.isSafeInteger(value) && luhnValid(String(value))) {
+    return "[card number removed]";
+  }
+  if (value instanceof Uint8Array) return value;
   if (Array.isArray(value)) return value.map((item) => scrubKnownStrings(item));
   if (!value || typeof value !== "object") return value;
   const out: Record<string, unknown> = {};

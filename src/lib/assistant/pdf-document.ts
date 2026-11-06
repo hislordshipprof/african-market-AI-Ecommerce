@@ -1,6 +1,3 @@
-import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
-
 const PAGE_LIMIT = 10;
 const PARSE_MS = 8_000;
 
@@ -8,24 +5,19 @@ export type PdfRead =
   | { ok: true; pages: number }
   | { ok: false; code: "attachment_encrypted" | "attachment_pages" | "attachment_type" };
 
-let workerReady = false;
-
 /**
  * Page count and encryption only. The worker takes ownership of the typed
  * array it is given, so callers pass a copy and keep their own bytes.
+ * Node runs pdf.js on the main thread (`PDFWorker` disables the worker there),
+ * so the route must not resolve `pdf.worker.mjs`: a production bundle turns
+ * `require.resolve` of that file into a numeric module id and `pathToFileURL`
+ * then throws before any page is read.
  * `isEvalSupported: false` is the pdf.js 4.2.67+ CVE-2024-4367 switch. 6.5
  * no longer evaluates font programs; the flag stays so a future build cannot
  * turn that path back on unnoticed.
  */
 export async function readPdfDocument(bytes: Uint8Array): Promise<PdfRead> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  if (!workerReady) {
-    const require = createRequire(import.meta.url);
-    pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
-      require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs"),
-    ).href;
-    workerReady = true;
-  }
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   let askedForPassword = false;
