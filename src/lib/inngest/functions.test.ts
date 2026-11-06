@@ -4,7 +4,9 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import * as dbModule from "../db";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, reset as resetFakeStripe, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
+import { cancelledPayments, captureCalls, fakeStripeProvider, reset as resetFakeStripe, scriptRetrieveStatuses, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
+import { inngest } from "./client";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -55,6 +57,7 @@ function getHandler(inngestFn: unknown): Handler {
 describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
   let rawPrisma: PrismaClient;
   let storeId: string;
+  let storeBId = "";
   let customerId: string;
   let variantId: string;
 
@@ -83,6 +86,25 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
     });
     storeId = store.id;
 
+    const storeB = await rawPrisma.store.upsert({
+      where: { slug: "inngest-fn-test-b" },
+      update: {
+        stripeAccountId: "acct_test_inngest_b",
+        hours: WEEKDAY_HOURS,
+        timezone: "America/New_York",
+      },
+      create: {
+        slug: "inngest-fn-test-b",
+        name: "Inngest Function Test Store B",
+        themePreset: "lagoon-and-coral",
+        prepTimeMinutes: 25,
+        stripeAccountId: "acct_test_inngest_b",
+        hours: WEEKDAY_HOURS,
+        timezone: "America/New_York",
+      },
+    });
+    storeBId = storeB.id;
+
     const scoped = storeScoped(storeId);
     const listing = await scoped.listing.create({
       data: { storeId, customName: "Inngest Test Product", price: 1000, stockMode: "unlimited", frozen: false, perishable: false },
@@ -100,18 +122,19 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
 
   afterAll(async () => {
     setStripeProvider(null);
+    const owned = [storeId, storeBId].filter((id) => id.length > 0);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.auditLog.deleteMany({ where: { storeId } }),
-      rawPrisma.stockEvent.deleteMany({ where: { storeId } }),
-      rawPrisma.orderLine.deleteMany({ where: { storeId } }),
-      rawPrisma.order.deleteMany({ where: { storeId } }),
-      rawPrisma.customer.deleteMany({ where: { storeId } }),
-      rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId } } }),
-      rawPrisma.listing.deleteMany({ where: { storeId } }),
+      rawPrisma.auditLog.deleteMany({ where: { storeId: { in: owned } } }),
+      rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: owned } } }),
+      rawPrisma.orderLine.deleteMany({ where: { storeId: { in: owned } } }),
+      rawPrisma.order.deleteMany({ where: { storeId: { in: owned } } }),
+      rawPrisma.customer.deleteMany({ where: { storeId: { in: owned } } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: owned } } } }),
+      rawPrisma.listing.deleteMany({ where: { storeId: { in: owned } } }),
     ]);
-    await rawPrisma.store.deleteMany({ where: { slug: "inngest-fn-test" } });
+    await rawPrisma.store.deleteMany({ where: { slug: { in: ["inngest-fn-test", "inngest-fn-test-b"] } } });
     await rawPrisma.$disconnect();
   });
 
@@ -670,5 +693,200 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
       expect(updated!.status).toBe("CANCELLED");
     });
+  });
+
+  async function orderSnapshot(ownerId: string, orderId: string) {
+    const order = await storeScoped(ownerId).order.findUnique({ where: { id: orderId } });
+    const audits = await storeScoped(ownerId).auditLog.findMany({
+      where: { entityId: orderId },
+      orderBy: { action: "asc" },
+    });
+    return {
+      status: order?.status ?? null,
+      capturedAmountCents: order?.capturedAmountCents ?? null,
+      inngestEventSentAt: order?.inngestEventSentAt?.toISOString() ?? null,
+      updatedAt: order?.updatedAt.toISOString() ?? null,
+      audits: audits.map((row) => `${row.entityType}:${row.action}`),
+    };
+  }
+
+  it("another store's id cannot alert, cancel, reconcile or send for this order", async () => {
+    const { acceptanceAlert, autoCancel, recordReconcileResult } = await import("./functions");
+    const { sendOrderAuthorized } = await import("./send");
+    const alert = getHandler(acceptanceAlert);
+    const cancel = getHandler(autoCancel);
+    const sendSpy = vi.spyOn(inngest, "send").mockResolvedValue({ ids: ["evt_188_cross_store"] });
+    const open = new Date("2026-11-03T14:00:00-05:00");
+    try {
+      const cases = [
+        async () => {
+          const order = await createTestOrder();
+          return { order, run: () => withMockedTime(open, () => alert({ event: { data: { orderId: order.id, storeId: storeBId } }, step: makeFakeStep() })) };
+        },
+        async () => {
+          const order = await createTestOrder();
+          return { order, run: () => withMockedTime(open, () => cancel({ event: { data: { orderId: order.id, storeId: storeBId } }, step: makeFakeStep() })) };
+        },
+        async () => {
+          const order = await createTestOrder();
+          await storeScopedTransaction(storeId, async (tx) => {
+            await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING", acceptedAt: new Date() } });
+          });
+          return { order, run: () => withMockedTime(open, () => cancel({ event: { data: { orderId: order.id, storeId: storeBId } }, step: makeFakeStep() })) };
+        },
+        async () => {
+          const order = await createTestOrder();
+          await storeScopedTransaction(storeId, async (tx) => {
+            await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
+          });
+          scriptRetrieveStatuses(order.paymentIntentId!, ["processing"]);
+          return { order, run: () => recordReconcileResult(storeBId, order.id) };
+        },
+        async () => {
+          const order = await createTestOrder();
+          return { order, run: () => sendOrderAuthorized(storeBId, order.id) };
+        },
+      ];
+      for (const build of cases) {
+        const { order, run } = await build();
+        const beforeA = await orderSnapshot(storeId, order.id);
+        const beforeB = await orderSnapshot(storeBId, order.id);
+        const stripe = { cancelled: cancelledPayments.size, captures: captureCalls.length, sends: sendSpy.mock.calls.length };
+        await run();
+        expect(await orderSnapshot(storeId, order.id)).toEqual(beforeA);
+        expect(await orderSnapshot(storeBId, order.id)).toEqual(beforeB);
+        expect(cancelledPayments.size).toBe(stripe.cancelled);
+        expect(captureCalls.length).toBe(stripe.captures);
+        expect(sendSpy.mock.calls.length).toBe(stripe.sends);
+      }
+
+      const alertOrder = await createTestOrder();
+      await withMockedTime(open, () => alert({ event: { data: { orderId: alertOrder.id, storeId } }, step: makeFakeStep() }));
+      const alertAudits = await storeScoped(storeId).auditLog.findMany({
+        where: { entityId: alertOrder.id, action: "acceptance_alert", entityType: "order" },
+      });
+      expect(alertAudits).toHaveLength(1);
+
+      const authorized = await createTestOrder();
+      await withMockedTime(open, () => cancel({ event: { data: { orderId: authorized.id, storeId } }, step: makeFakeStep() }));
+      const authorizedRow = await storeScoped(storeId).order.findUnique({ where: { id: authorized.id } });
+      expect(authorizedRow!.status).toBe("CANCELLED");
+      const autoAudits = await storeScoped(storeId).auditLog.findMany({
+        where: { entityId: authorized.id, action: "auto_cancel", entityType: "order" },
+      });
+      expect(autoAudits).toHaveLength(1);
+
+      const resumed = await createTestOrder();
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: resumed.id }, data: { status: "CANCELLING", acceptedAt: new Date() } });
+      });
+      setAuthorizedAmount(resumed.paymentIntentId!, resumed.totalAuthorizedCents);
+      await withMockedTime(open, () => cancel({ event: { data: { orderId: resumed.id, storeId } }, step: makeFakeStep() }));
+      const resumedRow = await storeScoped(storeId).order.findUnique({ where: { id: resumed.id } });
+      expect(resumedRow!.status).toBe("CANCELLED");
+      expect(resumedRow!.capturedAmountCents).toBeNull();
+      const voidAudits = await storeScoped(storeId).auditLog.findMany({
+        where: { entityId: resumed.id, action: "void_zero_amount", entityType: "order" },
+      });
+      const resumedAuto = await storeScoped(storeId).auditLog.findMany({
+        where: { entityId: resumed.id, action: "auto_cancel", entityType: "order" },
+      });
+      expect(voidAudits).toHaveLength(1);
+      expect(resumedAuto).toHaveLength(0);
+
+      const stuck = await createTestOrder();
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: stuck.id }, data: { status: "CANCELLING" } });
+      });
+      setAuthorizedAmount(stuck.paymentIntentId!, stuck.totalAuthorizedCents);
+      scriptRetrieveStatuses(stuck.paymentIntentId!, ["processing"]);
+      const beforeUpdate = (await storeScoped(storeId).order.findUnique({ where: { id: stuck.id } }))!.updatedAt;
+      await recordReconcileResult(storeId, stuck.id);
+      const failed = await storeScoped(storeId).auditLog.findMany({
+        where: { entityId: stuck.id, action: "reconcile_failed", entityType: "order" },
+      });
+      expect(failed).toHaveLength(1);
+      expect((failed[0].after as { error?: string }).error).toBe("unknown_stripe_status");
+      const afterStuck = await storeScoped(storeId).order.findUnique({ where: { id: stuck.id } });
+      expect(afterStuck!.updatedAt.getTime()).toBeGreaterThan(beforeUpdate.getTime());
+
+      const owned = await createTestOrder();
+      sendSpy.mockClear();
+      await sendOrderAuthorized(storeId, owned.id);
+      const sent = await storeScoped(storeId).order.findUnique({ where: { id: owned.id } });
+      expect(sent!.inngestEventSentAt).not.toBeNull();
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy).toHaveBeenCalledWith({
+        id: `order-authorized-${owned.id}`,
+        name: "order/authorized",
+        data: {
+          storeId,
+          orderId: owned.id,
+          authorizedAt: sent!.createdAt.toISOString(),
+        },
+      });
+    } finally {
+      sendSpy.mockRestore();
+    }
+  });
+
+  it("non-order audit rows do not suppress acceptance alerts or reconcile-failed audits", async () => {
+    const { acceptanceAlert, recordReconcileResult } = await import("./functions");
+    const alertOrder = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "acceptance_alert",
+          entityType: "listing",
+          entityId: alertOrder.id,
+        },
+      });
+    });
+    const handler = getHandler(acceptanceAlert);
+    await withMockedTime(new Date("2026-11-03T14:00:00-05:00"), () =>
+      handler({ event: { data: { orderId: alertOrder.id, storeId } }, step: makeFakeStep() }),
+    );
+    const alerts = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: alertOrder.id, action: "acceptance_alert", entityType: "order" },
+    });
+    expect(alerts).toHaveLength(1);
+    await withMockedTime(new Date("2026-11-03T14:00:00-05:00"), () =>
+      handler({ event: { data: { orderId: alertOrder.id, storeId } }, step: makeFakeStep() }),
+    );
+    const alertsAgain = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: alertOrder.id, action: "acceptance_alert", entityType: "order" },
+    });
+    expect(alertsAgain).toHaveLength(1);
+
+    const stuck = await createTestOrder();
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: stuck.id }, data: { status: "CANCELLING" } });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: SYSTEM_ACTOR_ID,
+          actorEmail: SYSTEM_ACTOR_EMAIL,
+          action: "reconcile_failed",
+          entityType: "listing",
+          entityId: stuck.id,
+          after: { error: "decoy" },
+        },
+      });
+    });
+    setAuthorizedAmount(stuck.paymentIntentId!, stuck.totalAuthorizedCents);
+    scriptRetrieveStatuses(stuck.paymentIntentId!, ["processing"]);
+    await recordReconcileResult(storeId, stuck.id);
+    const failed = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: stuck.id, action: "reconcile_failed", entityType: "order" },
+    });
+    expect(failed).toHaveLength(1);
+    await recordReconcileResult(storeId, stuck.id);
+    const failedAgain = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: stuck.id, action: "reconcile_failed", entityType: "order" },
+    });
+    expect(failedAgain).toHaveLength(1);
   });
 });
