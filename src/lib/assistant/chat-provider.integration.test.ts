@@ -194,8 +194,8 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
           id: "file-cache-turn-01",
           role: "user",
           parts: [
-            { type: "text", text: "rice from the photo" },
             { type: "file", mediaType: "image/jpeg", filename: "list.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+            { type: "file", mediaType: "image/jpeg", filename: "list-again.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
           ],
         },
       }),
@@ -210,10 +210,13 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
       const messages = request.body?.messages as Array<{ role: string; content: Array<{ type?: string; cache_control?: { type?: string } }> }>;
       const user = messages.find((message) => message.role === "user" && message.content.some((part) => part.type === "image"));
       expect(user).toBeTruthy();
+      const images = user!.content.filter((part) => part.type === "image");
+      expect(images).toHaveLength(2);
       const imageAt = user!.content.findIndex((part) => part.type === "image");
       const breakAt = user!.content.findIndex((part) => part.cache_control);
       expect(breakAt).toBeGreaterThanOrEqual(imageAt);
       expect(user!.content.at(-1)?.cache_control).toEqual({ type: "ephemeral" });
+      expect(user!.content.at(-1)?.type).toBe("image");
     }
     const textResponse = await handler(new Request("http://prov.test/api/assistant/chat", {
       method: "POST",

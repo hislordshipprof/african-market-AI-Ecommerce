@@ -1922,6 +1922,51 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(requests.length).toBe(callsBeforeReplay);
   }, 60_000);
 
+  it("a completed files-only id replays when the retry has no bytes", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    let calls = 0;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const handler = createChatHandler({
+      model: createAssistantModel({
+        fetch: async (input, init) => {
+          calls += 1;
+          return scriptedAssistantFetch(input, init);
+        },
+      }),
+    });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie,
+    };
+    const photo = {
+      type: "file",
+      mediaType: "image/jpeg",
+      filename: "list.jpg",
+      url: `data:image/jpeg;base64,${jpeg.toString("base64")}`,
+    };
+    const done = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.214" },
+      body: JSON.stringify({ message: { id: "files-only-done", role: "user", parts: [photo] } }),
+    }));
+    expect(done.status).toBe(200);
+    expect(await done.text()).toContain("I found some of the list");
+    const callsAfter = calls;
+    const replay = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.215" },
+      body: JSON.stringify({ message: { id: "files-only-done", role: "user", parts: [] } }),
+    }));
+    expect(replay.status).toBe(200);
+    expect(await replay.text()).toContain("I found some of the list");
+    expect(calls).toBe(callsAfter);
+  });
+
   it("overlapping requests cannot infer twice for one completed file id", async () => {
     const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
@@ -1982,6 +2027,177 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(textBody).toContain("attachment_missing");
     const line = await storeScoped(storeId).cartLine.findFirst({ where: { cartId: cart.id, variantId } });
     expect(line?.qty).toBe(1);
+  });
+
+  it("a sibling that read an empty snapshot replays a file id once it is complete", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    let releaseSnapshot: () => void = () => {};
+    const snapshotHeld = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    let seenSnapshot = false;
+    let calls = 0;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1;
+      return scriptedAssistantFetch(input, init);
+    };
+    const model = createAssistantModel({ fetch });
+    const handlerA = createChatHandler({ model });
+    const handlerB = createChatHandler({
+      model,
+      afterSnapshot: async () => {
+        if (seenSnapshot) return;
+        seenSnapshot = true;
+        await snapshotHeld;
+      },
+    });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie,
+    };
+    const waiting = handlerB(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.231" },
+      body: JSON.stringify({ message: { id: "race-done-file", role: "user", parts: [] } }),
+    }));
+    await vi.waitFor(() => expect(seenSnapshot).toBe(true));
+    const callsBefore = calls;
+    const done = await handlerA(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.232" },
+      body: JSON.stringify({
+        message: {
+          id: "race-done-file",
+          role: "user",
+          parts: [
+            { type: "text", text: "rice from the photo" },
+            { type: "file", mediaType: "image/jpeg", filename: "list.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    expect(done.status).toBe(200);
+    expect(await done.text()).toContain("I found some of the list");
+    const callsAfterFile = calls;
+    releaseSnapshot();
+    const replay = await waiting;
+    expect(replay.status).toBe(200);
+    expect(await replay.text()).toContain("I found some of the list");
+    expect(calls).toBe(callsAfterFile);
+    expect(callsAfterFile).toBeGreaterThan(callsBefore);
+    const other = await raw.store.create({
+      data: {
+        slug: `ai-file-b-${randomUUID().slice(0, 8)}`,
+        name: "Other Market",
+        themePreset: "palm-and-shea",
+        status: "active",
+        timezone: "America/Chicago",
+        minimumOrderCents: 0,
+        pickupEnabled: true,
+        hours: { wed: "09:00-17:00" },
+      },
+    });
+    const otherCart = await storeScoped(other.id).cart.create({ data: { storeId: other.id, source: "manual" } });
+    const callsBeforeOther = calls;
+    const otherTurn = await handlerA(new Request(`http://${other.slug}.localhost/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host: `${other.slug}.localhost`,
+        origin: `http://${other.slug}.localhost`,
+        "x-store-slug": other.slug,
+        "x-forwarded-for": "203.0.113.236",
+        cookie: `cart_id=${encodeURIComponent(otherCart.id)}`,
+      },
+      body: JSON.stringify({
+        message: {
+          id: "race-done-file",
+          role: "user",
+          parts: [
+            { type: "file", mediaType: "image/jpeg", filename: "list.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    expect(otherTurn.status).toBe(200);
+    expect(await otherTurn.text()).toContain("I found some of the list");
+    expect(calls).toBeGreaterThan(callsBeforeOther);
+  });
+
+  it("keeps a successful tool call in the next turn and does not audit a card number as a listing id", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "rice" } },
+        { kind: "text", text: "Here is what I found." },
+        { kind: "text", text: "Here is what I found." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie,
+    };
+    const first = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.233" },
+      body: JSON.stringify({ message: { id: "tool-history-1", role: "user", parts: [{ type: "text", text: "rice please" }] } }),
+    }));
+    expect(first.status).toBe(200);
+    await first.text();
+    const second = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.234" },
+      body: JSON.stringify({ message: { id: "tool-history-2", role: "user", parts: [{ type: "text", text: "more like that" }] } }),
+    }));
+    expect(second.status).toBe(200);
+    await second.text();
+    const follow = JSON.stringify(fake.requests.at(-1)?.body);
+    expect(follow).toContain("search_catalog");
+    expect(follow).toContain("tool_use");
+
+    const auditFake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "suggest_substitutes", toolInput: { listing_id: "4242424242424242" } },
+        { kind: "text", text: "I cannot use that." },
+      ],
+    });
+    const audited = await createChatHandler({
+      model: createAssistantModel({ fetch: auditFake.fetch }),
+    })(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.235" },
+      body: JSON.stringify({
+        message: {
+          id: "audit-card-id",
+          role: "user",
+          parts: [
+            { type: "text", text: "rice from the photo" },
+            { type: "file", mediaType: "image/jpeg", filename: "list.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    expect(audited.status).toBe(200);
+    await audited.text();
+    const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId: cart.id } });
+    const audits = await storeScoped(storeId).aiAction.findMany({ where: { conversationId: conversation?.id ?? "" } });
+    expect(JSON.stringify(audits)).not.toContain("4242424242424242");
+    expect(JSON.stringify(audits)).toContain("suggest_substitutes");
   });
 });
 

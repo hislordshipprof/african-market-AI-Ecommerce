@@ -68,4 +68,23 @@ describe("assistant model production import", () => {
     const invalidParsed = JSON.parse(invalid.stdout) as { errorName: string };
     expect(invalidParsed.errorName).toBe("AssistantConfigError");
   });
+
+  it("reads a real PDF and JPEG with the installed parsers", () => {
+    const result = runProbe("read-pdf", baseEnv({}));
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout) as { pages: number; format: string; external: boolean };
+    expect(parsed.pages).toBe(2);
+    expect(parsed.format).toBe("jpeg");
+    expect(parsed.external).toBe(true);
+  });
+
+  it("the live photo and PDF check does not run unless it is opted in", () => {
+    const result = spawnSync(process.execPath, ["scripts/assistant-live-check.mjs"], {
+      cwd: path.resolve(__dirname, "../../.."),
+      env: { ...process.env, ASSISTANT_LIVE_TESTS: "0" },
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ skipped: true });
+  });
 });

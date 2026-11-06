@@ -13,6 +13,22 @@ import {
 const phase = process.argv[2] ?? "missing-key";
 
 async function main() {
+  if (phase === "read-pdf") {
+    const { readFileSync } = await import("node:fs");
+    const { readPdfDocument } = await import("./pdf-document");
+    const sharp = (await import("sharp")).default;
+    const pdf = readFileSync(new URL("./fixtures/two-page.pdf", import.meta.url));
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const read = await readPdfDocument(pdf);
+    const image = sharp(jpeg, { limitInputPixels: 16_777_216, failOn: "warning" });
+    const meta = await image.metadata();
+    process.stdout.write(JSON.stringify({
+      pages: read.ok ? read.pages : 0,
+      format: meta.format ?? "",
+      external: readFileSync(new URL("../../../next.config.ts", import.meta.url), "utf8").includes("pdfjs-dist"),
+    }));
+    return;
+  }
   if (phase === "missing-key") {
     let failed = false;
     let name = "";

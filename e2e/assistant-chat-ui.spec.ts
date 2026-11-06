@@ -263,12 +263,14 @@ test("spoken words join typed text and nothing sends until Send", async ({ page 
       onerror: ((event: unknown) => void) | null = null;
       onend: (() => void) | null = null;
       start() {
-        const results = [
-          { isFinal: true, 0: { transcript: "rice" } },
-          { isFinal: true, 0: { transcript: "rice flour" } },
-        ];
-        this.onresult?.({ resultIndex: 0, results });
-        this.onend?.();
+        this.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: false, 0: { transcript: "rice" } }],
+        });
+        this.onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: true, 0: { transcript: "rice" } }],
+        });
       }
       stop() {
         this.onend?.();
@@ -294,11 +296,15 @@ test("spoken words join typed text and nothing sends until Send", async ({ page 
   await page.getByTestId("assistant-launcher").click();
   await page.getByRole("button", { name: "Cook a dish" }).click();
   await page.getByRole("button", { name: "Start listening" }).click();
-  await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook rice rice flour");
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook rice");
   expect(posts).toEqual([]);
   await page.getByTestId("assistant-send").click();
+  expect(posts).toEqual([]);
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook rice");
+  await page.getByTestId("assistant-send").click();
   await expect.poll(() => posts.length).toBe(1);
-  expect(posts[0]).toContain("I want to cook rice rice flour");
+  expect(posts[0]).toContain("I want to cook rice");
+  expect(posts[0]?.match(/rice/g)).toHaveLength(1);
   expect(posts[0]).not.toContain("audio");
   expect(posts[0]).not.toMatch(/data:audio|webm|octet-stream/);
 });
@@ -313,5 +319,47 @@ test("a photo does not change the basket until the customer taps", async ({ page
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("0");
+  let pdfPost = "";
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") pdfPost = request.postData() ?? "";
+  });
+  await page.locator('input[accept="application/pdf"]').setInputFiles("src/lib/assistant/fixtures/two-page.pdf");
+  await expect(page.getByRole("button", { name: "Remove two-page.pdf" })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("the recipe");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => pdfPost.includes("data:application/pdf;base64,JVBER")).toBe(true);
+  expect(pdfPost).not.toContain("data:application/pdf;base64,\"");
+});
+
+test("a rejected file send keeps the draft and a late file does not return", async ({ page }) => {
+  await page.route("**/api/assistant/chat", (route) => route.fulfill({ status: 413, body: "too big", contentType: "text/plain" }));
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("keep this list");
+  await page.getByTestId("assistant-send").click();
+  await expect(dialog.getByText("Those files are too big to send. Keep them under 3 MB.")).toBeVisible();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("keep this list");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+});
+
+test("a file that finishes after the sheet closes does not come back", async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = window.createImageBitmap.bind(window);
+    let release: (() => void) | null = null;
+    (window as unknown as { __releaseBitmap?: () => void }).__releaseBitmap = () => release?.();
+    window.createImageBitmap = ((blob: Blob) => new Promise((resolve, reject) => {
+      release = () => { original(blob).then(resolve, reject); };
+    })) as typeof createImageBitmap;
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await page.getByRole("button", { name: "Close Shop with help" }).click();
+  await page.evaluate(() => { (window as unknown as { __releaseBitmap?: () => void }).__releaseBitmap?.(); });
+  await page.getByTestId("assistant-launcher").click();
+  await expect(page.getByRole("button", { name: /Remove / })).toHaveCount(0);
 });
 
