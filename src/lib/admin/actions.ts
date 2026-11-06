@@ -10,7 +10,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
-import { parseInput, readFormFields } from "../security/parse-input";
+import { parseInput, readFormField, readFormFields } from "../security/parse-input";
 
 import { VALID_US_TIMEZONES } from "./timezone";
 
@@ -43,8 +43,8 @@ export type StoreFormState = {
   nudgedColor?: string;
 };
 
-function formText(data: FormData, key: string): string | null {
-  const value = data.get(key);
+function formText(data: unknown, key: string): string | null {
+  const value = readFormField(data, key);
   return typeof value === "string" ? value : null;
 }
 

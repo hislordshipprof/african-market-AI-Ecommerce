@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { requireStoreOwner } from "../store-admin/session";
-import { parseInput } from "../security/parse-input";
+import { parseInput, readFormField } from "../security/parse-input";
 import {
   generatePreview,
   commitImport,
@@ -28,7 +28,7 @@ export async function csvPreviewAction(
   formData: FormData,
 ): Promise<PreviewActionResult> {
   const session = await requireStoreOwner();
-  const file = formData.get("file");
+  const file = readFormField(formData, "file");
   const selected = parseInput(
     z.custom<File>((value) => value instanceof File && value.size > 0),
     file,

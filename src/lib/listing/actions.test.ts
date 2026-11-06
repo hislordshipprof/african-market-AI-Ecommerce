@@ -64,6 +64,20 @@ describe("createListingAction", () => {
     expect(result.error).toMatch(/name.*required/i);
   });
 
+  it("rejects an object or null in place of the listing form and does not write", async () => {
+    await expect(createListingAction({} as never)).resolves.toEqual({
+      error: "Product name or master product is required",
+    });
+    await expect(createListingAction(null as never)).resolves.toEqual({
+      error: "Product name or master product is required",
+    });
+    await expect(updateListingAction({} as never)).resolves.toEqual({
+      error: "Listing ID is required",
+    });
+    expect(mockCreateListing).not.toHaveBeenCalled();
+    expect(mockUpdateListing).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid price", async () => {
     const result = await createListingAction(formData({ ...VALID_LISTING, price: "abc" }));
     expect(result.error).toMatch(/price/i);
