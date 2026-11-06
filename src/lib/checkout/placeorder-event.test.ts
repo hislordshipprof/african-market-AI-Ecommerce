@@ -105,7 +105,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
           where: { paymentIntentId: { in: piToCleanup } },
         }),
         rawPrisma.customer.deleteMany({
-          where: { storeId, email: { in: ["evt@test.com", "replay@test.com", "race@test.com"] } },
+          where: { storeId, email: { in: ["evt@test.com", "replay@test.com", "race@test.com", "two-tab@test.com"] } },
         }),
         rawPrisma.cartLine.deleteMany({
           where: { cartId: { in: cartsCreated } },
@@ -189,6 +189,40 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
       return_url: "https://example.com/return",
     });
 
+    const placed = await placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, pi.id);
+    vi.mocked(sendOrderAuthorized).mockClear();
+
+    const result2 = await placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, pi.id);
+    expect(result2.token).toBe(placed.token);
+
+    expect(sendOrderAuthorized).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it("rejects a PaymentIntent that belongs to another cart", async (ctx) => {
+    if (!canRun) { ctx.skip(); return; }
+    const contact = { name: "Foreign Replay", phone: "+15551234567", email: "foreign-replay@test.com" };
+    const quote = computeQuote(0, [{ price: 1500, qty: 2, maxPerOrder: null }], contact, "pickup");
+    const scoped = storeScoped(storeId);
+    const cart = await scoped.cart.create({ data: { storeId } });
+    cartsCreated.push(cart.id);
+    await scoped.cartLine.create({
+      data: { storeId, cartId: cart.id, variantId, qty: 2, swapRule: "exact_only" },
+    });
+    const stripe = getStripeClient();
+    const pi = await stripe.paymentIntents.create({
+      amount: quote.holdCents,
+      currency: "usd",
+      capture_method: "manual",
+      on_behalf_of: stripeAccountId,
+      transfer_data: { destination: stripeAccountId },
+      metadata: { store_id: storeId, cart_id: cart.id },
+    });
+    piToCleanup.push(pi.id);
+    await scoped.cart.update({ where: { id: cart.id }, data: { paymentIntentId: pi.id } });
+    await stripe.paymentIntents.confirm(pi.id, {
+      payment_method: "pm_card_visa",
+      return_url: "https://example.com/return",
+    });
     await placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, pi.id);
     vi.mocked(sendOrderAuthorized).mockClear();
 
@@ -197,10 +231,9 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
     await scoped.cartLine.create({
       data: { storeId, cartId: cart2.id, variantId, qty: 2, swapRule: "exact_only" },
     });
-
-    const result2 = await placeOrder(storeId, 0, cart2.id, contact, "pickup", null, null, pi.id);
-    expect(result2.token).toBeTruthy();
-
+    await expect(
+      placeOrder(storeId, 0, cart2.id, contact, "pickup", null, null, pi.id),
+    ).rejects.toThrow("PaymentIntent does not belong to this cart");
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
   }, 30_000);
 
@@ -238,4 +271,45 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
     expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
     expect(sendOrderAuthorized).toHaveBeenCalledWith(storeId, first.token);
   }, 30_000);
+
+  it("two confirmed PaymentIntents on one basket place one order and release the other hold", async (ctx) => {
+    if (!canRun) { ctx.skip(); return; }
+    const contact = { name: "Two Tab", phone: "+15551234567", email: "two-tab@test.com" };
+    const quote = computeQuote(0, [{ price: 1500, qty: 1, maxPerOrder: null }], contact, "pickup");
+    const scoped = storeScoped(storeId);
+    const cart = await scoped.cart.create({ data: { storeId } });
+    cartsCreated.push(cart.id);
+    await scoped.cartLine.create({
+      data: { storeId, cartId: cart.id, variantId, qty: 1, swapRule: "exact_only" },
+    });
+    const stripe = getStripeClient();
+    const created = [];
+    for (const key of ["a", "b"]) {
+      const pi = await stripe.paymentIntents.create({
+        amount: quote.holdCents,
+        currency: "usd",
+        capture_method: "manual",
+        on_behalf_of: stripeAccountId,
+        transfer_data: { destination: stripeAccountId },
+        metadata: { store_id: storeId, cart_id: cart.id },
+      }, { idempotencyKey: `two-tab-${cart.id}-${key}` });
+      created.push(pi);
+      piToCleanup.push(pi.id);
+      await stripe.paymentIntents.confirm(pi.id, {
+        payment_method: "pm_card_visa",
+        return_url: "https://example.com/return",
+      });
+    }
+    vi.mocked(sendOrderAuthorized).mockClear();
+    const [first, second] = await Promise.all([
+      placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, created[0]!.id),
+      placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, created[1]!.id),
+    ]);
+    expect(first.token).toBe(second.token);
+    expect(sendOrderAuthorized).toHaveBeenCalledTimes(1);
+    const orders = await scoped.order.count({ where: { sourceCartId: cart.id } });
+    expect(orders).toBe(1);
+    const left = await Promise.all(created.map((pi) => stripe.paymentIntents.retrieve(pi.id)));
+    expect(left.map((pi) => pi.status).sort()).toEqual(["canceled", "requires_capture"]);
+  }, 60_000);
 });

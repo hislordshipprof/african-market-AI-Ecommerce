@@ -329,6 +329,9 @@ Location(id, tenant_id, address, geo, hours, radius_mi, uber_location_id, doorda
 User(id, email, phone, name)                      -- platform-wide identity
 Membership(user_id, tenant_id, role)              -- owner | staff
 Customer(id, user_id, tenant_id, marketing_consent, notes)
+PlatformCustomerProfile(user_id, stripe_customer_id?, stripe_customer_status, phone?)
+CustomerAddress(id, user_id, label, line1, line2?, city, state, zip, notes?, is_default)
+CardSaveConsent(id, user_id, payment_intent_id, payment_method_id?, stripe_customer_id, terms_version, purpose)
 
 MasterProduct(id, name, category_id, description, images, unit, weight_g, frozen, perishable)
 ProductSynonym(product_id, term, language, region)

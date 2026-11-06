@@ -38,6 +38,9 @@ import {
 } from "./common";
 import { PayButton } from "./feedback";
 import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
+import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
+import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
+import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import styles from "./cart-checkout.module.css";
 
 type Outcome =
@@ -49,6 +52,10 @@ type Outcome =
 
 interface StripeConfig {
   publishableKey: string;
+  onBehalfOf?: string;
+  harness?: boolean;
+  signedIn?: boolean;
+  prefill?: CheckoutPrefill | null;
 }
 
 export interface CheckoutPageProps extends ShoppingFlowProps {
@@ -65,7 +72,14 @@ function getStripePromise(config: StripeConfig): Promise<StripeJs | null> {
   return cached;
 }
 
-function StripeCardInput() {
+function StripeCardInput({ harness }: { harness?: boolean }) {
+  if (harness) {
+    return (
+      <p className={styles.muted}>
+        Card entry is simulated for this test. No card number is collected.
+      </p>
+    );
+  }
   return (
     <div className={styles.stripeCard}>
       <PaymentElement options={{ layout: "tabs" }} />
@@ -73,25 +87,88 @@ function StripeCardInput() {
   );
 }
 
+function createHarnessStripe(): StripeJs {
+  const element = {
+    on: () => element,
+    off: () => element,
+    mount: () => element,
+    unmount: () => element,
+    destroy: () => undefined,
+    update: () => element,
+  };
+  const elementsApi = {
+    submit: async () => ({ error: undefined }),
+    update: async () => ({ error: undefined }),
+    getElement: () => element,
+    create: () => element,
+    fetchUpdates: async () => ({ error: undefined }),
+  };
+  return {
+    elements: () => elementsApi,
+    confirmPayment: async (options: {
+      clientSecret?: string;
+      confirmParams?: { payment_method?: string };
+    }) => {
+      const id = String(options.clientSecret ?? "").split("_secret")[0];
+      const res = await fetch("/api/e2e/fake-confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          paymentIntentId: id,
+          paymentMethodId: options.confirmParams?.payment_method ?? null,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.error) {
+        return { error: { message: typeof body.error === "string" ? body.error : "Payment failed" } };
+      }
+      return { error: undefined };
+    },
+  } as unknown as StripeJs;
+}
+
 function RealCheckoutForm({
   settings,
   catalog,
+  stripeConfig,
 }: {
   settings: ShoppingFlowProps["settings"];
   catalog: ShoppingFlowProps["catalog"];
+  stripeConfig: StripeConfig;
 }) {
   const { lines, subtotal, refreshCart } = useCart();
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
   const fulfillment: Fulfillment = "pickup";
-  const [contact, setContact] = useState({ name: "", phone: "", email: "" });
+  const prefill = stripeConfig.prefill ?? null;
+  const cardView = checkoutCardView({
+    signedIn: Boolean(stripeConfig.signedIn),
+    cards: (prefill?.cards ?? []).map((card) => ({
+      id: card.id,
+      brand: card.brand,
+      last4: card.last4,
+      expMonth: card.expMonth,
+      expYear: card.expYear,
+      consented: card.reusable,
+      created: card.created,
+    })),
+    now: new Date(),
+  });
+  const [contact, setContact] = useState(
+    () => prefill?.contact ?? { name: "", phone: "", email: "" },
+  );
+  const [saveCard, setSaveCard] = useState(false);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(cardView.preselectedId);
+  const [showCardForm, setShowCardForm] = useState(cardView.showCardForm);
+  const [attemptToken, setAttemptToken] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [schedule, setSchedule] = useState(false);
   const [slot, setSlot] = useState("asap");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   const [quoteKey, setQuoteKey] = useState("");
   const [error, setError] = useState("");
+  const [errorHref, setErrorHref] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [payState, setPayState] = useState<"idle" | "pending" | "success">("idle");
   const metadata = lines.map((line) => ({
@@ -142,6 +219,7 @@ function RealCheckoutForm({
     event.preventDefault();
     setSubmitted(true);
     setError("");
+    setErrorHref(null);
     if (schedule && slot === "asap") {
       setError("Choose a pickup time within the next six days.");
       return;
@@ -150,7 +228,21 @@ function RealCheckoutForm({
     setPayState("pending");
     try {
       const quoteResult = await quoteCheckoutAction(contact, "pickup");
-      if (!quoteResult.ok) throw new Error(quoteResult.error);
+      if (!quoteResult.ok) {
+        if (quoteResult.code === "basket_already_ordered") {
+          setErrorHref("/account");
+          setError(quoteResult.error);
+          setPayState("idle");
+          return;
+        }
+        throw new Error(quoteResult.error);
+      }
+      if (quoteResult.orderedToken) {
+        setPayState("success");
+        await refreshCart();
+        router.push(`/order/${quoteResult.orderedToken}?placed=1`);
+        return;
+      }
       const latest = quoteResult.quote;
       if (latest.problems.length) {
         throw new Error(
@@ -161,18 +253,66 @@ function RealCheckoutForm({
         );
       }
 
-      const piResult = await createPaymentIntentAction(contact, "pickup");
-      if (!piResult.ok) throw new Error(piResult.error);
+      const payingSavedCard = Boolean(selectedCardId) && !showCardForm;
+      const piResult = await createPaymentIntentAction(
+        contact,
+        "pickup",
+        stripeConfig.signedIn
+          ? {
+              saveCard: payingSavedCard ? false : saveCard,
+              savedCardId: payingSavedCard ? selectedCardId : null,
+              attemptToken,
+            }
+          : undefined,
+      );
+      if (!piResult.ok) {
+        if (piResult.code === "basket_already_ordered") {
+          setErrorHref("/account");
+          setError(piResult.error);
+          setPayState("idle");
+          return;
+        }
+        if (piResult.code === "saved_card_unavailable") {
+          setSelectedCardId(null);
+          setShowCardForm(true);
+          setSaveCard(false);
+        }
+        throw new Error(piResult.error);
+      }
+      if ("orderedToken" in piResult) {
+        setPayState("success");
+        await refreshCart();
+        router.push(`/order/${piResult.orderedToken}?placed=1`);
+        return;
+      }
+      if (piResult.attemptToken) setAttemptToken(piResult.attemptToken);
 
-      const { error: submitError } = await elements.submit();
-      if (submitError) throw new Error(submitError.message ?? "Card validation failed");
-
-      const { error: confirmError } = await stripe.confirmPayment({
-        elements,
-        clientSecret: piResult.clientSecret,
-        confirmParams: { return_url: window.location.href },
-        redirect: "if_required",
-      });
+      let confirmError: { message?: string } | undefined;
+      if (payingSavedCard && selectedCardId) {
+        const confirmed = await stripe.confirmPayment({
+          clientSecret: piResult.clientSecret,
+          confirmParams: {
+            return_url: window.location.href,
+            payment_method: selectedCardId,
+          },
+          redirect: "if_required",
+        });
+        confirmError = confirmed.error;
+      } else {
+        await Promise.resolve(elements.update({
+          amount: latest.holdCents,
+          setupFutureUsage: saveCard ? "on_session" : null,
+        }));
+        const { error: submitError } = await elements.submit();
+        if (submitError) throw new Error(submitError.message ?? "Card validation failed");
+        const confirmed = await stripe.confirmPayment({
+          elements,
+          clientSecret: piResult.clientSecret,
+          confirmParams: { return_url: window.location.href },
+          redirect: "if_required",
+        });
+        confirmError = confirmed.error;
+      }
       if (confirmError) throw new Error(confirmError.message ?? "Payment failed");
 
       const orderResult = await placeOrderAction(
@@ -182,15 +322,24 @@ function RealCheckoutForm({
         notes,
         schedule ? slot : "asap",
       );
-      if (!orderResult.ok) throw new Error(orderResult.error);
+      if (!orderResult.ok) {
+        setErrorHref(orderResult.code === "basket_already_ordered" ? "/account" : null);
+        if (orderResult.code === "basket_changed" || orderResult.code === "basket_already_ordered") {
+          setError(orderResult.error);
+          setPayState("idle");
+          return;
+        }
+        throw new Error(orderResult.error);
+      }
+      setErrorHref(null);
 
       setPayState("success");
-      await clearCart();
       await refreshCart();
       if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches)
         await new Promise((r) => setTimeout(r, 650));
       router.push(`/order/${orderResult.token}?placed=1`);
     } catch (reason) {
+      setErrorHref(null);
       setError(
         reason instanceof Error
           ? reason.message
@@ -239,13 +388,74 @@ function RealCheckoutForm({
       quote={quote}
       quotePending={quotePending}
       error={error}
+      errorHref={errorHref}
       submitted={submitted}
       payState={payState}
       frozen={frozen}
       weightG={weightG}
       courierEligible={false}
       onSubmit={pay}
-      paymentSection={<StripeCardInput />}
+      signedIn={Boolean(stripeConfig.signedIn)}
+      paymentSection={
+        <>
+          {prefill?.cardsUnavailable ? <p>Saved cards are unavailable right now</p> : null}
+          {cardView.selectable.map((card) => (
+            <label className={styles.choice} key={card.id}>
+              <input
+                type="radio"
+                name="saved-card"
+                checked={selectedCardId === card.id && !showCardForm}
+                onChange={() => {
+                  setSelectedCardId(card.id);
+                  setShowCardForm(false);
+                  setSaveCard(false);
+                }}
+              />
+              <span>
+                {card.brand} ending in {card.last4}, expires {card.expMonth}/{card.expYear}
+              </span>
+            </label>
+          ))}
+          {cardView.expired.map((card) => (
+            <p key={card.id}>
+              {card.brand} ending in {card.last4} · Expired
+            </p>
+          ))}
+          {selectedCardId && !showCardForm ? (
+            <button
+              type="button"
+              className="sf-text-link"
+              onClick={() => {
+                setSelectedCardId(null);
+                setShowCardForm(true);
+                setSaveCard(false);
+              }}
+            >
+              Use a different card
+            </button>
+          ) : null}
+          {showCardForm ? <StripeCardInput harness={stripeConfig.harness} /> : null}
+          {cardView.showSaveTick && showCardForm ? (
+            <label className={styles.choice}>
+              <input
+                type="checkbox"
+                checked={saveCard}
+                onChange={(event) => setSaveCard(event.target.checked)}
+              />
+              <span>
+                Save this card
+                <small>{SAVED_CARD_PURPOSE}</small>
+              </span>
+            </label>
+          ) : null}
+          {prefill?.defaultAddress ? (
+            <p className={styles.muted}>
+              Default address: {prefill.defaultAddress.label}, {prefill.defaultAddress.line1},{" "}
+              {prefill.defaultAddress.city} {prefill.defaultAddress.state} {prefill.defaultAddress.zip}
+            </p>
+          ) : null}
+        </>
+      }
       payLabel={quote ? `Pay · ${money(quote.holdCents)}` : "Pay"}
       isRealPayment
     />
@@ -277,7 +487,7 @@ export function CheckoutPage({
     const estimatedHold = subtotal + Math.min(Math.round(subtotal * 0.10), 2000);
     return (
       <StripeWrapper config={stripeConfig} estimatedHoldCents={estimatedHold}>
-        <RealCheckoutForm settings={settings} catalog={catalog} />
+        <RealCheckoutForm settings={settings} catalog={catalog} stripeConfig={stripeConfig} />
       </StripeWrapper>
     );
   }
@@ -296,7 +506,10 @@ function StripeWrapper({
   estimatedHoldCents: number;
   children: React.ReactNode;
 }) {
-  const stripePromise = useMemo(() => getStripePromise(config), [config]);
+  const stripePromise = useMemo(
+    () => (config.harness ? Promise.resolve(createHarnessStripe()) : getStripePromise(config)),
+    [config],
+  );
   const amount = Math.max(estimatedHoldCents, 50);
   return (
     <Elements
@@ -305,6 +518,8 @@ function StripeWrapper({
         mode: "payment",
         amount,
         currency: "usd",
+        captureMethod: "manual",
+        onBehalfOf: config.onBehalfOf,
         appearance: {
           theme: "stripe",
           variables: { colorPrimary: "#16a34a" },
@@ -356,8 +571,11 @@ interface CheckoutLayoutProps {
   quote: CheckoutQuote | null;
   quotePending: boolean;
   error: string;
+  errorHref?: string | null;
   submitted: boolean;
   payState: "idle" | "pending" | "success";
+  signedIn?: boolean;
+  identityLocked?: boolean;
   frozen: boolean;
   weightG: number;
   courierEligible: boolean;
@@ -377,9 +595,10 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     slot, setSlot, slots, promo, setPromo,
     setAppliedPromo, promoMessage, setPromoMessage,
     tipPercent, setTipPercent, customTip, setCustomTip,
-    quote, quotePending, error, submitted, payState,
+    quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
     onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector,
+    signedIn = false, identityLocked = false,
   } = props;
 
   return (
@@ -562,14 +781,16 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           <div id="contact" className={styles.anchor}>
             <FlowCard title="Contact details">
               <p className={styles.muted}>
-                Guest checkout. A phone number helps your shopper reach you
-                about substitutions.
+                {signedIn
+                  ? "We filled your name and email from your account. Edits apply to this order only."
+                  : "Guest checkout. A phone number helps your shopper reach you about substitutions."}
               </p>
               <label className={styles.field}>
                 Full name
                 <input
                   autoComplete="name"
                   required
+                  readOnly={identityLocked}
                   value={contact.name}
                   aria-invalid={submitted && !contact.name.trim()}
                   onChange={(e) => setContact({ ...contact, name: e.target.value })}
@@ -602,6 +823,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   autoComplete="email"
                   type="email"
                   required
+                  readOnly={identityLocked}
                   value={contact.email}
                   aria-invalid={submitted && !contact.email.trim()}
                   onChange={(e) => setContact({ ...contact, email: e.target.value })}
@@ -743,7 +965,11 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
             {quotePending && (
               <p className={styles.muted} role="status">Updating estimate…</p>
             )}
-            {error && <FlowError title="Let's review that" message={error} />}
+            {error && (
+              <FlowError title="Let's review that" message={error}>
+                {errorHref ? <Link className="sf-text-link" href={errorHref}>View your orders</Link> : null}
+              </FlowError>
+            )}
             <PayButton
               type="submit"
               state={payState}

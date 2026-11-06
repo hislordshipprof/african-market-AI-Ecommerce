@@ -1,10 +1,16 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped } from "../db";
-import { getCartWithLines, type CartLineView, type CartWithLines } from "../cart/service";
+import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent } from "../db";
+import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
+import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
 import { scheduleAfterResponse } from "../schedule-after-response";
+import { checkoutTestHooks } from "./test-hooks";
+import { cartPaymentIdempotencyKey } from "../customer-account/consent";
+import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
+import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
+import { validPhone } from "../customer-account/phone";
 import type {
   CheckoutQuote,
   Contact,
@@ -20,9 +26,79 @@ async function getStripeStore(storeId: string) {
   return store as typeof store & { stripeAccountId: string };
 }
 
-const PHONE_RE = /^\+?[\d\s().-]{10,20}$/;
-function validPhone(phone: string): boolean {
-  return PHONE_RE.test(phone) && phone.replace(/\D/g, "").length >= 10;
+const SETTLED_PAYMENT = new Set(["requires_capture", "processing", "succeeded"]);
+const OPENABLE_PAYMENT = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
+
+export class BasketAlreadyOrderedError extends Error {
+  readonly code = "basket_already_ordered" as const;
+  constructor() {
+    super("This order was already placed");
+    this.name = "BasketAlreadyOrderedError";
+  }
+}
+
+export class BasketChangedError extends Error {
+  readonly code = "basket_changed" as const;
+  constructor() {
+    super("Your basket changed. Your card was not charged.");
+    this.name = "BasketChangedError";
+  }
+}
+
+function epochStamp(metadata: Record<string, string> | null | undefined): {
+  present: boolean;
+  epoch: number | null;
+} {
+  if (!metadata || metadata.purchase_epoch == null) return { present: false, epoch: null };
+  const raw = metadata.purchase_epoch;
+  if (!/^\d+$/.test(raw)) return { present: true, epoch: null };
+  return { present: true, epoch: Number(raw) };
+}
+
+function sameBasket(
+  current: AuthorizedOrderLine[],
+  requested: AuthorizedOrderLine[],
+): boolean {
+  if (current.length !== requested.length) return false;
+  const key = (line: AuthorizedOrderLine) =>
+    [line.variantId, line.qty, line.price, line.swapRule, line.substituteVariantId ?? ""].join(":");
+  const left = current.map(key).sort();
+  const right = requested.map(key).sort();
+  return left.every((value, index) => value === right[index]);
+}
+
+function idOf(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || !("id" in value)) return null;
+  if ("deleted" in value && (value as { deleted?: boolean }).deleted) return null;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" ? id : null;
+}
+
+function fakeIntent(id: string | null | undefined): boolean {
+  return checkoutPaymentsUseFake() && Boolean(id?.startsWith("pi_fake_"));
+}
+
+async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentIntent> {
+  if (fakeIntent(id)) return getCheckoutPayments().retrievePaymentIntent(id);
+  const pi = await getStripeClient().paymentIntents.retrieve(id);
+  const destination = pi.transfer_data?.destination;
+  return {
+    id: pi.id,
+    status: pi.status,
+    amount: pi.amount,
+    currency: pi.currency,
+    customer: idOf(pi.customer),
+    setup_future_usage: pi.setup_future_usage,
+    payment_method: idOf(pi.payment_method),
+    client_secret: pi.client_secret,
+    on_behalf_of: idOf(pi.on_behalf_of),
+    transfer_data: pi.transfer_data
+      ? { destination: typeof destination === "string" ? destination : destination?.id ?? null }
+      : null,
+    metadata: pi.metadata ?? {},
+    capture_method: pi.capture_method,
+  };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -121,48 +197,115 @@ export async function quoteCheckout(
   return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
 }
 
+export { checkoutTestHooks } from "./test-hooks";
+export { SavedCardUnavailableError } from "./saved-card-payment";
+
+export interface CreatePaymentIntentOptions {
+  actorUserId?: string | null;
+  saveCard?: boolean;
+  savedCardId?: string | null;
+  attemptToken?: string | null;
+}
+
 export async function createPaymentIntent(
   storeId: string,
   cartId: string,
   holdCents: number,
-): Promise<{ clientSecret: string; paymentIntentId: string }> {
-  const scoped = storeScoped(storeId);
+  options?: CreatePaymentIntentOptions,
+): Promise<{ clientSecret: string; paymentIntentId: string; attemptToken?: string }> {
   const store = await getStripeStore(storeId);
+  if (options?.actorUserId) {
+    return prepareSignedInPaymentIntent(storeId, cartId, holdCents, {
+      actorUserId: options.actorUserId,
+      saveCard: options.saveCard === true,
+      savedCardId: options.savedCardId ?? null,
+      attemptToken: options.attemptToken ?? null,
+    }, store.stripeAccountId);
+  }
+  const reserved = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    const cart = await tx.cart.findUnique({ where: { id: cartId } });
+    if (!cart) throw new Error("Cart not found");
 
-  const stripe = getStripeClient();
-
-  const cart = await scoped.cart.findUnique({ where: { id: cartId } });
-  if (!cart) throw new Error("Cart not found");
-
-  if (cart.paymentIntentId) {
-    const existing = await stripe.paymentIntents.retrieve(cart.paymentIntentId);
-    if (existing.status === "requires_capture") {
-      throw new Error("Payment already confirmed for this cart");
-    }
-    if (
-      existing.status === "requires_payment_method" ||
-      existing.status === "requires_confirmation" ||
-      existing.status === "requires_action"
-    ) {
-      if (existing.amount !== holdCents) {
-        await stripe.paymentIntents.update(cart.paymentIntentId, { amount: holdCents });
+    if (cart.paymentIntentId) {
+      const existing = await retrieveCheckoutIntent(cart.paymentIntentId);
+      const provenanceOk = paymentIntentProvenanceOk(existing, {
+        storeId,
+        cartId,
+        storeAccountId: store.stripeAccountId,
+      });
+      if (provenanceOk && SETTLED_PAYMENT.has(existing.status)) {
+        throw new Error("Payment already confirmed for this cart");
       }
-      return { clientSecret: existing.client_secret!, paymentIntentId: existing.id };
+      if (provenanceOk && OPENABLE_PAYMENT.has(existing.status)) {
+        if (!existing.client_secret) throw new Error("Stripe did not return a client secret");
+        return {
+          kind: "reuse" as const,
+          clientSecret: existing.client_secret,
+          paymentIntentId: existing.id,
+          amount: existing.amount,
+          purchaseEpoch: cart.purchaseEpoch,
+        };
+      }
     }
+
+    const generation = nextAttemptToken({
+      paymentIntentId: cart.paymentIntentId,
+      storedToken: cart.paymentAttemptToken,
+      fingerprint: `guest:${holdCents}`,
+      forceNew: false,
+    });
+    await tx.cart.update({
+      where: { id: cartId },
+      data: { paymentAttemptToken: generation, paymentIntentId: null },
+    });
+    return { kind: "create" as const, generation, purchaseEpoch: cart.purchaseEpoch };
+  }, { timeout: 20_000, maxWait: 8_000 });
+
+  if (reserved.kind === "reuse") {
+    if (reserved.amount !== holdCents) {
+      const patch = {
+        amount: holdCents,
+        metadata: { purchase_epoch: String(reserved.purchaseEpoch) },
+      };
+      if (fakeIntent(reserved.paymentIntentId)) {
+        await getCheckoutPayments().updatePaymentIntent(reserved.paymentIntentId, patch);
+      } else {
+        await getStripeClient().paymentIntents.update(reserved.paymentIntentId, patch);
+      }
+    }
+    return { clientSecret: reserved.clientSecret, paymentIntentId: reserved.paymentIntentId };
   }
 
-  const pi = await stripe.paymentIntents.create({
-    amount: holdCents,
-    currency: "usd",
-    capture_method: "manual",
-    on_behalf_of: store.stripeAccountId,
-    transfer_data: { destination: store.stripeAccountId },
-    metadata: { store_id: storeId, cart_id: cartId },
+  const guestBase = guestPaymentIntentParams({
+    holdCents,
+    storeAccountId: store.stripeAccountId,
+    storeId,
+    cartId,
   });
+  const guestParams = {
+    ...guestBase,
+    metadata: { ...guestBase.metadata, purchase_epoch: String(reserved.purchaseEpoch) },
+  };
+  const guestKey = cartPaymentIdempotencyKey(cartId, reserved.generation);
+  const pi = checkoutPaymentsUseFake()
+    ? await getCheckoutPayments().createPaymentIntent(guestParams as unknown as Record<string, unknown>, guestKey)
+    : await getStripeClient().paymentIntents.create(guestParams, { idempotencyKey: guestKey });
 
-  await scoped.cart.update({
-    where: { id: cartId },
-    data: { paymentIntentId: pi.id },
+  if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforePersistCartPaymentIntent) {
+    await checkoutTestHooks.beforePersistCartPaymentIntent();
+  }
+
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    const current = await tx.cart.findUnique({ where: { id: cartId } });
+    if (!current || current.paymentAttemptToken !== reserved.generation) return;
+    await tx.cart.update({
+      where: { id: cartId },
+      data: { paymentIntentId: pi.id, paymentAttemptToken: reserved.generation },
+    });
   });
 
   if (!pi.client_secret) {
@@ -171,25 +314,6 @@ export async function createPaymentIntent(
 
   return { clientSecret: pi.client_secret, paymentIntentId: pi.id };
 }
-
-/**
- * Test-only pauses. Production leaves every hook null. Each hook runs only
- * when NODE_ENV is test, so a leaked hook cannot stall a live checkout.
- *
- * afterMissedOrderLookup fires after the pre-cart lookup misses and before
- * the cart read. aroundCartRead wraps that read and must call it. The
- * post-read lookup runs only after the read returns. afterPostReadLookupMiss
- * fires when that second lookup also misses, before cart validation.
- */
-export const checkoutTestHooks: {
-  afterMissedOrderLookup: (() => Promise<void>) | null;
-  aroundCartRead: ((read: () => Promise<CartWithLines | null>) => Promise<CartWithLines | null>) | null;
-  afterPostReadLookupMiss: (() => Promise<void>) | null;
-} = {
-  afterMissedOrderLookup: null,
-  aroundCartRead: null,
-  afterPostReadLookupMiss: null,
-};
 
 function runTestHook(hook: (() => Promise<void>) | null): Promise<void> {
   if (process.env.NODE_ENV === "test" && hook) return hook();
@@ -215,6 +339,12 @@ export interface RecordAuthorizedOrderInput {
   lines: AuthorizedOrderLine[];
   /** When set, including null for a guest, the locked cart must still belong to this actor. */
   actorUserId?: string | null;
+  paymentAmount?: number;
+  /** Null when the intent was created before purchase epochs were stamped. */
+  purchaseEpoch?: number | null;
+  /** True when metadata includes purchase_epoch, including a value that is not a number. */
+  epochPresent?: boolean;
+  minimumOrderCents?: number;
 }
 
 function paymentIntentTaken(err: unknown): boolean {
@@ -244,6 +374,15 @@ export async function recordAuthorizedOrder(
         where: { paymentIntentId: input.paymentIntentId },
       });
       if (existing) {
+        if (existing.sourceCartId && existing.sourceCartId !== input.cartId) {
+          throw new Error("PaymentIntent is already recorded");
+        }
+        if (input.actorUserId !== undefined) {
+          const ownerCart = await tx.cart.findUnique({ where: { id: input.cartId } });
+          if (!ownerCart || ownerCart.userId !== input.actorUserId) {
+            throw new Error("Cart not found");
+          }
+        }
         return { orderId: existing.id, created: false };
       }
 
@@ -252,12 +391,46 @@ export async function recordAuthorizedOrder(
       }
 
       await lockCart(tx, input.cartId);
+      const released = await tx.paymentIntentRelease.findUnique({
+        where: { paymentIntentId: input.paymentIntentId },
+      });
+      if (released) throw new BasketChangedError();
       const cart = await tx.cart.findUnique({ where: { id: input.cartId } });
       if (!cart || cart.storeId !== storeId) {
         throw new Error("Cart not found");
       }
       if (input.actorUserId !== undefined && cart.userId !== input.actorUserId) {
         throw new Error("Cart not found");
+      }
+      if (input.epochPresent === true && input.purchaseEpoch !== cart.purchaseEpoch) {
+        throw new BasketAlreadyOrderedError();
+      }
+      if (input.epochPresent === false && cart.purchaseEpoch > 0) {
+        throw new BasketAlreadyOrderedError();
+      }
+
+      const currentLines = await tx.cartLine.findMany({
+        where: { cartId: input.cartId },
+        include: { variant: { include: { listing: true } } },
+      });
+      if (currentLines.length === 0) throw new BasketAlreadyOrderedError();
+      const current = currentLines.map((line) => ({
+        variantId: line.variantId,
+        qty: line.qty,
+        price: line.variant.price,
+        swapRule: line.swapRule,
+        substituteVariantId: line.substituteVariantId,
+        maxPerOrder: line.variant.listing.maxPerOrder,
+      }));
+      if (!sameBasket(current, input.lines)) throw new BasketChangedError();
+      const currentQuote = computeQuote(
+        input.minimumOrderCents ?? 0,
+        current,
+        input.contact,
+        input.fulfillment,
+      );
+      if (currentQuote.holdCents !== (input.paymentAmount ?? input.quote.holdCents)) {
+        throw new BasketChangedError();
       }
 
       const variantIds = [
@@ -311,6 +484,7 @@ export async function recordAuthorizedOrder(
           bufferCents: input.quote.bufferCents,
           totalAuthorizedCents: input.quote.holdCents,
           paymentIntentId: input.paymentIntentId,
+          sourceCartId: input.cartId,
           platformFeeCents: platformFeeCentsForCapture(input.quote.totalCents),
           notes: input.notes || null,
         },
@@ -329,7 +503,11 @@ export async function recordAuthorizedOrder(
       await tx.cartLine.deleteMany({ where: { cartId: input.cartId } });
       await tx.cart.update({
         where: { id: input.cartId },
-        data: { paymentIntentId: null },
+        data: {
+          paymentIntentId: null,
+          paymentAttemptToken: null,
+          purchaseEpoch: { increment: 1 },
+        },
       });
       return { orderId: order.id, created: true };
     }, { timeout: 40_000, maxWait: 8_000 });
@@ -363,6 +541,132 @@ function cartLinesToOrderLines(
   }));
 }
 
+function stripeAlreadyCanceled(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /status of canceled/i.test(message)
+    || /already canceled/i.test(message)
+    || /status canceled/i.test(message);
+}
+
+/**
+ * Reserves this intent for release under the same locks placement takes, then
+ * tells Stripe. An order that commits first is left capturable. A reservation
+ * that commits first makes a later place refuse.
+ */
+export async function releaseLosingHold(
+  storeId: string,
+  cartId: string,
+  paymentIntentId: string,
+): Promise<void> {
+  const reserved = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    if (await orderExistsForPaymentIntent(tx, paymentIntentId)) return false;
+    await tx.paymentIntentRelease.upsert({
+      where: { paymentIntentId },
+      create: { paymentIntentId, storeId },
+      update: {},
+    });
+    const cart = await tx.cart.findUnique({
+      where: { id: cartId },
+      select: { paymentIntentId: true },
+    });
+    if (cart?.paymentIntentId === paymentIntentId) {
+      await tx.cart.update({
+        where: { id: cartId },
+        data: { paymentIntentId: null, paymentAttemptToken: null },
+      });
+    }
+    return true;
+  });
+  if (!reserved) return;
+  if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforeReleaseLosingHold) {
+    await checkoutTestHooks.beforeReleaseLosingHold();
+  }
+  try {
+    const key = `release-${paymentIntentId}`;
+    if (fakeIntent(paymentIntentId)) {
+      await getCheckoutPayments().cancelPaymentIntent(paymentIntentId, key);
+      return;
+    }
+    await getStripeClient().paymentIntents.cancel(
+      paymentIntentId,
+      undefined,
+      { idempotencyKey: key },
+    );
+  } catch (error) {
+    if (stripeAlreadyCanceled(error)) return;
+    console.error(JSON.stringify({
+      event: "losing_hold_release_failed",
+      paymentIntentId,
+      message: "Platform alerted. The authorization expires on its own.",
+    }));
+  }
+}
+
+async function settleConsumedBasket(input: {
+  storeId: string;
+  cartId: string;
+  actorUserId: string | null;
+  paymentIntentId: string;
+  minimumOrderCents: number;
+  contact: Contact;
+  fulfillment: Fulfillment;
+}): Promise<
+  | { kind: "order"; result: { token: string; quote: CheckoutQuote } }
+  | { kind: "unproved" }
+  | { kind: "none"; lines: number }
+> {
+  const scoped = storeScoped(input.storeId);
+  const [cart, order] = await Promise.all([
+    scoped.cart.findUnique({ where: { id: input.cartId } }),
+    scoped.order.findFirst({
+      where: { sourceCartId: input.cartId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      include: { lines: true },
+    }),
+  ]);
+  if (!order) {
+    const lines = await scoped.cartLine.count({ where: { cartId: input.cartId } });
+    return { kind: "none", lines };
+  }
+  await releaseLosingHold(input.storeId, input.cartId, input.paymentIntentId);
+  if (!cart || cart.userId !== input.actorUserId) return { kind: "unproved" };
+  const quote = computeQuote(
+    input.minimumOrderCents,
+    order.lines.map((line) => ({
+      price: line.unitPriceCents,
+      qty: line.qtyOrdered,
+      maxPerOrder: null,
+    })),
+    input.contact,
+    input.fulfillment,
+  );
+  return { kind: "order", result: { token: order.id, quote } };
+}
+
+/** An emptied cart that already has an order for this actor. Pay uses this before quoting a new charge. */
+export async function resumeOrderedCart(
+  storeId: string,
+  cartId: string,
+  actorUserId: string | null,
+): Promise<{ kind: "order"; token: string } | { kind: "unproved" } | null> {
+  const scoped = storeScoped(storeId);
+  const cart = await scoped.cart.findUnique({
+    where: { id: cartId },
+    include: { lines: { select: { id: true }, take: 1 } },
+  });
+  if (!cart || cart.lines.length > 0) return null;
+  const order = await scoped.order.findFirst({
+    where: { sourceCartId: cartId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  if (!order) return null;
+  if (cart.userId !== actorUserId) return { kind: "unproved" };
+  return { kind: "order", token: order.id };
+}
+
 export async function placeOrder(
   storeId: string,
   minimumOrderCents: number,
@@ -380,8 +684,14 @@ export async function placeOrder(
     throw new Error("Only pickup fulfillment is supported");
   }
 
-  const stripe = getStripeClient();
-  const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+  const pi = await retrieveCheckoutIntent(paymentIntentId);
+
+  if (pi.status === "canceled") {
+    const canceledOrder = await storeScoped(storeId).order.findUnique({
+      where: { paymentIntentId },
+    });
+    if (!canceledOrder) throw new BasketChangedError();
+  }
 
   if (pi.status !== "requires_capture") {
     throw new Error(
@@ -398,13 +708,30 @@ export async function placeOrder(
   if (pi.metadata?.store_id !== storeId) {
     throw new Error("PaymentIntent store_id metadata does not match");
   }
+  if (pi.currency && pi.currency !== "usd") {
+    throw new Error("PaymentIntent currency does not match");
+  }
+  if (pi.customer) {
+    if (!actorUserId || pi.metadata?.user_id !== actorUserId) {
+      throw new Error("PaymentIntent customer does not match this account");
+    }
+    if (pi.metadata?.cart_id !== cartId) {
+      throw new Error("PaymentIntent does not belong to this cart");
+    }
+  } else if (pi.metadata?.cart_id && pi.metadata.cart_id !== cartId) {
+    throw new Error("PaymentIntent does not belong to this cart");
+  }
 
   const existingOrder = await storeScoped(storeId).order.findUnique({
     where: { paymentIntentId },
   });
   if (existingOrder) {
+    if (existingOrder.sourceCartId && existingOrder.sourceCartId !== cartId) {
+      throw new Error("PaymentIntent is already recorded");
+    }
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
     // Idempotent replay — don't re-send the Inngest event or touch the cart.
+    await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
     return { token: existingOrder.id, quote };
   }
 
@@ -421,13 +748,30 @@ export async function placeOrder(
     where: { paymentIntentId },
   });
   if (replay) {
+    if (replay.sourceCartId && replay.sourceCartId !== cartId) {
+      throw new Error("PaymentIntent is already recorded");
+    }
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
+    await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
     return { token: replay.id, quote };
   }
 
   await runTestHook(checkoutTestHooks.afterPostReadLookupMiss);
 
-  if (!cart || !cart.lines.length) {
+  if (!cart) throw new Error("Cart is empty");
+  if (!cart.lines.length) {
+    const settled = await settleConsumedBasket({
+      storeId,
+      cartId,
+      actorUserId,
+      paymentIntentId,
+      minimumOrderCents,
+      contact,
+      fulfillment,
+    });
+    if (settled.kind === "order") return settled.result;
+    if (settled.kind === "unproved") throw new BasketAlreadyOrderedError();
+    await releaseLosingHold(storeId, cartId, paymentIntentId);
     throw new Error("Cart is empty");
   }
 
@@ -439,14 +783,13 @@ export async function placeOrder(
   }));
   const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
 
-  if (quote.problems.length) {
-    throw new Error(quote.problems.map((p) => p.message).join(" "));
+  if (pi.amount !== quote.holdCents) {
+    await releaseLosingHold(storeId, cartId, paymentIntentId);
+    throw new BasketChangedError();
   }
 
-  if (pi.amount !== quote.holdCents) {
-    throw new Error(
-      `PaymentIntent amount (${pi.amount}) does not match quote hold (${quote.holdCents})`,
-    );
+  if (quote.problems.length) {
+    throw new Error(quote.problems.map((p) => p.message).join(" "));
   }
 
   for (const line of orderLineData) {
@@ -468,23 +811,55 @@ export async function placeOrder(
     }
   }
 
-  const recorded = await recordAuthorizedOrder(storeId, {
-    cartId,
-    contact,
-    fulfillment,
-    pickupSlot,
-    notes,
-    paymentIntentId,
-    quote,
-    actorUserId,
-    lines: orderLineData.map((line) => ({
-      variantId: line.variantId,
-      qty: line.qty,
-      price: line.price,
-      swapRule: line.swapRule,
-      substituteVariantId: line.substituteVariantId,
-    })),
-  });
+  let recorded: { orderId: string; created: boolean };
+  try {
+    recorded = await recordAuthorizedOrder(storeId, {
+      cartId,
+      contact,
+      fulfillment,
+      pickupSlot,
+      notes,
+      paymentIntentId,
+      quote,
+      actorUserId,
+      paymentAmount: pi.amount,
+      purchaseEpoch: epochStamp(pi.metadata).epoch,
+      epochPresent: epochStamp(pi.metadata).present,
+      minimumOrderCents,
+      lines: orderLineData.map((line) => ({
+        variantId: line.variantId,
+        qty: line.qty,
+        price: line.price,
+        swapRule: line.swapRule,
+        substituteVariantId: line.substituteVariantId,
+      })),
+    });
+  } catch (error) {
+    if (error instanceof BasketAlreadyOrderedError) {
+      const settled = await settleConsumedBasket({
+        storeId,
+        cartId,
+        actorUserId,
+        paymentIntentId,
+        minimumOrderCents,
+        contact,
+        fulfillment,
+      });
+      if (settled.kind === "order") return settled.result;
+      if (settled.kind === "unproved") throw error;
+      if (settled.lines > 0) {
+        await releaseLosingHold(storeId, cartId, paymentIntentId);
+        throw new BasketChangedError();
+      }
+      await releaseLosingHold(storeId, cartId, paymentIntentId);
+      throw new Error("Cart is empty");
+    }
+    if (error instanceof BasketChangedError) {
+      await releaseLosingHold(storeId, cartId, paymentIntentId);
+      throw error;
+    }
+    throw error;
+  }
 
   if (recorded.created) {
     scheduleAfterResponse(
@@ -492,8 +867,22 @@ export async function placeOrder(
       "inngest_send_failed",
     );
   }
+  await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
 
   return { token: recorded.orderId, quote };
+}
+
+async function recoverSavedCardConsent(
+  actorUserId: string | null,
+  paymentIntentId: string,
+  paymentMethodId: string | null,
+): Promise<void> {
+  if (!actorUserId || !paymentMethodId) return;
+  try {
+    await bindSavedCardConsent(actorUserId, paymentIntentId, paymentMethodId);
+  } catch {
+    // The order is already committed. The next replay binds the card.
+  }
 }
 
 async function quoteFromCart(
