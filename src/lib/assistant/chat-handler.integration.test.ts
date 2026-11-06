@@ -21,6 +21,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { createChatHandler } from "./chat-handler";
+import { takeRateLimit } from "../rate-limit/app-limiter";
 import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
 import { scriptedAssistantFetch } from "./fake-model";
 import { createAssistantModel } from "./model";
@@ -1132,8 +1133,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const response = await createChatHandler({ model })(request("from a proxy", { ip: `${left}, ${right}` }));
     expect(response.status).toBe(200);
     await response.text();
-    const first = await raw.rateLimit.findUnique({ where: { key: `assistant:ip:${left}` } });
-    const second = await raw.rateLimit.findUnique({ where: { key: `assistant:ip:${right}` } });
+    const first = await raw.appRateLimit.findUnique({ where: { key: `assistant:ip:${left}` } });
+    const second = await raw.appRateLimit.findUnique({ where: { key: `assistant:ip:${right}` } });
     expect(first?.count).toBeGreaterThan(0);
     expect(second).toBeNull();
   });
@@ -1335,5 +1336,53 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(again.status).toBe(200);
     expect(JSON.stringify(seen[1])).toContain("partial");
     expect(second).toContain("Recovered after the interruption.");
+  });
+
+  it("size, length and extra-key rules unchanged", async () => {
+    const { model, calls } = strictModel(() => [
+      { type: "stream-start", warnings: [] },
+      { type: "text-start", id: "t" },
+      { type: "text-delta", id: "t", delta: "ok" },
+      { type: "text-end", id: "t" },
+      { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+    ]);
+    const handler = createChatHandler({ model });
+    const short = await handler(request("a", { ip: "203.0.113.210", extra: { id: "sdk", trigger: "submit-message" } }));
+    expect(short.status).toBe(200);
+    await short.text();
+    const full = await handler(request("b".repeat(2000), { ip: "203.0.113.211" }));
+    expect(full.status).toBe(200);
+    await full.text();
+    const raw = JSON.stringify({ message: { role: "user", parts: [{ type: "text", text: "é".repeat(9000) }] } });
+    expect(Buffer.byteLength(raw, "utf8")).toBeGreaterThan(16 * 1024);
+    const wide = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.212",
+      },
+      body: raw,
+    }));
+    expect(wide.status).toBe(400);
+    expect(calls()).toBe(2);
+  });
+
+  it("assistant IP and cart limits survive an auth reset", async () => {
+    const run = randomUUID();
+    const now = Date.now() - 90_000;
+    const ipKey = `assistant:ip:${run}`;
+    const cartKey = `assistant:cart:${run}`;
+    expect((await takeRateLimit(ipKey, 60, 60 * 60 * 1000, now)).count).toBe(1);
+    expect((await takeRateLimit(cartKey, 30, 60 * 60 * 1000, now)).count).toBe(1);
+    const sacrificial = `sacrificial-chat-${run}`;
+    await authPrisma.rateLimit.create({ data: { key: sacrificial, count: 1, lastRequest: BigInt(now) } });
+    await authPrisma.rateLimit.deleteMany({ where: { lastRequest: { lt: BigInt(Date.now() - 60_000) } } });
+    expect(await authPrisma.rateLimit.findUnique({ where: { key: sacrificial } })).toBeNull();
+    expect((await authPrisma.appRateLimit.findUnique({ where: { key: ipKey } }))?.count).toBe(1);
+    expect((await authPrisma.appRateLimit.findUnique({ where: { key: cartKey } }))?.count).toBe(1);
+    await authPrisma.appRateLimit.deleteMany({ where: { key: { in: [ipKey, cartKey] } } });
   });
 });

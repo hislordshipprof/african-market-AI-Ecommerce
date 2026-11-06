@@ -152,7 +152,20 @@ export async function resolveRefundFailed(
   displayedOwedCents: number,
 ): Promise<ResolveResult> {
   const session = await requirePlatformAdmin();
-  const trimmed = note.trim();
+  const parsed = parseInput(z.strictObject({
+    orderId: z.string().max(200),
+    note: z.string().max(2_000),
+    repaidCents: z.number().int(),
+    displayedOwedCents: z.number().int(),
+  }), { orderId, note, repaidCents, displayedOwedCents });
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+      fieldError: "Enter the amount you repaid, from $0.01 up to the captured amount.",
+    };
+  }
+  const trimmed = parsed.data.note.trim();
   if (trimmed.length < 1 || trimmed.length > 500) {
     return { ok: false, error: "Note must be 1–500 characters.", fieldError: "Note must be 1–500 characters." };
   }

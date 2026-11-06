@@ -346,4 +346,50 @@ describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
     expect(succeeded).toBe(1000);
     expect(await storeScoped(storeA).refundRequest.count({ where: { orderId: order.id, state: { in: ["RESERVED", "UNKNOWN"] } } })).toBe(0);
   });
+
+  it("duplicate event applied once", async () => {
+    const customer = await storeScoped(storeA).customer.create({
+      data: { storeId: storeA, name: "Duplicate webhook" },
+    });
+    const pi = `pi_dup_${run}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-dup");
+    const order = await storeScoped(storeA).order.create({
+      data: {
+        storeId: storeA,
+        number: 18615,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const key = `refund:${order.id}:dup`;
+    await storeScoped(storeA).refundRequest.create({
+      data: {
+        storeId: storeA,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "RESERVED",
+      },
+    });
+    const refund = await fakeStripeProvider.refundPayment(pi, 1000, key, { reservationKey: key, orderId: order.id });
+    expect((await postRefund("refund.created", refund.refundId, pi, "succeeded", key)).status).toBe(200);
+    expect((await postRefund("refund.created", refund.refundId, pi, "succeeded", key)).status).toBe(200);
+    const rows = await storeScoped(storeA).refundRequest.findMany({ where: { orderId: order.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.state).toBe("CREATED");
+    expect(rows[0]?.amountCents).toBe(1000);
+    expect(rows[0]?.providerRefundId).toBe(refund.refundId);
+    const stored = await storeScoped(storeA).order.findUnique({ where: { id: order.id } });
+    expect(stored?.capturedAmountCents).toBe(1000);
+  });
 });

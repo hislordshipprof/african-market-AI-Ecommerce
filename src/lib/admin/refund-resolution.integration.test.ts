@@ -31,11 +31,24 @@ import { applyProviderRefund, clearReplayCallsForTests, evaluateOrderRefundState
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { failedAtLabel } from "./failed-at";
 import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction } from "./refund-resolution";
+import { parseRepaidDollars } from "./repaid-dollars";
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `t264-${Date.now()}`;
 const password = "RefundResolve-186!";
 const hasDb = !!process.env.DATABASE_URL;
+
+describe("repaid dollars", () => {
+  it("repaid dollars parsing and caps are unchanged under the schema", () => {
+    expect(parseRepaidDollars("10.5")).toBe(1050);
+    expect(parseRepaidDollars("10.50")).toBe(1050);
+    expect(parseRepaidDollars("10.005")).toBeNull();
+    expect(parseRepaidDollars("-1")).toBeNull();
+    expect(parseRepaidDollars("1e3")).toBeNull();
+    expect(parseRepaidDollars("100000000")).toBeNull();
+  });
+});
+
 const olderFailureAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
 async function secondAuditAt(storeId: string, orderId: string, refundId: string): Promise<Date> {
   const rows = await storeScoped(storeId).auditLog.findMany({

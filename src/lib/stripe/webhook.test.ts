@@ -67,6 +67,49 @@ describe("Stripe webhook handler", () => {
     expect(json.error).toMatch(/invalid/i);
   });
 
+  it("unsigned 400", async () => {
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const { NextRequest } = await import("next/server");
+    const res = await POST(new NextRequest(new Request("http://localhost:3000/api/webhooks/stripe", { method: "POST", body: "{}" })));
+    expect(res.status).toBe(400);
+  });
+
+  it("schema failure after signature 400", async () => {
+    const res = await callWebhook(
+      JSON.stringify({ type: "t".repeat(201), accountId: "acct_schema" }),
+      VALID_WEBHOOK_SIGNATURE,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid webhook payload" });
+    expect(updateStoreOnboardingStatus).not.toHaveBeenCalled();
+  });
+
+  it("duplicate event applied once", async () => {
+    const { applyProviderRefund } = await import("@/lib/order/refund-requests");
+    vi.mocked(applyProviderRefund).mockClear();
+    const body = JSON.stringify({
+      type: "charge.refunded",
+      accountId: "acct_dup",
+      data: { object: { id: "re_dup", object: "refund", status: "succeeded", payment_intent: "pi_dup" } },
+    });
+    expect((await callWebhook(body, VALID_WEBHOOK_SIGNATURE)).status).toBe(200);
+    expect((await callWebhook(body, VALID_WEBHOOK_SIGNATURE)).status).toBe(200);
+    const amounts = vi.mocked(applyProviderRefund).mock.calls.map((call) => call[0]?.amountRefunded);
+    expect(new Set(amounts).size).toBe(1);
+  });
+
+  it("DB failure returns 500 and retry converges", async () => {
+    const { applyProviderRefund } = await import("@/lib/order/refund-requests");
+    vi.mocked(applyProviderRefund).mockRejectedValueOnce(new Error("db down"));
+    const body = JSON.stringify({
+      type: "charge.refunded",
+      accountId: "acct_db",
+      data: { object: { id: "re_db", object: "refund", status: "succeeded", payment_intent: "pi_db" } },
+    });
+    expect((await callWebhook(body, VALID_WEBHOOK_SIGNATURE)).status).toBe(500);
+    expect((await callWebhook(body, VALID_WEBHOOK_SIGNATURE)).status).toBe(200);
+  });
+
   it("returns 200 and updates store for valid account.updated event", async () => {
     const event: WebhookEvent = {
       type: "account.updated",
@@ -204,6 +247,12 @@ describe("Stripe webhook signatures", () => {
   it("a payload signed with an unlisted secret is rejected with 400", async () => {
     const payload = JSON.stringify({ id: "evt_bad", object: "event", type: "account.updated", data: { object: { id: "acct_x", object: "account" } } });
     const res = await post(payload, sign(payload, "whsec_not_listed"));
+    expect(res.status).toBe(400);
+  });
+
+  it("stale signature 400", async () => {
+    const payload = JSON.stringify({ id: "evt_stale_301", object: "event", type: "account.updated", data: { object: { id: "acct_x", object: "account" } } });
+    const res = await post(payload, sign(payload, platformSecret, Math.floor(Date.now() / 1000) - 301));
     expect(res.status).toBe(400);
   });
 

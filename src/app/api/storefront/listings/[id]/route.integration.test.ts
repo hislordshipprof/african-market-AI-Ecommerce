@@ -146,4 +146,10 @@ describe.skipIf(!hasDb)("GET /api/storefront/listings/[id]", () => {
     await expect(call("", listingId)).rejects.toThrow("notFound");
     await expect(call("t226-route-unknown", listingId)).rejects.toThrow("notFound");
   });
+
+  it("malformed listing id is 404 before cache", async () => {
+    const response = await call("t226-route-unknown", "not-a-listing-id");
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Listing not found" });
+  });
 });

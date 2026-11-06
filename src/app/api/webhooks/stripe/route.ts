@@ -115,7 +115,8 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: settled.error }, { status: 500 });
         }
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       return NextResponse.json({ error: "Refund could not be recorded" }, { status: 500 });
     }
   }
