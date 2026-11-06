@@ -8,7 +8,7 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/checkout/actions.ts",
   "src/app/account/actions.ts",
 ]);
-const GUARDS = ["requireStoreOwner", "requireStoreMember", "requirePlatformAdmin"];
+const GUARDS = ["requireStoreOwner", "requireStoreMember", "requirePlatformAdmin", "requireUserId"];
 const HTTP = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 function walk(dir: string, acc: string[] = []): string[] {
