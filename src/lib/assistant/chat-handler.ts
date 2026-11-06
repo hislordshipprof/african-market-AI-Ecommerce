@@ -28,7 +28,7 @@ import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessa
 import { clientIp } from "./client-ip";
 import { callCostMicros, type TokenUsage } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
-import { groundingTransform } from "./grounding";
+import { groundingTransform, keyedUnitPricesFromHistory } from "./grounding";
 import { assistantSpendState, claimCapAlert, utcDay } from "./spend";
 import { ASSISTANT_STATIC_PROMPT, storeContextMessage } from "./system-prompt";
 import { assistantTools } from "./tools";
@@ -147,7 +147,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       turnMessageId: parsed.id,
     });
     const history = (await usableHistory(withUser, tools)).slice(-30);
-    const modelMessages = await convertToModelMessages(retryVisible(history, parsed.id, alreadyThere));
+    const sentHistory = retryVisible(history, parsed.id, alreadyThere);
+    const modelMessages = await convertToModelMessages(sentHistory);
 
     const result = streamText({
       model,
@@ -170,6 +171,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       timeout: { totalMs: 55_000 },
       providerOptions: assistantProviderOptions(modelId),
       experimental_transform: groundingTransform({
+        historyUnitPrices: keyedUnitPricesFromHistory(sentHistory),
+        getAllowedCents: () => new Set([store.minimumOrderCents]),
         onStrip: (amount) => {
           void storeScoped(store.id).aiAction.create({
             data: {

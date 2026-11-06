@@ -404,11 +404,17 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   }, 60_000);
 
   it("returns assistant_unavailable without a key or with an unknown model", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
     const missing = await createChatHandler()(request("hello", { ip: "203.0.113.40" }));
     expect(missing.status).toBe(503);
     expect((await missing.json()).error.code).toBe("assistant_unavailable");
+    vi.stubEnv("ANTHROPIC_API_KEY", "   ");
+    const blank = await createChatHandler()(request("blank key", { ip: "203.0.113.140" }));
+    expect(blank.status).toBe(503);
+    expect((await blank.json()).error.code).toBe("assistant_unavailable");
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
     vi.stubEnv("ASSISTANT_MODEL", "gpt-4o");
     const unknown = await createChatHandler()(request("hello", { ip: "203.0.113.41" }));
@@ -631,7 +637,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(JSON.stringify(rows[0].messages)).toContain("again");
   });
 
-  it("streams (see card) for an amount no tool returned", async () => {
+  it("replaces an amount no tool returned with a natural sentence", async () => {
     const { model } = strictModel(() => [
       { type: "stream-start", warnings: [] },
       { type: "text-start", id: "t" },
@@ -642,8 +648,9 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const handler = createChatHandler({ model });
     const response = await handler(request("price?", { ip: "203.0.113.86" }));
     const body = await response.text();
-    expect(body).toContain("(see card)");
+    expect(body).toContain("I couldn't confirm that price.");
     expect(body).not.toContain("3.00");
+    expect(body).not.toContain("(see card)");
   });
 
   it("stops at eight steps with the step-limit part", async () => {
@@ -1224,7 +1231,9 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
     ]);
     vi.stubEnv("ASSISTANT_CHAT_ENABLED", "");
-    const response = await createChatHandler({ model: seen.model })(new Request(`http://${host}/api/assistant/chat`, {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    const response = await createChatHandler()(new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
       headers: {
         "content-type": "application/json",

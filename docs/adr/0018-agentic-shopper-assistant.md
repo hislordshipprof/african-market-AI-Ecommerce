@@ -62,7 +62,7 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 ### Safety and grounding
 
 - Every tool runs server-side through `storeScoped()` with Postgres RLS. The cart comes from the session (`resolveShopperCart`), never from the model.
-- Prices, stock, fees and totals reach the shopper only as cards drawn from tool results. A post-reply check removes any dollar amount the model typed that no tool returned.
+- Prices, stock, fees and totals reach the shopper only from tool results. The allowed amounts for a reply are the newest keyed unit price (`priceCents` or `unitPriceCents`, keyed by `variantId` or else `listingId`) from tool outputs in the history sent to the model and this turn, every `*Cents` value in this turn's tool outputs, and the store's `minimumOrderCents`. Totals from earlier turns are not kept, and sums or multiples of allowed amounts are not allowed: the cart tools return `lineTotalCents`, `addedTotalCents` and `subtotalCents` instead. An amount that happens to equal a currently allowed unit price, the store minimum, or an amount returned this turn can still appear. User text, tool inputs and assistant text never add amounts. USD amounts (`$12.34`, `US$12.34`, `USD 12.34`, `12.34 USD`, `12.34 dollars`, `99¢`, `99 cents`) are checked as cents. Any other currency symbol or code is removed. A removed amount in a list line becomes "price not confirmed"; anywhere else the sentence becomes "I couldn't confirm that price." Newly generated replies never say "(see card)". A replay of an already stored reply is not grounded again.
 - Store-written listing text is data, never instructions.
 - Stock confidence below 0.6 (§8.1): the item is added as "may be unavailable" with a backup swap rule.
 
