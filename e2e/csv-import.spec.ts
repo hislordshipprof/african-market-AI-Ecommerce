@@ -361,9 +361,7 @@ test.describe("CSV import (authenticated)", () => {
       writeTempBytes("windows.csv", windows1252),
     );
     await page.click("text=Upload & Preview");
-    await expect(page.locator("[data-sonner-toast]")).toContainText("not saved as UTF-8", {
-      timeout: 15000,
-    });
+    await expect(page.getByText("not saved as UTF-8")).toBeVisible({ timeout: 15000 });
     const recovered = `E2E Utf8 ${ts}`;
     createdNames.push(recovered);
     await page.locator("input[type='file']").setInputFiles(
