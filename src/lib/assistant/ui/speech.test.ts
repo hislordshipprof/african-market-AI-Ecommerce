@@ -11,16 +11,17 @@ import {
   recognitionLanguage,
   speechErrorCopy,
   SPEECH_LIMIT_MESSAGE,
+  sealSpeech,
   stopSpeech,
   type BrowserSpeech,
 } from "./speech";
 
 describe("assistant speech", () => {
-  it("keeps separate finals that share a prefix and replaces the same index", () => {
+  it("replaces the same index and a longer copy of an earlier final", () => {
     let state = beginSpeech("I want to cook ", 1);
     state = applyFinal(state, 1, 0, "rice");
     state = applyFinal(state, 1, 1, "rice flour");
-    expect(state.draft).toBe("I want to cook rice rice flour");
+    expect(state.draft).toBe("I want to cook rice flour");
     state = applyFinal(state, 1, 0, "jollof rice");
     expect(state.draft).toBe("I want to cook jollof rice rice flour");
   });
@@ -182,5 +183,64 @@ describe("assistant speech", () => {
     recognizer.onerror?.({ error: "language-not-supported" });
     expect(starts).toEqual(["yo"]);
     expect(state.listening).toBe(true);
+  });
+
+  it("replaces a repeated final instead of appending it", () => {
+    const rows = [
+      { prefix: "rice ", finals: ["and beans", "and beans please"], draft: "rice and beans please" },
+      { prefix: "", finals: ["and beans", "and beans"], draft: "and beans" },
+      { prefix: "", finals: ["and", "and beans", "and beans please"], draft: "and beans please" },
+      { prefix: "", finals: ["rice", "beans"], draft: "rice beans" },
+      { prefix: "", finals: ["rice", "ricer"], draft: "rice ricer" },
+    ];
+    for (const row of rows) {
+      let state = beginSpeech(row.prefix, 1);
+      row.finals.forEach((text, index) => {
+        state = applyFinal(state, 1, index, text);
+      });
+      expect(state.draft).toBe(row.draft);
+    }
+  });
+
+  it("does not write the draft after a send ends acceptance", () => {
+    const writes: string[] = [];
+    let state = beginSpeech("", 1);
+    const recognizer: BrowserSpeech = {
+      lang: "",
+      continuous: true,
+      interimResults: false,
+      start: () => {},
+      stop: () => {},
+      abort: () => {},
+      onresult: null,
+      onerror: null,
+      onend: null,
+    };
+    bindRecognizer(recognizer, {
+      lang: "en-US",
+      session: 1,
+      read: () => state,
+      write: (next) => {
+        state = next;
+        writes.push(next.draft);
+      },
+    });
+    recognizer.onresult?.({
+      resultIndex: 0,
+      results: [{ isFinal: true, 0: { transcript: "beans" } }],
+    });
+    const written = writes.length;
+    state = sealSpeech(state);
+    recognizer.onend?.();
+    recognizer.onresult?.({
+      resultIndex: 1,
+      results: [
+        { isFinal: true, 0: { transcript: "beans" } },
+        { isFinal: true, 0: { transcript: "beans please" } },
+      ],
+    });
+    expect(writes).toHaveLength(written);
+    expect(state.accepting).toBe(false);
+    expect(state.draft).toBe("beans");
   });
 });

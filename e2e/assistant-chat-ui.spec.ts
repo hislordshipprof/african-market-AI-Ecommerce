@@ -319,6 +319,18 @@ test("a photo does not change the basket until the customer taps", async ({ page
   await page.getByTestId("assistant-send").click();
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" })).toBeVisible({ timeout: 20_000 });
+  const sentPhoto = dialog.locator('[class*="user"] img');
+  await expect(sentPhoto).toBeVisible();
+  await expect(sentPhoto).toHaveAttribute("src", /^data:image\//);
+  const followUps: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") followUps.push(request.postData() ?? "");
+  });
+  await page.getByTestId("assistant-composer").fill("just rice");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => followUps.length).toBe(1);
+  expect(followUps[0]).not.toContain("data:");
+  await expect(sentPhoto).toBeVisible();
   await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("0");
   let pdfPost = "";
   page.on("request", (request) => {

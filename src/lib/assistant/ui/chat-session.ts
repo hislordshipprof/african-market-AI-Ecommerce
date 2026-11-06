@@ -20,11 +20,12 @@ function sessionKey(storeId: string, accountId: string | null, cartId: string | 
   return `${storeId}\u0000${accountId ?? ""}\u0000${cartId ?? ""}`;
 }
 
-function releaseFileBytes(chat: Chat<UIMessage>) {
+function releaseFileBytes(chat: Chat<UIMessage>, keepImages = false) {
   const next = chat.messages.map((message) => ({
     ...message,
     parts: message.parts.map((part) => {
       if (part.type !== "file" || typeof part.url !== "string" || !part.url.startsWith("data:")) return part;
+      if (keepImages && part.mediaType.startsWith("image/")) return part;
       return { ...part, url: "" };
     }),
   }));
@@ -48,7 +49,7 @@ function createChat(storeId: string): Chat<UIMessage> {
       reconcileStoreCart(storeId);
     },
     onFinish: (event) => {
-      releaseFileBytes(chat);
+      releaseFileBytes(chat, true);
       if (!shouldSettleTurn(event)) return;
       void settleStoreCart(storeId);
     },

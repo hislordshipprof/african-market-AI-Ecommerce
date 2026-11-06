@@ -21,6 +21,7 @@ import {
   commitInterim,
   noteCustomerEdit,
   recognitionLanguage,
+  sealSpeech,
   stopSpeech,
   type BrowserSpeech,
   type SpeechState,
@@ -536,6 +537,12 @@ function Thread({
         };
         inflightRef.current = record;
         setInflight(record);
+        const spoken = speechRef.current;
+        if (spoken?.accepting) {
+          const sealed = sealSpeech(spoken);
+          speechRef.current = sealed;
+          setSpeech(sealed);
+        }
         draftRef.current = "";
         tilesRef.current = [];
         setDraft("");

@@ -14,8 +14,8 @@ const { prepareAttachments } = await import("../src/lib/assistant/attachments.ts
 const jpeg = readFileSync(new URL("../src/lib/assistant/fixtures/list-exif.jpg", import.meta.url));
 const pdf = readFileSync(new URL("../src/lib/assistant/fixtures/two-page.pdf", import.meta.url));
 const prepared = await prepareAttachments([
-  { name: "list.jpg", mediaType: "image/jpeg", bytes: jpeg },
-  { name: "recipe.pdf", mediaType: "application/pdf", bytes: pdf },
+  { filename: "list.jpg", mediaType: "image/jpeg", bytes: jpeg },
+  { filename: "recipe.pdf", mediaType: "application/pdf", bytes: pdf },
 ]);
 if (!prepared.ok) {
   process.stderr.write(prepared.code);
@@ -23,21 +23,25 @@ if (!prepared.ok) {
 }
 
 const { generateText } = await import("ai");
+const { assistantSpendState } = await import("../src/lib/assistant/spend.ts");
+const SPEND_CAP_MICROS = 50_000n;
 const model = createAssistantModel();
+const before = await assistantSpendState();
 let cacheRead = 0;
 let cacheWrite = 0;
 let input = 0;
 let output = 0;
 for (const file of prepared.files) {
+  const isPdf = file.modelMediaType === "application/pdf";
   const result = await generateText({
     model,
     messages: [{
       role: "user",
       content: [
         { type: "text", text: "Name the items you can see. Do not change a cart." },
-        file.mediaType === "application/pdf"
-          ? { type: "file", data: file.modelBytes, mediaType: "application/pdf" }
-          : { type: "image", image: file.modelBytes, mediaType: "image/jpeg" },
+        isPdf
+          ? { type: "file", data: file.modelBytes, mediaType: file.modelMediaType }
+          : { type: "image", image: file.modelBytes, mediaType: file.modelMediaType },
       ],
     }],
     maxOutputTokens: 80,
@@ -48,4 +52,17 @@ for (const file of prepared.files) {
   cacheRead += details?.cacheReadTokens ?? 0;
   cacheWrite += details?.cacheWriteTokens ?? 0;
 }
-process.stdout.write(JSON.stringify({ skipped: false, input, output, cacheRead, cacheWrite }));
+const after = await assistantSpendState();
+const spentMicros = after.spentMicros - before.spentMicros;
+if (spentMicros > SPEND_CAP_MICROS) {
+  process.stderr.write(`live check spent ${spentMicros} micros, above ${SPEND_CAP_MICROS}\n`);
+  process.exit(1);
+}
+process.stdout.write(JSON.stringify({
+  skipped: false,
+  input,
+  output,
+  cacheRead,
+  cacheWrite,
+  spentMicros: spentMicros.toString(),
+}));

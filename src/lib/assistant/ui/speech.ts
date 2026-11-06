@@ -40,12 +40,32 @@ function cloneMap(source: ReadonlyMap<number, string>): Map<number, string> {
   return new Map(source);
 }
 
+function normalizeSpoken(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** A later Android final often repeats the earlier phrase and then continues it. */
+function repeatsKept(previous: string, next: string): boolean {
+  if (next === previous) return true;
+  if (!next.startsWith(previous)) return false;
+  const boundary = next.charAt(previous.length);
+  return boundary === "" || /[^\p{L}\p{N}]/u.test(boundary);
+}
+
 function spokenFrom(finals: ReadonlyMap<number, string>): string {
-  return [...finals.entries()]
-    .sort((left, right) => left[0] - right[0])
-    .map(([, text]) => text.trim())
-    .filter((text) => text.length > 0)
-    .join(" ");
+  const kept: string[] = [];
+  const ordered = [...finals.entries()].sort((left, right) => left[0] - right[0]);
+  for (const [, text] of ordered) {
+    const trimmed = text.trim();
+    if (!trimmed) continue;
+    const previous = kept.length > 0 ? normalizeSpoken(kept[kept.length - 1] ?? "") : null;
+    if (previous != null && repeatsKept(previous, normalizeSpoken(trimmed))) {
+      kept[kept.length - 1] = trimmed;
+      continue;
+    }
+    kept.push(trimmed);
+  }
+  return kept.join(" ");
 }
 
 function compose(prefix: string, spoken: string): string {
@@ -169,6 +189,11 @@ export function stopSpeech(state: SpeechState): SpeechState {
   return { ...state, listening: false };
 }
 
+/** A real send has taken this draft. Later events from its recognizer must not write it back. */
+export function sealSpeech(state: SpeechState): SpeechState {
+  return { ...state, session: state.session + 1, listening: false, accepting: false, interim: "" };
+}
+
 export function endSpeech(state: SpeechState): SpeechState {
   return { ...state, listening: false, accepting: false, interim: "" };
 }
@@ -201,7 +226,7 @@ export function bindRecognizer(
   recognizer.interimResults = true;
   recognizer.onresult = (event) => {
     let state = input.read();
-    if (state.session !== input.session) return;
+    if (state.session !== input.session || !state.accepting) return;
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
       const result = event.results[index];
       const transcript = result?.[0]?.transcript ?? "";
@@ -229,7 +254,7 @@ export function bindRecognizer(
   };
   recognizer.onend = () => {
     const current = input.read();
-    if (current.session !== input.session) return;
+    if (current.session !== input.session || !current.accepting) return;
     input.write(endSpeech(current));
   };
   recognizer.start();
