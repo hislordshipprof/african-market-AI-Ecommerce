@@ -94,6 +94,27 @@ describe("price grounding", () => {
     expect(groundAmounts("- Palm: 10.99 C$", usd).text).toBe("- Palm: price not confirmed");
     expect(groundAmounts("10.99 C", usd)).toEqual({ text: "10.99 C", stripped: [] });
     expect(groundAmounts("10.99 C $10.99", usd).text).toBe("10.99 C $10.99");
+    const adjacent = groundAmounts("- Egusi and palm oil: $10.99 $7.77", usd);
+    expect(adjacent.text).toBe("- Egusi and palm oil: $10.99 price not confirmed");
+    expect(adjacent.stripped).toEqual(["$7.77"]);
+    expect(groundAmounts("- Egusi and palm oil: $10.99\n$7.77", usd).text).toBe(
+      `- Egusi and palm oil: $10.99\n${PHRASE}`,
+    );
+    const foreignNext = groundAmounts("- Egusi and palm oil: $10.99 €7.77", usd);
+    expect(foreignNext.text).toBe("- Egusi and palm oil: $10.99 price not confirmed");
+    expect(foreignNext.stripped).toEqual(["€7.77"]);
+    expect(groundAmounts("- Egusi and palm oil: $10.99€7.77", usd).stripped).toEqual(["€7.77"]);
+    expect(groundAmounts("$10.99 $10.99", usd)).toEqual({ text: "$10.99 $10.99", stripped: [] });
+    expect(groundAmounts("Egusi is $10.99 $7.77.", usd).text).toBe(PHRASE);
+    expect(groundAmounts("10.99$", usd).text).toBe("10.99$");
+    expect(groundAmounts("10.99€", usd).stripped).toEqual(["10.99€"]);
+    for (const gap of ["\u00a0", "\u202f", "\u2007"]) {
+      expect(groundAmounts(`Egusi costs $${gap}7.77.`, usd).text).toBe(PHRASE);
+      expect(groundAmounts(`Egusi costs $${gap}7.77.`, usd).stripped).toEqual([`$${gap}7.77`]);
+    }
+    expect(groundAmounts("$\u00a010.99", usd).text).toBe("$\u00a010.99");
+    expect(groundAmounts("10.99\u00a0USD", usd).text).toBe("10.99\u00a0USD");
+    expect(groundAmounts("$\n\n7.77", new Set())).toEqual({ text: "$\n\n7.77", stripped: [] });
     expect(groundAmounts("7.77\nUSD", new Set()).stripped).toEqual(["7.77\nUSD"]);
     expect(groundAmounts("We close at 9 PM. Ogbono is $7.77.", usd).text).toBe(`We close at 9 PM. ${PHRASE}`);
     const fractional = groundAmounts("- A: 1.99 cents\n- B: 4.505 cents", new Set([99, 505]));

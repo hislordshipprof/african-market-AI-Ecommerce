@@ -86,22 +86,29 @@ function lineSpans(text: string): Array<{ start: number; contentEnd: number; bre
   return spans;
 }
 
+/** Horizontal spaces from JavaScript `\s`, including NBSP. Newlines stay line breaks. */
+const HORIZONTAL_SPACE = /[ \t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]/;
+
+function isHorizontalSpace(char: string | undefined): boolean {
+  return char != null && HORIZONTAL_SPACE.test(char);
+}
+
 /** One soft break may sit between a prefix, a number, and a suffix. A blank line may not. */
 function skipSoft(text: string, index: number): number {
   let cursor = index;
-  while (text[cursor] === " " || text[cursor] === "\t") cursor += 1;
+  while (isHorizontalSpace(text[cursor])) cursor += 1;
   if (text[cursor] !== "\n" && text[cursor] !== "\r") return cursor;
   let next = cursor;
   if (text[next] === "\r") next += 1;
   if (text[next] === "\n") next += 1;
   if (text[next] === "\n" || text[next] === "\r") return index;
-  while (text[next] === " " || text[next] === "\t") next += 1;
+  while (isHorizontalSpace(text[next])) next += 1;
   return next;
 }
 
 function skipInline(text: string, index: number): number {
   let cursor = index;
-  while (text[cursor] === " " || text[cursor] === "\t") cursor += 1;
+  while (isHorizontalSpace(text[cursor])) cursor += 1;
   return cursor;
 }
 
@@ -163,6 +170,7 @@ function readLetterDollar(text: string, index: number): Suffix | null {
   if (!match) return null;
   const letters = match[1].toLowerCase();
   let end = start + match[0].length;
+  if (readNumber(text, skipSoft(text, end))) return null;
   let foreign = letters !== "us" && letters !== "usd";
   let cent = false;
   const next = readWord(text, skipInline(text, end));
@@ -183,6 +191,7 @@ function readSuffix(text: string, index: number): Suffix | null {
   const symbol = text[start];
   if (symbol === "¢") return { end: start + 1, foreign: false, cent: true };
   if (symbol === "$" || FOREIGN_SYMBOLS.has(symbol)) {
+    if (readNumber(text, skipSoft(text, start + 1))) return null;
     return { end: start + 1, foreign: symbol !== "$", cent: false };
   }
   if (!/[A-Za-z]/.test(symbol)) return null;
