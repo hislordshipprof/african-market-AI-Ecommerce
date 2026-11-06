@@ -60,6 +60,13 @@ function writeTempCsv(content: string): string {
   return filePath;
 }
 
+function importSuccessPanel(page: Page) {
+  return page
+    .getByRole("heading", { name: "Import Complete" })
+    .locator("..")
+    .getByText("Imported 1 listing successfully");
+}
+
 function writeTempBytes(name: string, bytes: Buffer): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "csv-import-e2e-"));
   const filePath = path.join(dir, name);
@@ -332,7 +339,7 @@ test.describe("CSV import (authenticated)", () => {
     const moreButton = page.getByRole("button", { name: "Import 1 listing" });
     await expect(moreButton).toBeVisible({ timeout: 15000 });
     await moreButton.click();
-    await expect(page.getByText("Imported 1 listing.")).toBeVisible({ timeout: 15000 });
+    await expect(importSuccessPanel(page)).toBeVisible({ timeout: 15000 });
 
     await page.getByRole("button", { name: "Import More" }).click();
     await page.locator("input[type='file']").setInputFiles(csvPath);
@@ -349,7 +356,7 @@ test.describe("CSV import (authenticated)", () => {
     const backButton = page.getByRole("button", { name: "Import 1 listing" });
     await expect(backButton).toBeVisible({ timeout: 15000 });
     await backButton.click();
-    await expect(page.getByText("Imported 1 listing.")).toBeVisible({ timeout: 15000 });
+    await expect(importSuccessPanel(page)).toBeVisible({ timeout: 15000 });
 
     await page.getByRole("button", { name: "Import More" }).click();
     const windows1252 = Buffer.concat([
