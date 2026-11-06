@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { storeScoped } from "../../db";
+import { customerCancelOrder } from "../../order/service";
 import { getCheckoutPayments } from "../../stripe/checkout-payments";
 import { confirmCheckout, mintCheckoutToken } from "./confirm";
 import { prepareCheckout, saveGuestContact, setFulfillment } from "./prepare";
@@ -85,6 +86,7 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
     await storeScoped(storeId).cart.deleteMany({});
     await storeScoped(storeId).listingVariant.deleteMany({});
     await storeScoped(storeId).listing.deleteMany({});
+    await raw.auditLog.deleteMany({ where: { storeId } });
     await raw.store.delete({ where: { id: storeId } });
     await raw.$disconnect();
   });
@@ -123,5 +125,15 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
     expect(orders[0]?.cancellableUntil).toBeTruthy();
     const attempts = await storeScoped(storeId).assistantCheckoutAttempt.findMany({ where: { cartId, paymentIntentId: { not: null } } });
     expect(new Set(attempts.map((attempt) => attempt.paymentIntentId)).size).toBe(1);
+    const cancelled = await customerCancelOrder({
+      storeId,
+      orderId: orders[0]!.id,
+      cartId,
+      actorUserId: null,
+      actorEmail: "guest@checkout",
+    });
+    expect(cancelled.ok, JSON.stringify(cancelled)).toBe(true);
+    const after = await storeScoped(storeId).order.findUnique({ where: { id: orders[0]!.id } });
+    expect(after?.status).toBe("CANCELLED");
   });
 });
