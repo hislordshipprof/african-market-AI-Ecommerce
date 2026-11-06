@@ -18,10 +18,13 @@ async function watch(page: import("@playwright/test").Page) {
 
 test("storefront, admin sign-in, checkout, api and static carry headers with zero CSP violations", async ({ page, request }) => {
   await watch(page);
-  const paths = ["/?store=mama-ngozi", "/admin/sign-in", "/checkout?store=mama-ngozi", "/api/health"];
+  const paths = ["/?store=mama-ngozi", "/store-admin/sign-in?store=mama-ngozi", "/checkout?store=mama-ngozi", "/api/health"];
   for (const path of paths) {
     const response = await page.goto(path);
-    expect(response?.status(), path).toBeLessThan(500);
+    expect(response?.status(), path).toBe(200);
+    if (path.startsWith("/store-admin")) {
+      await expect(page.getByText("Sign in to manage your store")).toBeVisible();
+    }
     const headers = response?.headers() ?? {};
     expect(headers["content-security-policy"], path).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
     expect(headers["content-security-policy-report-only"], path).toContain("default-src 'self'");
@@ -49,8 +52,12 @@ test("non-platform host (chromium --host-resolver-rules) loads with zero violati
   const page = await browser.newPage();
   await watch(page);
   const response = await page.goto(`http://mama-ngozi.example.test:${port}/`);
-  expect(response?.status()).toBeLessThan(500);
+  expect(response?.status()).toBe(200);
+  await expect(page.getByRole("button", { name: /shopping cart/i })).toBeVisible();
+  expect(response?.headers()["content-security-policy"]).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
   expect(response?.headers()["content-security-policy-report-only"]).toContain("'self'");
+  expect(response?.headers()["x-content-type-options"]).toBe("nosniff");
+  expect(response?.headers()["strict-transport-security"]).toBe("max-age=63072000");
   expect(await violationsOf(page)).toEqual([]);
   await browser.close();
 });

@@ -43,11 +43,16 @@ export type StoreFormState = {
   nudgedColor?: string;
 };
 
+function formText(data: FormData, key: string): string | null {
+  const value = data.get(key);
+  return typeof value === "string" ? value : null;
+}
+
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
   for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled", "timezone"]) {
-    const v = data.get(key);
-    if (v != null) raw[key] = String(v);
+    const v = formText(data, key);
+    if (v != null) raw[key] = v;
   }
   return raw;
 }
@@ -72,23 +77,23 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
 } {
   const errors: Record<string, string> = {};
 
-  const slug = (data.get("slug") as string)?.trim().toLowerCase() ?? "";
-  const name = (data.get("name") as string)?.trim() ?? "";
-  const logoUrl = (data.get("logoUrl") as string)?.trim() || null;
-  const brandColor = (data.get("brandColor") as string)?.trim() || null;
-  const themePreset = (data.get("themePreset") as string)?.trim() || "palm-and-shea";
-  const status = (data.get("status") as string)?.trim() || "active";
-  const hoursRaw = (data.get("hours") as string)?.trim() || "";
-  const prepTimeMinutes = parseIntOrDefault(data.get("prepTimeMinutes") as string, 30);
-  const deliveryRadiusMi = parseFloatOrDefault(data.get("deliveryRadiusMi") as string, 8);
+  const slug = formText(data, "slug")?.trim().toLowerCase() ?? "";
+  const name = formText(data, "name")?.trim() ?? "";
+  const logoUrl = formText(data, "logoUrl")?.trim() || null;
+  const brandColor = formText(data, "brandColor")?.trim() || null;
+  const themePreset = formText(data, "themePreset")?.trim() || "palm-and-shea";
+  const status = formText(data, "status")?.trim() || "active";
+  const hoursRaw = formText(data, "hours")?.trim() || "";
+  const prepTimeMinutes = parseIntOrDefault(formText(data, "prepTimeMinutes"), 30);
+  const deliveryRadiusMi = parseFloatOrDefault(formText(data, "deliveryRadiusMi"), 8);
   const minimumOrderCents = Math.round(
-    parseFloatOrDefault(data.get("minimumOrder") as string, 35) * 100,
+    parseFloatOrDefault(formText(data, "minimumOrder"), 35) * 100,
   );
-  const pickupEnabled = data.get("pickupEnabled") === "on";
+  const pickupEnabled = formText(data, "pickupEnabled") === "on";
   const autoRefundLimitCents = Math.round(
-    parseFloatOrDefault(data.get("autoRefundLimit") as string, 25) * 100,
+    parseFloatOrDefault(formText(data, "autoRefundLimit"), 25) * 100,
   );
-  const timezone = (data.get("timezone") as string)?.trim() || defaultTimezone;
+  const timezone = formText(data, "timezone")?.trim() || defaultTimezone;
 
   if (!slug) errors.slug = "Slug is required";
   else if (!isSlugRoutable(slug)) errors.slug = "This slug is not allowed (reserved, all-digit, or invalid format)";
@@ -313,7 +318,7 @@ export async function updateStore(
   const session = await requirePlatformAdmin();
   if (!boundStoreForm(data)) return { error: "Store ID is required" };
 
-  const storeId = data.get("storeId") as string;
+  const storeId = formText(data, "storeId") ?? "";
   if (!storeId) return { error: "Store ID is required" };
 
   const before = await platformAdmin.store.findUnique({

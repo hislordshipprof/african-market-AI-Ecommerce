@@ -199,6 +199,9 @@ describe("parseVariantsJson", () => {
     }
 
     expect(() => parseVariantsJson(JSON.stringify([
+      { label: "1kg", price: true, weightG: 1000 },
+    ]))).toThrow("Variant 1: valid non-negative price is required");
+    expect(() => parseVariantsJson(JSON.stringify([
       { label: "1kg", price: 12.5, weightG: 1000 },
     ]))).toThrow("Variant 1: price must be a whole number of cents");
     expect(() => parseVariantsJson(JSON.stringify([
@@ -212,7 +215,7 @@ describe("parseVariantsJson", () => {
     ]))).toThrow("Variant 1: weight must be a whole number of grams");
   });
 
-  it("validates optional IDs and both numeric boundaries without forwarding unknown fields", () => {
+  it("validates optional IDs and both numeric boundaries and rejects unknown fields", () => {
     const parsed = parseVariantsJson(JSON.stringify([
       {
         id: "var_edge",
@@ -221,8 +224,6 @@ describe("parseVariantsJson", () => {
         weightG: INT4_MAX,
         sku: "SKU-1",
         barcode: "123",
-        listingId: "other-listing",
-        storeId: "other-store",
       },
       { label: "2kg", price: 0, weightG: 1 },
     ]));
@@ -230,8 +231,9 @@ describe("parseVariantsJson", () => {
       { id: "var_edge", label: "1kg", price: INT4_MAX, weightG: INT4_MAX, sku: "SKU-1", barcode: "123" },
       { label: "2kg", price: 0, weightG: 1, sku: null, barcode: null },
     ]);
-    expect(parsed[0]).not.toHaveProperty("listingId");
-    expect(parsed[0]).not.toHaveProperty("storeId");
+    expect(() => parseVariantsJson(JSON.stringify([
+      { label: "1kg", price: 800, weightG: 1000, listingId: "other-listing", storeId: "other-store" },
+    ]))).toThrow("Variant 1: unknown field");
 
     expect(() => parseVariantsJson(JSON.stringify([
       { label: "1kg", price: -1, weightG: 1000 },

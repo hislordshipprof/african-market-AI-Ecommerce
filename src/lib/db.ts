@@ -606,6 +606,8 @@ export async function appRateLimitUpsert(
 }
 
 export async function appRateLimitCleanup(cutoff: bigint, limit: number): Promise<void> {
+  // The outer window_start predicate is checked again after a row-lock wait
+  // (READ COMMITTED), so a window refreshed by a concurrent upsert is kept.
   await prisma.$executeRaw`
     DELETE FROM app_rate_limits
     WHERE key IN (
@@ -613,6 +615,7 @@ export async function appRateLimitCleanup(cutoff: bigint, limit: number): Promis
       WHERE window_start < ${cutoff}
       LIMIT ${limit}
     )
+    AND window_start < ${cutoff}
   `;
 }
 

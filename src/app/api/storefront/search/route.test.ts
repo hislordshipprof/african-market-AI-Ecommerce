@@ -119,7 +119,7 @@ describe.skipIf(!hasDb)("GET /api/storefront/search (DB integration)", () => {
     expect(last?.headers.get("retry-after")).toBeTruthy();
     expect(await last?.json()).toEqual({ error: "Too many requests" });
     const other = await GET(new NextRequest("http://localhost/api/storefront/search?q=routetest", {
-      headers: { "x-shop-browser": "browser62ok", "x-forwarded-for": "198.51.100.62" },
+      headers: { "x-shop-browser": "browser62ok", "x-forwarded-for": "198.51.100.61" },
     }));
     expect(other.status).toBe(200);
   });

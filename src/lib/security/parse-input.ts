@@ -16,16 +16,16 @@ export function parseInput<T>(schema: ZodType<T>, input: unknown): ParseResult<T
 
 /**
  * Named form fields only. React adds `$ACTION_*` entries; `Object.fromEntries`
- * would treat those as payload.
+ * would treat those as payload. A missing field is null. A file stays a file
+ * so a string schema rejects it. Callers use the parsed value, not a second read.
  */
 export function readFormFields(
   formData: FormData,
   names: readonly string[],
-): Record<string, string | null> {
-  const fields: Record<string, string | null> = {};
+): Record<string, FormDataEntryValue | null> {
+  const fields: Record<string, FormDataEntryValue | null> = {};
   for (const name of names) {
-    const value = formData.get(name);
-    fields[name] = typeof value === "string" ? value : null;
+    fields[name] = formData.get(name);
   }
   return fields;
 }

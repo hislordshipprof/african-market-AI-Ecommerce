@@ -45,10 +45,10 @@ const LISTING_FIELDS = [
 ] as const;
 const MAX_VARIANTS = 50;
 
-function boundListingForm(formData: FormData): string | null {
+function readListingForm(formData: FormData) {
   const parsed = parseInput(listingFormSchema, readFormFields(formData, LISTING_FIELDS));
-  if (!parsed.ok) return "Valid non-negative price is required";
-  return null;
+  if (!parsed.ok) return null;
+  return parsed.data;
 }
 
 const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
@@ -59,19 +59,19 @@ function toActor(user: { id: string; email: string }): Actor {
 
 export async function createListingAction(formData: FormData) {
   const session = await requireStoreOwner();
-  const formError = boundListingForm(formData);
-  if (formError) return { error: formError };
+  const fields = readListingForm(formData);
+  if (!fields) return { error: "Valid non-negative price is required" };
 
-  const customName = formData.get("customName") as string | null;
-  const masterProductId = formData.get("masterProductId") as string | null;
-  const priceRaw = formData.get("price") as string | null;
-  const stockMode = (formData.get("stockMode") as string | null) ?? "counted";
-  const qtyRaw = formData.get("qty") as string | null;
-  const status = formData.get("status") as string | null;
-  const frozen = formData.get("frozen") === "true";
-  const perishable = formData.get("perishable") === "true";
-  const maxPerOrderRaw = formData.get("maxPerOrder") as string | null;
-  const variantsJson = formData.get("variants") as string | null;
+  const customName = fields.customName;
+  const masterProductId = fields.masterProductId;
+  const priceRaw = fields.price;
+  const stockMode = fields.stockMode ?? "counted";
+  const qtyRaw = fields.qty;
+  const status = fields.status;
+  const frozen = fields.frozen === "true";
+  const perishable = fields.perishable === "true";
+  const maxPerOrderRaw = fields.maxPerOrder;
+  const variantsJson = fields.variants;
 
   if (!customName && !masterProductId) {
     return { error: "Product name or master product is required" };
@@ -121,22 +121,22 @@ export async function createListingAction(formData: FormData) {
 
 export async function updateListingAction(formData: FormData) {
   const session = await requireStoreOwner();
-  const formError = boundListingForm(formData);
-  if (formError) return { error: formError };
+  const fields = readListingForm(formData);
+  if (!fields) return { error: "Valid non-negative price is required" };
 
-  const listingId = formData.get("listingId") as string | null;
+  const listingId = fields.listingId;
   if (!listingId) return { error: "Listing ID is required" };
 
-  const customName = formData.get("customName") as string | null;
-  const masterProductId = formData.get("masterProductId") as string | null;
-  const priceRaw = formData.get("price") as string | null;
-  const stockMode = formData.get("stockMode") as string | null;
-  const qtyRaw = formData.get("qty") as string | null;
-  const status = formData.get("status") as string | null;
-  const frozen = formData.get("frozen") as string | null;
-  const perishable = formData.get("perishable") as string | null;
-  const maxPerOrderRaw = formData.get("maxPerOrder") as string | null;
-  const variantsJson = formData.get("variants") as string | null;
+  const customName = fields.customName;
+  const masterProductId = fields.masterProductId;
+  const priceRaw = fields.price;
+  const stockMode = fields.stockMode;
+  const qtyRaw = fields.qty;
+  const status = fields.status;
+  const frozen = fields.frozen;
+  const perishable = fields.perishable;
+  const maxPerOrderRaw = fields.maxPerOrder;
+  const variantsJson = fields.variants;
 
   if (customName !== null && !customName.trim() && !masterProductId) {
     return { error: "Product name is required" };

@@ -286,6 +286,15 @@ describe("action authorization", () => {
       }));
       const capped = await createListingAction(listingForm("100", many));
       expect(capped).toEqual({ error: "Too many variants" });
+      const fileForm = listingForm("100", oneVariant);
+      fileForm.set("customName", new File(["x"], "x.txt"));
+      const filed = await createListingAction(fileForm);
+      expect(filed).toEqual({ error: "Valid non-negative price is required" });
+      const poisoned = await createListingAction(listingForm("100", [
+        { label: "bag", price: true, weightG: 500, injected: true },
+      ]));
+      expect(poisoned).toMatchObject({ error: expect.stringMatching(/^Variant 1:/) });
+      expect(poisoned).not.toHaveProperty("id");
       expect(await storeScoped(storeA).listing.count()).toBe(before);
       expect(await storeScoped(storeB).listingVariant.count()).toBe(1);
     });

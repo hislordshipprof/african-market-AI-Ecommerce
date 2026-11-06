@@ -392,4 +392,59 @@ describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
     const stored = await storeScoped(storeA).order.findUnique({ where: { id: order.id } });
     expect(stored?.capturedAmountCents).toBe(1000);
   });
+
+  it("DB failure returns 500 and the retry records the refund", async () => {
+    const customer = await storeScoped(storeA).customer.create({
+      data: { storeId: storeA, name: "Retry webhook" },
+    });
+    const pi = `pi_retry_${run}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-retry");
+    const order = await storeScoped(storeA).order.create({
+      data: {
+        storeId: storeA,
+        number: 18616,
+        customerId: customer.id,
+        status: "CANCELLING",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+      },
+    });
+    const key = `refund:${order.id}:retry`;
+    await storeScoped(storeA).refundRequest.create({
+      data: {
+        storeId: storeA,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 1000,
+        refundApplicationFee: true,
+        state: "RESERVED",
+      },
+    });
+    const refund = await fakeStripeProvider.refundPayment(pi, 1000, key, { reservationKey: key, orderId: order.id });
+    await raw.$executeRaw`REVOKE UPDATE ON refund_requests FROM app_user`;
+    try {
+      expect((await postRefund("refund.created", refund.refundId, pi, "succeeded", key)).status).toBe(500);
+    } finally {
+      await raw.$executeRaw`GRANT UPDATE ON refund_requests TO app_user`;
+    }
+    const midway = await storeScoped(storeA).refundRequest.findMany({ where: { orderId: order.id } });
+    expect(midway).toHaveLength(1);
+    expect(midway[0]?.state).toBe("RESERVED");
+    expect((await postRefund("refund.created", refund.refundId, pi, "succeeded", key)).status).toBe(200);
+    const rows = await storeScoped(storeA).refundRequest.findMany({ where: { orderId: order.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.state).toBe("CREATED");
+    expect(rows[0]?.amountCents).toBe(1000);
+    expect(rows[0]?.providerRefundId).toBe(refund.refundId);
+    const stored = await storeScoped(storeA).order.findUnique({ where: { id: order.id } });
+    expect(stored?.status).toBe("CANCELLING");
+    expect(stored?.capturedAmountCents).toBe(1000);
+  });
 });

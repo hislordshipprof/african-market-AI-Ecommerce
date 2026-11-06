@@ -28,12 +28,6 @@ export async function csvPreviewAction(
 ): Promise<PreviewActionResult> {
   const session = await requireStoreOwner();
   const file = formData.get("file");
-  const sized = parseInput(
-    z.object({ size: z.number().int().nonnegative().max(2 * 1024 * 1024) }),
-    { size: file instanceof File ? file.size : -1 },
-  );
-  if (!sized.ok) return { error: "Please select a CSV file." };
-
   if (!(file instanceof File) || file.size === 0) {
     return { error: "Please select a CSV file." };
   }
@@ -70,12 +64,12 @@ export async function csvCommitAction(
   const session = await requireStoreOwner();
   const token = parseInput(z.string().min(1).max(200), importToken);
   const selectionParsed = parseInput(z.strictObject({
-    matchedRows: z.array(z.number().int().nonnegative()).max(5000),
-    newItemRows: z.array(z.number().int().nonnegative()).max(5000),
+    matchedRows: z.array(z.number().int()).max(5001),
+    newItemRows: z.array(z.number().int()).max(5001),
     ambiguousResolutions: z.array(z.strictObject({
-      row: z.number().int().nonnegative(),
+      row: z.number().int(),
       masterProductId: z.string().min(1).max(200),
-    })).max(5000),
+    })).max(5001),
   }), selection);
   if (!token.ok) {
     return { error: "Missing import token. Please upload the file again." };

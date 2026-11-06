@@ -1,6 +1,26 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/cache", () => ({
+  unstable_cache: (fn: (...args: never[]) => unknown) => fn,
+  revalidateTag: () => {},
+  revalidatePath: () => {},
+}));
+
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({
+    "x-store-slug": process.env.PRUNE_STORE_SLUG ?? "",
+  }),
+  cookies: async () => ({
+    get: () => undefined,
+    getAll: () => [],
+    has: () => false,
+  }),
+}));
+
 import { auth } from "../auth";
 import { authPrisma } from "../db";
 
@@ -14,6 +34,7 @@ describe.skipIf(!hasDb || child)("app counters and Better Auth", () => {
       ...process.env,
       NODE_ENV: "production",
       RATE_LIMIT_PRUNE_CHILD: "1",
+      ASSISTANT_CHAT_ENABLED: "1",
     };
     delete env.AUTH_RATE_LIMIT_RELAXED;
     delete env.VERCEL;
@@ -33,38 +54,91 @@ describe.skipIf(!hasDb || child)("app counters and Better Auth", () => {
 describe.skipIf(!child)("production child prune", () => {
   it("production child prune", async () => {
     const run = `${Date.now()}`;
-    const ip = `203.0.113.${Number(run.slice(-2)) % 200 + 20}`;
-    const old = BigInt(Date.now() - 120_000);
-    const appKeys = [`assistant:ip:${run}`, `invite:${run}`, `search:ip:${run}`];
-    for (const key of appKeys) {
-      await authPrisma.appRateLimit.upsert({
-        where: { key },
-        create: { key, windowStart: BigInt(Date.now() - 90_000), count: 4 },
-        update: { windowStart: BigInt(Date.now() - 90_000), count: 4 },
+    const slug = `prune-${run}`;
+    const signInIp = `203.0.113.${Number(run.slice(-2)) % 200 + 20}`;
+    const assistantIp = "198.51.100.81";
+    const searchIp = "198.51.100.80";
+    process.env.ASSISTANT_CHAT_ENABLED = "1";
+    process.env.PRUNE_STORE_SLUG = slug;
+    const owner = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    const store = await owner.store.create({
+      data: {
+        slug,
+        name: "Prune store",
+        themePreset: "palm-and-shea",
+        prepTimeMinutes: 20,
+      },
+    });
+    const keys: string[] = [];
+    try {
+      const { checkInviteRateLimit } = await import("../invite/rate-limit");
+      await checkInviteRateLimit(store.id);
+      await checkInviteRateLimit(store.id);
+
+      const { GET } = await import("@/app/api/storefront/search/route");
+      const { NextRequest } = await import("next/server");
+      const searchHeaders = { "x-shop-browser": "browserprune", "x-forwarded-for": searchIp };
+      const firstSearch = await GET(new NextRequest("http://localhost/api/storefront/search?q=prune", { headers: searchHeaders }));
+      expect(firstSearch.status).toBe(200);
+      await GET(new NextRequest("http://localhost/api/storefront/search?q=prune", { headers: searchHeaders }));
+
+      const { createChatHandler } = await import("../assistant/chat-handler");
+      const chat = createChatHandler();
+      await chat(new Request("http://localhost:3000/api/assistant/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost:3000",
+          host: "localhost:3000",
+          "x-store-slug": slug,
+          "x-forwarded-for": assistantIp,
+        },
+        body: JSON.stringify({
+          message: { id: "pruneMsg1", role: "user", parts: [{ type: "text", text: "hello" }] },
+        }),
+      }));
+
+      keys.push(
+        `invite:${store.id}`,
+        "search:browser:browserprune",
+        `search:ip:${searchIp}`,
+        `assistant:ip:${assistantIp}`,
+      );
+      const before = new Map<string, number>();
+      for (const key of keys) {
+        const row = await authPrisma.appRateLimit.findUnique({ where: { key } });
+        expect(row?.count, key).toBeGreaterThan(0);
+        before.set(key, row?.count ?? 0);
+      }
+
+      const old = BigInt(Date.now() - 120_000);
+      await authPrisma.rateLimit.create({
+        data: { key: `${signInIp}|/sign-in/email`, count: 1, lastRequest: old },
       });
+      await authPrisma.rateLimit.create({
+        data: { key: `sacrificial-${run}`, count: 1, lastRequest: old },
+      });
+      const response = await auth.handler(new Request("http://localhost:3000/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": signInIp },
+        body: JSON.stringify({ email: `nobody-${run}@test.example`, password: "not-a-real-password" }),
+      }));
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      const sacrificial = await authPrisma.rateLimit.findUnique({ where: { key: `sacrificial-${run}` } });
+      expect(sacrificial).toBeNull();
+      for (const key of keys) {
+        const row = await authPrisma.appRateLimit.findUnique({ where: { key } });
+        expect(row?.count, key).toBe(before.get(key));
+      }
+      console.log("APP_COUNTERS_INTACT");
+      await authPrisma.rateLimit.deleteMany({
+        where: { key: { in: [`${signInIp}|/sign-in/email`, `no-trusted-ip|/sign-in/email`] } },
+      });
+    } finally {
+      if (keys.length) await authPrisma.appRateLimit.deleteMany({ where: { key: { in: keys } } });
+      await owner.$executeRaw`DELETE FROM carts WHERE store_id = ${store.id}`;
+      await owner.store.delete({ where: { id: store.id } }).catch(() => {});
+      await owner.$disconnect();
     }
-    await authPrisma.rateLimit.create({
-      data: { key: `${ip}|/sign-in/email`, count: 1, lastRequest: old },
-    });
-    await authPrisma.rateLimit.create({
-      data: { key: `sacrificial-${run}`, count: 1, lastRequest: old },
-    });
-
-    const response = await auth.handler(new Request("http://localhost:3000/api/auth/sign-in/email", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-forwarded-for": ip },
-      body: JSON.stringify({ email: `nobody-${run}@test.example`, password: "not-a-real-password" }),
-    }));
-    expect(response.status).toBeGreaterThanOrEqual(400);
-
-    const sacrificial = await authPrisma.rateLimit.findUnique({ where: { key: `sacrificial-${run}` } });
-    expect(sacrificial).toBeNull();
-    for (const key of appKeys) {
-      const row = await authPrisma.appRateLimit.findUnique({ where: { key } });
-      expect(row?.count).toBe(4);
-    }
-    console.log("APP_COUNTERS_INTACT");
-    await authPrisma.appRateLimit.deleteMany({ where: { key: { in: appKeys } } });
-    await authPrisma.rateLimit.deleteMany({ where: { key: { in: [`${ip}|/sign-in/email`, `no-trusted-ip|/sign-in/email`] } } });
-  });
+  }, 90_000);
 });
