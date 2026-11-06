@@ -12,6 +12,9 @@ import { checkoutPaymentsUseFake } from "../stripe/checkout-payments";
 
 const execFileAsync = promisify(execFile);
 const hasDb = Boolean(process.env.DATABASE_URL);
+// The child below cold-starts tsx: about 13 s on a quiet machine, longer beside parallel lanes.
+// Allow the child's own 60 s limit plus the setup around it.
+const COLD_PROCESS_TEST_MS = 75_000;
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -55,8 +58,10 @@ describe.skipIf(!hasDb)("cold production process", () => {
   });
 
   it("reads a populated account and refuses the fake when the key is missing", async () => {
-    await authPrisma.user.create({
-      data: { id: userId, name: "Cold", email: `${userId}@example.test` },
+    await authPrisma.user.upsert({
+      where: { id: userId },
+      create: { id: userId, name: "Cold", email: `${userId}@example.test` },
+      update: {},
     });
     await addAddress(userId, {
       label: "Home",
@@ -106,5 +111,5 @@ describe.skipIf(!hasDb)("cold production process", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, COLD_PROCESS_TEST_MS);
 });

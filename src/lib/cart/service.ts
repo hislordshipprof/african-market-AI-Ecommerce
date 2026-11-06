@@ -181,6 +181,13 @@ async function customerIdForCartUser(storeId: string, userId: string): Promise<s
   return customer.id;
 }
 
+/** Integer cents: live variant price × quantity. Shared by the cart page, summary, and cart tools. */
+export function cartLineSubtotalCents(lines: ReadonlyArray<{ priceCents: number; qty: number }>): number {
+  let sum = 0;
+  for (const line of lines) sum += line.priceCents * line.qty;
+  return sum;
+}
+
 export interface AddLineOptions {
   source?: "manual" | "ai";
   /** Add up to the max and report the clamp. Storefront callers omit this and still throw. */
@@ -576,9 +583,8 @@ export async function getCartWithLines(
     };
   });
 
-  const subtotalCents = lines.reduce(
-    (sum, l) => sum + l.variant.price * l.qty,
-    0,
+  const subtotalCents = cartLineSubtotalCents(
+    lines.map((line) => ({ priceCents: line.variant.price, qty: line.qty })),
   );
 
   return { id: cart.id, storeId: cart.storeId, lines, subtotalCents };
