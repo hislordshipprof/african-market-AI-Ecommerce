@@ -1469,6 +1469,78 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(second).toContain("Recovered after the interruption.");
   });
 
+  it("scripted tool turns remain valid after the real UI history window fills", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const ids: string[] = [];
+    const toolLengths: number[] = [];
+    let clock = new Date("2041-08-01T00:00:00Z");
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const raw = typeof init?.body === "string"
+        ? init.body
+        : init?.body instanceof Uint8Array
+          ? new TextDecoder().decode(init.body)
+          : "";
+      const parsed = raw ? JSON.parse(raw) as { messages?: unknown[] } : {};
+      const length = Array.isArray(parsed.messages) ? parsed.messages.length : 0;
+      const response = await scriptedAssistantFetch(input, init);
+      const sse = await response.clone().text();
+      let tool = false;
+      for (const line of sse.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice("data:".length).trim();
+        if (!data) continue;
+        const json = JSON.parse(data) as { type?: string; content_block?: { type?: string; id?: string } };
+        if (json.type === "content_block_start" && json.content_block?.type === "tool_use" && json.content_block.id) {
+          ids.push(json.content_block.id);
+          tool = true;
+        }
+      }
+      if (tool) toolLengths.push(length);
+      return response;
+    };
+    const handler = createChatHandler({
+      model: createAssistantModel({ fetch: fetchImpl }),
+      now: () => clock,
+    });
+    const ip = `198.51.100.${randomInt(20, 250)}`;
+    let cookie = "";
+    let sent = 0;
+    const turn = async (id: string, text: string) => {
+      if (sent > 0 && sent % 24 === 0) clock = new Date(clock.getTime() + 61 * 60 * 1000);
+      sent += 1;
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host,
+          origin: `http://${host}`,
+          "x-store-slug": slug,
+          "x-forwarded-for": ip,
+          ...(cookie ? { cookie } : {}),
+        },
+        body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      const body = await response.text();
+      if (!cookie) cookie = response.headers.get("set-cookie") ?? "";
+      return { status: response.status, body };
+    };
+    for (let index = 0; index < 12; index += 1) {
+      const result = await turn(`win-text-${index}`, "hello");
+      expect(result.status, result.body).toBe(200);
+    }
+    let baskets = 0;
+    while (new Set(toolLengths).size === toolLengths.length && baskets < 36) {
+      const result = await turn(`win-basket-${baskets}`, "show my basket");
+      expect(result.status, result.body).toBe(200);
+      expect(result.body).toContain("Here is your basket.");
+      baskets += 1;
+    }
+    expect(toolLengths.length, toolLengths.join(",")).toBeGreaterThan(new Set(toolLengths).size);
+    expect(ids.length).toBe(toolLengths.length);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((id) => /^toolu_[A-Za-z0-9_-]{1,94}$/.test(id))).toBe(true);
+  });
+
   it("size, length and extra-key rules unchanged", async () => {
     const { model, calls } = strictModel(() => [
       { type: "stream-start", warnings: [] },

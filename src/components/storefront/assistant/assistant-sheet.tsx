@@ -10,7 +10,17 @@ import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
 import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
-import { retainSession } from "@/lib/assistant/ui/chat-session";
+import {
+  acknowledgeUndo,
+  commitUndoLabel,
+  EMPTY_SESSION_SNAPSHOT,
+  noteAcceptedSend,
+  partsForRetry,
+  retainSession,
+  retryOffer,
+  sessionSnapshot,
+  subscribeSessionMemory,
+} from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
 import { dataUrl, displayFileName, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
 import { createSendLock, outgoingMessage, settleSend } from "@/lib/assistant/ui/send";
@@ -26,8 +36,7 @@ import {
   type BrowserSpeech,
   type SpeechState,
 } from "@/lib/assistant/ui/speech";
-import { planUndo, undoCardAfter, type UndoAck } from "@/lib/assistant/ui/undo";
-import { replaceUndoLabels, undoLabelsForStore } from "@/lib/assistant/ui/undo-memory";
+import { planUndo, type UndoAck } from "@/lib/assistant/ui/undo";
 import { AssistantRouteError, mapRouteError, type RouteView } from "@/lib/assistant/ui/route-errors";
 import { undoAssistantAdditionAction } from "@/lib/cart/actions";
 import type { CartLine } from "@/lib/storefront/cart-store";
@@ -160,6 +169,7 @@ function Thread({
   const photoInput = useRef<HTMLInputElement>(null);
   const pdfInput = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
+  const [generation, setGeneration] = useState(0);
   const revisionRef = useRef(0);
   type Flight = {
     id: string;
@@ -171,22 +181,27 @@ function Thread({
   const [inflight, setInflight] = useState<Flight | null>(null);
   const inflightRef = useRef<Flight | null>(null);
   const revokedRef = useRef(new Set<string>());
-  const [trackedStore, setTrackedStore] = useState(storeId);
-  const [undoState, setUndoState] = useState(() => undoLabelsForStore(storeId));
-  if (trackedStore !== storeId) {
-    setTrackedStore(storeId);
-    setUndoState(undoLabelsForStore(storeId));
-  }
-  function rememberUndoState(update: (current: Record<string, "undone" | "already_removed">) => Record<string, "undone" | "already_removed">) {
-    setUndoState((current) => {
-      const next = update(current);
-      replaceUndoLabels(storeId, next);
-      return next;
-    });
-  }
+  const memory = useSyncExternalStore(
+    (listener) => subscribeSessionMemory(chat, listener),
+    () => sessionSnapshot(chat),
+    () => EMPTY_SESSION_SNAPSHOT,
+  );
+  const undoState = memory.labels;
   const liveRef = useRef<HTMLParagraphElement>(null);
   const busy = status === "submitted" || status === "streaming";
   const routeError: RouteView | null = error ? viewFor(error) : null;
+  const fileRetry = Boolean(
+    inflight &&
+    inflight.generation === generation &&
+    inflight.tiles.length > 0,
+  );
+  const retry = routeError
+    ? retryOffer(chat, {
+        routeCode: routeError.code,
+        terminal: routeError.terminal,
+        openFileFlight: fileRetry && inflight ? { messageId: inflight.id, text: inflight.text } : null,
+      })
+    : null;
 
   useEffect(() => {
     if (routeError?.terminal) onTerminal();
@@ -318,6 +333,7 @@ function Thread({
   useEffect(() => {
     if (open) return;
     generationRef.current += 1;
+    setGeneration(generationRef.current);
     stopListening("abort");
     const owned = takeOwned();
     window.setTimeout(() => {
@@ -496,7 +512,7 @@ function Thread({
     }
   }
 
-  async function submit(text: string, id = messageId()) {
+  async function submit(text: string, id = messageId(), retainedText = false) {
     if (speechRef.current?.listening) {
       publishSpeech(commitInterim(speechRef.current));
       recognizerRef.current?.stop();
@@ -504,9 +520,9 @@ function Thread({
     }
     if (loading || busy || routeError?.terminal) return;
     const flight = inflightRef.current;
-    const retrying = flight?.id === id;
+    const retrying = !retainedText && flight?.id === id;
     if (retrying && flight.generation !== generationRef.current) return;
-    const currentTiles = retrying ? flight.tiles : tilesRef.current;
+    const currentTiles = retainedText ? [] : retrying ? flight.tiles : tilesRef.current;
     if (!retrying && currentTiles.some((tile) => tile.status === "pending" || tile.status === "invalid")) return;
     const ready = currentTiles.filter((tile) => tile.status === "ready");
     if (!withinByteCap(ready.map((tile) => tile.bytes))) {
@@ -516,10 +532,19 @@ function Thread({
     if (!sendLock.current.tryBegin()) return;
     let settled = false;
     try {
+      const sentText = retrying ? flight.text : text;
+      const composerFiles = tilesRef.current
+        .filter((tile) => tile.status === "ready")
+        .map((tile) => ({ type: "file" as const, mediaType: tile.mediaType, filename: tile.filename, url: tile.url }));
+      const retainedParts = retainedText
+        ? partsForRetry({ kind: "text", messageId: id, text: sentText }, composerFiles)
+        : null;
       const outgoing = outgoingMessage({
         id,
-        text: retrying ? flight.text : text,
-        files: ready.map((tile) => ({ type: "file", mediaType: tile.mediaType, filename: tile.filename, url: tile.url })),
+        text: retainedParts?.find((part) => part.type === "text")?.text ?? sentText,
+        files: retainedParts
+          ? []
+          : ready.map((tile) => ({ type: "file", mediaType: tile.mediaType, filename: tile.filename, url: tile.url })),
       });
       if (!outgoing.ok) {
         if (outgoing.reason === "too_long") setLocalError("Couldn't send that.");
@@ -528,7 +553,8 @@ function Thread({
       setLocalError(null);
       const textPart = outgoing.body.message.parts.find((part) => part.type === "text");
       const sent = textPart?.type === "text" ? textPart.text : "";
-      if (!retrying) {
+      noteAcceptedSend(chat, { messageId: id, text: sent, hasFiles: ready.length > 0 && !retainedText });
+      if (!retrying && !retainedText) {
         const previous = inflightRef.current;
         if (previous) {
           const sending = new Set(ready.map((tile) => tile.preview).filter(Boolean));
@@ -555,6 +581,10 @@ function Thread({
         setTiles([]);
       }
       clearError();
+      if (retainedText) {
+        inflightRef.current = null;
+        setInflight(null);
+      }
       const exists = chat.messages.some((message) => message.role === "user" && message.id === id);
       const parts = outgoing.body.message.parts;
       if (exists) await sendMessage({ messageId: id, role: "user", parts });
@@ -584,7 +614,7 @@ function Thread({
   }
 
   return (
-    <div className={styles.thread} data-chunk={ASSISTANT_CHUNK} style={{ paddingBottom: keyboardInset }}>
+    <div className={styles.thread} data-chunk={ASSISTANT_CHUNK} data-retry={memory.retryToken} style={{ paddingBottom: keyboardInset }}>
       <p className={styles.live} aria-live="polite" ref={liveRef} />
       <div
         className={styles.log}
@@ -603,7 +633,7 @@ function Thread({
             turnFailed={status === "error" && message.role === "assistant" && index === messages.length - 1}
             onChoice={(text) => { void submit(text); }}
             onUndo={(card) => {
-              void undoCard(card, lines, storeId, undoState, rememberUndoState, onCartFailure);
+              void undoCard(card, lines, storeId, chat, undoState, onCartFailure);
             }}
             onChange={() => composer.current?.focus()}
             onClose={onClose}
@@ -652,13 +682,13 @@ function Thread({
         <div className={styles.notice} role="status">
           <p>{routeError.title}</p>
           <a href={routeError.searchHref}>Search the shelves</a>
-          {inflight && (routeError.retry || inflight.tiles.length > 0) ? (
+          {retry ? (
             <button
               type="button"
               className={styles.ghost}
               onClick={() => {
                 if (sendLock.current.held) return;
-                void submit(inflight.text, inflight.id);
+                void submit(retry.text, retry.messageId, retry.kind === "text");
               }}
             >
               Retry
@@ -975,8 +1005,8 @@ async function undoCard(
   card: Extract<AssistantCard, { kind: "added" }>,
   lines: readonly CartLine[],
   storeId: string,
+  chat: ReturnType<typeof retainSession>,
   undoState: Record<string, "undone" | "already_removed">,
-  setUndoState: (value: (current: Record<string, "undone" | "already_removed">) => Record<string, "undone" | "already_removed">) => void,
   onCartFailure: (failure: { error?: string; thrown?: unknown }) => void,
 ) {
   const line = lines.find((item) => item.serverLineId === card.lineId);
@@ -989,7 +1019,7 @@ async function undoCard(
   });
   if (plan.action === "skip") {
     const label = plan.label === "Undone" ? "undone" : "already_removed";
-    setUndoState((current) => ({ ...current, [card.additionId]: label }));
+    commitUndoLabel(chat, card.additionId, label);
     return;
   }
   if (plan.action !== "submit") return;
@@ -1015,8 +1045,5 @@ async function undoCard(
   } catch {
     refresh = "failed";
   }
-  const view = undoCardAfter(ack, refresh);
-  if (view === "unchanged") return;
-  const label = view === "undone" ? "undone" : "already_removed";
-  setUndoState((current) => ({ ...current, [card.additionId]: label }));
+  acknowledgeUndo(chat, card.additionId, ack, refresh);
 }
