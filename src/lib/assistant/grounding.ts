@@ -156,6 +156,27 @@ interface Suffix {
   cent: boolean;
 }
 
+/** 1–3 letters glued to `$`, or split from it by one newline. A space is not part of the marker. */
+function readLetterDollar(text: string, index: number): Suffix | null {
+  const start = skipSoft(text, index);
+  const match = /^([A-Za-z]{1,3})(?:\r?\n)?\$/.exec(text.slice(start));
+  if (!match) return null;
+  const letters = match[1].toLowerCase();
+  let end = start + match[0].length;
+  let foreign = letters !== "us" && letters !== "usd";
+  let cent = false;
+  const next = readWord(text, skipInline(text, end));
+  if (next) {
+    const nextKind = wordKind(next.raw, false);
+    if (nextKind === "usd" || nextKind === "foreign" || nextKind === "cent") {
+      end = next.end;
+      if (nextKind === "foreign") foreign = true;
+      if (nextKind === "cent") cent = true;
+    }
+  }
+  return { end, foreign, cent };
+}
+
 function readSuffix(text: string, index: number): Suffix | null {
   const start = skipSoft(text, index);
   if (start >= text.length) return null;
@@ -165,6 +186,8 @@ function readSuffix(text: string, index: number): Suffix | null {
     return { end: start + 1, foreign: symbol !== "$", cent: false };
   }
   if (!/[A-Za-z]/.test(symbol)) return null;
+  const qualified = readLetterDollar(text, index);
+  if (qualified) return qualified;
   const word = readWord(text, start);
   if (!word) return null;
   if (word.raw.toLowerCase() === "us") {
