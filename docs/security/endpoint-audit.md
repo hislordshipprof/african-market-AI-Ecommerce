@@ -1,14 +1,15 @@
 # Endpoint audit
 
 One row per exported Server Action and route-handler method after #309.
+Better Auth's catch-all is the two methods below. Both name the enabled groups: email-and-password, magic-link, and two-factor. Phone number is registered on the client only and is not enabled on the server.
 A gap is either `fixed in #309` or `listed, not fixed` with a reason. No production setting was changed.
 
 | Endpoint | Caller | Auth check | Store scope | Input | Rate limit | Money or auth | Gap | Resolution |
 |---|---|---|---|---|---|---|---|---|
 | `src/app/account/actions.ts` syncCustomerAction | customer | session inside the action | signed-in user; customers | no caller input | none | no | none | fixed in #309 |
 | `src/app/api/assistant/chat/route.ts` POST | guest | same origin | host store; carts, ai_conversations, ai_actions, assistant_undo_receipts | message envelope; extra keys stripped | 60/hour per IP and 30/hour per cart | no | none | fixed in #309 |
-| `src/app/api/auth/[...all]/route.ts` GET | guest | Better Auth | getStore() from the host | relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
-| `src/app/api/auth/[...all]/route.ts` POST | guest | Better Auth | getStore() from the host | relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
+| `src/app/api/auth/[...all]/route.ts` GET | guest | Better Auth | getStore() from the host | enabled groups: email-and-password, magic-link, two-factor; relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
+| `src/app/api/auth/[...all]/route.ts` POST | guest | Better Auth | getStore() from the host | enabled groups: email-and-password, magic-link, two-factor; relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
 | `src/app/api/catalog-image/[...key]/route.ts` GET | guest | public | getStore() from the host | key segments; rejects .. and backslash | none | no | none | fixed in #309 |
 | `src/app/api/e2e/magic-link-token/route.ts` GET | test-only | testOnlyRoutesAllowed; closed on Vercel and production unless CI or preview | getStore() from the host | email length, not a strict email format | none | no | none | fixed in #309 |
 | `src/app/api/health/route.ts` GET | probe | public | getStore() from the host | no body | in-memory per isolate | no | per-isolate in-memory limiter (ADR-0017) | listed, not fixed |

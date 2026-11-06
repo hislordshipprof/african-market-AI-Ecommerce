@@ -5,6 +5,7 @@ import { searchListings } from "@/lib/storefront/service";
 import { clientIp } from "@/lib/assistant/client-ip";
 import { takeRateLimit } from "@/lib/rate-limit/app-limiter";
 import { parseInput } from "@/lib/security/parse-input";
+import { SEARCH_QUERY_TOO_LONG, normalizedSearchQuery } from "@/lib/storefront/search-query";
 
 const SEARCH_WINDOW_MS = 60_000;
 const BROWSER_LIMIT = 60;
@@ -15,11 +16,11 @@ export async function GET(request: NextRequest) {
   const rawQuery = request.nextUrl.searchParams.get("q") ?? "";
   const query = parseInput(z.string().max(10_000), rawQuery);
   if (!query.ok) {
-    return NextResponse.json({ error: "Search query is too long" }, { status: 400 });
+    return NextResponse.json({ error: SEARCH_QUERY_TOO_LONG }, { status: 400 });
   }
-  const trimmed = query.data.trim();
-  if (trimmed.length > 200) {
-    return NextResponse.json({ error: "Search query is too long" }, { status: 400 });
+  const { query: trimmed, tooLong } = normalizedSearchQuery(query.data);
+  if (tooLong) {
+    return NextResponse.json({ error: SEARCH_QUERY_TOO_LONG }, { status: 400 });
   }
 
   const store = await getStore();
