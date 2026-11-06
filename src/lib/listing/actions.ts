@@ -10,7 +10,8 @@ import {
   deactivateListing,
   reactivateListing,
   listMasterProducts,
-  type Actor,
+  toActor,
+  VALID_STOCK_MODES,
   type StockMode,
   type StockStatus,
 } from "./service";
@@ -49,12 +50,6 @@ function readListingForm(formData: FormData) {
   const parsed = parseInput(listingFormSchema, readFormFields(formData, LISTING_FIELDS));
   if (!parsed.ok) return null;
   return parsed.data;
-}
-
-const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
-
-function toActor(user: { id: string; email: string }): Actor {
-  return { id: user.id, email: user.email };
 }
 
 export async function createListingAction(formData: FormData) {

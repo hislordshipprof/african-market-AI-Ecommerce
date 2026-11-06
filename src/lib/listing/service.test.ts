@@ -926,7 +926,38 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       variants: [{ label: "1", price: 100, weightG: 100 }],
       actor,
     });
+    expect(zero).toMatchObject({ stockMode: "counted", qty: 0, status: null });
+    expect(status).toMatchObject({ stockMode: "status", qty: null, status: "in_stock" });
     expect(await storeScoped(storeId).stockEvent.findMany({ where: { listingId: zero.id } })).toEqual([]);
     expect(await storeScoped(storeId).stockEvent.findMany({ where: { listingId: status.id } })).toEqual([]);
+
+    const countedBlank = await createListing({
+      storeId,
+      customName: "Counted Blank Crate",
+      price: 100,
+      stockMode: "counted",
+      qty: null,
+      status: "low",
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1", price: 100, weightG: 100 }],
+      actor,
+    });
+    const statusQty = await createListing({
+      storeId,
+      customName: "Status With Qty Crate",
+      price: 100,
+      stockMode: "status",
+      qty: 5,
+      status: "low",
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1", price: 100, weightG: 100 }],
+      actor,
+    });
+    expect(countedBlank).toMatchObject({ stockMode: "counted", qty: 0, status: null });
+    expect(statusQty).toMatchObject({ stockMode: "status", qty: null, status: "low" });
+    expect(await storeScoped(storeId).stockEvent.findMany({ where: { listingId: countedBlank.id } })).toEqual([]);
+    expect(await storeScoped(storeId).stockEvent.findMany({ where: { listingId: statusQty.id } })).toEqual([]);
   });
 });

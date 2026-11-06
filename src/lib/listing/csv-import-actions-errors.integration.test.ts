@@ -1175,6 +1175,136 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     expect(await storeScoped(storeAId).order.count()).toBe(ordersBefore);
   });
 
+  it("a Windows-1252 upload is refused before anything is stored", async () => {
+    const utf8Message =
+      "This file is not saved as UTF-8, so letters like é would be lost. In Excel choose Save As, then CSV UTF-8 (Comma delimited), and upload it again.";
+    const nonCsv =
+      "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.";
+    const expired = await previewCsv(storeASlug, cookies.ownerA, priceCsv(`Expired Cap ${RUN}`));
+    await backdate(expired.importToken, 31 * 60 * 1000);
+    for (let i = 0; i < 9; i++) {
+      await platformAdmin.listingImport.create({
+        data: {
+          storeId: storeAId,
+          csvText: `name,price\nCap Pad ${i} ${RUN},1.00\n`,
+          rowCount: 1,
+          status: "pending",
+          createdById: ids.ownerA,
+        },
+      });
+    }
+    async function importSnapshot() {
+      const rows = await storeScoped(storeAId).listingImport.findMany({ orderBy: { id: "asc" } });
+      return rows.map((row) => ({
+        id: row.id,
+        csvText: row.csvText,
+        status: row.status,
+        committedAt: row.committedAt?.toISOString() ?? null,
+      }));
+    }
+    const before = await importSnapshot();
+    expect(before.some((row) => row.id === expired.importToken && row.status === "pending")).toBe(true);
+    asStore(storeASlug, cookies.ownerA);
+
+    function upload(bytes: Uint8Array) {
+      const form = new FormData();
+      form.set("file", new File([Buffer.from(bytes)], "upload.csv", { type: "text/csv" }));
+      return csvPreviewAction(form);
+    }
+
+    const windows1252 = new Uint8Array([
+      ...new TextEncoder().encode("name,price\n"),
+      0x42, 0xee, 0x6d, 0x62, 0x61,
+      ...new TextEncoder().encode(",5.00\n"),
+    ]);
+    const refused = await upload(windows1252);
+    expect(refused.error).toBe(utf8Message);
+    expect(refused.preview).toBeUndefined();
+    expect(await importSnapshot()).toEqual(before);
+
+    const truncated = new Uint8Array([
+      ...new TextEncoder().encode("name,price\n"),
+      0xc3,
+      ...new TextEncoder().encode(",5.00\n"),
+    ]);
+    const broken = await upload(truncated);
+    expect(broken.error).toBe(utf8Message);
+    expect(await importSnapshot()).toEqual(before);
+
+    const utf16 = new Uint8Array(Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from("name,price\nBimba,5.00\n", "utf16le"),
+    ]));
+    const utf16Result = await upload(utf16);
+    expect(utf16Result.error).toBe(nonCsv);
+    expect(await importSnapshot()).toEqual(before);
+
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const pngResult = await upload(png);
+    expect(pngResult.error).toBe(nonCsv);
+    expect(await importSnapshot()).toEqual(before);
+
+    const accented = `Bîmba ${RUN}`;
+    const withBom = new Uint8Array([
+      0xef, 0xbb, 0xbf,
+      ...new TextEncoder().encode(`name,price\n${accented},5.00\n`),
+    ]);
+    const accepted = await upload(withBom);
+    expect(accepted.error).toBeUndefined();
+    expect(accepted.preview?.newItems.map((row) => row.csvName)).toEqual([accented]);
+
+    const literalName = `B\uFFFDmba ${RUN}`;
+    const literal = await upload(new TextEncoder().encode(`name,price\n${literalName},5.00\n`));
+    expect(literal.error).toBeUndefined();
+    expect(literal.preview?.newItems.map((row) => row.csvName)).toEqual([literalName]);
+    const afterSuccess = await importSnapshot();
+    expect(afterSuccess.some((row) => row.id === accepted.preview?.importToken)).toBe(true);
+    expect(afterSuccess.some((row) => row.id === literal.preview?.importToken)).toBe(true);
+    const refusedAgain = await upload(windows1252);
+    expect(refusedAgain.error).toBe(utf8Message);
+    expect(await importSnapshot()).toEqual(afterSuccess);
+  });
+
+  it("only typed business errors expose commit messages", async () => {
+    const preview = await previewCsv(storeASlug, cookies.ownerA, priceCsv(`Typed Rows ${RUN}`));
+    const empty = await commitAs(storeASlug, cookies.ownerA, preview.importToken, EMPTY);
+    expectVerbatim(empty, NO_ROWS);
+    const thrownValues: unknown[] = [
+      new Error("Import token is invalid, expired, or already used."),
+      "Import token is invalid, expired, or already used.",
+      { name: "CsvImportRejection", message: "Import token is invalid, expired, or already used." },
+    ];
+    for (const thrown of thrownValues) {
+      consoleSpy?.mockClear();
+      revalidateTagMock.mockClear();
+      const token = await previewCsv(storeASlug, cookies.ownerA, priceCsv(`Typed ${crypto.randomUUID()}`));
+      const before = await fiveTables(storeAId);
+      commitImportMock.mockRejectedValueOnce(thrown);
+      const res = await commitAs(storeASlug, cookies.ownerA, token.importToken, newItems([2]));
+      expectGeneric(res, thrown, storeAId);
+      expect(await fiveTables(storeAId)).toEqual(before);
+      expect((await tokenRow(storeAId, token.importToken))?.status).toBe("pending");
+    }
+  });
+
+  it("fresh failed and unknown imports cannot be committed", async () => {
+    const failed = await previewCsv(storeASlug, cookies.ownerA, priceCsv(`Failed Status ${RUN}`));
+    const unknown = await previewCsv(storeASlug, cookies.ownerA, priceCsv(`Unknown Status ${RUN}`));
+    await platformAdmin.listingImport.update({ where: { id: failed.importToken }, data: { status: "failed" } });
+    await platformAdmin.listingImport.update({ where: { id: unknown.importToken }, data: { status: "legacy" } });
+    for (const token of [failed.importToken, unknown.importToken]) {
+      consoleSpy?.mockClear();
+      revalidateTagMock.mockClear();
+      const before = await fiveTables(storeAId);
+      const res = await commitAs(storeASlug, cookies.ownerA, token, newItems([2]));
+      expectVerbatim(res, EXPIRED);
+      const row = await tokenRow(storeAId, token);
+      expect(row?.status).not.toBe("committed");
+      expect(row?.committedAt).toBeNull();
+      expect(await fiveTables(storeAId)).toEqual(before);
+    }
+  });
+
   if (process.env.CSV_COMMIT_PROD_CHECK === "1") {
     it("production error mapping is unchanged with Vercel flags absent and present", async () => {
       expect(process.env.NODE_ENV).toBe("production");

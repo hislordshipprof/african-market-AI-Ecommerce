@@ -68,6 +68,29 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
   const [selectedNew, setSelectedNew] = useState<Set<number>>(new Set());
   const [ambiguousResolutions, setAmbiguousResolutions] = useState<Map<number, string>>(new Map());
 
+  function clearSelections() {
+    setSelectedMatches(new Set());
+    setSelectedNew(new Set());
+    setAmbiguousResolutions(new Map());
+  }
+
+  function applyPreviewDefaults(next: CsvPreviewResult) {
+    setPreview(next);
+    setSelectedMatches(new Set(next.matches.map((match) => match.row)));
+    setSelectedNew(new Set(next.newItems.map((item) => item.row)));
+    setAmbiguousResolutions(new Map());
+  }
+
+  function resetImport() {
+    setStep("upload");
+    setPreview(null);
+    setSelectedFile(null);
+    setCreatedCount(0);
+    setNeedsWeightCount(0);
+    clearSelections();
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
   function handleFileChange(file: File | null) {
     if (!file) return;
     setSelectedFile(file);
@@ -100,9 +123,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
       }
 
       if (res.preview) {
-        setPreview(res.preview);
-        setSelectedMatches(new Set(res.preview.matches.map((m) => m.row)));
-        setSelectedNew(new Set(res.preview.newItems.map((n) => n.row)));
+        applyPreviewDefaults(res.preview);
         setStep("preview");
       }
     });
@@ -118,6 +139,9 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
         row,
         masterProductId,
       })),
+      matchedIdentities: preview.matches
+        .filter((match) => selectedMatches.has(match.row))
+        .map((match) => ({ row: match.row, masterProductId: match.masterProductId })),
     };
 
     if (
@@ -255,12 +279,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
                   });
                 }}
                 onCommit={handleCommit}
-                onBack={() => {
-                  setStep("upload");
-                  setPreview(null);
-                  setSelectedFile(null);
-                  setAmbiguousResolutions(new Map());
-                }}
+                onBack={resetImport}
                 isPending={isPending}
               />
             </motion.div>
@@ -279,13 +298,7 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
                 onGoToProducts={() =>
                   router.push(`/store-admin/listings?store=${storeSlug}`)
                 }
-                onImportMore={() => {
-                  setStep("upload");
-                  setPreview(null);
-                  setSelectedFile(null);
-                  setCreatedCount(0);
-                  setNeedsWeightCount(0);
-                }}
+                onImportMore={resetImport}
               />
             </motion.div>
           )}

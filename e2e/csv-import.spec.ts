@@ -60,6 +60,13 @@ function writeTempCsv(content: string): string {
   return filePath;
 }
 
+function importSuccessPanel(page: Page) {
+  return page
+    .getByRole("heading", { name: "Import Complete" })
+    .locator("..")
+    .getByText("Imported 1 listing successfully");
+}
+
 function writeTempBytes(name: string, bytes: Buffer): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "csv-import-e2e-"));
   const filePath = path.join(dir, name);
@@ -321,6 +328,55 @@ test.describe("CSV import (authenticated)", () => {
     ]);
     expect(listing).toBeTruthy();
     expect(listing!.perishable).toBe(true);
+
+    await page.getByRole("button", { name: "Import More" }).click();
+    const moreName = `E2E More Custom ${ts}`;
+    createdNames.push(moreName);
+    await page.locator("input[type='file']").setInputFiles(
+      writeTempCsv(`name,price\n${moreName},3.50\n`),
+    );
+    await page.click("text=Upload & Preview");
+    const moreButton = page.getByRole("button", { name: "Import 1 listing" });
+    await expect(moreButton).toBeVisible({ timeout: 15000 });
+    await moreButton.click();
+    await expect(importSuccessPanel(page)).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole("button", { name: "Import More" }).click();
+    await page.locator("input[type='file']").setInputFiles(csvPath);
+    await page.click("text=Upload & Preview");
+    await expect(page.getByText("Ambiguous Matches")).toBeVisible({ timeout: 15000 });
+    await page.locator(`label:has-text("E2E Ambig Beta ${ts}")`).click();
+    await page.getByRole("button", { name: "Back" }).click();
+    const backName = `E2E Back Custom ${ts}`;
+    createdNames.push(backName);
+    await page.locator("input[type='file']").setInputFiles(
+      writeTempCsv(`name,price\n${backName},2.25\n`),
+    );
+    await page.click("text=Upload & Preview");
+    const backButton = page.getByRole("button", { name: "Import 1 listing" });
+    await expect(backButton).toBeVisible({ timeout: 15000 });
+    await backButton.click();
+    await expect(importSuccessPanel(page)).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole("button", { name: "Import More" }).click();
+    const windows1252 = Buffer.concat([
+      Buffer.from("name,price\n"),
+      Buffer.from([0x42, 0xee, 0x6d, 0x62, 0x61]),
+      Buffer.from(",5.00\n"),
+    ]);
+    await page.locator("input[type='file']").setInputFiles(
+      writeTempBytes("windows.csv", windows1252),
+    );
+    await page.click("text=Upload & Preview");
+    await expect(page.getByText("not saved as UTF-8")).toBeVisible({ timeout: 15000 });
+    const recovered = `E2E Utf8 ${ts}`;
+    createdNames.push(recovered);
+    await page.locator("input[type='file']").setInputFiles(
+      writeTempCsv(`name,price\n${recovered},4.00\n`),
+    );
+    await page.click("text=Upload & Preview");
+    await expect(page.getByText(recovered)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("button", { name: "Import 1 listing" })).toBeVisible();
 
     // Cleanup test master products (inside platform admin transaction for RLS)
     await prisma.$transaction([

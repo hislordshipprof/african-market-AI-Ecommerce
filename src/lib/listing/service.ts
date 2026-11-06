@@ -17,12 +17,18 @@ export function resolveStockMode(input: {
   qty?: number;
   status?: string;
 }): ResolvedStock {
-  const mode: StockMode =
-    input.stockMode === "counted" || input.stockMode === "status"
-      ? input.stockMode
-      : input.hasQtyColumn
-        ? "counted"
-        : "status";
+  const explicit =
+    input.stockMode === "counted" || input.stockMode === "status" ? input.stockMode : undefined;
+  // A cell the owner filled wins over the file-level fallback. Qty 0 is filled in.
+  const mode: StockMode = explicit
+    ? explicit
+    : input.qty !== undefined
+      ? "counted"
+      : input.status
+        ? "status"
+        : input.hasQtyColumn
+          ? "counted"
+          : "status";
 
   if (mode === "counted") {
     return { stockMode: "counted", qty: input.qty ?? 0, status: null };
@@ -54,6 +60,13 @@ export interface SaveVariantInput extends CreateVariantInput {
 export interface Actor {
   id: string;
   email: string;
+}
+
+/** The only stock modes a listing form or a CSV `stock_mode` cell may name. */
+export const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
+
+export function toActor(user: { id: string; email: string }): Actor {
+  return { id: user.id, email: user.email };
 }
 
 type ListingTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
