@@ -267,8 +267,16 @@ export async function getStoreOrders(storeId: string) {
       select: { entityId: true },
     });
     const resolvedIds = resolved.map((row) => row.entityId);
+    const held = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM orders
+      WHERE store_id = ${storeId}
+        AND cancellable_until IS NOT NULL
+        AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')
+    `;
+    const heldIds = held.map((row) => row.id);
     return tx.order.findMany({
       where: {
+        ...(heldIds.length > 0 ? { id: { notIn: heldIds } } : {}),
         OR: [
           { status: { in: ACTIVE_STATUSES } },
           ...(resolvedIds.length > 0
@@ -296,6 +304,14 @@ export async function acceptOrder(
     if (!order) return { ok: false, error: "Order not found" };
     if (order.status !== "AUTHORIZED") {
       return { ok: false, error: `Cannot accept order in status ${order.status}` };
+    }
+    const windowOpen = await tx.$queryRaw<Array<{ open: boolean }>>`
+      SELECT (cancellable_until IS NOT NULL AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')) AS open
+      FROM orders
+      WHERE id = ${orderId}
+    `;
+    if (windowOpen[0]?.open) {
+      return { ok: false, error: "The customer can still cancel this order" };
     }
 
     await tx.order.update({
@@ -1036,6 +1052,61 @@ export async function completePickup(
 
     return { ok: true };
   });
+}
+
+export async function customerCancelOrder(input: {
+  storeId: string;
+  orderId: string;
+  cartId: string | null;
+  actorUserId: string | null;
+  actorEmail: string;
+}): Promise<{ ok: true } | { ok: false; code: "not_found" | "window_closed" | "pending"; message: string }> {
+  const claim = await storeScopedTransaction(input.storeId, async (tx) => {
+    await lockStoreRow(tx, input.storeId);
+    const order = await tx.order.findUnique({ where: { id: input.orderId } });
+    if (!order) return { ok: false as const, code: "not_found" as const, message: "That order is not available." };
+    const source = order.sourceCartId
+      ? await tx.cart.findUnique({ where: { id: order.sourceCartId } })
+      : null;
+    const ownsCart = Boolean(input.cartId && input.cartId === order.sourceCartId && (!source?.userId || source.userId === input.actorUserId));
+    const ownsAccount = Boolean(input.actorUserId && source?.userId === input.actorUserId);
+    if (!ownsCart && !ownsAccount) {
+      return { ok: false as const, code: "not_found" as const, message: "That order is not available." };
+    }
+    if (order.status === "CANCELLED") return { ok: true as const, done: true as const };
+    if (order.status === "CANCELLING") {
+      return { ok: true as const, done: false as const, paymentIntentId: order.paymentIntentId, totalAuthorizedCents: order.totalAuthorizedCents, refundId: order.refundId };
+    }
+    if (order.status !== "AUTHORIZED") {
+      return { ok: false as const, code: "window_closed" as const, message: "This order can no longer be cancelled. Contact the store." };
+    }
+    const windowOpen = await tx.$queryRaw<Array<{ open: boolean }>>`
+      SELECT (cancellable_until IS NOT NULL AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')) AS open
+      FROM orders WHERE id = ${input.orderId}
+    `;
+    if (!windowOpen[0]?.open) {
+      return { ok: false as const, code: "window_closed" as const, message: "This order can no longer be cancelled. Contact the store." };
+    }
+    await tx.order.update({ where: { id: input.orderId }, data: { status: "CANCELLING" } });
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.actorUserId ?? SYSTEM_ACTOR_ID,
+        actorEmail: input.actorEmail,
+        action: "customer_cancel",
+        entityType: "order",
+        entityId: input.orderId,
+        after: { actorKind: input.actorUserId ? "customer" : "guest", cartId: input.cartId },
+      },
+    });
+    return { ok: true as const, done: false as const, paymentIntentId: order.paymentIntentId, totalAuthorizedCents: order.totalAuthorizedCents, refundId: order.refundId };
+  });
+
+  if (!claim.ok) return claim;
+  if (claim.done) return { ok: true };
+  const finished = await autoCancelOrder(input.storeId, input.orderId);
+  if (!finished.ok) return { ok: false, code: "pending", message: finished.error };
+  return { ok: true };
 }
 
 export async function autoCancelOrder(

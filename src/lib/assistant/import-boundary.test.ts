@@ -12,12 +12,25 @@ afterEach(() => {
 });
 
 describe("assistant import boundary", () => {
-  it("assistant code cannot reach Stripe or placeOrder", () => {
+  it("the model path cannot reach PaymentIntent creation or placeOrder", () => {
     const hits = findForbiddenImports(
-      [path.join(SRC, "lib/assistant"), path.join(SRC, "app/api/assistant")],
+      [path.join(SRC, "lib/assistant/tools"), path.join(SRC, "lib/assistant/chat-handler.ts")],
       SRC,
     );
     expect(hits).toEqual([]);
+  });
+
+  it("fails when a tool file imports the confirm module", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "assistant-boundary-"));
+    temps.push(root);
+    const src = path.join(root, "src");
+    fs.mkdirSync(path.join(src, "lib/assistant/tools"), { recursive: true });
+    fs.writeFileSync(
+      path.join(src, "lib/assistant/tools/hostile.ts"),
+      'import { confirmCheckout } from "@/lib/assistant/checkout/confirm";\nexport const leak = confirmCheckout;\n',
+    );
+    const hits = findForbiddenImports([path.join(src, "lib/assistant/tools")], src);
+    expect(hits.join("\n")).toContain("assistant/checkout/confirm");
   });
 
   it("the walker fails when a forbidden import is added", () => {

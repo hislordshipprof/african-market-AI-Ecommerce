@@ -51,6 +51,9 @@ model Store {
   assistantUndoReceipts AssistantUndoReceipt[]
   guestBrowserCarts GuestBrowserCart[]
   paymentIntentReleases PaymentIntentRelease[]
+  assistantCheckoutDrafts AssistantCheckoutDraft[]
+  assistantCheckoutAttempts AssistantCheckoutAttempt[]
+  assistantCheckoutTokens AssistantCheckoutToken[]
 
   @@map("stores")
 }
@@ -459,6 +462,9 @@ model Cart {
   aiConversations AiConversation[]
   assistantUndoReceipts AssistantUndoReceipt[]
   guestBrowserCarts GuestBrowserCart[]
+  assistantCheckoutAttempts AssistantCheckoutAttempt[]
+
+  @@unique([id, storeId])
 
   @@index([storeId])
   @@index([storeId, userId])
@@ -549,7 +555,10 @@ model AiConversation {
   cart     Cart      @relation(fields: [cartId], references: [id], onDelete: Cascade)
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   actions  AiAction[]
+  checkoutDraft AssistantCheckoutDraft?
+  checkoutAttempts AssistantCheckoutAttempt[]
 
+  @@unique([id, storeId])
   @@unique([storeId, cartId])
   @@index([cartId])
   @@index([storeId])
@@ -575,6 +584,80 @@ model AiAction {
   @@index([storeId])
   @@index([createdAt])
   @@map("ai_actions")
+}
+
+/// Guest contact and the chosen pickup slot for one assistant conversation.
+model AssistantCheckoutDraft {
+  id             String   @id @default(cuid())
+  storeId        String   @map("store_id")
+  conversationId String   @unique @map("conversation_id")
+  fulfillment    String   @default("pickup")
+  slotId         String?  @map("slot_id")
+  contactName    String?  @map("contact_name")
+  contactEmail   String?  @map("contact_email")
+  contactPhone   String?  @map("contact_phone")
+  contactVersion Int      @default(0) @map("contact_version")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  store        Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  conversation AiConversation @relation(fields: [conversationId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@unique([conversationId, storeId])
+  @@index([storeId])
+  @@map("assistant_checkout_drafts")
+}
+
+/// One immutable checkout the customer can pay for. Contact stays here so a
+/// transcript cleanup cannot erase an in-flight hold.
+model AssistantCheckoutAttempt {
+  id                   String    @id @default(cuid())
+  storeId              String    @map("store_id")
+  conversationId       String?   @map("conversation_id")
+  cartId               String    @map("cart_id")
+  actorUserId          String?   @map("actor_user_id")
+  status               String    @default("open")
+  snapshotHash         String    @map("snapshot_hash")
+  snapshot             Json
+  paymentKind          String    @map("payment_kind")
+  savedPaymentMethodId String?   @map("saved_payment_method_id")
+  idempotencyKey       String    @unique @map("idempotency_key")
+  reservedAmountCents  Int       @map("reserved_amount_cents")
+  paymentIntentId      String?   @map("payment_intent_id")
+  orderId              String?   @map("order_id")
+  windowMinutes        Int       @map("window_minutes")
+  contactName          String?   @map("contact_name")
+  contactEmail         String?   @map("contact_email")
+  contactPhone         String?   @map("contact_phone")
+  contactVersion       Int       @map("contact_version")
+  expiresAt            DateTime  @map("expires_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  store        Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  cart         Cart            @relation(fields: [cartId, storeId], references: [id, storeId], onDelete: Restrict)
+  tokens       AssistantCheckoutToken[]
+
+  @@unique([id, storeId])
+  @@index([storeId, conversationId])
+  @@index([storeId, cartId])
+  @@index([storeId, paymentIntentId])
+  @@map("assistant_checkout_attempts")
+}
+
+/// SHA-256 of a single-use checkout token. The raw token is never stored.
+model AssistantCheckoutToken {
+  tokenHash String   @id @map("token_hash")
+  storeId   String   @map("store_id")
+  attemptId String   @map("attempt_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store   Store                    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  attempt AssistantCheckoutAttempt @relation(fields: [attemptId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@index([storeId, attemptId])
+  @@map("assistant_checkout_tokens")
 }
 
 /// One row per assistant addition the customer undoes. A retry sees the row and does not subtract again.
@@ -665,6 +748,7 @@ model Order {
   readyAt              DateTime? @map("ready_at")
   completedAt          DateTime? @map("completed_at")
   cancelledAt          DateTime? @map("cancelled_at")
+  cancellableUntil     DateTime? @map("cancellable_until")
   inngestEventSentAt   DateTime? @map("inngest_event_sent_at")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
@@ -679,6 +763,7 @@ model Order {
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, sourceCartId, createdAt])
+  @@index([storeId, cancellableUntil])
   @@index([customerId])
   @@map("orders")
 }

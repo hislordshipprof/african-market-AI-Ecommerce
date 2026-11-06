@@ -191,7 +191,7 @@ Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant default
 - Ask before assuming quantities when servings are unclear; default to recipe scaling. When the customer states servings, propose a quantity for every item. When the customer accepts that current proposal, add every resolved item at those quantities without asking again. A stated quantity overrides the proposal. An acceptance does not revive an older list, skip an unresolved choice, add a product that was not matched, or place an order.
 - Never claims a price or stock it didn't get from a tool. The allowed amounts are the newest keyed unit price from tool outputs in the history sent to the model and this turn, every cent value in this turn's tool outputs, and the store minimum. The item key is the variant id on that price, otherwise the listing id. A newer price for the same key replaces the older one. Totals from earlier turns are not kept, and the model gets no credit for arithmetic: cart tools return the line, added and cart totals. An amount that equals a currently allowed unit price, the store minimum, or a value returned this turn can still appear. USD amounts are recognized in `$`, `US$`, `USD`, `dollars`, `¢` and `cents` forms. Any other currency is removed. A removed amount in a list line reads "price not confirmed"; any other sentence reads "I couldn't confirm that price." No medical/nutrition claims beyond product data.
 - Shows product photos on request; accepts shopper photos of an item or a list and matches them through `search_catalog`; may ask for a photo when it can't match a name.
-- Never places an order or touches card data. Payment happens only on the shopper's tap on the confirm card; the shopper can cancel for 10 minutes after placing (hold voided).
+- Never places an order or touches card data. Payment happens only on the customer's tap on the confirm card. The customer can cancel for the configured window (5–10 minutes, unset means 10) after placing. The store does not see or accept that order until the window closes. The hold is voided. Normal checkout has no window.
 - Languages: English first; understands Nigerian Pidgin and common Yoruba/Igbo/Hausa/Twi/Amharic/Swahili/Somali food terms via the synonym base.
 
 ### 8.2 Store copilot
@@ -246,8 +246,10 @@ Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_ST
 
 | Transition | Trigger | Side effects |
 |---|---|---|
-| → AUTHORIZED | Stripe PaymentIntent `requires_capture` | Notify store (stock reservation deferred to #141) |
-| → ACCEPTED | Store tap / auto | Customer notified with prep ETA |
+| → AUTHORIZED | Stripe PaymentIntent `requires_capture` | Notify store when the cancel window is closed (stock reservation deferred to #141). Assistant orders set `cancellableUntil` and send `order/authorized` with `ts` at that deadline. Other orders leave it null and notify immediately. |
+| → CANCELLING | Customer cancel inside the window, or auto-cancel | Claimed before the provider call. Accept is refused. A retry finishes the same claim. |
+| → CANCELLED | Customer, inside the window, after the hold is voided or refunded; or store, before ACCEPTED | Hold voided, or a captured PaymentIntent refunded through the existing ledger |
+| → ACCEPTED | Store tap / auto, only after an assistant order's window has closed | Customer notified with prep ETA. The 15- and 30-minute timers count from the window close when the order has one. |
 | → SUBSTITUTION_PENDING | Picker marks short | Customer prompt; timer |
 | → CAPTURING | All lines resolved | Set transitional status; Stripe capture in flight |
 | → READY / AWAITING_PICKUP | Stripe capture succeeded | Delivery re-quote (delivery) or customer notified (pickup). #141 sale stock events fire on this transition for both Ready and Awaiting pickup. |

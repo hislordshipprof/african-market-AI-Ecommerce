@@ -17,6 +17,7 @@ import {
   type ExistingPaymentIntent,
   type PaymentIntentCreateParams,
 } from "./payment-intent-params";
+import { assertAssistantAttempt, AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
 import { checkoutTestHooks } from "./test-hooks";
 
 export class SavedCardUnavailableError extends Error {
@@ -32,6 +33,8 @@ export interface SignedInPaymentInput {
   saveCard: boolean;
   savedCardId: string | null;
   attemptToken: string | null;
+  assistantAttemptId?: string | null;
+  idempotencyKey?: string | null;
 }
 
 function asExisting(intent: NormalizedPaymentIntent): ExistingPaymentIntent {
@@ -189,6 +192,7 @@ export async function prepareSignedInPaymentIntent(
   const reserved = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     await lockCart(tx, cartId);
+    const assistantOwner = await assertAssistantAttempt(tx, cartId, input.assistantAttemptId);
     const cart = await tx.cart.findUnique({ where: { id: cartId } });
     if (!cart || (cart.userId && cart.userId !== input.actorUserId)) {
       throw new Error("Cart not found");
@@ -196,13 +200,13 @@ export async function prepareSignedInPaymentIntent(
     const existing = cart.paymentIntentId
       ? asExisting(await payments.retrievePaymentIntent(cart.paymentIntentId))
       : null;
-    const generation = nextAttemptToken({
+    const generation = input.idempotencyKey ?? nextAttemptToken({
       paymentIntentId: cart.paymentIntentId,
       storedToken: cart.paymentAttemptToken,
       fingerprint,
       forceNew: false,
     });
-    const attemptKey = cartPaymentIdempotencyKey(cartId, generation);
+    const attemptKey = input.idempotencyKey ?? cartPaymentIdempotencyKey(cartId, generation);
     const plan = planPaymentAttempt({
       existing,
       holdCents,
@@ -221,6 +225,9 @@ export async function prepareSignedInPaymentIntent(
     });
     if (plan.action === "blocked") {
       throw new Error("Payment already confirmed for this cart");
+    }
+    if (assistantOwner && (plan.action === "replace" || (existing != null && existing.amount !== assistantOwner.reservedAmountCents))) {
+      throw new AssistantCheckoutInProgressError();
     }
     if (plan.action === "reuse") {
       return {

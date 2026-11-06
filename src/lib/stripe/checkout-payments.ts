@@ -315,6 +315,8 @@ export const fakeCheckoutPayments: CheckoutPayments = {
       throw invalid(`You cannot cancel a PaymentIntent in status ${intent.status}.`);
     }
     intent.status = "canceled";
+    const { markFakeStripeCanceled } = await import("./fake");
+    markFakeStripeCanceled(id);
     return { id, status: "canceled" };
   },
 
@@ -355,9 +357,18 @@ export const fakeCheckoutPayments: CheckoutPayments = {
       intent.payment_method = paymentMethodId;
     }
     intent.status = card.behavior === "action" ? "requires_action" : "requires_capture";
+    if (intent.status === "requires_capture") {
+      const { ensureAuthorizedAmount } = await import("./fake");
+      ensureAuthorizedAmount(intent.id, intent.amount);
+    }
     return intent;
   },
 };
+
+export function markFakeCheckoutCanceled(id: string): void {
+  const intent = intents.get(id);
+  if (intent && intent.status !== "succeeded") intent.status = "canceled";
+}
 
 function requireIntent(id: string): NormalizedPaymentIntent {
   const intent = intents.get(id);

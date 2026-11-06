@@ -13,6 +13,7 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
+import { checkoutToolModelOutput, runGetCheckoutProfile, runGetFulfillmentOptions, runPrepareCheckout, runSetFulfillment } from "./checkout";
 import {
   addToCartInput,
   cartSummaryInput,
@@ -24,6 +25,10 @@ import {
   showProductsInput,
   suggestSubstitutesInput,
   updateCartInput,
+  checkoutProfileInput,
+  fulfillmentOptionsInput,
+  prepareCheckoutInput,
+  setFulfillmentInput,
 } from "./schemas";
 
 export type { AssistantContext, ToolResult } from "./execute";
@@ -80,6 +85,30 @@ export function assistantTools(ctx: AssistantContext) {
       description: "Offer 2 to 6 products from this store and wait for the customer to pick one.",
       inputSchema: offerChoicesInput,
       execute: (input, options) => offerChoices({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    get_fulfillment_options: tool({
+      description: "List today's pickup times. Pickup only. Does not place an order.",
+      inputSchema: fulfillmentOptionsInput,
+      execute: (_input, options) => runGetFulfillmentOptions({ ...ctx, toolCallId: options.toolCallId }),
+      toModelOutput: ({ output }) => checkoutToolModelOutput(output),
+    }),
+    set_fulfillment: tool({
+      description: "Save a pickup time from get_fulfillment_options. Does not place an order.",
+      inputSchema: setFulfillmentInput,
+      execute: (input, options) => runSetFulfillment({ ...ctx, toolCallId: options.toolCallId }, input),
+      toModelOutput: ({ output }) => checkoutToolModelOutput(output),
+    }),
+    get_checkout_profile: tool({
+      description: "Say whether contact and a saved card are on file. Never returns the card number, email, phone, or a payment id.",
+      inputSchema: checkoutProfileInput,
+      execute: (_input, options) => runGetCheckoutProfile({ ...ctx, toolCallId: options.toolCallId }),
+      toModelOutput: ({ output }) => checkoutToolModelOutput(output),
+    }),
+    prepare_checkout: tool({
+      description: "Draw a confirm card for the customer to tap. This does not place the order or charge a card.",
+      inputSchema: prepareCheckoutInput,
+      execute: (_input, options) => runPrepareCheckout({ ...ctx, toolCallId: options.toolCallId }),
+      toModelOutput: ({ output }) => checkoutToolModelOutput(output),
     }),
   });
 }

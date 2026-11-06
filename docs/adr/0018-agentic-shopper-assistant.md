@@ -48,11 +48,15 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
   - A typed "yes" never places an order.
   - If anything changed since the card was drawn (price, stock, fee, slot), the token is rejected and a fresh card is drawn.
 - **Cancellation window:**
-  - after placing, the shopper has **10 minutes** to cancel from the chat, the confirmation page or the tracking page;
-  - the window is a platform setting with an allowed range of 5–10 minutes;
-  - cancelling voids the card hold (manual capture, #64) and cancels the order; nothing is captured;
-  - the store gets the new-order alert when the window closes, so it never picks an order that may be cancelled;
-  - v1 applies the window to orders placed through the assistant; extending it to normal checkout is a later decision.
+  - after placing, the customer has **10 minutes** to cancel from the placed card, the confirmation page, or the order page (`/order/[token]`, which is also the tracking page);
+  - `ASSISTANT_CANCEL_WINDOW_MIN` is unset for 10, or an integer from 5 to 10. Any other value fails closed: new checkout says it is unavailable and creates no PaymentIntent;
+  - the deadline is `clock_timestamp()` plus that window, written in the same transaction as the order. Cancel and accept read the database clock after the store row lock;
+  - cancelling claims `CANCELLING`, voids the card hold (manual capture, #64), then finalises `CANCELLED`. A captured PaymentIntent uses the existing refund ledger. A retry after the deadline finishes a cancellation that was already claimed;
+  - the store list hides the order, and accept and auto-accept refuse it, until the deadline. `order/authorized` is sent at placement with `ts` and `authorizedAt` set to that deadline, so the 15- and 30-minute timers start when the window closes. Normal checkout leaves the deadline null and is unchanged;
+  - v1 applies the window only to orders placed through the assistant confirm route.
+- **Confirm is two phases and is not a model tool.** Phase A checks the token and snapshot, then creates or reuses one PaymentIntent outside the row locks. Phase B places the order only when that PaymentIntent is `requires_capture`. `prepare_checkout` never finishes phase B. A token that already placed an order returns that order. The raw token is returned once to the browser and only its SHA-256 is stored. It is not written to model input, transcripts, or action rows.
+- **One attempt owns the PaymentIntent.** A newer prepare or the normal checkout cannot change that intent's amount or payment method. If the snapshot no longer matches when the order is inserted, the hold is released and the customer gets a fresh card.
+- **The model path cannot import money code.** The tool registry, the chat handler, and everything they import do not reach Stripe, the checkout service, saved-card payment, or the confirm module. Masked account facts are injected by the chat route. Guest contact is posted to its own route.
 - **Card data never touches the model.** Cards are entered in Stripe's Payment Element inside the sheet. The model only learns masked facts such as "card on file: Visa 4242". If a shopper types a card number into the chat, it is removed before the message reaches the model or the transcript.
 - **Saved cards:** a Stripe Customer on the platform account. "Save this card for next time" is offered on the first order, needs the shopper's tick, and can be listed and removed from the account page. Cards work across stores through the existing destination charges.
 - **Saved addresses:** an address book on the platform customer account (ADR-0002). An address is copied into an order only when used, so a store never sees addresses from other stores' orders. The address book is built in #248 and used at checkout by store delivery (#15). Pickup needs no address.

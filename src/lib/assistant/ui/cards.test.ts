@@ -106,7 +106,7 @@ describe("assistant cards", () => {
         state: "output-error",
         errorText: "provider exploded <script>",
       },
-      { type: "tool-prepare_checkout", toolCallId: "u1", state: "output-available", output: { ok: true } },
+      { type: "tool-not_a_real_tool", toolCallId: "u1", state: "output-available", output: { ok: true } },
       { type: "data-step-limit", data: { text: "I've done as much as I can in one go. Tell me what you'd like next." } },
     ]);
 
@@ -150,7 +150,7 @@ describe("assistant cards", () => {
     for (const state of states) {
       for (const turnFailed of [false, true]) {
         expect(cardsFromParts([
-          { type: "tool-prepare_checkout", toolCallId: "unknown-static", state, output: { ok: true }, errorText: "no" },
+          { type: "tool-not_a_real_tool", toolCallId: "unknown-static", state, output: { ok: true }, errorText: "no" },
         ], { turnFailed })).toEqual([]);
         expect(cardsFromParts([
           { type: "dynamic-tool", toolName: "not_a_tool", toolCallId: "unknown-dynamic", state, output: { ok: true } },
@@ -331,7 +331,7 @@ describe("assistant cards", () => {
   });
 
   it("unknown tools add no completion summary and preserve the empty-message fallback", () => {
-    const unknown = { type: "tool-prepare_checkout", toolCallId: "gone", state: "input-available" };
+    const unknown = { type: "tool-not_a_real_tool", toolCallId: "gone", state: "input-available" };
     expect(cardsFromParts([unknown], { turnFailed: true })).toEqual([]);
     expect(completionAnnouncement({ parts: [unknown] })).toBe("Reply ready");
     expect(completionAnnouncement({

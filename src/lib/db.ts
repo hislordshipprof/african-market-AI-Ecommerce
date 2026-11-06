@@ -109,6 +109,9 @@ export function storeScoped(storeId: string) {
     aiAction: wrapDelegate(storeId, prisma.aiAction),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
+    assistantCheckoutDraft: wrapDelegate(storeId, prisma.assistantCheckoutDraft),
+    assistantCheckoutAttempt: wrapDelegate(storeId, prisma.assistantCheckoutAttempt),
+    assistantCheckoutToken: wrapDelegate(storeId, prisma.assistantCheckoutToken),
   };
 }
 
@@ -279,7 +282,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "assistantCheckoutDraft" | "assistantCheckoutAttempt" | "assistantCheckoutToken" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -306,6 +309,9 @@ export async function storeScopedTransaction<T>(
       aiAction: tx.aiAction,
       assistantUndoReceipt: tx.assistantUndoReceipt,
       guestBrowserCart: tx.guestBrowserCart,
+      assistantCheckoutDraft: tx.assistantCheckoutDraft,
+      assistantCheckoutAttempt: tx.assistantCheckoutAttempt,
+      assistantCheckoutToken: tx.assistantCheckoutToken,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -723,25 +729,35 @@ export function deleteExpiredAssistantConversations(
   batchSize: number,
   batchKey: string,
 ): Promise<number> {
-  return deleteExpiredBatch(batchKey, (tx) =>
-    tx.$queryRaw<Array<{ deleted: number }>>`
-      WITH doomed AS (
-        SELECT id FROM ai_conversations
-        WHERE created_at < ${cutoff}
-          AND (in_flight_until IS NULL OR in_flight_until <= ${now})
-        ORDER BY created_at, id
-        LIMIT ${batchSize}
-        FOR UPDATE SKIP LOCKED
-      ),
-      removed AS (
+  return deleteExpiredBatch(batchKey, async (tx) => {
+    const doomed = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM ai_conversations
+      WHERE created_at < ${cutoff}
+        AND (in_flight_until IS NULL OR in_flight_until <= ${now})
+      ORDER BY created_at, id
+      LIMIT ${batchSize}
+      FOR UPDATE SKIP LOCKED
+    `;
+    if (doomed.length === 0) return [{ deleted: 0 }];
+    const ids = doomed.map((row) => row.id);
+    await tx.$executeRaw`
+      UPDATE assistant_checkout_attempts
+      SET conversation_id = NULL,
+          contact_name = CASE WHEN status IN ('reserved', 'awaiting_payment') THEN contact_name ELSE NULL END,
+          contact_email = CASE WHEN status IN ('reserved', 'awaiting_payment') THEN contact_email ELSE NULL END,
+          contact_phone = CASE WHEN status IN ('reserved', 'awaiting_payment') THEN contact_phone ELSE NULL END
+      WHERE conversation_id IN (${Prisma.join(ids)})
+    `;
+    return tx.$queryRaw<Array<{ deleted: number }>>`
+      WITH removed AS (
         DELETE FROM ai_conversations
-        WHERE id IN (SELECT id FROM doomed)
+        WHERE id IN (${Prisma.join(ids)})
           AND (in_flight_until IS NULL OR in_flight_until <= ${now})
         RETURNING id
       )
       SELECT count(*)::int AS deleted FROM removed
-    `,
-  );
+    `;
+  });
 }
 
 async function deleteExpiredBatch(

@@ -35,7 +35,7 @@ function logSendFailure(event: string, orderId: string, err: unknown): void {
   console.error(JSON.stringify({ event, orderId, message }));
 }
 
-async function sendWithTimeout(storeId: string, orderId: string, authorizedAt: string): Promise<void> {
+async function sendWithTimeout(storeId: string, orderId: string, authorizedAt: string, ts?: number): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error("inngest send timed out")), SEND_TIMEOUT_MS);
@@ -44,6 +44,7 @@ async function sendWithTimeout(storeId: string, orderId: string, authorizedAt: s
     id: `order-authorized-${orderId}`,
     name: "order/authorized",
     data: { storeId, orderId, authorizedAt },
+    ...(ts != null ? { ts } : {}),
   });
   try {
     await Promise.race([sendPromise, timeout]);
@@ -61,13 +62,15 @@ export async function sendOrderAuthorized(storeId: string, orderId: string): Pro
   let sent = false;
   try {
     const order = await storeScopedTransaction(storeId, async (tx) => {
-      return tx.order.findUnique({ where: { id: orderId }, select: { createdAt: true } });
+      return tx.order.findUnique({ where: { id: orderId }, select: { createdAt: true, cancellableUntil: true } });
     });
     if (!order) {
       console.error(JSON.stringify({ event: "inngest_order_not_found", orderId }));
       return;
     }
-    await sendWithTimeout(storeId, orderId, order.createdAt.toISOString());
+    const deadline = order.cancellableUntil ?? null;
+    const authorizedAt = (deadline ?? order.createdAt).toISOString();
+    await sendWithTimeout(storeId, orderId, authorizedAt, deadline ? deadline.getTime() : undefined);
     sent = true;
     await storeScopedTransaction(storeId, async (tx) => {
       await tx.order.update({

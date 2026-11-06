@@ -10,11 +10,12 @@ import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
-import { validPhone } from "../customer-account/phone";
+import { hashCanonical, liveCanonical, paymentRef } from "../assistant/checkout/snapshot";
+import { assertAssistantAttempt, AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
+import { computeQuote } from "./quote";
 import type {
   CheckoutQuote,
   Contact,
-  FlowProblem,
   Fulfillment,
 } from "../customer-flow/contracts";
 
@@ -101,82 +102,7 @@ async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentInte
   };
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function validEmail(email: string): boolean {
-  return EMAIL_RE.test(email.trim());
-}
-
-export function computeQuote(
-  minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null }>,
-  contact: Contact,
-  fulfillment: Fulfillment,
-): CheckoutQuote {
-  const problems: FlowProblem[] = [];
-  let subtotalCents = 0;
-
-  for (const line of cartLines) {
-    if (
-      !Number.isInteger(line.qty) ||
-      line.qty < 1
-    ) {
-      problems.push({ code: "max-quantity", message: "Check item quantity." });
-      continue;
-    }
-    if (line.maxPerOrder !== null && line.qty > line.maxPerOrder) {
-      problems.push({
-        code: "max-quantity",
-        message: `Maximum ${line.maxPerOrder} per order for this item.`,
-      });
-    }
-    subtotalCents += line.price * line.qty;
-  }
-
-  if (!cartLines.length || subtotalCents < minimumOrderCents) {
-    problems.push({
-      code: "minimum-order",
-      message: `Minimum order is $${(minimumOrderCents / 100).toFixed(2)}.`,
-    });
-  }
-
-  if (
-    !contact.name.trim() ||
-    !validEmail(contact.email) ||
-    !validPhone(contact.phone)
-  ) {
-    problems.push({
-      code: "invalid-contact",
-      message: "Name, email, and a valid phone number are required.",
-    });
-  }
-
-  if (fulfillment !== "pickup") {
-    problems.push({
-      code: "ineligible",
-      message: "Only pickup is available for this store.",
-    });
-  }
-
-  const tipCents = 0;
-  const totalCents = subtotalCents + tipCents;
-  const bufferCents = Math.min(Math.round(subtotalCents * 0.1), 2000);
-  const holdCents = totalCents + bufferCents;
-
-  return {
-    id: crypto.randomUUID(),
-    subtotalCents,
-    deliveryFeeCents: 0,
-    courierFeeCents: 0,
-    taxCents: 0,
-    tipCents,
-    discountCents: 0,
-    totalCents,
-    bufferCents,
-    holdCents,
-    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-    problems,
-  };
-}
+export { computeQuote } from "./quote";
 
 export async function quoteCheckout(
   storeId: string,
@@ -199,12 +125,15 @@ export async function quoteCheckout(
 
 export { checkoutTestHooks } from "./test-hooks";
 export { SavedCardUnavailableError } from "./saved-card-payment";
+export { AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
 
 export interface CreatePaymentIntentOptions {
   actorUserId?: string | null;
   saveCard?: boolean;
   savedCardId?: string | null;
   attemptToken?: string | null;
+  assistantAttemptId?: string | null;
+  idempotencyKey?: string | null;
 }
 
 export async function createPaymentIntent(
@@ -220,11 +149,14 @@ export async function createPaymentIntent(
       saveCard: options.saveCard === true,
       savedCardId: options.savedCardId ?? null,
       attemptToken: options.attemptToken ?? null,
+      assistantAttemptId: options.assistantAttemptId ?? null,
+      idempotencyKey: options.idempotencyKey ?? null,
     }, store.stripeAccountId);
   }
   const reserved = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     await lockCart(tx, cartId);
+    const assistantOwner = await assertAssistantAttempt(tx, cartId, options?.assistantAttemptId);
     const cart = await tx.cart.findUnique({ where: { id: cartId } });
     if (!cart) throw new Error("Cart not found");
 
@@ -246,11 +178,12 @@ export async function createPaymentIntent(
           paymentIntentId: existing.id,
           amount: existing.amount,
           purchaseEpoch: cart.purchaseEpoch,
+          reservedAmount: assistantOwner?.reservedAmountCents ?? null,
         };
       }
     }
 
-    const generation = nextAttemptToken({
+    const generation = options?.idempotencyKey ?? nextAttemptToken({
       paymentIntentId: cart.paymentIntentId,
       storedToken: cart.paymentAttemptToken,
       fingerprint: `guest:${holdCents}`,
@@ -264,6 +197,9 @@ export async function createPaymentIntent(
   }, { timeout: 20_000, maxWait: 8_000 });
 
   if (reserved.kind === "reuse") {
+    if (reserved.reservedAmount != null && reserved.reservedAmount !== holdCents) {
+      throw new AssistantCheckoutInProgressError();
+    }
     if (reserved.amount !== holdCents) {
       const patch = {
         amount: holdCents,
@@ -345,6 +281,7 @@ export interface RecordAuthorizedOrderInput {
   /** True when metadata includes purchase_epoch, including a value that is not a number. */
   epochPresent?: boolean;
   minimumOrderCents?: number;
+  assistantAttemptId?: string | null;
 }
 
 function paymentIntentTaken(err: unknown): boolean {
@@ -432,6 +369,31 @@ export async function recordAuthorizedOrder(
       if (currentQuote.holdCents !== (input.paymentAmount ?? input.quote.holdCents)) {
         throw new BasketChangedError();
       }
+      let assistantWindow: number | null = null;
+      if (input.assistantAttemptId) {
+        const attempt = await tx.assistantCheckoutAttempt.findUnique({ where: { id: input.assistantAttemptId } });
+        const stored = attempt?.snapshot;
+        const slotId = stored && typeof stored === "object" && stored !== null && "slotId" in stored
+          ? String((stored as { slotId?: unknown }).slotId ?? "")
+          : "";
+        if (!attempt || attempt.cartId !== input.cartId || attempt.paymentIntentId !== input.paymentIntentId || !slotId) {
+          throw new BasketChangedError();
+        }
+        const live = await liveCanonical(tx, {
+          storeId,
+          cartId: input.cartId,
+          contact: input.contact,
+          contactVersion: attempt.contactVersion,
+          slotId,
+          paymentRef: paymentRef(attempt.paymentKind === "saved" ? "saved" : "new", attempt.savedPaymentMethodId),
+          now: new Date(),
+          windowMinutes: attempt.windowMinutes,
+        });
+        if ("missing" in live || hashCanonical(live.canonical) !== attempt.snapshotHash) {
+          throw new BasketChangedError();
+        }
+        assistantWindow = attempt.windowMinutes;
+      }
 
       const variantIds = [
         ...new Set(
@@ -509,6 +471,23 @@ export async function recordAuthorizedOrder(
           purchaseEpoch: { increment: 1 },
         },
       });
+      if (assistantWindow != null && input.assistantAttemptId) {
+        await tx.$executeRaw`
+          UPDATE orders
+          SET cancellable_until = (clock_timestamp() AT TIME ZONE 'UTC') + (${assistantWindow} * INTERVAL '1 minute')
+          WHERE id = ${order.id}
+        `;
+        await tx.assistantCheckoutAttempt.update({
+          where: { id: input.assistantAttemptId },
+          data: {
+            status: "placed",
+            orderId: order.id,
+            contactName: null,
+            contactEmail: null,
+            contactPhone: null,
+          },
+        });
+      }
       return { orderId: order.id, created: true };
     }, { timeout: 40_000, maxWait: 8_000 });
   } catch (err) {
@@ -677,6 +656,7 @@ export async function placeOrder(
   pickupSlot: string | null,
   paymentIntentId: string,
   actorUserId: string | null = null,
+  assistantAttemptId: string | null = null,
 ): Promise<{ token: string; quote: CheckoutQuote }> {
   const store = await getStripeStore(storeId);
 
@@ -826,6 +806,7 @@ export async function placeOrder(
       purchaseEpoch: epochStamp(pi.metadata).epoch,
       epochPresent: epochStamp(pi.metadata).present,
       minimumOrderCents,
+      assistantAttemptId,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
         qty: line.qty,

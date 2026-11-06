@@ -15,6 +15,7 @@ import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
 import { readBrowserId } from "../cart/browser";
 import { CartError, getOrCreateCart } from "../cart/service";
 import { lockConversationRow, storeScoped, storeScopedTransaction, takeRollingFileTurn } from "../db";
+import { projectCheckoutSecrets } from "./checkout/safe-output";
 import { findStore } from "../get-store";
 import { auth } from "../auth";
 import {
@@ -60,6 +61,13 @@ export interface ChatHandlerOptions {
   now?: () => Date;
   /** Test seam. Runs after the unlocked transcript read and before classification. */
   afterSnapshot?: (messages: UIMessage[]) => Promise<void>;
+  loadAccountContact?: (actorUserId: string) => Promise<{ name: string; email: string; phone: string } | null>;
+  loadMaskedFacts?: (actorUserId: string) => Promise<{
+    contactOnFile: boolean;
+    card: { brand: string; last4: string } | null;
+    addressOnFile: boolean;
+    savedPaymentMethodId: string | null;
+  }>;
 }
 
 export function createChatHandler(options: ChatHandlerOptions = {}) {
@@ -216,6 +224,9 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       conversationId: turn.id,
       actorUserId: userId,
       turnMessageId: parsed.id,
+      now: at,
+      loadAccountContact: options.loadAccountContact,
+      loadMaskedFacts: options.loadMaskedFacts,
     });
     const history = (await usableHistory(withUser, tools)).slice(-30);
     if (!history.some((message) => message.id === parsed.id)) {
@@ -564,7 +575,7 @@ function scrubOutboundChunk(value: unknown): unknown {
   if (typeof part.type === "string" && part.type.includes("error")) return scrubKnownStrings(part);
   if (part.type === "tool-input-available") return { ...part, input: scrubKnownStrings(part.input) };
   if (part.type === "tool-output-available" || part.type === "tool-result") {
-    return { ...part, output: scrubKnownStrings(part.output) };
+    return { ...part, output: projectCheckoutSecrets(scrubKnownStrings(part.output)) };
   }
   return value;
 }
@@ -575,7 +586,7 @@ function scrubUiMessages(messages: UIMessage[]): UIMessage[] {
     parts: message.parts.map((part) => {
       if (part.type === "text") return { ...part, text: scrubCardNumbers(part.text).text };
       if (part.type === "data-attachment") return part;
-      return scrubKnownStrings(part) as typeof part;
+      return projectCheckoutSecrets(scrubKnownStrings(part)) as typeof part;
     }),
   }));
 }

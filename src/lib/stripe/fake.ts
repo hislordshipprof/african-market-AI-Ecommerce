@@ -403,6 +403,10 @@ const fakeStripeProvider: StripeProvider = {
         throw stripeApiError("Internal server error");
       }
       cancelledPayments.add(paymentIntentId);
+      if (paymentIntentId.startsWith("pi_fake_")) {
+        const { markFakeCheckoutCanceled } = await import("./checkout-payments");
+        markFakeCheckoutCanceled(paymentIntentId);
+      }
       if (idempotencyKey) cancelKeys.set(paymentIntentId, idempotencyKey);
       return {
         paymentIntentId,
@@ -596,10 +600,14 @@ function setRefundCreatedLate(key: string) {
   lateRefundKeys.add(key);
 }
 
+function markFakeStripeCanceled(paymentIntentId: string) {
+  cancelledPayments.add(paymentIntentId);
+}
+
 function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   if (!authorizedAmounts.has(paymentIntentId)) {
     authorizedAmounts.set(paymentIntentId, amount);
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, markFakeStripeCanceled, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };

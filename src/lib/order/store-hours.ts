@@ -8,7 +8,7 @@ const DAY_KEYS: Record<number, string[]> = {
   6: ["sat", "saturday"],
 };
 
-function parseTimeMinutes(raw: string): number | null {
+export function parseTimeMinutes(raw: string): number | null {
   const trimmed = raw.trim().toLowerCase().replace(/\./g, "");
   // 24h "09:00" / "21:00", 12h "9:00 AM", and compact "9am" / "9 PM".
   const match = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
@@ -35,7 +35,7 @@ type DaySchedule =
   | { kind: "closed" }
   | { kind: "unparseable"; raw: string };
 
-function findDaySchedule(
+export function findDaySchedule(
   hours: Record<string, unknown>,
   dayOfWeek: number,
 ): DaySchedule | null {

@@ -3,6 +3,7 @@ import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { OrderFlow } from "@/components/storefront/flow/order-flow";
 import { ClosedFlow, FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
+import { OrderCancel } from "@/components/storefront/flow/order-cancel";
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { storeScoped } from "@/lib/db";
 
@@ -81,6 +82,7 @@ export default async function OrderPage({
             </ul>
             <p><strong>Subtotal:</strong> {money(realOrder.subtotalCents)}</p>
             <p><strong>Authorization hold:</strong> {money(realOrder.totalAuthorizedCents)}</p>
+            <OrderCancel orderId={realOrder.id} status={realOrder.status} />
           </FlowCard>
           <div style={{ marginTop: "1rem", textAlign: "center" }}>
             <Link className="sf-button" href="/">Continue shopping</Link>

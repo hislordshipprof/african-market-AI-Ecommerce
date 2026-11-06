@@ -66,6 +66,19 @@ export type ChoiceCard = {
   options: ChoiceOption[];
 };
 
+export type CheckoutCard = {
+  kind: "checkout";
+  key: string;
+  mode: "confirm" | "contact" | "recovery" | "slots" | "missing";
+  message: string;
+  holdCents: number | null;
+  lines: Array<{ name: string; qty: number; lineTotalCents: number }>;
+  slots: Array<{ id: string; label: string }>;
+  paymentKind: "new" | "saved" | null;
+  cardLabel: string | null;
+  cancelMinutes: number | null;
+};
+
 export type SkeletonCard = { kind: "skeleton"; key: string };
 export type ToolErrorCard = { kind: "tool-error"; key: string; message: string };
 
@@ -75,6 +88,7 @@ export type AssistantCard =
   | MissingCard
   | SummaryCard
   | ChoiceCard
+  | CheckoutCard
   | SkeletonCard
   | ToolErrorCard;
 
@@ -147,7 +161,47 @@ function cardsForOutput(tool: string, callId: string, input: unknown, output: un
   if (tool === "add_to_cart") return addedCards(callId, output);
   if (tool === "offer_choices") return choiceCards(callId, output);
   if (tool === "get_cart_summary") return summaryCards(callId, output);
+  if (tool === "prepare_checkout" || tool === "get_fulfillment_options") return checkoutCards(callId, output);
   return [];
+}
+
+function checkoutCards(callId: string, output: unknown): AssistantCard[] {
+  const body = isRecord(output) ? output : {};
+  const message = typeof body.message === "string" ? body.message : "Checkout is unavailable right now.";
+  const lines = Array.isArray(body.lines)
+    ? body.lines.flatMap((line) => {
+        if (!isRecord(line) || typeof line.name !== "string") return [];
+        return [{
+          name: line.name,
+          qty: typeof line.qty === "number" ? line.qty : 1,
+          lineTotalCents: typeof line.lineTotalCents === "number" ? line.lineTotalCents : 0,
+        }];
+      })
+    : [];
+  const slots = Array.isArray(body.slots)
+    ? body.slots.flatMap((slot) => {
+        if (!isRecord(slot) || typeof slot.id !== "string" || typeof slot.label !== "string") return [];
+        return [{ id: slot.id, label: slot.label }];
+      })
+    : [];
+  const card = isRecord(body.card) && typeof body.card.brand === "string" && typeof body.card.last4 === "string"
+    ? `${body.card.brand} ···· ${body.card.last4}`
+    : null;
+  const mode = body.kind === "confirm" || body.kind === "recovery_required" || body.kind === "slots" || body.code === "contact"
+    ? (body.code === "contact" ? "contact" : body.kind === "recovery_required" ? "recovery" : body.kind === "slots" ? "slots" : "confirm")
+    : "missing";
+  return [{
+    kind: "checkout",
+    key: `${callId}:checkout`,
+    mode,
+    message,
+    holdCents: typeof body.holdCents === "number" ? body.holdCents : null,
+    lines,
+    slots,
+    paymentKind: body.paymentKind === "saved" || body.paymentKind === "new" ? body.paymentKind : null,
+    cardLabel: card,
+    cancelMinutes: typeof body.cancelMinutes === "number" ? body.cancelMinutes : null,
+  }];
 }
 
 function searchCards(callId: string, input: unknown, output: unknown): AssistantCard[] {

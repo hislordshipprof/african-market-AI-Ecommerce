@@ -36,9 +36,16 @@ const ACCOUNT_LOADERS = [
   "customer-account/address-book",
 ];
 
+const MONEY_MODULES = [
+  "checkout/service",
+  "checkout/saved-card-payment",
+  "stripe/provider",
+  "assistant/checkout/confirm",
+  "assistant/checkout/cancel",
+];
+
 function forbiddenResolved(normalized: string): boolean {
-  return normalized.endsWith("/lib/stripe/provider.ts")
-    || normalized.endsWith("/lib/checkout/service.ts")
+  return MONEY_MODULES.some((mod) => normalized.endsWith(`/lib/${mod}.ts`))
     || ACCOUNT_LOADERS.some((loader) => normalized.endsWith(`/lib/${loader}.ts`));
 }
 
@@ -46,10 +53,7 @@ function forbiddenSpecifier(spec: string): boolean {
   return spec === "stripe"
     || spec.startsWith("@stripe/")
     || FORBIDDEN_PACKAGES.has(spec)
-    || spec === "@/lib/checkout/service"
-    || spec === "@/lib/stripe/provider"
-    || spec.endsWith("/lib/checkout/service")
-    || spec.endsWith("/lib/stripe/provider")
+    || MONEY_MODULES.some((mod) => spec === `@/lib/${mod}` || spec.endsWith(`/lib/${mod}`))
     || ACCOUNT_LOADERS.some((loader) => spec === `@/lib/${loader}` || spec.endsWith(`/lib/${loader}`));
 }
 
@@ -79,6 +83,8 @@ function importSpecifiers(text: string, fileName: string): string[] {
 
 function listModules(root: string): string[] {
   if (!fs.existsSync(root)) return [];
+  const stat = fs.statSync(root);
+  if (stat.isFile()) return /\.tsx?$/.test(root) && !root.endsWith(".test.ts") ? [root] : [];
   const found: string[] = [];
   const walk = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

@@ -58,6 +58,16 @@ export const offerChoicesInput = z.object({
 
 export const cartSummaryInput = z.object({});
 
+export const fulfillmentOptionsInput = z.object({});
+
+export const setFulfillmentInput = z.object({
+  slot_id: z.string().min(1).max(80),
+});
+
+export const checkoutProfileInput = z.object({});
+
+export const prepareCheckoutInput = z.object({});
+
 export const toolInputSchemas = exactAssistantKeys({
   search_catalog: searchCatalogInput,
   show_products: showProductsInput,
@@ -69,6 +79,10 @@ export const toolInputSchemas = exactAssistantKeys({
   set_swap_rule: setSwapRuleInput,
   get_cart_summary: cartSummaryInput,
   offer_choices: offerChoicesInput,
+  get_fulfillment_options: fulfillmentOptionsInput,
+  set_fulfillment: setFulfillmentInput,
+  get_checkout_profile: checkoutProfileInput,
+  prepare_checkout: prepareCheckoutInput,
 });
 
 function toolInput(input: unknown): unknown {

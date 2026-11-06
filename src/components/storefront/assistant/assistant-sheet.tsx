@@ -40,6 +40,7 @@ import { planUndo, type UndoAck } from "@/lib/assistant/ui/undo";
 import { AssistantRouteError, mapRouteError, type RouteView } from "@/lib/assistant/ui/route-errors";
 import { undoAssistantAdditionAction } from "@/lib/cart/actions";
 import type { CartLine } from "@/lib/storefront/cart-store";
+import { CheckoutCardView } from "./checkout-card";
 import styles from "./assistant.module.css";
 
 export const ASSISTANT_CHUNK = "assistant-chat-chunk-v1";
@@ -926,6 +927,9 @@ function CardView({
   onChange: () => void;
   onClose: () => void;
 }) {
+  if (card.kind === "checkout") {
+    return <CheckoutCardView card={card} disabled={disabled} onChoice={onChoice} />;
+  }
   if (card.kind === "skeleton") return <div className={styles.skeleton} />;
   if (card.kind === "tool-error" || card.kind === "missing") {
     return <p className={styles.notice}>{card.message}</p>;

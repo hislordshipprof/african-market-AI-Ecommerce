@@ -16,6 +16,7 @@ import {
 } from "../../cart/service";
 import { storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
+import { projectCheckoutSecrets } from "../checkout/safe-output";
 import { listingImage } from "../../storefront/images";
 import { searchListings } from "../../storefront/service";
 import { stockBadge } from "../../storefront/stock-badge";
@@ -41,6 +42,14 @@ export interface AssistantContext {
   actorUserId: string | null;
   turnMessageId?: string;
   toolCallId?: string;
+  now?: Date;
+  loadAccountContact?: (actorUserId: string) => Promise<{ name: string; email: string; phone: string } | null>;
+  loadMaskedFacts?: (actorUserId: string) => Promise<{
+    contactOnFile: boolean;
+    card: { brand: string; last4: string } | null;
+    addressOnFile: boolean;
+    savedPaymentMethodId: string | null;
+  }>;
 }
 
 type ToolFailure = { ok: false; code: string; message: string; [key: string]: unknown };
@@ -75,7 +84,7 @@ function auditedInput(ctx: AssistantContext, input: unknown): unknown {
   };
 }
 
-async function recordRead(
+export async function recordRead(
   ctx: AssistantContext,
   tool: string,
   input: unknown,
@@ -88,7 +97,7 @@ async function recordRead(
         conversationId: ctx.conversationId,
         tool,
         input: asJson(auditedInput(ctx, input)),
-        output: asJson(scrubKnownStrings(output)),
+        output: asJson(projectCheckoutSecrets(scrubKnownStrings(output))),
         ok: output.ok,
       },
     });
@@ -98,7 +107,7 @@ async function recordRead(
   return output;
 }
 
-async function recordWrite<T extends ToolResult>(
+export async function recordWrite<T extends ToolResult>(
   ctx: AssistantContext,
   tool: string,
   input: unknown,
@@ -113,7 +122,7 @@ async function recordWrite<T extends ToolResult>(
           conversationId: ctx.conversationId,
           tool,
           input: asJson(auditedInput(ctx, input)),
-          output: asJson(scrubKnownStrings(output)),
+          output: asJson(projectCheckoutSecrets(scrubKnownStrings(output))),
           ok: output.ok,
         },
       });

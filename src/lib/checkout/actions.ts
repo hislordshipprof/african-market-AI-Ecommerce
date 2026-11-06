@@ -12,6 +12,7 @@ import {
   placeOrder,
   resumeOrderedCart,
   SavedCardUnavailableError,
+  AssistantCheckoutInProgressError,
   BasketAlreadyOrderedError,
   BasketChangedError,
 } from "./service";
@@ -148,6 +149,9 @@ export async function createPaymentIntentAction(
   } catch (e) {
     if (e instanceof SavedCardUnavailableError) {
       return { ok: false, error: e.message, code: "saved_card_unavailable" };
+    }
+    if (e instanceof AssistantCheckoutInProgressError) {
+      return { ok: false, error: "A payment is already in progress for this basket." };
     }
     return {
       ok: false,
