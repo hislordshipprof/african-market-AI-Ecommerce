@@ -155,5 +155,27 @@ describe.skipIf(!hasDb)("GET /api/storefront/listings/[id]", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Listing not found" });
     await expect(call("t226-route-unknown", "mn_egusi")).rejects.toThrow("notFound");
+
+    const importedId = crypto.randomUUID();
+    await prisma.$transaction([
+      ...scoped(storeAId),
+      prisma.listing.create({
+        data: {
+          id: importedId,
+          storeId: storeAId,
+          customName: "CSV import shape",
+          price: 100,
+          stockMode: "counted",
+          qty: 1,
+          frozen: false,
+          perishable: false,
+          confidence: 0.9,
+          active: true,
+        },
+      }),
+    ]);
+    const imported = await call(slugA, importedId);
+    expect(imported.status).toBe(200);
+    expect((await imported.json()).id).toBe(importedId);
   });
 });
