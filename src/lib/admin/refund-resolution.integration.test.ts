@@ -1991,7 +1991,18 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await storeScoped(storeAId).auditLog.count({
       where: { entityId: order.id, action: "refund_after_manual_resolution" },
     })).toBe(1);
-    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+    const afterReplay = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(afterReplay?.status).toBe("CANCELLED");
+    expect(afterReplay?.capturedAmountCents).toBeNull();
+    const manualAfterReplay = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(manualAfterReplay?.after).toMatchObject({
+      repaidCents: 1000,
+      displayedOwedCents: 1000,
+      refundedCents: 600,
+      capturedCents: 1000,
+    });
   });
 
   it("submitting less than owed records an underpayment alert", async () => {
@@ -2030,7 +2041,20 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       where: { entityId: order.id, action: "refund_reversed_after_resolution" },
     });
     expect(alert?.after).toMatchObject({ underpaidCents: 600, alert: "store_and_platform" });
-    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+    const stored = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(stored?.status).toBe("CANCELLED");
+    expect(stored?.capturedAmountCents).toBeNull();
+    await evaluateOrderRefundState(order.id);
+    const replayed = await storeScoped(storeAId).order.findUnique({ where: { id: order.id } });
+    expect(replayed?.status).toBe("CANCELLED");
+    expect(replayed?.capturedAmountCents).toBeNull();
+    const manualAfterReplay = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_resolved_manually" },
+    });
+    expect(manualAfterReplay?.after).toMatchObject({ repaidCents: 400, refundedCents: 0, capturedCents: 1000 });
+    expect(await storeScoped(storeAId).auditLog.count({
+      where: { entityId: order.id, action: "refund_reversed_after_resolution" },
+    })).toBe(1);
   });
 
   it("an edited amount that meets the new balance does not claim an alert", async () => {

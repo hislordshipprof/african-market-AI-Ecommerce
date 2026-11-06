@@ -567,46 +567,73 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
   it("timer wins an in-flight staff void without relabelling or duplicating its audit", async () => {
     const order = await pickingBelowMinimum();
-    let resolveCancel!: (value: CancelResult) => void;
-    const cancelDeferred = new Promise<CancelResult>((resolve) => {
-      resolveCancel = resolve;
+    let releaseStaff!: (value: CancelResult) => void;
+    const staffHeld = new Promise<CancelResult>((resolve) => {
+      releaseStaff = resolve;
     });
+    let staffEntered!: () => void;
+    const staffEnteredGate = new Promise<void>((resolve) => {
+      staffEntered = resolve;
+    });
+    let calls = 0;
     const deferredProvider: StripeProvider = {
       ...fakeStripeProvider,
-      cancelPaymentIntent: async (paymentIntentId) => {
-        const result = await cancelDeferred;
-        cancelledPayments.add(paymentIntentId);
-        return result;
+      cancelPaymentIntent: async (paymentIntentId, idempotencyKey) => {
+        calls += 1;
+        // Hold only the staff void. The timer must cancel and commit on its own call.
+        if (calls === 1) {
+          staffEntered();
+          return staffHeld;
+        }
+        return fakeStripeProvider.cancelPaymentIntent(paymentIntentId, idempotencyKey);
       },
     };
     setStripeProvider(deferredProvider);
+    let staffReleased = false;
+    const finishStaff = () => {
+      if (staffReleased) return;
+      staffReleased = true;
+      releaseStaff({ paymentIntentId: order.paymentIntentId!, status: "canceled" });
+    };
+    const readyPromise = markReady(storeId, order.id);
     try {
-      const readyPromise = markReady(storeId, order.id);
-      let mid;
-      for (let i = 0; i < 20; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        mid = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-        if (mid!.status === "CANCELLING") break;
-      }
-      expect(mid!.status).toBe("CANCELLING");
-      const timerPromise = autoCancelOrder(storeId, order.id);
-      resolveCancel({ paymentIntentId: order.paymentIntentId!, status: "canceled" });
-      await Promise.all([readyPromise, timerPromise]);
+      await staffEnteredGate;
+      const claimed = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(claimed!.status).toBe("CANCELLING");
+      expect(claimed!.acceptedAt).not.toBeNull();
+
+      const timer = await autoCancelOrder(storeId, order.id);
+      expect(timer).toEqual({ ok: true });
+      const committed = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(committed!.status).toBe("CANCELLED");
+      expect(committed!.capturedAmountCents).toBeNull();
+      expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
+      const beforeStaff = await storeScoped(storeId).auditLog.findMany({
+        where: {
+          entityId: order.id,
+          action: { in: ["void_zero_amount", "auto_cancel", "reconcile_cancel", "anomaly_refund", "capture_released"] },
+        },
+      });
+      expect(beforeStaff.map((row) => row.action)).toEqual(["void_zero_amount"]);
+
+      finishStaff();
+      const ready = await readyPromise;
+      expect(ready.ok).toBe(true);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      expect(updated!.status).toBe("CANCELLED");
+      expect(updated!.capturedAmountCents).toBeNull();
+      const completion = await storeScoped(storeId).auditLog.findMany({
+        where: {
+          entityId: order.id,
+          action: { in: ["void_zero_amount", "auto_cancel", "reconcile_cancel", "anomaly_refund", "capture_released"] },
+        },
+      });
+      expect(completion.map((row) => row.action)).toEqual(["void_zero_amount"]);
     } finally {
+      finishStaff();
+      await readyPromise.catch(() => undefined);
       setStripeProvider(fakeStripeProvider);
     }
-
-    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("CANCELLED");
-    expect(updated!.capturedAmountCents).toBeNull();
-    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
-    const completion = await storeScoped(storeId).auditLog.findMany({
-      where: {
-        entityId: order.id,
-        action: { in: ["void_zero_amount", "auto_cancel", "reconcile_cancel", "anomaly_refund", "capture_released"] },
-      },
-    });
-    expect(completion.map((row) => row.action)).toEqual(["void_zero_amount"]);
   }, 10_000);
 
   it("resuming a staff void without a PaymentIntent retains its action", async () => {
@@ -721,6 +748,90 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: refundOrder.id, action: "refund_failed", entityType: "order" },
     });
     expect(failuresAgain).toHaveLength(1);
+
+    const collision = await createTestOrder("CANCELLING");
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({ where: { id: collision.id }, data: { acceptedAt: new Date() } });
+    });
+    setAuthorizedAmount(collision.paymentIntentId!, collision.totalAuthorizedCents);
+    setNextCancelFailure(collision.paymentIntentId!, 1);
+    let releaseCancel!: () => void;
+    const cancelGate = new Promise<void>((resolve) => {
+      releaseCancel = resolve;
+    });
+    let cancelEntered!: () => void;
+    const cancelEnteredGate = new Promise<void>((resolve) => {
+      cancelEntered = resolve;
+    });
+    const cancelKeys: string[] = [];
+    const heldProvider: StripeProvider = {
+      ...fakeStripeProvider,
+      cancelPaymentIntent: async (paymentIntentId, idempotencyKey) => {
+        cancelKeys.push(idempotencyKey ?? "");
+        if (cancelKeys.length === 1) {
+          cancelEntered();
+          await cancelGate;
+        }
+        return fakeStripeProvider.cancelPaymentIntent(paymentIntentId, idempotencyKey);
+      },
+    };
+    setStripeProvider(heldProvider);
+    let cancelReleased = false;
+    const finishCancel = () => {
+      if (cancelReleased) return;
+      cancelReleased = true;
+      releaseCancel();
+    };
+    const firstPromise = autoCancelOrder(storeId, collision.id);
+    try {
+      await cancelEnteredGate;
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.auditLog.create({
+          data: {
+            storeId,
+            actorId: SYSTEM_ACTOR_ID,
+            actorEmail: SYSTEM_ACTOR_EMAIL,
+            action: "cancel_retry",
+            entityType: "listing",
+            entityId: collision.id,
+            after: { attempt: 9, inFlight: true },
+            createdAt: new Date(Date.now() + 60_000),
+          },
+        });
+      });
+      finishCancel();
+      const first = await firstPromise;
+      expect(first.ok).toBe(false);
+      expect(cancelKeys).toEqual([`cancel:${collision.id}:1`]);
+      const released = await storeScoped(storeId).auditLog.findMany({
+        where: { entityId: collision.id, action: "cancel_retry", entityType: "order" },
+      });
+      expect(released.some((row) => {
+        const after = row.after as { attempt?: number; inFlight?: boolean } | null;
+        return after?.attempt === 1 && after.inFlight === false;
+      })).toBe(true);
+      const second = await autoCancelOrder(storeId, collision.id);
+      expect(second).toEqual({ ok: true });
+      expect(cancelKeys[1]).toBe(`cancel:${collision.id}:2`);
+    } finally {
+      finishCancel();
+      await firstPromise.catch(() => undefined);
+      setStripeProvider(fakeStripeProvider);
+    }
+    const collisionOrder = await storeScoped(storeId).order.findUnique({ where: { id: collision.id } });
+    expect(collisionOrder!.status).toBe("CANCELLED");
+    expect(collisionOrder!.capturedAmountCents).toBeNull();
+    const collisionVoids = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: collision.id, action: "void_zero_amount", entityType: "order" },
+    });
+    expect(collisionVoids).toHaveLength(1);
+    const listingStillHeld = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: collision.id, action: "cancel_retry", entityType: "listing" },
+    });
+    expect(listingStillHeld.some((row) => {
+      const after = row.after as { attempt?: number; inFlight?: boolean } | null;
+      return after?.attempt === 9 && after.inFlight === true;
+    })).toBe(true);
   });
 
   it("autoCancelOrder rejects non-AUTHORIZED order", async () => {
