@@ -87,13 +87,6 @@ function itemsOf(output: unknown): Array<{ listingId?: string; variantId?: strin
   return output.items.filter(isRecord);
 }
 
-export const WIDE_LAYOUT_TOKEN = "W".repeat(60);
-export const WIDE_LAYOUT_STORE = `MamaNgozi${"S".repeat(48)}`;
-
-export function wideLayoutText(): string {
-  return `See https://example.com/assistant/wide-layout and ${WIDE_LAYOUT_TOKEN} at ${WIDE_LAYOUT_STORE}.`;
-}
-
 export function scriptStep(messages: unknown): ScriptStep {
   const turn = currentTurn(messages);
   const text = turn.text.toLowerCase();
@@ -126,7 +119,6 @@ export function scriptStep(messages: unknown): ScriptStep {
   if (last.name === "offer_choices") return { kind: "text", text: "Pick one." };
   if (last.name === "get_cart_summary") return { kind: "text", text: "Here is your basket." };
   if (last.name === "show_products" || last.name === "add_to_cart") {
-    if (text.includes("wide layout")) return { kind: "text", text: wideLayoutText() };
     return { kind: "text", text: "Here is what I found." };
   }
   return { kind: "text", text: "Here is what I found." };
@@ -211,7 +203,11 @@ function sse(events: unknown[]): string {
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
 }
 
-function eventsFor(step: ScriptStep, model: string, messagesLength: number): unknown[] {
+function toolUseId(): string {
+  return `toolu_${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+function eventsFor(step: ScriptStep, model: string): unknown[] {
   const start = {
     type: "message_start",
     message: {
@@ -237,7 +233,7 @@ function eventsFor(step: ScriptStep, model: string, messagesLength: number): unk
     ];
   }
   if (step.kind === "tool") {
-    const id = `toolu_${step.name}_${messagesLength}_0`;
+    const id = toolUseId();
     const json = JSON.stringify(step.input);
     const mid = Math.max(1, Math.ceil(json.length / 2));
     return [
@@ -314,8 +310,7 @@ export const scriptedAssistantFetch: typeof fetch = async (input, init) => {
   const step = scriptStep(body?.messages);
   if (step.kind === "text" && step.delayMs) await new Promise((resolve) => setTimeout(resolve, step.delayMs));
   const model = String(body?.model ?? "");
-  const length = Array.isArray(body?.messages) ? body.messages.length : 0;
-  return new Response(sse(eventsFor(step, model, length)), {
+  return new Response(sse(eventsFor(step, model)), {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });
