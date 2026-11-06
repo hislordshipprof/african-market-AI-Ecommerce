@@ -94,7 +94,10 @@ export function applyFinal(state: SpeechState, session: number, index: number, t
   if (!text) return state;
   const previous = state.finals.get(index);
   if (previous != null) {
-    if (state.draft !== compose(state.prefix, spokenFrom(state.finals))) return clearInterimFor(state, index);
+    const composed = compose(state.prefix, spokenFrom(state.finals));
+    const limited = clamp(composed);
+    const clampedOnly = state.notice === SPEECH_LIMIT_MESSAGE && state.draft === limited.text;
+    if (state.draft !== composed && !clampedOnly) return clearInterimFor(state, index);
     const finals = cloneMap(state.finals);
     finals.set(index, text);
     return paint(clearInterimFor(state, index), finals);

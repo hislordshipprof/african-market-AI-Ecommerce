@@ -70,6 +70,16 @@ describe("assistant speech", () => {
     expect(state.listening).toBe(false);
   });
 
+  it("replaces the same final after the limit clamp", () => {
+    let state = applyFinal(beginSpeech("a".repeat(1990), 1), 1, 0, "b".repeat(20));
+    state = applyFinal(state, 1, 0, "c".repeat(20));
+    expect(state.draft).toHaveLength(2000);
+    expect(state.draft.endsWith("c".repeat(9))).toBe(true);
+    expect(state.notice).toBe(SPEECH_LIMIT_MESSAGE);
+    expect(state.accepting).toBe(true);
+    expect(state.listening).toBe(false);
+  });
+
   it("tells the recognizer to stop when speech reaches the limit", () => {
     const stops: number[] = [];
     const recognizer: BrowserSpeech = {
