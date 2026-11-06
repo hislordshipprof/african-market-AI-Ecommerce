@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { UNSET_MAX_PER_ORDER } from "../../cart/limits";
+import { scrubKnownStrings } from "../card-scrub";
 
 const listingIds = (max: number) =>
   z.array(z.string().min(1)).min(1).max(max);
@@ -69,8 +70,17 @@ export const toolInputSchemas = {
   offer_choices: offerChoicesInput,
 } as const;
 
+function toolInput(input: unknown): unknown {
+  if (typeof input !== "string") return scrubKnownStrings(input);
+  try {
+    return scrubKnownStrings(JSON.parse(input) as unknown);
+  } catch {
+    return scrubKnownStrings(input);
+  }
+}
+
 export function parseToolInput<T>(schema: z.ZodType<T>, input: unknown): T {
-  const parsed = schema.safeParse(input);
+  const parsed = schema.safeParse(toolInput(input));
   if (!parsed.success) {
     const error = new Error("Invalid tool input");
     error.name = "InvalidToolInput";

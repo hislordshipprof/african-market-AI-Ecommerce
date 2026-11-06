@@ -70,3 +70,73 @@ function isDigit(text: string, index: number): boolean {
   const code = text.charCodeAt(index);
   return code >= 48 && code <= 57;
 }
+
+/** Ids and tool-call handles are opaque. Scrubbing them would change a different record. */
+const OPAQUE_KEYS = new Set([
+  "id",
+  "listingId",
+  "variantId",
+  "lineId",
+  "toolCallId",
+  "conversationId",
+  "storeId",
+  "cartId",
+  "additionId",
+  "choiceId",
+  "listing_id",
+  "variant_id",
+  "line_id",
+  "_turn",
+  "_call",
+]);
+
+/**
+ * A scalar id is not rewritten unless it is itself a card number.
+ * A container under an opaque key is still walked, so a rejected tool
+ * input cannot hide a card number inside an object or array.
+ */
+function keepOpaque(value: unknown): unknown {
+  if (typeof value === "string") {
+    const scrubbed = scrubCardNumbers(value).text;
+    return scrubbed === value ? value : scrubbed;
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && luhnValid(String(value))) {
+    return "[card number removed]";
+  }
+  if (value instanceof Uint8Array) return value;
+  if (Array.isArray(value) || (value !== null && typeof value === "object")) {
+    return scrubKnownStrings(value);
+  }
+  return value;
+}
+
+/**
+ * A card number used as a property name is renamed. A second one in the same
+ * object gets " (2)", then " (3)", so the digits are not kept to tell them apart.
+ * A name that is not a card number stays as it was written.
+ */
+function scrubbedKey(key: string, used: Record<string, unknown>): string {
+  const scrubbed = scrubCardNumbers(key);
+  const name = scrubbed.removed > 0 ? scrubbed.text : key;
+  if (!Object.prototype.hasOwnProperty.call(used, name)) return name;
+  let n = 2;
+  while (Object.prototype.hasOwnProperty.call(used, `${name} (${n})`)) n += 1;
+  return `${name} (${n})`;
+}
+
+/** Card numbers in customer-visible or audited strings. Scalar opaque ids stay as they are. */
+export function scrubKnownStrings(value: unknown): unknown {
+  if (typeof value === "string") return scrubCardNumbers(value).text;
+  if (typeof value === "number" && Number.isSafeInteger(value) && luhnValid(String(value))) {
+    return "[card number removed]";
+  }
+  if (value instanceof Uint8Array) return value;
+  if (Array.isArray(value)) return value.map((item) => scrubKnownStrings(item));
+  if (!value || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    const name = scrubbedKey(key, out);
+    out[name] = OPAQUE_KEYS.has(key) ? keepOpaque(child) : scrubKnownStrings(child);
+  }
+  return out;
+}

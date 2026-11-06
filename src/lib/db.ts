@@ -579,6 +579,36 @@ export async function rateLimitUpsert(
   return { count: Number(rows[0].count), lastRequest: BigInt(rows[0].last_request) };
 }
 
+/** One counted file turn inside a rolling hour. The lock makes concurrent requests agree. */
+export async function takeRollingFileTurn(
+  key: string,
+  nowMs: bigint,
+  windowMs: bigint,
+  max: number,
+): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+    const windowStart = nowMs - windowMs;
+    await tx.$executeRaw`DELETE FROM assistant_file_turns WHERE key = ${key} AND at_ms <= ${windowStart}`;
+    const rows = await tx.$queryRaw<Array<{ count: number; oldest: bigint | null }>>`
+      SELECT COUNT(*)::int AS count, MIN(at_ms) AS oldest
+      FROM assistant_file_turns
+      WHERE key = ${key} AND at_ms > ${windowStart}
+    `;
+    const count = Number(rows[0]?.count ?? 0);
+    if (count >= max) {
+      const oldest = rows[0]?.oldest == null ? nowMs : BigInt(rows[0].oldest);
+      const retryAfter = Math.max(1, Math.ceil(Number(oldest + windowMs - nowMs) / 1000));
+      return { ok: false, retryAfter };
+    }
+    await tx.$executeRaw`
+      INSERT INTO assistant_file_turns (id, key, at_ms)
+      VALUES (gen_random_uuid()::text, ${key}, ${nowMs})
+    `;
+    return { ok: true };
+  });
+}
+
 export async function appRateLimitUpsert(
   key: string,
   nowMs: bigint,

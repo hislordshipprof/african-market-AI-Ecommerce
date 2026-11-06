@@ -1,3 +1,15 @@
+import { scrubCardNumbers, scrubKnownStrings } from "./card-scrub";
+
+function scrubToolString(input: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(input);
+    if (parsed && typeof parsed === "object") return scrubKnownStrings(parsed);
+  } catch {
+    // A tool input that is not JSON stays text and is scrubbed as text.
+  }
+  return scrubCardNumbers(input).text;
+}
+
 const PHRASE = "I couldn't confirm that price.";
 const LIST_PRICE = "price not confirmed";
 
@@ -502,13 +514,21 @@ export function groundingTransform(options: GroundingTransformOptions = {}) {
             return;
           }
           if (type === "text-end" && buffers.has(id)) {
-            const grounded = groundAmounts(buffers.get(id) ?? "", allowed);
+            const original = buffers.get(id) ?? "";
+            const grounded = groundAmounts(original, allowed);
+            const emitted = scrubCardNumbers(grounded.text).text;
             buffers.delete(id);
             for (const amount of grounded.stripped) options.onStrip?.(amount);
-            if (grounded.text) {
-              controller.enqueue({ type: "text-delta", id, text: grounded.text });
+            if (emitted) {
+              controller.enqueue({ type: "text-delta", id, text: emitted });
             }
             controller.enqueue(part);
+            return;
+          }
+          if (type === "tool-call") {
+            const input = (part as { input?: unknown }).input;
+            const scrubbed = typeof input === "string" ? scrubToolString(input) : scrubKnownStrings(input ?? {});
+            controller.enqueue({ ...part, input: scrubbed });
             return;
           }
           if (type === "error") {

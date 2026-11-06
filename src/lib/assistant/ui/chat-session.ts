@@ -20,8 +20,22 @@ function sessionKey(storeId: string, accountId: string | null, cartId: string | 
   return `${storeId}\u0000${accountId ?? ""}\u0000${cartId ?? ""}`;
 }
 
+function releaseFileBytes(chat: Chat<UIMessage>, keepImages = false) {
+  const next = chat.messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => {
+      if (part.type !== "file" || typeof part.url !== "string" || !part.url.startsWith("data:")) return part;
+      if (keepImages && part.mediaType.startsWith("image/")) return part;
+      return { ...part, url: "" };
+    }),
+  }));
+  const held = JSON.stringify(chat.messages);
+  if (JSON.stringify(next) === held) return;
+  chat.messages = next;
+}
+
 function createChat(storeId: string): Chat<UIMessage> {
-  return new Chat<UIMessage>({
+  const chat = new Chat<UIMessage>({
     transport: new DefaultChatTransport({
       api: "/api/assistant/chat",
       credentials: "same-origin",
@@ -35,10 +49,12 @@ function createChat(storeId: string): Chat<UIMessage> {
       reconcileStoreCart(storeId);
     },
     onFinish: (event) => {
+      releaseFileBytes(chat, true);
       if (!shouldSettleTurn(event)) return;
       void settleStoreCart(storeId);
     },
   });
+  return chat;
 }
 
 /**
@@ -52,6 +68,9 @@ export function retainSession(input: {
   cartId: string | null;
   loading: boolean;
 }): Chat<UIMessage> {
+  for (const session of sessions.values()) {
+    if (session.storeId !== input.storeId) releaseFileBytes(session.chat);
+  }
   const existing = [...sessions.values()].find((session) => session.storeId === input.storeId);
   const action = retainAction(existing ?? null, input);
   if (existing && (action === "keep" || action === "adopt")) {

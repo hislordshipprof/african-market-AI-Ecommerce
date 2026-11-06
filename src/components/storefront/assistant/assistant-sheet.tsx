@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
+import { ArrowUp, Mic, Square } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
@@ -11,7 +12,20 @@ import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
 import { retainSession } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
-import { createSendLock, outgoingMessage } from "@/lib/assistant/ui/send";
+import { dataUrl, displayFileName, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
+import { createSendLock, outgoingMessage, settleSend } from "@/lib/assistant/ui/send";
+import {
+  abortSpeech,
+  beginSpeech,
+  bindRecognizer,
+  commitInterim,
+  noteCustomerEdit,
+  recognitionLanguage,
+  sealSpeech,
+  stopSpeech,
+  type BrowserSpeech,
+  type SpeechState,
+} from "@/lib/assistant/ui/speech";
 import { planUndo, undoCardAfter, type UndoAck } from "@/lib/assistant/ui/undo";
 import { replaceUndoLabels, undoLabelsForStore } from "@/lib/assistant/ui/undo-memory";
 import { AssistantRouteError, mapRouteError, type RouteView } from "@/lib/assistant/ui/route-errors";
@@ -25,7 +39,12 @@ const STARTERS = [
   { label: "Cook a dish", text: "I want to cook " },
   { label: "Restock my usual", text: "Restock my usual: " },
   { label: "Show me pictures", text: "Show me pictures of " },
+  { label: "Snap your shopping list", text: "Here is my shopping list: " },
+  { label: "Send a recipe PDF", text: "Here is a recipe: " },
 ] as const;
+
+const FILE_NOTE = "Read once to answer you. We don't save your files. Please don't send cards or IDs.";
+const LISTENING_NOTE = "Your browser turns your speech into text. Check it, then send.";
 
 function messageId(): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -113,8 +132,45 @@ function Thread({
   const [localError, setLocalError] = useState<string | null>(null);
   const seenTools = useRef(new Set<string>());
   const announced = useRef(new Set<string>());
-  const [lastSent, setLastSent] = useState<{ id: string; text: string } | null>(null);
   const [draft, setDraft] = useState("");
+  const draftRef = useRef("");
+  const [speech, setSpeech] = useState<SpeechState | null>(null);
+  const [micHidden, setMicHidden] = useState(false);
+  const micDetected = useSyncExternalStore(
+    () => () => {},
+    () => {
+      const host = window as Window & { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+      return Boolean(host.SpeechRecognition ?? host.webkitSpeechRecognition);
+    },
+    () => false,
+  );
+  const micReady = micDetected && !micHidden;
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const speechRef = useRef<SpeechState | null>(null);
+  const recognizerRef = useRef<BrowserSpeech | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const [awayFromLatest, setAwayFromLatest] = useState(false);
+  const [tiles, setTiles] = useState<Array<PreparedFile & { preview: string }>>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const tilesRef = useRef(tiles);
+  useEffect(() => {
+    tilesRef.current = tiles;
+  }, [tiles]);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const pdfInput = useRef<HTMLInputElement>(null);
+  const generationRef = useRef(0);
+  const revisionRef = useRef(0);
+  type Flight = {
+    id: string;
+    text: string;
+    tiles: Array<PreparedFile & { preview: string }>;
+    revision: number;
+    generation: number;
+  };
+  const [inflight, setInflight] = useState<Flight | null>(null);
+  const inflightRef = useRef<Flight | null>(null);
+  const revokedRef = useRef(new Set<string>());
   const [trackedStore, setTrackedStore] = useState(storeId);
   const [undoState, setUndoState] = useState(() => undoLabelsForStore(storeId));
   if (trackedStore !== storeId) {
@@ -158,38 +214,386 @@ function Thread({
     return () => window.clearTimeout(timer);
   }, [open]);
 
-  async function submit(text: string, id = messageId()) {
-    if (loading || busy || routeError?.terminal) return;
-    if (!sendLock.current.tryBegin()) return;
+  function tileKey(list: Array<PreparedFile & { preview: string }>) {
+    return list.map((tile) => `${tile.id}:${tile.status}:${tile.bytes}:${tile.preview}`).join("\n");
+  }
+
+  function changeDraft(text: string, nextTiles = tilesRef.current) {
+    const textChanged = text !== draftRef.current;
+    const filesChanged = tileKey(nextTiles) !== tileKey(tilesRef.current);
+    if (!textChanged && !filesChanged) return;
+    revisionRef.current += 1;
+    draftRef.current = text;
+    tilesRef.current = nextTiles;
+    setDraft(text);
+    setTiles(nextTiles);
+  }
+
+  function revokeOnce(list: Array<{ preview: string }>) {
+    for (const tile of list) {
+      if (!tile.preview || revokedRef.current.has(tile.preview)) continue;
+      revokedRef.current.add(tile.preview);
+      URL.revokeObjectURL(tile.preview);
+    }
+  }
+
+  function ownsPreview(preview: string) {
+    return Boolean(preview) && (inflightRef.current?.tiles.some((tile) => tile.preview === preview) ?? false);
+  }
+
+  function takeOwned() {
+    const flight = inflightRef.current;
+    const loose = tilesRef.current;
+    inflightRef.current = null;
+    draftRef.current = "";
+    tilesRef.current = [];
+    const seen = new Set<string>();
+    const owned: Array<PreparedFile & { preview: string }> = [];
+    for (const tile of [...loose, ...(flight?.tiles ?? [])]) {
+      if (!tile.preview || seen.has(tile.preview)) continue;
+      seen.add(tile.preview);
+      owned.push(tile);
+    }
+    return owned;
+  }
+
+  function finish(outcome: "success" | "rejected") {
+    const flight = inflightRef.current;
+    const decision = settleSend({
+      outcome,
+      generation: generationRef.current,
+      revision: revisionRef.current,
+      flight,
+    });
+    if (!flight || decision.action === "ignore" || decision.action === "keep") return;
+    if (decision.action === "revoke") {
+      revokeOnce(flight.tiles);
+      const owned = new Set(flight.tiles.map((tile) => tile.preview).filter(Boolean));
+      if (revisionRef.current === flight.revision) {
+        draftRef.current = "";
+        setDraft("");
+      }
+      const remaining = tilesRef.current.filter((tile) => !tile.preview || !owned.has(tile.preview));
+      if (revisionRef.current === flight.revision || remaining.length !== tilesRef.current.length) {
+        tilesRef.current = remaining;
+        setTiles(remaining);
+      }
+      inflightRef.current = null;
+      setInflight(null);
+      return;
+    }
+    draftRef.current = flight.text;
+    tilesRef.current = flight.tiles;
+    setDraft(flight.text);
+    setTiles(flight.tiles);
+    const spoken = speechRef.current;
+    if (spoken?.accepting) {
+      const edited = noteCustomerEdit(spoken, flight.text);
+      speechRef.current = edited;
+      setSpeech(edited);
+    }
+  }
+
+  function publishSpeech(next: SpeechState) {
+    speechRef.current = next;
+    setSpeech(next);
+    changeDraft(next.draft);
+    if (next.notice) setLocalError(next.notice);
+    if (next.listening && liveRef.current) liveRef.current.textContent = "Listening";
+  }
+
+  function stopListening(mode: "stop" | "abort") {
+    const current = speechRef.current;
+    const recognizer = recognizerRef.current;
+    if (!current) return;
+    if (mode === "abort") {
+      publishSpeech(abortSpeech(current, current.session + 1));
+      recognizer?.abort();
+      return;
+    }
+    publishSpeech(stopSpeech(current));
+    recognizer?.stop();
+  }
+
+  useEffect(() => {
+    if (open) return;
+    generationRef.current += 1;
+    stopListening("abort");
+    const owned = takeOwned();
+    window.setTimeout(() => {
+      revokeOnce(owned);
+      setInflight(null);
+      setDraft("");
+      setTiles([]);
+      setAddOpen(false);
+    }, 0);
+  }, [open]);
+
+  useEffect(() => () => {
+    generationRef.current += 1;
+    const owned = takeOwned();
+    revokeOnce(owned);
+  }, []);
+
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") stopListening("abort");
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      recognizerRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!speech?.listening) return;
+    const timer = window.setTimeout(() => stopListening("stop"), 60_000);
+    return () => window.clearTimeout(timer);
+  }, [speech?.listening, speech?.session]);
+
+  useEffect(() => {
+    const node = logRef.current;
+    if (!node) return;
+    setAwayFromLatest(node.scrollHeight - node.scrollTop - node.clientHeight > 48);
+  }, [messages, open]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport || !open) return;
+    const apply = () => {
+      const overlap = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      setKeyboardInset(overlap);
+    };
+    apply();
+    viewport.addEventListener("resize", apply);
+    viewport.addEventListener("scroll", apply);
+    return () => {
+      viewport.removeEventListener("resize", apply);
+      viewport.removeEventListener("scroll", apply);
+    };
+  }, [open]);
+
+  function placeTile(id: string, generation: number, next: PreparedFile & { preview: string }) {
+    if (generationRef.current !== generation) {
+      revokeOnce([next]);
+      return;
+    }
+    const current = tilesRef.current;
+    if (!current.some((item) => item.id === id)) {
+      revokeOnce([next]);
+      return;
+    }
+    const replaced = current.map((item) => item.id === id ? next : item);
+    const sizes = replaced.flatMap((item) => item.status === "ready" ? [item.bytes] : []);
+    if (next.status === "ready" && !withinByteCap(sizes)) {
+      revokeOnce([next]);
+      changeDraft(draftRef.current, current.map((item) => item.id === id
+        ? { ...next, url: "", preview: "", status: "invalid" as const, bytes: 0, message: fileNotice("too-large") }
+        : item));
+      return;
+    }
+    changeDraft(draftRef.current, replaced);
+  }
+
+  async function takeFiles(list: FileList | null) {
+    setAddOpen(false);
+    if (!list || list.length === 0) return;
+    const generation = generationRef.current;
+    const room = roomFor(tilesRef.current.length);
+    if (list.length > room) setLocalError(fileNotice("too-many"));
+    const chosen = [...list].slice(0, room);
+    const reserved: Array<PreparedFile & { preview: string }> = chosen.map((file) => ({
+      id: messageId(),
+      name: displayFileName(file.name || "file"),
+      filename: displayFileName(file.name || "file"),
+      mediaType: file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg",
+      url: "",
+      preview: "",
+      status: "pending",
+      message: null,
+      bytes: 0,
+    }));
+    changeDraft(draftRef.current, [...tilesRef.current, ...reserved]);
+    for (let index = 0; index < chosen.length; index += 1) {
+      const file = chosen[index];
+      const reservedTile = reserved[index];
+      if (!file || !reservedTile) continue;
+      const pdf = reservedTile.mediaType === "application/pdf";
+      if (pdf) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const result = await pdfPages(bytes);
+        if (generationRef.current !== generation) continue;
+        if ("message" in result) {
+          placeTile(reservedTile.id, generation, { ...reservedTile, status: "invalid", message: result.message });
+          continue;
+        }
+        const preview = URL.createObjectURL(file);
+        const url = await dataUrl(file);
+        placeTile(reservedTile.id, generation, {
+          ...reservedTile, url, preview, status: "ready", bytes: bytes.byteLength, message: null,
+        });
+        continue;
+      }
+      try {
+        const blob = await jpegBlob(file);
+        if (generationRef.current !== generation) continue;
+        const preview = URL.createObjectURL(blob);
+        const url = await dataUrl(blob);
+        placeTile(reservedTile.id, generation, {
+          ...reservedTile,
+          filename: "photo.jpg",
+          url,
+          preview,
+          status: "ready",
+          bytes: blob.size,
+          message: null,
+        });
+      } catch {
+        placeTile(reservedTile.id, generation, {
+          ...reservedTile, status: "invalid", message: fileNotice("undecodable"),
+        });
+      }
+    }
+  }
+
+  function removeTile(id: string) {
+    const current = tilesRef.current;
+    const tile = current.find((item) => item.id === id);
+    if (tile?.preview && !ownsPreview(tile.preview)) revokeOnce([tile]);
+    changeDraft(draftRef.current, current.filter((item) => item.id !== id));
+  }
+
+  function toggleMic() {
+    if (speechRef.current?.listening) {
+      stopListening("stop");
+      return;
+    }
+    const host = window as Window & {
+      SpeechRecognition?: new () => BrowserSpeech;
+      webkitSpeechRecognition?: new () => BrowserSpeech;
+    };
+    const Ctor = host.SpeechRecognition ?? host.webkitSpeechRecognition;
+    if (!Ctor) {
+      setMicHidden(true);
+      return;
+    }
+    const session = (speechRef.current?.session ?? 0) + 1;
+    const started = beginSpeech(draft, session);
+    publishSpeech(started);
+    const recognizer = new Ctor();
+    recognizerRef.current = recognizer;
     try {
-      const outgoing = outgoingMessage({ id, text });
+      bindRecognizer(recognizer, {
+        lang: recognitionLanguage(document.documentElement.lang, navigator.language),
+        session,
+        read: () => speechRef.current ?? started,
+        write: publishSpeech,
+      });
+    } catch {
+      publishSpeech(stopSpeech(started));
+      setLocalError("Microphone access is off. You can type instead.");
+    }
+  }
+
+  async function submit(text: string, id = messageId()) {
+    if (speechRef.current?.listening) {
+      publishSpeech(commitInterim(speechRef.current));
+      recognizerRef.current?.stop();
+      return;
+    }
+    if (loading || busy || routeError?.terminal) return;
+    const flight = inflightRef.current;
+    const retrying = flight?.id === id;
+    if (retrying && flight.generation !== generationRef.current) return;
+    const currentTiles = retrying ? flight.tiles : tilesRef.current;
+    if (!retrying && currentTiles.some((tile) => tile.status === "pending" || tile.status === "invalid")) return;
+    const ready = currentTiles.filter((tile) => tile.status === "ready");
+    if (!withinByteCap(ready.map((tile) => tile.bytes))) {
+      setLocalError(fileNotice("too-large"));
+      return;
+    }
+    if (!sendLock.current.tryBegin()) return;
+    let settled = false;
+    try {
+      const outgoing = outgoingMessage({
+        id,
+        text: retrying ? flight.text : text,
+        files: ready.map((tile) => ({ type: "file", mediaType: tile.mediaType, filename: tile.filename, url: tile.url })),
+      });
       if (!outgoing.ok) {
         if (outgoing.reason === "too_long") setLocalError("Couldn't send that.");
         return;
       }
       setLocalError(null);
-      const sent = outgoing.body.message.parts[0].text;
-      setLastSent({ id, text: sent });
-      setDraft("");
+      const textPart = outgoing.body.message.parts.find((part) => part.type === "text");
+      const sent = textPart?.type === "text" ? textPart.text : "";
+      if (!retrying) {
+        const previous = inflightRef.current;
+        if (previous) {
+          const sending = new Set(ready.map((tile) => tile.preview).filter(Boolean));
+          revokeOnce(previous.tiles.filter((tile) => !sending.has(tile.preview)));
+        }
+        const record: Flight = {
+          id,
+          text: sent,
+          tiles: ready,
+          revision: revisionRef.current,
+          generation: generationRef.current,
+        };
+        inflightRef.current = record;
+        setInflight(record);
+        const spoken = speechRef.current;
+        if (spoken?.accepting) {
+          const sealed = sealSpeech(spoken);
+          speechRef.current = sealed;
+          setSpeech(sealed);
+        }
+        draftRef.current = "";
+        tilesRef.current = [];
+        setDraft("");
+        setTiles([]);
+      }
       clearError();
-      const exists = messages.some((message) => message.id === id);
-      if (exists) await sendMessage({ text: sent, messageId: id });
-      else await sendMessage({ id, role: "user", parts: [{ type: "text", text: sent }] });
+      const exists = chat.messages.some((message) => message.role === "user" && message.id === id);
+      const parts = outgoing.body.message.parts;
+      if (exists) await sendMessage({ messageId: id, role: "user", parts });
+      else await sendMessage({ id, role: "user", parts });
+      finish(chat.status === "error" || chat.error ? "rejected" : "success");
+      settled = true;
+    } catch {
+      if (!settled) finish("rejected");
     } finally {
       sendLock.current.end();
     }
   }
 
+  function sendCurrent() {
+    const flight = inflightRef.current;
+    if (flight && flight.generation === generationRef.current && revisionRef.current === flight.revision) {
+      void submit(flight.text, flight.id);
+      return;
+    }
+    void submit(draftRef.current);
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey || composing.current || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    void submit(draft);
+    sendCurrent();
   }
 
   return (
-    <div className={styles.thread} data-chunk={ASSISTANT_CHUNK}>
+    <div className={styles.thread} data-chunk={ASSISTANT_CHUNK} style={{ paddingBottom: keyboardInset }}>
       <p className={styles.live} aria-live="polite" ref={liveRef} />
-      <div className={styles.log}>
+      <div
+        className={styles.log}
+        ref={logRef}
+        onScroll={(event) => {
+          const node = event.currentTarget;
+          setAwayFromLatest(node.scrollHeight - node.scrollTop - node.clientHeight > 48);
+        }}
+      >
         {messages.map((message, index) => (
           <MessageView
             key={message.id}
@@ -206,9 +610,25 @@ function Thread({
           />
         ))}
         {busy ? (
-          <p className={styles.typing} data-motion={reduced ? "off" : "on"}>Working</p>
+          <p className={styles.typing} data-motion={reduced ? "off" : "on"}>{waitingLabel(messages)}</p>
         ) : null}
       </div>
+      {awayFromLatest ? (
+        <button
+          type="button"
+          className={styles.jump}
+          onClick={() => {
+            const node = logRef.current;
+            if (!node) return;
+            node.scrollTo({ top: node.scrollHeight, behavior: reduced ? "auto" : "smooth" });
+          }}
+        >
+          Jump to latest
+        </button>
+      ) : null}
+      {messages.length === 0 ? (
+        <p className={styles.bubble}>What are you cooking or restocking?</p>
+      ) : null}
       {messages.length === 0 ? (
         <div className={styles.starters}>
           {STARTERS.map((starter) => (
@@ -218,7 +638,7 @@ function Thread({
               className={styles.chip}
               disabled={!!routeError?.terminal}
               onClick={() => {
-                setDraft(starter.text);
+                changeDraft(starter.text);
                 composer.current?.focus();
               }}
             >
@@ -232,12 +652,13 @@ function Thread({
         <div className={styles.notice} role="status">
           <p>{routeError.title}</p>
           <a href={routeError.searchHref}>Search the shelves</a>
-          {routeError.retry && lastSent ? (
+          {inflight && (routeError.retry || inflight.tiles.length > 0) ? (
             <button
               type="button"
               className={styles.ghost}
               onClick={() => {
-                void submit(lastSent.text, lastSent.id);
+                if (sendLock.current.held) return;
+                void submit(inflight.text, inflight.id);
               }}
             >
               Retry
@@ -249,10 +670,45 @@ function Thread({
         className={styles.composer}
         onSubmit={(event) => {
           event.preventDefault();
-          void submit(draft);
+          sendCurrent();
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          void takeFiles(event.dataTransfer.files);
+        }}
+        onPaste={(event) => {
+          if (event.clipboardData.files.length === 0) return;
+          event.preventDefault();
+          void takeFiles(event.clipboardData.files);
         }}
       >
         <label className="sr-only" htmlFor="assistant-composer">Message</label>
+        {tiles.length > 0 ? (
+          <div className={styles.tiles}>
+            {tiles.map((tile) => (
+              <div key={tile.id} className={styles.tile} data-status={tile.status}>
+                {tile.preview && tile.mediaType === "image/jpeg" ? <img src={tile.preview} alt="" /> : null}
+                <p>{tile.name}</p>
+                <p>{tile.mediaType === "application/pdf" ? "PDF" : "Photo"}</p>
+                {tile.message ? <p>{tile.message}</p> : null}
+                <button type="button" onClick={() => removeTile(tile.id)}>Remove {tile.name}</button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {speech?.interim ? <p className={styles.interim}>{speech.interim}</p> : null}
+        {addOpen ? (
+          <div className={styles.addMenu}>
+            <button type="button" onClick={() => cameraInput.current?.click()}>Camera</button>
+            <button type="button" onClick={() => photoInput.current?.click()}>Photos</button>
+            <button type="button" onClick={() => pdfInput.current?.click()}>PDF</button>
+          </div>
+        ) : null}
+        <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
+        <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
+        <input ref={pdfInput} type="file" accept="application/pdf" hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
+        <div className={styles.composerRow}>
         <textarea
           id="assistant-composer"
           ref={composer}
@@ -260,22 +716,66 @@ function Thread({
           maxLength={2000}
           value={draft}
           disabled={!!routeError?.terminal}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (speechRef.current) {
+              const edited = noteCustomerEdit(speechRef.current, next);
+              speechRef.current = edited;
+              setSpeech(edited);
+            }
+            changeDraft(next);
+          }}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={() => { composing.current = false; }}
           onKeyDown={onKeyDown}
         />
-        <button
-          type="submit"
-          className={styles.send}
-          data-testid="assistant-send"
-          disabled={!!routeError?.terminal || busy || loading || draft.trim().length === 0}
-        >
-          Send
-        </button>
+        <div className={styles.tools}>
+          <button
+            type="button"
+            className={styles.tool}
+            aria-label="Add a photo or PDF"
+            aria-expanded={addOpen}
+            disabled={!!routeError?.terminal}
+            onClick={() => setAddOpen((openMenu) => !openMenu)}
+          >
+            Add
+          </button>
+          {micReady ? (
+            <button
+              type="button"
+              className={styles.tool}
+              aria-pressed={speech?.listening === true}
+              aria-label={speech?.listening ? "Stop listening" : "Start listening"}
+              data-motion={reduced ? "off" : "on"}
+              onClick={toggleMic}
+            >
+              {speech?.listening ? <Square size={18} aria-hidden="true" /> : <Mic size={18} aria-hidden="true" />}
+            </button>
+          ) : null}
+          <button
+            type="submit"
+            className={styles.send}
+            data-testid="assistant-send"
+            aria-label="Send"
+            disabled={!!routeError?.terminal || busy || loading || tiles.some((tile) => tile.status !== "ready") || (!speech?.listening && draft.trim().length === 0 && !tiles.some((tile) => tile.status === "ready"))}
+          >
+            <ArrowUp size={18} aria-hidden="true" />
+          </button>
+        </div>
+        </div>
+        <p className={styles.note}>{FILE_NOTE}</p>
+        {speech?.listening ? <p className={styles.note}>{LISTENING_NOTE}</p> : null}
       </form>
     </div>
   );
+}
+
+function waitingLabel(messages: UIMessage[]): string {
+  const lastUser = [...messages].reverse().find((message) => message.role === "user");
+  if (lastUser?.parts.some((part) => part.type === "file")) return "Reading your list";
+  const assistant = [...messages].reverse().find((message) => message.role === "assistant");
+  if (assistant && JSON.stringify(assistant.parts).includes("search_catalog")) return "Checking the shelves";
+  return "Working";
 }
 
 function viewFor(error: Error): RouteView {
@@ -309,7 +809,18 @@ function MessageView({
   onClose: () => void;
 }) {
   if (message.role === "user") {
-    return <p className={`${styles.bubble} ${styles.user}`}>{textOf(message)}</p>;
+    const files = message.parts.flatMap((part) => part.type === "file" ? [part] : []);
+    const text = textOf(message);
+    return (
+      <div className={`${styles.bubble} ${styles.user}`}>
+        {files.map((file) => (
+          file.mediaType.startsWith("image/") && file.url
+            ? <img key={file.url} className={styles.photo} src={file.url} alt="" />
+            : <p key={`${file.filename ?? "file"}-${file.url}`} className={styles.fileChip}>{file.filename ?? "PDF"}</p>
+        ))}
+        {text ? <p>{text}</p> : null}
+      </div>
+    );
   }
   return (
     <div className={styles.message}>
@@ -319,13 +830,41 @@ function MessageView({
         }
         const cards = cardsFromParts([part], { turnFailed });
         if (cards.length === 0) return null;
+        const products = cards.filter((card) => card.kind === "product");
+        const added = cards.filter((card) => card.kind === "added");
+        const rest = cards.filter((card) => card.kind !== "product" && card.kind !== "added");
         return (
-          <div key={`${message.id}-cards-${index}`} className={styles.cards}>
-            {cards.map((card) => (
+          <div key={`${message.id}-cards-${index}`}>
+            {products.length > 0 ? (
+              <>
+                <div className={styles.cards}>
+                  {products.map((card) => (
+                    <CardView key={card.key} card={card} disabled={disabled} onChoice={onChoice} onUndo={onUndo} onChange={onChange} onClose={onClose} />
+                  ))}
+                </div>
+                <Link className={styles.seeAll} href="/search">See all</Link>
+              </>
+            ) : null}
+            {added.length > 0 ? (
+              <div className={styles.addedRow}>
+                {added.map((card) => (
+                  <CardView
+                    key={card.key}
+                    card={card}
+                    undoLabel={card.kind === "added" ? undoState[card.additionId] : undefined}
+                    disabled={disabled}
+                    onChoice={onChoice}
+                    onUndo={onUndo}
+                    onChange={onChange}
+                    onClose={onClose}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {rest.map((card) => (
               <CardView
                 key={card.key}
                 card={card}
-                undoLabel={card.kind === "added" ? undoState[card.additionId] : undefined}
                 disabled={disabled}
                 onChoice={onChoice}
                 onUndo={onUndo}

@@ -20,6 +20,15 @@ export const ASSISTANT_ROUTE_CODES = [
   "assistant_resting",
   "assistant_unavailable",
   "assistant_disabled",
+  "attachment_too_many",
+  "attachment_too_large",
+  "attachment_type",
+  "attachment_pixels",
+  "attachment_pages",
+  "attachment_encrypted",
+  "attachment_missing",
+  "attachment_rate_limited",
+  "attachment_conflict",
 ] as const;
 
 export type AssistantRouteCode = (typeof ASSISTANT_ROUTE_CODES)[number];
@@ -34,6 +43,15 @@ export const ASSISTANT_ROUTE_STATUS: Record<AssistantRouteCode, number> = {
   assistant_resting: 503,
   assistant_unavailable: 503,
   assistant_disabled: ASSISTANT_DISABLED_STATUS,
+  attachment_too_many: 400,
+  attachment_too_large: 400,
+  attachment_type: 400,
+  attachment_pixels: 400,
+  attachment_pages: 400,
+  attachment_encrypted: 400,
+  attachment_missing: 400,
+  attachment_rate_limited: 429,
+  attachment_conflict: 400,
 };
 
 export function assistantChatEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

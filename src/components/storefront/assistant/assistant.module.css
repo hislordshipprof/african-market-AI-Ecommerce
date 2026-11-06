@@ -23,16 +23,22 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  box-sizing: border-box;
+  height: calc(100dvh - 96px);
+  max-height: calc(100dvh - 96px);
   min-height: 0;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
 }
 
 .log {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: min(62dvh, 640px);
+  flex: 1;
+  min-height: 0;
   min-width: 0;
   max-width: 100%;
   overflow-y: auto;
@@ -66,12 +72,60 @@
   max-width: min(38rem, 100%);
   padding: 10px 14px;
   border-radius: 16px 16px 8px 16px;
-  background: var(--color-soft);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
 }
 
-.cards {
-  display: grid;
+.cards,
+.addedRow {
+  display: flex;
   gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cards > *,
+.addedRow > * {
+  flex: 0 0 220px;
+  scroll-snap-align: start;
+}
+
+.seeAll {
+  color: var(--color-primary);
+  font: 600 14px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.photo {
+  display: block;
+  width: min(220px, 100%);
+  height: auto;
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+
+.fileChip,
+.interim,
+.note,
+.jump {
+  margin: 0;
+  color: var(--color-muted, var(--color-ink));
+  font: 400 13px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.interim {
+  opacity: 0.7;
+}
+
+.jump {
+  align-self: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
 }
 
 .card,
@@ -235,24 +289,110 @@
 }
 
 .composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: end;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 20px;
+  background: var(--color-surface);
+}
+
+.composerRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composerRow textarea {
+  flex: 1;
+  min-width: 0;
+}
+
+.tiles {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.tile {
+  flex: 0 0 160px;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  font: 400 13px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.tile img {
+  width: 100%;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.tile button,
+.addMenu button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-soft);
+  color: var(--color-ink);
+}
+
+.addMenu {
+  display: grid;
+  gap: 8px;
+}
+
+.tools {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool,
+.send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+.tool {
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.tool[aria-pressed="true"][data-motion="on"] {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% { transform: scale(1.06); }
 }
 
 .composer textarea {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  min-height: 48px;
+  min-height: 44px;
   max-height: 140px;
+  field-sizing: content;
   overflow-wrap: anywhere;
-  resize: vertical;
-  padding: 12px 14px;
-  border: 1px solid var(--color-line);
+  resize: none;
+  padding: 8px 10px;
+  border: 0;
   border-radius: 12px;
-  background: var(--color-surface);
+  background: transparent;
   color: var(--color-ink);
   caret-color: var(--color-primary);
   font: 400 16px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
@@ -322,6 +462,11 @@
 }
 
 @media (max-width: 767px) {
+  .thread {
+    height: calc(88dvh - 88px);
+    max-height: calc(88dvh - 88px);
+  }
+
   .launcher {
     right: 16px;
     bottom: calc(84px + env(safe-area-inset-bottom));
@@ -335,7 +480,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .typing[data-motion="on"]::after,
-  .skeleton {
+  .skeleton,
+  .tool[aria-pressed="true"] {
     animation: none;
   }
 }
