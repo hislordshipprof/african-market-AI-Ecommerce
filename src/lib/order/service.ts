@@ -42,6 +42,20 @@ export function fulfilledStatus(fulfillment: string): "AWAITING_PICKUP" | "READY
   return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
 }
 
+function orderAuditWhere(entityId: string, action: string) {
+  return { entityId, action, entityType: "order" as const };
+}
+
+/**
+ * Label for a cancellation the timer finishes.
+ * Only two writers set CANCELLING: markReady's below-minimum void (the order
+ * was already accepted, so acceptedAt is set) and autoCancelOrder's own claim
+ * from AUTHORIZED (acceptedAt stays null). A later store cancel would need its own label.
+ */
+function cancellationAuditAction(acceptedAt: Date | null): "void_zero_amount" | "auto_cancel" {
+  return acceptedAt == null ? "auto_cancel" : "void_zero_amount";
+}
+
 function systemAuditData(
   storeId: string,
   orderId: string,
@@ -77,7 +91,7 @@ async function finalizeCancelledOrder(
       return { wrote: false };
     }
     if (await openRefundRequest(tx, orderId)) return { wrote: false };
-    const existing = await tx.auditLog.findFirst({ where: { entityId: orderId, action } });
+    const existing = await tx.auditLog.findFirst({ where: orderAuditWhere(orderId, action) });
     await tx.order.update({
       where: { id: orderId },
       data: {
@@ -122,7 +136,7 @@ async function reserveAttempt(
   return storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findMany({
-      where: { entityId: orderId, action },
+      where: orderAuditWhere(orderId, action),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
     const newestAfter = prior[0]?.after as { attempt?: number; inFlight?: boolean } | null;
@@ -193,7 +207,7 @@ async function noteAttemptReleased(
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findMany({
-      where: { entityId: orderId, action },
+      where: orderAuditWhere(orderId, action),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 1,
     });
@@ -478,7 +492,7 @@ async function persistRefundFailure(
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || (current.status !== "CANCELLING" && current.status !== "CANCELLED")) return;
     const manual = await tx.auditLog.findFirst({
-      where: { entityId: orderId, action: "refund_resolved_manually" },
+      where: orderAuditWhere(orderId, "refund_resolved_manually"),
     });
     if (manual) {
       alreadyResolved = true;
@@ -496,7 +510,7 @@ async function persistRefundFailure(
       },
     });
     const prior = await tx.auditLog.findMany({
-      where: { entityId: orderId, action: "refund_failed" },
+      where: orderAuditWhere(orderId, "refund_failed"),
     });
     const duplicate = prior.some((log) => {
       const after = log.after as { refundId?: string } | null;
@@ -652,7 +666,7 @@ async function recordDistinctRefundFailure(
   await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const prior = await tx.auditLog.findMany({
-      where: { entityId: orderId, action: "refund_failed" },
+      where: orderAuditWhere(orderId, "refund_failed"),
     });
     const duplicate = prior.some((log) => {
       const after = log.after as { refundId?: string } | null;
@@ -725,13 +739,13 @@ export async function markTerminalRefundFailure(input: {
     const row = await tx.order.findUnique({ where: { id: order.id } });
     if (!row || (row.status !== "CANCELLING" && row.status !== "CANCELLED")) return;
     const manual = await tx.auditLog.findFirst({
-      where: { entityId: order.id, action: "refund_resolved_manually" },
+      where: orderAuditWhere(order.id, "refund_resolved_manually"),
     });
     if (manual) {
       alreadyResolved = true;
       return;
     }
-    const prior = await tx.auditLog.findMany({ where: { entityId: order.id, action } });
+    const prior = await tx.auditLog.findMany({ where: orderAuditWhere(order.id, action) });
     const duplicate = prior.some((log) => {
       const after = log.after as { refundId?: string } | null;
       return after?.refundId === input.refundId;
@@ -790,7 +804,6 @@ export async function markReady(
         paymentIntentId: order.paymentIntentId!,
         totalAuthorizedCents: order.totalAuthorizedCents,
         newStatus: fulfilledStatus(order.fulfillment),
-        alreadyClaiming: true,
       };
     }
     if (order.status !== "PICKING") {
@@ -829,7 +842,6 @@ export async function markReady(
         capturedAmountCents,
         paymentIntentId: order.paymentIntentId,
         newStatus: "CANCELLED" as OrderStatus,
-        alreadyClaiming: false,
         voidInsteadOfCapture: true,
         orderId: order.id,
         storeId,
@@ -864,7 +876,6 @@ export async function markReady(
       paymentIntentId: order.paymentIntentId,
       totalAuthorizedCents: order.totalAuthorizedCents,
       newStatus,
-      alreadyClaiming: false,
       voidInsteadOfCapture: false,
       orderId: order.id,
       storeId,
@@ -1041,8 +1052,8 @@ export async function autoCancelOrder(
         ok: true as const,
         paymentIntentId: order.paymentIntentId,
         totalAuthorizedCents: order.totalAuthorizedCents,
-        alreadyClaiming: true,
         refundId: order.refundId,
+        action: cancellationAuditAction(order.acceptedAt),
       };
     }
     if (order.status !== "AUTHORIZED") {
@@ -1053,8 +1064,8 @@ export async function autoCancelOrder(
       ok: true as const,
       paymentIntentId: order.paymentIntentId,
       totalAuthorizedCents: order.totalAuthorizedCents,
-      alreadyClaiming: false,
       refundId: null,
+      action: cancellationAuditAction(null),
     };
   });
 
@@ -1101,7 +1112,7 @@ export async function autoCancelOrder(
   }
 
   // Phase 3: one cancellation write. Stock restore stays deferred to #141.
-  const finalize = await finalizeCancelledOrder(storeId, orderId, "auto_cancel", { from: ["CANCELLING"] });
+  const finalize = await finalizeCancelledOrder(storeId, orderId, validation.action, { from: ["CANCELLING"] });
   if (!finalize.wrote) return { ok: false, error: "Order status changed during cancellation" };
 
   return { ok: true };

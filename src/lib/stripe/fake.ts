@@ -602,4 +602,4 @@ function ensureAuthorizedAmount(paymentIntentId: string, amount: number) {
   }
 }
 
-export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, authorizedAmounts, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, nextRefundStatus, VALID_WEBHOOK_SIGNATURE };
+export { FakeStripeError, fakeStripeProvider, reset, getAccounts, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextRefundStatus, setRefundStatus, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setRefundCreatedLate, setCancelUnexpectedState, scriptRetrieveStatuses, ensureAuthorizedAmount, VALID_WEBHOOK_SIGNATURE };

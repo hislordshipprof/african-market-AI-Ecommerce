@@ -107,4 +107,45 @@ describe.skipIf(!hasDb)("sendOrderAuthorized bookkeeping (lane DB)", () => {
     expect(logged).not.toContain("send-buyer@t186.test");
     errorSpy.mockRestore();
   });
+
+  it("missing and foreign-store orders do not send; the owning store still can", async () => {
+    const { store, order } = await seedOrder();
+    const other = await seedOrder();
+    send.mockReset();
+    send.mockResolvedValue({ ids: [`order-authorized-${order.id}`] });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const missingId = `ord_missing_${crypto.randomUUID()}`;
+
+    await expect(sendOrderAuthorized(store.id, missingId)).resolves.toBeUndefined();
+    await expect(sendOrderAuthorized(other.store.id, order.id)).resolves.toBeUndefined();
+
+    expect(send).not.toHaveBeenCalled();
+    expect(errorSpy.mock.calls.map((call) => call[0])).toEqual([
+      JSON.stringify({ event: "inngest_order_not_found", orderId: missingId }),
+      JSON.stringify({ event: "inngest_order_not_found", orderId: order.id }),
+    ]);
+    const hidden = await storeScoped(store.id).order.findUnique({ where: { id: order.id } });
+    expect(hidden?.inngestEventSentAt).toBeNull();
+    expect(hidden?.status).toBe("AUTHORIZED");
+
+    errorSpy.mockClear();
+    await expect(sendOrderAuthorized(store.id, order.id)).resolves.toBeUndefined();
+
+    const stored = await storeScoped(store.id).order.findUnique({ where: { id: order.id } });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      id: `order-authorized-${order.id}`,
+      name: "order/authorized",
+      data: {
+        storeId: store.id,
+        orderId: order.id,
+        authorizedAt: stored!.createdAt.toISOString(),
+      },
+    });
+    expect(stored?.inngestEventSentAt).not.toBeNull();
+    expect(errorSpy).not.toHaveBeenCalled();
+    const foreign = await storeScoped(other.store.id).order.findUnique({ where: { id: other.order.id } });
+    expect(foreign?.inngestEventSentAt).toBeNull();
+    errorSpy.mockRestore();
+  });
 });

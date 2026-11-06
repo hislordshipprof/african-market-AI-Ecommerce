@@ -9,6 +9,10 @@ import { runAssistantRetention } from "../assistant/retention";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
+function orderAuditWhere(entityId: string, action: string) {
+  return { entityId, action, entityType: "order" as const };
+}
+
 export async function recordReconcileResult(storeId: string, orderId: string): Promise<void> {
   let failReason: string | undefined;
   try {
@@ -26,8 +30,7 @@ export async function recordReconcileResult(storeId: string, orderId: string): P
     const recent = await storeScopedTransaction(storeId, async (tx) => {
       return tx.auditLog.findFirst({
         where: {
-          entityId: orderId,
-          action: "reconcile_failed",
+          ...orderAuditWhere(orderId, "reconcile_failed"),
           createdAt: { gte: new Date(Date.now() - RECONCILE_FAILED_COOLDOWN_MS) },
         },
       });
@@ -100,7 +103,7 @@ export const acceptanceAlert = inngest.createFunction(
         if (!current || current.status !== "AUTHORIZED") return;
 
         const existing = await tx.auditLog.findFirst({
-          where: { entityId: orderId, action: "acceptance_alert" },
+          where: orderAuditWhere(orderId, "acceptance_alert"),
         });
         if (existing) return;
 
