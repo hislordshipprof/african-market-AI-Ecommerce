@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { completionAnnouncement } from "./announce";
 import { cardsFromParts } from "./cards";
 
 const text = { type: "text", text: "The palm oil is $1.00 and <img onerror=x> [buy](http://evil)" };
@@ -136,6 +137,56 @@ describe("assistant cards", () => {
       "Egusi (400 g)",
       "Garri (1 kg)",
     ]);
+
+    const states = [
+      "input-streaming",
+      "input-available",
+      "approval-requested",
+      "approval-responded",
+      "output-available",
+      "output-error",
+      "output-denied",
+    ];
+    for (const state of states) {
+      for (const turnFailed of [false, true]) {
+        expect(cardsFromParts([
+          { type: "tool-prepare_checkout", toolCallId: "unknown-static", state, output: { ok: true }, errorText: "no" },
+        ], { turnFailed })).toEqual([]);
+        expect(cardsFromParts([
+          { type: "dynamic-tool", toolName: "not_a_tool", toolCallId: "unknown-dynamic", state, output: { ok: true } },
+        ], { turnFailed })).toEqual([]);
+        expect(cardsFromParts([
+          { type: "dynamic-tool", toolName: "constructor", toolCallId: "proto", state },
+        ], { turnFailed })).toEqual([]);
+        expect(cardsFromParts([
+          { type: "tool-toString", toolCallId: "proto-static", state },
+        ], { turnFailed })).toEqual([]);
+      }
+    }
+    expect(cardsFromParts([
+      { type: "dynamic-tool", toolCallId: "missing-name", state: "output-error", errorText: "no" },
+    ], { turnFailed: true })).toEqual([]);
+    expect(cardsFromParts([
+      { type: "dynamic-tool", toolName: "check_availability", toolCallId: "live", state: "input-streaming" },
+    ])).toEqual([{ kind: "skeleton", key: "live:skeleton" }]);
+    expect(cardsFromParts([
+      { type: "dynamic-tool", toolName: "search_catalog", toolCallId: "dyn-search", state: "output-error", errorText: "no" },
+    ])).toEqual([expect.objectContaining({ kind: "tool-error", key: "dyn-search:error" })]);
+    expect(cardsFromParts([
+      { type: "dynamic-tool", toolName: "add_to_cart", toolCallId: "dyn-cart", state: "output-error", errorText: "no" },
+    ])).toEqual([]);
+    expect(cardsFromParts([
+      { type: "tool-check_availability", toolCallId: "avail", state: "input-streaming" },
+    ])).toEqual([{ kind: "skeleton", key: "avail:skeleton" }]);
+    expect(cardsFromParts([
+      { type: "tool-check_availability", toolCallId: "avail-out", state: "output-available", output: { ok: true, items: [] } },
+    ])).toEqual([]);
+    expect(cardsFromParts([
+      { type: "tool-search_catalog", toolCallId: "approval", state: "approval-requested" },
+    ])).toEqual([]);
+    expect(cardsFromParts([
+      { type: "tool-search_catalog", toolCallId: "denied", state: "output-denied" },
+    ])).toEqual([]);
   });
 
   it("card prices come only from tool output", () => {
@@ -277,6 +328,15 @@ describe("assistant cards", () => {
       "Rice (Bag) · aaaa",
       "Rice (Bag) · bbbb",
     ]);
+  });
+
+  it("unknown tools add no completion summary and preserve the empty-message fallback", () => {
+    const unknown = { type: "tool-prepare_checkout", toolCallId: "gone", state: "input-available" };
+    expect(cardsFromParts([unknown], { turnFailed: true })).toEqual([]);
+    expect(completionAnnouncement({ parts: [unknown] })).toBe("Reply ready");
+    expect(completionAnnouncement({
+      parts: [{ type: "text", text: "Palm oil is in stock." }, unknown],
+    })).toBe("Palm oil is in stock.");
   });
 
   it("a summary names the gap to the store minimum", () => {
