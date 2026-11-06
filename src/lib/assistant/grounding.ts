@@ -93,19 +93,6 @@ function isHorizontalSpace(char: string | undefined): boolean {
   return char != null && HORIZONTAL_SPACE.test(char);
 }
 
-/** One soft break may sit between a prefix, a number, and a suffix. A blank line may not. */
-function skipSoft(text: string, index: number): number {
-  let cursor = index;
-  while (isHorizontalSpace(text[cursor])) cursor += 1;
-  if (text[cursor] !== "\n" && text[cursor] !== "\r") return cursor;
-  let next = cursor;
-  if (text[next] === "\r") next += 1;
-  if (text[next] === "\n") next += 1;
-  if (text[next] === "\n" || text[next] === "\r") return index;
-  while (isHorizontalSpace(text[next])) next += 1;
-  return next;
-}
-
 function skipInline(text: string, index: number): number {
   let cursor = index;
   while (isHorizontalSpace(text[cursor])) cursor += 1;
@@ -157,75 +144,55 @@ function wordKind(raw: string, glued: boolean): "usd" | "cent" | "foreign" | nul
   return codeKind(raw, glued);
 }
 
-interface Suffix {
+type MarkRole = "usd" | "cent" | "foreign";
+
+interface Atom {
+  kind: "number" | "mark";
+  start: number;
   end: number;
-  foreign: boolean;
-  cent: boolean;
+  role: MarkRole | null;
+  whole: string;
+  frac: string;
 }
 
-/** 1–3 letters glued to `$`, or split from it by one newline. A space is not part of the marker. */
-function readLetterDollar(text: string, index: number): Suffix | null {
-  const start = skipSoft(text, index);
-  const match = /^([A-Za-z]{1,3})(?:\r?\n)?\$/.exec(text.slice(start));
-  if (!match) return null;
-  const letters = match[1].toLowerCase();
-  let end = start + match[0].length;
-  if (readNumber(text, skipSoft(text, end))) return null;
-  let foreign = letters !== "us" && letters !== "usd";
-  let cent = false;
-  const next = readWord(text, skipInline(text, end));
-  if (next) {
-    const nextKind = wordKind(next.raw, false);
-    if (nextKind === "usd" || nextKind === "foreign" || nextKind === "cent") {
-      end = next.end;
-      if (nextKind === "foreign") foreign = true;
-      if (nextKind === "cent") cent = true;
-    }
-  }
-  return { end, foreign, cent };
+/** Empty, horizontal spaces, or one newline. A blank line or a word is not direct. */
+function gapDirect(text: string, from: number, to: number): boolean {
+  if (to < from) return false;
+  let index = from;
+  while (isHorizontalSpace(text[index])) index += 1;
+  if (index === to) return true;
+  if (text[index] === "\r") index += 1;
+  if (text[index] !== "\n") return false;
+  index += 1;
+  if (text[index] === "\n" || text[index] === "\r") return false;
+  while (isHorizontalSpace(text[index])) index += 1;
+  return index === to;
 }
 
-function readSuffix(text: string, index: number): Suffix | null {
-  const start = skipSoft(text, index);
-  if (start >= text.length) return null;
-  const symbol = text[start];
-  if (symbol === "¢") return { end: start + 1, foreign: false, cent: true };
-  if (symbol === "$" || FOREIGN_SYMBOLS.has(symbol)) {
-    if (readNumber(text, skipSoft(text, start + 1))) return null;
-    return { end: start + 1, foreign: symbol !== "$", cent: false };
+function readMark(text: string, index: number): { end: number; role: MarkRole } | null {
+  const symbol = text[index];
+  if (symbol === "¢") return { end: index + 1, role: "cent" };
+  if (symbol === "$") return { end: index + 1, role: "usd" };
+  if (FOREIGN_SYMBOLS.has(symbol)) return { end: index + 1, role: "foreign" };
+  const qualified = /^([A-Za-z]{1,3})\$/.exec(text.slice(index));
+  if (qualified) {
+    const letters = qualified[1].toLowerCase();
+    return { end: index + qualified[0].length, role: letters === "us" || letters === "usd" ? "usd" : "foreign" };
   }
-  if (!/[A-Za-z]/.test(symbol)) return null;
-  const qualified = readLetterDollar(text, index);
-  if (qualified) return qualified;
-  const word = readWord(text, start);
+  const word = readWord(text, index);
   if (!word) return null;
   if (word.raw.toLowerCase() === "us") {
-    const next = readWord(text, skipInline(text, word.end));
-    if (!next || !USD_WORDS.has(next.raw.toLowerCase())) return null;
-    return { end: next.end, foreign: false, cent: false };
-  }
-  const kind = wordKind(word.raw, start === index);
-  if (!kind) return null;
-  let end = word.end;
-  let foreign = kind === "foreign";
-  let cent = kind === "cent";
-  if (kind !== "cent") {
-    const next = readWord(text, skipInline(text, end));
-    if (next) {
-      const nextKind = wordKind(next.raw, false);
-      if (nextKind === "usd" || nextKind === "foreign" || nextKind === "cent") {
-        end = next.end;
-        if (nextKind === "foreign") foreign = true;
-        if (nextKind === "cent") cent = true;
-      }
+    const nextAt = skipInline(text, word.end);
+    const next = readWord(text, nextAt);
+    if (next && USD_WORDS.has(next.raw.toLowerCase()) && gapDirect(text, word.end, nextAt)) {
+      return { end: next.end, role: "usd" };
     }
+    return null;
   }
-  return { end, foreign, cent };
-}
-
-function centsOf(num: ParsedNumber, foreign: boolean, cent: boolean): number | null {
-  if (foreign) return null;
-  return cent ? centValue(num) : dollarCents(num);
+  const glued = (index > 0 && /[0-9]/.test(text[index - 1] ?? "")) || /[0-9]/.test(text[word.end] ?? "");
+  const kind = wordKind(word.raw, glued);
+  if (!kind) return null;
+  return { end: word.end, role: kind };
 }
 
 function atBoundary(text: string, index: number): boolean {
@@ -242,85 +209,60 @@ function pushToken(text: string, start: number, end: number, cents: number | nul
   into.push({ start, end, raw: text.slice(start, end), cents });
 }
 
-function findMoney(text: string): MoneyToken[] {
-  const tokens: MoneyToken[] = [];
+function tokenize(text: string): Atom[] {
+  const atoms: Atom[] = [];
   let index = 0;
   while (index < text.length) {
-    const consumed = matchMoney(text, index, tokens);
-    index = consumed != null && consumed > index ? consumed : index + 1;
+    if (atBoundary(text, index)) {
+      const mark = readMark(text, index);
+      if (mark) {
+        atoms.push({ kind: "mark", start: index, end: mark.end, role: mark.role, whole: "", frac: "" });
+        index = mark.end;
+        continue;
+      }
+      const num = readNumber(text, index);
+      if (num) {
+        atoms.push({ kind: "number", start: index, end: num.end, role: null, whole: num.whole, frac: num.frac });
+        index = num.end;
+        continue;
+      }
+    }
+    index += 1;
+  }
+  return atoms;
+}
+
+function findMoney(text: string): MoneyToken[] {
+  const atoms = tokenize(text);
+  const tokens: MoneyToken[] = [];
+  for (let index = 0; index < atoms.length; index += 1) {
+    const number = atoms[index];
+    if (number.kind !== "number") continue;
+    const marks: Atom[] = [];
+    for (let left = index - 1; left >= 0 && atoms[left].kind === "mark"; left -= 1) {
+      if (!gapDirect(text, atoms[left].end, atoms[left + 1].start)) break;
+      marks.unshift(atoms[left]);
+    }
+    const right = atoms[index + 1];
+    const afterRight = atoms[index + 2];
+    if (
+      right?.kind === "mark" &&
+      gapDirect(text, number.end, right.start) &&
+      !(afterRight?.kind === "number" && gapDirect(text, right.end, afterRight.start))
+    ) {
+      marks.push(right);
+    }
+    if (marks.length === 0) continue;
+    const foreign = marks.some((mark) => mark.role === "foreign");
+    const cent = marks.some((mark) => mark.role === "cent");
+    const usd = marks.some((mark) => mark.role === "usd");
+    const parsed = { end: number.end, whole: number.whole, frac: number.frac };
+    const cents = foreign || (cent && usd) ? null : cent ? centValue(parsed) : dollarCents(parsed);
+    const start = Math.min(number.start, ...marks.map((mark) => mark.start));
+    const end = Math.max(number.end, ...marks.map((mark) => mark.end));
+    pushToken(text, start, end, cents, tokens);
   }
   return tokens;
-}
-
-function matchMoney(text: string, index: number, into: MoneyToken[]): number | null {
-  if (!atBoundary(text, index)) return null;
-  const letterDollar = /^([A-Za-z]{1,3})\$/.exec(text.slice(index));
-  if (letterDollar) {
-    const num = readNumber(text, skipSoft(text, index + letterDollar[0].length));
-    if (!num) return null;
-    const suffix = readSuffix(text, num.end);
-    const letters = letterDollar[1].toLowerCase();
-    const foreign = (letters !== "us" && letters !== "usd") || (suffix?.foreign ?? false);
-    const end = suffix?.end ?? num.end;
-    pushToken(text, index, end, centsOf(num, foreign, suffix?.cent ?? false), into);
-    return end;
-  }
-  const symbol = text[index];
-  if (symbol === "$" || FOREIGN_SYMBOLS.has(symbol)) {
-    const num = readNumber(text, skipSoft(text, index + 1));
-    if (!num) return null;
-    const suffix = readSuffix(text, num.end);
-    const foreign = symbol !== "$" || (suffix?.foreign ?? false);
-    const end = suffix?.end ?? num.end;
-    pushToken(text, index, end, centsOf(num, foreign, suffix?.cent ?? false), into);
-    return end;
-  }
-  const word = readWord(text, index);
-  if (word?.raw.toLowerCase() === "us") {
-    const dollars = readWord(text, skipInline(text, word.end));
-    if (dollars && USD_WORDS.has(dollars.raw.toLowerCase())) {
-      const prefixed = readPrefixedNumber(text, dollars.end);
-      if (prefixed) {
-        const suffix = readSuffix(text, prefixed.end);
-        const foreign = prefixed.symbolForeign || (suffix?.foreign ?? false);
-        const end = suffix?.end ?? prefixed.end;
-        pushToken(text, index, end, centsOf(prefixed.num, foreign, suffix?.cent ?? false), into);
-        return end;
-      }
-    }
-  }
-  if (word) {
-    const prefixed = readPrefixedNumber(text, word.end);
-    if (prefixed) {
-      const kind = wordKind(word.raw, prefixed.glued);
-      if (kind) {
-        const suffix = readSuffix(text, prefixed.end);
-        const foreign = kind === "foreign" || prefixed.symbolForeign || (suffix?.foreign ?? false);
-        const end = suffix?.end ?? prefixed.end;
-        pushToken(text, index, end, centsOf(prefixed.num, foreign, (suffix?.cent ?? false) || kind === "cent"), into);
-        return end;
-      }
-    }
-  }
-  const num = readNumber(text, index);
-  if (!num) return null;
-  const suffix = readSuffix(text, num.end);
-  if (!suffix) return null;
-  pushToken(text, index, suffix.end, centsOf(num, suffix.foreign, suffix.cent), into);
-  return suffix.end;
-}
-
-function readPrefixedNumber(text: string, index: number): { end: number; num: ParsedNumber; symbolForeign: boolean; glued: boolean } | null {
-  const start = skipSoft(text, index);
-  let cursor = start;
-  let symbolForeign = false;
-  if (cursor < text.length && (text[cursor] === "$" || FOREIGN_SYMBOLS.has(text[cursor]))) {
-    symbolForeign = text[cursor] !== "$";
-    cursor = skipSoft(text, cursor + 1);
-  }
-  const num = readNumber(text, cursor);
-  if (!num) return null;
-  return { end: num.end, num, symbolForeign, glued: start === index && !symbolForeign && cursor === start };
 }
 
 function allowedToken(token: MoneyToken, allowedCents: Set<number>): boolean {

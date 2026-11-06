@@ -406,5 +406,28 @@ describe("grounding stream", () => {
     expect(seamText).toBe(`- Egusi and palm oil: $10.99 price not confirmed\nI couldn't confirm that price.`);
     expect(seamText).not.toContain("7.77");
     expect(seamStrips).toEqual(["$7.77", "$\u00a07.77"]);
+
+    const splitStrips: string[] = [];
+    const split = streamText({
+      model: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: streamOf([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "t" },
+            { type: "text-delta", id: "t", delta: "- Egusi and palm: $10.99 USD" },
+            { type: "text-delta", id: "t", delta: "7.77" },
+            { type: "text-end", id: "t" },
+            { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+          ]),
+        }),
+      }),
+      prompt: "split",
+      experimental_transform: groundingTransform({
+        historyUnitPrices: [{ key: "variant:egusi", cents: 1099 }],
+        onStrip: (amount) => splitStrips.push(amount),
+      }),
+    });
+    expect(await split.text).toBe("- Egusi and palm: $10.99 price not confirmed");
+    expect(splitStrips).toEqual(["USD7.77"]);
   });
 });
