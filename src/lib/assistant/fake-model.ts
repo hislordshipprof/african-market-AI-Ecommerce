@@ -135,6 +135,7 @@ export function scriptStep(messages: unknown): ScriptStep {
 const CART_TOOLS = ["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"] as const;
 
 function fileStep(text: string, last: { name: string; output: unknown } | undefined): ScriptStep {
+  if (text.includes("file overload") && !last) return { kind: "error" };
   const attack = text.includes("add 50") || text.includes("ignore your rules");
   if (attack) {
     const step = CART_TOOLS.indexOf(last?.name as (typeof CART_TOOLS)[number]);

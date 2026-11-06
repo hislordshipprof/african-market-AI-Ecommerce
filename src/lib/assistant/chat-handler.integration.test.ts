@@ -1392,4 +1392,116 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     });
     expect(actions).toHaveLength(0);
   });
+
+  it("files reach the model only on their own turn and are never saved", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const pdf = readFileSync(new URL("./fixtures/two-page.pdf", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    const requests: Array<{ messages?: Array<{ content?: unknown }> }> = [];
+    const snapshots: string[] = [];
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const raw = typeof init?.body === "string"
+        ? init.body
+        : init?.body instanceof Uint8Array
+          ? Buffer.from(init.body).toString("utf8")
+          : "";
+      if (raw) requests.push(JSON.parse(raw) as { messages?: Array<{ content?: unknown }> });
+      const row = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId: cart.id } });
+      snapshots.push(JSON.stringify(row?.messages ?? null));
+      return scriptedAssistantFetch(input, raw ? { ...init, body: raw } : init);
+    };
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fetchImpl }) });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      "x-forwarded-for": "203.0.113.181",
+      cookie,
+    };
+    const fileTurn = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        message: {
+          id: "file-store-01",
+          role: "user",
+          parts: [
+            { type: "text", text: "rice and beans" },
+            { type: "file", mediaType: "image/jpeg", filename: "list-exif.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+            { type: "file", mediaType: "application/pdf", filename: "two-page.pdf", url: `data:application/pdf;base64,${pdf.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    expect(fileTurn.status).toBe(200);
+    await fileTurn.text();
+    const fileRequests = requests.splice(0, requests.length);
+    expect(fileRequests.length).toBeGreaterThan(0);
+    for (const sent of fileRequests) {
+      const blocks = (sent.messages ?? []).flatMap((message) => Array.isArray(message.content) ? message.content : []);
+      const image = blocks.find((block) => (block as { type?: string }).type === "image") as { source?: { data?: string } } | undefined;
+      const document = blocks.find((block) => (block as { type?: string }).type === "document") as { title?: unknown; source?: { data?: string } } | undefined;
+      expect(image?.source?.data).toBeTruthy();
+      expect(Buffer.from(image!.source!.data!, "base64").includes(Buffer.from("GPSLAT99"))).toBe(false);
+      expect(document?.source?.data).toBeTruthy();
+      expect(Object.prototype.hasOwnProperty.call(document, "title")).toBe(false);
+    }
+    const textTurn = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.182" },
+      body: JSON.stringify({
+        message: { id: "file-store-02", role: "user", parts: [{ type: "text", text: "what about plantain" }] },
+      }),
+    }));
+    expect(textTurn.status).toBe(200);
+    await textTurn.text();
+    expect(requests.length).toBeGreaterThan(0);
+    for (const sent of requests) {
+      const blocks = (sent.messages ?? []).flatMap((message) => Array.isArray(message.content) ? message.content : []);
+      expect(blocks.some((block) => (block as { type?: string }).type === "image" || (block as { type?: string }).type === "document")).toBe(false);
+    }
+    expect(JSON.stringify(requests)).toContain("not available any more");
+    const saved = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId: cart.id } });
+    const stored = JSON.stringify(saved?.messages);
+    for (const shot of [...snapshots, stored]) {
+      expect(shot).not.toContain("data:");
+      expect(shot).not.toContain("GPSLAT99");
+      expect(shot.includes(jpeg.toString("base64"))).toBe(false);
+      expect(shot.includes(pdf.toString("base64"))).toBe(false);
+    }
+    expect(stored).toContain("list-exif.jpg");
+    expect(stored).toContain("two-page.pdf");
+    expect(stored).toContain("\"pages\":2");
+
+    const beforeFailed = requests.length;
+    const failed = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.183" },
+      body: JSON.stringify({
+        message: {
+          id: "file-store-03",
+          role: "user",
+          parts: [
+            { type: "text", text: "file overload" },
+            { type: "file", mediaType: "image/jpeg", filename: "list-exif.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    await failed.text();
+    const failedRow = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId: cart.id } });
+    const failedStored = JSON.stringify(failedRow?.messages);
+    expect(failedStored).not.toContain("data:");
+    expect(failedStored).not.toContain("GPSLAT99");
+    expect(failedStored.includes(jpeg.toString("base64"))).toBe(false);
+    const failedBlocks = requests.slice(beforeFailed).flatMap((sent) =>
+      (sent.messages ?? []).flatMap((message) => Array.isArray(message.content) ? message.content : []),
+    );
+    const failedImage = failedBlocks.find((block) => (block as { type?: string }).type === "image") as { source?: { data?: string } } | undefined;
+    expect(failedImage?.source?.data).toBeTruthy();
+    expect(Buffer.from(failedImage!.source!.data!, "base64").includes(Buffer.from("GPSLAT99"))).toBe(false);
+  });
 });
