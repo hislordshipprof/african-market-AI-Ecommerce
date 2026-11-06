@@ -1,5 +1,8 @@
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { test, expect, type Page } from "@playwright/test";
+import { resolveDirectUrl } from "../src/lib/env";
 import { storeUrl } from "./urls";
-import { test, expect } from "@playwright/test";
 import { generateTOTP } from "./totp";
 
 const ADMIN_EMAIL = "admin@platform.test";
@@ -217,9 +220,57 @@ test.describe("Store management (authenticated)", () => {
   });
 });
 
+// The review list is confidence desc (nulls first), then name asc, 25 per page.
+// A null confidence sorts ahead of the seeded medium/low queue and ahead of
+// the active catalog, whose nulls would otherwise fill page 1. "!" sorts
+// before those names, so the row stays on page 1 after a rename. A name like
+// AAA-E2E-* does not: 25 earlier needs_review names hide it.
+let reviewNameSeq = 0;
+
+function reviewProductName(label: string): string {
+  reviewNameSeq += 1;
+  const rank = String(Number.MAX_SAFE_INTEGER - Date.now()).padStart(16, "0");
+  return `!${rank}-${reviewNameSeq} ${label}`;
+}
+
+async function withPlatformCatalog<T>(
+  run: (tx: import("@prisma/client").Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      return run(tx);
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+async function insertReviewProduct(name: string): Promise<string> {
+  const row = await withPlatformCatalog((tx) =>
+    tx.masterProduct.create({
+      data: { name, status: "needs_review", confidence: null },
+    }),
+  );
+  return row.id;
+}
+
+async function deleteReviewProduct(id: string): Promise<void> {
+  await withPlatformCatalog(async (tx) => {
+    await tx.auditLog.deleteMany({ where: { entityId: id } });
+    await tx.masterProduct.deleteMany({ where: { id } });
+  });
+}
+
+function reviewRow(page: Page, name: string) {
+  return page.locator("table tbody tr").filter({ hasText: name });
+}
+
 test.describe("Catalog review (authenticated)", () => {
-  // These tests all mutate the first review row. Parallel workers were approving
-  // that row while another test was renaming it.
+  // Sign-in uses one shared admin. Keep the cases serial so two TOTP submits
+  // do not overlap. Each case still targets a product it created.
   test.describe.configure({ mode: "serial" });
   test.beforeEach(async ({ page }) => {
     await adminSignIn(page);
@@ -228,43 +279,51 @@ test.describe("Catalog review (authenticated)", () => {
   });
 
   test("approve moves product to active tab", async ({ page }) => {
-    const reviewCountBefore = await page.locator("a[href*='status=needs_review'] span").last().textContent();
-    const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
+    const name = reviewProductName("approve");
+    const id = await insertReviewProduct(name);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const row = reviewRow(page, name);
+      await expect(row).toBeVisible({ timeout: 10000 });
+      await row.getByRole("button", { name: "Approve" }).click();
+      await expect(row).toHaveCount(0, { timeout: 10000 });
 
-    const firstRow = page.locator("table tbody tr").first();
-    await firstRow.getByRole("button", { name: "Approve" }).click();
-
-    await expect(page.locator("a[href*='status=needs_review'] span").last()).not.toHaveText(reviewCountBefore!, { timeout: 10000 });
-
-    const reviewCountAfter = await page.locator("a[href*='status=needs_review'] span").last().textContent();
-    const activeCountAfter = await page.locator("a[href*='status=active'] span").last().textContent();
-    expect(Number(reviewCountAfter)).toBe(Number(reviewCountBefore) - 1);
-    expect(Number(activeCountAfter)).toBe(Number(activeCountBefore) + 1);
+      await page.goto("/admin/catalog/review?status=active");
+      await expect(reviewRow(page, name)).toBeVisible({ timeout: 10000 });
+    } finally {
+      await deleteReviewProduct(id);
+    }
   });
 
   test("edit-then-approve updates name and moves to active", async ({ page }) => {
-    const activeCountBefore = await page.locator("a[href*='status=active'] span").last().textContent();
+    const original = reviewProductName("edit");
+    const editedName = reviewProductName("edited");
+    const id = await insertReviewProduct(original);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const row = reviewRow(page, original);
+      await expect(row).toBeVisible({ timeout: 10000 });
+      await row.getByRole("button", { name: "Edit" }).click();
 
-    const firstRow = page.locator("table tbody tr").first();
-    await firstRow.getByRole("button", { name: "Edit" }).click();
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(editedName);
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
-    const modal = page.getByRole("heading", { name: "Edit product" });
-    await expect(modal).toBeVisible({ timeout: 5000 });
+      await page.reload();
+      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
 
-    const nameInput = page.getByRole("dialog").locator("input").first();
-    const editedName = `AAA-E2E-${Date.now()}`;
-    await nameInput.fill(editedName);
-    await page.getByRole("button", { name: "Save" }).click();
-    await expect(modal).not.toBeVisible({ timeout: 5000 });
+      const editedRow = reviewRow(page, editedName);
+      await expect(editedRow).toBeVisible({ timeout: 10000 });
+      await editedRow.getByRole("button", { name: "Approve" }).click();
+      await expect(editedRow).toHaveCount(0, { timeout: 10000 });
 
-    await page.reload();
-    await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
-
-    const editedRow = page.locator("table tbody tr").filter({ hasText: editedName });
-    await expect(editedRow).toBeVisible({ timeout: 10000 });
-    await editedRow.getByRole("button", { name: "Approve" }).click();
-
-    await expect(page.locator("a[href*='status=active'] span").last()).not.toHaveText(activeCountBefore!, { timeout: 10000 });
+      await page.goto("/admin/catalog/review?status=active");
+      await expect(reviewRow(page, editedName)).toBeVisible({ timeout: 10000 });
+    } finally {
+      await deleteReviewProduct(id);
+    }
   });
 
   test("edit modal is an accessible dialog: role, aria-modal, focus trap, Escape", async ({ page }) => {
@@ -291,15 +350,20 @@ test.describe("Catalog review (authenticated)", () => {
   });
 
   test("reject moves product to rejected tab", async ({ page }) => {
-    const rejectedCountBefore = await page.locator("a[href*='status=rejected'] span").last().textContent();
+    const name = reviewProductName("reject");
+    const id = await insertReviewProduct(name);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const row = reviewRow(page, name);
+      await expect(row).toBeVisible({ timeout: 10000 });
+      await row.getByRole("button", { name: "Reject" }).click();
+      await expect(row).toHaveCount(0, { timeout: 10000 });
 
-    const firstRow = page.locator("table tbody tr").first();
-    await firstRow.getByRole("button", { name: "Reject" }).click();
-
-    await expect(page.locator("a[href*='status=rejected'] span").last()).not.toHaveText(rejectedCountBefore!, { timeout: 10000 });
-
-    const rejectedCountAfter = await page.locator("a[href*='status=rejected'] span").last().textContent();
-    expect(Number(rejectedCountAfter)).toBe(Number(rejectedCountBefore) + 1);
+      await page.goto("/admin/catalog/review?status=rejected");
+      await expect(reviewRow(page, name)).toBeVisible({ timeout: 10000 });
+    } finally {
+      await deleteReviewProduct(id);
+    }
   });
 
   test("non-admin access to catalog review redirects to sign-in", async ({ browser }) => {
