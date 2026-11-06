@@ -10,7 +10,16 @@ import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
 import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
-import { retainSession } from "@/lib/assistant/ui/chat-session";
+import {
+  acknowledgeUndo,
+  commitUndoLabel,
+  EMPTY_SESSION_SNAPSHOT,
+  noteAcceptedSend,
+  retainSession,
+  sessionSnapshot,
+  subscribeSessionMemory,
+  visibleRetry,
+} from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
 import { dataUrl, displayFileName, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
 import { createSendLock, outgoingMessage, settleSend } from "@/lib/assistant/ui/send";
@@ -26,8 +35,7 @@ import {
   type BrowserSpeech,
   type SpeechState,
 } from "@/lib/assistant/ui/speech";
-import { planUndo, undoCardAfter, type UndoAck } from "@/lib/assistant/ui/undo";
-import { replaceUndoLabels, undoLabelsForStore } from "@/lib/assistant/ui/undo-memory";
+import { planUndo, type UndoAck } from "@/lib/assistant/ui/undo";
 import { AssistantRouteError, mapRouteError, type RouteView } from "@/lib/assistant/ui/route-errors";
 import { undoAssistantAdditionAction } from "@/lib/cart/actions";
 import type { CartLine } from "@/lib/storefront/cart-store";
@@ -171,22 +179,21 @@ function Thread({
   const [inflight, setInflight] = useState<Flight | null>(null);
   const inflightRef = useRef<Flight | null>(null);
   const revokedRef = useRef(new Set<string>());
-  const [trackedStore, setTrackedStore] = useState(storeId);
-  const [undoState, setUndoState] = useState(() => undoLabelsForStore(storeId));
-  if (trackedStore !== storeId) {
-    setTrackedStore(storeId);
-    setUndoState(undoLabelsForStore(storeId));
-  }
-  function rememberUndoState(update: (current: Record<string, "undone" | "already_removed">) => Record<string, "undone" | "already_removed">) {
-    setUndoState((current) => {
-      const next = update(current);
-      replaceUndoLabels(storeId, next);
-      return next;
-    });
-  }
+  const memory = useSyncExternalStore(
+    (listener) => subscribeSessionMemory(chat, listener),
+    () => sessionSnapshot(chat),
+    () => EMPTY_SESSION_SNAPSHOT,
+  );
+  const undoState = memory.labels;
+  const retainedRetry = visibleRetry(chat);
   const liveRef = useRef<HTMLParagraphElement>(null);
   const busy = status === "submitted" || status === "streaming";
   const routeError: RouteView | null = error ? viewFor(error) : null;
+  const fileRetry = Boolean(
+    inflight &&
+    inflight.generation === generationRef.current &&
+    inflight.tiles.length > 0,
+  );
 
   useEffect(() => {
     if (routeError?.terminal) onTerminal();
@@ -528,6 +535,7 @@ function Thread({
       setLocalError(null);
       const textPart = outgoing.body.message.parts.find((part) => part.type === "text");
       const sent = textPart?.type === "text" ? textPart.text : "";
+      noteAcceptedSend(chat, { messageId: id, text: sent, hasFiles: ready.length > 0 });
       if (!retrying) {
         const previous = inflightRef.current;
         if (previous) {
@@ -603,7 +611,7 @@ function Thread({
             turnFailed={status === "error" && message.role === "assistant" && index === messages.length - 1}
             onChoice={(text) => { void submit(text); }}
             onUndo={(card) => {
-              void undoCard(card, lines, storeId, undoState, rememberUndoState, onCartFailure);
+              void undoCard(card, lines, storeId, chat, undoState, onCartFailure);
             }}
             onChange={() => composer.current?.focus()}
             onClose={onClose}
@@ -652,13 +660,16 @@ function Thread({
         <div className={styles.notice} role="status">
           <p>{routeError.title}</p>
           <a href={routeError.searchHref}>Search the shelves</a>
-          {inflight && (routeError.retry || inflight.tiles.length > 0) ? (
+          {routeError.retry && (fileRetry || retainedRetry) ? (
             <button
               type="button"
               className={styles.ghost}
               onClick={() => {
                 if (sendLock.current.held) return;
-                void submit(inflight.text, inflight.id);
+                const retryId = fileRetry && inflight ? inflight.id : retainedRetry?.messageId;
+                const retryText = fileRetry && inflight ? inflight.text : retainedRetry?.text ?? "";
+                if (!retryId) return;
+                void submit(retryText, retryId);
               }}
             >
               Retry
@@ -975,8 +986,8 @@ async function undoCard(
   card: Extract<AssistantCard, { kind: "added" }>,
   lines: readonly CartLine[],
   storeId: string,
+  chat: ReturnType<typeof retainSession>,
   undoState: Record<string, "undone" | "already_removed">,
-  setUndoState: (value: (current: Record<string, "undone" | "already_removed">) => Record<string, "undone" | "already_removed">) => void,
   onCartFailure: (failure: { error?: string; thrown?: unknown }) => void,
 ) {
   const line = lines.find((item) => item.serverLineId === card.lineId);
@@ -989,7 +1000,7 @@ async function undoCard(
   });
   if (plan.action === "skip") {
     const label = plan.label === "Undone" ? "undone" : "already_removed";
-    setUndoState((current) => ({ ...current, [card.additionId]: label }));
+    commitUndoLabel(chat, card.additionId, label);
     return;
   }
   if (plan.action !== "submit") return;
@@ -1015,8 +1026,5 @@ async function undoCard(
   } catch {
     refresh = "failed";
   }
-  const view = undoCardAfter(ack, refresh);
-  if (view === "unchanged") return;
-  const label = view === "undone" ? "undone" : "already_removed";
-  setUndoState((current) => ({ ...current, [card.additionId]: label }));
+  acknowledgeUndo(chat, card.additionId, ack, refresh);
 }

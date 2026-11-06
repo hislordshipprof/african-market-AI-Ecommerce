@@ -158,17 +158,39 @@ test("Looks good closes the sheet when the summary starts on the cart", async ({
   await expect(dialog).toBeHidden();
 });
 
-test("a fake mid-stream failure recovers when the shopper retries", async ({ page }) => {
+test("a failed turn can be retried after the customer leaves the sheet", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
+  });
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "mid-stream");
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
   await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
-  await dialog.getByRole("button", { name: "Retry" }).click();
-  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
+  expect(posts).toHaveLength(1);
+  const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await page.getByTestId("assistant-launcher").click();
+  const again = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(again.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible();
+  await again.getByRole("button", { name: "Retry" }).click();
+  await expect(again.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
+  await expect(bubbles(again).filter({ hasText: "mid-stream" })).toHaveCount(1);
+  await expect(again.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  expect(posts).toHaveLength(2);
+  expect(JSON.parse(posts[1] ?? "{}").message.id).toBe(failedId);
 });
 
 test("a stream cut after the tool starts shows an error and retry does not add again", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST" && request.headers()["x-e2e-full"] !== "1") {
+      posts.push(request.postData() ?? "");
+    }
+  });
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await page.route("**/api/assistant/chat", async (route) => {
@@ -196,10 +218,17 @@ test("a stream cut after the tool starts shows an error and retry does not add a
   await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
   const count = page.getByRole("banner").getByTestId("cart-count");
   await expect(count).toHaveText("2", { timeout: 10_000 });
+  const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.unroute("**/api/assistant/chat");
-  await dialog.getByRole("button", { name: "Retry" }).click();
-  await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("assistant-launcher").click();
+  const again = page.getByRole("dialog", { name: "Shop with help" });
+  await again.getByRole("button", { name: "Retry" }).click();
+  await expect(again.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(count).toHaveText("2");
+  expect(posts).toHaveLength(2);
+  expect(JSON.parse(posts[1] ?? "{}").message.id).toBe(failedId);
 });
 
 test("one submit is one request, and a rejected undo says what happened", async ({ page }) => {
@@ -551,5 +580,160 @@ test("a transparent photo stays dark ink on white and keeps the scrubbed name", 
   const ink = at(Math.floor(info.width / 2), Math.floor(info.height / 2));
   expect(Math.min(...corner)).toBeGreaterThan(200);
   expect(Math.max(...ink)).toBeLessThan(80);
+});
+
+test("a text turn failing after navigation retains its original Retry", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
+  });
+  let release = () => {};
+  let hold = true;
+  await page.route("**/api/assistant/chat", async (route) => {
+    if (hold) await new Promise<void>((resolve) => { release = resolve; });
+    await route.continue();
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await send(page, "mid-stream");
+  await expect.poll(() => posts.length).toBe(1);
+  await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "Search", exact: true }).click();
+  release();
+  hold = false;
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const retry = dialog.getByRole("button", { name: "Retry" });
+  await expect(retry).toBeVisible({ timeout: 20_000 });
+  const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  await retry.evaluate((node) => {
+    const button = node as HTMLButtonElement;
+    button.click();
+    button.click();
+  });
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
+  await expect(bubbles(dialog).filter({ hasText: "mid-stream" })).toHaveCount(1);
+  await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  expect(posts).toHaveLength(2);
+  expect(JSON.parse(posts[1] ?? "{}").message.id).toBe(failedId);
+
+  hold = true;
+  await send(page, "hello from the shelves");
+  await expect.poll(() => posts.length).toBe(3);
+  await page.keyboard.press("Escape");
+  release();
+  hold = false;
+  await page.getByTestId("assistant-launcher").click();
+  const returned = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(returned.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
+  await expect(returned.getByRole("button", { name: "Retry" })).toHaveCount(0);
+});
+
+test("closing a failed file turn removes Retry without turning it into a text turn", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
+  });
+  let release = () => {};
+  await page.route("**/api/assistant/chat", async (route) => {
+    await new Promise<void>((resolve) => { release = resolve; });
+    await route.continue();
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("file overload rice");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(1);
+  await page.keyboard.press("Escape");
+  release();
+  await page.unroute("**/api/assistant/chat");
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(dialog.getByRole("status")).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Remove / })).toHaveCount(0);
+  const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  await send(page, "rice please");
+  await expect.poll(() => posts.length).toBe(2);
+  const next = JSON.parse(posts[1] ?? "{}").message as { id: string; parts: unknown[] };
+  expect(next.id).not.toBe(failedId);
+  expect(JSON.stringify(next.parts)).not.toContain("image/jpeg");
+
+  await page.goto(`${origin}/`);
+  release = () => {};
+  await page.route("**/api/assistant/chat", async (route) => {
+    await new Promise<void>((resolve) => { release = resolve; });
+    await route.fulfill({ status: 500, contentType: "text/plain", body: "no" });
+  });
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="application/pdf"]').setInputFiles("src/lib/assistant/fixtures/two-page.pdf");
+  await expect(page.getByRole("button", { name: "Remove two-page.pdf" })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("recipe");
+  await page.getByTestId("assistant-send").click();
+  await page.keyboard.press("Escape");
+  release();
+  await page.unroute("**/api/assistant/chat");
+  await page.getByTestId("assistant-launcher").click();
+  const pdfDialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(pdfDialog.getByRole("status")).toBeVisible({ timeout: 20_000 });
+  await expect(pdfDialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(pdfDialog.getByRole("button", { name: /Remove / })).toHaveCount(0);
+
+  await page.goto(`${origin}/`);
+  release = () => {};
+  await page.route("**/api/assistant/chat", async (route) => {
+    await new Promise<void>((resolve) => { release = resolve; });
+    await route.fulfill({ status: 500, contentType: "text/plain", body: "no" });
+  });
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-send").click();
+  await page.keyboard.press("Escape");
+  release();
+  await page.unroute("**/api/assistant/chat");
+  await page.getByTestId("assistant-launcher").click();
+  const filesOnly = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(filesOnly.getByRole("status")).toBeVisible({ timeout: 20_000 });
+  await expect(filesOnly.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("fresh list");
+  const before = posts.length;
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(before + 1);
+  const fresh = JSON.parse(posts.at(-1) ?? "{}").message as { id: string; parts: Array<{ type?: string }> };
+  expect(fresh.id).not.toBe(failedId);
+  expect(fresh.parts.some((part) => part.type === "file")).toBe(true);
+});
+
+test("file presence cannot enable Retry for terminal or message-rate-limited errors", async ({ page }) => {
+  const cases = [
+    [503, "assistant_unavailable", "The helper isn't available right now."],
+    [404, "assistant_disabled", "The helper isn't available right now."],
+    [403, "store_suspended", "This store isn't taking orders right now."],
+    [503, "assistant_resting", "The helper is resting right now. You can keep shopping the usual way."],
+    [429, "rate_limited", "Too many messages."],
+  ] as const;
+  for (const [status, code, title] of cases) {
+    await page.goto(`${origin}/`);
+    await page.getByTestId("assistant-launcher").click();
+    await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+    await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+    await page.route("**/api/assistant/chat", (route) => route.fulfill({
+      status,
+      contentType: "application/json",
+      headers: code === "rate_limited" ? { "retry-after": "60" } : {},
+      body: JSON.stringify({ error: { code } }),
+    }));
+    await page.getByTestId("assistant-composer").fill("rice from the photo");
+    await page.getByTestId("assistant-send").click();
+    const dialog = page.getByRole("dialog", { name: "Shop with help" });
+    await expect(dialog.getByRole("status").getByText(title)).toBeVisible({ timeout: 20_000 });
+    await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
+    await page.unroute("**/api/assistant/chat");
+  }
 });
 
