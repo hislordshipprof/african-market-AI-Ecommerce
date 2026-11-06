@@ -39,7 +39,6 @@ test("real Payment Element renders under the report-only policy with zero violat
       });
     });
 
-    const violations: string[] = [];
     await page.addInitScript(() => {
       const target = window as unknown as { __csp?: string[] };
       target.__csp = [];
@@ -49,15 +48,20 @@ test("real Payment Element renders under the report-only policy with zero violat
     });
     await page.goto(`/?store=${slug}`);
     await page.getByRole("button", { name: `Add ${name} to cart` }).click();
+    const cart = page.getByRole("button", { name: "Shopping cart" }).first();
+    await expect(cart.getByTestId("cart-count")).toHaveText("1");
+    await expect(cart).not.toHaveAttribute("data-cart-pending");
     await page.goto(`/checkout?store=${slug}`);
-    await expect(page.locator("iframe[name^='__privateStripeFrame'], iframe[src*='js.stripe.com']").first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("iframe[src*='js.stripe.com']:visible").first()).toBeVisible({ timeout: 20_000 });
     const seen = await page.evaluate(() => (window as unknown as { __csp?: string[] }).__csp ?? []);
     expect(seen).toEqual([]);
-    expect(violations).toEqual([]);
   } finally {
+    await page.close();
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.cartLine.deleteMany({ where: { storeId: store.id } });
+      await tx.cart.deleteMany({ where: { storeId: store.id } });
       await tx.listingVariant.deleteMany({ where: { listing: { storeId: store.id } } });
       await tx.listing.deleteMany({ where: { storeId: store.id } });
     });

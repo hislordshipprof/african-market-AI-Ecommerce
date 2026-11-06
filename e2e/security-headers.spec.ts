@@ -28,8 +28,10 @@ test("storefront, admin sign-in, checkout, api and static carry headers with zer
     expect(headers["x-content-type-options"], path).toBe("nosniff");
     expect(headers["strict-transport-security"], path).toBe("max-age=63072000");
     expect(headers["content-security-policy-report-only"], path).not.toContain("unsafe-eval");
+    if (!path.startsWith("/api/")) {
+      expect(await violationsOf(page), path).toEqual([]);
+    }
   }
-  expect(await violationsOf(page)).toEqual([]);
 
   const home = await request.get("/?store=mama-ngozi");
   const html = await home.text();

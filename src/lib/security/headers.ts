@@ -61,7 +61,12 @@ export function reportOnlyPolicy(
   ].filter(Boolean).join(" ");
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://js.stripe.com https://*.js.stripe.com https://maps.googleapis.com${devEval}`,
+    // Next 16.4.3 emits inline scripts with no nonce attribute, and its production
+    // runtime does not read the request CSP. A nonce in script-src disables
+    // 'unsafe-inline', and 'strict-dynamic' ignores 'self', so either one reports
+    // every framework script. The rotating nonce lives on script-src-attr instead.
+    `script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com https://maps.googleapis.com${devEval}`,
+    `script-src-attr 'nonce-${nonce}'`,
     "style-src 'self' 'unsafe-inline'",
     `img-src ${imgSrc}`,
     "font-src 'self'",
