@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { acceptInvite } from "@/lib/invite/service";
+import { parseInput } from "@/lib/security/parse-input";
+import { requireSameOrigin } from "@/lib/security/same-origin";
+
+const bodySchema = z.strictObject({
+  token: z.string().min(1).max(512),
+});
 
 export async function POST(req: NextRequest) {
   const reqHeaders = await headers();
@@ -21,17 +28,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = await req.json();
-  const { token } = body as { token: string };
-
-  if (!token || typeof token !== "string") {
-    return NextResponse.json(
-      { error: "Missing invite token" },
-      { status: 400 },
-    );
+  if (!requireSameOrigin(req)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const result = await acceptInvite(token, session.user.id, session.user.email);
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Missing invite token" }, { status: 400 });
+  }
+  const body = parseInput(bodySchema, raw);
+  if (!body.ok) {
+    return NextResponse.json({ error: "Missing invite token" }, { status: 400 });
+  }
+
+  const result = await acceptInvite(body.data.token, session.user.id, session.user.email);
 
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 400 });

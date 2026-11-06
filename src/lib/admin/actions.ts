@@ -7,8 +7,10 @@ import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
 import { isSlugRoutable } from "../slug";
 import type { ThemePreset } from "../theme";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
+import { parseInput, readFormField, readFormFields } from "../security/parse-input";
 
 import { VALID_US_TIMEZONES } from "./timezone";
 
@@ -41,11 +43,16 @@ export type StoreFormState = {
   nudgedColor?: string;
 };
 
+function formText(data: unknown, key: string): string | null {
+  const value = readFormField(data, key);
+  return typeof value === "string" ? value : null;
+}
+
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
   for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled", "timezone"]) {
-    const v = data.get(key);
-    if (v != null) raw[key] = String(v);
+    const v = formText(data, key);
+    if (v != null) raw[key] = v;
   }
   return raw;
 }
@@ -70,23 +77,23 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
 } {
   const errors: Record<string, string> = {};
 
-  const slug = (data.get("slug") as string)?.trim().toLowerCase() ?? "";
-  const name = (data.get("name") as string)?.trim() ?? "";
-  const logoUrl = (data.get("logoUrl") as string)?.trim() || null;
-  const brandColor = (data.get("brandColor") as string)?.trim() || null;
-  const themePreset = (data.get("themePreset") as string)?.trim() || "palm-and-shea";
-  const status = (data.get("status") as string)?.trim() || "active";
-  const hoursRaw = (data.get("hours") as string)?.trim() || "";
-  const prepTimeMinutes = parseIntOrDefault(data.get("prepTimeMinutes") as string, 30);
-  const deliveryRadiusMi = parseFloatOrDefault(data.get("deliveryRadiusMi") as string, 8);
+  const slug = formText(data, "slug")?.trim().toLowerCase() ?? "";
+  const name = formText(data, "name")?.trim() ?? "";
+  const logoUrl = formText(data, "logoUrl")?.trim() || null;
+  const brandColor = formText(data, "brandColor")?.trim() || null;
+  const themePreset = formText(data, "themePreset")?.trim() || "palm-and-shea";
+  const status = formText(data, "status")?.trim() || "active";
+  const hoursRaw = formText(data, "hours")?.trim() || "";
+  const prepTimeMinutes = parseIntOrDefault(formText(data, "prepTimeMinutes"), 30);
+  const deliveryRadiusMi = parseFloatOrDefault(formText(data, "deliveryRadiusMi"), 8);
   const minimumOrderCents = Math.round(
-    parseFloatOrDefault(data.get("minimumOrder") as string, 35) * 100,
+    parseFloatOrDefault(formText(data, "minimumOrder"), 35) * 100,
   );
-  const pickupEnabled = data.get("pickupEnabled") === "on";
+  const pickupEnabled = formText(data, "pickupEnabled") === "on";
   const autoRefundLimitCents = Math.round(
-    parseFloatOrDefault(data.get("autoRefundLimit") as string, 25) * 100,
+    parseFloatOrDefault(formText(data, "autoRefundLimit"), 25) * 100,
   );
-  const timezone = (data.get("timezone") as string)?.trim() || defaultTimezone;
+  const timezone = formText(data, "timezone")?.trim() || defaultTimezone;
 
   if (!slug) errors.slug = "Slug is required";
   else if (!isSlugRoutable(slug)) errors.slug = "This slug is not allowed (reserved, all-digit, or invalid format)";
@@ -185,11 +192,40 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
   };
 }
 
+const STORE_FORM_FIELDS = [
+  "slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours",
+  "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit",
+  "pickupEnabled", "timezone", "storeId",
+] as const;
+const storeFormSchema = z.strictObject({
+  slug: z.string().max(80).nullable(),
+  name: z.string().max(200).nullable(),
+  logoUrl: z.string().max(2_000).nullable(),
+  brandColor: z.string().max(32).nullable(),
+  themePreset: z.string().max(40).nullable(),
+  status: z.string().max(20).nullable(),
+  hours: z.string().max(20_000).nullable(),
+  prepTimeMinutes: z.string().max(20).nullable(),
+  deliveryRadiusMi: z.string().max(20).nullable(),
+  minimumOrder: z.string().max(20).nullable(),
+  autoRefundLimit: z.string().max(20).nullable(),
+  pickupEnabled: z.string().max(10).nullable(),
+  timezone: z.string().max(80).nullable(),
+  storeId: z.string().max(200).nullable(),
+});
+
+function boundStoreForm(data: FormData): boolean {
+  return parseInput(storeFormSchema, readFormFields(data, STORE_FORM_FIELDS)).ok;
+}
+
 export async function createStore(
   _prev: StoreFormState,
   data: FormData,
 ): Promise<StoreFormState> {
   const session = await requirePlatformAdmin();
+  if (!boundStoreForm(data)) {
+    return { fieldErrors: { hours: "Hours must be valid JSON" }, submittedValues: extractRawValues(data) };
+  }
 
   const raw = extractRawValues(data);
   const { errors, values } = validateStoreFields(data);
@@ -280,8 +316,9 @@ export async function updateStore(
   data: FormData,
 ): Promise<StoreFormState> {
   const session = await requirePlatformAdmin();
+  if (!boundStoreForm(data)) return { error: "Store ID is required" };
 
-  const storeId = data.get("storeId") as string;
+  const storeId = formText(data, "storeId") ?? "";
   if (!storeId) return { error: "Store ID is required" };
 
   const before = await platformAdmin.store.findUnique({
@@ -400,11 +437,14 @@ export async function setStoreStatus(
   storeId: string,
   targetStatus: "suspended" | "active",
 ): Promise<StoreFormState> {
-  if (!(VALID_STORE_STATUSES as readonly string[]).includes(targetStatus)) {
+  const session = await requirePlatformAdmin();
+  const parsed = parseInput(z.strictObject({
+    storeId: z.string().min(1).max(200),
+    targetStatus: z.enum(VALID_STORE_STATUSES),
+  }), { storeId, targetStatus });
+  if (!parsed.ok) {
     return { error: `Invalid status: must be one of ${VALID_STORE_STATUSES.join(", ")}` };
   }
-
-  const session = await requirePlatformAdmin();
 
   const result = await platformAdminTransaction(async (tx) => {
     const before = await tx.store.findUnique({ where: { id: storeId } });
@@ -451,13 +491,19 @@ export async function listStores() {
 
 export async function getStoreById(id: string) {
   await requirePlatformAdmin();
-  return platformAdmin.store.findUnique({ where: { id } });
+  const parsed = parseInput(z.string().min(1).max(200), id);
+  if (!parsed.ok) return null;
+  return platformAdmin.store.findUnique({ where: { id: parsed.data } });
 }
 
 export async function inviteStoreOwnerAction(formData: FormData) {
   const session = await requirePlatformAdmin();
-  const storeId = formData.get("storeId") as string | null;
-  const email = formData.get("email") as string | null;
+  const fields = parseInput(z.strictObject({
+    storeId: z.string().max(200).nullable(),
+    email: z.string().max(320).nullable(),
+  }), readFormFields(formData, ["storeId", "email"]));
+  const storeId = fields.ok ? fields.data.storeId : null;
+  const email = fields.ok ? fields.data.email : null;
 
   if (!storeId || !email) {
     return { error: "Store ID and email are required" };

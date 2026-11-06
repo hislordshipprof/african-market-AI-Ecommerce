@@ -1,22 +1,32 @@
 import { NextResponse } from "next/server";
-import { checkoutPaymentsUseFake, getCheckoutPayments } from "@/lib/stripe/checkout-payments";
+import { z } from "zod";
+import { getCheckoutPayments } from "@/lib/stripe/checkout-payments";
+import { parseInput } from "@/lib/security/parse-input";
+import { testOnlyRoutesAllowed } from "@/lib/security/test-only-routes";
 
-/** Confirms a fake PaymentIntent. Closed unless the checkout fake is allowed. */
+/** Closed unless this route's own flag passes the shared test-route gate. */
+export function fakeConfirmRouteAllowed(
+  env: Record<string, string | undefined>,
+): boolean {
+  return testOnlyRoutesAllowed(env, env.E2E_FAKE_STRIPE);
+}
+
+/** Confirms a fake PaymentIntent. The gate runs before parsing or the provider. */
 export async function POST(request: Request) {
-  if (!checkoutPaymentsUseFake()) {
+  if (!fakeConfirmRouteAllowed(process.env)) {
     return NextResponse.json({ error: "Not available" }, { status: 404 });
   }
-  const body = await request.json().catch(() => null) as {
-    paymentIntentId?: string;
-    paymentMethodId?: string | null;
-  } | null;
-  const paymentIntentId = body?.paymentIntentId;
-  if (!paymentIntentId) {
+  const body = await request.json().catch(() => null);
+  const parsed = parseInput(z.strictObject({
+    paymentIntentId: z.string().min(1).max(200),
+    paymentMethodId: z.string().max(200).nullable().optional(),
+  }), body);
+  if (!parsed.ok) {
     return NextResponse.json({ error: "paymentIntentId required" }, { status: 400 });
   }
   try {
-    const intent = await getCheckoutPayments().confirmPaymentIntent(paymentIntentId, {
-      payment_method: body?.paymentMethodId || "pm_card_visa",
+    const intent = await getCheckoutPayments().confirmPaymentIntent(parsed.data.paymentIntentId, {
+      payment_method: parsed.data.paymentMethodId || "pm_card_visa",
     });
     return NextResponse.json({ status: intent.status });
   } catch (error) {

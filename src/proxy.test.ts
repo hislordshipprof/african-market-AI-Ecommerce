@@ -266,3 +266,44 @@ describe("proxy in production (override not allowed)", () => {
     );
   });
 });
+
+describe("security headers on the proxy", () => {
+  it("redirect and pass-through both carry headers", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("VERCEL_ENV", "");
+    const redirect = proxy(makeRequest("http://localhost:3000/?store=mama-ngozi"));
+    expect(redirect.status).toBe(307);
+    expect(redirect.headers.get("content-security-policy")).toBe(
+      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+    );
+    expect(redirect.headers.get("content-security-policy-report-only")).toContain("default-src 'self'");
+    expect(redirect.headers.get("strict-transport-security")).toBe("max-age=63072000");
+
+    vi.stubEnv("NODE_ENV", "production");
+    const pass = proxy(makeRequest("http://localhost:3000/"));
+    expect(pass.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(pass.headers.get("x-frame-options")).toBe("DENY");
+    expect(pass.headers.get("content-security-policy-report-only")).not.toContain("unsafe-eval");
+    expect(pass.headers.get("content-security-policy")).toBe(
+      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+    );
+
+    const nextConfig = (await import("../next.config")).default;
+    if (!nextConfig.headers) throw new Error("next config does not set headers");
+    const configured = await nextConfig.headers();
+    expect(configured.map((entry: { source: string }) => entry.source)).toContain("/_next/static/:path*");
+  });
+
+  it("nonce request equals response and differs per request", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const first = proxy(makeRequest("http://localhost:3000/shop"));
+    const second = proxy(makeRequest("http://localhost:3000/shop"));
+    const report = (response: { headers: { get(name: string): string | null } }) =>
+      response.headers.get("content-security-policy-report-only");
+    expect(report(first)).toBe(first.headers.get("x-middleware-request-content-security-policy-report-only"));
+    expect(report(first)).not.toBe(report(second));
+    expect(first.headers.get("content-security-policy")).not.toContain("nonce-");
+  });
+});

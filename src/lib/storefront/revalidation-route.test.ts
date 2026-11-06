@@ -23,4 +23,15 @@ describe("seed revalidation bridge", () => {
     }
     expect(revalidateTag).not.toHaveBeenCalled();
   });
+
+  it("no secret, wrong secret and short secret are 401; oversized store list is 400", async () => {
+    vi.stubEnv("STOREFRONT_REVALIDATION_SECRET", "");
+    expect((await POST(request({ stores: [{ id: "a", slug: "shop" }] }, ""))).status).toBe(401);
+    vi.stubEnv("STOREFRONT_REVALIDATION_SECRET", "test-only-cache-secret");
+    expect((await POST(request({ stores: [{ id: "a", slug: "shop" }] }, "wrong"))).status).toBe(401);
+    expect((await POST(request({ stores: [{ id: "a", slug: "shop" }] }, "short"))).status).toBe(401);
+    const stores = Array.from({ length: 51 }, (_, index) => ({ id: `s${index}`, slug: `shop-${index}` }));
+    expect((await POST(request({ stores }))).status).toBe(400);
+    expect(revalidateTag).not.toHaveBeenCalled();
+  });
 });

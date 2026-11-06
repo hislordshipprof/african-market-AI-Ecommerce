@@ -1,11 +1,13 @@
 "use server";
 
+import { z } from "zod";
 import { headers } from "next/headers";
 import { assistantFakeAllowed } from "../assistant/contract";
 import { auth } from "../auth";
 import { getStore } from "../get-store";
 import { readBrowserId } from "./browser";
 import { getCartIdFromCookie, setCartIdCookie } from "./cookies";
+import { parseInput } from "../security/parse-input";
 import {
   getOrCreateCart,
   addLine,
@@ -21,6 +23,13 @@ import {
   type CartWithLines,
   type MinimumOrderResult,
 } from "./service";
+
+const lineIdSchema = z.string().min(1).max(200);
+const qtySchema = z.number().int().min(0).max(1_000_000);
+
+function invalidItem(): { ok: false; error: string; code: string } {
+  return { ok: false, error: "Invalid item", code: "INVALID_INPUT" };
+}
 
 async function sessionUserId(): Promise<string | null> {
   const reqHeaders = await headers();
@@ -83,9 +92,12 @@ export async function addToCart(
   variantId: string,
   qty: number,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
+  const variant = parseInput(lineIdSchema, variantId);
+  const quantity = parseInput(qtySchema, qty);
+  if (!variant.ok || !quantity.ok || quantity.data < 1) return invalidItem();
   try {
     const { storeId, cartId, userId } = await ensureCartId();
-    await addLine(storeId, cartId, variantId, qty, userId);
+    await addLine(storeId, cartId, variant.data, quantity.data, userId);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -99,9 +111,12 @@ export async function setLineQty(
   lineId: string,
   qty: number,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
+  const line = parseInput(lineIdSchema, lineId);
+  const quantity = parseInput(qtySchema, qty);
+  if (!line.ok || !quantity.ok) return invalidItem();
   try {
     const { storeId, cartId, userId } = await ensureCartId();
-    await updateLineQty(storeId, cartId, lineId, qty, userId);
+    await updateLineQty(storeId, cartId, line.data, quantity.data, userId);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -116,14 +131,20 @@ export async function setSwapRule(
   swapRule: SwapRuleValue,
   substituteVariantId: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
+  const parsed = parseInput(z.strictObject({
+    lineId: lineIdSchema,
+    swapRule: z.enum(["exact_only", "store_suggests", "named_substitute"]),
+    substituteVariantId: z.string().max(200).nullable(),
+  }), { lineId, swapRule, substituteVariantId });
+  if (!parsed.ok) return invalidItem();
   try {
     const { storeId, cartId, userId } = await ensureCartId();
     await updateLineSwapRule(
       storeId,
       cartId,
-      lineId,
-      swapRule,
-      substituteVariantId,
+      parsed.data.lineId,
+      parsed.data.swapRule,
+      parsed.data.substituteVariantId,
       userId,
     );
     return { ok: true };
@@ -143,6 +164,12 @@ export async function undoAssistantAdditionAction(input: {
   | { ok: true; result: Awaited<ReturnType<typeof undoAssistantAddition>> }
   | { ok: false; error: string; code: string }
 > {
+  const parsed = parseInput(z.strictObject({
+    lineId: lineIdSchema,
+    added: z.number().int().min(0).max(1_000_000),
+    additionId: lineIdSchema,
+  }), input);
+  if (!parsed.ok) return invalidItem();
   if (assistantFakeAllowed()) {
     const cookie = (await headers()).get("cookie") ?? "";
     if (cookie.includes("e2e_undo=reject")) return { ok: false, error: "Could not undo that", code: "CART_NOT_FOUND" };
@@ -151,7 +178,7 @@ export async function undoAssistantAdditionAction(input: {
   }
   try {
     const { storeId, cartId, userId } = await ensureCartId();
-    const result = await undoAssistantAddition(storeId, cartId, input.lineId, input.added, input.additionId, userId);
+    const result = await undoAssistantAddition(storeId, cartId, parsed.data.lineId, parsed.data.added, parsed.data.additionId, userId);
     return { ok: true, result };
   } catch (e) {
     if (e instanceof CartError) return { ok: false, error: e.message, code: e.code };
@@ -162,9 +189,11 @@ export async function undoAssistantAdditionAction(input: {
 export async function removeCartLine(
   lineId: string,
 ): Promise<{ ok: true } | { ok: false; error: string; code: string }> {
+  const line = parseInput(lineIdSchema, lineId);
+  if (!line.ok) return invalidItem();
   try {
     const { storeId, cartId, userId } = await ensureCartId();
-    await removeLine(storeId, cartId, lineId, userId);
+    await removeLine(storeId, cartId, line.data, userId);
     return { ok: true };
   } catch (e) {
     if (e instanceof CartError) {
@@ -206,13 +235,20 @@ export async function migrateLocalCart(
     substituteVariantId?: string | null;
   }>,
 ): Promise<{ ok: true; cartId: string } | { ok: false; error: string }> {
+  const parsed = parseInput(z.array(z.strictObject({
+    variantId: lineIdSchema,
+    qty: qtySchema,
+    swapRule: z.enum(["exact_only", "store_suggests", "named_substitute"]).optional(),
+    substituteVariantId: z.string().max(200).nullable().optional(),
+  })).max(200), localLines);
+  if (!parsed.ok) return { ok: false, error: "Invalid item" };
   try {
     const { storeId, cartId, userId } = await ensureCartId();
     const existingCart = await getCartWithLines(storeId, cartId);
     if (existingCart && existingCart.lines.length > 0) {
       return { ok: true, cartId };
     }
-    for (const line of localLines) {
+    for (const line of parsed.data) {
       if (!line.variantId || line.qty <= 0) continue;
       try {
         await addLine(storeId, cartId, line.variantId, line.qty, userId);

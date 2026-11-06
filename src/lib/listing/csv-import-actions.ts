@@ -1,10 +1,13 @@
 "use server";
 
+import { z } from "zod";
 import { requireStoreOwner } from "../store-admin/session";
+import { parseInput, readFormField } from "../security/parse-input";
 import {
   generatePreview,
   commitImport,
   validateFileSize,
+  MAX_FILE_BYTES,
   type CsvPreviewResult,
   type CommitSelection,
   type CommitResult,
@@ -25,16 +28,18 @@ export async function csvPreviewAction(
   formData: FormData,
 ): Promise<PreviewActionResult> {
   const session = await requireStoreOwner();
-  const file = formData.get("file") as File | null;
-
-  if (!file || file.size === 0) {
-    return { error: "Please select a CSV file." };
+  const file = readFormField(formData, "file");
+  const selected = parseInput(
+    z.custom<File>((value) => value instanceof File && value.size > 0),
+    file,
+  );
+  if (!selected.ok) return { error: "Please select a CSV file." };
+  const sized = parseInput(z.number().int().nonnegative().max(MAX_FILE_BYTES), selected.data.size);
+  if (!sized.ok) {
+    return { error: validateFileSize(selected.data.size) ?? "Please select a CSV file." };
   }
 
-  const sizeError = validateFileSize(file.size);
-  if (sizeError) return { error: sizeError };
-
-  const csvText = await file.text();
+  const csvText = await selected.data.text();
   const preview = await generatePreview(session.store.id, csvText, session.user.id);
 
   const hasContent =
@@ -61,17 +66,28 @@ export async function csvCommitAction(
   selection: CommitSelection,
 ): Promise<CommitActionResult> {
   const session = await requireStoreOwner();
-
-  if (!importToken) {
+  const token = parseInput(z.string().min(1).max(200), importToken);
+  const selectionParsed = parseInput(z.strictObject({
+    matchedRows: z.array(z.number().int()).max(5001),
+    newItemRows: z.array(z.number().int()).max(5001),
+    ambiguousResolutions: z.array(z.strictObject({
+      row: z.number().int(),
+      masterProductId: z.string().min(1).max(200),
+    })).max(5001),
+  }), selection);
+  if (!token.ok) {
     return { error: "Missing import token. Please upload the file again." };
+  }
+  if (!selectionParsed.ok) {
+    return { error: "No rows selected." };
   }
 
   let result: CommitResult;
   try {
     result = await commitImport(
       session.store.id,
-      importToken,
-      selection,
+      token.data,
+      selectionParsed.data,
       toActor(session.user),
     );
   } catch (e) {

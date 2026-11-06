@@ -75,6 +75,12 @@ describe("createStore", () => {
     expect(result.fieldErrors?.slug).toBeDefined();
   });
 
+  it("rejects a non-form body and does not create a store", async () => {
+    const result = await createStore({}, {} as never);
+    expect(result.fieldErrors?.slug).toBe("Slug is required");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
   it("lowercases slug before validation", async () => {
     mockFindUnique.mockResolvedValueOnce(null);
     mockCreate.mockResolvedValueOnce({
