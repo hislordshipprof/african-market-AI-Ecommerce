@@ -216,13 +216,14 @@ export function bindRecognizer(
     }
   };
   recognizer.onerror = (event) => {
+    const current = input.read();
+    if (current.session !== input.session) return;
     if (event.error === "language-not-supported" && !retried && recognizer.lang !== "en-US") {
       retried = true;
       recognizer.lang = "en-US";
       recognizer.start();
       return;
     }
-    const current = input.read();
     const copy = speechErrorCopy(event.error);
     input.write({ ...current, listening: false, notice: copy ?? current.notice });
   };

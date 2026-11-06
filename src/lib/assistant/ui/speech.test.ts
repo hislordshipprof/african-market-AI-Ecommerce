@@ -152,4 +152,35 @@ describe("assistant speech", () => {
     recognizer.onerror?.({ error: "language-not-supported" });
     expect(state.listening).toBe(false);
   });
+
+  it("ignores an error from a recognizer after a newer session has started", () => {
+    const starts: string[] = [];
+    const recognizer: BrowserSpeech = {
+      lang: "",
+      continuous: true,
+      interimResults: false,
+      start: () => { starts.push(recognizer.lang); },
+      stop: () => {},
+      abort: () => {},
+      onresult: null,
+      onerror: null,
+      onend: null,
+    };
+    let state = beginSpeech("beans", 1);
+    bindRecognizer(recognizer, {
+      lang: "yo",
+      session: 1,
+      read: () => state,
+      write: (next) => { state = next; },
+    });
+    state = beginSpeech("beans", 2);
+    recognizer.onerror?.({ error: "aborted" });
+    expect(state.session).toBe(2);
+    expect(state.listening).toBe(true);
+    expect(state.draft).toBe("beans");
+    expect(state.notice).toBeNull();
+    recognizer.onerror?.({ error: "language-not-supported" });
+    expect(starts).toEqual(["yo"]);
+    expect(state.listening).toBe(true);
+  });
 });
