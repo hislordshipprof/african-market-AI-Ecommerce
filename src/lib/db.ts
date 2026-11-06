@@ -493,10 +493,10 @@ export async function claimImportRow(
   const ttlInterval = Prisma.raw(`${ttlMs} * INTERVAL '1 millisecond'`);
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     UPDATE listing_imports
-    SET status = 'committed', committed_at = (NOW() AT TIME ZONE 'UTC')
+    SET status = 'committed', committed_at = (clock_timestamp() AT TIME ZONE 'UTC')
     WHERE id = ${importToken}
-      AND status IN ('pending', 'failed')
-      AND created_at > (NOW() AT TIME ZONE 'UTC') - ${ttlInterval}
+      AND status = 'pending'
+      AND created_at > (clock_timestamp() AT TIME ZONE 'UTC') - ${ttlInterval}
     RETURNING id
   `;
   return rows.length > 0;

@@ -12,12 +12,10 @@ import {
   type CommitSelection,
   type CommitResult,
 } from "./csv-import";
-import type { Actor } from "./service";
+import { CsvImportRejection } from "./csv-import-error";
+import { readCsvUpload } from "./csv-upload";
+import { toActor } from "./service";
 import { revalidateStorefront } from "../storefront/cache";
-
-function toActor(user: { id: string; email: string }): Actor {
-  return { id: user.id, email: user.email };
-}
 
 export interface PreviewActionResult {
   error?: string;
@@ -39,8 +37,10 @@ export async function csvPreviewAction(
     return { error: validateFileSize(selected.data.size) ?? "Please select a CSV file." };
   }
 
-  const csvText = await selected.data.text();
-  const preview = await generatePreview(session.store.id, csvText, session.user.id);
+  const bytes = new Uint8Array(await selected.data.arrayBuffer());
+  const decoded = readCsvUpload(bytes);
+  if ("error" in decoded) return { error: decoded.error };
+  const preview = await generatePreview(session.store.id, decoded.text, session.user.id);
 
   const hasContent =
     preview.matches.length > 0 ||
@@ -74,6 +74,10 @@ export async function csvCommitAction(
       row: z.number().int(),
       masterProductId: z.string().min(1).max(200),
     })).max(5001),
+    matchedIdentities: z.array(z.strictObject({
+      row: z.number().int(),
+      masterProductId: z.string().min(1).max(200),
+    })).max(5001).optional(),
   }), selection);
   if (!token.ok) {
     return { error: "Missing import token. Please upload the file again." };
@@ -91,10 +95,9 @@ export async function csvCommitAction(
       toActor(session.user),
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "";
-    const safe = /^(Import token|This import|No rows|No valid|All selected|Resolution for|Row \d)/.test(msg);
-    if (!safe) console.error("[csv-import] commit error:", e);
-    return { error: safe ? msg : "Import failed. Please try again." };
+    if (e instanceof CsvImportRejection) return { error: e.message };
+    console.error("[csv-import] commit error:", e);
+    return { error: "Import failed. Please try again." };
   }
 
   // Only a synchronous throw is caught here. Next applies queued tags after

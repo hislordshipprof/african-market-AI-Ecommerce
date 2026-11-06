@@ -61,6 +61,10 @@ A canonical product shared across stores (e.g. "Egusi, ground"), with its local 
 A store's offer of a product: its price, sizes and stock at that store.
 _Avoid_: Product (when meaning the store's item), SKU
 
+**Listing import**:
+A CSV file a store owner uploaded, held for 30 minutes between its preview and the one commit that turns the chosen rows into listings.
+_Avoid_: product import, upload token
+
 **Variant**:
 A size or weight option of a **Listing** with its own price and weight. Carts and orders point at a variant, so a variant a cart or order uses can't be removed. Customers always see a listing's packs cheapest first.
 

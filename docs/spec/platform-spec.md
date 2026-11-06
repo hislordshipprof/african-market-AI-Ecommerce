@@ -126,6 +126,16 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - **Stock confidence score (0–1)** per listing, from: last manual confirmation, recent sales velocity, recent shortage reports, time since restock. Decays daily. Shown internally; drives storefront badge and AI behavior.
 - Quick stock check: phone list "Confirm these 10 fast movers" each morning (30 seconds).
 - Bulk price update, variant management, perishable flag, weight per unit, frozen flag, max qty per order.
+- **CSV import** (owner only; staff and customers are sent away and nothing is written):
+  - `name` and `price` are required. `stock_mode`, `qty`, `status` and one weight column with units are optional. Columns come from the header row, including when the first data row is short.
+  - Limits: 2 MB, 5,000 rows, names up to 200 characters. The file must be UTF-8. A UTF-8 BOM is accepted. A file that is not UTF-8 is refused before anything is stored, unless it is a non-CSV signature (ZIP, PDF, PNG or UTF-16), which keeps the non-CSV message.
+  - Prices must be above 0. `$` and comma thousands are allowed, with at most 2 decimals.
+  - A quantity is a whole number up to 2,147,483,647, either plain digits (`12`, `007`) or digits grouped by commas in threes (`1,000`). The commas in a quantity must be inside quotes. Anything else, including `2.5`, `10 bags` and an unquoted thousands comma, is a row error and that row is not imported. Duplicate known column names are rejected.
+  - For each row, a valid `stock_mode` wins (`counted` with an empty qty is qty 0; `status` ignores a valid qty). Otherwise a non-empty qty, including 0, makes the listing counted. Otherwise a non-empty status makes it a status listing. Otherwise the listing is counted with qty 0 when the file has a qty column, and status `in_stock` when it does not. A stock event is written only for a positive counted qty.
+  - An active master product's exact name beats another product's synonym. Two exact names stay ambiguous with each other. A product is counted once. Inactive products are not candidates.
+  - Among the selected rows, the lowest CSV row wins when two rows would create the same listing. A later duplicate is skipped. A row already listed in that store is skipped.
+  - Weight is the CSV weight, then a positive master-product weight, then 100 g marked as a placeholder. A real weight of 100 g is not a placeholder.
+  - A preview is valid for 30 minutes, measured at claim time against the database clock, and commits once. Each store keeps at most 10 pending previews; the oldest pending row is dropped in the same locked step that stores the new preview. A commit whose previewed product is no longer the sole candidate is refused and the owner uploads again.
 
 ### 6.3 Order inbox & picking (phone-first)
 - New order alert (push + sound + optional SMS to owner).
@@ -341,6 +351,7 @@ Substitution(product_id, substitute_id, rank, note)
 Listing(id, tenant_id, master_product_id?, custom_name, price, stock_mode, qty, status,
         confidence, confidence_updated_at, max_per_order, active)
 ListingVariant(id, listing_id, label, price, weight_g, weight_placeholder, sku, barcode)
+ListingImport(id, store_id, csv_text, row_count, status[pending|committed], created_by_id, created_at, committed_at)
 StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|short|adjust], delta, actor, at)
 
 Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id, source[manual|ai])

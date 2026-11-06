@@ -40,7 +40,7 @@ vi.mock("../db", async (importOriginal) => {
   };
 });
 import { probeCrossStoreImportWrites } from "./cross-store-write";
-import { commitPairBehindStoreLock } from "./import-lock-test-helpers";
+import { commitPairBehindStoreLock, holdStoreRow, waitForLockWaiters } from "./import-lock-test-helpers";
 import { createListing } from "./service";
 import type { Actor } from "./service";
 
@@ -149,12 +149,6 @@ describe("parseCsvText", () => {
     expect(errors[0].reason).toContain("empty");
   });
 
-  it("E5: binary/non-CSV data", () => {
-    const binary = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]).toString();
-    const { errors } = parseCsvText(binary);
-    expect(errors.length).toBeGreaterThan(0);
-  });
-
   const NON_CSV =
     "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.";
 
@@ -176,19 +170,6 @@ describe("parseCsvText", () => {
 
   it("N14: NUL in a name cell is the non-CSV message", async () => {
     expectNonCsv(parseCsvText("name,price\nRice\u0000,5\n"));
-  });
-
-  it("N14: Windows-1252 Bîmba is not rejected", async () => {
-    const bytes = new Uint8Array([
-      ...new TextEncoder().encode("name,price\n"),
-      0x42, 0xee, 0x6d, 0x62, 0x61,
-      ...new TextEncoder().encode(",5.00\n"),
-    ]);
-    const parsed = parseCsvText(await textFromBytes(bytes));
-    expect(parsed.errors.filter((e) => e.reason === NON_CSV)).toEqual([]);
-    expect(parsed.rows).toHaveLength(1);
-    expect(parsed.rows[0].name).toBe("B\uFFFDmba");
-    expect(parsed.rows[0].price).toBe(500);
   });
 
   it("N14: a signature later in the file is a normal row", () => {
@@ -1442,6 +1423,447 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(remaining).toBeLessThanOrEqual(10);
   });
 
+  it("concurrent previews preserve the pending cap", { timeout: 30_000 }, async () => {
+    const runtime = (await healthQueryRaw`SELECT current_user`) as { current_user: string }[];
+    expect(runtime[0]?.current_user).toBe("app_runtime");
+
+    async function fillPending(count: number, label: string) {
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.listingImport.deleteMany({ where: { storeId: storeBId, status: "pending" } }),
+      ]);
+      for (let i = 0; i < count; i++) {
+        await storeScoped(storeBId).listingImport.create({
+          data: {
+            storeId: storeBId,
+            csvText: `name,price\n${label} ${i},1.00\n`,
+            rowCount: 1,
+            status: "pending",
+            createdById: testUserId,
+          },
+        });
+      }
+    }
+
+    const beforeBTokens = await storeScoped(storeAId).listingImport.findMany({
+      where: { status: "pending" },
+      select: { id: true, status: true },
+    });
+
+    await fillPending(9, `Cap9 T189 ${RUN}`);
+    const holdNine = await holdStoreRow(storeBId);
+    const firstNine = generatePreview(storeBId, `name,price\nCap9 A T189 ${RUN},1.00\n`, testUserId);
+    const secondNine = generatePreview(storeBId, `name,price\nCap9 B T189 ${RUN},1.00\n`, testUserId);
+    try {
+      await waitForLockWaiters(holdNine.pid, 2, {
+        label: "two previews wait at nine pending",
+        settled: [firstNine, secondNine],
+      });
+    } finally {
+      await holdNine.rollback();
+    }
+    const [nineA, nineB] = await Promise.all([firstNine, secondNine]);
+    expect(nineA.importToken).toBeTruthy();
+    expect(nineB.importToken).toBeTruthy();
+    expect(await storeScoped(storeBId).listingImport.count({ where: { status: "pending" } })).toBeLessThanOrEqual(10);
+
+    await fillPending(10, `Cap10 T189 ${RUN}`);
+    const oldest = await storeScoped(storeBId).listingImport.findFirst({
+      where: { status: "pending" },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(oldest).toBeTruthy();
+    const durableCsv = `name,price\nDurable Cap T189 ${RUN},3.00\n`;
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeBId}, true)`,
+      rawPrisma.listingImport.update({
+        where: { id: oldest!.id },
+        data: { csvText: durableCsv, status: "pending" },
+      }),
+    ]);
+    const holdRace = await holdStoreRow(storeBId);
+    const claiming = commitImport(
+      storeBId,
+      oldest!.id,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    let evicting: ReturnType<typeof generatePreview> | undefined;
+    try {
+      await waitForLockWaiters(holdRace.pid, 1, {
+        label: "commit waits before eviction",
+        settled: [claiming],
+      });
+      evicting = generatePreview(storeBId, `name,price\nEvict Race T189 ${RUN},1.00\n`, testUserId);
+      await waitForLockWaiters(holdRace.pid, 2, {
+        label: "preview waits behind the commit",
+        settled: [claiming, evicting],
+      });
+    } finally {
+      await holdRace.rollback();
+    }
+    const claimed = await claiming;
+    const evicted = await evicting!;
+    expect(claimed.createdCount).toBe(1);
+    expect(evicted.importToken).toBeTruthy();
+    const durable = await storeScoped(storeBId).listingImport.findUnique({ where: { id: oldest!.id } });
+    expect(durable?.status).toBe("committed");
+    expect(durable?.csvText).toBe(durableCsv);
+    expect(await storeScoped(storeBId).listingImport.count({ where: { status: "pending" } })).toBeLessThanOrEqual(10);
+    const afterA = await storeScoped(storeAId).listingImport.findMany({
+      where: { id: { in: beforeBTokens.map((row) => row.id) } },
+      select: { id: true, status: true },
+    });
+    expect(afterA).toEqual(beforeBTokens);
+  });
+
+  it("short first records do not hide later stock cells", async () => {
+    const first = `Short First T189 ${RUN}`;
+    const later = `Later Counted T189 ${RUN}`;
+    const bad = `Later Bad T189 ${RUN}`;
+    const csv = `name,price,qty,status\n${first},5\n${later},5,7,low\n${bad},5,2.5,low\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.errors.map((error) => error.csvName)).toEqual([bad]);
+    expect(preview.errors[0]?.reason).toBe(
+      'Invalid quantity: "2.5". Use a whole number like 12 or 1,000.',
+    );
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: preview.newItems.map((row) => row.row), ambiguousResolutions: [] },
+      actor,
+    );
+    expect(result.createdCount).toBe(2);
+    const scoped = storeScoped(storeAId);
+    const shortRow = await scoped.listing.findFirst({
+      where: { customName: first },
+      include: { stockEvents: true },
+    });
+    const countedRow = await scoped.listing.findFirst({
+      where: { customName: later },
+      include: { stockEvents: true },
+    });
+    expect(shortRow).toMatchObject({ stockMode: "counted", qty: 0, status: null });
+    expect(shortRow?.stockEvents).toEqual([]);
+    expect(countedRow).toMatchObject({ stockMode: "counted", qty: 7, status: null });
+    expect(countedRow?.stockEvents.map((event) => event.delta)).toEqual([7]);
+    expect(await scoped.listing.findFirst({ where: { customName: bad } })).toBeNull();
+  });
+
+  it("CSV structure cannot silently truncate quantity cells", async () => {
+    const format = "Could not parse file as CSV. Check the file format.";
+    const quoted = parseCsvText('name,price,qty\nQuoted Structure,5.00,"1,000"\n');
+    expect(quoted.errors).toEqual([]);
+    expect(quoted.rows[0]?.qty).toBe(1000);
+
+    const unquoted = parseCsvText("name,price,qty\nUnquoted Structure,5.00,1,000\n");
+    expect(unquoted.rows).toEqual([]);
+    expect(unquoted.errors[0]?.reason).toBe(format);
+
+    const extra = parseCsvText("name,price,qty\nExtra Structure,5.00,12,99\n");
+    expect(extra.rows).toEqual([]);
+    expect(extra.errors[0]?.reason).toBe(format);
+
+    const duplicate = parseCsvText("name,price,qty,quantity\nDup Structure,5.00,1,2\n");
+    expect(duplicate.rows).toEqual([]);
+    expect(duplicate.errors[0]?.reason).toBe(format);
+
+    const name = `Preview Quoted T189 ${RUN}`;
+    const before = await storeScoped(storeAId).listing.count({ where: { customName: name } });
+    const preview = await generatePreview(
+      storeAId,
+      `name,price,qty\n${name},5.00,"1,000"\n`,
+      testUserId,
+    );
+    expect(preview.newItems.map((row) => row.csvName)).toEqual([name]);
+    const refused = await generatePreview(
+      storeAId,
+      `name,price,qty\nRefused Structure T189 ${RUN},5.00,1,000\n`,
+      testUserId,
+    );
+    expect(refused.importToken).toBe("");
+    expect(refused.errors[0]?.reason).toBe(format);
+    expect(await storeScoped(storeAId).listing.count({ where: { customName: name } })).toBe(before);
+  });
+
+  it("row stock comes from its own qty and status cells", async () => {
+    const runtime = (await healthQueryRaw`SELECT current_user`) as { current_user: string }[];
+    expect(runtime[0]?.current_user).toBe("app_runtime");
+    const qtyMessage = (cell: string) =>
+      `Invalid quantity: "${cell}". Use a whole number like 12 or 1,000.`;
+    const names = {
+      quoted: `Quoted Thousand T189 ${RUN}`,
+      padded: `Padded T189 ${RUN}`,
+      low: `Low Only T189 ${RUN}`,
+      three: `Qty Three T189 ${RUN}`,
+      blank: `Blank Both T189 ${RUN}`,
+      zero: `Zero Low T189 ${RUN}`,
+      statusPos: `Status Positive T189 ${RUN}`,
+      countedBlank: `Counted Blank T189 ${RUN}`,
+      max: `Max Int T189 ${RUN}`,
+      overflow: `Overflow T189 ${RUN}`,
+      group: `Bad Group T189 ${RUN}`,
+      bags: `Bags T189 ${RUN}`,
+      decimal: `Decimal T189 ${RUN}`,
+      fallback: `Status Fallback T189 ${RUN}`,
+    };
+    const csv = [
+      "name,price,qty,status,stock_mode",
+      `${names.quoted},5.00,"1,000",,`,
+      `${names.padded},5.00,007,,`,
+      `${names.low},4.00,,low,`,
+      `${names.three},4.00,3,,`,
+      `${names.blank},4.00,,,`,
+      `${names.zero},4.00,0,low,`,
+      `${names.statusPos},4.00,5,low,status`,
+      `${names.countedBlank},4.00,,low,counted`,
+      `${names.max},4.00,"2,147,483,647",,`,
+      `${names.overflow},4.00,"2,147,483,648",,`,
+      `${names.group},4.00,"1,5",,`,
+      `${names.bags},4.00,10 bags,,`,
+      `${names.decimal},4.00,2.5,,`,
+    ].join("\n");
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.errors.map((error) => error.reason)).toEqual([
+      qtyMessage("2,147,483,648"),
+      qtyMessage("1,5"),
+      qtyMessage("10 bags"),
+      qtyMessage("2.5"),
+    ]);
+    const result = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: preview.newItems.map((row) => row.row), ambiguousResolutions: [] },
+      actor,
+    );
+    const ids = result.listingIds;
+    const scoped = storeScoped(storeAId);
+    const created = await scoped.listing.findMany({
+      where: { id: { in: ids } },
+      include: { stockEvents: true },
+    });
+    expect(created).toHaveLength(9);
+    const byName = new Map(created.map((row) => [row.customName, row]));
+    expect(byName.get(names.quoted)).toMatchObject({ stockMode: "counted", qty: 1000, status: null });
+    expect(byName.get(names.quoted)?.stockEvents.map((event) => event.delta)).toEqual([1000]);
+    expect(byName.get(names.padded)).toMatchObject({ stockMode: "counted", qty: 7, status: null });
+    expect(byName.get(names.padded)?.stockEvents.map((event) => event.delta)).toEqual([7]);
+    expect(byName.get(names.low)).toMatchObject({ stockMode: "status", qty: null, status: "low" });
+    expect(byName.get(names.low)?.stockEvents).toEqual([]);
+    expect(byName.get(names.three)).toMatchObject({ stockMode: "counted", qty: 3, status: null });
+    expect(byName.get(names.three)?.stockEvents.map((event) => event.delta)).toEqual([3]);
+    expect(byName.get(names.blank)).toMatchObject({ stockMode: "counted", qty: 0, status: null });
+    expect(byName.get(names.blank)?.stockEvents).toEqual([]);
+    expect(byName.get(names.zero)).toMatchObject({ stockMode: "counted", qty: 0, status: null });
+    expect(byName.get(names.zero)?.stockEvents).toEqual([]);
+    expect(byName.get(names.statusPos)).toMatchObject({ stockMode: "status", qty: null, status: "low" });
+    expect(byName.get(names.statusPos)?.stockEvents).toEqual([]);
+    expect(byName.get(names.countedBlank)).toMatchObject({ stockMode: "counted", qty: 0, status: null });
+    expect(byName.get(names.countedBlank)?.stockEvents).toEqual([]);
+    expect(byName.get(names.max)).toMatchObject({ stockMode: "counted", qty: 2_147_483_647, status: null });
+    expect(byName.get(names.max)?.stockEvents.map((event) => event.delta)).toEqual([2_147_483_647]);
+    for (const absent of [names.overflow, names.group, names.bags, names.decimal]) {
+      expect(await scoped.listing.findFirst({ where: { customName: absent } })).toBeNull();
+    }
+
+    const proved = await scoped.listing.findMany({ where: { id: { in: ids } }, orderBy: { id: "asc" } });
+    expect(proved.map((row) => row.id).sort()).toEqual([...ids].sort());
+    const hidden = await storeScoped(storeBId).listing.findMany({ where: { id: { in: ids } } });
+    expect(hidden).toEqual([]);
+    const updated = await storeScoped(storeBId).listing.updateMany({
+      where: { id: { in: ids } },
+      data: { price: 1 },
+    });
+    expect(updated.count).toBe(0);
+    const reread = await scoped.listing.findMany({ where: { id: { in: ids } }, orderBy: { id: "asc" } });
+    expect(reread.map((row) => row.price)).toEqual(proved.map((row) => row.price));
+
+    const fallbackPreview = await generatePreview(
+      storeAId,
+      `name,price,status\n${names.fallback},4.00,\n`,
+      testUserId,
+    );
+    const fallback = await commitImport(
+      storeAId,
+      fallbackPreview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    const fallbackListing = await scoped.listing.findUnique({
+      where: { id: fallback.listingIds[0] },
+      include: { stockEvents: true },
+    });
+    expect(fallbackListing).toMatchObject({ stockMode: "status", qty: null, status: "in_stock" });
+    expect(fallbackListing?.stockEvents).toEqual([]);
+  });
+
+  it("an exact master-product name beats another product's synonym", async () => {
+    const exactName = `Millet Flour T189 ${RUN}`;
+    const exact = await platformAdmin.masterProduct.create({
+      data: { name: exactName, status: "active", frozen: true, perishable: false, weightG: 400 },
+    });
+    const synonym = await platformAdmin.masterProduct.create({
+      data: { name: `Finger Millet T189 ${RUN}`, status: "active", frozen: false, perishable: true, weightG: 80 },
+    });
+    mpIds.push(exact.id, synonym.id);
+    await platformAdmin.productSynonym.createMany({
+      data: [
+        { productId: synonym.id, term: `millet flour t189 ${RUN}` },
+        { productId: synonym.id, term: `MILLET FLOUR T189 ${RUN}` },
+        { productId: exact.id, term: exactName },
+        { productId: exact.id, term: `millet flour t189 ${RUN}` },
+      ],
+    });
+    const csv = `name,price\nmillet flour t189 ${RUN},5.00\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.ambiguous).toEqual([]);
+    expect(preview.matches).toEqual([
+      expect.objectContaining({
+        row: 2,
+        masterProductId: exact.id,
+        masterProductName: exactName,
+        matchType: "exact",
+        frozen: true,
+        perishable: false,
+      }),
+    ]);
+    const committed = await commitImport(
+      storeAId,
+      preview.importToken,
+      {
+        matchedRows: [2],
+        newItemRows: [],
+        ambiguousResolutions: [],
+        matchedIdentities: [{ row: 2, masterProductId: exact.id }],
+      },
+      actor,
+    );
+    const listing = await storeScoped(storeAId).listing.findUnique({
+      where: { id: committed.listingIds[0] },
+      include: { variants: true },
+    });
+    expect(listing?.masterProductId).toBe(exact.id);
+    expect(listing?.frozen).toBe(true);
+    expect(listing?.perishable).toBe(false);
+    expect(listing?.variants[0]).toMatchObject({ weightG: 400, weightPlaceholder: false, price: 500 });
+
+    const twin = await platformAdmin.masterProduct.create({
+      data: { name: exactName, status: "active", frozen: false, perishable: false },
+    });
+    mpIds.push(twin.id);
+    const ambiguous = await generatePreview(storeBId, csv, testUserId);
+    expect(ambiguous.matches).toEqual([]);
+    expect(ambiguous.ambiguous).toHaveLength(1);
+    expect(ambiguous.ambiguous[0]?.candidates.map((candidate) => candidate.matchType)).toEqual(["exact", "exact"]);
+    expect(ambiguous.ambiguous[0]?.candidates.map((candidate) => candidate.masterProductId).sort()).toEqual(
+      [exact.id, twin.id].sort(),
+    );
+
+    await platformAdmin.masterProduct.update({ where: { id: exact.id }, data: { status: "needs_review" } });
+    await platformAdmin.masterProduct.update({ where: { id: twin.id }, data: { status: "needs_review" } });
+    const inactive = await generatePreview(storeBId, csv, testUserId);
+    expect(inactive.ambiguous).toEqual([]);
+    expect(inactive.matches[0]).toMatchObject({
+      masterProductId: synonym.id,
+      matchType: "synonym",
+      perishable: true,
+    });
+  });
+
+  it("a new exact product cannot silently replace the previewed synonym match", async () => {
+    const synonym = await platformAdmin.masterProduct.create({
+      data: { name: `Syn Host T189 ${RUN}`, status: "active", frozen: false, perishable: true, weightG: 90 },
+    });
+    mpIds.push(synonym.id);
+    await platformAdmin.productSynonym.create({
+      data: { productId: synonym.id, term: `drift grain t189 ${RUN}` },
+    });
+    const csv = `name,price\ndrift grain t189 ${RUN},4.00\n`;
+    const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.matches[0]).toMatchObject({ masterProductId: synonym.id, matchType: "synonym" });
+    const exact = await platformAdmin.masterProduct.create({
+      data: { name: `Drift Grain T189 ${RUN}`, status: "active", frozen: true, perishable: false, weightG: 300 },
+    });
+    mpIds.push(exact.id);
+    const before = await storeScoped(storeAId).listing.count({ where: { masterProductId: { in: [synonym.id, exact.id] } } });
+    await expect(
+      commitImport(
+        storeAId,
+        preview.importToken,
+        {
+          matchedRows: [2],
+          newItemRows: [],
+          ambiguousResolutions: [],
+          matchedIdentities: [{ row: 2, masterProductId: synonym.id }],
+        },
+        actor,
+      ),
+    ).rejects.toThrow(
+      `Resolution for row 2 references product ${synonym.id} which is not in the match list.`,
+    );
+    const token = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(token?.status).toBe("pending");
+    expect(token?.committedAt).toBeNull();
+    expect(await storeScoped(storeAId).listing.count({ where: { masterProductId: { in: [synonym.id, exact.id] } } })).toBe(before);
+    const again = await generatePreview(storeAId, csv, testUserId);
+    expect(again.matches[0]).toMatchObject({
+      masterProductId: exact.id,
+      matchType: "exact",
+      frozen: true,
+      perishable: false,
+    });
+  });
+
+  it("a token expiring behind the store lock cannot be claimed", { timeout: 45_000 }, async () => {
+    const name = `Lock Expiry T189 ${RUN}`;
+    const preview = await generatePreview(storeAId, `name,price\n${name},4.00\n`, testUserId);
+    const beforeListings = await storeScoped(storeAId).listing.count({ where: { customName: name } });
+    const beforeAudits = await storeScoped(storeAId).auditLog.count({
+      where: { action: "catalog.csv_import", entityId: preview.importToken },
+    });
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`,
+      rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${new Date(Date.now() - IMPORT_TOKEN_TTL_MS + 15_000)} WHERE id = ${preview.importToken}`,
+    ]);
+    const hold = await holdStoreRow(storeAId);
+    const pending = commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    const settled = pending.then(
+      () => "committed" as const,
+      (error: unknown) => error,
+    );
+    try {
+      await waitForLockWaiters(hold.pid, 1, {
+        label: "commit queued while the token is still inside 30 minutes",
+        settled: [pending],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+    } finally {
+      await hold.rollback();
+    }
+    const outcome = await settled;
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).message).toMatch(/expired/i);
+    const token = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(token?.status).toBe("pending");
+    expect(token?.committedAt).toBeNull();
+    expect(await storeScoped(storeAId).listing.count({ where: { customName: name } })).toBe(beforeListings);
+    expect(await storeScoped(storeAId).stockEvent.count({ where: { listing: { customName: name } } })).toBe(0);
+    expect(await storeScoped(storeAId).listingVariant.count({ where: { listing: { customName: name } } })).toBe(0);
+    expect(
+      await storeScoped(storeAId).auditLog.count({
+        where: { action: "catalog.csv_import", entityId: preview.importToken },
+      }),
+    ).toBe(beforeAudits);
+  });
+
   it("A2: expired pending imports cleaned up on new preview", async () => {
     const scopedB = storeScoped(storeBId);
     const rec = await scopedB.listingImport.create({
@@ -1697,6 +2119,53 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(after.duplicatesSkipped).toBe(1);
     expect(after.alreadyListedSkipped).toBe(0);
     expect(after.count).toBe(1);
+
+    const earlier = await platformAdmin.masterProduct.create({
+      data: { name: `Earlier Exact T189 ${RUN}`, status: "active", frozen: true, perishable: false, weightG: 250 },
+    });
+    const synonymOnly = await platformAdmin.masterProduct.create({
+      data: { name: `Earlier Synonym Only T189 ${RUN}`, status: "active", frozen: false, perishable: true },
+    });
+    mpIds.push(earlier.id, synonymOnly.id);
+    await platformAdmin.productSynonym.create({
+      data: { productId: earlier.id, term: `earlier ambig t189 ${RUN}` },
+    });
+    await platformAdmin.productSynonym.create({
+      data: { productId: synonymOnly.id, term: `earlier ambig t189 ${RUN}` },
+    });
+
+    const reversed = `name,price,qty\nearlier ambig t189 ${RUN},6.50,4\nEarlier Exact T189 ${RUN},9.25,11\n`;
+    const reversedPreview = await generatePreview(storeBId, reversed, testUserId);
+    expect(reversedPreview.ambiguous.map((row) => row.row)).toEqual([2]);
+    expect(reversedPreview.matches.map((row) => row.row)).toEqual([3]);
+    const reversedResult = await commitImport(
+      storeBId,
+      reversedPreview.importToken,
+      {
+        matchedRows: [3],
+        newItemRows: [],
+        ambiguousResolutions: [{ row: 2, masterProductId: earlier.id }],
+        matchedIdentities: [{ row: 3, masterProductId: earlier.id }],
+      },
+      actor,
+    );
+    expect(reversedResult.createdCount).toBe(1);
+    const winner = await storeScoped(storeBId).listing.findUnique({
+      where: { id: reversedResult.listingIds[0] },
+      include: { variants: true, stockEvents: true },
+    });
+    expect(winner?.masterProductId).toBe(earlier.id);
+    expect(winner?.price).toBe(650);
+    expect(winner?.qty).toBe(4);
+    expect(winner?.frozen).toBe(true);
+    expect(winner?.variants[0]?.price).toBe(650);
+    expect(winner?.variants[0]?.weightG).toBe(250);
+    expect(winner?.variants[0]?.weightPlaceholder).toBe(false);
+    expect(winner?.stockEvents.map((event) => event.delta)).toEqual([4]);
+    const reversedAudit = await auditFor(storeBId, reversedPreview.importToken);
+    expect(reversedAudit.duplicatesSkipped).toBe(1);
+    expect(reversedAudit.count).toBe(1);
+    expect(reversedAudit.alreadyListedSkipped).toBe(0);
   });
 
   it("same custom name twice records duplicatesSkipped", async () => {
