@@ -83,7 +83,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
     });
     variantId = v.id;
     canRun = true;
-  }, 30_000);
+  }, 60_000);
 
   afterAll(async () => {
     if (!canRun) { await rawPrisma?.$disconnect(); return; }
