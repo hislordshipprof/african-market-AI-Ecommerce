@@ -9,6 +9,32 @@ export const ASSISTANT_DISABLED_MESSAGE = "The helper is not available.";
 
 export const ASSISTANT_FIXED_ERROR = "Sorry, something went wrong. Please try again.";
 
+/** Tools the assistant registers. The browser and the server share this list. */
+export const ASSISTANT_TOOL_NAMES = [
+  "search_catalog",
+  "show_products",
+  "check_availability",
+  "suggest_substitutes",
+  "add_to_cart",
+  "update_cart",
+  "remove_from_cart",
+  "set_swap_rule",
+  "get_cart_summary",
+  "offer_choices",
+] as const;
+
+export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];
+
+/**
+ * The argument's keys must be exactly `AssistantToolName`.
+ * An extra key or a missing key fails typecheck.
+ */
+export function exactAssistantKeys<const T extends Record<AssistantToolName, unknown>>(
+  value: [Exclude<keyof T, AssistantToolName>] extends [never] ? T : never,
+): T {
+  return value;
+}
+
 /** Codes the chat handler can return. The client maps every one of these. */
 export const ASSISTANT_ROUTE_CODES = [
   "invalid_request",
