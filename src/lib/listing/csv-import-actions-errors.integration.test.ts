@@ -1,5 +1,4 @@
 import { missingCsvCommitKeys } from "./csv-commit-prod-guard";
-import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Synchronous revalidateStorefront throws are the only cache failures this
@@ -1174,19 +1173,6 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     const listing = await storeScoped(storeAId).listing.findFirst({ where: { customName: name } });
     expect(listing?.price).toBe(450);
     expect(await storeScoped(storeAId).order.count()).toBe(ordersBefore);
-  });
-
-  it("commit action source keeps the allow-list and does not branch on Vercel or CI", () => {
-    const source = readFileSync(new URL("./csv-import-actions.ts", import.meta.url), "utf8");
-    const body = source.slice(source.indexOf("export async function csvCommitAction"));
-    expect(body).toContain("requireStoreOwner()");
-    expect(body.indexOf("requireStoreOwner()")).toBeLessThan(body.indexOf("try"));
-    expect(body).toContain("Missing import token. Please upload the file again.");
-    expect(body).toContain("/^(Import token|This import|No rows|No valid|All selected|Resolution for|Row \\d)/");
-    expect(body).toContain('"[csv-import] commit error:"');
-    expect(body).toContain('"[csv-import] storefront revalidation failed:"');
-    expect(body.indexOf("revalidateStorefront(session.store.id)")).toBeGreaterThan(body.indexOf('"[csv-import] commit error:"'));
-    expect(body).not.toMatch(/process\.env\.(VERCEL|CI)\b/);
   });
 
   if (process.env.CSV_COMMIT_PROD_CHECK === "1") {

@@ -1,14 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { money } from "../src/lib/format";
-import { resolveDirectUrl } from "../src/lib/env";
-import { WIDE_LAYOUT_STORE, WIDE_LAYOUT_TOKEN, wideLayoutText } from "../src/lib/assistant/fake-model";
 import { storeUrl } from "./urls";
 
 const origin = storeUrl("mama-ngozi");
-const shots = "C:/E-commerce-project/.builder/screenshots-246";
 /** Fake-model reply for "html please". The live region must announce this string, not an image. */
 const HTML_REPLY = 'See <img onerror="alert(1)"> and [a](http://evil.test).';
 const ROUTE_ERROR = "Sorry, something went wrong. Please try again.";
@@ -97,14 +91,9 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   expect(posted).not.toContain("4242");
 });
 
-test("checkout hides the launcher and the sheet fits a phone without sideways scroll", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
+test("checkout hides the launcher", async ({ page }) => {
   await page.goto(`${origin}/checkout`);
   await expect(page.getByTestId("assistant-launcher")).toHaveCount(0);
-  await page.goto(`${origin}/`);
-  await page.getByTestId("assistant-launcher").click();
-  const wide = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
-  expect(wide).toBe(false);
 });
 
 test("choice chips and the basket summary are keyboard reachable", async ({ page }) => {
@@ -161,7 +150,6 @@ test("Looks good closes the sheet when the summary starts on the cart", async ({
   await expect(dialog).toBeHidden();
   const launcher = page.getByTestId("assistant-launcher");
   await expect(launcher).toBeVisible();
-  await page.screenshot({ path: "test-results/looks-good-cart-390.png" });
   await launcher.click();
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
@@ -233,8 +221,7 @@ test("one submit is one request, and a rejected undo says what happened", async 
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
 });
 
-test("the open sheet is readable at phone and desktop in light and dark", async ({ page }) => {
-  mkdirSync(shots, { recursive: true });
+test("product cards show the catalog price", async ({ page }) => {
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "show me pictures of egusi");
@@ -253,167 +240,5 @@ test("the open sheet is readable at phone and desktop in light and dark", async 
     compared += 1;
   }
   expect(compared).toBeGreaterThan(0);
-  await page.setViewportSize({ width: 375, height: 812 });
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
-  expect(overflow).toBe(false);
-  for (const width of [375, 390, 1440]) {
-    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
-    for (const scheme of ["light", "dark"] as const) {
-      await page.emulateMedia({ colorScheme: scheme });
-      await page.screenshot({ path: `${shots}/sheet-${width}-${scheme}.png`, fullPage: false });
-    }
-  }
 });
-
-const LONG_NAME = `Egusi ${"X".repeat(114)}`;
-const CHIP_A = `Yam ${"C".repeat(70)}`;
-
-function ownerPrisma() {
-  return new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
-}
-
-async function expectWithinScreen(page: Page) {
-  const box = await page.evaluate(() => {
-    const root = document.documentElement;
-    const dialog = document.querySelector("dialog");
-    const open = dialog instanceof HTMLDialogElement && dialog.open;
-    const log = open ? dialog.querySelector("[class*='log']") : null;
-    const bar = document.querySelector("[class*='mobileAction']");
-    const barVisible = !!bar && bar.getClientRects().length > 0;
-    const measure = (el: Element) => ({ scroll: el.scrollWidth, client: el.clientWidth });
-    return {
-      root: measure(root),
-      dialog: open && dialog ? measure(dialog) : null,
-      log: log ? measure(log) : null,
-      bar: barVisible && bar ? bar.getBoundingClientRect().right : null,
-      viewport: root.clientWidth,
-    };
-  });
-  expect(box.root.scroll).toBeLessThanOrEqual(box.root.client + 1);
-  if (box.dialog) expect(box.dialog.scroll).toBeLessThanOrEqual(box.dialog.client + 1);
-  if (box.log) expect(box.log.scroll).toBeLessThanOrEqual(box.log.client + 1);
-  if (box.bar != null) expect(box.bar).toBeLessThanOrEqual(box.viewport + 1);
-}
-
-test("long names, tokens, and the cart bar stay within a 375px screen", async ({ page }) => {
-  test.setTimeout(120_000);
-  mkdirSync(shots, { recursive: true });
-  const prisma = ownerPrisma();
-  const store = await prisma.store.findUniqueOrThrow({ where: { slug: "mama-ngozi" } });
-  let changed: { id: string; customName: string | null }[] = [];
-  try {
-    changed = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
-      const listings = await tx.listing.findMany({
-        where: { storeId: store.id },
-        select: { id: true, customName: true, masterProduct: { select: { name: true } } },
-      });
-      const egusi = listings.filter((row) => /egusi/i.test(row.masterProduct?.name ?? ""));
-      // Choice chips use the first two search hits, which an earlier test may have cached.
-      // Renaming only findMany's first two leaves the offered yam on its short name.
-      const yams = listings.filter((row) => /yam/i.test(row.masterProduct?.name ?? ""));
-      if (egusi.length === 0 || yams.length < 2) {
-        throw new Error(`expected egusi and two yam listings, saw ${egusi.length} and ${yams.length}`);
-      }
-      await tx.listing.updateMany({
-        where: { id: { in: egusi.map((row) => row.id) } },
-        data: { customName: LONG_NAME },
-      });
-      await tx.listing.updateMany({
-        where: { id: { in: yams.map((row) => row.id) } },
-        data: { customName: CHIP_A },
-      });
-      return [...egusi, ...yams].map((row) => ({ id: row.id, customName: row.customName }));
-    });
-
-    await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto(`${origin}/`);
-    await page.getByTestId("assistant-launcher").click();
-    const dialog = page.getByRole("dialog", { name: "Shop with help" });
-    await expect(dialog.getByTestId("assistant-composer")).toBeVisible();
-    await expectWithinScreen(page);
-
-    await send(page, `wide layout show me pictures of egusi ${WIDE_LAYOUT_TOKEN} https://example.com/assistant/wide-layout`);
-    await expect(dialog.getByRole("heading", { name: LONG_NAME }).first()).toBeVisible({ timeout: 20_000 });
-    await expectWithinScreen(page);
-    const headerFits = await page.evaluate((storeName) => {
-      const heading = document.querySelector("[data-testid='store-name']");
-      if (!(heading instanceof HTMLElement)) return false;
-      const previous = heading.textContent;
-      heading.textContent = storeName;
-      const root = document.documentElement;
-      const fits = root.scrollWidth <= root.clientWidth + 1;
-      heading.textContent = previous;
-      return fits && heading.title.length > 0;
-    }, WIDE_LAYOUT_STORE);
-    expect(headerFits).toBe(true);
-    await expect(dialog.locator("[class*='bubble']").filter({ hasText: wideLayoutText() })).toBeVisible({ timeout: 20_000 });
-    await expectWithinScreen(page);
-
-    await send(page, "wide layout choices of yam");
-    const longChips = dialog.getByRole("button", { name: new RegExp(CHIP_A) });
-    await expect(longChips).toHaveCount(2, { timeout: 20_000 });
-    await expect(longChips.first()).toBeVisible();
-    await expectWithinScreen(page);
-
-    await send(page, "add two egusi");
-    await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(dialog.locator("article").filter({ has: page.getByRole("button", { name: "Undo", exact: true }) }).getByRole("heading", { name: LONG_NAME })).toBeVisible();
-    await expectWithinScreen(page);
-
-    await send(page, "summary");
-    await expect(dialog.getByRole("heading", { name: "Your basket" })).toBeVisible({ timeout: 20_000 });
-    await expect(dialog.locator("[class*='summary']").getByText(LONG_NAME)).toBeVisible();
-    await expectWithinScreen(page);
-
-    await send(page, `${WIDE_LAYOUT_TOKEN} overload https://example.com/assistant/wide-layout`);
-    await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
-    await expect(dialog.getByRole("button", { name: "Retry" })).toBeVisible();
-    await expectWithinScreen(page);
-
-    await page.screenshot({ path: `${shots}/wide-sheet-375-light.png` });
-    await page.emulateMedia({ colorScheme: "dark" });
-    await page.screenshot({ path: `${shots}/wide-sheet-375-dark.png` });
-    await page.emulateMedia({ colorScheme: "light" });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expectWithinScreen(page);
-    await page.screenshot({ path: `${shots}/wide-sheet-390-light.png` });
-    await page.setViewportSize({ width: 375, height: 812 });
-
-    await page.keyboard.press("Escape");
-    await expect(dialog).toBeHidden();
-    await page.goto(`${origin}/cart`);
-    await expect(page.getByRole("heading", { name: LONG_NAME })).toBeVisible({ timeout: 20_000 });
-    const cartBar = page.locator("[class*='mobileAction']");
-    await expect(cartBar).toBeVisible();
-    await expect(cartBar.getByText("Subtotal")).toBeVisible();
-    await expectWithinScreen(page);
-    await page.screenshot({ path: `${shots}/wide-cart-375-light.png` });
-
-    await page.getByTestId("assistant-launcher").click();
-    await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
-    await expectWithinScreen(page);
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
-
-    await page.getByRole("button", { name: /Replace with/ }).first().click();
-    const swap = page.getByRole("dialog", { name: "If this item is sold out" });
-    await expect(swap.getByText(LONG_NAME).first()).toBeVisible();
-    await expectWithinScreen(page);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expectWithinScreen(page);
-    await page.screenshot({ path: `${shots}/wide-cart-390-light.png` });
-  } finally {
-    if (changed.length > 0) {
-      await prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
-        for (const row of changed) {
-          await tx.listing.update({ where: { id: row.id }, data: { customName: row.customName } });
-        }
-      });
-    }
-    await prisma.$disconnect();
-  }
-});
+

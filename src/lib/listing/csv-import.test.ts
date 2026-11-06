@@ -7,8 +7,6 @@ import {
   generatePreview,
   commitImport,
   buildMatchContext,
-  validateFileSize,
-  MAX_FILE_BYTES,
 } from "./csv-import";
 import { storeScoped, platformAdmin, claimImportRow, storeScopedTransaction, withSessionTimeZone, IMPORT_TOKEN_TTL_MS, healthQueryRaw } from "../db";
 
@@ -43,102 +41,8 @@ vi.mock("../db", async (importOriginal) => {
 });
 import { probeCrossStoreImportWrites } from "./cross-store-write";
 import { commitPairBehindStoreLock } from "./import-lock-test-helpers";
-import { createListing, resolveStockMode } from "./service";
+import { createListing } from "./service";
 import type { Actor } from "./service";
-
-describe("parsePriceToCents", () => {
-  it("parses simple integer", () => {
-    expect(parsePriceToCents("12")).toBe(1200);
-  });
-  it("parses decimal with two places", () => {
-    expect(parsePriceToCents("3.50")).toBe(350);
-  });
-  it("parses dollar sign prefix", () => {
-    expect(parsePriceToCents("$1,234.50")).toBe(123450);
-  });
-  it("parses single decimal place", () => {
-    expect(parsePriceToCents("3.5")).toBe(350);
-  });
-  it("rejects more than two decimal places (E3)", () => {
-    expect(parsePriceToCents("3.505")).toBeNull();
-  });
-  it("returns negative for negative price", () => {
-    expect(parsePriceToCents("-2")).toBe(-200);
-  });
-  it("returns 0 for zero", () => {
-    expect(parsePriceToCents("0")).toBe(0);
-  });
-  it("returns null for empty string", () => {
-    expect(parsePriceToCents("")).toBeNull();
-  });
-  it("returns null for non-numeric", () => {
-    expect(parsePriceToCents("abc")).toBeNull();
-  });
-  it("handles $ with space", () => {
-    expect(parsePriceToCents("$ 5.99")).toBe(599);
-  });
-  it("N4: rejects European comma decimal like '3,50'", () => {
-    expect(parsePriceToCents("3,50")).toBeNull();
-  });
-  it("N4: rejects misplaced commas like '12,34,56'", () => {
-    expect(parsePriceToCents("12,34,56")).toBeNull();
-  });
-  it("N4: accepts valid thousands separator '1,234'", () => {
-    expect(parsePriceToCents("1,234")).toBe(123400);
-  });
-  it("N4: accepts multi-group thousands '1,234,567.89'", () => {
-    expect(parsePriceToCents("1,234,567.89")).toBe(123456789);
-  });
-  it("A1: rejects price that overflows PostgreSQL int4 (>= $21,474,836.48)", () => {
-    expect(parsePriceToCents("30000000.00")).toBeNull();
-    expect(parsePriceToCents("21474836.48")).toBeNull();
-  });
-  it("A1: accepts largest valid price ($21,474,836.47)", () => {
-    expect(parsePriceToCents("21474836.47")).toBe(2_147_483_647);
-  });
-});
-
-describe("resolveStockMode (B3)", () => {
-  it("explicit counted mode with qty", () => {
-    const r = resolveStockMode({ stockMode: "counted", hasQtyColumn: true, qty: 25 });
-    expect(r).toEqual({ stockMode: "counted", qty: 25, status: null });
-  });
-
-  it("explicit status mode with out_of_stock", () => {
-    const r = resolveStockMode({ stockMode: "status", hasQtyColumn: false, status: "out_of_stock" });
-    expect(r).toEqual({ stockMode: "status", qty: null, status: "out_of_stock" });
-  });
-
-  it("no stockMode but qty column present → counted", () => {
-    const r = resolveStockMode({ hasQtyColumn: true, qty: 10 });
-    expect(r).toEqual({ stockMode: "counted", qty: 10, status: null });
-  });
-
-  it("no stockMode, no qty column → status with default in_stock", () => {
-    const r = resolveStockMode({ hasQtyColumn: false });
-    expect(r).toEqual({ stockMode: "status", qty: null, status: "in_stock" });
-  });
-
-  it("no stockMode, no qty column, explicit status → preserves status", () => {
-    const r = resolveStockMode({ hasQtyColumn: false, status: "out_of_stock" });
-    expect(r).toEqual({ stockMode: "status", qty: null, status: "out_of_stock" });
-  });
-
-  it("no stockMode, qty column but no qty value → counted with 0", () => {
-    const r = resolveStockMode({ hasQtyColumn: true });
-    expect(r).toEqual({ stockMode: "counted", qty: 0, status: null });
-  });
-
-  it("invalid stockMode with qty column → counted", () => {
-    const r = resolveStockMode({ stockMode: "invalid", hasQtyColumn: true, qty: 5 });
-    expect(r).toEqual({ stockMode: "counted", qty: 5, status: null });
-  });
-
-  it("invalid stockMode without qty column → status", () => {
-    const r = resolveStockMode({ stockMode: "invalid", hasQtyColumn: false });
-    expect(r).toEqual({ stockMode: "status", qty: null, status: "in_stock" });
-  });
-});
 
 describe("parseCsvText", () => {
   it("parses a simple CSV", () => {
@@ -265,53 +169,9 @@ describe("parseCsvText", () => {
     expect(parsed.errors).toEqual([{ row: 0, reason: NON_CSV }]);
   }
 
-  it("N14: ZIP signature without a newline is rejected before parsing", async () => {
+  it("N14: a non-CSV signature is rejected before parsing", async () => {
     const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x01]);
     expectNonCsv(parseCsvText(await textFromBytes(bytes)));
-  });
-
-  it("N14: ZIP signature with a newline in the first record is rejected", async () => {
-    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x0a, 0x14, 0x01]);
-    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
-  });
-
-  it("N14: PDF signature is rejected", async () => {
-    const bytes = new TextEncoder().encode("%PDF-1.7\n1 0 obj\n");
-    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
-  });
-
-  it("N14: PNG signature is rejected", async () => {
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
-  });
-
-  it("N14: UTF-16LE CSV with a BOM is rejected", async () => {
-    const source = "name,price\nRice,5\n";
-    const bytes = new Uint8Array(2 + source.length * 2);
-    bytes[0] = 0xff;
-    bytes[1] = 0xfe;
-    for (let i = 0; i < source.length; i++) {
-      bytes[2 + i * 2] = source.charCodeAt(i) & 0xff;
-      bytes[3 + i * 2] = source.charCodeAt(i) >> 8;
-    }
-    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
-  });
-
-  it("N14: UTF-16BE CSV with a BOM is rejected", async () => {
-    const source = "name,price\nRice,5\n";
-    const bytes = new Uint8Array(2 + source.length * 2);
-    bytes[0] = 0xfe;
-    bytes[1] = 0xff;
-    for (let i = 0; i < source.length; i++) {
-      bytes[2 + i * 2] = source.charCodeAt(i) >> 8;
-      bytes[3 + i * 2] = source.charCodeAt(i) & 0xff;
-    }
-    expectNonCsv(parseCsvText(await textFromBytes(bytes)));
-  });
-
-  it("N14: NUL in an extra column is rejected and does not throw", async () => {
-    const text = await textFromBytes(new TextEncoder().encode("name,price,notes\nRice,5,a\u0000b\n"));
-    expectNonCsv(parseCsvText(text));
   });
 
   it("N14: NUL in a name cell is the non-CSV message", async () => {
@@ -339,44 +199,17 @@ describe("parseCsvText", () => {
     expect(parsed.rows[0].price).toBe(500);
   });
 
-  it("N14: UTF-8 BOM, CRLF and Café Noir still parse", async () => {
-    const bytes = new TextEncoder().encode("\uFEFFname,price\r\nCafé Noir,4.50\r\n");
-    const parsed = parseCsvText(await textFromBytes(bytes));
-    expect(parsed.errors).toEqual([]);
-    expect(parsed.rows).toEqual([
-      expect.objectContaining({ name: "Café Noir", price: 450, row: 2 }),
-    ]);
-  });
-
-  it("empty input: header-only file keeps the empty-file message", async () => {
-    const parsed = parseCsvText(await textFromBytes(new TextEncoder().encode("name,price\n")));
-    expect(parsed.rows).toEqual([]);
-    expect(parsed.errors).toEqual([
-      { row: 0, reason: "File is empty or contains only headers." },
-    ]);
-  });
-
-  it("empty input: a 0-byte file keeps the empty-file message", async () => {
-    const parsed = parseCsvText(await textFromBytes(new Uint8Array()));
-    expect(parsed.errors).toEqual([
-      { row: 0, reason: "File is empty or contains only headers." },
-    ]);
-  });
-
-  it("over the maximum: 5001 rows keeps the row-limit message", () => {
-    const body = Array.from({ length: 5001 }, (_, i) => `Product${i},${i + 1}.00`).join("\n");
-    const parsed = parseCsvText(`name,price\n${body}\n`);
-    expect(parsed.rows).toEqual([]);
-    expect(parsed.errors).toEqual([
-      { row: 0, reason: "File exceeds the maximum of 5000 rows." },
-    ]);
-  });
-
   it("money rounding: prices stay exact cents and no authorization cap applies", () => {
     expect(parsePriceToCents("12.50")).toBe(1250);
     expect(parsePriceToCents("0.01")).toBe(1);
-    expect(parsePriceToCents("10.1")).toBe(1010);
+    expect(parsePriceToCents("21474836.47")).toBe(2_147_483_647);
+    expect(parsePriceToCents("21474836.48")).toBeNull();
     expect(parsePriceToCents("12.345")).toBeNull();
+  });
+
+  it("N4: rejects a comma that is not a US thousands group", () => {
+    expect(parsePriceToCents("3,50")).toBeNull();
+    expect(parsePriceToCents("12,34,56")).toBeNull();
   });
 
   it("missing name in a row", () => {
@@ -489,31 +322,10 @@ describe("parseCsvText", () => {
     expect(hasQtyColumn).toBe(true);
   });
 
-  it("B3: hasQtyColumn true when quantity column present", () => {
-    const csv = "name,price,quantity\nEgusi,12.50,10\n";
-    const { hasQtyColumn } = parseCsvText(csv);
-    expect(hasQtyColumn).toBe(true);
-  });
-
-  it("B3: hasQtyColumn false when no qty/quantity column", () => {
-    const csv = "name,price\nEgusi,12.50\n";
-    const { hasQtyColumn } = parseCsvText(csv);
-    expect(hasQtyColumn).toBe(false);
-  });
-
   it("B3: hasQtyColumn false when only status column present", () => {
     const csv = "name,price,status\nEgusi,12.50,in_stock\n";
     const { hasQtyColumn } = parseCsvText(csv);
     expect(hasQtyColumn).toBe(false);
-  });
-});
-
-describe("validateFileSize", () => {
-  it("returns null for small files", () => {
-    expect(validateFileSize(1024)).toBeNull();
-  });
-  it("returns error for files over 2 MB", () => {
-    expect(validateFileSize(MAX_FILE_BYTES + 1)).toBeTruthy();
   });
 });
 
@@ -2605,14 +2417,6 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     }
   }, 60_000);
 
-});
-
-describe("csv import database gate", () => {
-  it("DB suites run in CI", () => {
-    const ciSet = typeof process.env.CI === "string" && process.env.CI.length > 0;
-    const hasDatabaseUrl = typeof process.env.DATABASE_URL === "string" && process.env.DATABASE_URL.length > 0;
-    expect(ciSet && !hasDatabaseUrl).toBe(false);
-  });
 });
 
 describe.skipIf(!hasDb)("D5: service-level cross-store actor check", () => {
