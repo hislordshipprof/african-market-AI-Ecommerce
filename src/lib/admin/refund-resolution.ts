@@ -225,12 +225,12 @@ export async function resolveRefundFailed(
     }
     const existing = current.notes?.trim();
     const notes = existing ? `${existing}\n${trimmed}` : trimmed;
+    const gap = fresh.refundedCents + repaidCents - capturedCents;
     const updated = await tx.order.updateMany({
       where: { id: orderId, status: "REFUND_FAILED" },
-      data: { status: "CANCELLED", cancelledAt: new Date(), notes },
+      data: { status: "CANCELLED", cancelledAt: new Date(), notes, capturedAmountCents: null },
     });
     if (updated.count !== 1) return { ok: false as const, error: "already resolved" };
-    const gap = fresh.refundedCents + repaidCents - capturedCents;
     await tx.auditLog.create({
       data: {
         storeId: order.storeId,
