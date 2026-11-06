@@ -9,9 +9,19 @@ function productionRuntime(): boolean {
   return process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
 }
 
+/**
+ * Local Dev Server may send without an event key. On Vercel the client forces
+ * cloud mode (`isDev: false`), so INNGEST_DEV must not skip the key there.
+ * CI does not select dev mode.
+ */
+function devServerWithoutKey(): boolean {
+  if (process.env.VERCEL) return false;
+  return process.env.INNGEST_DEV === "1";
+}
+
 /** One log per process when production has no event key and is not on the Dev Server. */
 function missingEventKey(): boolean {
-  if (process.env.INNGEST_DEV === "1") return false;
+  if (devServerWithoutKey()) return false;
   if (!productionRuntime() || process.env.INNGEST_EVENT_KEY) return false;
   if (!loggedMissingEventKey) {
     loggedMissingEventKey = true;
@@ -53,11 +63,11 @@ export async function sendOrderAuthorized(storeId: string, orderId: string): Pro
     const order = await storeScopedTransaction(storeId, async (tx) => {
       return tx.order.findUnique({ where: { id: orderId }, select: { createdAt: true } });
     });
-    await sendWithTimeout(
-      storeId,
-      orderId,
-      order?.createdAt?.toISOString() ?? new Date().toISOString(),
-    );
+    if (!order) {
+      console.error(JSON.stringify({ event: "inngest_order_not_found", orderId }));
+      return;
+    }
+    await sendWithTimeout(storeId, orderId, order.createdAt.toISOString());
     sent = true;
     await storeScopedTransaction(storeId, async (tx) => {
       await tx.order.update({

@@ -111,20 +111,24 @@ describe("sendOrderAuthorized", () => {
     const previousNode = process.env.NODE_ENV;
     const previousKey = process.env.INNGEST_EVENT_KEY;
     const previousDev = process.env.INNGEST_DEV;
+    const previousCi = process.env.CI;
     vi.stubEnv("NODE_ENV", "production");
     delete process.env.INNGEST_EVENT_KEY;
     delete process.env.INNGEST_DEV;
 
+    process.env.CI = "true";
     const { inngest } = await import("./client");
+    const { storeScopedTransaction } = await import("../db");
     const { sendOrderAuthorized } = await import("./send");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(sendOrderAuthorized("store-1", "order-1")).resolves.toBeUndefined();
     await expect(sendOrderAuthorized("store-1", "order-2")).resolves.toBeUndefined();
 
-    const missing = errorSpy.mock.calls.filter((call) => String(call[0]).includes("inngest_event_key_missing"));
+    const missing = errorSpy.mock.calls.filter((call) => call[0] === JSON.stringify({ event: "inngest_event_key_missing" }));
     expect(missing).toHaveLength(1);
     expect(inngest.send).not.toHaveBeenCalled();
+    expect(storeScopedTransaction).not.toHaveBeenCalled();
 
     errorSpy.mockRestore();
     vi.stubEnv("NODE_ENV", previousNode ?? "test");
@@ -132,6 +136,8 @@ describe("sendOrderAuthorized", () => {
     else process.env.INNGEST_EVENT_KEY = previousKey;
     if (previousDev === undefined) delete process.env.INNGEST_DEV;
     else process.env.INNGEST_DEV = previousDev;
+    if (previousCi === undefined) delete process.env.CI;
+    else process.env.CI = previousCi;
   });
 
   it("a missing event key with VERCEL=1 logs once and does not send", async () => {
@@ -145,12 +151,15 @@ describe("sendOrderAuthorized", () => {
     delete process.env.INNGEST_DEV;
 
     const { inngest } = await import("./client");
+    const { storeScopedTransaction } = await import("../db");
     const { sendOrderAuthorized } = await import("./send");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(sendOrderAuthorized("store-1", "order-1")).resolves.toBeUndefined();
+    await expect(sendOrderAuthorized("store-1", "order-2")).resolves.toBeUndefined();
     expect(inngest.send).not.toHaveBeenCalled();
-    expect(errorSpy.mock.calls.filter((call) => String(call[0]).includes("inngest_event_key_missing"))).toHaveLength(1);
+    expect(storeScopedTransaction).not.toHaveBeenCalled();
+    expect(errorSpy.mock.calls.filter((call) => call[0] === JSON.stringify({ event: "inngest_event_key_missing" }))).toHaveLength(1);
 
     errorSpy.mockRestore();
     vi.stubEnv("NODE_ENV", previousNode ?? "test");
@@ -160,6 +169,80 @@ describe("sendOrderAuthorized", () => {
     else process.env.INNGEST_EVENT_KEY = previousKey;
     if (previousDev === undefined) delete process.env.INNGEST_DEV;
     else process.env.INNGEST_DEV = previousDev;
+  });
+
+  it("Vercel ignores INNGEST_DEV when the event key is missing", async () => {
+    const previousNode = process.env.NODE_ENV;
+    const previousVercel = process.env.VERCEL;
+    const previousKey = process.env.INNGEST_EVENT_KEY;
+    const previousDev = process.env.INNGEST_DEV;
+    try {
+      for (const nodeEnv of ["production", "test"]) {
+        vi.resetModules();
+        vi.stubEnv("NODE_ENV", nodeEnv);
+        process.env.VERCEL = "1";
+        process.env.INNGEST_DEV = "1";
+        delete process.env.INNGEST_EVENT_KEY;
+
+        const { inngest } = await import("./client");
+        const { storeScopedTransaction } = await import("../db");
+        const { sendOrderAuthorized } = await import("./send");
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        await expect(sendOrderAuthorized("store-1", "order-1")).resolves.toBeUndefined();
+        await expect(sendOrderAuthorized("store-1", "order-2")).resolves.toBeUndefined();
+
+        const missing = errorSpy.mock.calls.filter((call) => call[0] === JSON.stringify({ event: "inngest_event_key_missing" }));
+        expect(missing, nodeEnv).toHaveLength(1);
+        expect(inngest.send, nodeEnv).not.toHaveBeenCalled();
+        expect(storeScopedTransaction, nodeEnv).not.toHaveBeenCalled();
+        errorSpy.mockRestore();
+      }
+    } finally {
+      vi.stubEnv("NODE_ENV", previousNode ?? "test");
+      if (previousVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = previousVercel;
+      if (previousKey === undefined) delete process.env.INNGEST_EVENT_KEY;
+      else process.env.INNGEST_EVENT_KEY = previousKey;
+      if (previousDev === undefined) delete process.env.INNGEST_DEV;
+      else process.env.INNGEST_DEV = previousDev;
+    }
+  });
+
+  it("a configured event key in production sends", async () => {
+    const previousNode = process.env.NODE_ENV;
+    const previousKey = process.env.INNGEST_EVENT_KEY;
+    const previousDev = process.env.INNGEST_DEV;
+    const previousVercel = process.env.VERCEL;
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.INNGEST_EVENT_KEY = "evt_test_dummy";
+    delete process.env.INNGEST_DEV;
+    delete process.env.VERCEL;
+
+    const createdAt = new Date("2026-11-02T10:00:00.000Z");
+    const { inngest } = await import("./client");
+    const { storeScopedTransaction } = await import("../db");
+    const { sendOrderAuthorized } = await import("./send");
+    (storeScopedTransaction as ReturnType<typeof vi.fn>).mockImplementation(async (_sid: string, fn: (tx: unknown) => unknown) => {
+      return fn({
+        order: { findUnique: () => ({ createdAt }), update: () => ({}) },
+      });
+    });
+    (inngest.send as ReturnType<typeof vi.fn>).mockResolvedValue({ ids: ["order-authorized-order-keyed"] });
+
+    await sendOrderAuthorized("store-1", "order-keyed");
+    expect(inngest.send).toHaveBeenCalledWith({
+      id: "order-authorized-order-keyed",
+      name: "order/authorized",
+      data: { storeId: "store-1", orderId: "order-keyed", authorizedAt: "2026-11-02T10:00:00.000Z" },
+    });
+
+    vi.stubEnv("NODE_ENV", previousNode ?? "test");
+    if (previousKey === undefined) delete process.env.INNGEST_EVENT_KEY;
+    else process.env.INNGEST_EVENT_KEY = previousKey;
+    if (previousDev === undefined) delete process.env.INNGEST_DEV;
+    else process.env.INNGEST_DEV = previousDev;
+    if (previousVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = previousVercel;
   });
 
   it("INNGEST_DEV=1 sends without an event key", async () => {
