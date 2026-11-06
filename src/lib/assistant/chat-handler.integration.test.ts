@@ -2240,6 +2240,52 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(JSON.stringify(audits)).not.toContain("4242424242424242");
     expect(JSON.stringify(audits)).toContain("suggest_substitutes");
   });
+
+  it("scrubs a card number nested under a rejected tool id", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const pan = "4242424242424242";
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "suggest_substitutes", toolInput: { listing_id: { card: pan } } },
+        { kind: "text", text: "I cannot use that." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.241",
+        cookie: `cart_id=${encodeURIComponent(cart.id)}`,
+      },
+      body: JSON.stringify({
+        message: {
+          id: "nested-card-01",
+          role: "user",
+          parts: [
+            { type: "text", text: "rice from the photo" },
+            { type: "file", mediaType: "image/jpeg", filename: "list.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    const body = await response.text();
+    const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId: cart.id } });
+    const stored = JSON.stringify(conversation?.messages ?? null);
+    const nextRequest = JSON.stringify(fake.requests.slice(1));
+    expect(response.status).toBe(200);
+    expect(fake.requests).toHaveLength(2);
+    expect(body).not.toContain(pan);
+    expect(stored).not.toContain(pan);
+    expect(nextRequest).not.toContain(pan);
+    expect(body).toContain("I cannot use that.");
+  });
 });
 
 function padJpeg(jpeg: Buffer, target: number): Buffer {

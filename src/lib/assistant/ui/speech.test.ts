@@ -70,6 +70,45 @@ describe("assistant speech", () => {
     expect(state.listening).toBe(false);
   });
 
+  it("tells the recognizer to stop when speech reaches the limit", () => {
+    const stops: number[] = [];
+    const recognizer: BrowserSpeech = {
+      lang: "",
+      continuous: true,
+      interimResults: false,
+      start: () => {},
+      stop: () => { stops.push(1); },
+      abort: () => {},
+      onresult: null,
+      onerror: null,
+      onend: null,
+    };
+    let state = beginSpeech("a".repeat(1990), 1);
+    bindRecognizer(recognizer, {
+      lang: "en-US",
+      session: 1,
+      read: () => state,
+      write: (next) => { state = next; },
+    });
+    recognizer.onresult?.({
+      resultIndex: 0,
+      results: [{ isFinal: true, 0: { transcript: "b".repeat(20) } }],
+    });
+    expect(state.draft).toHaveLength(2000);
+    expect(state.notice).toBe(SPEECH_LIMIT_MESSAGE);
+    expect(state.listening).toBe(false);
+    expect(stops).toHaveLength(1);
+    recognizer.onresult?.({
+      resultIndex: 1,
+      results: [
+        { isFinal: true, 0: { transcript: "b".repeat(20) } },
+        { isFinal: true, 0: { transcript: "plantain" } },
+      ],
+    });
+    expect(stops).toHaveLength(1);
+    expect(state.accepting).toBe(true);
+  });
+
   it("picks the page language, then the browser language, then en-US", () => {
     expect(recognitionLanguage("fr", "en-GB")).toBe("fr");
     expect(recognitionLanguage("  ", "en-GB")).toBe("en-GB");

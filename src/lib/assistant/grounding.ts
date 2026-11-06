@@ -514,11 +514,13 @@ export function groundingTransform(options: GroundingTransformOptions = {}) {
             return;
           }
           if (type === "text-end" && buffers.has(id)) {
-            const grounded = groundAmounts(scrubCardNumbers(buffers.get(id) ?? "").text, allowed);
+            const original = buffers.get(id) ?? "";
+            const grounded = groundAmounts(original, allowed);
+            const emitted = scrubCardNumbers(grounded.text).text;
             buffers.delete(id);
             for (const amount of grounded.stripped) options.onStrip?.(amount);
-            if (grounded.text) {
-              controller.enqueue({ type: "text-delta", id, text: grounded.text });
+            if (emitted) {
+              controller.enqueue({ type: "text-delta", id, text: emitted });
             }
             controller.enqueue(part);
             return;

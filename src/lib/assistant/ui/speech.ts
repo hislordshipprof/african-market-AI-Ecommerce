@@ -192,6 +192,7 @@ export function bindRecognizer(
   input: { lang: string; session: number; read: () => SpeechState; write: (state: SpeechState) => void },
 ): void {
   let retried = false;
+  let stoppedForLimit = false;
   recognizer.lang = input.lang;
   recognizer.continuous = false;
   recognizer.interimResults = true;
@@ -206,6 +207,10 @@ export function bindRecognizer(
         : applyInterim(state, input.session, index, transcript);
     }
     input.write(state);
+    if (!stoppedForLimit && state.notice === SPEECH_LIMIT_MESSAGE) {
+      stoppedForLimit = true;
+      recognizer.stop();
+    }
   };
   recognizer.onerror = (event) => {
     if (event.error === "language-not-supported" && !retried && recognizer.lang !== "en-US") {
