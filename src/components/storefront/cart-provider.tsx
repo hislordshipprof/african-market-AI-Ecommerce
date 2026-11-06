@@ -365,6 +365,27 @@ export function CartProvider({
     for (const key of pendingDelete.current.keys()) keys.add(key);
     return [...keys].filter(isDirty);
   }
+  /**
+   * Shared by a thrown write and a rejected write: one keep-intent read, one
+   * retry, then stop when the page is stale, unmounted, or a newer gesture won.
+   */
+  async function readCartForRecovery(
+    key: string,
+    sinceRev: number,
+    scope?: ReconcileScope,
+  ): Promise<"ok" | "empty" | "failed" | "stopped"> {
+    let pulled = await pullServer("keep-intent", scope);
+    if (pulled === "failed" && !staleDeployment.current && readFailures.current < 1) {
+      readFailures.current = 1;
+      pulled = await pullServer("keep-intent", scope);
+    }
+    if (!mounted.current || staleDeployment.current) return "stopped";
+    if ((revs.current.get(key) ?? 0) > sinceRev) {
+      paused.current.delete(key);
+      return "stopped";
+    }
+    return pulled;
+  }
   async function onThrown(error: unknown, key: string, uncertainAdd: boolean, revAtSend?: number) {
     const failedRev = revAtSend ?? revs.current.get(key) ?? 0;
     const removing = pendingDelete.current.has(key);
@@ -383,17 +404,8 @@ export function CartProvider({
     }
     if (uncertainAdd) addAccepted.current.add(key);
     const scope = removing ? { key, sinceRev: failedRev } : undefined;
-    let pulled = await pullServer("keep-intent", scope);
-    if (pulled === "failed" && !staleDeployment.current && readFailures.current < 1) {
-      readFailures.current = 1;
-      pulled = await pullServer("keep-intent", scope);
-    }
-    if (!mounted.current || staleDeployment.current) return;
-    const newer = (revs.current.get(key) ?? 0) > failedRev;
-    if (newer) {
-      paused.current.delete(key);
-      return;
-    }
+    const pulled = await readCartForRecovery(key, failedRev, scope);
+    if (pulled === "stopped") return;
     if (removing) {
       if (pulled === "failed") {
         readFailures.current = 2;
@@ -429,17 +441,8 @@ export function CartProvider({
     paused.current.delete(key);
   }
   async function recoverRejected(key: string, sinceRev: number, kind: "remove" | "qty" | "add") {
-    const scope = { key, sinceRev };
-    let pulled = await pullServer("keep-intent", scope);
-    if (pulled === "failed" && !staleDeployment.current && readFailures.current < 1) {
-      readFailures.current = 1;
-      pulled = await pullServer("keep-intent", scope);
-    }
-    if (!mounted.current || staleDeployment.current) return;
-    if ((revs.current.get(key) ?? 0) > sinceRev) {
-      paused.current.delete(key);
-      return;
-    }
+    const pulled = await readCartForRecovery(key, sinceRev, { key, sinceRev });
+    if (pulled === "stopped") return;
     if (pulled === "failed") {
       readFailures.current = 2;
       paused.current.add(key);
