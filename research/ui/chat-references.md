@@ -26,11 +26,12 @@ The shots below were opened and their lead images viewed through Agent Reach. On
 4. A thin line moves over a photo while it is read, with real tool steps below. Reduced motion removes the movement.
 5. Shopper messages are store-coloured bubbles. Helper text stays unboxed.
 6. Products sit in a sideways rail with "See all" beneath.
+7. A mic beside send turns speech into editable text in the composer. Added at the owner's request after this review.
 
 ## What we reject
 
 - Orbs, mascots, sparkle marks, iridescent or purple gradients, and glass panels.
 - Dark-only chat. Each store's theme decides.
-- Voice notes and model pickers.
+- Recorded voice notes, waveforms and model pickers.
 
 Mockup: https://claude.ai/artifact/KYsfAXFxuNFECmSHgifbfm

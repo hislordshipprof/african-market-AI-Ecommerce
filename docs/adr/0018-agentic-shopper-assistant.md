@@ -32,6 +32,12 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
   - files are **not stored**. They reach the model only on the turn they were sent. The transcript keeps a safe filename, the type, size and page count, so the 90-day transcript rule needs no file cleanup. No bucket, signed URL or new secret is needed. A larger limit would need direct upload to a private R2 bucket, which is a later decision;
   - file content is untrusted data. On a turn with a file, the tools that change the cart are switched off, so text inside a file can't change the basket. The assistant reports what it found and the shopper taps or types to add it;
   - we can't scrub a card number out of a picture. The composer asks shoppers not to send cards or IDs, the model is told not to repeat such numbers, and replies pass the existing card scrub before they are saved.
+- Shoppers can speak instead of typing (added 2026-11-05):
+  - the mic uses the browser's own speech recognition. It costs nothing, needs no key, and no audio reaches our servers. Claude can't take audio here, so voice has to become text first;
+  - words appear in the composer, stay editable and send only when the shopper taps send. Typed-message rules apply, including the card scrub;
+  - the mic is hidden where the browser has no speech recognition. Firefox is the known gap;
+  - the browser maker's service may process the audio, so the mic says "Your browser turns your speech into text" and the privacy policy must cover it;
+  - if real shoppers find names like egusi and ogbono too often wrong, the next step is a paid speech service that accepts a store word list. That needs a new vendor and key, so it is the owner's call.
 
 ### Checkout and payment (supersedes D15 "cannot submit payment")
 
