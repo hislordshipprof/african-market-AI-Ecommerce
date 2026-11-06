@@ -1,8 +1,12 @@
 "use server";
 
+import { z } from "zod";
 import { platformAdmin, platformAdminTransaction, lockMasterProductRow } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { downloadAndUploadImage } from "../catalog-image";
+import { parseInput } from "../security/parse-input";
+
+const productIdSchema = z.string().min(1).max(200);
 
 export type ReviewProduct = {
   id: string;
@@ -28,10 +32,16 @@ export async function listReviewProducts(opts?: {
   pageSize?: number;
 }): Promise<{ products: ReviewProduct[]; total: number; page: number; pageSize: number }> {
   await requirePlatformAdmin();
+  const parsed = parseInput(z.strictObject({
+    status: z.string().max(40).optional(),
+    page: z.number().int().min(1).max(100_000).optional(),
+    pageSize: z.number().int().min(1).max(10_000).optional(),
+  }), opts ?? {});
+  if (!parsed.ok) return { products: [], total: 0, page: 1, pageSize: 25 };
 
-  const status = opts?.status ?? "needs_review";
-  const page = Math.max(1, opts?.page ?? 1);
-  const pageSize = Math.min(100, Math.max(1, opts?.pageSize ?? 25));
+  const status = parsed.data.status ?? "needs_review";
+  const page = Math.max(1, parsed.data.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, parsed.data.pageSize ?? 25));
   const skip = (page - 1) * pageSize;
 
   const [products, total] = await Promise.all([
@@ -98,6 +108,9 @@ export async function approveProduct(
   productId: string,
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
+  const id = parseInput(productIdSchema, productId);
+  if (!id.ok) return { error: "Product not found" };
+  productId = id.data;
 
   // Optimistic read, outside the transaction, only so the image download (network I/O)
   // never happens while the row lock is held. The locked re-read below is authoritative.
@@ -142,6 +155,9 @@ export async function rejectProduct(
   productId: string,
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
+  const id = parseInput(productIdSchema, productId);
+  if (!id.ok) return { error: "Product not found" };
+  productId = id.data;
 
   return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
     await lockMasterProductRow(tx, productId);
@@ -179,6 +195,19 @@ export async function updateReviewProduct(
   },
 ): Promise<CatalogActionResult> {
   const session = await requirePlatformAdmin();
+  const parsed = parseInput(z.strictObject({
+    productId: productIdSchema,
+    data: z.strictObject({
+      name: z.string().max(500).optional(),
+      description: z.string().max(20_000).optional(),
+      unit: z.string().max(100).optional(),
+      storage: z.string().max(100).optional(),
+      originCountries: z.string().max(500).optional(),
+    }),
+  }), { productId, data });
+  if (!parsed.ok) return { error: "Product not found" };
+  productId = parsed.data.productId;
+  data = parsed.data.data;
 
   const updateData: {
     name?: string;

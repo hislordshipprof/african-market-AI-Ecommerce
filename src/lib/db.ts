@@ -609,6 +609,46 @@ export async function takeRollingFileTurn(
   });
 }
 
+export async function appRateLimitUpsert(
+  key: string,
+  nowMs: bigint,
+  boundary: bigint,
+): Promise<{ count: number; windowStart: bigint }> {
+  const rows = await prisma.$queryRaw<Array<{ count: number; window_start: bigint }>>`
+    INSERT INTO app_rate_limits (key, window_start, count)
+    VALUES (${key}, ${nowMs}, 1)
+    ON CONFLICT (key) DO UPDATE SET
+      count = CASE
+        WHEN app_rate_limits.window_start < ${boundary}
+        THEN 1
+        ELSE app_rate_limits.count + 1
+      END,
+      window_start = CASE
+        WHEN app_rate_limits.window_start < ${boundary}
+        THEN ${nowMs}
+        ELSE app_rate_limits.window_start
+      END
+    RETURNING count, window_start
+  `;
+  const row = rows[0];
+  if (!row) throw new Error("rate limit upsert returned no row");
+  return { count: Number(row.count), windowStart: BigInt(row.window_start) };
+}
+
+export async function appRateLimitCleanup(cutoff: bigint, limit: number): Promise<void> {
+  // The outer window_start predicate is checked again after a row-lock wait
+  // (READ COMMITTED), so a window refreshed by a concurrent upsert is kept.
+  await prisma.$executeRaw`
+    DELETE FROM app_rate_limits
+    WHERE key IN (
+      SELECT key FROM app_rate_limits
+      WHERE window_start < ${cutoff}
+      LIMIT ${limit}
+    )
+    AND window_start < ${cutoff}
+  `;
+}
+
 /**
  * Wraps each query in a transaction that first sets a 5 s server-side statement
  * timeout, so a slow database cancels the query

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { getStore } from "@/lib/get-store";
 import { storeScoped, platformAdmin } from "@/lib/db";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
+import { parseInput } from "@/lib/security/parse-input";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +17,9 @@ export async function GET(req: NextRequest) {
   });
 
   if (!session) {
-    const storeSlug = req.nextUrl.searchParams.get("store") ?? "";
+    const storeSlug = parseInput(z.string().max(80), req.nextUrl.searchParams.get("store") ?? "");
     return NextResponse.redirect(
-      new URL(`/store-admin/sign-in?store=${storeSlug}`, req.nextUrl.origin),
+      new URL(`/store-admin/sign-in?store=${storeSlug.ok ? storeSlug.data : ""}`, req.nextUrl.origin),
     );
   }
 

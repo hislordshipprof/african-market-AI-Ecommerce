@@ -2,7 +2,12 @@ import { serve } from "inngest/next";
 import { inngest } from "@/lib/inngest/client";
 import { inngestFunctions } from "@/lib/inngest/functions";
 
-const handler = serve({ client: inngest, functions: inngestFunctions });
+const handler = serve({
+  client: inngest,
+  functions: inngestFunctions,
+  servePath: "/api/inngest",
+  enableUnauthedSync: false,
+});
 
 export const GET = handler.GET;
 export const POST = handler.POST;

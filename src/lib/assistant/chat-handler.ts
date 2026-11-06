@@ -14,7 +14,7 @@ import { Prisma } from "@prisma/client";
 import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
 import { readBrowserId } from "../cart/browser";
 import { CartError, getOrCreateCart } from "../cart/service";
-import { lockConversationRow, rateLimitUpsert, storeScoped, storeScopedTransaction, takeRollingFileTurn } from "../db";
+import { lockConversationRow, storeScoped, storeScopedTransaction, takeRollingFileTurn } from "../db";
 import { findStore } from "../get-store";
 import { auth } from "../auth";
 import {
@@ -37,6 +37,8 @@ import {
 } from "./contract";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { clientIp } from "./client-ip";
+import { takeRateLimit } from "../rate-limit/app-limiter";
+import { requireSameOrigin } from "../security/same-origin";
 import { callCostMicros, type TokenUsage } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
 import { groundingTransform, keyedUnitPricesFromHistory } from "./grounding";
@@ -68,7 +70,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     }
     const parsed = await readAssistantRequest(request);
     if (!parsed.ok) return jsonError(parsed.status, parsed.code, parsed.message);
-    if (!originAllowed(request)) return jsonError(403, "forbidden_origin", "This request was not sent from the store.");
+    if (!requireSameOrigin(request)) return jsonError(403, "forbidden_origin", "This request was not sent from the store.");
 
     const slug = request.headers.get("x-store-slug");
     const store = slug ? await findStore(slug) : null;
@@ -598,11 +600,9 @@ async function releaseLease(storeId: string, conversationId: string) {
 }
 
 async function takeLimit(key: string, max: number, at: Date): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
-  const nowMs = BigInt(at.getTime());
-  const { count, lastRequest } = await rateLimitUpsert(key, nowMs, nowMs - BigInt(WINDOW_MS));
-  if (count <= max) return { ok: true };
-  const retryAfter = Math.max(1, Math.ceil((Number(lastRequest) + WINDOW_MS - at.getTime()) / 1000));
-  return { ok: false, retryAfter };
+  const result = await takeRateLimit(key, max, WINDOW_MS, at.getTime());
+  if (result.ok) return { ok: true };
+  return { ok: false, retryAfter: result.retryAfter };
 }
 
 function rateLimited(retryAfter: number): Response {
@@ -613,17 +613,6 @@ function rateLimited(retryAfter: number): Response {
 
 function jsonError(status: number, code: string, message: string, extra?: HeadersInit): Response {
   return Response.json({ error: { code, message } }, { status, headers: extra });
-}
-
-function originAllowed(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return false;
-  try {
-    return new URL(origin).host === host.toLowerCase();
-  } catch {
-    return false;
-  }
 }
 
 function readCookie(header: string | null, name: string): string | null {

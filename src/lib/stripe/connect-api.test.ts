@@ -64,6 +64,7 @@ async function callConnect() {
   const { POST } = await import("@/app/api/stripe/connect/route");
   const req = new Request("http://localhost:3000/api/stripe/connect?store=test-store", {
     method: "POST",
+    headers: { origin: "http://localhost:3000", host: "localhost:3000" },
   });
   const { NextRequest } = await import("next/server");
   return POST(new NextRequest(req));

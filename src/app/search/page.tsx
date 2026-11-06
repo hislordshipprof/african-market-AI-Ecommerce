@@ -2,6 +2,7 @@ import { ProductListMotion } from "@/components/storefront/product-list-motion";
 import Link from "next/link";
 import { getStore } from "@/lib/get-store";
 import { searchListings } from "@/lib/storefront/service";
+import { SEARCH_QUERY_TOO_LONG, normalizedSearchQuery } from "@/lib/storefront/search-query";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { ListingCard } from "@/components/storefront/listing-card";
 import { EmptyState } from "@/components/storefront/primitives";
@@ -12,11 +13,11 @@ export default async function SearchPage({
   searchParams: Promise<{ q?: string | string[] }>;
 }) {
   const raw = (await searchParams).q;
-  const q = (
-    typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] || "" : ""
-  ).trim();
+  const { query: q, tooLong } = normalizedSearchQuery(
+    typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] || "" : "",
+  );
   const store = await getStore();
-  const results = q ? await searchListings(store.id, q) : [];
+  const results = q && !tooLong ? await searchListings(store.id, q) : [];
   return (
     <StorefrontShell store={store}>
       <div className="sf-container sf-search-page">
@@ -26,13 +27,17 @@ export default async function SearchPage({
           <span>Search</span>
         </nav>
         <h2 className="sf-page-title">
-          {q ? `Results for "${q}"` : "What's cooking?"}
+          {tooLong ? SEARCH_QUERY_TOO_LONG : q ? `Results for "${q}"` : "What's cooking?"}
         </h2>
         <p className="sf-page-intro">
           Search the names you know. Ugu, egusi, garri — you’re in the right
           place.
         </p>
-        {q ? (
+        {tooLong ? (
+          <p className="sf-page-intro" role="status">
+            {SEARCH_QUERY_TOO_LONG}. Use 200 characters or fewer.
+          </p>
+        ) : q ? (
           <div className="sf-section">
             <p className="sf-result-count" role="status">
               {results.length} {results.length === 1 ? "listing" : "listings"}{" "}

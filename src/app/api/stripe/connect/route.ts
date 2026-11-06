@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { getStore, revalidateStore } from "@/lib/get-store";
 import { storeScoped, platformAdmin } from "@/lib/db";
 import { getStripeProvider } from "@/lib/stripe";
+import { requireSameOrigin } from "@/lib/security/same-origin";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,10 @@ export async function POST(req: NextRequest) {
 
   if (!session.user.twoFactorEnabled || !session.session.twoFactorVerified) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!requireSameOrigin(req)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   let store;

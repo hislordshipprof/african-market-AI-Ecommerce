@@ -1,6 +1,8 @@
 "use server";
 
+import { z } from "zod";
 import { requireStoreMember } from "../store-admin/session";
+import { parseInput } from "../security/parse-input";
 import {
   getStoreOrders,
   acceptOrder,
@@ -72,6 +74,8 @@ async function runStaffAction<T extends { ok: boolean }>(
   }
 }
 
+const orderIdSchema = z.string().min(1).max(200);
+
 export async function fetchOrdersAction() {
   const session = await requireStoreMember();
   const orders = await getStoreOrders(session.store.id);
@@ -80,13 +84,18 @@ export async function fetchOrdersAction() {
 
 export async function acceptOrderAction(orderId: string, prepEstimateMinutes: number) {
   const session = await requireStoreMember();
-  return runStaffAction("acceptOrder", orderId, () =>
-    acceptOrder(session.store.id, orderId, prepEstimateMinutes),
+  const id = parseInput(orderIdSchema, orderId);
+  const prep = parseInput(z.number().int().min(0).max(100_000), prepEstimateMinutes);
+  if (!id.ok || !prep.ok) return { ok: false as const, error: "Order not found" };
+  return runStaffAction("acceptOrder", id.data, () =>
+    acceptOrder(session.store.id, id.data, prep.data),
   );
 }
 
 export async function autoAcceptOrderAction(orderId: string) {
   const session = await requireStoreMember();
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
   const store = await platform.store.findUnique({
     where: { id: session.store.id },
     select: { autoAcceptOrders: true, prepTimeMinutes: true },
@@ -94,22 +103,28 @@ export async function autoAcceptOrderAction(orderId: string) {
   if (!store?.autoAcceptOrders) {
     return { ok: false as const, error: "Auto-accept is not enabled for this store" };
   }
-  return runStaffAction("acceptOrder", orderId, () =>
-    acceptOrder(session.store.id, orderId, store.prepTimeMinutes),
+  return runStaffAction("acceptOrder", id.data, () =>
+    acceptOrder(session.store.id, id.data, store.prepTimeMinutes),
   );
 }
 
 export async function markLinePickedAction(lineId: string) {
   const session = await requireStoreMember();
-  return runStaffAction("markLinePicked", lineId, () => markLinePicked(session.store.id, lineId));
+  const id = parseInput(orderIdSchema, lineId);
+  if (!id.ok) return { ok: false as const, error: "Order line not found" };
+  return runStaffAction("markLinePicked", id.data, () => markLinePicked(session.store.id, id.data));
 }
 
 export async function markReadyAction(orderId: string) {
   const session = await requireStoreMember();
-  return runStaffAction("markReady", orderId, () => markReady(session.store.id, orderId));
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  return runStaffAction("markReady", id.data, () => markReady(session.store.id, id.data));
 }
 
 export async function completePickupAction(orderId: string) {
   const session = await requireStoreMember();
-  return runStaffAction("completePickup", orderId, () => completePickup(session.store.id, orderId));
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  return runStaffAction("completePickup", id.data, () => completePickup(session.store.id, id.data));
 }

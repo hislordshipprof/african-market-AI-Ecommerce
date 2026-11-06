@@ -126,7 +126,15 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
     const phone = await asUser(b.cookie, () => savePhoneAction("(808) 555-0199"));
     expect(phone.ok).toBe(true);
 
+    const forged = await asUser(a.cookie, () => addAddressAction({ ...home, injected: true, notes: { bad: true } }));
+    expect(forged.ok).toBe(false);
+    expect(await customerScoped(a.id).customerAddress.count()).toBe(1);
+    const savedNote = await asUser(a.cookie, () => editAddressAction(addressId, { ...home, notes: "Leave at door" }));
+    expect(savedNote.ok).toBe(true);
+    const cleared = await asUser(a.cookie, () => editAddressAction(addressId, { ...home, notes: {} }));
+    expect(cleared.ok).toBe(false);
     const own = await customerScoped(a.id).customerAddress.findUnique({ where: { id: addressId } });
+    expect(own?.notes).toBe("Leave at door");
     expect(own?.label).toBe("Home");
     const aPhone = await customerScoped(a.id).platformCustomerProfile.findUnique({ where: { userId: a.id } });
     expect(aPhone?.phone ?? null).toBeNull();
