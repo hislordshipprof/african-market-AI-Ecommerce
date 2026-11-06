@@ -24,11 +24,14 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
   - a photo of an item ("what is this called, do you have it?"): the model identifies it, then the identification goes through `search_catalog`;
   - a photo of a handwritten or printed list: each line goes through `search_catalog`.
 - When the assistant can't match a name, it may ask the shopper for a photo.
-- Uploads:
-  - images only (JPEG, PNG, WebP, HEIC), at most 10 MB;
-  - EXIF location data is stripped before storage or model use;
-  - kept with the transcript under the 90-day retention below;
-  - never shown to the store unless the shopper starts a store chat (#19).
+- Shoppers can also send a PDF, such as a recipe, a shopping list or a flyer.
+- Attachments (amended 2026-11-05; replaces the original rule of images up to 10 MB kept with the transcript):
+  - at most 3 per message: JPEG, PNG or WebP photos, and PDFs of at most 10 pages, 3 MB in total. Vercel Functions take at most 4.5 MB per request on every plan, and base64 adds about a third;
+  - photos are resized on the device to a 2000 px long edge. HEIC works only where the browser can decode it; our server build of sharp can't, and Claude doesn't accept it;
+  - the server checks the real file type, then re-encodes every photo with sharp, which removes EXIF and location data;
+  - files are **not stored**. They reach the model only on the turn they were sent. The transcript keeps a safe filename, the type, size and page count, so the 90-day transcript rule needs no file cleanup. No bucket, signed URL or new secret is needed. A larger limit would need direct upload to a private R2 bucket, which is a later decision;
+  - file content is untrusted data. On a turn with a file, the tools that change the cart are switched off, so text inside a file can't change the basket. The assistant reports what it found and the shopper taps or types to add it;
+  - we can't scrub a card number out of a picture. The composer asks shoppers not to send cards or IDs, the model is told not to repeat such numbers, and replies pass the existing card scrub before they are saved.
 
 ### Checkout and payment (supersedes D15 "cannot submit payment")
 
@@ -75,7 +78,7 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 
 ## Consequences
 
-- New work beyond #145 and #146: agentic checkout (confirm card, `checkoutToken`, cancellation window), saved cards, address book, and image upload with photo cards.
+- New work beyond #145 and #146: agentic checkout (confirm card, `checkoutToken`, cancellation window), saved cards, address book, and photo and PDF attachments.
 - Order flow gains a "cancellable until" state and a delayed store alert for assistant orders.
 - PCI scope stays SAQ A: card data only ever goes into Stripe's hosted fields.
 - The $10 cap will be hit quickly if the assistant is opened to real shoppers. Raise it deliberately before launch.
