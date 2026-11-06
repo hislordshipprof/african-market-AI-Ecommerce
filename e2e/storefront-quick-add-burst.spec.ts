@@ -1275,6 +1275,14 @@ test.describe("quick add recovery gaps", () => {
   test("an unknown server action asks for a reload and a fresh page still adds", async ({ page }) => {
     await openGrains(page);
     await addGarri(page);
+    const cartId = await cartCookie(page);
+    const yellow = () =>
+      readCartLines("mama-ngozi", cartId).then((lines) =>
+        lines.filter((line) => line.listingId === "mn_garri_yellow"),
+      );
+    const saved = await yellow();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.qty).toBe(1);
     let actions = 0;
     let rewritten = 0;
     await page.route("**/*", async (route) => {
@@ -1295,17 +1303,30 @@ test.describe("quick add recovery gaps", () => {
     });
     await garri(page).getByTestId("stepper-plus").click();
     await expectNoCrash(page);
-    await expect(page.locator("[data-sonner-toast]").filter({ hasText: "This page is out of date" }).first()).toBeVisible();
+    const staleToast = page.locator("[data-sonner-toast]").filter({ hasText: "This page is out of date" });
+    await expect(staleToast.first()).toBeVisible();
     const actionsAtToast = actions;
-    const qtyAtToast = await garri(page).getByTestId("stepper-qty").innerText();
+    const qtyAtToast = (await garri(page).getByTestId("stepper-qty").innerText()).trim();
+    const headerAtToast = (await cartCount(page).innerText()).trim();
+    const rowAtToast = await yellow();
     expect(rewritten).toBe(1);
+    expect(actionsAtToast).toBeGreaterThan(0);
+    expect(rowAtToast).toHaveLength(1);
+    expect(rowAtToast[0]?.id).toBe(saved[0]?.id);
+    expect(rowAtToast[0]?.qty).toBe(1);
     await settle(page);
     await garri(page).getByTestId("stepper-plus").click();
+    await expect(staleToast.first()).toBeVisible();
     await settle(page);
     await page.waitForTimeout(400);
     expect(actions).toBe(actionsAtToast);
     expect(rewritten).toBe(1);
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText(qtyAtToast);
+    await expect(cartCount(page)).toHaveText(headerAtToast);
+    const frozen = await yellow();
+    expect(frozen).toHaveLength(1);
+    expect(frozen[0]?.id).toBe(rowAtToast[0]?.id);
+    expect(frozen[0]?.qty).toBe(1);
     await page.unroute("**/*");
     await page.reload();
     await expect(garri(page).getByTestId("stepper-qty")).toHaveText("1");
