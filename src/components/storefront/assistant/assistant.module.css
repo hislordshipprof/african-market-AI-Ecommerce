@@ -24,10 +24,13 @@
   flex-direction: column;
   gap: 16px;
   flex: 1;
+  box-sizing: border-box;
   height: calc(100dvh - 96px);
+  max-height: calc(100dvh - 96px);
   min-height: 0;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
 }
 
 .log {
@@ -295,6 +298,18 @@
   background: var(--color-surface);
 }
 
+.composerRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composerRow textarea {
+  flex: 1;
+  min-width: 0;
+}
+
 .tiles {
   display: flex;
   gap: 8px;
@@ -449,6 +464,7 @@
 @media (max-width: 767px) {
   .thread {
     height: calc(88dvh - 88px);
+    max-height: calc(88dvh - 88px);
   }
 
   .launcher {

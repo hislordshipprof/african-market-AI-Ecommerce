@@ -108,6 +108,7 @@ export function cardsFromParts(parts: readonly Part[], options?: { turnFailed?: 
       return;
     }
     if (state === "output-error") {
+      if (CART_TOOLS.has(tool)) return;
       cards.push({ kind: "tool-error", key: `${callId}:error`, message: CARD_TOOL_ERROR });
       return;
     }

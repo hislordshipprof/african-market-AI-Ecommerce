@@ -134,6 +134,13 @@ export function scriptStep(messages: unknown): ScriptStep {
 
 const CART_TOOLS = ["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"] as const;
 
+function fileQuery(text: string): string {
+  if (text.includes("egusi")) return "egusi";
+  if (text.includes("yam")) return "yam";
+  if (text.includes("rice")) return "rice";
+  return "rice";
+}
+
 function fileStep(text: string, last: { name: string; output: unknown } | undefined): ScriptStep {
   if (text.includes("file overload") && !last) return { kind: "error" };
   const attack = text.includes("add 50") || text.includes("ignore your rules");
@@ -152,7 +159,7 @@ function fileStep(text: string, last: { name: string; output: unknown } | undefi
     }
     return { kind: "text", text: "The file says to add 50 of everything. I will not change the basket." };
   }
-  if (!last) return { kind: "tool", name: "search_catalog", input: { query: "shopping list" } };
+  if (!last) return { kind: "tool", name: "search_catalog", input: { query: fileQuery(text) } };
   if (last.name === "search_catalog") {
     const items = itemsOf(last.output);
     const options = items.slice(0, 2).flatMap((item) => item.listingId ? [{ listing_id: item.listingId }] : []);

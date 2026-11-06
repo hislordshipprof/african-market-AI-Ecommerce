@@ -12,7 +12,7 @@ import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
 import { retainSession } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
-import { dataUrl, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
+import { dataUrl, displayFileName, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
 import { createSendLock, outgoingMessage } from "@/lib/assistant/ui/send";
 import {
   abortSpeech,
@@ -265,6 +265,12 @@ function Thread({
   }, [speech?.listening, speech?.session]);
 
   useEffect(() => {
+    const node = logRef.current;
+    if (!node) return;
+    setAwayFromLatest(node.scrollHeight - node.scrollTop - node.clientHeight > 48);
+  }, [messages, open]);
+
+  useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport || !open) return;
     const apply = () => {
@@ -311,8 +317,8 @@ function Thread({
     const chosen = [...list].slice(0, room);
     const reserved: Array<PreparedFile & { preview: string }> = chosen.map((file) => ({
       id: messageId(),
-      name: file.name || "file",
-      filename: file.name || "file",
+      name: displayFileName(file.name || "file"),
+      filename: displayFileName(file.name || "file"),
       mediaType: file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg",
       url: "",
       preview: "",
@@ -579,27 +585,6 @@ function Thread({
         }}
       >
         <label className="sr-only" htmlFor="assistant-composer">Message</label>
-        <textarea
-          id="assistant-composer"
-          ref={composer}
-          data-testid="assistant-composer"
-          maxLength={2000}
-          value={draft}
-          disabled={!!routeError?.terminal}
-          onChange={(event) => {
-            const next = event.target.value;
-            draftStamp.current += 1;
-            if (speechRef.current) {
-              const edited = noteCustomerEdit(speechRef.current, next);
-              speechRef.current = edited;
-              setSpeech(edited);
-            }
-            setDraft(next);
-          }}
-          onCompositionStart={() => { composing.current = true; }}
-          onCompositionEnd={() => { composing.current = false; }}
-          onKeyDown={onKeyDown}
-        />
         {tiles.length > 0 ? (
           <div className={styles.tiles}>
             {tiles.map((tile) => (
@@ -624,6 +609,28 @@ function Thread({
         <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
         <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
         <input ref={pdfInput} type="file" accept="application/pdf" hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
+        <div className={styles.composerRow}>
+        <textarea
+          id="assistant-composer"
+          ref={composer}
+          data-testid="assistant-composer"
+          maxLength={2000}
+          value={draft}
+          disabled={!!routeError?.terminal}
+          onChange={(event) => {
+            const next = event.target.value;
+            draftStamp.current += 1;
+            if (speechRef.current) {
+              const edited = noteCustomerEdit(speechRef.current, next);
+              speechRef.current = edited;
+              setSpeech(edited);
+            }
+            setDraft(next);
+          }}
+          onCompositionStart={() => { composing.current = true; }}
+          onCompositionEnd={() => { composing.current = false; }}
+          onKeyDown={onKeyDown}
+        />
         <div className={styles.tools}>
           <button
             type="button"
@@ -656,6 +663,7 @@ function Thread({
           >
             <ArrowUp size={18} aria-hidden="true" />
           </button>
+        </div>
         </div>
         <p className={styles.note}>{FILE_NOTE}</p>
         {speech?.listening ? <p className={styles.note}>{LISTENING_NOTE}</p> : null}

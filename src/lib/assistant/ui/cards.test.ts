@@ -123,6 +123,10 @@ describe("assistant cards", () => {
     const error = cards.find((card) => card.kind === "tool-error");
     expect(error).toMatchObject({ message: "Sorry, something went wrong. Please try again." });
     expect(JSON.stringify(cards)).not.toContain("provider exploded");
+    const hiddenCartError = cardsFromParts([
+      { type: "tool-add_to_cart", toolCallId: "cart-err", state: "output-error", errorText: "not on this turn" },
+    ]);
+    expect(hiddenCartError).toEqual([]);
     expect(JSON.stringify(cards)).not.toContain("missing-listing");
     expect(JSON.stringify(cards)).not.toContain("$1.00");
     const shown = cards.find((card) => card.kind === "product" && card.name === "Stockfish");

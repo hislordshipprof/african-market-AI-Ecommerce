@@ -1,3 +1,13 @@
+import { scrubCardNumbers } from "../card-scrub";
+
+const BIDI = /[\u202A-\u202E\u2066-\u2069]/g;
+
+/** The name shown on a tile. Card digits and bidi controls never reach the button. */
+export function displayFileName(name: string): string {
+  const cleaned = name.replace(BIDI, "").replace(/[\r\n]/g, " ").replace(/\s+/g, " ").trim();
+  return scrubCardNumbers(cleaned || "file").text.slice(0, 80);
+}
+
 export const FILE_CAP = 3;
 export const FILE_BYTE_CAP = 3_145_728;
 
