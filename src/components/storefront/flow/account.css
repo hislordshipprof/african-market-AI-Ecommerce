@@ -10,6 +10,14 @@
   grid-template-columns: 1fr 1fr;
   gap: 24px;
 }
+.sf-account-grid > * {
+  min-width: 0;
+}
+.sf-account-address,
+.sf-account-address p,
+.sf-account-cards {
+  overflow-wrap: anywhere;
+}
 .sf-account-form {
   display: grid;
   gap: 18px;
@@ -48,6 +56,17 @@
 .sf-account-actions {
   display: flex;
   gap: 24px;
+}
+.sf-account-default {
+  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+.sf-account-cards h3 {
+  margin: 28px 0 8px;
+  font: inherit;
+  font-weight: 600;
 }
 .sf-account-order {
   display: flex;

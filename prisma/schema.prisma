@@ -50,6 +50,7 @@ model Store {
   aiActions       AiAction[]
   assistantUndoReceipts AssistantUndoReceipt[]
   guestBrowserCarts GuestBrowserCart[]
+  paymentIntentReleases PaymentIntentRelease[]
 
   @@map("stores")
 }
@@ -80,16 +81,19 @@ model User {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  sessions    Session[]
-  accounts    Account[]
-  twoFactor   TwoFactor[]
-  auditLogs   AuditLog[]
-  memberships StoreMembership[]
-  invitesSent StoreInvite[]
-stockEvents    StockEvent[]
-  customers      Customer[]
-  carts          Cart[]
-  listingImports ListingImport[]
+  sessions                 Session[]
+  accounts                 Account[]
+  twoFactor                TwoFactor[]
+  auditLogs                AuditLog[]
+  memberships              StoreMembership[]
+  invitesSent              StoreInvite[]
+  stockEvents              StockEvent[]
+  customers                Customer[]
+  carts                    Cart[]
+  listingImports           ListingImport[]
+  platformCustomerProfile  PlatformCustomerProfile?
+  customerAddresses        CustomerAddress[]
+  cardSaveConsents         CardSaveConsent[]
 
   @@map("users")
 }
@@ -418,8 +422,10 @@ model Cart {
   storeId         String   @map("store_id")
   userId          String?  @map("user_id")
   customerId      String?  @map("customer_id")
-  paymentIntentId String?  @unique @map("payment_intent_id")
-  source          String   @default("manual")
+  paymentIntentId     String? @unique @map("payment_intent_id")
+  paymentAttemptToken String? @map("payment_attempt_token")
+  purchaseEpoch       Int     @default(0) @map("purchase_epoch")
+  source              String  @default("manual")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -436,6 +442,20 @@ model Cart {
   @@index([userId])
   @@index([customerId])
   @@map("carts")
+}
+
+/// A PaymentIntent reserved for release. Placement and release take the same
+/// locks, and this row is the decision: the intent becomes an order, or it is
+/// released. Stripe is told only after the row commits.
+model PaymentIntentRelease {
+  paymentIntentId String   @id @map("payment_intent_id")
+  storeId         String   @map("store_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("payment_intent_releases")
 }
 
 model CartLine {
@@ -609,6 +629,7 @@ model Order {
   bufferCents          Int       @map("buffer_cents")
   totalAuthorizedCents Int       @map("total_authorized_cents")
   paymentIntentId      String?   @unique @map("payment_intent_id")
+  sourceCartId         String?   @map("source_cart_id")
   capturedAmountCents  Int?      @map("captured_amount_cents")
   refundId             String?   @map("refund_id")
   platformFeeCents     Int?      @map("platform_fee_cents")
@@ -633,6 +654,7 @@ model Order {
   @@unique([storeId, number])
   @@index([storeId])
   @@index([storeId, status])
+  @@index([storeId, sourceCartId, createdAt])
   @@index([customerId])
   @@map("orders")
 }
@@ -702,4 +724,59 @@ model ListingImport {
   @@index([createdById])
   @@index([storeId, status])
   @@map("listing_imports")
+}
+
+/// Platform account profile. One row per login. Not store-scoped.
+model PlatformCustomerProfile {
+  userId                        String    @id @map("user_id")
+  stripeCustomerId              String?   @unique @map("stripe_customer_id")
+  stripeCustomerStatus          String?   @map("stripe_customer_status")
+  stripeCustomerIdempotencyKey  String?   @map("stripe_customer_idempotency_key")
+  stripeCustomerAttemptedAt     DateTime? @map("stripe_customer_attempted_at")
+  phone                         String?
+  createdAt                     DateTime  @default(now()) @map("created_at")
+  updatedAt                     DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("platform_customer_profiles")
+}
+
+/// A delivery address saved on the customer's account. Copied onto an order only by #15.
+model CustomerAddress {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  label     String
+  line1     String
+  line2     String?
+  city      String
+  state     String
+  zip       String
+  notes     String?
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("customer_addresses")
+}
+
+/// Affirmative consent to reuse a card at any store. The payment method id is a Stripe token, not card data.
+model CardSaveConsent {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  paymentIntentId   String   @map("payment_intent_id")
+  paymentMethodId   String?  @map("payment_method_id")
+  stripeCustomerId  String?  @map("stripe_customer_id")
+  termsVersion      String   @map("terms_version")
+  purpose           String
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, paymentMethodId])
+  @@map("card_save_consents")
 }

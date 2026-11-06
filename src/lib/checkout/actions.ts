@@ -1,20 +1,46 @@
 "use server";
 
+import { headers } from "next/headers";
+import { auth } from "../auth";
 import { getStore } from "../get-store";
 import { resolveShopperCart } from "../cart/actions";
 import { checkCheckoutReady } from "../stripe/checkout-gate";
-import { quoteCheckout, createPaymentIntent, placeOrder } from "./service";
+import {
+  quoteCheckout,
+  createPaymentIntent,
+  placeOrder,
+  resumeOrderedCart,
+  SavedCardUnavailableError,
+  BasketAlreadyOrderedError,
+  BasketChangedError,
+} from "./service";
 import type { CheckoutQuote, Contact, Fulfillment } from "../customer-flow/contracts";
+
+async function signedInUserId(): Promise<string | null> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+    query: { disableCookieCache: true },
+  });
+  return session?.user?.id ?? null;
+}
 
 export async function quoteCheckoutAction(
   contact: Contact,
   fulfillment: Fulfillment,
-): Promise<{ ok: true; quote: CheckoutQuote } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; quote: CheckoutQuote; orderedToken?: string }
+  | { ok: false; error: string; code?: "basket_already_ordered" }
+> {
   try {
     const store = await getStore();
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
     const cartId = resolved.cartId;
+    const actorUserId = await signedInUserId();
+    const resume = await resumeOrderedCart(store.id, cartId, actorUserId);
+    if (resume?.kind === "unproved") {
+      return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
+    }
     const quote = await quoteCheckout(
       store.id,
       store.minimumOrderCents,
@@ -22,6 +48,7 @@ export async function quoteCheckoutAction(
       contact,
       fulfillment,
     );
+    if (resume?.kind === "order") return { ok: true, quote, orderedToken: resume.token };
     return { ok: true, quote };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Quote failed" };
@@ -31,9 +58,11 @@ export async function quoteCheckoutAction(
 export async function createPaymentIntentAction(
   contact: Contact,
   fulfillment: Fulfillment,
+  selection?: { saveCard?: boolean; savedCardId?: string | null; attemptToken?: string | null },
 ): Promise<
-  | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number }
-  | { ok: false; error: string }
+  | { ok: true; orderedToken: string }
+  | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number; attemptToken?: string }
+  | { ok: false; error: string; code?: "saved_card_unavailable" | "basket_already_ordered" }
 > {
   try {
     const store = await getStore();
@@ -44,6 +73,12 @@ export async function createPaymentIntentAction(
     const resolved = await resolveShopperCart();
     if (!resolved) return { ok: false, error: "No cart found" };
     const cartId = resolved.cartId;
+    const actorUserId = await signedInUserId();
+    const resume = await resumeOrderedCart(store.id, cartId, actorUserId);
+    if (resume?.kind === "order") return { ok: true, orderedToken: resume.token };
+    if (resume?.kind === "unproved") {
+      return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
+    }
     const quote = await quoteCheckout(
       store.id,
       store.minimumOrderCents,
@@ -57,9 +92,19 @@ export async function createPaymentIntentAction(
     if (quote.holdCents < 50) {
       return { ok: false, error: "Order total is too low" };
     }
-    const result = await createPaymentIntent(store.id, cartId, quote.holdCents);
+    const result = await createPaymentIntent(store.id, cartId, quote.holdCents, actorUserId
+      ? {
+          actorUserId,
+          saveCard: selection?.saveCard === true,
+          savedCardId: selection?.savedCardId ?? null,
+          attemptToken: selection?.attemptToken ?? null,
+        }
+      : undefined);
     return { ok: true, ...result, holdCents: quote.holdCents };
   } catch (e) {
+    if (e instanceof SavedCardUnavailableError) {
+      return { ok: false, error: e.message, code: "saved_card_unavailable" };
+    }
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Payment setup failed",
@@ -73,7 +118,10 @@ export async function placeOrderAction(
   fulfillment: Fulfillment,
   notes: string,
   slot: string,
-): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; token: string }
+  | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" }
+> {
   try {
     const store = await getStore();
     const resolved = await resolveShopperCart();
@@ -92,6 +140,12 @@ export async function placeOrderAction(
     );
     return { ok: true, token: result.token };
   } catch (e) {
+    if (e instanceof BasketAlreadyOrderedError) {
+      return { ok: false, error: e.message, code: e.code };
+    }
+    if (e instanceof BasketChangedError) {
+      return { ok: false, error: e.message, code: e.code };
+    }
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Could not place order",

@@ -46,7 +46,7 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
   - v1 applies the window to orders placed through the assistant; extending it to normal checkout is a later decision.
 - **Card data never touches the model.** Cards are entered in Stripe's Payment Element inside the sheet. The model only learns masked facts such as "card on file: Visa 4242". If a shopper types a card number into the chat, it is removed before the message reaches the model or the transcript.
 - **Saved cards:** a Stripe Customer on the platform account. "Save this card for next time" is offered on the first order, needs the shopper's tick, and can be listed and removed from the account page. Cards work across stores through the existing destination charges.
-- **Saved addresses:** an address book on the platform customer account (ADR-0002). An address is copied into an order only when used, so a store never sees addresses from other stores' orders. It is built with store delivery (#15). Pickup needs no address.
+- **Saved addresses:** an address book on the platform customer account (ADR-0002). An address is copied into an order only when used, so a store never sees addresses from other stores' orders. The address book is built in #248 and used at checkout by store delivery (#15). Pickup needs no address.
 - **Guest contact details** are entered in form cards that post to our server, not typed in the conversation, so names, phones and emails stay out of model prompts and transcripts.
 - v1 agentic checkout is **pickup only**, like checkout today. Delivery and courier options appear in the flow when #15, #16 and #17 land. Tax appears when #65 lands.
 
