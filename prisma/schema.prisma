@@ -556,7 +556,8 @@ model AiConversation {
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   actions  AiAction[]
   checkoutDraft AssistantCheckoutDraft?
-  checkoutAttempts AssistantCheckoutAttempt[]
+  checkoutAttempts AssistantCheckoutAttempt[] @relation("AttemptConversation")
+  checkoutAttemptsSameStore AssistantCheckoutAttempt[] @relation("AttemptConversationStore")
 
   @@unique([id, storeId])
   @@unique([storeId, cartId])
@@ -635,7 +636,8 @@ model AssistantCheckoutAttempt {
   updatedAt            DateTime  @updatedAt @map("updated_at")
 
   store        Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  conversation AiConversation? @relation("AttemptConversation", fields: [conversationId], references: [id], onDelete: Restrict)
+  conversationStore AiConversation? @relation("AttemptConversationStore", fields: [conversationId, storeId], references: [id, storeId], onDelete: Restrict, map: "assistant_checkout_attempts_conversation_store_fkey")
   cart         Cart            @relation(fields: [cartId, storeId], references: [id, storeId], onDelete: Restrict)
   tokens       AssistantCheckoutToken[]
 

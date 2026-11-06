@@ -8,6 +8,10 @@ A gap is either `fixed in #309` or `listed, not fixed` with a reason. No product
 |---|---|---|---|---|---|---|---|---|
 | `src/app/account/actions.ts` syncCustomerAction | customer | session inside the action | signed-in user; customers | no caller input | none | no | none | fixed in #309 |
 | `src/app/api/assistant/chat/route.ts` POST | guest | same origin | host store; carts, ai_conversations, ai_actions, assistant_undo_receipts | message envelope; extra keys stripped | 60/hour per IP and 30/hour per cart | no | none | fixed in #309 |
+| `src/app/api/assistant/checkout/cancel/route.ts` POST | guest | same origin | host store; orders, carts | strict order id; extra keys stripped | none | yes | none | fixed in #309 |
+| `src/app/api/assistant/checkout/card/route.ts` GET | guest | same origin | host store; assistant checkout attempt for this cart | attempt id query; no body | none | yes | none | fixed in #309 |
+| `src/app/api/assistant/checkout/confirm/route.ts` POST | guest | same origin | host store; carts, assistant checkout attempts | strict token and phase; extra keys stripped | 30/hour per cart on reserve | yes | none | fixed in #309 |
+| `src/app/api/assistant/checkout/contact/route.ts` POST | guest | same origin | host store; assistant checkout draft for this cart | strict name, email, phone; extra keys stripped | none | no | none | fixed in #309 |
 | `src/app/api/auth/[...all]/route.ts` GET | guest | Better Auth | getStore() from the host | enabled groups: email-and-password, magic-link, two-factor; relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
 | `src/app/api/auth/[...all]/route.ts` POST | guest | Better Auth | getStore() from the host | enabled groups: email-and-password, magic-link, two-factor; relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
 | `src/app/api/catalog-image/[...key]/route.ts` GET | guest | public | getStore() from the host | key segments; rejects .. and backslash | none | no | none | fixed in #309 |

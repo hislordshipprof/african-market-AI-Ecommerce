@@ -77,6 +77,10 @@ export type CheckoutCard = {
   paymentKind: "new" | "saved" | null;
   cardLabel: string | null;
   cancelMinutes: number | null;
+  attemptId: string | null;
+  slotLabel: string | null;
+  feeCents: number | null;
+  bufferCents: number | null;
 };
 
 export type SkeletonCard = { kind: "skeleton"; key: string };
@@ -201,6 +205,10 @@ function checkoutCards(callId: string, output: unknown): AssistantCard[] {
     paymentKind: body.paymentKind === "saved" || body.paymentKind === "new" ? body.paymentKind : null,
     cardLabel: card,
     cancelMinutes: typeof body.cancelMinutes === "number" ? body.cancelMinutes : null,
+    attemptId: typeof body.attemptId === "string" ? body.attemptId : null,
+    slotLabel: typeof body.slotLabel === "string" ? body.slotLabel : null,
+    feeCents: typeof body.feeCents === "number" ? body.feeCents : null,
+    bufferCents: typeof body.bufferCents === "number" ? body.bufferCents : null,
   }];
 }
 

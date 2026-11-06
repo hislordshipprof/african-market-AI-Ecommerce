@@ -10,7 +10,7 @@ import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
-import { hashCanonical, liveCanonical, paymentRef } from "../assistant/checkout/snapshot";
+import { consentedCheckout, hashCanonical, liveCanonical } from "../assistant/checkout/snapshot";
 import { assertAssistantAttempt, AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
 import { computeQuote } from "./quote";
 import type {
@@ -370,26 +370,36 @@ export async function recordAuthorizedOrder(
         throw new BasketChangedError();
       }
       let assistantWindow: number | null = null;
-      if (input.assistantAttemptId) {
-        const attempt = await tx.assistantCheckoutAttempt.findUnique({ where: { id: input.assistantAttemptId } });
-        const stored = attempt?.snapshot;
-        const slotId = stored && typeof stored === "object" && stored !== null && "slotId" in stored
-          ? String((stored as { slotId?: unknown }).slotId ?? "")
-          : "";
-        if (!attempt || attempt.cartId !== input.cartId || attempt.paymentIntentId !== input.paymentIntentId || !slotId) {
+      const owner = await tx.assistantCheckoutAttempt.findFirst({
+        where: {
+          cartId: input.cartId,
+          paymentIntentId: input.paymentIntentId,
+          status: { in: ["reserved", "awaiting_payment"] },
+        },
+      });
+      const attemptId = owner?.id ?? input.assistantAttemptId ?? null;
+      if (owner && input.assistantAttemptId && input.assistantAttemptId !== owner.id) {
+        throw new BasketChangedError();
+      }
+      if (attemptId) {
+        const attempt = owner && owner.id === attemptId
+          ? owner
+          : await tx.assistantCheckoutAttempt.findUnique({ where: { id: attemptId } });
+        if (!attempt || attempt.cartId !== input.cartId || attempt.paymentIntentId !== input.paymentIntentId) {
           throw new BasketChangedError();
         }
+        const consent = await consentedCheckout(tx, attempt);
         const live = await liveCanonical(tx, {
           storeId,
           cartId: input.cartId,
-          contact: input.contact,
-          contactVersion: attempt.contactVersion,
-          slotId,
-          paymentRef: paymentRef(attempt.paymentKind === "saved" ? "saved" : "new", attempt.savedPaymentMethodId),
+          contact: consent.contact,
+          contactVersion: consent.contactVersion,
+          slotId: consent.slotId,
+          paymentRef: consent.paymentRef,
           now: new Date(),
-          windowMinutes: attempt.windowMinutes,
+          windowMinutes: consent.windowMinutes,
         });
-        if ("missing" in live || hashCanonical(live.canonical) !== attempt.snapshotHash) {
+        if ("missing" in live || !consent.slotId || hashCanonical(live.canonical) !== attempt.snapshotHash) {
           throw new BasketChangedError();
         }
         assistantWindow = attempt.windowMinutes;
@@ -471,10 +481,10 @@ export async function recordAuthorizedOrder(
           purchaseEpoch: { increment: 1 },
         },
       });
-      if (assistantWindow != null && input.assistantAttemptId) {
+      if (assistantWindow != null && attemptId) {
         await stampCancelWindow(tx, order.id, assistantWindow);
         await tx.assistantCheckoutAttempt.update({
-          where: { id: input.assistantAttemptId },
+          where: { id: attemptId },
           data: {
             status: "placed",
             orderId: order.id,

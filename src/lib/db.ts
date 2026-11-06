@@ -525,12 +525,24 @@ export async function orderCancelWindowOpen(tx: Pick<PrismaClient, "$queryRaw">,
   return rows[0]?.open === true;
 }
 
-export async function assistantHeldOrderIds(tx: Pick<PrismaClient, "$queryRaw">, storeId: string): Promise<string[]> {
+export async function visibleStoreOrderIds(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  statuses: readonly string[],
+  resolvedIds: readonly string[],
+): Promise<string[]> {
+  if (statuses.length === 0 && resolvedIds.length === 0) return [];
+  const statusClause = statuses.length > 0
+    ? Prisma.sql`status IN (${Prisma.join([...statuses])})`
+    : Prisma.sql`FALSE`;
+  const resolvedClause = resolvedIds.length > 0
+    ? Prisma.sql`OR (id IN (${Prisma.join([...resolvedIds])}) AND status = 'CANCELLED')`
+    : Prisma.empty;
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT id FROM orders
     WHERE store_id = ${storeId}
-      AND cancellable_until IS NOT NULL
-      AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')
+      AND (cancellable_until IS NULL OR cancellable_until <= (clock_timestamp() AT TIME ZONE 'UTC'))
+      AND (${statusClause} ${resolvedClause})
   `;
   return rows.map((row) => row.id);
 }

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { validPhone } from "../../customer-account/phone";
 import type { Contact } from "../../customer-flow/contracts";
 import { lockCart, lockStoreRow, storeScoped, storeScopedTransaction } from "../../db";
 import { newCheckoutAllowed, STRIPE_USD_MAX_CENTS, STRIPE_USD_MIN_CENTS } from "./gates";
@@ -54,10 +55,13 @@ export type PrepareResult = {
   addressOnFile?: boolean;
   paymentKind?: "new" | "saved";
   slots?: Array<{ id: string; label: string }>;
+  attemptId?: string;
 };
 
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function contactReady(contact: AccountContact | null | undefined): contact is AccountContact {
-  return Boolean(contact && contact.name.trim() && contact.email.trim() && contact.phone.trim());
+  return Boolean(contact && contact.name.trim() && EMAIL.test(contact.email.trim()) && validPhone(contact.phone));
 }
 
 async function factsFor(ctx: PrepareContext): Promise<MaskedFacts> {
@@ -137,6 +141,7 @@ export async function setFulfillment(ctx: PrepareContext, slotId: string): Promi
 }
 
 export async function saveGuestContact(ctx: PrepareContext, contact: AccountContact): Promise<{ ok: true } | { ok: false; code: string }> {
+  if (!contactReady(contact)) return { ok: false, code: "contact" };
   const conversation = await storeScoped(ctx.storeId).aiConversation.findUnique({ where: { id: ctx.conversationId } });
   if (!conversation || conversation.cartId !== ctx.cartId) return { ok: false, code: "not_found" };
   await storeScopedTransaction(ctx.storeId, async (tx) => {
@@ -262,6 +267,7 @@ export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResul
     });
     if (!built.canonical.slotFeasible) return missing("slot", "That pickup time is no longer available.");
     if (built.canonical.lines.some((line) => !line.active)) return missing("unavailable", "An item in your basket is no longer available.");
+    if (built.problems.length > 0) return missing("cart", built.problems[0] ?? "Your basket needs a change before checkout.");
     if (built.canonical.holdCents < STRIPE_USD_MIN_CENTS) return missing("minimum", "Order total is too low.");
     if (built.canonical.holdCents > STRIPE_USD_MAX_CENTS) return missing("maximum", "This order is too large to place online.");
     const quoteProblems = built.canonical.holdCents <= 0;
@@ -310,6 +316,7 @@ export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResul
       lines: built.names.map((line) => ({ name: line.name, qty: line.qty, lineTotalCents: line.lineTotalCents })),
       card: facts.card,
       paymentKind: kind,
+      attemptId: id,
       message: "Review the card and tap Place order. The helper cannot place it.",
     };
   });

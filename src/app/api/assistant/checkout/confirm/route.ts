@@ -2,6 +2,7 @@ import { z } from "zod";
 import { confirmCheckout } from "@/lib/assistant/checkout/confirm";
 import { checkoutActor, checkoutJson, limitNewPayment, parseCheckout, readCheckoutBody } from "@/lib/assistant/checkout/http";
 import { loadCheckoutPrefill } from "@/lib/customer-account/checkout-profile";
+import { validPhone } from "@/lib/customer-account/phone";
 
 export const runtime = "nodejs";
 
@@ -30,7 +31,19 @@ export async function POST(request: Request): Promise<Response> {
     token: parsed.data.token,
     phase: parsed.data.phase,
     loadAccountContact: async (userId) => (await loadCheckoutPrefill(userId)).contact,
-    loadMaskedFacts: async () => ({ contactOnFile: false, card: null, addressOnFile: false, savedPaymentMethodId: null }),
+    loadMaskedFacts: async (userId) => {
+      const prefill = await loadCheckoutPrefill(userId);
+      if (prefill.cardsUnavailable) {
+        return { contactOnFile: false, card: null, addressOnFile: prefill.defaultAddress !== null, savedPaymentMethodId: null };
+      }
+      const card = prefill.cards.find((item) => item.reusable && !item.expired) ?? null;
+      return {
+        contactOnFile: validPhone(prefill.contact.phone),
+        card: card ? { brand: card.brand, last4: card.last4 } : null,
+        addressOnFile: prefill.defaultAddress !== null,
+        savedPaymentMethodId: card?.id ?? null,
+      };
+    },
   });
   const status = result.ok ? 200 : result.code === "not_found" ? 404 : 409;
   return checkoutJson(result, status, actor.actor.headers);

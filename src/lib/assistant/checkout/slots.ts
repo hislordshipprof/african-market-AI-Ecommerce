@@ -49,15 +49,19 @@ export function storeLocalToUtc(
   minute: number,
   timeZone: string,
 ): Date | null {
-  const guess = Date.UTC(year, month - 1, day, hour, minute);
-  const seen = parts(new Date(guess), timeZone);
-  const seenUtc = Date.UTC(seen.year, seen.month - 1, seen.day, seen.hour, seen.minute);
-  const utc = new Date(guess - (seenUtc - guess));
-  const check = parts(utc, timeZone);
-  if (check.year !== year || check.month !== month || check.day !== day || check.hour !== hour || check.minute !== minute) {
-    return null;
+  parts(new Date(Date.UTC(year, month - 1, day, hour, minute)), timeZone);
+  const desired = Date.UTC(year, month - 1, day, hour, minute);
+  const matches: number[] = [];
+  for (let offsetMin = -14 * 60; offsetMin <= 14 * 60; offsetMin += 30) {
+    const utc = desired - offsetMin * 60_000;
+    const seen = parts(new Date(utc), timeZone);
+    if (seen.year === year && seen.month === month && seen.day === day && seen.hour === hour && seen.minute === minute) {
+      matches.push(utc);
+    }
   }
-  return utc;
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => a - b);
+  return new Date(matches[0]!);
 }
 
 function labelAt(date: Date, timeZone: string): string {

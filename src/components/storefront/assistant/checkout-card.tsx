@@ -29,12 +29,14 @@ export function CheckoutCardView({
   const cardMount = useRef<HTMLDivElement>(null);
   const stripeRef = useRef<{ submit: () => Promise<{ error?: { message?: string } }>; confirm: (secret: string) => Promise<string | null> } | null>(null);
 
+  const cardQuery = card.attemptId ? `?attemptId=${encodeURIComponent(card.attemptId)}` : "";
+
   useEffect(() => {
     if (card.mode !== "confirm" || card.paymentKind === "saved") return;
     const mount = cardMount.current;
     let cancelled = false;
     void (async () => {
-      const loaded = await fetch("/api/assistant/checkout/card", { credentials: "same-origin" });
+      const loaded = await fetch(`/api/assistant/checkout/card${cardQuery}`, { credentials: "same-origin" });
       const payload = await loaded.json() as CardPayload | { ok: false };
       if (cancelled || !loaded.ok || !payload.ok || payload.harness || !payload.publishableKey || !payload.amount || !payload.onBehalfOf || !mount) return;
       const stripeJs = await import("@stripe/stripe-js");
@@ -61,13 +63,13 @@ export function CheckoutCardView({
       };
     })();
     return () => { cancelled = true; };
-  }, [card.mode, card.paymentKind]);
+  }, [card.mode, card.paymentKind, cardQuery]);
 
   async function place() {
     setBusy(true);
     setNotice(null);
     try {
-      const loaded = await fetch("/api/assistant/checkout/card", { credentials: "same-origin" });
+      const loaded = await fetch(`/api/assistant/checkout/card${cardQuery}`, { credentials: "same-origin" });
       const payload = await loaded.json() as CardPayload | { ok: false; message?: string };
       if (!loaded.ok || !payload.ok) {
         setNotice("message" in payload && payload.message ? payload.message : "That checkout is not available.");
@@ -95,6 +97,16 @@ export function CheckoutCardView({
           });
           if (!fake.ok) {
             setNotice("You have not been charged yet. Try again.");
+            return;
+          }
+        } else if (card.paymentKind === "saved") {
+          if (!payload.publishableKey) {
+            setNotice("The card form is not available.");
+            return;
+          }
+          const message = await confirmSavedCard(payload.publishableKey, reserved.clientSecret);
+          if (message) {
+            setNotice(message);
             return;
           }
         } else if (stripeRef.current) {
@@ -167,6 +179,9 @@ export function CheckoutCardView({
           ))}
         </ul>
       ) : null}
+      {card.slotLabel ? <p>{card.slotLabel}</p> : null}
+      {card.feeCents ? <p>Fees {money(card.feeCents)}</p> : null}
+      {card.bufferCents ? <p>Buffer {money(card.bufferCents)}. The final charge may be lower.</p> : null}
       {card.holdCents != null ? <p>Hold {money(card.holdCents)}. The final charge may be lower. Tax is $0.00.</p> : null}
       {card.cardLabel ? <p>{card.cardLabel}</p> : null}
       {card.mode === "confirm" && card.paymentKind !== "saved" ? <div ref={cardMount} data-testid="assistant-card-element" /> : null}
@@ -198,6 +213,18 @@ export function CheckoutCardView({
       {notice ? <p role="status">{notice}</p> : null}
     </article>
   );
+}
+
+async function confirmSavedCard(publishableKey: string, secret: string): Promise<string | null> {
+  const stripeJs = await import("@stripe/stripe-js");
+  const stripe = await stripeJs.loadStripe(publishableKey);
+  if (!stripe) return "The card form is not available.";
+  const confirmed = await stripe.confirmPayment({
+    clientSecret: secret,
+    redirect: "if_required",
+    confirmParams: { return_url: window.location.href },
+  });
+  return confirmed.error?.message ?? null;
 }
 
 async function postConfirm(token: string, phase: "reserve" | "complete") {

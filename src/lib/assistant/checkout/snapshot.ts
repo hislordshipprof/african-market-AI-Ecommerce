@@ -15,6 +15,9 @@ export interface CanonicalLine {
   maxPerOrder: number | null;
   mayBeUnavailable: boolean;
   active: boolean;
+  stockMode: string;
+  stockQty: number | null;
+  stockStatus: string | null;
 }
 
 export interface CanonicalSnapshot {
@@ -84,7 +87,7 @@ export function buildCanonical(input: {
   store: StoreShift;
   now: Date;
   windowMinutes: number;
-}): { canonical: CanonicalSnapshot; names: Array<{ variantId: string; name: string; qty: number; lineTotalCents: number }> } {
+}): { canonical: CanonicalSnapshot; problems: string[]; names: Array<{ variantId: string; name: string; qty: number; lineTotalCents: number }> } {
   const sorted = [...input.lines].sort((a, b) => a.variantId.localeCompare(b.variantId));
   const lines: CanonicalLine[] = sorted.map((line) => ({
     variantId: line.variantId,
@@ -95,6 +98,9 @@ export function buildCanonical(input: {
     maxPerOrder: line.variant.listing.maxPerOrder,
     mayBeUnavailable: mayBeUnavailable(line.variant.listing),
     active: line.variant.listing.active,
+    stockMode: line.variant.listing.stockMode,
+    stockQty: line.variant.listing.qty,
+    stockStatus: line.variant.listing.status,
   }));
   const quote = computeQuote(
     input.store.minimumOrderCents,
@@ -129,6 +135,7 @@ export function buildCanonical(input: {
   };
   return {
     canonical,
+    problems: quote.problems.map((problem) => problem.message),
     names: sorted.map((line) => ({
       variantId: line.variantId,
       name: line.variant.listing.customName || line.variant.listing.masterProduct?.name || line.variant.label,
@@ -196,4 +203,64 @@ export async function liveCanonical(
     now: input.now,
     windowMinutes: input.windowMinutes,
   });
+}
+
+type DraftReader = {
+  assistantCheckoutDraft: {
+    findUnique: (args: { where: { conversationId: string } }) => Promise<{
+      slotId: string | null;
+      contactName: string | null;
+      contactEmail: string | null;
+      contactPhone: string | null;
+      contactVersion: number;
+    } | null>;
+  };
+};
+
+/** The customer's current draft is the consent. A detached conversation keeps the copy on the attempt. */
+export async function consentedCheckout(
+  tx: DraftReader,
+  attempt: {
+    conversationId: string | null;
+    contactName: string | null;
+    contactEmail: string | null;
+    contactPhone: string | null;
+    contactVersion: number;
+    snapshot: unknown;
+    windowMinutes: number;
+    paymentKind: string;
+    savedPaymentMethodId: string | null;
+  },
+): Promise<{ contact: Contact; contactVersion: number; slotId: string; paymentRef: string; windowMinutes: number }> {
+  const draft = attempt.conversationId
+    ? await tx.assistantCheckoutDraft.findUnique({ where: { conversationId: attempt.conversationId } })
+    : null;
+  const storedSlot = attempt.snapshot && typeof attempt.snapshot === "object" && "slotId" in attempt.snapshot
+    && typeof (attempt.snapshot as { slotId?: unknown }).slotId === "string"
+    ? (attempt.snapshot as { slotId: string }).slotId
+    : "";
+  if (draft) {
+    return {
+      contact: {
+        name: draft.contactName ?? "",
+        email: draft.contactEmail ?? "",
+        phone: draft.contactPhone ?? "",
+      },
+      contactVersion: draft.contactVersion,
+      slotId: draft.slotId ?? "",
+      paymentRef: paymentRef(attempt.paymentKind === "saved" ? "saved" : "new", attempt.savedPaymentMethodId),
+      windowMinutes: attempt.windowMinutes,
+    };
+  }
+  return {
+    contact: {
+      name: attempt.contactName ?? "",
+      email: attempt.contactEmail ?? "",
+      phone: attempt.contactPhone ?? "",
+    },
+    contactVersion: attempt.contactVersion,
+    slotId: storedSlot,
+    paymentRef: paymentRef(attempt.paymentKind === "saved" ? "saved" : "new", attempt.savedPaymentMethodId),
+    windowMinutes: attempt.windowMinutes,
+  };
 }

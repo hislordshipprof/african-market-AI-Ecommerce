@@ -2,13 +2,14 @@ import { z } from "zod";
 import { assistantChatEnabled } from "@/lib/assistant/contract";
 import { saveGuestContact } from "@/lib/assistant/checkout/prepare";
 import { checkoutActor, checkoutJson, parseCheckout, readCheckoutBody } from "@/lib/assistant/checkout/http";
+import { validPhone } from "@/lib/customer-account/phone";
 
 export const runtime = "nodejs";
 
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(200),
   email: z.string().trim().email().max(320),
-  phone: z.string().trim().min(7).max(40),
+  phone: z.string().trim().max(40).refine((value) => validPhone(value), "Enter a phone number."),
 }).strict();
 
 export async function POST(request: Request): Promise<Response> {

@@ -7,10 +7,11 @@ import {
   SavedCardUnavailableError,
 } from "../../checkout/service";
 import { lockCart, lockConversationRow, lockStoreRow, readStoreCheckoutShift, storeScoped, storeScopedTransaction } from "../../db";
+import { getCheckoutPayments } from "../../stripe/checkout-payments";
 import { assistantChatEnabled } from "../contract";
 import { newCheckoutAllowed } from "./gates";
 import { prepareCheckout, tokenHash, type PrepareContext, type PrepareResult } from "./prepare";
-import { hashCanonical, liveCanonical, paymentRef } from "./snapshot";
+import { consentedCheckout, hashCanonical, liveCanonical } from "./snapshot";
 
 export interface ConfirmInput {
   storeId: string;
@@ -33,21 +34,29 @@ function deny(): ConfirmResult {
   return { ok: false, code: "not_found", message: "That checkout is not available." };
 }
 
+const LIVE_ATTEMPT = ["open", "reserved", "awaiting_payment", "placed"] as const;
+
 export async function mintCheckoutToken(input: {
   storeId: string;
   cartId: string;
   actorUserId: string | null;
-  conversationId: string;
+  conversationId: string | null;
+  attemptId?: string | null;
 }): Promise<{ token: string; card: PrepareResult } | null> {
-  const attempt = await storeScoped(input.storeId).assistantCheckoutAttempt.findFirst({
-    where: {
-      conversationId: input.conversationId,
-      cartId: input.cartId,
-      status: { in: ["open", "reserved", "awaiting_payment", "placed"] },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!attempt) return null;
+  const db = storeScoped(input.storeId);
+  const attempt = input.attemptId
+    ? await db.assistantCheckoutAttempt.findUnique({ where: { id: input.attemptId } })
+    : await db.assistantCheckoutAttempt.findFirst({
+      where: {
+        cartId: input.cartId,
+        status: { in: [...LIVE_ATTEMPT] },
+        OR: input.conversationId
+          ? [{ conversationId: input.conversationId }, { conversationId: null }]
+          : [{ conversationId: null }],
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  if (!attempt || attempt.cartId !== input.cartId || !LIVE_ATTEMPT.includes(attempt.status as (typeof LIVE_ATTEMPT)[number])) return null;
   const cart = await storeScoped(input.storeId).cart.findUnique({ where: { id: input.cartId } });
   if (!cart || !owns(cart.userId, attempt.actorUserId, attempt.paymentKind, input.actorUserId)) return null;
   const token = randomBytes(16).toString("hex");
@@ -120,18 +129,18 @@ async function reserve(input: ConfirmInput, attemptId: string, now: Date): Promi
     if (!attempt || attempt.status === "superseded") return { action: "stale" as const, conversationId: attempt?.conversationId ?? null };
     if (attempt.orderId) return { action: "order" as const, orderId: attempt.orderId };
     if (attempt.status === "awaiting_payment" && attempt.paymentIntentId) {
-      return { action: "held" as const, attempt };
+      return { action: "resume" as const, attempt };
     }
-    const stored = attempt.snapshot as { slotId?: string; canonical?: { contactVersion?: number } };
+    const consent = await consentedCheckout(tx, attempt);
     const live = await liveCanonical(tx, {
       storeId: input.storeId,
       cartId: input.cartId,
-      contact: { name: attempt.contactName ?? "", email: attempt.contactEmail ?? "", phone: attempt.contactPhone ?? "" },
-      contactVersion: attempt.contactVersion,
-      slotId: stored.slotId ?? "",
-      paymentRef: paymentRef(attempt.paymentKind === "saved" ? "saved" : "new", attempt.savedPaymentMethodId),
+      contact: consent.contact,
+      contactVersion: consent.contactVersion,
+      slotId: consent.slotId,
+      paymentRef: consent.paymentRef,
       now,
-      windowMinutes: attempt.windowMinutes,
+      windowMinutes: consent.windowMinutes,
     });
     const expired = attempt.expiresAt.getTime() <= now.getTime();
     const stale = "missing" in live || hashCanonical(live.canonical) !== attempt.snapshotHash || !live.canonical.slotFeasible;
@@ -154,7 +163,7 @@ async function reserve(input: ConfirmInput, attemptId: string, now: Date): Promi
       : undefined;
     return { ok: false, code: "stale", message: "The total changed. Review the new card.", card };
   }
-  if (decision.action === "held") return complete(input, decision.attempt.id);
+  if (decision.action === "resume") return resumeHeld(input, decision.attempt);
 
   try {
     const created = await createWithRetry(input, decision.attempt);
@@ -167,23 +176,60 @@ async function reserve(input: ConfirmInput, attemptId: string, now: Date): Promi
         data: { paymentIntentId: created.paymentIntentId, status: "awaiting_payment" },
       });
     });
-    if (decision.attempt.paymentKind === "saved") {
-      return { ok: true, kind: "saved", paymentIntentId: created.paymentIntentId, amount: decision.attempt.reservedAmountCents };
+    if (!created.clientSecret) {
+      return { ok: false, code: "payment_unavailable", message: "The payment service is unavailable. You have not been charged." };
     }
     return { ok: true, kind: "client_secret", clientSecret: created.clientSecret, paymentIntentId: created.paymentIntentId, amount: decision.attempt.reservedAmountCents };
   } catch (error) {
     if (error instanceof SavedCardUnavailableError) {
       await storeScoped(input.storeId).assistantCheckoutAttempt.update({
         where: { id: decision.attempt.id },
-        data: { status: "open", paymentKind: "new", savedPaymentMethodId: null },
+        data: { status: "superseded" },
       });
-      return { ok: false, code: "saved_card_unavailable", message: "That saved card is not available. Enter a card on the new form." };
+      const card = decision.attempt.conversationId
+        ? await prepareCheckout({
+          ...context(input, input.now ?? new Date()),
+          conversationId: decision.attempt.conversationId,
+          loadMaskedFacts: async () => ({ contactOnFile: false, card: null, addressOnFile: false, savedPaymentMethodId: null }),
+        })
+        : undefined;
+      return { ok: false, code: "saved_card_unavailable", message: "That saved card is not available. Review the new card and tap again.", card };
     }
     if (error instanceof AssistantCheckoutInProgressError) {
       return { ok: false, code: "in_progress", message: "A payment is already in progress for this basket." };
     }
     return { ok: false, code: "payment_unavailable", message: "The payment service is unavailable. You have not been charged." };
   }
+}
+
+async function resumeHeld(
+  input: ConfirmInput,
+  attempt: { id: string; paymentIntentId: string | null; reservedAmountCents: number; conversationId: string | null },
+): Promise<ConfirmResult> {
+  if (!attempt.paymentIntentId) return { ok: false, code: "not_charged", message: "You have not been charged yet. Try again." };
+  const pi = await getCheckoutPayments().retrievePaymentIntent(attempt.paymentIntentId);
+  if (pi.status === "requires_capture") return complete(input, attempt.id);
+  if (pi.status === "canceled") {
+    await storeScoped(input.storeId).assistantCheckoutAttempt.update({
+      where: { id: attempt.id },
+      data: { status: "superseded" },
+    });
+    const card = attempt.conversationId
+      ? await prepareCheckout({ ...context(input, input.now ?? new Date()), conversationId: attempt.conversationId })
+      : undefined;
+    return { ok: false, code: "stale", message: "The hold was released. Review the new card.", card };
+  }
+  if (pi.status === "requires_payment_method" || pi.status === "requires_confirmation" || pi.status === "requires_action") {
+    if (!pi.client_secret) return { ok: false, code: "not_charged", message: "You have not been charged yet. Try again." };
+    return {
+      ok: true,
+      kind: "client_secret",
+      clientSecret: pi.client_secret,
+      paymentIntentId: pi.id,
+      amount: attempt.reservedAmountCents,
+    };
+  }
+  return { ok: false, code: "not_charged", message: "The bank has not approved the charge. Nothing was placed." };
 }
 
 async function createWithRetry(input: ConfirmInput, attempt: { id: string; idempotencyKey: string; reservedAmountCents: number; paymentKind: string; savedPaymentMethodId: string | null; actorUserId: string | null }) {
@@ -212,14 +258,15 @@ async function complete(input: ConfirmInput, attemptId: string): Promise<Confirm
   const minimum = await readMinimum(input.storeId);
   const slotId = snapshotSlot(attempt.snapshot);
   try {
+    const consent = await storeScopedTransaction(input.storeId, (tx) => consentedCheckout(tx, attempt));
     const placed = await placeOrder(
       input.storeId,
       minimum,
       input.cartId,
-      { name: attempt.contactName ?? "", email: attempt.contactEmail ?? "", phone: attempt.contactPhone ?? "" },
+      consent.contact,
       "pickup",
       null,
-      slotId,
+      consent.slotId || slotId,
       attempt.paymentIntentId,
       input.actorUserId,
       attempt.id,
@@ -227,6 +274,10 @@ async function complete(input: ConfirmInput, attemptId: string): Promise<Confirm
     return { ok: true, kind: "order", orderId: placed.token };
   } catch (error) {
     if (error instanceof BasketChangedError) {
+      await storeScoped(input.storeId).assistantCheckoutAttempt.update({
+        where: { id: attempt.id },
+        data: { status: "superseded" },
+      });
       const card = attempt.conversationId
         ? await prepareCheckout({ ...context(input, input.now ?? new Date()), conversationId: attempt.conversationId })
         : undefined;

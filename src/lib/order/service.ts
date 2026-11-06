@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { assistantHeldOrderIds, findOrderByPaymentIntent, lockStoreRow, orderCancelWindowOpen, storeScoped, storeScopedTransaction } from "../db";
+import { findOrderByPaymentIntent, lockStoreRow, orderCancelWindowOpen, storeScoped, storeScopedTransaction, visibleStoreOrderIds } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
 import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
@@ -267,17 +267,10 @@ export async function getStoreOrders(storeId: string) {
       select: { entityId: true },
     });
     const resolvedIds = resolved.map((row) => row.entityId);
-    const heldIds = await assistantHeldOrderIds(tx, storeId);
+    const visibleIds = await visibleStoreOrderIds(tx, storeId, ACTIVE_STATUSES, resolvedIds);
+    if (visibleIds.length === 0) return [];
     return tx.order.findMany({
-      where: {
-        ...(heldIds.length > 0 ? { id: { notIn: heldIds } } : {}),
-        OR: [
-          { status: { in: ACTIVE_STATUSES } },
-          ...(resolvedIds.length > 0
-            ? [{ id: { in: resolvedIds }, status: "CANCELLED" as const }]
-            : []),
-        ],
-      },
+      where: { id: { in: visibleIds } },
       include: ORDER_WITH_LINES,
       orderBy: { createdAt: "desc" },
     });

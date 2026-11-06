@@ -45,6 +45,18 @@ describe("fake payment status machine", () => {
     expect(after.status).toBe("requires_capture");
   });
 
+  it("declines Stripe's charge-declined fixture instead of authorizing it", async () => {
+    const created = await fakeCheckoutPayments.createPaymentIntent(
+      { amount: 1200, currency: "usd" },
+      "decline-fixture",
+    );
+    await expect(
+      fakeCheckoutPayments.confirmPaymentIntent(created.id, { payment_method: "pm_card_visa_chargeDeclined" }),
+    ).rejects.toThrow(/card was declined/i);
+    const after = await fakeCheckoutPayments.retrievePaymentIntent(created.id);
+    expect(after.status).toBe("requires_payment_method");
+  });
+
   it("returns the cached create after cancel, so a new purchase needs a new key", async () => {
     const first = await fakeCheckoutPayments.createPaymentIntent(
       { amount: 1200, currency: "usd", metadata: { cart_id: "cart_1" } },

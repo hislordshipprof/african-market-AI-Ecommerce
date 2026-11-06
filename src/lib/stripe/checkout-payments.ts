@@ -92,6 +92,7 @@ let failNext: "timeout" | "500" | null = null;
 
 const FIXTURES: Record<string, Pick<NormalizedCard, "brand" | "last4" | "expMonth" | "expYear" | "behavior">> = {
   pm_card_visa: { brand: "visa", last4: "4242", expMonth: 12, expYear: 2034, behavior: "ok" },
+  pm_card_visa_chargeDeclined: { brand: "visa", last4: "0002", expMonth: 12, expYear: 2034, behavior: "decline" },
   pm_card_chargeCustomerFail: { brand: "visa", last4: "0341", expMonth: 12, expYear: 2034, behavior: "decline" },
   pm_card_authenticationRequired: { brand: "visa", last4: "3184", expMonth: 12, expYear: 2034, behavior: "action" },
 };
@@ -107,6 +108,10 @@ function hashParams(params: unknown): string {
 function emptyToNull(value: unknown): string | null {
   if (value == null || value === "") return null;
   return String(value);
+}
+
+export function fakeCheckoutIntentCount(): number {
+  return intents.size;
 }
 
 export function resetFakeCheckoutPayments(): void {

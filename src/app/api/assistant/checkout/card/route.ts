@@ -1,7 +1,9 @@
+import { z } from "zod";
 import { mintCheckoutToken } from "@/lib/assistant/checkout/confirm";
 import { assistantPaymentsHarness } from "@/lib/assistant/checkout/gates";
 import { checkoutActor, checkoutJson } from "@/lib/assistant/checkout/http";
 import { readStoreCheckoutShift, storeScopedTransaction } from "@/lib/db";
+import { parseInput } from "@/lib/security/parse-input";
 import { requireSameOrigin } from "@/lib/security/same-origin";
 
 export const runtime = "nodejs";
@@ -12,14 +14,18 @@ export async function GET(request: Request): Promise<Response> {
   }
   const actor = await checkoutActor(request);
   if (!actor.ok) return checkoutJson({ ok: false, code: actor.code, message: actor.message }, actor.status);
-  if (!actor.actor.conversationId) {
-    return checkoutJson({ ok: false, code: "not_found", message: "That checkout is not available." }, 404);
-  }
+  const parsed = parseInput(
+    z.object({ attemptId: z.string().min(1).max(128).nullable() }).strict(),
+    { attemptId: new URL(request.url).searchParams.get("attemptId") },
+  );
+  if (!parsed.ok) return checkoutJson({ ok: false, code: "invalid_request", message: "That checkout is not available." }, 400);
+  const attemptId = parsed.data.attemptId;
   const minted = await mintCheckoutToken({
     storeId: actor.actor.storeId,
     cartId: actor.actor.cartId,
     actorUserId: actor.actor.actorUserId,
     conversationId: actor.actor.conversationId,
+    attemptId,
   });
   if (!minted) return checkoutJson({ ok: false, code: "not_found", message: "That checkout is not available." }, 404);
   const account = await storeScopedTransaction(actor.actor.storeId, (tx) => readStoreCheckoutShift(tx, actor.actor.storeId));
