@@ -85,7 +85,7 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   await expect(liveRegion(dialog)).toHaveText(HTML_REPLY, { timeout: 20_000 });
   await expect(dialog.locator("img")).toHaveCount(0);
   await send(page, "stray price");
-  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "That is (see card)." })).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I couldn't confirm that price." })).toBeVisible({ timeout: 20_000 });
   await send(page, "4242424242424242");
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
   expect(posted).not.toContain("4242");

@@ -69,7 +69,7 @@ describe("grounding stream", () => {
         !!chunk && typeof chunk === "object" && (chunk as { type?: string }).type === "text-delta")
       .map((chunk) => chunk.delta)
       .join("");
-    expect(text).toBe("That is $12.99 and (see card)");
+    expect(text).toBe("I couldn't confirm that price.");
     expect(chunks.some((chunk) => JSON.stringify(chunk).includes("7.00"))).toBe(false);
     expect(strips).toEqual(["$7.00"]);
   });
@@ -186,8 +186,93 @@ describe("grounding stream", () => {
       if ((chunk as { type?: string }).type === "text-delta") text += (chunk as { delta: string }).delta;
     }
     expect(executions).toBe(0);
-    expect(text).toBe("It costs (see card).");
+    expect(text).toBe("I couldn't confirm that price.");
     expect(text).not.toContain("7.77");
+  });
+
+  it("a successful tool result cannot whitelist cents from its input", async () => {
+    let call = 0;
+    const strips: string[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        call += 1;
+        const chunks = call === 1
+          ? [
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call",
+                toolCallId: "call-in",
+                toolName: "show_products",
+                input: JSON.stringify({ priceCents: 777, listing_ids: ["egusi"] }),
+              },
+              { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+            ]
+          : [
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "t" },
+              { type: "text-delta", id: "t", delta: "Output is $12." },
+              { type: "text-delta", id: "t", delta: "99. Input said $7.77." },
+              { type: "text-end", id: "t" },
+              { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+            ];
+        return { stream: streamOf(chunks) };
+      },
+    });
+    const result = streamText({
+      model,
+      prompt: "price",
+      stopWhen: stepCountIs(3),
+      tools: {
+        show_products: tool({
+          description: "Show",
+          inputSchema: z.object({ priceCents: z.number(), listing_ids: z.array(z.string()) }),
+          execute: async () => ({ priceCents: 1299, variantId: "egusi" }),
+        }),
+      },
+      experimental_transform: groundingTransform({ onStrip: (amount) => strips.push(amount) }),
+    });
+    let text = "";
+    for await (const chunk of result.toUIMessageStream()) {
+      if ((chunk as { type?: string }).type === "text-delta") text += (chunk as { delta: string }).delta;
+    }
+    expect(text).toBe("Output is $12.99. I couldn't confirm that price.");
+    expect(text).not.toContain("7.77");
+    expect(text).not.toContain("(see card)");
+    expect(strips).toEqual(["$7.77"]);
+  });
+
+  it("a chunked foreign amount cannot pass as an allowed dollar price", async () => {
+    const strips: string[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: streamOf([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Real is $10.99. " },
+          { type: "text-delta", id: "t", delta: "CAD $" },
+          { type: "text-delta", id: "t", delta: "10.99 is not." },
+          { type: "text-end", id: "t" },
+          { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+        ]),
+      }),
+    });
+    const result = streamText({
+      model,
+      prompt: "currency",
+      experimental_transform: groundingTransform({
+        getAllowedCents: () => new Set([1099]),
+        onStrip: (amount) => strips.push(amount),
+      }),
+    });
+    let text = "";
+    const raw: string[] = [];
+    for await (const chunk of result.toUIMessageStream()) {
+      raw.push(JSON.stringify(chunk));
+      if ((chunk as { type?: string }).type === "text-delta") text += (chunk as { delta: string }).delta;
+    }
+    expect(text).toBe("Real is $10.99. I couldn't confirm that price.");
+    expect(strips).toEqual(["CAD $10.99"]);
+    expect(raw.join("\n")).not.toContain("CAD $10.99");
   });
 
   it("interleaved text blocks are grounded separately", async () => {
@@ -214,7 +299,7 @@ describe("grounding stream", () => {
     for await (const chunk of result.toUIMessageStream()) {
       if ((chunk as { type?: string }).type === "text-delta") text += (chunk as { delta: string }).delta;
     }
-    expect(text).toBe("$4.50(see card)");
+    expect(text).toBe("$4.50I couldn't confirm that price.");
   });
 
   it("overlapping text blocks keep each block's own buffer", async () => {
@@ -249,7 +334,7 @@ describe("grounding stream", () => {
     const textAt = chunks.findIndex((chunk) => chunk.type === "text-delta");
     expect(toolAt).toBeGreaterThanOrEqual(0);
     expect(textAt).toBeGreaterThan(toolAt);
-    expect(text).toBe("$3.00(see card) and (see card)");
+    expect(text).toBe("$3.00I couldn't confirm that price.");
     expect(chunks.map((chunk) => JSON.stringify(chunk)).join("\n")).not.toContain("999");
     expect(chunks.map((chunk) => JSON.stringify(chunk)).join("\n")).not.toContain("$4.00");
   });
@@ -297,5 +382,74 @@ describe("grounding stream", () => {
     });
     await result.consumeStream();
     expect(strips).toEqual(["$5.00", "$6.00"]);
+
+    const seamStrips: string[] = [];
+    const seam = streamText({
+      model: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: streamOf([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "a" },
+            { type: "text-delta", id: "a", delta: "- Egusi and palm oil: $10.99 $7.77\nEgusi costs $\u00a07.77." },
+            { type: "text-end", id: "a" },
+            { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+          ]),
+        }),
+      }),
+      prompt: "adjacent",
+      experimental_transform: groundingTransform({
+        historyUnitPrices: [{ key: "variant:egusi", cents: 1099 }],
+        onStrip: (amount) => seamStrips.push(amount),
+      }),
+    });
+    const seamText = await seam.text;
+    expect(seamText).toBe(`- Egusi and palm oil: $10.99 price not confirmed\nI couldn't confirm that price.`);
+    expect(seamText).not.toContain("7.77");
+    expect(seamStrips).toEqual(["$7.77", "$\u00a07.77"]);
+
+    const splitStrips: string[] = [];
+    const split = streamText({
+      model: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: streamOf([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "t" },
+            { type: "text-delta", id: "t", delta: "- Egusi and palm: $10.99 USD" },
+            { type: "text-delta", id: "t", delta: "7.77" },
+            { type: "text-end", id: "t" },
+            { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+          ]),
+        }),
+      }),
+      prompt: "split",
+      experimental_transform: groundingTransform({
+        historyUnitPrices: [{ key: "variant:egusi", cents: 1099 }],
+        onStrip: (amount) => splitStrips.push(amount),
+      }),
+    });
+    expect(await split.text).toBe("- Egusi and palm: $10.99 price not confirmed");
+    expect(splitStrips).toEqual(["USD7.77"]);
+
+    const trailStrips: string[] = [];
+    const trail = streamText({
+      model: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: streamOf([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "t" },
+            { type: "text-delta", id: "t", delta: "- Palm: 10.99 US$ naira" },
+            { type: "text-end", id: "t" },
+            { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+          ]),
+        }),
+      }),
+      prompt: "trail",
+      experimental_transform: groundingTransform({
+        historyUnitPrices: [{ key: "variant:egusi", cents: 1099 }],
+        onStrip: (amount) => trailStrips.push(amount),
+      }),
+    });
+    expect(await trail.text).toBe("- Palm: price not confirmed");
+    expect(trailStrips).toEqual(["10.99 US$ naira"]);
   });
 });
