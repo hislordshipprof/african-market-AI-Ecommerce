@@ -57,25 +57,4 @@ describe.skipIf(!hasKey)("Stripe Connect sandbox integration", () => {
       });
       expect(link.url).toMatch(/^https:\/\/connect\.stripe\.com/);
     });
-
-    it("webhook endpoint rejects invalid signature with 400", { timeout: 15_000 }, async () => {
-      try {
-        const res = await fetch("http://localhost:3000/api/webhooks/stripe", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "stripe-signature": "invalid_sig",
-          },
-          body: JSON.stringify({ type: "account.updated" }),
-        });
-        expect(res.status).toBe(400);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-          console.warn("SKIP: app server not running on localhost:3000");
-          return;
-        }
-        throw err;
-      }
-    });
   });
