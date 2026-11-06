@@ -207,6 +207,11 @@ describe("parseCsvText", () => {
     expect(parsePriceToCents("12.345")).toBeNull();
   });
 
+  it("N4: rejects a comma that is not a US thousands group", () => {
+    expect(parsePriceToCents("3,50")).toBeNull();
+    expect(parsePriceToCents("12,34,56")).toBeNull();
+  });
+
   it("missing name in a row", () => {
     const csv = "name,price\n,12.50\n";
     const { errors } = parseCsvText(csv);
