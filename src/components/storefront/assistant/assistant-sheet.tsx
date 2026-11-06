@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
+import { ArrowUp, Mic, Square } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
@@ -11,7 +12,19 @@ import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
 import { retainSession } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
+import { dataUrl, fileNotice, jpegBlob, pdfPages, roomFor, type PreparedFile } from "@/lib/assistant/ui/client-files";
 import { createSendLock, outgoingMessage } from "@/lib/assistant/ui/send";
+import {
+  abortSpeech,
+  beginSpeech,
+  bindRecognizer,
+  commitInterim,
+  noteCustomerEdit,
+  recognitionLanguage,
+  stopSpeech,
+  type BrowserSpeech,
+  type SpeechState,
+} from "@/lib/assistant/ui/speech";
 import { planUndo, undoCardAfter, type UndoAck } from "@/lib/assistant/ui/undo";
 import { replaceUndoLabels, undoLabelsForStore } from "@/lib/assistant/ui/undo-memory";
 import { AssistantRouteError, mapRouteError, type RouteView } from "@/lib/assistant/ui/route-errors";
@@ -25,7 +38,12 @@ const STARTERS = [
   { label: "Cook a dish", text: "I want to cook " },
   { label: "Restock my usual", text: "Restock my usual: " },
   { label: "Show me pictures", text: "Show me pictures of " },
+  { label: "Snap your shopping list", text: "Here is my shopping list: " },
+  { label: "Send a recipe PDF", text: "Here is a recipe: " },
 ] as const;
+
+const FILE_NOTE = "Read once to answer you. We don't save your files. Please don't send cards or IDs.";
+const LISTENING_NOTE = "Your browser turns your speech into text. Check it, then send.";
 
 function messageId(): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -115,6 +133,31 @@ function Thread({
   const announced = useRef(new Set<string>());
   const [lastSent, setLastSent] = useState<{ id: string; text: string } | null>(null);
   const [draft, setDraft] = useState("");
+  const [speech, setSpeech] = useState<SpeechState | null>(null);
+  const [micHidden, setMicHidden] = useState(false);
+  const micDetected = useSyncExternalStore(
+    () => () => {},
+    () => {
+      const host = window as Window & { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+      return Boolean(host.SpeechRecognition ?? host.webkitSpeechRecognition);
+    },
+    () => false,
+  );
+  const micReady = micDetected && !micHidden;
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const speechRef = useRef<SpeechState | null>(null);
+  const recognizerRef = useRef<BrowserSpeech | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const [awayFromLatest, setAwayFromLatest] = useState(false);
+  const [tiles, setTiles] = useState<Array<PreparedFile & { preview: string }>>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const tilesRef = useRef(tiles);
+  useEffect(() => {
+    tilesRef.current = tiles;
+  }, [tiles]);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const pdfInput = useRef<HTMLInputElement>(null);
   const [trackedStore, setTrackedStore] = useState(storeId);
   const [undoState, setUndoState] = useState(() => undoLabelsForStore(storeId));
   if (trackedStore !== storeId) {
@@ -158,23 +201,193 @@ function Thread({
     return () => window.clearTimeout(timer);
   }, [open]);
 
+  function publishSpeech(next: SpeechState) {
+    speechRef.current = next;
+    setSpeech(next);
+    setDraft(next.draft);
+    if (next.notice) setLocalError(next.notice);
+    if (next.listening && liveRef.current) liveRef.current.textContent = "Listening";
+  }
+
+  function stopListening(mode: "stop" | "abort") {
+    const current = speechRef.current;
+    const recognizer = recognizerRef.current;
+    if (!current) return;
+    if (mode === "abort") {
+      publishSpeech(abortSpeech(current, current.session + 1));
+      recognizer?.abort();
+      return;
+    }
+    publishSpeech(stopSpeech(current));
+    recognizer?.stop();
+  }
+
+  useEffect(() => {
+    if (open) return;
+    stopListening("abort");
+    const current = tilesRef.current;
+    const timer = window.setTimeout(() => {
+      for (const tile of current) {
+        if (tile.preview) URL.revokeObjectURL(tile.preview);
+      }
+      setTiles([]);
+      setAddOpen(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  useEffect(() => () => {
+    for (const tile of tilesRef.current) {
+      if (tile.preview) URL.revokeObjectURL(tile.preview);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") stopListening("abort");
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      recognizerRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!speech?.listening) return;
+    const timer = window.setTimeout(() => stopListening("stop"), 60_000);
+    return () => window.clearTimeout(timer);
+  }, [speech?.listening, speech?.session]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport || !open) return;
+    const apply = () => {
+      const overlap = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      setKeyboardInset(overlap);
+    };
+    apply();
+    viewport.addEventListener("resize", apply);
+    viewport.addEventListener("scroll", apply);
+    return () => {
+      viewport.removeEventListener("resize", apply);
+      viewport.removeEventListener("scroll", apply);
+    };
+  }, [open]);
+
+  async function takeFiles(list: FileList | null) {
+    setAddOpen(false);
+    if (!list || list.length === 0) return;
+    const room = roomFor(tilesRef.current.length);
+    if (list.length > room) setLocalError(fileNotice("too-many"));
+    const chosen = [...list].slice(0, room);
+    for (const file of chosen) {
+      const id = messageId();
+      const pdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      if (pdf) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const result = await pdfPages(bytes);
+        if ("message" in result) {
+          setTiles((current) => [...current, {
+            id, name: file.name, filename: file.name, mediaType: "application/pdf", url: "", preview: "", status: "invalid", message: result.message,
+          }]);
+          continue;
+        }
+        const preview = URL.createObjectURL(file);
+        const url = await dataUrl(new Blob([bytes], { type: "application/pdf" }));
+        setTiles((current) => [...current, {
+          id, name: file.name, filename: file.name, mediaType: "application/pdf", url, preview, status: "ready", message: null,
+        }]);
+        continue;
+      }
+      try {
+        const blob = await jpegBlob(file);
+        const preview = URL.createObjectURL(blob);
+        const url = await dataUrl(blob);
+        setTiles((current) => [...current, {
+          id, name: file.name || "photo.jpg", filename: "photo.jpg", mediaType: "image/jpeg", url, preview, status: "ready", message: null,
+        }]);
+      } catch {
+        setTiles((current) => [...current, {
+          id, name: file.name || "photo", filename: "photo.jpg", mediaType: "image/jpeg", url: "", preview: "", status: "invalid", message: fileNotice("undecodable"),
+        }]);
+      }
+    }
+  }
+
+  function removeTile(id: string) {
+    setTiles((current) => {
+      const tile = current.find((item) => item.id === id);
+      if (tile?.preview) URL.revokeObjectURL(tile.preview);
+      return current.filter((item) => item.id !== id);
+    });
+  }
+
+  function toggleMic() {
+    if (speechRef.current?.listening) {
+      stopListening("stop");
+      return;
+    }
+    const host = window as Window & {
+      SpeechRecognition?: new () => BrowserSpeech;
+      webkitSpeechRecognition?: new () => BrowserSpeech;
+    };
+    const Ctor = host.SpeechRecognition ?? host.webkitSpeechRecognition;
+    if (!Ctor) {
+      setMicHidden(true);
+      return;
+    }
+    const session = (speechRef.current?.session ?? 0) + 1;
+    const started = beginSpeech(draft, session);
+    publishSpeech(started);
+    const recognizer = new Ctor();
+    recognizerRef.current = recognizer;
+    try {
+      bindRecognizer(recognizer, {
+        lang: recognitionLanguage(document.documentElement.lang, navigator.language),
+        session,
+        read: () => speechRef.current ?? started,
+        write: publishSpeech,
+      });
+    } catch {
+      publishSpeech(stopSpeech(started));
+      setLocalError("Microphone access is off. You can type instead.");
+    }
+  }
+
   async function submit(text: string, id = messageId()) {
+    if (speechRef.current?.listening) {
+      publishSpeech(commitInterim(speechRef.current));
+      recognizerRef.current?.stop();
+      return;
+    }
     if (loading || busy || routeError?.terminal) return;
     if (!sendLock.current.tryBegin()) return;
     try {
-      const outgoing = outgoingMessage({ id, text });
+      const ready = tiles.filter((tile) => tile.status === "ready");
+      if (tiles.some((tile) => tile.status === "invalid")) return;
+      const outgoing = outgoingMessage({
+        id,
+        text,
+        files: ready.map((tile) => ({ type: "file", mediaType: tile.mediaType, filename: tile.filename, url: tile.url })),
+      });
       if (!outgoing.ok) {
         if (outgoing.reason === "too_long") setLocalError("Couldn't send that.");
         return;
       }
       setLocalError(null);
-      const sent = outgoing.body.message.parts[0].text;
+      const textPart = outgoing.body.message.parts.find((part) => part.type === "text");
+      const sent = textPart?.type === "text" ? textPart.text : "";
       setLastSent({ id, text: sent });
       setDraft("");
+      for (const tile of tiles) {
+        if (tile.preview) URL.revokeObjectURL(tile.preview);
+      }
+      setTiles([]);
       clearError();
       const exists = messages.some((message) => message.id === id);
-      if (exists) await sendMessage({ text: sent, messageId: id });
-      else await sendMessage({ id, role: "user", parts: [{ type: "text", text: sent }] });
+      if (exists && ready.length === 0) await sendMessage({ text: sent, messageId: id });
+      else await sendMessage({ id, role: "user", parts: outgoing.body.message.parts });
     } finally {
       sendLock.current.end();
     }
@@ -187,9 +400,16 @@ function Thread({
   }
 
   return (
-    <div className={styles.thread} data-chunk={ASSISTANT_CHUNK}>
+    <div className={styles.thread} data-chunk={ASSISTANT_CHUNK} style={{ paddingBottom: keyboardInset }}>
       <p className={styles.live} aria-live="polite" ref={liveRef} />
-      <div className={styles.log}>
+      <div
+        className={styles.log}
+        ref={logRef}
+        onScroll={(event) => {
+          const node = event.currentTarget;
+          setAwayFromLatest(node.scrollHeight - node.scrollTop - node.clientHeight > 48);
+        }}
+      >
         {messages.map((message, index) => (
           <MessageView
             key={message.id}
@@ -206,9 +426,25 @@ function Thread({
           />
         ))}
         {busy ? (
-          <p className={styles.typing} data-motion={reduced ? "off" : "on"}>Working</p>
+          <p className={styles.typing} data-motion={reduced ? "off" : "on"}>{waitingLabel(messages)}</p>
         ) : null}
       </div>
+      {awayFromLatest ? (
+        <button
+          type="button"
+          className={styles.jump}
+          onClick={() => {
+            const node = logRef.current;
+            if (!node) return;
+            node.scrollTo({ top: node.scrollHeight, behavior: reduced ? "auto" : "smooth" });
+          }}
+        >
+          Jump to latest
+        </button>
+      ) : null}
+      {messages.length === 0 ? (
+        <p className={styles.bubble}>What are you cooking or restocking?</p>
+      ) : null}
       {messages.length === 0 ? (
         <div className={styles.starters}>
           {STARTERS.map((starter) => (
@@ -251,6 +487,16 @@ function Thread({
           event.preventDefault();
           void submit(draft);
         }}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          void takeFiles(event.dataTransfer.files);
+        }}
+        onPaste={(event) => {
+          if (event.clipboardData.files.length === 0) return;
+          event.preventDefault();
+          void takeFiles(event.clipboardData.files);
+        }}
       >
         <label className="sr-only" htmlFor="assistant-composer">Message</label>
         <textarea
@@ -260,22 +506,89 @@ function Thread({
           maxLength={2000}
           value={draft}
           disabled={!!routeError?.terminal}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (speechRef.current) {
+              const edited = noteCustomerEdit(speechRef.current, next);
+              speechRef.current = edited;
+              setSpeech(edited);
+            }
+            setDraft(next);
+          }}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={() => { composing.current = false; }}
           onKeyDown={onKeyDown}
         />
-        <button
-          type="submit"
-          className={styles.send}
-          data-testid="assistant-send"
-          disabled={!!routeError?.terminal || busy || loading || draft.trim().length === 0}
-        >
-          Send
-        </button>
+        {tiles.length > 0 ? (
+          <div className={styles.tiles}>
+            {tiles.map((tile) => (
+              <div key={tile.id} className={styles.tile} data-status={tile.status}>
+                {tile.preview && tile.mediaType === "image/jpeg" ? <img src={tile.preview} alt="" /> : null}
+                <p>{tile.name}</p>
+                <p>{tile.mediaType === "application/pdf" ? "PDF" : "Photo"}</p>
+                {tile.message ? <p>{tile.message}</p> : null}
+                <button type="button" onClick={() => removeTile(tile.id)}>Remove {tile.name}</button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {speech?.interim ? <p className={styles.interim}>{speech.interim}</p> : null}
+        {addOpen ? (
+          <div className={styles.addMenu}>
+            <button type="button" onClick={() => cameraInput.current?.click()}>Camera</button>
+            <button type="button" onClick={() => photoInput.current?.click()}>Photos</button>
+            <button type="button" onClick={() => pdfInput.current?.click()}>PDF</button>
+          </div>
+        ) : null}
+        <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
+        <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
+        <input ref={pdfInput} type="file" accept="application/pdf" hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
+        <div className={styles.tools}>
+          <button
+            type="button"
+            className={styles.tool}
+            aria-label="Add a photo or PDF"
+            aria-expanded={addOpen}
+            disabled={!!routeError?.terminal}
+            onClick={() => setAddOpen((openMenu) => !openMenu)}
+          >
+            Add
+          </button>
+          {micReady ? (
+            <button
+              type="button"
+              className={styles.tool}
+              aria-pressed={speech?.listening === true}
+              aria-label={speech?.listening ? "Stop listening" : "Start listening"}
+              data-motion={reduced ? "off" : "on"}
+              onClick={toggleMic}
+            >
+              {speech?.listening ? <Square size={18} aria-hidden="true" /> : <Mic size={18} aria-hidden="true" />}
+            </button>
+          ) : null}
+          <button
+            type="submit"
+            className={styles.send}
+            data-testid="assistant-send"
+            aria-label="Send"
+            disabled={!!routeError?.terminal || busy || loading || tiles.some((tile) => tile.status === "invalid") || (!speech?.listening && draft.trim().length === 0 && tiles.every((tile) => tile.status !== "ready"))}
+          >
+            <ArrowUp size={18} aria-hidden="true" />
+          </button>
+        </div>
+        <p className={styles.note}>{FILE_NOTE}</p>
+        {speech?.listening ? <p className={styles.note}>{LISTENING_NOTE}</p> : null}
       </form>
     </div>
   );
+}
+
+function waitingLabel(messages: UIMessage[]): string {
+  const lastUser = [...messages].reverse().find((message) => message.role === "user");
+  if (lastUser?.parts.some((part) => part.type === "file")) return "Reading your list";
+  const assistant = [...messages].reverse().find((message) => message.role === "assistant");
+  if (assistant && JSON.stringify(assistant.parts).includes("search_catalog")) return "Checking the shelves";
+  return "Working";
 }
 
 function viewFor(error: Error): RouteView {
@@ -309,7 +622,18 @@ function MessageView({
   onClose: () => void;
 }) {
   if (message.role === "user") {
-    return <p className={`${styles.bubble} ${styles.user}`}>{textOf(message)}</p>;
+    const files = message.parts.flatMap((part) => part.type === "file" ? [part] : []);
+    const text = textOf(message);
+    return (
+      <div className={`${styles.bubble} ${styles.user}`}>
+        {files.map((file) => (
+          file.mediaType.startsWith("image/")
+            ? <img key={file.url} className={styles.photo} src={file.url} alt="" />
+            : <p key={`${file.filename ?? "file"}-${file.url}`} className={styles.fileChip}>{file.filename ?? "PDF"}</p>
+        ))}
+        {text ? <p>{text}</p> : null}
+      </div>
+    );
   }
   return (
     <div className={styles.message}>
@@ -319,13 +643,41 @@ function MessageView({
         }
         const cards = cardsFromParts([part], { turnFailed });
         if (cards.length === 0) return null;
+        const products = cards.filter((card) => card.kind === "product");
+        const added = cards.filter((card) => card.kind === "added");
+        const rest = cards.filter((card) => card.kind !== "product" && card.kind !== "added");
         return (
-          <div key={`${message.id}-cards-${index}`} className={styles.cards}>
-            {cards.map((card) => (
+          <div key={`${message.id}-cards-${index}`}>
+            {products.length > 0 ? (
+              <>
+                <div className={styles.cards}>
+                  {products.map((card) => (
+                    <CardView key={card.key} card={card} disabled={disabled} onChoice={onChoice} onUndo={onUndo} onChange={onChange} onClose={onClose} />
+                  ))}
+                </div>
+                <Link className={styles.seeAll} href="/search">See all</Link>
+              </>
+            ) : null}
+            {added.length > 0 ? (
+              <div className={styles.addedRow}>
+                {added.map((card) => (
+                  <CardView
+                    key={card.key}
+                    card={card}
+                    undoLabel={card.kind === "added" ? undoState[card.additionId] : undefined}
+                    disabled={disabled}
+                    onChoice={onChoice}
+                    onUndo={onUndo}
+                    onChange={onChange}
+                    onClose={onClose}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {rest.map((card) => (
               <CardView
                 key={card.key}
                 card={card}
-                undoLabel={card.kind === "added" ? undoState[card.additionId] : undefined}
                 disabled={disabled}
                 onChoice={onChoice}
                 onUndo={onUndo}
