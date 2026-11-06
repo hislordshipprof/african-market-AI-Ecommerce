@@ -44,6 +44,7 @@ test("the launcher stays out of the first load and the chat chunk arrives on ope
   await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
   await expect.poll(() => scriptsHave(page, "assistant-chat-chunk-v1")).toBe(true);
+  expect(await scriptsHave(page, "InvalidPDFException")).toBe(false);
   expect(chat).toEqual([]);
 });
 
@@ -240,5 +241,77 @@ test("product cards show the catalog price", async ({ page }) => {
     compared += 1;
   }
   expect(compared).toBeGreaterThan(0);
+});
+
+test("a browser without speech recognition shows no mic", async ({ page }) => {
+  await page.addInitScript(() => {
+    delete (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition;
+    delete (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await expect(page.getByRole("button", { name: "Start listening" })).toHaveCount(0);
+});
+
+test("spoken words join typed text and nothing sends until Send", async ({ page }) => {
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      lang = "";
+      continuous = false;
+      interimResults = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        const results = [
+          { isFinal: true, 0: { transcript: "rice" } },
+          { isFinal: true, 0: { transcript: "rice flour" } },
+        ];
+        this.onresult?.({ resultIndex: 0, results });
+        this.onend?.();
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {
+        this.onend?.();
+      }
+    }
+    const host = window as unknown as {
+      SpeechRecognition: typeof FakeRecognition;
+      webkitSpeechRecognition: typeof FakeRecognition;
+    };
+    host.SpeechRecognition = FakeRecognition;
+    host.webkitSpeechRecognition = FakeRecognition;
+  });
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") {
+      posts.push(request.postData() ?? "");
+    }
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.getByRole("button", { name: "Cook a dish" }).click();
+  await page.getByRole("button", { name: "Start listening" }).click();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook rice rice flour");
+  expect(posts).toEqual([]);
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(1);
+  expect(posts[0]).toContain("I want to cook rice rice flour");
+  expect(posts[0]).not.toContain("audio");
+  expect(posts[0]).not.toMatch(/data:audio|webm|octet-stream/);
+});
+
+test("a photo does not change the basket until the customer taps", async ({ page }) => {
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("rice from the photo");
+  await page.getByTestId("assistant-send").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("0");
 });
 
