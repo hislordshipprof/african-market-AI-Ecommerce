@@ -7,6 +7,7 @@ import {
 } from "../../cart/limits";
 import {
   applyAddLine,
+  cartLineSubtotalCents,
   checkMinimumOrder,
   runCartMutation,
   type CartWriteTx,
@@ -329,6 +330,35 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
   return recordRead(ctx, "offer_choices", parsed, { ok: true, options: chosen, notFound });
 }
 
+async function readCartMoney(tx: CartWriteTx, cartId: string) {
+  const lines = await tx.cartLine.findMany({
+    where: { cartId },
+    orderBy: { createdAt: "asc" },
+    include: { variant: { select: { id: true, price: true } } },
+  });
+  return {
+    lines,
+    subtotalCents: cartLineSubtotalCents(
+      lines.map((line) => ({ priceCents: line.variant.price, qty: line.qty })),
+    ),
+  };
+}
+
+function withLineMoney<T extends { ok: true; lineId: string; qty: number; added: number }>(
+  item: T,
+  money: Awaited<ReturnType<typeof readCartMoney>>,
+): T & { unitPriceCents: number; lineTotalCents: number; addedTotalCents: number } {
+  const line = money.lines.find((row) => row.id === item.lineId);
+  if (!line) throw new Error("added cart line missing from subtotal read");
+  const unitPriceCents = line.variant.price;
+  return {
+    ...item,
+    unitPriceCents,
+    lineTotalCents: unitPriceCents * item.qty,
+    addedTotalCents: unitPriceCents * item.added,
+  };
+}
+
 async function enrichAdded(tx: CartWriteTx, variantId: string) {
   const variant = await tx.listingVariant.findUnique({
     where: { id: variantId },
@@ -393,11 +423,14 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       });
     }
     if (items.length === 1 && items[0].ok === false) return items[0];
-    const first = items[0];
+    const money = await readCartMoney(tx, ctx.cartId);
+    const priced = items.map((item) => (item.ok === true ? withLineMoney(item, money) : item));
+    const first = priced[0];
     return {
       ok: true as const,
-      items,
-      ...(items.length === 1 && first?.ok ? first : {}),
+      items: priced,
+      ...(priced.length === 1 && first?.ok ? first : {}),
+      subtotalCents: money.subtotalCents,
     };
   });
 }
@@ -412,12 +445,26 @@ export async function updateCart(ctx: AssistantContext, input: unknown): Promise
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
     if (parsed.qty <= 0) {
       await tx.cartLine.delete({ where: { id: line.id } });
-      return { ok: true, removed: true, lineId: line.id, qty: 0 };
+      const money = await readCartMoney(tx, ctx.cartId);
+      return { ok: true, removed: true, lineId: line.id, qty: 0, subtotalCents: money.subtotalCents };
     }
     const decision = decideLineQty(parsed.qty, line.variant.listing.maxPerOrder);
     if (!decision.ok) return fail("max_per_order");
     await tx.cartLine.update({ where: { id: line.id }, data: { qty: parsed.qty } });
-    return { ok: true, lineId: line.id, qty: parsed.qty, swapRule: line.swapRule };
+    const money = await readCartMoney(tx, ctx.cartId);
+    const fresh = money.lines.find((row) => row.id === line.id);
+    if (!fresh) throw new Error("updated cart line missing from subtotal read");
+    const unitPriceCents = fresh.variant.price;
+    return {
+      ok: true,
+      lineId: line.id,
+      qty: parsed.qty,
+      swapRule: line.swapRule,
+      variantId: fresh.variant.id,
+      unitPriceCents,
+      lineTotalCents: unitPriceCents * parsed.qty,
+      subtotalCents: money.subtotalCents,
+    };
   });
 }
 
@@ -427,7 +474,8 @@ export async function removeFromCart(ctx: AssistantContext, input: unknown): Pro
     const line = await tx.cartLine.findUnique({ where: { id: parsed.line_id } });
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
     await tx.cartLine.delete({ where: { id: line.id } });
-    return { ok: true, removed: true };
+    const money = await readCartMoney(tx, ctx.cartId);
+    return { ok: true, removed: true, subtotalCents: money.subtotalCents };
   });
 }
 
@@ -501,6 +549,7 @@ export async function getCartSummary(ctx: AssistantContext, input: unknown): Pro
       : undefined;
     return {
       lineId: line.id,
+      variantId: line.variantId,
       name,
       packLabel: line.variant.label,
       qty: line.qty,
@@ -513,7 +562,9 @@ export async function getCartSummary(ctx: AssistantContext, input: unknown): Pro
       source: line.source,
     };
   });
-  const subtotalCents = lines.reduce((sum, line) => sum + line.lineTotalCents, 0);
+  const subtotalCents = cartLineSubtotalCents(
+    lines.map((line) => ({ priceCents: line.unitPriceCents, qty: line.qty })),
+  );
   const minimum = await checkMinimumOrder(ctx.storeId, ctx.cartId);
   const missingCents = Math.max(0, minimum.minimumCents - subtotalCents);
   return recordRead(ctx, "get_cart_summary", parsed, {

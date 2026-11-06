@@ -247,12 +247,67 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     const before = await lineCount();
     const result = await addToCart(ctx(), { items: [{ variant_id: variantB, qty: 1 }] });
     expect(result).toMatchObject({ ok: false, code: "variant_not_found" });
+    expect(result).not.toHaveProperty("subtotalCents");
+    expect(result).not.toHaveProperty("lineTotalCents");
     expect(await lineCount()).toBe(before);
+    const foreignLines = await storeScoped(storeB).cartLine.count({ where: { variantId: variantB } });
+    expect(foreignLines).toBe(0);
     const action = await storeScoped(storeA).aiAction.findFirst({
       where: { conversationId: conversation, tool: "add_to_cart" },
       orderBy: { createdAt: "desc" },
     });
     expect(action?.ok).toBe(false);
+    expect(JSON.stringify(action?.output)).not.toContain("subtotalCents");
+  });
+
+  it("add_to_cart returns the line total, the added total and the cart subtotal after the write", async () => {
+    const cart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
+    const decoy = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
+    const talk = (await storeScoped(storeA).aiConversation.create({
+      data: { storeId: storeA, cartId: cart, model: "claude-haiku-5-5", messages: [] },
+    })).id;
+    const other = await makeListing(storeA, { name: "Basket Yam", price: 250 });
+    const item = await makeListing(storeA, { name: "Priced Egusi", price: 100 });
+    await storeScoped(storeA).listing.update({ where: { id: item.listingId }, data: { price: 50 } });
+    await storeScoped(storeA).listingVariant.update({ where: { id: item.variantId }, data: { price: 1099 } });
+    await addLine(storeA, cart, other.variantId, 1, null);
+    await addLine(storeA, cart, item.variantId, 1, null);
+    await addLine(storeA, decoy, other.variantId, 4, null);
+    const result = await addToCart(ctx({ cartId: cart, conversationId: talk }), {
+      items: [{ variant_id: item.variantId, qty: 2 }],
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      unitPriceCents: 1099,
+      qty: 3,
+      added: 2,
+      lineTotalCents: 3297,
+      addedTotalCents: 2198,
+      subtotalCents: 3547,
+    });
+    const action = await storeScoped(storeA).aiAction.findFirst({
+      where: { conversationId: talk, tool: "add_to_cart" },
+    });
+    expect(action?.output).toMatchObject({
+      unitPriceCents: 1099,
+      lineTotalCents: 3297,
+      addedTotalCents: 2198,
+      subtotalCents: 3547,
+    });
+    const doubled = await addToCart(ctx({ cartId: cart, conversationId: talk }), {
+      items: [
+        { variant_id: item.variantId, qty: 1 },
+        { variant_id: item.variantId, qty: 2 },
+        { variant_id: variantB, qty: 1 },
+      ],
+    });
+    expect(doubled).toMatchObject({ ok: true, subtotalCents: 6844 });
+    const rows = (doubled as unknown as { items: Array<Record<string, unknown>> }).items;
+    expect(rows[0]).toMatchObject({ ok: true, added: 1, qty: 4, lineTotalCents: 4396, addedTotalCents: 1099 });
+    expect(rows[1]).toMatchObject({ ok: true, added: 2, qty: 6, lineTotalCents: 6594, addedTotalCents: 2198 });
+    expect(rows[2]).toMatchObject({ ok: false, code: "variant_not_found" });
+    expect(rows[2]).not.toHaveProperty("lineTotalCents");
+    expect(await storeScoped(storeA).cartLine.findFirst({ where: { cartId: decoy, variantId: other.variantId } })).toMatchObject({ qty: 4 });
   });
 
   it("set_swap_rule rejects another store's substitute", async () => {
@@ -374,6 +429,8 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       items: [{ variant_id: item.variantId, qty: 1 }],
     });
     expect(result).toMatchObject({ ok: false, code: "audit_failed" });
+    expect(result).not.toHaveProperty("subtotalCents");
+    expect(result).not.toHaveProperty("lineTotalCents");
     expect(await lineCount()).toBe(before);
     expect(await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } })).toBeNull();
   });
@@ -392,8 +449,13 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     const summary = await getCartSummary(ctx({ cartId, conversationId: talk.id }), {});
     expect(summary.ok).toBe(true);
     if (!summary.ok) return;
-    const rows = summary.lines as Array<{ lineId: string; qty: number; lineTotalCents: number }>;
-    expect(rows).toEqual([expect.objectContaining({ lineId: line!.id, qty: 3, lineTotalCents: 1200 })]);
+    const rows = summary.lines as Array<{ lineId: string; qty: number; lineTotalCents: number; variantId: string }>;
+    expect(rows).toEqual([expect.objectContaining({
+      lineId: line!.id,
+      variantId: item.variantId,
+      qty: 3,
+      lineTotalCents: 1200,
+    })]);
     expect(summary.subtotalCents).toBe(1200);
     expect(summary.minimumOrderCents).toBe(2000);
     expect(summary.minimumMet).toBe(false);
@@ -405,7 +467,16 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     const item = await makeListing(storeA, { name: "Limited Pack", price: 100, maxPerOrder: 3 });
     await addLine(storeA, cartA, item.variantId, 2, null);
     const result = await addToCart(ctx(), { items: [{ variant_id: item.variantId, qty: 5 }] });
-    expect(result).toMatchObject({ ok: true, qty: 3, limitedTo: 3, code: "max_per_order" });
+    expect(result).toMatchObject({
+      ok: true,
+      qty: 3,
+      added: 1,
+      limitedTo: 3,
+      code: "max_per_order",
+      unitPriceCents: 100,
+      lineTotalCents: 300,
+      addedTotalCents: 100,
+    });
     const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
     expect(line?.qty).toBe(3);
   });
@@ -497,19 +568,51 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
 
   it("update_cart with quantity zero removes the line", async () => {
     const item = await makeListing(storeA, { name: "Remove By Zero", price: 55 });
-    await addLine(storeA, cartA, item.variantId, 2, null);
-    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
-    const result = await updateCart(ctx(), { line_id: line!.id, qty: 0 });
-    expect(result).toMatchObject({ ok: true, removed: true, qty: 0 });
-    expect(await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } })).toBeNull();
+    const keeper = await makeListing(storeA, { name: "Keep Yam", price: 40 });
+    const keeperCart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
+    const keeperTalk = (await storeScoped(storeA).aiConversation.create({
+      data: { storeId: storeA, cartId: keeperCart, model: "claude-haiku-5-5", messages: [] },
+    })).id;
+    await addLine(storeA, keeperCart, item.variantId, 2, null);
+    await addLine(storeA, keeperCart, keeper.variantId, 1, null);
+    const gone = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: item.variantId } });
+    const result = await updateCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: gone!.id, qty: 0 });
+    expect(result).toMatchObject({ ok: true, removed: true, qty: 0, subtotalCents: 40 });
+    expect(result).not.toHaveProperty("lineTotalCents");
+    const kept = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: keeper.variantId } });
+    const removed = await removeFromCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: kept!.id });
+    expect(removed).toMatchObject({ ok: true, removed: true, subtotalCents: 0 });
+    expect(removed).not.toHaveProperty("lineTotalCents");
   });
 
   it("update_cart accepts a quantity equal to the listing max", async () => {
     const item = await makeListing(storeA, { name: "Exact Cap", price: 70, maxPerOrder: 3 });
     await addLine(storeA, cartA, item.variantId, 1, null);
     const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const freshCart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
+    const freshTalk = (await storeScoped(storeA).aiConversation.create({
+      data: { storeId: storeA, cartId: freshCart, model: "claude-haiku-5-5", messages: [] },
+    })).id;
+    await storeScoped(storeA).listingVariant.update({ where: { id: item.variantId }, data: { price: 80 } });
+    await addLine(storeA, freshCart, item.variantId, 1, null);
+    const priced = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: freshCart, variantId: item.variantId } });
+    const raised = await updateCart(ctx({ cartId: freshCart, conversationId: freshTalk }), { line_id: priced!.id, qty: 3 });
+    expect(raised).toMatchObject({
+      ok: true,
+      qty: 3,
+      variantId: item.variantId,
+      unitPriceCents: 80,
+      lineTotalCents: 240,
+      subtotalCents: 240,
+    });
     const result = await updateCart(ctx(), { line_id: line!.id, qty: 3 });
-    expect(result).toMatchObject({ ok: true, qty: 3 });
+    expect(result).toMatchObject({
+      ok: true,
+      qty: 3,
+      variantId: item.variantId,
+      unitPriceCents: 80,
+      lineTotalCents: 240,
+    });
     expect((await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } }))?.qty).toBe(3);
   });
 

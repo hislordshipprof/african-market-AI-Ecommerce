@@ -84,18 +84,34 @@ describe.skipIf(!hasDb)("assistant cart tool concurrency", () => {
     const variantId = await listing("Locked Max", 3);
     await addLine(storeId, cartId, variantId, 2, null);
     const hold = await holdCart();
+    let added: Awaited<ReturnType<typeof addToCart>> | undefined;
     try {
       const adding = addToCart(ctx, { items: [{ variant_id: variantId, qty: 5 }] });
       await waitForLockWaiters(hold.pid, 1, { label: "assistant add waits on the cart" });
+      await storeScoped(storeId).listingVariant.update({ where: { id: variantId }, data: { price: 250 } });
       const line = await storeScoped(storeId).cartLine.findFirst({ where: { variantId } });
       const editing = updateLineQty(storeId, cartId, line!.id, 1, null);
       await waitForLockWaiters(hold.pid, 2, { label: "cart edit waits on the cart" });
       await hold.release();
-      await Promise.all([adding, editing]);
+      [added] = await Promise.all([adding, editing]);
     } catch (error) {
       await hold.release();
       throw error;
     }
+    expect(added).toMatchObject({
+      ok: true,
+      qty: 3,
+      added: 1,
+      unitPriceCents: 250,
+      lineTotalCents: 750,
+      addedTotalCents: 250,
+      subtotalCents: 750,
+    });
+    const action = await storeScoped(storeId).aiAction.findFirst({
+      where: { conversationId, tool: "add_to_cart" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(action?.output).toMatchObject({ unitPriceCents: 250, lineTotalCents: 750, subtotalCents: 750 });
     const line = await storeScoped(storeId).cartLine.findFirst({ where: { variantId } });
     expect(line?.qty).toBeLessThanOrEqual(3);
     expect(await storeScoped(storeId).cartLine.count({ where: { variantId } })).toBe(1);
