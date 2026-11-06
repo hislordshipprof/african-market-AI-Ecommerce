@@ -716,6 +716,21 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
     const alert = getHandler(acceptanceAlert);
     const cancel = getHandler(autoCancel);
     const sendSpy = vi.spyOn(inngest, "send").mockResolvedValue({ ids: ["evt_188_cross_store"] });
+    const providerSpies = {
+      createConnectAccount: vi.spyOn(fakeStripeProvider, "createConnectAccount"),
+      createAccountLink: vi.spyOn(fakeStripeProvider, "createAccountLink"),
+      getAccount: vi.spyOn(fakeStripeProvider, "getAccount"),
+      verifyWebhookSignature: vi.spyOn(fakeStripeProvider, "verifyWebhookSignature"),
+      capturePaymentIntent: vi.spyOn(fakeStripeProvider, "capturePaymentIntent"),
+      cancelPaymentIntent: vi.spyOn(fakeStripeProvider, "cancelPaymentIntent"),
+      retrievePaymentIntent: vi.spyOn(fakeStripeProvider, "retrievePaymentIntent"),
+      refundPayment: vi.spyOn(fakeStripeProvider, "refundPayment"),
+      listRefunds: vi.spyOn(fakeStripeProvider, "listRefunds"),
+      retrieveRefund: vi.spyOn(fakeStripeProvider, "retrieveRefund"),
+    };
+    const clearProviderSpies = () => {
+      for (const spy of Object.values(providerSpies)) spy.mockClear();
+    };
     const open = new Date("2026-11-03T14:00:00-05:00");
     try {
       const cases = [
@@ -739,7 +754,6 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
           await storeScopedTransaction(storeId, async (tx) => {
             await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLING" } });
           });
-          scriptRetrieveStatuses(order.paymentIntentId!, ["processing"]);
           return { order, run: () => recordReconcileResult(storeBId, order.id) };
         },
         async () => {
@@ -752,12 +766,14 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         const beforeA = await orderSnapshot(storeId, order.id);
         const beforeB = await orderSnapshot(storeBId, order.id);
         const stripe = { cancelled: cancelledPayments.size, captures: captureCalls.length, sends: sendSpy.mock.calls.length };
+        clearProviderSpies();
         await run();
         expect(await orderSnapshot(storeId, order.id)).toEqual(beforeA);
         expect(await orderSnapshot(storeBId, order.id)).toEqual(beforeB);
         expect(cancelledPayments.size).toBe(stripe.cancelled);
         expect(captureCalls.length).toBe(stripe.captures);
         expect(sendSpy.mock.calls.length).toBe(stripe.sends);
+        for (const spy of Object.values(providerSpies)) expect(spy).not.toHaveBeenCalled();
       }
 
       const alertOrder = await createTestOrder();
@@ -801,7 +817,9 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       setAuthorizedAmount(stuck.paymentIntentId!, stuck.totalAuthorizedCents);
       scriptRetrieveStatuses(stuck.paymentIntentId!, ["processing"]);
       const beforeUpdate = (await storeScoped(storeId).order.findUnique({ where: { id: stuck.id } }))!.updatedAt;
+      clearProviderSpies();
       await recordReconcileResult(storeId, stuck.id);
+      expect(providerSpies.retrievePaymentIntent).toHaveBeenCalled();
       const failed = await storeScoped(storeId).auditLog.findMany({
         where: { entityId: stuck.id, action: "reconcile_failed", entityType: "order" },
       });
@@ -827,6 +845,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       });
     } finally {
       sendSpy.mockRestore();
+      for (const spy of Object.values(providerSpies)) spy.mockRestore();
     }
   });
 
