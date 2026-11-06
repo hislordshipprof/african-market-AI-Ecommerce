@@ -538,6 +538,7 @@ model AiConversation {
   actions  AiAction[]
 
   @@unique([storeId, cartId])
+  @@index([cartId])
   @@index([storeId])
   @@index([createdAt])
   @@index([customerId])
