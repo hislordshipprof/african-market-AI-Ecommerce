@@ -1,3 +1,5 @@
+import { scrubCardNumbers, scrubKnownStrings } from "./card-scrub";
+
 const AMOUNT = /(?:US)?\$\s?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 
 export function groundAmounts(
@@ -72,13 +74,21 @@ export function groundingTransform(options: GroundingTransformOptions = {}) {
             return;
           }
           if (type === "text-end" && buffers.has(id)) {
-            const grounded = groundAmounts(buffers.get(id) ?? "", allowed);
+            const grounded = groundAmounts(scrubCardNumbers(buffers.get(id) ?? "").text, allowed);
             buffers.delete(id);
             for (const amount of grounded.stripped) options.onStrip?.(amount);
             if (grounded.text) {
               controller.enqueue({ type: "text-delta", id, text: grounded.text });
             }
             controller.enqueue(part);
+            return;
+          }
+          if (type === "tool-call") {
+            const input = (part as { input?: unknown }).input;
+            const scrubbed = typeof input === "string"
+              ? scrubCardNumbers(input).text
+              : JSON.stringify(scrubKnownStrings(input ?? {}));
+            controller.enqueue({ ...part, input: scrubbed });
             return;
           }
           if (type === "error") {

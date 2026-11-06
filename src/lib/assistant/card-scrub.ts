@@ -70,3 +70,34 @@ function isDigit(text: string, index: number): boolean {
   const code = text.charCodeAt(index);
   return code >= 48 && code <= 57;
 }
+
+/** Ids and tool-call handles are opaque. Scrubbing them would change a different record. */
+const OPAQUE_KEYS = new Set([
+  "id",
+  "listingId",
+  "variantId",
+  "lineId",
+  "toolCallId",
+  "conversationId",
+  "storeId",
+  "cartId",
+  "additionId",
+  "choiceId",
+  "listing_id",
+  "variant_id",
+  "line_id",
+  "_turn",
+  "_call",
+]);
+
+/** Card numbers in customer-visible or audited strings. Opaque ids are left as they are. */
+export function scrubKnownStrings(value: unknown): unknown {
+  if (typeof value === "string") return scrubCardNumbers(value).text;
+  if (Array.isArray(value)) return value.map((item) => scrubKnownStrings(item));
+  if (!value || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    out[key] = OPAQUE_KEYS.has(key) ? child : scrubKnownStrings(child);
+  }
+  return out;
+}

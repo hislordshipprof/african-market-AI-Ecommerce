@@ -3,21 +3,32 @@ import {
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
-  generateId,
   safeValidateUIMessages,
   stepCountIs,
   streamText,
   type LanguageModel,
+  type ModelMessage,
   type UIMessage,
 } from "ai";
 import { Prisma } from "@prisma/client";
 import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
 import { readBrowserId } from "../cart/browser";
 import { CartError, getOrCreateCart } from "../cart/service";
-import { claimConversationLease, lockConversationRow, rateLimitUpsert, storeScoped, storeScopedTransaction } from "../db";
+import { lockConversationRow, rateLimitUpsert, storeScoped, storeScopedTransaction, takeRollingFileTurn } from "../db";
 import { findStore } from "../get-store";
 import { auth } from "../auth";
-import { scrubCardNumbers } from "./card-scrub";
+import {
+  attachmentDescriptors,
+  attachmentFailure,
+  attachmentNote,
+  descriptorsMatch,
+  FILE_TURN_TOOLS,
+  prepareAttachments,
+  readAssistantRequest,
+  type AttachmentDescriptor,
+  type PreparedAttachment,
+} from "./attachments";
+import { scrubCardNumbers, scrubKnownStrings } from "./card-scrub";
 import {
   ASSISTANT_DISABLED_CODE,
   ASSISTANT_DISABLED_MESSAGE,
@@ -36,8 +47,8 @@ import { assistantTools } from "./tools";
 const WINDOW_MS = 60 * 60 * 1000;
 const IP_LIMIT = 60;
 const CART_LIMIT = 30;
+const FILE_LIMIT = 10;
 const LEASE_MS = 90_000;
-const BODY_LIMIT = 16 * 1024;
 const FIXED_ERROR = "Sorry, something went wrong. Please try again.";
 const STEP_LIMIT_TEXT = "I've done as much as I can in one go. Tell me what you'd like next.";
 const RESTING_MESSAGE = "The helper is resting right now. You can still shop and check out as usual.";
@@ -53,8 +64,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     if (!assistantChatEnabled()) {
       return jsonError(ASSISTANT_DISABLED_STATUS, ASSISTANT_DISABLED_CODE, ASSISTANT_DISABLED_MESSAGE);
     }
-    const parsed = await readUserMessage(request);
-    if (!parsed.ok) return jsonError(400, "invalid_request", parsed.message);
+    const parsed = await readAssistantRequest(request);
+    if (!parsed.ok) return jsonError(parsed.status, parsed.code, parsed.message);
     if (!originAllowed(request)) return jsonError(403, "forbidden_origin", "This request was not sent from the store.");
 
     const slug = request.headers.get("x-store-slug");
@@ -113,17 +124,62 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
 
     const headers = new Headers();
     if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId));
-    const replay = await replayCompletedTurn(store.id, cartId, parsed.id, headers, at);
-    if (replay) return replay;
+    const lookedUp = await storeScoped(store.id).aiConversation.findUnique({
+      where: { storeId_cartId: { storeId: store.id, cartId } },
+    });
+    const storedMessages = asMessages(lookedUp?.messages);
+    const storedUser = storedMessages.find((message) => message.role === "user" && message.id === parsed.id);
+    const storedFiles = storedUser ? attachmentDescriptors(storedUser) : [];
+    const sameFiles = parsed.files.length === 0 || (storedFiles.length > 0 && descriptorsMatch(storedFiles, parsed.files));
+    if (sameFiles) {
+      const replay = await replayCompletedTurn(store.id, cartId, parsed.id, headers, at);
+      if (replay) return replay;
+    } else if (storedFiles.length > 0) {
+      return jsonError(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
+    }
+    if (parsed.replayOnly) {
+      if (storedFiles.length > 0) return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
+      return jsonError(400, "invalid_request", "Write between 1 and 2000 characters.");
+    }
+    const fileTurn = parsed.files.length > 0 || storedFiles.length > 0;
+    if (fileTurn && parsed.files.length === 0) {
+      return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
+    }
 
-    const turn = await takeTurn(store.id, cartId, userId, at, modelId);
+    let prepared: PreparedAttachment[] = [];
+    if (parsed.files.length > 0) {
+      const slot = await takeRollingFileTurn(
+        `assistant:files:cart:${cartId}`,
+        BigInt(at.getTime()),
+        BigInt(WINDOW_MS),
+        FILE_LIMIT,
+      );
+      if (!slot.ok) {
+        return jsonError(429, "attachment_rate_limited", "Too many files this hour. You can still type a message.", {
+          "retry-after": String(slot.retryAfter),
+        });
+      }
+      const processed = await prepareAttachments(parsed.files);
+      if (!processed.ok) return jsonError(processed.status, processed.code, processed.message);
+      prepared = processed.files;
+    }
+
+    const leasedAt = now();
+    const turn = await takeTurn(store.id, cartId, userId, leasedAt, modelId, parsed.id);
     if (!turn) return jsonError(409, "assistant_busy", "The helper is still working on the previous message.");
+    if ("replay" in turn) return replayAssistantMessage(turn.replay as UIMessage, headers);
 
     const scrubbed = scrubCardNumbers(parsed.text).text;
     const userMessage: UIMessage = {
       id: parsed.id,
       role: "user",
-      parts: [{ type: "text", text: scrubbed }],
+      parts: [
+        ...(scrubbed ? [{ type: "text" as const, text: scrubbed }] : []),
+        ...prepared.map((file, index) => ({
+          type: "data-attachment" as const,
+          data: { ...file.descriptor, index: index + 1 },
+        })),
+      ],
     };
     const prior = asMessages(turn.messages);
     const alreadyThere = prior.some((message) => message.role === "user" && message.id === parsed.id);
@@ -147,7 +203,28 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       turnMessageId: parsed.id,
     });
     const history = (await usableHistory(withUser, tools)).slice(-30);
-    const modelMessages = await convertToModelMessages(retryVisible(history, parsed.id, alreadyThere));
+    if (!history.some((message) => message.id === parsed.id)) {
+      const current = withUser.find((message) => message.id === parsed.id);
+      if (current) history.push(current);
+    }
+    let modelMessages: ModelMessage[];
+    try {
+      let attachmentIndex = 0;
+      modelMessages = await convertToModelMessages(retryVisible(history, parsed.id, alreadyThere), {
+        tools,
+        convertDataPart: (part) => {
+          if (part.type !== "data-attachment") return undefined;
+          const data = part.data as AttachmentDescriptor & { index?: number };
+          attachmentIndex += 1;
+          return { type: "text", text: attachmentNote(data, data.index ?? attachmentIndex) };
+        },
+      });
+      if (prepared.length > 0) overlayCurrentFiles(modelMessages, scrubbed, prepared);
+    } catch {
+      console.error("[assistant] message could not be prepared", turn.id);
+      await releaseLease(store.id, turn.id);
+      return jsonError(503, "assistant_unavailable", FIXED_ERROR);
+    }
 
     const result = streamText({
       model,
@@ -162,12 +239,13 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       ],
       allowSystemInMessages: true,
       tools,
+      ...(fileTurn ? { activeTools: [...FILE_TURN_TOOLS] } : {}),
       toolCallConcurrency: 1,
       stopWhen: stepCountIs(8),
       maxOutputTokens: 1024,
       maxRetries: 0,
       streamRetries: 0,
-      timeout: { totalMs: 55_000 },
+      timeout: { totalMs: fileTurn ? 45_000 : 55_000 },
       providerOptions: assistantProviderOptions(modelId),
       experimental_transform: groundingTransform({
         onStrip: (amount) => {
@@ -200,10 +278,10 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         } catch {
           status = "failed";
         }
-        const messages = stampAssistant([
+        const messages = scrubUiMessages(stampAssistant([
           ...withUser.filter((message) => !keptIds.has(message.id)),
           ...event.messages,
-        ], status);
+        ], status));
         await persistTurn({
           storeId: store.id,
           conversationId: turn.id,
@@ -217,7 +295,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         while (true) {
           const next = await reader.read();
           if (next.done) break;
-          writer.write(next.value);
+          const outgoing = scrubOutboundChunk(next.value);
+          if (outgoing) writer.write(outgoing as typeof next.value);
         }
         const steps = await Promise.resolve(result.steps).catch(() => []);
         const last = steps.at(-1);
@@ -337,13 +416,13 @@ function retryVisible(messages: UIMessage[], clientId: string, alreadyThere: boo
 async function usableHistory(messages: UIMessage[], tools: ReturnType<typeof assistantTools>): Promise<UIMessage[]> {
   const first = await safeValidateUIMessages({ messages, tools });
   if (first.success) return first.data;
-  const textOnly = messages.flatMap((message) => {
-    const parts = message.parts.filter((part) => part.type === "text");
+  const kept = messages.flatMap((message) => {
+    const parts = message.parts.filter((part) => part.type === "text" || part.type === "data-attachment");
     if (parts.length === 0) return [];
     return [{ ...message, parts }];
   });
-  const second = await safeValidateUIMessages({ messages: textOnly, tools });
-  return second.success ? second.data : textOnly;
+  const second = await safeValidateUIMessages({ messages: kept, tools });
+  return second.success ? second.data : kept;
 }
 
 async function takeTurn(
@@ -352,12 +431,13 @@ async function takeTurn(
   userId: string | null,
   at: Date,
   modelId: ReturnType<typeof assistantModelId>,
+  clientId: string,
 ) {
   try {
-    return await claimFirstTurn(storeId, cartId, userId, at, modelId);
+    return await claimFirstTurn(storeId, cartId, userId, at, modelId, clientId);
   } catch (error) {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
-    return claimFirstTurn(storeId, cartId, userId, at, modelId);
+    return claimFirstTurn(storeId, cartId, userId, at, modelId, clientId);
   }
 }
 
@@ -368,6 +448,7 @@ async function claimFirstTurn(
   userId: string | null,
   at: Date,
   modelId: ReturnType<typeof assistantModelId>,
+  clientId: string,
 ) {
   const until = new Date(at.getTime() + LEASE_MS);
   const cart = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
@@ -383,8 +464,71 @@ async function claimFirstTurn(
       },
       update: userId ? { customerId: cart?.customerId ?? undefined } : {},
     });
-    return claimConversationLease(tx, storeId, cartId, until, at);
+    const row = await tx.aiConversation.findUnique({ where: { storeId_cartId: { storeId, cartId } } });
+    if (!row) return null;
+    await lockConversationRow(tx, row.id);
+    const fresh = await tx.aiConversation.findUnique({ where: { id: row.id } });
+    if (!fresh) return null;
+    const finished = completedAssistant(asMessages(fresh.messages), clientId);
+    if (finished) return { replay: finished };
+    if (fresh.inFlightUntil && fresh.inFlightUntil.getTime() > at.getTime()) return null;
+    await tx.aiConversation.update({
+      where: { id: fresh.id },
+      data: { inFlightUntil: until },
+    });
+    return { id: fresh.id, messages: fresh.messages };
   });
+}
+
+function completedAssistant(messages: UIMessage[], clientId: string): UIMessage | null {
+  const index = messages.findIndex((message) => message.role === "user" && message.id === clientId);
+  if (index < 0) return null;
+  const rest = messages.slice(index + 1);
+  const nextUser = rest.findIndex((message) => message.role === "user");
+  const span = nextUser === -1 ? rest : rest.slice(0, nextUser);
+  const assistant = span.find((message) => message.role === "assistant");
+  if (assistant && replyStatus(assistant) === "complete") return assistant;
+  return null;
+}
+
+function scrubOutboundChunk(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const part = value as { type?: string; input?: unknown; output?: unknown; errorText?: unknown };
+  if (part.type === "tool-input-delta") return null;
+  if (part.type === "tool-input-available") return { ...part, input: scrubKnownStrings(part.input) };
+  if (part.type === "tool-output-available" || part.type === "tool-result") {
+    return { ...part, output: scrubKnownStrings(part.output) };
+  }
+  if (typeof part.errorText === "string") {
+    return { ...part, errorText: scrubCardNumbers(part.errorText).text };
+  }
+  return value;
+}
+
+function scrubUiMessages(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => {
+      if (part.type === "text") return { ...part, text: scrubCardNumbers(part.text).text };
+      if (part.type === "data-attachment") return part;
+      return scrubKnownStrings(part) as typeof part;
+    }),
+  }));
+}
+
+function overlayCurrentFiles(messages: ModelMessage[], text: string, files: PreparedAttachment[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "user" || !Array.isArray(message.content)) continue;
+    const blocks = message.content as Array<{ type: string }>;
+    if (blocks.every((part) => part.type === "tool-result")) continue;
+    message.content = [
+      ...files.map((file) => ({ type: "file" as const, data: file.modelBytes, mediaType: file.modelMediaType })),
+      ...(text ? [{ type: "text" as const, text }] : []),
+    ];
+    message.providerOptions = { anthropic: { cacheControl: { type: "ephemeral" } } };
+    return;
+  }
 }
 
 async function releaseLease(storeId: string, conversationId: string) {
@@ -488,37 +632,4 @@ async function replayCompletedTurn(
     return synthetic;
   });
   return recovered ? replayAssistantMessage(recovered, headers) : null;
-}
-
-async function readUserMessage(request: Request): Promise<{ ok: true; text: string; id: string } | { ok: false; message: string }> {
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/json")) {
-    return { ok: false, message: "Send a JSON message." };
-  }
-  const raw = await request.text();
-  if (Buffer.byteLength(raw, "utf8") > BODY_LIMIT) return { ok: false, message: "That message is too large." };
-  let body: unknown;
-  try {
-    body = JSON.parse(raw);
-  } catch {
-    return { ok: false, message: "Send a JSON message." };
-  }
-  const message = body && typeof body === "object" ? (body as { message?: unknown }).message : undefined;
-  if (!message || typeof message !== "object") return { ok: false, message: "Send one user message." };
-  const record = message as { role?: unknown; parts?: unknown };
-  if (record.role !== "user" || !Array.isArray(record.parts)) {
-    return { ok: false, message: "Send one user message." };
-  }
-  if (record.parts.some((part) => {
-    if (!part || typeof part !== "object") return true;
-    const typed = part as { type?: unknown; text?: unknown };
-    return typed.type !== "text" || typeof typed.text !== "string";
-  })) {
-    return { ok: false, message: "Send plain text." };
-  }
-  const text = record.parts.map((part) => (part as { text: string }).text).join("").trim();
-  if (text.length < 1 || text.length > 2000) return { ok: false, message: "Write between 1 and 2000 characters." };
-  const rawId = typeof (record as { id?: unknown }).id === "string" ? (record as { id: string }).id : "";
-  const id = /^[A-Za-z0-9_-]{8,80}$/.test(rawId) ? rawId : generateId();
-  return { ok: true, text, id };
 }

@@ -13,6 +13,7 @@ import {
   type SwapRuleValue,
 } from "../../cart/service";
 import { storeScoped } from "../../db";
+import { scrubKnownStrings } from "../card-scrub";
 import { listingImage } from "../../storefront/images";
 import { searchListings } from "../../storefront/service";
 import { stockBadge } from "../../storefront/stock-badge";
@@ -63,9 +64,10 @@ function asJson(value: unknown): Prisma.InputJsonValue {
 }
 
 function auditedInput(ctx: AssistantContext, input: unknown): unknown {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const scrubbed = scrubKnownStrings(input);
+  if (!scrubbed || typeof scrubbed !== "object" || Array.isArray(scrubbed)) return scrubbed;
   return {
-    ...input,
+    ...(scrubbed as Record<string, unknown>),
     ...(ctx.turnMessageId ? { _turn: ctx.turnMessageId } : {}),
     ...(ctx.toolCallId ? { _call: ctx.toolCallId } : {}),
   };
@@ -84,7 +86,7 @@ async function recordRead(
         conversationId: ctx.conversationId,
         tool,
         input: asJson(auditedInput(ctx, input)),
-        output: asJson(output),
+        output: asJson(scrubKnownStrings(output)),
         ok: output.ok,
       },
     });
@@ -109,7 +111,7 @@ async function recordWrite<T extends ToolResult>(
           conversationId: ctx.conversationId,
           tool,
           input: asJson(auditedInput(ctx, input)),
-          output: asJson(output),
+          output: asJson(scrubKnownStrings(output)),
           ok: output.ok,
         },
       });

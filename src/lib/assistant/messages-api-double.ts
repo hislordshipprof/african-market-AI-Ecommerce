@@ -201,7 +201,56 @@ export function judgeMessagesRequest(args: {
       }
     }
   }
+  const media = judgeMedia(body);
+  if (media) return media;
   return judgeToolHistory(body);
+}
+
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+function judgeMedia(body: Record<string, unknown>): MessagesVerdict | null {
+  if (!Array.isArray(body.messages)) return null;
+  for (const message of body.messages) {
+    if (!isRecord(message)) continue;
+    for (const block of contentBlocks(message.content)) {
+      if (block.type === "image" && isRecord(block.source) && block.source.type === "base64") {
+        const mediaType = typeof block.source.media_type === "string" ? block.source.media_type : "";
+        const data = typeof block.source.data === "string" ? block.source.data : "";
+        if (!IMAGE_TYPES.has(mediaType)) {
+          return { status: 400, errorType: "invalid_request_error", message: "unsupported image media_type" };
+        }
+        const bytes = strictBase64(data);
+        if (!bytes) return { status: 400, errorType: "invalid_request_error", message: "image base64 does not decode" };
+        if (!imageMagic(bytes, mediaType)) {
+          return { status: 400, errorType: "invalid_request_error", message: "Image does not match the provided media type" };
+        }
+      }
+      if (block.type === "document" && isRecord(block.source) && block.source.type === "base64") {
+        if (block.source.media_type !== "application/pdf") {
+          return { status: 400, errorType: "invalid_request_error", message: "document media_type must be application/pdf" };
+        }
+        if (!strictBase64(typeof block.source.data === "string" ? block.source.data : "")) {
+          return { status: 400, errorType: "invalid_request_error", message: "document base64 does not decode" };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function strictBase64(data: string): Buffer | null {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(data) || data.length % 4 !== 0) return null;
+  const bytes = Buffer.from(data, "base64");
+  if (bytes.toString("base64") !== data) return null;
+  return bytes;
+}
+
+function imageMagic(bytes: Buffer, mediaType: string): boolean {
+  if (mediaType === "image/jpeg") return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (mediaType === "image/png") return bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  if (mediaType === "image/gif") return bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a";
+  if (mediaType === "image/webp") return bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
+  return false;
 }
 
 function contentBlocks(content: unknown): Array<Record<string, unknown>> {
@@ -209,15 +258,12 @@ function contentBlocks(content: unknown): Array<Record<string, unknown>> {
   return content.filter(isRecord);
 }
 
-/** Anthropic rejects orphaned, mismatched, duplicate, or undeclared tool calls. */
+/**
+ * Pairing still has to hold. A later file turn drops cart tools from the request,
+ * so an earlier add_to_cart block is history, not an offer to call that tool again.
+ */
 function judgeToolHistory(body: Record<string, unknown>): MessagesVerdict | null {
   if (!Array.isArray(body.messages)) return null;
-  const declared = new Set<string>();
-  if (Array.isArray(body.tools)) {
-    for (const tool of body.tools) {
-      if (isRecord(tool) && typeof tool.name === "string") declared.add(tool.name);
-    }
-  }
   const seen = new Set<string>();
   let pending = new Map<string, string>();
   for (const message of body.messages) {
@@ -246,13 +292,6 @@ function judgeToolHistory(body: Record<string, unknown>): MessagesVerdict | null
             status: 400,
             errorType: "invalid_request_error",
             message: "duplicate tool_use id",
-          };
-        }
-        if (declared.size > 0 && !declared.has(block.name)) {
-          return {
-            status: 400,
-            errorType: "invalid_request_error",
-            message: "undeclared tool",
           };
         }
         seen.add(block.id);

@@ -173,6 +173,19 @@ model RateLimit {
   @@map("rate_limits")
 }
 
+/// File-turn counter for the shopper assistant. Not store-owned: the key is
+/// `assistant:files:cart:<cartId>` after the cart is resolved in that store.
+/// Better Auth prunes `rate_limits` after 60 seconds, so this hour-long counter
+/// cannot live there.
+model AssistantFileTurn {
+  id   String @id @default(cuid())
+  key  String
+  atMs BigInt @map("at_ms")
+
+  @@index([key, atMs])
+  @@map("assistant_file_turns")
+}
+
 model AuditLog {
   id         String   @id @default(cuid())
   storeId    String?  @map("store_id")

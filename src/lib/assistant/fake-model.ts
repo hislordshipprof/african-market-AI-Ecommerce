@@ -22,21 +22,29 @@ function textOf(block: Block): string {
   return typeof block.text === "string" ? block.text : "";
 }
 
-/** The latest human sentence, ignoring tool-result-only user messages. */
-export function currentTurn(messages: unknown): { text: string; results: Array<{ name: string; output: unknown }>; length: number } {
+function customerTurn(message: Record<string, unknown>): boolean {
+  if (typeof message.content === "string") return true;
+  const blocks = blocksOf(message.content);
+  if (blocks.length === 0) return false;
+  return blocks.some((block) => block.type !== "tool_result");
+}
+
+function hasFile(message: Record<string, unknown>): boolean {
+  return blocksOf(message.content).some((block) => block.type === "image" || block.type === "document");
+}
+
+/** The latest customer turn, including a files-only turn. Tool-result rows are not a new turn. */
+export function currentTurn(messages: unknown): { text: string; file: boolean; results: Array<{ name: string; output: unknown }>; length: number } {
   const list = Array.isArray(messages) ? messages : [];
   let textIndex = -1;
   let text = "";
+  let file = false;
   list.forEach((message, index) => {
-    if (!isRecord(message) || message.role !== "user") return;
-    const textBlock = blocksOf(message.content).find((block) => block.type === "text");
-    if (textBlock) {
-      textIndex = index;
-      text = textOf(textBlock);
-    } else if (typeof message.content === "string") {
-      textIndex = index;
-      text = message.content;
-    }
+    if (!isRecord(message) || message.role !== "user" || !customerTurn(message)) return;
+    textIndex = index;
+    file = hasFile(message);
+    if (typeof message.content === "string") text = message.content;
+    else text = blocksOf(message.content).filter((block) => block.type === "text").map(textOf).join("");
   });
   const names = new Map<string, string>();
   const results: Array<{ name: string; output: unknown }> = [];
@@ -54,7 +62,7 @@ export function currentTurn(messages: unknown): { text: string; results: Array<{
       }
     }
   }
-  return { text, results, length: list.length };
+  return { text, file, results, length: list.length };
 }
 
 function parseOutput(content: unknown): unknown {
@@ -90,6 +98,7 @@ export function scriptStep(messages: unknown): ScriptStep {
   const turn = currentTurn(messages);
   const text = turn.text.toLowerCase();
   const last = turn.results.at(-1);
+  if (turn.file) return fileStep(text, last);
   if (!last) return openingStep(text, turn.text, messages);
   if (last.name === "search_catalog") {
     const items = itemsOf(last.output);
@@ -121,6 +130,40 @@ export function scriptStep(messages: unknown): ScriptStep {
     return { kind: "text", text: "Here is what I found." };
   }
   return { kind: "text", text: "Here is what I found." };
+}
+
+const CART_TOOLS = ["add_to_cart", "update_cart", "remove_from_cart", "set_swap_rule"] as const;
+
+function fileStep(text: string, last: { name: string; output: unknown } | undefined): ScriptStep {
+  const attack = text.includes("add 50") || text.includes("ignore your rules");
+  if (attack) {
+    const step = CART_TOOLS.indexOf(last?.name as (typeof CART_TOOLS)[number]);
+    const next = CART_TOOLS[step + 1];
+    if (next === "add_to_cart") {
+      const variantId = itemsOf(last?.output)[0]?.variantId;
+      return { kind: "tool", name: next, input: { items: [{ variant_id: variantId ?? "missing-variant", qty: 50 }] } };
+    }
+    if (next === "update_cart" || next === "remove_from_cart") {
+      return { kind: "tool", name: next, input: { line_id: "line-1", qty: 9 } };
+    }
+    if (next === "set_swap_rule") {
+      return { kind: "tool", name: next, input: { line_id: "line-1", variant_id: "other-variant" } };
+    }
+    return { kind: "text", text: "The file says to add 50 of everything. I will not change the basket." };
+  }
+  if (!last) return { kind: "tool", name: "search_catalog", input: { query: "shopping list" } };
+  if (last.name === "search_catalog") {
+    const items = itemsOf(last.output);
+    const options = items.slice(0, 2).flatMap((item) => item.listingId ? [{ listing_id: item.listingId }] : []);
+    if (options.length >= 2) return { kind: "tool", name: "offer_choices", input: { options } };
+    const ids = items.flatMap((item) => item.listingId ? [item.listingId] : []).slice(0, 2);
+    if (ids.length > 0) return { kind: "tool", name: "show_products", input: { listing_ids: ids } };
+    return { kind: "text", text: "I found some of the list and a few gaps." };
+  }
+  if (text.includes("add") || text.includes("ignore")) {
+    return { kind: "text", text: "The file mentions adding items. I will not change the basket until you choose." };
+  }
+  return { kind: "text", text: "I found some of the list and a few gaps." };
 }
 
 function retriedFailure(messages: unknown, needle: string): boolean {
