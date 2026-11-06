@@ -668,6 +668,18 @@ async function replayCompletedTurn(
         && (input as { _turn?: unknown })._turn === clientId;
     });
     if (mine.length === 0) return null;
+    const freshMessages = asMessages(fresh.messages);
+    const finishedNow = completedAssistant(freshMessages, clientId);
+    if (finishedNow) return finishedNow;
+    const storedUser = freshMessages.find((message) => message.role === "user" && message.id === clientId);
+    const storedFiles = storedUser ? attachmentDescriptors(storedUser) : [];
+    const wroteCart = mine.some((action) => (
+      action.tool === "add_to_cart"
+      || action.tool === "update_cart"
+      || action.tool === "remove_from_cart"
+      || action.tool === "set_swap_rule"
+    ));
+    if (storedFiles.length > 0 && !wroteCart) return null;
     const synthetic = assistantMessageFromActions(mine.map((action) => ({
       id: action.id,
       tool: action.tool,

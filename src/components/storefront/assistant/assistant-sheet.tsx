@@ -286,6 +286,12 @@ function Thread({
     tilesRef.current = flight.tiles;
     setDraft(flight.text);
     setTiles(flight.tiles);
+    const spoken = speechRef.current;
+    if (spoken?.accepting) {
+      const edited = noteCustomerEdit(spoken, flight.text);
+      speechRef.current = edited;
+      setSpeech(edited);
+    }
   }
 
   function publishSpeech(next: SpeechState) {

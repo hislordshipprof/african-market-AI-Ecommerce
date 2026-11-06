@@ -344,6 +344,59 @@ test("a photo does not change the basket until the customer taps", async ({ page
   expect(pdfPost).not.toContain("data:application/pdf;base64,\"");
 });
 
+test("a final after a rejected send keeps the restored draft", async ({ page }) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      lang = "";
+      continuous = false;
+      interimResults = false;
+      onresult: ((event: unknown) => void) | null = null;
+      onerror: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        (window as unknown as { __emitSpeech?: () => void }).__emitSpeech = () => {
+          this.onresult?.({
+            resultIndex: 0,
+            results: [{ isFinal: true, 0: { transcript: "and beans" } }],
+          });
+        };
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {
+        this.onend?.();
+      }
+    }
+    const host = window as unknown as {
+      SpeechRecognition: typeof FakeRecognition;
+      webkitSpeechRecognition: typeof FakeRecognition;
+    };
+    host.SpeechRecognition = FakeRecognition;
+    host.webkitSpeechRecognition = FakeRecognition;
+  });
+  await page.route("**/api/assistant/chat", async (route) => {
+    await held;
+    await route.fulfill({ status: 413, body: "too big", contentType: "text/plain" });
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.getByTestId("assistant-composer").fill("rice");
+  await page.getByTestId("assistant-send").click();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("");
+  await page.getByRole("button", { name: "Start listening" }).click();
+  release();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("rice");
+  await page.evaluate(() => {
+    (window as unknown as { __emitSpeech?: () => void }).__emitSpeech?.();
+  });
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("rice and beans");
+});
+
 test("a rejected file send keeps the draft and a late file does not return", async ({ page }) => {
   await page.route("**/api/assistant/chat", (route) => route.fulfill({ status: 413, body: "too big", contentType: "text/plain" }));
   await page.goto(`${origin}/`);

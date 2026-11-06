@@ -1876,6 +1876,62 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(Number(rollingRows[0]?.count ?? 0)).toBe(10);
   }, 90_000);
 
+  it("a failed file read stays incomplete until the files are sent again", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "rice" } },
+        { kind: "error" },
+        { kind: "text", text: "I found some of the list." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie,
+    };
+    const photo = {
+      type: "file",
+      mediaType: "image/jpeg",
+      filename: "list.jpg",
+      url: `data:image/jpeg;base64,${jpeg.toString("base64")}`,
+    };
+    const id = "failed-file-read-01";
+    const failed = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.240" },
+      body: JSON.stringify({ message: { id, role: "user", parts: [photo] } }),
+    }));
+    expect(failed.status).toBe(200);
+    await failed.text();
+    const stored = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId: cart.id } });
+    expect(stored?.inFlightUntil).toBeNull();
+    const callsAfterFailure = fake.requests.length;
+    const missing = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.241" },
+      body: JSON.stringify({ message: { id, role: "user", parts: [] } }),
+    }));
+    expect(missing.status).toBe(400);
+    expect(await missing.text()).toContain("attachment_missing");
+    expect(fake.requests.length).toBe(callsAfterFailure);
+    const again = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.242" },
+      body: JSON.stringify({ message: { id, role: "user", parts: [photo] } }),
+    }));
+    expect(again.status).toBe(200);
+    expect(await again.text()).toContain("I found some of the list.");
+    expect(fake.requests.length).toBeGreaterThan(callsAfterFailure);
+  }, 60_000);
+
   it("a file added to a completed text id conflicts and does not call the model again", async () => {
     const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
