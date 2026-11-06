@@ -5,14 +5,18 @@ import { revalidateStorefront } from "../storefront/cache";
 const mockCreateListing = vi.fn();
 const mockUpdateListing = vi.fn();
 
-vi.mock("./service", () => ({
-  createListing: (...args: unknown[]) => mockCreateListing(...args),
-  updateListing: (...args: unknown[]) => mockUpdateListing(...args),
-  deactivateListing: vi.fn(),
-  reactivateListing: vi.fn(),
-  updateVariants: vi.fn(),
-  listMasterProducts: vi.fn(),
-}));
+vi.mock("./service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./service")>();
+  return {
+    ...actual,
+    createListing: (...args: unknown[]) => mockCreateListing(...args),
+    updateListing: (...args: unknown[]) => mockUpdateListing(...args),
+    deactivateListing: vi.fn(),
+    reactivateListing: vi.fn(),
+    updateVariants: vi.fn(),
+    listMasterProducts: vi.fn(),
+  };
+});
 
 vi.mock("../store-admin/session", () => ({
   requireStoreOwner: vi.fn().mockResolvedValue({
