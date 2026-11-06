@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UIMessage } from "ai";
 import {
   acknowledgeUndo,
   commitUndoLabel,
   noteAcceptedSend,
+  partsForRetry,
   resetAssistantSessions,
   retainSession,
+  retryOffer,
   settleAttempt,
   undoLabelsForChat,
   visibleRetry,
@@ -111,21 +113,19 @@ describe("retained assistant session", () => {
     expect(visibleRetry(otherStore)).toBeNull();
     expect(visibleRetry(adopted)).toEqual({ messageId: "m1", text: "yam" });
 
+    const stale = noteAcceptedSend(adopted, { messageId: "m-stale", text: "old", hasFiles: false });
     const newer = noteAcceptedSend(adopted, { messageId: "m2", text: "rice", hasFiles: false });
-    settleAttempt(adopted, seq, "retryable");
+    adopted.messages = [user("m1", "yam"), user("m-stale", "old"), user("m2", "rice")];
+    settleAttempt(adopted, stale, "retryable");
     expect(visibleRetry(adopted)).toBeNull();
-    adopted.messages = [user("m1", "yam"), user("m2", "rice")];
     settleAttempt(adopted, newer, "success");
     expect(visibleRetry(adopted)).toBeNull();
 
     const failed = noteAcceptedSend(adopted, { messageId: "m3", text: "beans", hasFiles: false });
-    adopted.messages = [...adopted.messages, user("m3", "beans")];
-    settleAttempt(adopted, failed, "retryable");
-    expect(visibleRetry(adopted)?.messageId).toBe("m3");
     const busy = noteAcceptedSend(adopted, { messageId: "m3", text: "beans", hasFiles: false });
-    settleAttempt(adopted, busy, "retryable");
-    expect(visibleRetry(adopted)).toEqual({ messageId: "m3", text: "beans" });
+    adopted.messages = [...adopted.messages, user("m3", "beans")];
     settleAttempt(adopted, failed, "success");
+    settleAttempt(adopted, busy, "retryable");
     expect(visibleRetry(adopted)).toEqual({ messageId: "m3", text: "beans" });
 
     const terminal = noteAcceptedSend(adopted, { messageId: "m4", text: "nope", hasFiles: false });
@@ -152,12 +152,65 @@ describe("retained assistant session", () => {
 
     const open = noteAcceptedSend(adopted, { messageId: "m9", text: "plantain", hasFiles: false });
     adopted.messages = [...adopted.messages, user("m9", "plantain")];
-    settleAttempt(adopted, open, "retryable");
     const reset = retainSession({ ...store, accountId: "user-1", cartId: "cart-z", loading: false });
     expect(visibleRetry(reset)).toBeNull();
     settleAttempt(adopted, open, "retryable");
     commitUndoLabel(adopted, "toolu_same:0", "undone");
     expect(visibleRetry(reset)).toBeNull();
     expect(undoLabelsForChat(reset)).toEqual({});
+  });
+
+  it("an in-band error keeps the original text retry and does not take composer files", async () => {
+    const events = [
+      { type: "start", messageId: "asst-1" },
+      { type: "start-step" },
+      { type: "text-start", id: "t1" },
+      { type: "text-delta", id: "t1", delta: "partial" },
+      { type: "error", errorText: "Overloaded" },
+      { type: "finish-step" },
+      { type: "finish", finishReason: "error" },
+    ];
+    const sse = `${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
+    vi.stubGlobal("fetch", async () => new Response(sse, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+    try {
+      const chat = retainSession({ ...store, storeId: "store-inband" });
+      noteAcceptedSend(chat, { messageId: "m-err", text: "mid-stream", hasFiles: false });
+      chat.messages = [user("m-err", "mid-stream")];
+      await chat.sendMessage({
+        messageId: "m-err",
+        role: "user",
+        parts: [{ type: "text", text: "mid-stream" }],
+      }).catch(() => undefined);
+      expect(chat.status).toBe("error");
+      expect(visibleRetry(chat)).toEqual({ messageId: "m-err", text: "mid-stream" });
+      const offer = retryOffer(chat, {
+        routeCode: "unknown",
+        terminal: false,
+        openFileFlight: null,
+      });
+      expect(offer).toEqual({ kind: "text", messageId: "m-err", text: "mid-stream" });
+      if (offer?.kind !== "text") throw new Error("expected a text retry");
+      expect(partsForRetry(offer, [{ type: "file" }])).toEqual([{ type: "text", text: "mid-stream" }]);
+      expect(retryOffer(chat, {
+        routeCode: "attachment_rate_limited",
+        terminal: false,
+        openFileFlight: { messageId: "file-1", text: "the list" },
+      })).toEqual({ kind: "files", messageId: "file-1", text: "the list" });
+      expect(retryOffer(chat, {
+        routeCode: "rate_limited",
+        terminal: false,
+        openFileFlight: { messageId: "file-1", text: "the list" },
+      })).toBeNull();
+      expect(retryOffer(chat, {
+        routeCode: "assistant_unavailable",
+        terminal: true,
+        openFileFlight: { messageId: "file-1", text: "the list" },
+      })).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

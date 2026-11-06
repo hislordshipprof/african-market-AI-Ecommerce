@@ -131,52 +131,23 @@ function claimSeq(session: Session | null, body: BodyInit | null | undefined): n
   return found;
 }
 
-function observe(response: Response, done: (outcome: SettleOutcome) => void): Response {
-  if (!response.body) {
-    done("retryable");
-    return response;
-  }
-  const reader = response.body.getReader();
-  let settled = false;
-  const finish = (outcome: SettleOutcome) => {
-    if (settled) return;
-    settled = true;
-    done(outcome);
-  };
-  const stream = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const next = await reader.read();
-        if (next.done) {
-          finish("success");
-          controller.close();
-          return;
-        }
-        controller.enqueue(next.value);
-      } catch (error) {
-        finish(outcomeFromError(error));
-        controller.error(error);
-      }
-    },
-    cancel(reason) {
-      finish(outcomeFromError(reason));
-      return reader.cancel(reason);
-    },
-  });
-  return new Response(stream, { status: response.status, statusText: response.statusText, headers: response.headers });
+function finishOutcome(event: { isAbort: boolean; isDisconnect: boolean; isError: boolean; finishReason?: string }): SettleOutcome {
+  if (event.isAbort) return "ignore";
+  if (event.isError || event.isDisconnect || event.finishReason === "error") return "retryable";
+  return "success";
 }
 
 function createChat(storeId: string, holder: { session: Session | null }): Chat<UIMessage> {
+  const attempt = { seq: 0 };
   const chat = new Chat<UIMessage>({
     transport: new DefaultChatTransport({
       api: "/api/assistant/chat",
       credentials: "same-origin",
       fetch: async (input, init) => {
         const seq = claimSeq(holder.session, init?.body);
+        attempt.seq = seq;
         try {
-          const response = await createAssistantFetch()(input, init);
-          if (seq === 0) return response;
-          return observe(response, (outcome) => settleAttempt(chat, seq, outcome));
+          return await createAssistantFetch()(input, init);
         } catch (error) {
           if (seq !== 0) settleAttempt(chat, seq, outcomeFromError(error));
           throw error;
@@ -192,6 +163,7 @@ function createChat(storeId: string, holder: { session: Session | null }): Chat<
     },
     onFinish: (event) => {
       releaseFileBytes(chat, true);
+      if (attempt.seq !== 0) settleAttempt(chat, attempt.seq, finishOutcome(event));
       if (!shouldSettleTurn(event)) return;
       void settleStoreCart(storeId);
     },
@@ -285,6 +257,38 @@ export function settleAttempt(chat: Chat<UIMessage>, seq: number, outcome: Settl
   if (outcome === "retryable") session.retry = { ...session.retry, eligible: true };
   else session.retry = null;
   publish(session);
+}
+
+export type RetryOffer =
+  | { kind: "text"; messageId: string; text: string }
+  | { kind: "files"; messageId: string; text: string };
+
+/**
+ * What Retry may send for this turn. Terminal errors and a message rate limit
+ * suppress it. An open file flight resends that flight. A text failure resends
+ * its own words and never a file added to the composer afterwards.
+ */
+export function retryOffer(chat: Chat<UIMessage>, input: {
+  routeCode: string | null;
+  terminal: boolean;
+  openFileFlight: { messageId: string; text: string } | null;
+}): RetryOffer | null {
+  if (input.terminal || input.routeCode === "rate_limited") return null;
+  if (input.openFileFlight) {
+    return { kind: "files", messageId: input.openFileFlight.messageId, text: input.openFileFlight.text };
+  }
+  const text = visibleRetry(chat);
+  if (!text) return null;
+  return { kind: "text", messageId: text.messageId, text: text.text };
+}
+
+/** Original text only. Files sitting in the composer belong to a later send. */
+export function partsForRetry(
+  offer: Extract<RetryOffer, { kind: "text" }>,
+  composerFiles: readonly { type: string }[],
+): Array<{ type: "text"; text: string }> {
+  void composerFiles;
+  return [{ type: "text", text: offer.text }];
 }
 
 /** Retry for the latest customer message still in this chat. Missing and older ids are not offered. */

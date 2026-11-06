@@ -606,27 +606,25 @@ test("a text turn failing after navigation retains its original Retry", async ({
   const retry = dialog.getByRole("button", { name: "Retry" });
   await expect(retry).toBeVisible({ timeout: 20_000 });
   const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
+  hold = true;
   await retry.evaluate((node) => {
     const button = node as HTMLButtonElement;
     button.click();
     button.click();
   });
-  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
-  await expect(bubbles(dialog).filter({ hasText: "mid-stream" })).toHaveCount(1);
-  await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
-  expect(posts).toHaveLength(2);
-  expect(JSON.parse(posts[1] ?? "{}").message.id).toBe(failedId);
-
-  hold = true;
-  await send(page, "hello from the shelves");
-  await expect.poll(() => posts.length).toBe(3);
+  await expect.poll(() => posts.length).toBe(2);
   await page.keyboard.press("Escape");
+  await page.getByRole("link", { name: "Search", exact: true }).click();
   release();
   hold = false;
   await page.getByTestId("assistant-launcher").click();
   const returned = page.getByRole("dialog", { name: "Shop with help" });
-  await expect(returned.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
+  await expect(returned.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
+  await expect(bubbles(returned).filter({ hasText: "mid-stream" })).toHaveCount(1);
   await expect(returned.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(returned.locator("[data-retry]")).toHaveAttribute("data-retry", "");
+  expect(posts).toHaveLength(2);
+  expect(JSON.parse(posts[1] ?? "{}").message.id).toBe(failedId);
 });
 
 async function holdChat(page: Page, settle: (route: Route) => Promise<void>) {

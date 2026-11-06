@@ -15,10 +15,11 @@ import {
   commitUndoLabel,
   EMPTY_SESSION_SNAPSHOT,
   noteAcceptedSend,
+  partsForRetry,
   retainSession,
+  retryOffer,
   sessionSnapshot,
   subscribeSessionMemory,
-  visibleRetry,
 } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
 import { dataUrl, displayFileName, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
@@ -186,7 +187,6 @@ function Thread({
     () => EMPTY_SESSION_SNAPSHOT,
   );
   const undoState = memory.labels;
-  const retainedRetry = visibleRetry(chat);
   const liveRef = useRef<HTMLParagraphElement>(null);
   const busy = status === "submitted" || status === "streaming";
   const routeError: RouteView | null = error ? viewFor(error) : null;
@@ -195,6 +195,13 @@ function Thread({
     inflight.generation === generation &&
     inflight.tiles.length > 0,
   );
+  const retry = routeError
+    ? retryOffer(chat, {
+        routeCode: routeError.code,
+        terminal: routeError.terminal,
+        openFileFlight: fileRetry && inflight ? { messageId: inflight.id, text: inflight.text } : null,
+      })
+    : null;
 
   useEffect(() => {
     if (routeError?.terminal) onTerminal();
@@ -505,7 +512,7 @@ function Thread({
     }
   }
 
-  async function submit(text: string, id = messageId()) {
+  async function submit(text: string, id = messageId(), retainedText = false) {
     if (speechRef.current?.listening) {
       publishSpeech(commitInterim(speechRef.current));
       recognizerRef.current?.stop();
@@ -513,9 +520,9 @@ function Thread({
     }
     if (loading || busy || routeError?.terminal) return;
     const flight = inflightRef.current;
-    const retrying = flight?.id === id;
+    const retrying = !retainedText && flight?.id === id;
     if (retrying && flight.generation !== generationRef.current) return;
-    const currentTiles = retrying ? flight.tiles : tilesRef.current;
+    const currentTiles = retainedText ? [] : retrying ? flight.tiles : tilesRef.current;
     if (!retrying && currentTiles.some((tile) => tile.status === "pending" || tile.status === "invalid")) return;
     const ready = currentTiles.filter((tile) => tile.status === "ready");
     if (!withinByteCap(ready.map((tile) => tile.bytes))) {
@@ -525,10 +532,19 @@ function Thread({
     if (!sendLock.current.tryBegin()) return;
     let settled = false;
     try {
+      const sentText = retrying ? flight.text : text;
+      const composerFiles = tilesRef.current
+        .filter((tile) => tile.status === "ready")
+        .map((tile) => ({ type: "file" as const, mediaType: tile.mediaType, filename: tile.filename, url: tile.url }));
+      const retainedParts = retainedText
+        ? partsForRetry({ kind: "text", messageId: id, text: sentText }, composerFiles)
+        : null;
       const outgoing = outgoingMessage({
         id,
-        text: retrying ? flight.text : text,
-        files: ready.map((tile) => ({ type: "file", mediaType: tile.mediaType, filename: tile.filename, url: tile.url })),
+        text: retainedParts?.find((part) => part.type === "text")?.text ?? sentText,
+        files: retainedParts
+          ? []
+          : ready.map((tile) => ({ type: "file", mediaType: tile.mediaType, filename: tile.filename, url: tile.url })),
       });
       if (!outgoing.ok) {
         if (outgoing.reason === "too_long") setLocalError("Couldn't send that.");
@@ -537,8 +553,8 @@ function Thread({
       setLocalError(null);
       const textPart = outgoing.body.message.parts.find((part) => part.type === "text");
       const sent = textPart?.type === "text" ? textPart.text : "";
-      noteAcceptedSend(chat, { messageId: id, text: sent, hasFiles: ready.length > 0 });
-      if (!retrying) {
+      noteAcceptedSend(chat, { messageId: id, text: sent, hasFiles: ready.length > 0 && !retainedText });
+      if (!retrying && !retainedText) {
         const previous = inflightRef.current;
         if (previous) {
           const sending = new Set(ready.map((tile) => tile.preview).filter(Boolean));
@@ -565,6 +581,10 @@ function Thread({
         setTiles([]);
       }
       clearError();
+      if (retainedText) {
+        inflightRef.current = null;
+        setInflight(null);
+      }
       const exists = chat.messages.some((message) => message.role === "user" && message.id === id);
       const parts = outgoing.body.message.parts;
       if (exists) await sendMessage({ messageId: id, role: "user", parts });
@@ -594,7 +614,7 @@ function Thread({
   }
 
   return (
-    <div className={styles.thread} data-chunk={ASSISTANT_CHUNK} style={{ paddingBottom: keyboardInset }}>
+    <div className={styles.thread} data-chunk={ASSISTANT_CHUNK} data-retry={memory.retryToken} style={{ paddingBottom: keyboardInset }}>
       <p className={styles.live} aria-live="polite" ref={liveRef} />
       <div
         className={styles.log}
@@ -662,16 +682,13 @@ function Thread({
         <div className={styles.notice} role="status">
           <p>{routeError.title}</p>
           <a href={routeError.searchHref}>Search the shelves</a>
-          {routeError.retry && (fileRetry || retainedRetry) ? (
+          {retry ? (
             <button
               type="button"
               className={styles.ghost}
               onClick={() => {
                 if (sendLock.current.held) return;
-                const retryId = fileRetry && inflight ? inflight.id : retainedRetry?.messageId;
-                const retryText = fileRetry && inflight ? inflight.text : retainedRetry?.text ?? "";
-                if (!retryId) return;
-                void submit(retryText, retryId);
+                void submit(retry.text, retry.messageId, retry.kind === "text");
               }}
             >
               Retry
