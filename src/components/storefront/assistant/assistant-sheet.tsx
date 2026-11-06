@@ -12,7 +12,7 @@ import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
 import { retainSession } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
-import { dataUrl, fileNotice, jpegBlob, pdfPages, roomFor, type PreparedFile } from "@/lib/assistant/ui/client-files";
+import { dataUrl, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
 import { createSendLock, outgoingMessage } from "@/lib/assistant/ui/send";
 import {
   abortSpeech,
@@ -131,7 +131,7 @@ function Thread({
   const [localError, setLocalError] = useState<string | null>(null);
   const seenTools = useRef(new Set<string>());
   const announced = useRef(new Set<string>());
-  const [lastSent, setLastSent] = useState<{ id: string; text: string } | null>(null);
+  const [lastSent, setLastSent] = useState<{ id: string; text: string; files: Array<PreparedFile & { preview: string }> } | null>(null);
   const [draft, setDraft] = useState("");
   const [speech, setSpeech] = useState<SpeechState | null>(null);
   const [micHidden, setMicHidden] = useState(false);
@@ -158,6 +158,9 @@ function Thread({
   const cameraInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const pdfInput = useRef<HTMLInputElement>(null);
+  const generationRef = useRef(0);
+  const draftStamp = useRef(0);
+  const snapshotRef = useRef<{ text: string; tiles: Array<PreparedFile & { preview: string }>; stamp: number } | null>(null);
   const [trackedStore, setTrackedStore] = useState(storeId);
   const [undoState, setUndoState] = useState(() => undoLabelsForStore(storeId));
   if (trackedStore !== storeId) {
@@ -224,6 +227,7 @@ function Thread({
 
   useEffect(() => {
     if (open) return;
+    generationRef.current += 1;
     stopListening("abort");
     const current = tilesRef.current;
     const timer = window.setTimeout(() => {
@@ -237,6 +241,7 @@ function Thread({
   }, [open]);
 
   useEffect(() => () => {
+    generationRef.current += 1;
     for (const tile of tilesRef.current) {
       if (tile.preview) URL.revokeObjectURL(tile.preview);
     }
@@ -275,52 +280,98 @@ function Thread({
     };
   }, [open]);
 
+  function placeTile(id: string, generation: number, next: PreparedFile & { preview: string }) {
+    if (generationRef.current !== generation) {
+      if (next.preview) URL.revokeObjectURL(next.preview);
+      return;
+    }
+    setTiles((current) => {
+      if (!current.some((item) => item.id === id)) {
+        if (next.preview) URL.revokeObjectURL(next.preview);
+        return current;
+      }
+      const replaced = current.map((item) => item.id === id ? next : item);
+      const sizes = replaced.flatMap((item) => item.status === "ready" ? [item.bytes] : []);
+      if (next.status === "ready" && !withinByteCap(sizes)) {
+        if (next.preview) URL.revokeObjectURL(next.preview);
+        return current.map((item) => item.id === id
+          ? { ...next, url: "", preview: "", status: "invalid", bytes: 0, message: fileNotice("too-large") }
+          : item);
+      }
+      return replaced;
+    });
+  }
+
   async function takeFiles(list: FileList | null) {
     setAddOpen(false);
     if (!list || list.length === 0) return;
+    const generation = generationRef.current;
     const room = roomFor(tilesRef.current.length);
     if (list.length > room) setLocalError(fileNotice("too-many"));
     const chosen = [...list].slice(0, room);
-    for (const file of chosen) {
-      const id = messageId();
-      const pdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const reserved: Array<PreparedFile & { preview: string }> = chosen.map((file) => ({
+      id: messageId(),
+      name: file.name || "file",
+      filename: file.name || "file",
+      mediaType: file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg",
+      url: "",
+      preview: "",
+      status: "pending",
+      message: null,
+      bytes: 0,
+    }));
+    setTiles((current) => [...current, ...reserved]);
+    tilesRef.current = [...tilesRef.current, ...reserved];
+    for (let index = 0; index < chosen.length; index += 1) {
+      const file = chosen[index];
+      const reservedTile = reserved[index];
+      if (!file || !reservedTile) continue;
+      const pdf = reservedTile.mediaType === "application/pdf";
       if (pdf) {
         const bytes = new Uint8Array(await file.arrayBuffer());
         const result = await pdfPages(bytes);
+        if (generationRef.current !== generation) continue;
         if ("message" in result) {
-          setTiles((current) => [...current, {
-            id, name: file.name, filename: file.name, mediaType: "application/pdf", url: "", preview: "", status: "invalid", message: result.message,
-          }]);
+          placeTile(reservedTile.id, generation, { ...reservedTile, status: "invalid", message: result.message });
           continue;
         }
         const preview = URL.createObjectURL(file);
-        const url = await dataUrl(new Blob([bytes], { type: "application/pdf" }));
-        setTiles((current) => [...current, {
-          id, name: file.name, filename: file.name, mediaType: "application/pdf", url, preview, status: "ready", message: null,
-        }]);
+        const url = await dataUrl(file);
+        placeTile(reservedTile.id, generation, {
+          ...reservedTile, url, preview, status: "ready", bytes: bytes.byteLength, message: null,
+        });
         continue;
       }
       try {
         const blob = await jpegBlob(file);
+        if (generationRef.current !== generation) continue;
         const preview = URL.createObjectURL(blob);
         const url = await dataUrl(blob);
-        setTiles((current) => [...current, {
-          id, name: file.name || "photo.jpg", filename: "photo.jpg", mediaType: "image/jpeg", url, preview, status: "ready", message: null,
-        }]);
+        placeTile(reservedTile.id, generation, {
+          ...reservedTile,
+          name: file.name || "photo.jpg",
+          filename: "photo.jpg",
+          url,
+          preview,
+          status: "ready",
+          bytes: blob.size,
+          message: null,
+        });
       } catch {
-        setTiles((current) => [...current, {
-          id, name: file.name || "photo", filename: "photo.jpg", mediaType: "image/jpeg", url: "", preview: "", status: "invalid", message: fileNotice("undecodable"),
-        }]);
+        placeTile(reservedTile.id, generation, {
+          ...reservedTile, status: "invalid", message: fileNotice("undecodable"),
+        });
       }
     }
   }
 
   function removeTile(id: string) {
-    setTiles((current) => {
-      const tile = current.find((item) => item.id === id);
-      if (tile?.preview) URL.revokeObjectURL(tile.preview);
-      return current.filter((item) => item.id !== id);
-    });
+    const current = tilesRef.current;
+    const tile = current.find((item) => item.id === id);
+    if (tile?.preview) URL.revokeObjectURL(tile.preview);
+    const next = current.filter((item) => item.id !== id);
+    tilesRef.current = next;
+    setTiles(next);
   }
 
   function toggleMic() {
@@ -355,6 +406,16 @@ function Thread({
     }
   }
 
+  function restoreSnapshot() {
+    const snapshot = snapshotRef.current;
+    if (!snapshot) return;
+    const newer = draftStamp.current !== snapshot.stamp || tilesRef.current.length > 0;
+    if (newer) return;
+    setDraft(snapshot.text);
+    setTiles(snapshot.tiles);
+    tilesRef.current = snapshot.tiles;
+  }
+
   async function submit(text: string, id = messageId()) {
     if (speechRef.current?.listening) {
       publishSpeech(commitInterim(speechRef.current));
@@ -362,10 +423,16 @@ function Thread({
       return;
     }
     if (loading || busy || routeError?.terminal) return;
+    const currentTiles = tilesRef.current;
+    if (currentTiles.some((tile) => tile.status === "pending" || tile.status === "invalid")) return;
+    if (!withinByteCap(currentTiles.flatMap((tile) => tile.status === "ready" ? [tile.bytes] : []))) {
+      setLocalError(fileNotice("too-large"));
+      return;
+    }
     if (!sendLock.current.tryBegin()) return;
+    const ready = currentTiles.filter((tile) => tile.status === "ready");
+    const stamp = draftStamp.current;
     try {
-      const ready = tiles.filter((tile) => tile.status === "ready");
-      if (tiles.some((tile) => tile.status === "invalid")) return;
       const outgoing = outgoingMessage({
         id,
         text,
@@ -378,16 +445,25 @@ function Thread({
       setLocalError(null);
       const textPart = outgoing.body.message.parts.find((part) => part.type === "text");
       const sent = textPart?.type === "text" ? textPart.text : "";
-      setLastSent({ id, text: sent });
+      setLastSent({ id, text: sent, files: ready });
+      snapshotRef.current = { text, tiles: ready, stamp };
       setDraft("");
-      for (const tile of tiles) {
-        if (tile.preview) URL.revokeObjectURL(tile.preview);
-      }
       setTiles([]);
+      tilesRef.current = [];
       clearError();
       const exists = messages.some((message) => message.id === id);
       if (exists && ready.length === 0) await sendMessage({ text: sent, messageId: id });
       else await sendMessage({ id, role: "user", parts: outgoing.body.message.parts });
+      if (chat.status === "error" || chat.error) {
+        restoreSnapshot();
+        return;
+      }
+      for (const tile of ready) {
+        if (tile.preview) URL.revokeObjectURL(tile.preview);
+      }
+      snapshotRef.current = null;
+    } catch {
+      restoreSnapshot();
     } finally {
       sendLock.current.end();
     }
@@ -473,6 +549,10 @@ function Thread({
               type="button"
               className={styles.ghost}
               onClick={() => {
+                if (tiles.length === 0 && lastSent.files.length > 0) {
+                  setTiles(lastSent.files);
+                  tilesRef.current = lastSent.files;
+                }
                 void submit(lastSent.text, lastSent.id);
               }}
             >
@@ -508,6 +588,7 @@ function Thread({
           disabled={!!routeError?.terminal}
           onChange={(event) => {
             const next = event.target.value;
+            draftStamp.current += 1;
             if (speechRef.current) {
               const edited = noteCustomerEdit(speechRef.current, next);
               speechRef.current = edited;
@@ -571,7 +652,7 @@ function Thread({
             className={styles.send}
             data-testid="assistant-send"
             aria-label="Send"
-            disabled={!!routeError?.terminal || busy || loading || tiles.some((tile) => tile.status === "invalid") || (!speech?.listening && draft.trim().length === 0 && tiles.every((tile) => tile.status !== "ready"))}
+            disabled={!!routeError?.terminal || busy || loading || tiles.some((tile) => tile.status !== "ready") || (!speech?.listening && draft.trim().length === 0 && !tiles.some((tile) => tile.status === "ready"))}
           >
             <ArrowUp size={18} aria-hidden="true" />
           </button>
@@ -627,7 +708,7 @@ function MessageView({
     return (
       <div className={`${styles.bubble} ${styles.user}`}>
         {files.map((file) => (
-          file.mediaType.startsWith("image/")
+          file.mediaType.startsWith("image/") && file.url
             ? <img key={file.url} className={styles.photo} src={file.url} alt="" />
             : <p key={`${file.filename ?? "file"}-${file.url}`} className={styles.fileChip}>{file.filename ?? "PDF"}</p>
         ))}

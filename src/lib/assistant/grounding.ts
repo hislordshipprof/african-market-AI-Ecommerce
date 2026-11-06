@@ -1,5 +1,15 @@
 import { scrubCardNumbers, scrubKnownStrings } from "./card-scrub";
 
+function scrubToolString(input: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(input);
+    if (parsed && typeof parsed === "object") return scrubKnownStrings(parsed);
+  } catch {
+    // A tool input that is not JSON stays text and is scrubbed as text.
+  }
+  return scrubCardNumbers(input).text;
+}
+
 const AMOUNT = /(?:US)?\$\s?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 
 export function groundAmounts(
@@ -85,9 +95,7 @@ export function groundingTransform(options: GroundingTransformOptions = {}) {
           }
           if (type === "tool-call") {
             const input = (part as { input?: unknown }).input;
-            const scrubbed = typeof input === "string"
-              ? scrubCardNumbers(input).text
-              : JSON.stringify(scrubKnownStrings(input ?? {}));
+            const scrubbed = typeof input === "string" ? scrubToolString(input) : scrubKnownStrings(input ?? {});
             controller.enqueue({ ...part, input: scrubbed });
             return;
           }

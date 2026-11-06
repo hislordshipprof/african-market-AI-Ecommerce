@@ -1,4 +1,5 @@
 export const FILE_CAP = 3;
+export const FILE_BYTE_CAP = 3_145_728;
 
 export type PreparedFile = {
   id: string;
@@ -6,18 +7,24 @@ export type PreparedFile = {
   mediaType: "image/jpeg" | "application/pdf";
   url: string;
   filename: string;
-  status: "ready" | "invalid";
+  status: "pending" | "ready" | "invalid";
   message: string | null;
+  bytes: number;
 };
 
 export function roomFor(count: number): number {
   return Math.max(0, FILE_CAP - count);
 }
 
-export function fileNotice(kind: "pages" | "encrypted" | "undecodable" | "too-many"): string {
+export function withinByteCap(sizes: number[]): boolean {
+  return sizes.reduce((sum, size) => sum + size, 0) <= FILE_BYTE_CAP;
+}
+
+export function fileNotice(kind: "pages" | "encrypted" | "undecodable" | "too-many" | "too-large"): string {
   if (kind === "pages") return "PDFs can be up to 10 pages.";
   if (kind === "encrypted") return "That PDF is locked. Send one that opens without a password.";
   if (kind === "too-many") return "You can send up to 3 files.";
+  if (kind === "too-large") return "Those files are too big to send. Keep them under 3 MB.";
   return "This browser can't read that photo.";
 }
 
@@ -54,7 +61,10 @@ export async function pdfPages(bytes: Uint8Array): Promise<{ pages: number } | {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const worker = new Worker(new URL("pdfjs-dist/legacy/build/pdf.worker.mjs", import.meta.url), { type: "module" });
   pdfjs.GlobalWorkerOptions.workerPort = worker;
-  const task = pdfjs.getDocument({ data: bytes, isEvalSupported: false, verbosity: 0 } as Parameters<typeof pdfjs.getDocument>[0]);
+  // pdf.js takes ownership of the typed array and detaches it. Keep the caller's bytes.
+  const owned = new Uint8Array(bytes.byteLength);
+  owned.set(bytes);
+  const task = pdfjs.getDocument({ data: owned, isEvalSupported: false, verbosity: 0 } as Parameters<typeof pdfjs.getDocument>[0]);
   try {
     const doc = await task.promise;
     const pages = doc.numPages;

@@ -94,10 +94,10 @@ export function applyFinal(state: SpeechState, session: number, index: number, t
   if (!text) return state;
   const previous = state.finals.get(index);
   if (previous != null) {
-    if (state.draft !== compose(state.prefix, spokenFrom(state.finals))) return state;
+    if (state.draft !== compose(state.prefix, spokenFrom(state.finals))) return clearInterimFor(state, index);
     const finals = cloneMap(state.finals);
     finals.set(index, text);
-    return paint(state, finals);
+    return paint(clearInterimFor(state, index), finals);
   }
   const committed = state.committed.get(index);
   if (committed) {
@@ -107,14 +107,19 @@ export function applyFinal(state: SpeechState, session: number, index: number, t
       const prefix = state.draft.slice(0, -committed.length);
       const finals = cloneMap(state.finals);
       finals.set(index, text);
-      return paint({ ...state, committed: committedNext }, finals, prefix);
+      return paint(clearInterimFor({ ...state, committed: committedNext }, index), finals, prefix);
     }
-    return { ...state, committed: committedNext };
+    return clearInterimFor({ ...state, committed: committedNext }, index);
   }
-  if (state.settled.has(index)) return state;
+  if (state.settled.has(index)) return clearInterimFor(state, index);
   const finals = cloneMap(state.finals);
   finals.set(index, text);
-  return paint(state, finals);
+  return paint(clearInterimFor(state, index), finals);
+}
+
+function clearInterimFor(state: SpeechState, index: number): SpeechState {
+  if (state.interimIndex !== index) return state;
+  return { ...state, interim: "" };
 }
 
 export function applyInterim(state: SpeechState, session: number, index: number, transcript: string): SpeechState {

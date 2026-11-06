@@ -140,10 +140,6 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     } else if (storedFiles.length > 0) {
       return jsonError(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
     }
-    if (parsed.replayOnly) {
-      if (storedFiles.length > 0) return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
-      return jsonError(400, "invalid_request", "Write between 1 and 2000 characters.");
-    }
     let fileTurn = parsed.files.length > 0 || storedFiles.length > 0;
     if (fileTurn && parsed.files.length === 0) {
       return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
@@ -176,8 +172,10 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       modelId,
       parsed.id,
       prepared.map((file) => file.descriptor.digest),
+      parsed.replayOnly,
     );
     if (!turn) return jsonError(409, "assistant_busy", "The helper is still working on the previous message.");
+    if ("empty" in turn) return jsonError(400, "invalid_request", "Write between 1 and 2000 characters.");
     if ("missing" in turn) return jsonError(400, "attachment_missing", attachmentFailure("attachment_missing").message);
     if ("conflict" in turn) return jsonError(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
     if ("replay" in turn) return replayAssistantMessage(turn.replay as UIMessage, headers);
@@ -440,8 +438,25 @@ function retryVisible(messages: UIMessage[], clientId: string, alreadyThere: boo
   return [...messages.slice(0, index + 1), marker, ...rest];
 }
 
+function coerceToolInputs(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => {
+      if (!("input" in part) || typeof part.input !== "string") return part;
+      try {
+        const parsed: unknown = JSON.parse(part.input);
+        if (parsed && typeof parsed === "object") return { ...part, input: parsed };
+      } catch {
+        return part;
+      }
+      return part;
+    }),
+  }));
+}
+
 async function usableHistory(messages: UIMessage[], tools: ReturnType<typeof assistantTools>): Promise<UIMessage[]> {
-  const first = await safeValidateUIMessages({ messages, tools });
+  const normalized = coerceToolInputs(messages);
+  const first = await safeValidateUIMessages({ messages: normalized, tools });
   if (first.success) return first.data;
   const kept = messages.flatMap((message) => {
     const parts = message.parts.filter((part) => part.type === "text" || part.type === "data-attachment");
@@ -460,12 +475,13 @@ async function takeTurn(
   modelId: ReturnType<typeof assistantModelId>,
   clientId: string,
   incomingDigests: string[],
+  replayOnly = false,
 ) {
   try {
-    return await claimFirstTurn(storeId, cartId, userId, at, modelId, clientId, incomingDigests);
+    return await claimFirstTurn(storeId, cartId, userId, at, modelId, clientId, incomingDigests, replayOnly);
   } catch (error) {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
-    return claimFirstTurn(storeId, cartId, userId, at, modelId, clientId, incomingDigests);
+    return claimFirstTurn(storeId, cartId, userId, at, modelId, clientId, incomingDigests, replayOnly);
   }
 }
 
@@ -478,6 +494,7 @@ async function claimFirstTurn(
   modelId: ReturnType<typeof assistantModelId>,
   clientId: string,
   incomingDigests: string[],
+  replayOnly = false,
 ) {
   const until = new Date(at.getTime() + LEASE_MS);
   const cart = await storeScoped(storeId).cart.findUnique({ where: { id: cartId } });
@@ -508,6 +525,7 @@ async function claimFirstTurn(
     if (storedNowFiles.length > 0 && incomingDigests.length > 0 && !digestsMatch) return { conflict: true as const };
     if (storedNowFiles.length > 0 && incomingDigests.length === 0) return { missing: true as const };
     if (fresh.inFlightUntil && fresh.inFlightUntil.getTime() > at.getTime()) return null;
+    if (replayOnly) return { empty: true as const };
     await tx.aiConversation.update({
       where: { id: fresh.id },
       data: { inFlightUntil: until },
@@ -544,7 +562,7 @@ function scrubOutboundChunk(value: unknown): unknown {
 }
 
 function scrubUiMessages(messages: UIMessage[]): UIMessage[] {
-  return messages.map((message) => ({
+  return coerceToolInputs(messages).map((message) => ({
     ...message,
     parts: message.parts.map((part) => {
       if (part.type === "text") return { ...part, text: scrubCardNumbers(part.text).text };

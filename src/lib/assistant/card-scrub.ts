@@ -90,6 +90,22 @@ const OPAQUE_KEYS = new Set([
   "_call",
 ]);
 
+/**
+ * A real record id is not a card number. An opaque key still loses a value
+ * that is itself a Luhn-valid number, so a model-supplied listing id cannot
+ * be stored as a card number.
+ */
+function keepOpaque(value: unknown): unknown {
+  if (typeof value === "string") {
+    const scrubbed = scrubCardNumbers(value).text;
+    return scrubbed === value ? value : scrubbed;
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && luhnValid(String(value))) {
+    return "[card number removed]";
+  }
+  return value;
+}
+
 /** Card numbers in customer-visible or audited strings. Opaque ids are left as they are. */
 export function scrubKnownStrings(value: unknown): unknown {
   if (typeof value === "string") return scrubCardNumbers(value).text;
@@ -101,7 +117,7 @@ export function scrubKnownStrings(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
-    out[key] = OPAQUE_KEYS.has(key) ? child : scrubKnownStrings(child);
+    out[key] = OPAQUE_KEYS.has(key) ? keepOpaque(child) : scrubKnownStrings(child);
   }
   return out;
 }
