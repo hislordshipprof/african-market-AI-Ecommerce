@@ -95,10 +95,10 @@ function strictModel(reply: (call: number) => Array<Record<string, unknown>>) {
   return { model, prompts, calls: () => calls };
 }
 
-function userBody(text: string, extra?: Record<string, unknown>) {
+function userBody(text: string, extra?: Record<string, unknown>, id = "m1") {
   return JSON.stringify({
     ...extra,
-    message: { id: "m1", role: "user", parts: [{ type: "text", text }] },
+    message: { id, role: "user", parts: [{ type: "text", text }] },
   });
 }
 
@@ -153,7 +153,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     vi.restoreAllMocks();
   });
 
-  function request(text: string, init?: { ip?: string; cookie?: string; origin?: string; extra?: Record<string, unknown> }) {
+  function request(text: string, init?: { ip?: string; cookie?: string; origin?: string; extra?: Record<string, unknown>; id?: string }) {
     return new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
       headers: {
@@ -164,7 +164,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         "x-forwarded-for": init?.ip ?? "203.0.113.10",
         ...(init?.cookie ? { cookie: init.cookie } : {}),
       },
-      body: userBody(text, init?.extra),
+      body: userBody(text, init?.extra, init?.id),
     });
   }
 
@@ -516,27 +516,96 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   it("two first turns on a cart that has never chatted yield 200 and assistant_busy", async () => {
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
     const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    let modelEntries = 0;
+    let openModel: () => void = () => {};
+    let openSnapshots: () => void = () => {};
+    const modelGate = new Promise<void>((resolve) => {
+      openModel = resolve;
+    });
+    const snapshotGate = new Promise<void>((resolve) => {
+      openSnapshots = resolve;
+    });
+    let opened = false;
+    const open = () => {
+      if (opened) return;
+      opened = true;
+      openModel();
+      openSnapshots();
+    };
+    const snapshots: string[][] = [];
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const failed = new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => {
+        open();
+        reject(new Error("first-turn barrier deadline"));
+      }, 8_000);
+    });
     const model = new MockLanguageModelV4({
       doStream: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        modelEntries += 1;
+        if (modelEntries >= 2) open();
+        await modelGate;
         return { stream: textStream("ok") };
       },
     });
-    const handler = createChatHandler({ model });
-    const settled = await Promise.allSettled([
-      handler(request("first", { ip: "203.0.113.170", cookie })),
-      handler(request("second", { ip: "203.0.113.171", cookie })),
-    ]);
-    const responses = settled.filter((item): item is PromiseFulfilledResult<Response> => item.status === "fulfilled").map((item) => item.value);
-    const statuses = responses.map((response) => response.status).sort((a, b) => a - b);
-    expect(settled.every((item) => item.status === "fulfilled")).toBe(true);
-    expect(statuses).toEqual([200, 409]);
-    const busy = responses.find((response) => response.status === 409);
-    expect((await busy!.json()).error.code).toBe("assistant_busy");
-    const ok = responses.find((response) => response.status === 200);
-    await ok!.text();
-    expect(await storeScoped(storeId).aiConversation.count({ where: { cartId: cart.id } })).toBe(1);
-  });
+    const handler = createChatHandler({
+      model,
+      afterSnapshot: async (messages) => {
+        snapshots.push(messages.map((message) => message.id));
+        if (snapshots.length >= 2) openSnapshots();
+        await snapshotGate;
+      },
+    });
+    const responses: Response[] = [];
+    const watch = (task: Promise<Response>) => task.then(
+      (response) => {
+        responses.push(response);
+        if (response.status !== 200) open();
+        if (response.status !== 200 && response.status !== 409) {
+          throw new Error(`unexpected status ${response.status}`);
+        }
+        return response;
+      },
+      (error: unknown) => {
+        open();
+        throw error;
+      },
+    );
+    const pending = [
+      watch(handler(request("first", { ip: "203.0.113.170", cookie, id: "turn-a" }))),
+      watch(handler(request("second", { ip: "203.0.113.171", cookie, id: "turn-b" }))),
+    ];
+    try {
+      const settled = await Promise.race([Promise.all(pending), failed]);
+      expect(settled.map((response) => response.status).sort((a, b) => a - b)).toEqual([200, 409]);
+      expect(modelEntries).toBe(1);
+      expect(snapshots).toEqual([[], []]);
+      const busy = settled.find((response) => response.status === 409);
+      const ok = settled.find((response) => response.status === 200);
+      expect((await busy!.json()).error.code).toBe("assistant_busy");
+      expect(await ok!.text()).toContain("ok");
+      const rows = await storeScoped(storeId).aiConversation.findMany({ where: { cartId: cart.id } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.inFlightUntil).toBeNull();
+      const stored = JSON.stringify(rows[0]?.messages);
+      const winner = settled[0]?.status === 200 ? "first" : "second";
+      const loser = winner === "first" ? "second" : "first";
+      expect(stored).toContain(`"text":"${winner}"`);
+      expect(stored).not.toContain(`"text":"${loser}"`);
+      expect(stored).toContain("\"text\":\"ok\"");
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      open();
+      const drained = await Promise.allSettled(pending);
+      for (const item of drained) {
+        if (item.status !== "fulfilled" || item.value.bodyUsed) continue;
+        await item.value.body?.cancel().catch(() => undefined);
+      }
+      for (const response of responses) {
+        if (!response.bodyUsed) await response.body?.cancel().catch(() => undefined);
+      }
+    }
+  }, 20_000);
 
   it("masks card numbers before the model and the database", async () => {
     const logs: string[] = [];
