@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { checkoutPaymentsUseFake, getCheckoutPayments } from "@/lib/stripe/checkout-payments";
+import { getCheckoutPayments } from "@/lib/stripe/checkout-payments";
 import { parseInput } from "@/lib/security/parse-input";
+import { testOnlyRoutesAllowed } from "@/lib/security/test-only-routes";
 
-/** Confirms a fake PaymentIntent. Closed unless the checkout fake is allowed. */
+/** Closed unless this route's own flag passes the shared test-route gate. */
+export function fakeConfirmRouteAllowed(
+  env: Record<string, string | undefined>,
+): boolean {
+  return testOnlyRoutesAllowed(env, env.E2E_FAKE_STRIPE);
+}
+
+/** Confirms a fake PaymentIntent. The gate runs before parsing or the provider. */
 export async function POST(request: Request) {
-  if (!checkoutPaymentsUseFake()) {
+  if (!fakeConfirmRouteAllowed(process.env)) {
     return NextResponse.json({ error: "Not available" }, { status: 404 });
   }
   const body = await request.json().catch(() => null);

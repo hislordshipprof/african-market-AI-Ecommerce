@@ -31,12 +31,37 @@ function failed(error: unknown): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : "Something went wrong. Please try again." };
 }
 
+const ADDRESS_FIELDS = {
+  label: "Enter an address label of 1 to 40 characters.",
+  line1: "Enter a street address of at most 100 characters.",
+  line2: "Address line 2 must be at most 100 characters.",
+  city: "Enter a city of at most 60 characters.",
+  state: "Enter a US state or DC.",
+  zip: "Enter a 5-digit ZIP code.",
+  notes: "Notes must be at most 280 characters.",
+} as const;
+
+const addressSchema = z.strictObject({
+  label: z.string(),
+  line1: z.string(),
+  line2: z.string().nullable().optional(),
+  city: z.string(),
+  state: z.string(),
+  zip: z.string(),
+  notes: z.string().nullable().optional(),
+});
+
 function readAddress(input: unknown): { ok: true; value: AddressInput } | { ok: false; error: string } {
-  const checked = validateAddress(input);
-  const parsed = parseInput(z.custom<AddressInput>((value) => validateAddress(value).ok), input);
-  if (!checked.ok || !parsed.ok) {
-    return { ok: false, error: checked.ok ? "Enter an address label of 1 to 40 characters." : checked.error };
+  const parsed = addressSchema.safeParse(input);
+  if (!parsed.success) {
+    const key = parsed.error.issues[0]?.path[0];
+    const error = typeof key === "string" && key in ADDRESS_FIELDS
+      ? ADDRESS_FIELDS[key as keyof typeof ADDRESS_FIELDS]
+      : ADDRESS_FIELDS.label;
+    return { ok: false, error };
   }
+  const checked = validateAddress(parsed.data);
+  if (!checked.ok) return checked;
   return { ok: true, value: checked.value };
 }
 

@@ -4,6 +4,7 @@ vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { isListingId } from "@/lib/security/listing-id";
 import { GET } from "./route";
 
 let currentSlug = "";
@@ -148,8 +149,11 @@ describe.skipIf(!hasDb)("GET /api/storefront/listings/[id]", () => {
   });
 
   it("malformed listing id is 404 before cache", async () => {
+    expect(isListingId("mn_egusi")).toBe(true);
+    expect(isListingId("not-a-listing-id")).toBe(false);
     const response = await call("t226-route-unknown", "not-a-listing-id");
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Listing not found" });
+    await expect(call("t226-route-unknown", "mn_egusi")).rejects.toThrow("notFound");
   });
 });

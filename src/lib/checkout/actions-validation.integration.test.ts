@@ -6,6 +6,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("next/cache", () => ({ revalidateTag: () => {}, revalidatePath: () => {} }));
 
 import { createPaymentIntentAction, placeOrderAction, quoteCheckoutAction } from "./actions";
+import * as appLimiter from "../rate-limit/app-limiter";
 import * as checkoutService from "./service";
 
 describe("checkout input", () => {
@@ -16,6 +17,7 @@ describe("checkout input", () => {
     const quoteSpy = vi.spyOn(checkoutService, "quoteCheckout");
     const intentSpy = vi.spyOn(checkoutService, "createPaymentIntent");
     const placeSpy = vi.spyOn(checkoutService, "placeOrder");
+    const limitSpy = vi.spyOn(appLimiter, "takeRateLimit");
     try {
       const badContact = { name: 1, phone: "555", email: "a@b.test" };
       const quote = await quoteCheckoutAction(badContact as never, "pickup");
@@ -32,15 +34,23 @@ describe("checkout input", () => {
       const intent = await placeOrderAction("p".repeat(201), contact, "pickup", "", "asap");
       expect(intent).toEqual({ ok: false, error: "Could not place order" });
 
+      const badSelection = await createPaymentIntentAction(contact, "pickup", {
+        injected: true,
+        saveCard: "wrong-type",
+      } as never);
+      expect(badSelection).toEqual({ ok: false, error: "Payment setup failed" });
+
       expect(quoteSpy).not.toHaveBeenCalled();
       expect(intentSpy).not.toHaveBeenCalled();
       expect(placeSpy).not.toHaveBeenCalled();
+      expect(limitSpy).not.toHaveBeenCalled();
       expect(await db.order.count()).toBe(ordersBefore);
       expect(await db.cart.count()).toBe(cartsBefore);
     } finally {
       quoteSpy.mockRestore();
       intentSpy.mockRestore();
       placeSpy.mockRestore();
+      limitSpy.mockRestore();
       await db.$disconnect();
     }
   });

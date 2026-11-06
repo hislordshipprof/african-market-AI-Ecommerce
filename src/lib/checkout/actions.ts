@@ -25,6 +25,11 @@ const contactSchema = z.strictObject({
   email: z.string().max(320),
 });
 const fulfillmentSchema = z.enum(["pickup", "store-delivery", "courier"]);
+const selectionSchema = z.strictObject({
+  saveCard: z.boolean().optional(),
+  savedCardId: z.string().min(1).max(200).nullable().optional(),
+  attemptToken: z.string().min(1).max(200).nullable().optional(),
+}).optional();
 const PAYMENT_LIMIT = 30;
 const PAYMENT_WINDOW_MS = 60 * 60 * 1000;
 
@@ -92,6 +97,9 @@ export async function createPaymentIntentAction(
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
+  const selectionParsed = parseInput(selectionSchema, selection);
+  if (!selectionParsed.ok) return { ok: false, error: "Payment setup failed" };
+  const chosen = selectionParsed.data;
   try {
     const store = await getStore();
     const gate = checkCheckoutReady(store.stripeOnboardingStatus);
@@ -131,9 +139,9 @@ export async function createPaymentIntentAction(
     const result = await createPaymentIntent(store.id, cartId, quote.holdCents, actorUserId
       ? {
           actorUserId,
-          saveCard: selection?.saveCard === true,
-          savedCardId: selection?.savedCardId ?? null,
-          attemptToken: selection?.attemptToken ?? null,
+          saveCard: chosen?.saveCard === true,
+          savedCardId: chosen?.savedCardId ?? null,
+          attemptToken: chosen?.attemptToken ?? null,
         }
       : undefined);
     return { ok: true, ...result, holdCents: quote.holdCents };

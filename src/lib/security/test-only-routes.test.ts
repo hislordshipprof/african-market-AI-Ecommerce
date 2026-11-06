@@ -18,10 +18,10 @@ function routeFiles(dir: string, acc: string[] = []): string[] {
 }
 
 const closed = [
-  { VERCEL: "1", NODE_ENV: "production", VERCEL_ENV: "production", CI: "true", E2E_STORE_OVERRIDE: "1" },
-  { NODE_ENV: "production", VERCEL_ENV: "production", E2E_STORE_OVERRIDE: "1" },
-  { NODE_ENV: "production", E2E_STORE_OVERRIDE: "1" },
-  { VERCEL: "1", NODE_ENV: "development", E2E_STORE_OVERRIDE: "1" },
+  { VERCEL: "1", NODE_ENV: "production", VERCEL_ENV: "production", CI: "true", E2E_STORE_OVERRIDE: "1", E2E_FAKE_STRIPE: "1" },
+  { NODE_ENV: "production", VERCEL_ENV: "production", CI: "true", E2E_STORE_OVERRIDE: "1", E2E_FAKE_STRIPE: "1" },
+  { NODE_ENV: "production", E2E_STORE_OVERRIDE: "1", E2E_FAKE_STRIPE: "1" },
+  { VERCEL: "1", NODE_ENV: "development", E2E_STORE_OVERRIDE: "1", E2E_FAKE_STRIPE: "1" },
 ];
 
 describe("test-only routes", () => {
@@ -55,6 +55,39 @@ describe("test-only routes", () => {
       E2E_STORE_OVERRIDE: "1",
     }, "1")).toBe(true);
     expect(testOnlyRoutesAllowed({ NODE_ENV: "test", E2E_STORE_OVERRIDE: "1" }, "0")).toBe(false);
+  });
+
+  it("each route opens only when its own flag is on", async () => {
+    for (const [key, value] of Object.entries({
+      NODE_ENV: "test",
+      CI: "",
+      VERCEL: "",
+      VERCEL_ENV: "",
+      E2E_FAKE_STRIPE: "1",
+      E2E_STORE_OVERRIDE: "",
+    })) vi.stubEnv(key, value);
+    const fake = await import(pathToFileURL(path.join(e2eRoot, "fake-confirm", "route.ts")).href);
+    const opened = await fake.POST(new Request("http://localhost/api/e2e/fake-confirm", {
+      method: "POST",
+      body: "{}",
+    }));
+    expect(opened.status).toBe(400);
+    vi.stubEnv("E2E_FAKE_STRIPE", "");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "1");
+    expect((await fake.POST(new Request("http://localhost/api/e2e/fake-confirm", {
+      method: "POST",
+      body: JSON.stringify({ paymentIntentId: "pi_test" }),
+    }))).status).toBe(404);
+
+    const magic = await import(pathToFileURL(path.join(e2eRoot, "magic-link-token", "route.ts")).href);
+    const magicRequest = new NextRequest("http://localhost/api/e2e/magic-link-token?email=a@b.test");
+    const magicOpen = await magic.GET(magicRequest);
+    expect(await magicOpen.json()).toEqual({ error: "no verification found" });
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    const magicClosed = await magic.GET(magicRequest);
+    expect(magicClosed.status).toBe(404);
+    expect(await magicClosed.json()).toEqual({ error: "Not available" });
   });
 
   it("cart-bootstrap route is gone", () => {
