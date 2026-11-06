@@ -429,5 +429,27 @@ describe("grounding stream", () => {
     });
     expect(await split.text).toBe("- Egusi and palm: $10.99 price not confirmed");
     expect(splitStrips).toEqual(["USD7.77"]);
+
+    const trailStrips: string[] = [];
+    const trail = streamText({
+      model: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: streamOf([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "t" },
+            { type: "text-delta", id: "t", delta: "- Palm: 10.99 US$ naira" },
+            { type: "text-end", id: "t" },
+            { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+          ]),
+        }),
+      }),
+      prompt: "trail",
+      experimental_transform: groundingTransform({
+        historyUnitPrices: [{ key: "variant:egusi", cents: 1099 }],
+        onStrip: (amount) => trailStrips.push(amount),
+      }),
+    });
+    expect(await trail.text).toBe("- Palm: price not confirmed");
+    expect(trailStrips).toEqual(["10.99 US$ naira"]);
   });
 });

@@ -232,26 +232,59 @@ function tokenize(text: string): Atom[] {
   return atoms;
 }
 
+/** Contiguous marks across a direct gap. A word or a blank line ends the run. */
+function markRunEnd(text: string, atoms: Atom[], start: number): number {
+  let end = start + 1;
+  while (
+    end < atoms.length &&
+    atoms[end].kind === "mark" &&
+    gapDirect(text, atoms[end - 1].end, atoms[end].start)
+  ) {
+    end += 1;
+  }
+  return end;
+}
+
+/**
+ * Each mark binds to one number. A run before a number belongs to that number.
+ * A run after a number belongs to it, except the last mark when a number follows:
+ * that mark introduces the next number and binds forward alone.
+ */
+function markOwners(text: string, atoms: Atom[]): Map<number, number> {
+  const owner = new Map<number, number>();
+  for (let index = 0; index < atoms.length; ) {
+    if (atoms[index].kind !== "mark") {
+      index += 1;
+      continue;
+    }
+    const runEnd = markRunEnd(text, atoms, index);
+    const before = atoms[index - 1];
+    const after = atoms[runEnd];
+    const prevNumber =
+      before?.kind === "number" && gapDirect(text, before.end, atoms[index].start) ? index - 1 : -1;
+    const nextNumber =
+      after?.kind === "number" && gapDirect(text, atoms[runEnd - 1].end, after.start) ? runEnd : -1;
+    if (nextNumber >= 0 && prevNumber >= 0) {
+      owner.set(runEnd - 1, nextNumber);
+      for (let mark = index; mark < runEnd - 1; mark += 1) owner.set(mark, prevNumber);
+    } else if (nextNumber >= 0) {
+      for (let mark = index; mark < runEnd; mark += 1) owner.set(mark, nextNumber);
+    } else if (prevNumber >= 0) {
+      for (let mark = index; mark < runEnd; mark += 1) owner.set(mark, prevNumber);
+    }
+    index = runEnd;
+  }
+  return owner;
+}
+
 function findMoney(text: string): MoneyToken[] {
   const atoms = tokenize(text);
+  const owner = markOwners(text, atoms);
   const tokens: MoneyToken[] = [];
   for (let index = 0; index < atoms.length; index += 1) {
     const number = atoms[index];
     if (number.kind !== "number") continue;
-    const marks: Atom[] = [];
-    for (let left = index - 1; left >= 0 && atoms[left].kind === "mark"; left -= 1) {
-      if (!gapDirect(text, atoms[left].end, atoms[left + 1].start)) break;
-      marks.unshift(atoms[left]);
-    }
-    const right = atoms[index + 1];
-    const afterRight = atoms[index + 2];
-    if (
-      right?.kind === "mark" &&
-      gapDirect(text, number.end, right.start) &&
-      !(afterRight?.kind === "number" && gapDirect(text, right.end, afterRight.start))
-    ) {
-      marks.push(right);
-    }
+    const marks = atoms.filter((_, markIndex) => owner.get(markIndex) === index);
     if (marks.length === 0) continue;
     const foreign = marks.some((mark) => mark.role === "foreign");
     const cent = marks.some((mark) => mark.role === "cent");

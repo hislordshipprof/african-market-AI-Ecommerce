@@ -88,6 +88,27 @@ describe("price grounding", () => {
     expect(qualified.text).toBe(`Egusi is $10.99. ${PHRASE}`);
     expect(qualified.stripped).toEqual(["10.99 C$", "$10.99 C$", "10.99C$", "10.99 A$", "10.99 CAD$"]);
     expect(groundAmounts("10.99 US$", usd).text).toBe("10.99 US$");
+    expect(groundAmounts("10.99 US$ naira", usd)).toEqual({
+      text: PHRASE,
+      stripped: ["10.99 US$ naira"],
+    });
+    expect(groundAmounts("- Palm: 10.99 US$ naira", usd)).toEqual({
+      text: "- Palm: price not confirmed",
+      stripped: ["10.99 US$ naira"],
+    });
+    expect(groundAmounts("$10.99 USD EUR", usd)).toEqual({
+      text: PHRASE,
+      stripped: ["$10.99 USD EUR"],
+    });
+    const trailed = groundAmounts("- Palm: 10.99 USD EUR 7.77", usd);
+    expect(trailed.text).toBe("- Palm: 10.99 USD price not confirmed");
+    expect(trailed.stripped).toEqual(["EUR 7.77"]);
+    expect(groundAmounts("10.99 US$ naira 7.77", usd)).toEqual({
+      text: PHRASE,
+      stripped: ["naira 7.77"],
+    });
+    expect(groundAmounts("10.99 US$\nnaira", new Set()).stripped).toEqual(["10.99 US$\nnaira"]);
+    expect(groundAmounts("10.99 US$\n\nnaira", usd).text).toBe("10.99 US$\n\nnaira");
     expect(groundAmounts("10.99 USD$", usd).text).toBe("10.99 USD$");
     expect(groundAmounts("10.99 US$", new Set()).stripped).toEqual(["10.99 US$"]);
     expect(groundAmounts("10.99\nC$", new Set()).stripped).toEqual(["10.99\nC$"]);
