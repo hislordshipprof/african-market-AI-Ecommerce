@@ -435,7 +435,6 @@ function Thread({
         const url = await dataUrl(blob);
         placeTile(reservedTile.id, generation, {
           ...reservedTile,
-          name: file.name || "photo.jpg",
           filename: "photo.jpg",
           url,
           preview,

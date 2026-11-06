@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import sharp from "sharp";
 import { money } from "../src/lib/format";
 import { storeUrl } from "./urls";
 
@@ -441,5 +442,49 @@ test("closing during a held file send drops the preview", async ({ page }) => {
   const after = await page.evaluate(() => (window as unknown as { __objectUrls: { created: number; revoked: number } }).__objectUrls);
   expect(after.created).toBe(before);
   expect(after.created).toBe(after.revoked);
+});
+
+test("a transparent photo stays dark ink on white and keeps the scrubbed name", async ({ page }) => {
+  const size = 64;
+  const raw = Buffer.alloc(size * size * 4, 0);
+  for (let y = 24; y < 40; y += 1) {
+    for (let x = 24; x < 40; x += 1) {
+      const index = (y * size + x) * 4;
+      raw[index + 3] = 255;
+    }
+  }
+  const png = await sharp(raw, { raw: { width: size, height: size, channels: 4 } }).png().toBuffer();
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") {
+      posts.push(request.postData() ?? "");
+    }
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles({
+    name: "4242424242424242\u202e.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  const ready = page.locator('[data-status="ready"]');
+  await expect(ready).toBeVisible();
+  await expect.soft(ready.getByRole("button", { name: "Remove [card number removed].png" })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("the list");
+  await page.getByTestId("assistant-send").click();
+  await expect.poll(() => posts.length).toBe(1);
+  const body = posts[0] ?? "";
+  expect(body).toContain('"filename":"photo.jpg"');
+  const encoded = body.match(/data:image\/jpeg;base64,([A-Za-z0-9+/=]+)/)?.[1];
+  expect(encoded).toBeTruthy();
+  const { data, info } = await sharp(Buffer.from(encoded ?? "", "base64")).raw().toBuffer({ resolveWithObject: true });
+  const at = (x: number, y: number) => {
+    const index = (y * info.width + x) * info.channels;
+    return [data[index] ?? 0, data[index + 1] ?? 0, data[index + 2] ?? 0];
+  };
+  const corner = at(1, 1);
+  const ink = at(Math.floor(info.width / 2), Math.floor(info.height / 2));
+  expect(Math.min(...corner)).toBeGreaterThan(200);
+  expect(Math.max(...ink)).toBeLessThan(80);
 });
 
