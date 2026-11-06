@@ -168,6 +168,7 @@ function Thread({
   const photoInput = useRef<HTMLInputElement>(null);
   const pdfInput = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
+  const [generation, setGeneration] = useState(0);
   const revisionRef = useRef(0);
   type Flight = {
     id: string;
@@ -191,7 +192,7 @@ function Thread({
   const routeError: RouteView | null = error ? viewFor(error) : null;
   const fileRetry = Boolean(
     inflight &&
-    inflight.generation === generationRef.current &&
+    inflight.generation === generation &&
     inflight.tiles.length > 0,
   );
 
@@ -325,6 +326,7 @@ function Thread({
   useEffect(() => {
     if (open) return;
     generationRef.current += 1;
+    setGeneration(generationRef.current);
     stopListening("abort");
     const owned = takeOwned();
     window.setTimeout(() => {
