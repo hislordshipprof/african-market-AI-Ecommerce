@@ -168,6 +168,10 @@ export async function prepareAttachments(files: IncomingFile[]): Promise<
       });
       continue;
     }
+    const header = pngHeader(file.bytes);
+    if (header && (header.width > MAX_EDGE || header.height > MAX_EDGE || header.width * header.height > MAX_PIXELS)) {
+      return attachmentFailure("attachment_pixels");
+    }
     const photo = await reencodePhoto(file.bytes);
     if (!photo.ok) return photo;
     prepared.push({
@@ -232,6 +236,11 @@ function decodeDataUrl(url: string, mediaType: string): Buffer | null {
   const bytes = Buffer.from(payload, "base64");
   if (bytes.toString("base64") !== payload) return null;
   return bytes;
+}
+
+function pngHeader(bytes: Buffer): { width: number; height: number } | null {
+  if (bytes.length < 24 || bytes.toString("ascii", 12, 16) !== "IHDR") return null;
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
 function magicMatches(bytes: Buffer, mediaType: string): boolean {

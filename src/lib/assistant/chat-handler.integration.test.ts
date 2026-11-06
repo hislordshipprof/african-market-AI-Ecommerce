@@ -1504,4 +1504,116 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(failedImage?.source?.data).toBeTruthy();
     expect(Buffer.from(failedImage!.source!.data!, "base64").includes(Buffer.from("GPSLAT99"))).toBe(false);
   });
+
+  it("rejects fake, oversized, encrypted and remote files before any model call", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const onePage = readFileSync(new URL("./fixtures/one-page.pdf", import.meta.url));
+    const eleven = readFileSync(new URL("./fixtures/eleven-page.pdf", import.meta.url));
+    const truncated = readFileSync(new URL("./fixtures/truncated.pdf", import.meta.url));
+    const locked = readFileSync(new URL("./fixtures/encrypted-user.pdf", import.meta.url));
+    const ownerLocked = readFileSync(new URL("./fixtures/encrypted-owner.pdf", import.meta.url));
+    const huge = readFileSync(new URL("./fixtures/huge-header.png", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    let calls = 0;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const handler = createChatHandler({
+      model: createAssistantModel({
+        fetch: async (input, init) => {
+          calls += 1;
+          return scriptedAssistantFetch(input, init);
+        },
+      }),
+    });
+    let ip = 190;
+    async function post(body: BodyInit, extra?: { length?: string }) {
+      const before = calls;
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host,
+          origin: `http://${host}`,
+          "x-store-slug": slug,
+          "x-forwarded-for": `203.0.113.${ip++}`,
+          cookie,
+          ...(extra?.length ? { "content-length": extra.length } : {}),
+        },
+        body,
+        // @ts-expect-error Node requires duplex when the body is a stream.
+        duplex: "half",
+      }));
+      const payload = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+      return { status: response.status, code: payload?.error?.code, message: payload?.error?.message, called: calls > before };
+    }
+    function message(id: string, parts: unknown[]) {
+      return JSON.stringify({ message: { id, role: "user", parts } });
+    }
+    function file(mediaType: string, bytes: Buffer, filename: string, extra?: Record<string, unknown>) {
+      return {
+        type: "file",
+        mediaType,
+        filename,
+        url: `data:${mediaType};base64,${bytes.toString("base64")}`,
+        ...extra,
+      };
+    }
+    const padded = padJpeg(jpeg, 3_145_728);
+    const cases: Array<{ id: string; body: BodyInit; length?: string; code: string; called: boolean }> = [
+      { id: "bad-b64", body: message("reject-b64-01", [{ type: "file", mediaType: "image/jpeg", url: "data:image/jpeg;base64,abc" }]), code: "attachment_type", called: false },
+      { id: "bad-mime", body: message("reject-mime01", [{ type: "file", mediaType: "image/jpeg", url: `data:image/png;base64,${jpeg.toString("base64")}` }]), code: "attachment_type", called: false },
+      { id: "forged", body: message("reject-forge1", [file("image/jpeg", jpeg, "list.jpg", { providerReference: "x" })]), code: "attachment_type", called: false },
+      { id: "remote", body: message("reject-https1", [{ type: "file", mediaType: "image/jpeg", filename: "a.jpg", url: "https://example.test/a.jpg" }]), code: "attachment_type", called: false },
+      { id: "magic", body: message("reject-magic1", [file("image/jpeg", onePage, "nope.jpg")]), code: "attachment_type", called: false },
+      { id: "fourth", body: message("reject-four01", [file("image/jpeg", jpeg, "a.jpg"), file("image/jpeg", jpeg, "b.jpg"), file("image/jpeg", jpeg, "c.jpg"), file("image/jpeg", jpeg, "d.jpg")]), code: "attachment_too_many", called: false },
+      { id: "pages", body: message("reject-page01", [file("application/pdf", eleven, "eleven.pdf")]), code: "attachment_pages", called: false },
+      { id: "cut", body: message("reject-cut-01", [file("application/pdf", truncated, "cut.pdf")]), code: "attachment_type", called: false },
+      { id: "locked", body: message("reject-lock01", [file("application/pdf", locked, "locked.pdf")]), code: "attachment_encrypted", called: false },
+      { id: "owner", body: message("reject-own-01", [file("application/pdf", ownerLocked, "owner.pdf")]), code: "attachment_encrypted", called: false },
+      { id: "pixels", body: message("reject-pix-01", [file("image/png", huge, "huge.png")]), code: "attachment_pixels", called: false },
+      { id: "over-bytes", body: message("reject-byte01", [file("image/jpeg", padJpeg(jpeg, 3_145_729), "big.jpg")]), code: "attachment_too_large", called: false },
+    ];
+    for (const item of cases) {
+      const result = await post(item.body, item.length ? { length: item.length } : undefined);
+      expect(result.code, item.id).toBe(item.code);
+      expect(result.called, item.id).toBe(item.called);
+    }
+    const text = "x".repeat(20_000);
+    const tooBig = await post(message("reject-text01", [{ type: "text", text }]));
+    expect(tooBig.code).toBe("invalid_request");
+    expect(tooBig.message).toBe("That message is too large.");
+    expect(tooBig.called).toBe(false);
+    const chunk = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("x".repeat(4_300_001)));
+        controller.close();
+      },
+    });
+    const chunked = await post(chunk, { length: "32" });
+    expect(chunked.code).toBe("attachment_too_large");
+    expect(chunked.called).toBe(false);
+    const filesOnly = await post(message("accept-file01", [file("image/jpeg", jpeg, "list.jpg")]));
+    expect(filesOnly.called).toBe(true);
+    const exactPdf = await post(message("accept-pdf-01", [{ type: "text", text: "rice" }, file("application/pdf", onePage, "one.pdf")]));
+    expect(exactPdf.called).toBe(true);
+    const exactBytes = await post(message("accept-byte1", [file("image/jpeg", padded, "exact.jpg")]));
+    expect(exactBytes.code ?? "ok").toBe("ok");
+    expect(exactBytes.called).toBe(true);
+  }, 60_000);
 });
+
+function padJpeg(jpeg: Buffer, target: number): Buffer {
+  const extra = target - jpeg.length;
+  const segments: Buffer[] = [];
+  let left = extra;
+  while (left > 0) {
+    const room = Math.min(left, 65535);
+    const segment = Buffer.alloc(room);
+    segment[0] = 0xff;
+    segment[1] = 0xfe;
+    segment.writeUInt16BE(room - 2, 2);
+    segments.push(segment);
+    left -= room;
+  }
+  return Buffer.concat([jpeg.subarray(0, 2), ...segments, jpeg.subarray(2)]);
+}
