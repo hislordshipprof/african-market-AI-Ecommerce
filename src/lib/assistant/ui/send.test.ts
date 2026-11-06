@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSendLock, outgoingMessage } from "./send";
+import { createSendLock, outgoingMessage, settleSend } from "./send";
 
 describe("assistant send", () => {
   it("the outgoing body is one scrubbed user message", () => {
@@ -30,5 +30,16 @@ describe("assistant send", () => {
     expect(lock.tryBegin()).toBe(true);
     const dashed = outgoingMessage({ id: "card", text: "4242-4242-4242-4242" });
     expect(JSON.stringify(dashed)).not.toContain("4242");
+  });
+
+  it("settles one in-flight send from its generation and revision", () => {
+    const flight = { generation: 1, revision: 4 };
+    expect(settleSend({ outcome: "success", generation: 1, revision: 4, flight })).toEqual({ action: "revoke" });
+    expect(settleSend({ outcome: "success", generation: 1, revision: 5, flight })).toEqual({ action: "revoke" });
+    expect(settleSend({ outcome: "success", generation: 2, revision: 4, flight })).toEqual({ action: "ignore" });
+    expect(settleSend({ outcome: "rejected", generation: 1, revision: 4, flight })).toEqual({ action: "restore" });
+    expect(settleSend({ outcome: "rejected", generation: 1, revision: 5, flight })).toEqual({ action: "keep" });
+    expect(settleSend({ outcome: "rejected", generation: 2, revision: 5, flight })).toEqual({ action: "ignore" });
+    expect(settleSend({ outcome: "rejected", generation: 1, revision: 4, flight: null })).toEqual({ action: "ignore" });
   });
 });

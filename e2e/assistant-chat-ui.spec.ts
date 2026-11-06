@@ -362,4 +362,84 @@ test("a file that finishes after the sheet closes does not come back", async ({ 
   await page.getByTestId("assistant-launcher").click();
   await expect(page.getByRole("button", { name: /Remove / })).toHaveCount(0);
 });
+
+test("retrying a failed send keeps one customer bubble", async ({ page }) => {
+  const posts: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/assistant/chat") && request.method() === "POST") posts.push(request.postData() ?? "");
+  });
+  await page.route("**/api/assistant/chat", (route) => route.fulfill({ status: 500, body: "no", contentType: "text/plain" }));
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const bubbles = dialog.locator('[class*="bubble"][class*="user"]');
+  await page.getByTestId("assistant-composer").fill("beans");
+  await page.getByTestId("assistant-send").click();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(bubbles).toHaveCount(1);
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect.poll(() => posts.length).toBe(2);
+  await expect(bubbles).toHaveCount(1);
+  const textIds = posts.map((body) => JSON.parse(body).message.id as string);
+  expect(textIds[0]).toBeTruthy();
+  expect(textIds[1]).toBe(textIds[0]);
+
+  posts.length = 0;
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("rice from photo");
+  await page.getByTestId("assistant-send").click();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(bubbles).toHaveCount(1);
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect.poll(() => posts.length).toBe(2);
+  await expect(bubbles).toHaveCount(1);
+  const fileBodies = posts.map((body) => JSON.parse(body).message as { id: string; parts: unknown[] });
+  expect(fileBodies[1]?.id).toBe(fileBodies[0]?.id);
+  expect(JSON.stringify(fileBodies[0]?.parts)).toContain("image/jpeg");
+  expect(JSON.stringify(fileBodies[1]?.parts)).toContain("image/jpeg");
+});
+
+test("closing during a held file send drops the preview", async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { created: 0, revoked: 0 };
+    const create = URL.createObjectURL.bind(URL);
+    const revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = ((value: Blob | MediaSource) => {
+      state.created += 1;
+      return create(value);
+    }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = ((url: string) => {
+      state.revoked += 1;
+      return revoke(url);
+    }) as typeof URL.revokeObjectURL;
+    (window as unknown as { __objectUrls: typeof state }).__objectUrls = state;
+  });
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/assistant/chat", async (route) => {
+    await gate;
+    await route.fulfill({ status: 413, body: "too big", contentType: "text/plain" });
+  });
+  await page.goto(`${origin}/`);
+  await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
+  await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
+  await page.getByTestId("assistant-composer").fill("old draft");
+  const before = await page.evaluate(() => (window as unknown as { __objectUrls: { created: number; revoked: number } }).__objectUrls.created);
+  await page.getByTestId("assistant-send").click();
+  await page.getByRole("button", { name: "Close Shop with help" }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __objectUrls: { revoked: number } }).__objectUrls.revoked)).toBeGreaterThan(0);
+  release();
+  await page.getByTestId("assistant-launcher").click();
+  await expect(page.getByTestId("assistant-composer")).toHaveValue("");
+  await expect(page.getByRole("button", { name: /Remove / })).toHaveCount(0);
+  const after = await page.evaluate(() => (window as unknown as { __objectUrls: { created: number; revoked: number } }).__objectUrls);
+  expect(after.created).toBe(before);
+  expect(after.created).toBe(after.revoked);
+});
 

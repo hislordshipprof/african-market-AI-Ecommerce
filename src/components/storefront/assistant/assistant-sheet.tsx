@@ -13,7 +13,7 @@ import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assis
 import { retainSession } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
 import { dataUrl, displayFileName, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
-import { createSendLock, outgoingMessage } from "@/lib/assistant/ui/send";
+import { createSendLock, outgoingMessage, settleSend } from "@/lib/assistant/ui/send";
 import {
   abortSpeech,
   beginSpeech,
@@ -131,8 +131,8 @@ function Thread({
   const [localError, setLocalError] = useState<string | null>(null);
   const seenTools = useRef(new Set<string>());
   const announced = useRef(new Set<string>());
-  const [lastSent, setLastSent] = useState<{ id: string; text: string; files: Array<PreparedFile & { preview: string }> } | null>(null);
   const [draft, setDraft] = useState("");
+  const draftRef = useRef("");
   const [speech, setSpeech] = useState<SpeechState | null>(null);
   const [micHidden, setMicHidden] = useState(false);
   const micDetected = useSyncExternalStore(
@@ -159,8 +159,17 @@ function Thread({
   const photoInput = useRef<HTMLInputElement>(null);
   const pdfInput = useRef<HTMLInputElement>(null);
   const generationRef = useRef(0);
-  const draftStamp = useRef(0);
-  const snapshotRef = useRef<{ text: string; tiles: Array<PreparedFile & { preview: string }>; stamp: number } | null>(null);
+  const revisionRef = useRef(0);
+  type Flight = {
+    id: string;
+    text: string;
+    tiles: Array<PreparedFile & { preview: string }>;
+    revision: number;
+    generation: number;
+  };
+  const [inflight, setInflight] = useState<Flight | null>(null);
+  const inflightRef = useRef<Flight | null>(null);
+  const revokedRef = useRef(new Set<string>());
   const [trackedStore, setTrackedStore] = useState(storeId);
   const [undoState, setUndoState] = useState(() => undoLabelsForStore(storeId));
   if (trackedStore !== storeId) {
@@ -204,10 +213,84 @@ function Thread({
     return () => window.clearTimeout(timer);
   }, [open]);
 
+  function tileKey(list: Array<PreparedFile & { preview: string }>) {
+    return list.map((tile) => `${tile.id}:${tile.status}:${tile.bytes}:${tile.preview}`).join("\n");
+  }
+
+  function changeDraft(text: string, nextTiles = tilesRef.current) {
+    const textChanged = text !== draftRef.current;
+    const filesChanged = tileKey(nextTiles) !== tileKey(tilesRef.current);
+    if (!textChanged && !filesChanged) return;
+    revisionRef.current += 1;
+    draftRef.current = text;
+    tilesRef.current = nextTiles;
+    setDraft(text);
+    setTiles(nextTiles);
+  }
+
+  function revokeOnce(list: Array<{ preview: string }>) {
+    for (const tile of list) {
+      if (!tile.preview || revokedRef.current.has(tile.preview)) continue;
+      revokedRef.current.add(tile.preview);
+      URL.revokeObjectURL(tile.preview);
+    }
+  }
+
+  function ownsPreview(preview: string) {
+    return Boolean(preview) && (inflightRef.current?.tiles.some((tile) => tile.preview === preview) ?? false);
+  }
+
+  function takeOwned() {
+    const flight = inflightRef.current;
+    const loose = tilesRef.current;
+    inflightRef.current = null;
+    draftRef.current = "";
+    tilesRef.current = [];
+    const seen = new Set<string>();
+    const owned: Array<PreparedFile & { preview: string }> = [];
+    for (const tile of [...loose, ...(flight?.tiles ?? [])]) {
+      if (!tile.preview || seen.has(tile.preview)) continue;
+      seen.add(tile.preview);
+      owned.push(tile);
+    }
+    return owned;
+  }
+
+  function finish(outcome: "success" | "rejected") {
+    const flight = inflightRef.current;
+    const decision = settleSend({
+      outcome,
+      generation: generationRef.current,
+      revision: revisionRef.current,
+      flight,
+    });
+    if (!flight || decision.action === "ignore" || decision.action === "keep") return;
+    if (decision.action === "revoke") {
+      revokeOnce(flight.tiles);
+      const owned = new Set(flight.tiles.map((tile) => tile.preview).filter(Boolean));
+      if (revisionRef.current === flight.revision) {
+        draftRef.current = "";
+        setDraft("");
+      }
+      const remaining = tilesRef.current.filter((tile) => !tile.preview || !owned.has(tile.preview));
+      if (revisionRef.current === flight.revision || remaining.length !== tilesRef.current.length) {
+        tilesRef.current = remaining;
+        setTiles(remaining);
+      }
+      inflightRef.current = null;
+      setInflight(null);
+      return;
+    }
+    draftRef.current = flight.text;
+    tilesRef.current = flight.tiles;
+    setDraft(flight.text);
+    setTiles(flight.tiles);
+  }
+
   function publishSpeech(next: SpeechState) {
     speechRef.current = next;
     setSpeech(next);
-    setDraft(next.draft);
+    changeDraft(next.draft);
     if (next.notice) setLocalError(next.notice);
     if (next.listening && liveRef.current) liveRef.current.textContent = "Listening";
   }
@@ -229,22 +312,20 @@ function Thread({
     if (open) return;
     generationRef.current += 1;
     stopListening("abort");
-    const current = tilesRef.current;
-    const timer = window.setTimeout(() => {
-      for (const tile of current) {
-        if (tile.preview) URL.revokeObjectURL(tile.preview);
-      }
+    const owned = takeOwned();
+    window.setTimeout(() => {
+      revokeOnce(owned);
+      setInflight(null);
+      setDraft("");
       setTiles([]);
       setAddOpen(false);
     }, 0);
-    return () => window.clearTimeout(timer);
   }, [open]);
 
   useEffect(() => () => {
     generationRef.current += 1;
-    for (const tile of tilesRef.current) {
-      if (tile.preview) URL.revokeObjectURL(tile.preview);
-    }
+    const owned = takeOwned();
+    revokeOnce(owned);
   }, []);
 
   useEffect(() => {
@@ -288,24 +369,24 @@ function Thread({
 
   function placeTile(id: string, generation: number, next: PreparedFile & { preview: string }) {
     if (generationRef.current !== generation) {
-      if (next.preview) URL.revokeObjectURL(next.preview);
+      revokeOnce([next]);
       return;
     }
-    setTiles((current) => {
-      if (!current.some((item) => item.id === id)) {
-        if (next.preview) URL.revokeObjectURL(next.preview);
-        return current;
-      }
-      const replaced = current.map((item) => item.id === id ? next : item);
-      const sizes = replaced.flatMap((item) => item.status === "ready" ? [item.bytes] : []);
-      if (next.status === "ready" && !withinByteCap(sizes)) {
-        if (next.preview) URL.revokeObjectURL(next.preview);
-        return current.map((item) => item.id === id
-          ? { ...next, url: "", preview: "", status: "invalid", bytes: 0, message: fileNotice("too-large") }
-          : item);
-      }
-      return replaced;
-    });
+    const current = tilesRef.current;
+    if (!current.some((item) => item.id === id)) {
+      revokeOnce([next]);
+      return;
+    }
+    const replaced = current.map((item) => item.id === id ? next : item);
+    const sizes = replaced.flatMap((item) => item.status === "ready" ? [item.bytes] : []);
+    if (next.status === "ready" && !withinByteCap(sizes)) {
+      revokeOnce([next]);
+      changeDraft(draftRef.current, current.map((item) => item.id === id
+        ? { ...next, url: "", preview: "", status: "invalid" as const, bytes: 0, message: fileNotice("too-large") }
+        : item));
+      return;
+    }
+    changeDraft(draftRef.current, replaced);
   }
 
   async function takeFiles(list: FileList | null) {
@@ -326,8 +407,7 @@ function Thread({
       message: null,
       bytes: 0,
     }));
-    setTiles((current) => [...current, ...reserved]);
-    tilesRef.current = [...tilesRef.current, ...reserved];
+    changeDraft(draftRef.current, [...tilesRef.current, ...reserved]);
     for (let index = 0; index < chosen.length; index += 1) {
       const file = chosen[index];
       const reservedTile = reserved[index];
@@ -374,10 +454,8 @@ function Thread({
   function removeTile(id: string) {
     const current = tilesRef.current;
     const tile = current.find((item) => item.id === id);
-    if (tile?.preview) URL.revokeObjectURL(tile.preview);
-    const next = current.filter((item) => item.id !== id);
-    tilesRef.current = next;
-    setTiles(next);
+    if (tile?.preview && !ownsPreview(tile.preview)) revokeOnce([tile]);
+    changeDraft(draftRef.current, current.filter((item) => item.id !== id));
   }
 
   function toggleMic() {
@@ -412,16 +490,6 @@ function Thread({
     }
   }
 
-  function restoreSnapshot() {
-    const snapshot = snapshotRef.current;
-    if (!snapshot) return;
-    const newer = draftStamp.current !== snapshot.stamp || tilesRef.current.length > 0;
-    if (newer) return;
-    setDraft(snapshot.text);
-    setTiles(snapshot.tiles);
-    tilesRef.current = snapshot.tiles;
-  }
-
   async function submit(text: string, id = messageId()) {
     if (speechRef.current?.listening) {
       publishSpeech(commitInterim(speechRef.current));
@@ -429,19 +497,22 @@ function Thread({
       return;
     }
     if (loading || busy || routeError?.terminal) return;
-    const currentTiles = tilesRef.current;
-    if (currentTiles.some((tile) => tile.status === "pending" || tile.status === "invalid")) return;
-    if (!withinByteCap(currentTiles.flatMap((tile) => tile.status === "ready" ? [tile.bytes] : []))) {
+    const flight = inflightRef.current;
+    const retrying = flight?.id === id;
+    if (retrying && flight.generation !== generationRef.current) return;
+    const currentTiles = retrying ? flight.tiles : tilesRef.current;
+    if (!retrying && currentTiles.some((tile) => tile.status === "pending" || tile.status === "invalid")) return;
+    const ready = currentTiles.filter((tile) => tile.status === "ready");
+    if (!withinByteCap(ready.map((tile) => tile.bytes))) {
       setLocalError(fileNotice("too-large"));
       return;
     }
     if (!sendLock.current.tryBegin()) return;
-    const ready = currentTiles.filter((tile) => tile.status === "ready");
-    const stamp = draftStamp.current;
+    let settled = false;
     try {
       const outgoing = outgoingMessage({
         id,
-        text,
+        text: retrying ? flight.text : text,
         files: ready.map((tile) => ({ type: "file", mediaType: tile.mediaType, filename: tile.filename, url: tile.url })),
       });
       if (!outgoing.ok) {
@@ -451,34 +522,53 @@ function Thread({
       setLocalError(null);
       const textPart = outgoing.body.message.parts.find((part) => part.type === "text");
       const sent = textPart?.type === "text" ? textPart.text : "";
-      setLastSent({ id, text: sent, files: ready });
-      snapshotRef.current = { text, tiles: ready, stamp };
-      setDraft("");
-      setTiles([]);
-      tilesRef.current = [];
+      if (!retrying) {
+        const previous = inflightRef.current;
+        if (previous) {
+          const sending = new Set(ready.map((tile) => tile.preview).filter(Boolean));
+          revokeOnce(previous.tiles.filter((tile) => !sending.has(tile.preview)));
+        }
+        const record: Flight = {
+          id,
+          text: sent,
+          tiles: ready,
+          revision: revisionRef.current,
+          generation: generationRef.current,
+        };
+        inflightRef.current = record;
+        setInflight(record);
+        draftRef.current = "";
+        tilesRef.current = [];
+        setDraft("");
+        setTiles([]);
+      }
       clearError();
-      const exists = messages.some((message) => message.id === id);
-      if (exists && ready.length === 0) await sendMessage({ text: sent, messageId: id });
-      else await sendMessage({ id, role: "user", parts: outgoing.body.message.parts });
-      if (chat.status === "error" || chat.error) {
-        restoreSnapshot();
-        return;
-      }
-      for (const tile of ready) {
-        if (tile.preview) URL.revokeObjectURL(tile.preview);
-      }
-      snapshotRef.current = null;
+      const exists = chat.messages.some((message) => message.role === "user" && message.id === id);
+      const parts = outgoing.body.message.parts;
+      if (exists) await sendMessage({ messageId: id, role: "user", parts });
+      else await sendMessage({ id, role: "user", parts });
+      finish(chat.status === "error" || chat.error ? "rejected" : "success");
+      settled = true;
     } catch {
-      restoreSnapshot();
+      if (!settled) finish("rejected");
     } finally {
       sendLock.current.end();
     }
   }
 
+  function sendCurrent() {
+    const flight = inflightRef.current;
+    if (flight && flight.generation === generationRef.current && revisionRef.current === flight.revision) {
+      void submit(flight.text, flight.id);
+      return;
+    }
+    void submit(draftRef.current);
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey || composing.current || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    void submit(draft);
+    sendCurrent();
   }
 
   return (
@@ -536,7 +626,7 @@ function Thread({
               className={styles.chip}
               disabled={!!routeError?.terminal}
               onClick={() => {
-                setDraft(starter.text);
+                changeDraft(starter.text);
                 composer.current?.focus();
               }}
             >
@@ -550,16 +640,13 @@ function Thread({
         <div className={styles.notice} role="status">
           <p>{routeError.title}</p>
           <a href={routeError.searchHref}>Search the shelves</a>
-          {routeError.retry && lastSent ? (
+          {inflight && (routeError.retry || inflight.tiles.length > 0) ? (
             <button
               type="button"
               className={styles.ghost}
               onClick={() => {
-                if (tiles.length === 0 && lastSent.files.length > 0) {
-                  setTiles(lastSent.files);
-                  tilesRef.current = lastSent.files;
-                }
-                void submit(lastSent.text, lastSent.id);
+                if (sendLock.current.held) return;
+                void submit(inflight.text, inflight.id);
               }}
             >
               Retry
@@ -571,7 +658,7 @@ function Thread({
         className={styles.composer}
         onSubmit={(event) => {
           event.preventDefault();
-          void submit(draft);
+          sendCurrent();
         }}
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
@@ -619,13 +706,12 @@ function Thread({
           disabled={!!routeError?.terminal}
           onChange={(event) => {
             const next = event.target.value;
-            draftStamp.current += 1;
             if (speechRef.current) {
               const edited = noteCustomerEdit(speechRef.current, next);
               speechRef.current = edited;
               setSpeech(edited);
             }
-            setDraft(next);
+            changeDraft(next);
           }}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={() => { composing.current = false; }}

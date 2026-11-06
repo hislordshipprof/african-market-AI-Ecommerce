@@ -28,6 +28,21 @@ export function outgoingMessage(input: { id: string; text: string; files?: Outgo
   };
 }
 
+export type SettleAction = "revoke" | "restore" | "keep" | "ignore";
+
+/** One decision for one in-flight send. Close has already cleared a changed generation. */
+export function settleSend(input: {
+  outcome: "success" | "rejected";
+  generation: number;
+  revision: number;
+  flight: { generation: number; revision: number } | null;
+}): { action: SettleAction } {
+  if (!input.flight || input.flight.generation !== input.generation) return { action: "ignore" };
+  if (input.outcome === "success") return { action: "revoke" };
+  if (input.revision !== input.flight.revision) return { action: "keep" };
+  return { action: "restore" };
+}
+
 export function createSendLock() {
   let held = false;
   return {
