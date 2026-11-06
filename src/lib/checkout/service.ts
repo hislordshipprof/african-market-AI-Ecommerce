@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, stampCancelWindow } from "../db";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
@@ -472,11 +472,7 @@ export async function recordAuthorizedOrder(
         },
       });
       if (assistantWindow != null && input.assistantAttemptId) {
-        await tx.$executeRaw`
-          UPDATE orders
-          SET cancellable_until = (clock_timestamp() AT TIME ZONE 'UTC') + (${assistantWindow} * INTERVAL '1 minute')
-          WHERE id = ${order.id}
-        `;
+        await stampCancelWindow(tx, order.id, assistantWindow);
         await tx.assistantCheckoutAttempt.update({
           where: { id: input.assistantAttemptId },
           data: {

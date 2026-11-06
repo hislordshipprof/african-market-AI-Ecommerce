@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import { readStoreCheckoutShift } from "../../db";
 import { computeQuote } from "../../checkout/quote";
 import type { Contact } from "../../customer-flow/contracts";
 import { mayBeUnavailable } from "../tools/availability";
@@ -40,7 +41,7 @@ export interface StoreShift {
   minimumOrderCents: number;
   prepTimeMinutes: number;
   timezone: string;
-  hours: Prisma.JsonValue;
+  hours: unknown;
   stripeOnboardingStatus: string;
 }
 
@@ -148,28 +149,16 @@ const LINE_INCLUDE = {
 type ReadTx = Pick<PrismaClient, "cart" | "cartLine" | "$queryRaw">;
 
 export async function readStoreShift(tx: Pick<PrismaClient, "$queryRaw">, storeId: string): Promise<StoreShift | null> {
-  const rows = await tx.$queryRaw<Array<{
-    status: string;
-    pickup_enabled: boolean;
-    minimum_order_cents: number;
-    prep_time_minutes: number;
-    timezone: string;
-    hours: Prisma.JsonValue;
-    stripe_onboarding_status: string;
-  }>>`
-    SELECT status, pickup_enabled, minimum_order_cents, prep_time_minutes, timezone, hours, stripe_onboarding_status
-    FROM stores WHERE id = ${storeId}
-  `;
-  const row = rows[0];
+  const row = await readStoreCheckoutShift(tx, storeId);
   if (!row) return null;
   return {
     status: row.status,
-    pickupEnabled: row.pickup_enabled,
-    minimumOrderCents: row.minimum_order_cents,
-    prepTimeMinutes: row.prep_time_minutes,
+    pickupEnabled: row.pickupEnabled,
+    minimumOrderCents: row.minimumOrderCents,
+    prepTimeMinutes: row.prepTimeMinutes,
     timezone: row.timezone,
     hours: row.hours,
-    stripeOnboardingStatus: row.stripe_onboarding_status,
+    stripeOnboardingStatus: row.stripeOnboardingStatus,
   };
 }
 

@@ -474,6 +474,79 @@ export async function lockCart(
   await tx.$queryRaw`SELECT id FROM carts WHERE id = ${cartId} FOR UPDATE`;
 }
 
+export interface StoreCheckoutShift {
+  status: string;
+  pickupEnabled: boolean;
+  minimumOrderCents: number;
+  prepTimeMinutes: number;
+  timezone: string;
+  hours: Prisma.JsonValue;
+  stripeOnboardingStatus: string;
+  stripeAccountId: string | null;
+}
+
+export async function readStoreCheckoutShift(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+): Promise<StoreCheckoutShift | null> {
+  const rows = await tx.$queryRaw<Array<{
+    status: string;
+    pickup_enabled: boolean;
+    minimum_order_cents: number;
+    prep_time_minutes: number;
+    timezone: string;
+    hours: Prisma.JsonValue;
+    stripe_onboarding_status: string;
+    stripe_account_id: string | null;
+  }>>`
+    SELECT status, pickup_enabled, minimum_order_cents, prep_time_minutes, timezone, hours,
+           stripe_onboarding_status, stripe_account_id
+    FROM stores WHERE id = ${storeId}
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    status: row.status,
+    pickupEnabled: row.pickup_enabled,
+    minimumOrderCents: row.minimum_order_cents,
+    prepTimeMinutes: row.prep_time_minutes,
+    timezone: row.timezone,
+    hours: row.hours,
+    stripeOnboardingStatus: row.stripe_onboarding_status,
+    stripeAccountId: row.stripe_account_id,
+  };
+}
+
+export async function orderCancelWindowOpen(tx: Pick<PrismaClient, "$queryRaw">, orderId: string): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ open: boolean }>>`
+    SELECT (cancellable_until IS NOT NULL AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')) AS open
+    FROM orders WHERE id = ${orderId}
+  `;
+  return rows[0]?.open === true;
+}
+
+export async function assistantHeldOrderIds(tx: Pick<PrismaClient, "$queryRaw">, storeId: string): Promise<string[]> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM orders
+    WHERE store_id = ${storeId}
+      AND cancellable_until IS NOT NULL
+      AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')
+  `;
+  return rows.map((row) => row.id);
+}
+
+export async function stampCancelWindow(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  orderId: string,
+  minutes: number,
+): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE orders
+    SET cancellable_until = (clock_timestamp() AT TIME ZONE 'UTC') + (${minutes} * INTERVAL '1 minute')
+    WHERE id = ${orderId}
+  `;
+}
+
 export async function lockCartLineByVariant(
   tx: Pick<PrismaClient, "$queryRaw">,
   cartId: string,

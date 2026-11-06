@@ -173,7 +173,7 @@ export function offerPickupSlots(input: {
       if (!instant) continue;
       const at = instant.getTime();
       if (at < earliest) continue;
-      if (at > shift.close.getTime()) continue;
+      if (at >= shift.close.getTime()) continue;
       slots.push({
         id: instant.toISOString(),
         label: labelAt(instant, input.timeZone),

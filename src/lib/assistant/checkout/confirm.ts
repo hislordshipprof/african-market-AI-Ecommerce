@@ -6,7 +6,7 @@ import {
   placeOrder,
   SavedCardUnavailableError,
 } from "../../checkout/service";
-import { lockCart, lockConversationRow, lockStoreRow, storeScoped, storeScopedTransaction } from "../../db";
+import { lockCart, lockConversationRow, lockStoreRow, readStoreCheckoutShift, storeScoped, storeScopedTransaction } from "../../db";
 import { assistantChatEnabled } from "../contract";
 import { newCheckoutAllowed } from "./gates";
 import { prepareCheckout, tokenHash, type PrepareContext, type PrepareResult } from "./prepare";
@@ -237,10 +237,8 @@ async function complete(input: ConfirmInput, attemptId: string): Promise<Confirm
 }
 
 async function readMinimum(storeId: string): Promise<number> {
-  const rows = await storeScopedTransaction(storeId, (tx) => tx.$queryRaw<Array<{ minimum_order_cents: number }>>`
-    SELECT minimum_order_cents FROM stores WHERE id = ${storeId}
-  `);
-  return rows[0]?.minimum_order_cents ?? 0;
+  const shift = await storeScopedTransaction(storeId, (tx) => readStoreCheckoutShift(tx, storeId));
+  return shift?.minimumOrderCents ?? 0;
 }
 
 function snapshotSlot(snapshot: unknown): string | null {

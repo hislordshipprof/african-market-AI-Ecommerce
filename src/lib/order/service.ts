@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
+import { assistantHeldOrderIds, findOrderByPaymentIntent, lockStoreRow, orderCancelWindowOpen, storeScoped, storeScopedTransaction } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
 import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
@@ -267,13 +267,7 @@ export async function getStoreOrders(storeId: string) {
       select: { entityId: true },
     });
     const resolvedIds = resolved.map((row) => row.entityId);
-    const held = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM orders
-      WHERE store_id = ${storeId}
-        AND cancellable_until IS NOT NULL
-        AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')
-    `;
-    const heldIds = held.map((row) => row.id);
+    const heldIds = await assistantHeldOrderIds(tx, storeId);
     return tx.order.findMany({
       where: {
         ...(heldIds.length > 0 ? { id: { notIn: heldIds } } : {}),
@@ -305,12 +299,7 @@ export async function acceptOrder(
     if (order.status !== "AUTHORIZED") {
       return { ok: false, error: `Cannot accept order in status ${order.status}` };
     }
-    const windowOpen = await tx.$queryRaw<Array<{ open: boolean }>>`
-      SELECT (cancellable_until IS NOT NULL AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')) AS open
-      FROM orders
-      WHERE id = ${orderId}
-    `;
-    if (windowOpen[0]?.open) {
+    if (await orderCancelWindowOpen(tx, orderId)) {
       return { ok: false, error: "The customer can still cancel this order" };
     }
 
@@ -1080,11 +1069,7 @@ export async function customerCancelOrder(input: {
     if (order.status !== "AUTHORIZED") {
       return { ok: false as const, code: "window_closed" as const, message: "This order can no longer be cancelled. Contact the store." };
     }
-    const windowOpen = await tx.$queryRaw<Array<{ open: boolean }>>`
-      SELECT (cancellable_until IS NOT NULL AND cancellable_until > (clock_timestamp() AT TIME ZONE 'UTC')) AS open
-      FROM orders WHERE id = ${input.orderId}
-    `;
-    if (!windowOpen[0]?.open) {
+    if (!(await orderCancelWindowOpen(tx, input.orderId))) {
       return { ok: false as const, code: "window_closed" as const, message: "This order can no longer be cancelled. Contact the store." };
     }
     await tx.order.update({ where: { id: input.orderId }, data: { status: "CANCELLING" } });

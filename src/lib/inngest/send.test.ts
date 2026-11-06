@@ -107,6 +107,33 @@ describe("sendOrderAuthorized", () => {
     );
   });
 
+  it("an assistant order's authorized event starts when its cancel window closes", async () => {
+    const { inngest } = await import("./client");
+    const { storeScopedTransaction } = await import("../db");
+    const { sendOrderAuthorized } = await import("./send");
+    const deadline = new Date("2026-11-06T18:10:00.000Z");
+
+    (storeScopedTransaction as ReturnType<typeof vi.fn>).mockImplementation(async (_sid: string, fn: (tx: unknown) => unknown) => {
+      return fn({
+        order: {
+          findUnique: () => ({ createdAt: new Date("2026-11-06T18:00:00.000Z"), cancellableUntil: deadline }),
+          update: () => ({}),
+        },
+      });
+    });
+    (inngest.send as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    await sendOrderAuthorized("store-1", "ord_window");
+
+    expect(inngest.send).toHaveBeenCalledWith(expect.objectContaining({
+      id: "order-authorized-ord_window",
+      ts: deadline.getTime(),
+      data: expect.objectContaining({ authorizedAt: deadline.toISOString() }),
+    }));
+    const payload = (inngest.send as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as { ts: unknown };
+    expect(typeof payload.ts).toBe("number");
+  });
+
   it("a missing event key in production logs once and does not throw", async () => {
     const previousNode = process.env.NODE_ENV;
     const previousKey = process.env.INNGEST_EVENT_KEY;
