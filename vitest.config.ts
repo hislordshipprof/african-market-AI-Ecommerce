@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "e2e/**/*.unit.ts"],
     setupFiles: ["src/lib/test-setup.ts"],
     testTimeout: 15_000,
     // One worker per core (24 here) starves the Vitest parent until "Timeout calling
