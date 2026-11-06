@@ -26,6 +26,7 @@ if [ "$REVIEW_ENGINE" = codex ]; then
 fi
 
 # Review round for this ticket (1 = first review). From round 3 on, only real blockers block.
+# Keep this pipeline identical to ticket_review_count in build-ticket.sh.
 # (grep -c exits 1 on zero matches, so the count is guarded: under set -e a bare pipeline would end the script.)
 PRIOR=$(ls "$ROOT"/.builder/logs/review-"$N"-*.json 2>/dev/null | grep -vc '\.second\.json$' || true)
 ROUND="${REVIEW_ROUND:-$(( ${PRIOR:-0} + 1 ))}"
