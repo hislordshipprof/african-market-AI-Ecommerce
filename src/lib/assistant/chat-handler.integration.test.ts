@@ -1600,6 +1600,115 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(exactBytes.code ?? "ok").toBe("ok");
     expect(exactBytes.called).toBe(true);
   }, 60_000);
+
+  it("file quota survives auth cleanup, concurrent requests and a trailing-hour boundary", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    const key = `assistant:files:cart:${cart.id}`;
+    let clock = new Date("2032-06-01T00:00:00.000Z");
+    let calls = 0;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const handler = createChatHandler({
+      now: () => clock,
+      model: createAssistantModel({
+        fetch: async (input, init) => {
+          calls += 1;
+          return scriptedAssistantFetch(input, init);
+        },
+      }),
+    });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie,
+    };
+    async function send(id: string, parts: unknown[], ip: string) {
+      return handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: { ...headers, "x-forwarded-for": ip },
+        body: JSON.stringify({ message: { id, role: "user", parts } }),
+      }));
+    }
+    const photo = (name: string) => ({
+      type: "file",
+      mediaType: "image/jpeg",
+      filename: name,
+      url: `data:image/jpeg;base64,${jpeg.toString("base64")}`,
+    });
+    async function countRows() {
+      const rows = await raw.$queryRaw<Array<{ count: number }>>`
+        SELECT COUNT(*)::int AS count FROM assistant_file_turns WHERE key = ${key}`;
+      return Number(rows[0]?.count ?? 0);
+    }
+    for (let i = 0; i < 9; i += 1) {
+      const ok = await send(`quota-ok-${i}-abcd`, [photo("list.jpg")], `198.51.100.${i + 1}`);
+      expect(ok.status, `turn ${i}`).toBe(200);
+      await ok.text();
+    }
+    const parallel = await Promise.all([
+      send("quota-race-a-abcd", [photo("list.jpg")], "198.51.100.21"),
+      send("quota-race-b-abcd", [photo("list.jpg")], "198.51.100.22"),
+    ]);
+    const statuses = (await Promise.all(parallel.map(async (response) => response.status))).sort((a, b) => a - b);
+    for (const response of parallel) {
+      if (response.status === 200) await response.text();
+      else await response.json();
+    }
+    expect(statuses).toEqual([200, 429]);
+    expect(await countRows()).toBe(10);
+    const authIp = "198.51.100.40";
+    const authKey = `${authIp}|/sign-in/email`;
+    const staleKey = "198.51.100.41|/sign-in/email";
+    const expired = BigInt(Date.now() - 120_000);
+    await raw.rateLimit.upsert({
+      where: { key: authKey },
+      create: { key: authKey, count: 1, lastRequest: expired },
+      update: { count: 1, lastRequest: expired },
+    });
+    await raw.rateLimit.upsert({
+      where: { key: staleKey },
+      create: { key: staleKey, count: 1, lastRequest: expired },
+      update: { count: 1, lastRequest: expired },
+    });
+    await auth.handler(new Request("http://localhost:3000/api/auth/sign-in/email", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://localhost:3000",
+        "x-forwarded-for": authIp,
+      },
+      body: JSON.stringify({ email: "quota-nobody@example.com", password: "not-a-real-password" }),
+    }));
+    expect(await countRows()).toBe(10);
+    await raw.rateLimit.deleteMany({ where: { key: { in: [authKey, staleKey] } } });
+    const callsAtCap = calls;
+    clock = new Date(clock.getTime() + 30 * 60 * 1000);
+    const blocked = await send("quota-blocked-abcd", [photo("list.jpg")], "198.51.100.23");
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("retry-after")).toBeTruthy();
+    expect((await blocked.json()).error.code).toBe("attachment_rate_limited");
+    expect(calls).toBe(callsAtCap);
+    const typed = await send("quota-typed-abcd", [{ type: "text", text: "rice please" }], "198.51.100.24");
+    expect(typed.status).toBe(200);
+    await typed.text();
+    const beforeCheap = await countRows();
+    const fourth = await send("quota-cheap-abcd", [photo("a.jpg"), photo("b.jpg"), photo("c.jpg"), photo("d.jpg")], "198.51.100.25");
+    expect((await fourth.json()).error.code).toBe("attachment_too_many");
+    expect(await countRows()).toBe(beforeCheap);
+    const callsBeforeReplay = calls;
+    const replay = await send("quota-ok-0-abcd", [photo("list.jpg")], "198.51.100.26");
+    expect(replay.status).toBe(200);
+    await replay.text();
+    expect(calls).toBe(callsBeforeReplay);
+    expect(await countRows()).toBe(beforeCheap);
+    clock = new Date("2032-06-01T01:00:01.000Z");
+    const later = await send("quota-later-abcd", [photo("list.jpg")], "198.51.100.27");
+    expect(later.status).toBe(200);
+    await later.text();
+  }, 90_000);
 });
 
 function padJpeg(jpeg: Buffer, target: number): Buffer {
