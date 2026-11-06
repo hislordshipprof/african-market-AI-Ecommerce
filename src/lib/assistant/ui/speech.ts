@@ -40,32 +40,12 @@ function cloneMap(source: ReadonlyMap<number, string>): Map<number, string> {
   return new Map(source);
 }
 
-function normalizeSpoken(text: string): string {
-  return text.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-/** A later Android final often repeats the earlier phrase and then continues it. */
-function repeatsKept(previous: string, next: string): boolean {
-  if (next === previous) return true;
-  if (!next.startsWith(previous)) return false;
-  const boundary = next.charAt(previous.length);
-  return boundary === "" || /[^\p{L}\p{N}]/u.test(boundary);
-}
-
 function spokenFrom(finals: ReadonlyMap<number, string>): string {
-  const kept: string[] = [];
-  const ordered = [...finals.entries()].sort((left, right) => left[0] - right[0]);
-  for (const [, text] of ordered) {
-    const trimmed = text.trim();
-    if (!trimmed) continue;
-    const previous = kept.length > 0 ? normalizeSpoken(kept[kept.length - 1] ?? "") : null;
-    if (previous != null && repeatsKept(previous, normalizeSpoken(trimmed))) {
-      kept[kept.length - 1] = trimmed;
-      continue;
-    }
-    kept.push(trimmed);
-  }
-  return kept.join(" ");
+  return [...finals.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([, text]) => text.trim())
+    .filter((text) => text.length > 0)
+    .join(" ");
 }
 
 function compose(prefix: string, spoken: string): string {

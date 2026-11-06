@@ -1876,6 +1876,69 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(Number(rollingRows[0]?.count ?? 0)).toBe(10);
   }, 90_000);
 
+  it("a file added to a completed text id conflicts and does not call the model again", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    let calls = 0;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const handler = createChatHandler({
+      model: createAssistantModel({
+        fetch: async (input, init) => {
+          calls += 1;
+          return scriptedAssistantFetch(input, init);
+        },
+      }),
+    });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie,
+    };
+    const id = "text-then-file-01";
+    const first = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.230" },
+      body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text: "hello" }] } }),
+    }));
+    expect(first.status).toBe(200);
+    const firstBody = await first.text();
+    expect(firstBody).toContain("Here is what I found.");
+    const afterFirst = calls;
+    const changed = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.231" },
+      body: JSON.stringify({
+        message: {
+          id,
+          role: "user",
+          parts: [
+            { type: "text", text: "hello" },
+            {
+              type: "file",
+              mediaType: "image/jpeg",
+              filename: "list.jpg",
+              url: `data:image/jpeg;base64,${jpeg.toString("base64")}`,
+            },
+          ],
+        },
+      }),
+    }));
+    expect(changed.status).toBe(400);
+    expect(await changed.text()).toContain("attachment_conflict");
+    expect(calls).toBe(afterFirst);
+    const replay = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: { ...headers, "x-forwarded-for": "203.0.113.232" },
+      body: JSON.stringify({ message: { id, role: "user", parts: [] } }),
+    }));
+    expect(replay.status).toBe(200);
+    expect(await replay.text()).toContain("Here is what I found.");
+    expect(calls).toBe(afterFirst);
+  }, 60_000);
+
   it("a files-only retry resends its files once and a completed id replays without bytes", async () => {
     const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });

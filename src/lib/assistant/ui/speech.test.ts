@@ -17,11 +17,11 @@ import {
 } from "./speech";
 
 describe("assistant speech", () => {
-  it("replaces the same index and a longer copy of an earlier final", () => {
+  it("keeps two final indices and replaces the same index", () => {
     let state = beginSpeech("I want to cook ", 1);
     state = applyFinal(state, 1, 0, "rice");
     state = applyFinal(state, 1, 1, "rice flour");
-    expect(state.draft).toBe("I want to cook rice flour");
+    expect(state.draft).toBe("I want to cook rice rice flour");
     state = applyFinal(state, 1, 0, "jollof rice");
     expect(state.draft).toBe("I want to cook jollof rice rice flour");
   });
@@ -185,11 +185,11 @@ describe("assistant speech", () => {
     expect(state.listening).toBe(true);
   });
 
-  it("replaces a repeated final instead of appending it", () => {
+  it("keeps separate final indices even when one phrase starts with the other", () => {
     const rows = [
-      { prefix: "rice ", finals: ["and beans", "and beans please"], draft: "rice and beans please" },
-      { prefix: "", finals: ["and beans", "and beans"], draft: "and beans" },
-      { prefix: "", finals: ["and", "and beans", "and beans please"], draft: "and beans please" },
+      { prefix: "rice ", finals: ["and beans", "and beans please"], draft: "rice and beans and beans please" },
+      { prefix: "", finals: ["and beans", "and beans"], draft: "and beans and beans" },
+      { prefix: "", finals: ["and", "and beans", "and beans please"], draft: "and and beans and beans please" },
       { prefix: "", finals: ["rice", "beans"], draft: "rice beans" },
       { prefix: "", finals: ["rice", "ricer"], draft: "rice ricer" },
     ];

@@ -135,12 +135,13 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     if (options.afterSnapshot) await options.afterSnapshot(storedMessages);
     const storedUser = storedMessages.find((message) => message.role === "user" && message.id === parsed.id);
     const storedFiles = storedUser ? attachmentDescriptors(storedUser) : [];
-    const sameFiles = parsed.files.length === 0 || (storedFiles.length > 0 && descriptorsMatch(storedFiles, parsed.files));
+    if (storedUser && parsed.files.length > 0 && !descriptorsMatch(storedFiles, parsed.files)) {
+      return jsonError(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
+    }
+    const sameFiles = parsed.files.length === 0 || descriptorsMatch(storedFiles, parsed.files);
     if (sameFiles) {
       const replay = await replayCompletedTurn(store.id, cartId, parsed.id, headers, at);
       if (replay) return replay;
-    } else if (storedFiles.length > 0) {
-      return jsonError(400, "attachment_conflict", attachmentFailure("attachment_conflict").message);
     }
     let fileTurn = parsed.files.length > 0 || storedFiles.length > 0;
     if (fileTurn && parsed.files.length === 0) {
@@ -529,7 +530,7 @@ async function claimFirstTurn(
       && storedNowFiles.every((descriptor, index) => descriptor.digest === incomingDigests[index]);
     const finished = completedAssistant(freshMessages, clientId);
     if (finished && (incomingDigests.length === 0 || digestsMatch)) return { replay: finished };
-    if (storedNowFiles.length > 0 && incomingDigests.length > 0 && !digestsMatch) return { conflict: true as const };
+    if (storedNow && incomingDigests.length > 0 && !digestsMatch) return { conflict: true as const };
     if (storedNowFiles.length > 0 && incomingDigests.length === 0) return { missing: true as const };
     if (fresh.inFlightUntil && fresh.inFlightUntil.getTime() > at.getTime()) return null;
     if (replayOnly) return { empty: true as const };
