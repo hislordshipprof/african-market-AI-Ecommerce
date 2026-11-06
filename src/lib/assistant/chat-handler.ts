@@ -279,12 +279,14 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         historyUnitPrices: keyedUnitPricesFromHistory(sentHistory),
         getAllowedCents: () => new Set([store.minimumOrderCents]),
         onStrip: (amount) => {
+          const scrubbed = scrubCardNumbers(amount);
+          const stored = scrubbed.removed > 0 ? scrubbed.text : amount;
           void storeScoped(store.id).aiAction.create({
             data: {
               storeId: store.id,
               conversationId: turn.id,
               tool: "grounding_strip",
-              input: { amount },
+              input: { amount: stored },
               output: {},
               ok: true,
             },

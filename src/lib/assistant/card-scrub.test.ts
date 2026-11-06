@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { luhnValid, scrubCardNumbers } from "./card-scrub";
+import { luhnValid, scrubCardNumbers, scrubKnownStrings } from "./card-scrub";
 
 function luhnTwelve(digits: string): boolean {
   let sum = 0;
@@ -30,6 +30,24 @@ describe("card number scrubber", () => {
     const text = "4242 4242 4242 4241 call (555) 123-4567 order 100045";
     expect(scrubCardNumbers(text).text).toBe(text);
     expect(scrubCardNumbers(text).removed).toBe(0);
+  });
+
+  it("renames card-number keys and keeps a second one distinct", () => {
+    const visa = "4242424242424242";
+    const mastercard = "5555555555554444";
+    const result = scrubKnownStrings({
+      [visa]: "first",
+      [mastercard]: "second",
+      listing_id: { [visa]: "nested" },
+    });
+    const encoded = JSON.stringify(result);
+    expect(encoded).not.toContain(visa);
+    expect(encoded).not.toContain(mastercard);
+    expect(encoded).toContain("[card number removed]");
+    expect(encoded).toContain("[card number removed] (2)");
+    expect(encoded).toContain("first");
+    expect(encoded).toContain("second");
+    expect(encoded).toContain("nested");
   });
 
   it("keeps a Luhn-valid 12-digit run", () => {

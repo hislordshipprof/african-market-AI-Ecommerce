@@ -110,6 +110,20 @@ function keepOpaque(value: unknown): unknown {
   return value;
 }
 
+/**
+ * A card number used as a property name is renamed. A second one in the same
+ * object gets " (2)", then " (3)", so the digits are not kept to tell them apart.
+ * A name that is not a card number stays as it was written.
+ */
+function scrubbedKey(key: string, used: Record<string, unknown>): string {
+  const scrubbed = scrubCardNumbers(key);
+  const name = scrubbed.removed > 0 ? scrubbed.text : key;
+  if (!Object.prototype.hasOwnProperty.call(used, name)) return name;
+  let n = 2;
+  while (Object.prototype.hasOwnProperty.call(used, `${name} (${n})`)) n += 1;
+  return `${name} (${n})`;
+}
+
 /** Card numbers in customer-visible or audited strings. Scalar opaque ids stay as they are. */
 export function scrubKnownStrings(value: unknown): unknown {
   if (typeof value === "string") return scrubCardNumbers(value).text;
@@ -121,7 +135,8 @@ export function scrubKnownStrings(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
-    out[key] = OPAQUE_KEYS.has(key) ? keepOpaque(child) : scrubKnownStrings(child);
+    const name = scrubbedKey(key, out);
+    out[name] = OPAQUE_KEYS.has(key) ? keepOpaque(child) : scrubKnownStrings(child);
   }
   return out;
 }
