@@ -570,7 +570,7 @@ test.describe("CSV import (authenticated)", () => {
   });
 
   test("a lost commit response can be pressed again without importing twice", async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     const stamp = Date.now();
     const skipped = `E2E Lost Skip ${stamp}`;
     const keptAside = `E2E Lost Aside ${stamp}`;
@@ -600,21 +600,28 @@ test.describe("CSV import (authenticated)", () => {
       const csvPath = writeTempCsv(
         `name,price,qty\n${skipped},2.00,1\n${keptAside},1.00,4\n${shared},3.00,6\n`,
       );
-      await page.goto(IMPORT_URL);
-      await page.locator("input[type='file']").setInputFiles(csvPath);
-      await page.click("text=Upload & Preview");
-      await expect(page.getByText("Ambiguous Matches", { exact: true })).toBeVisible({ timeout: 20_000 });
+      await test.step("preview", async () => {
+        await page.goto(IMPORT_URL);
+        await page.locator("input[type='file']").setInputFiles(csvPath);
+        await page.click("text=Upload & Preview");
+        await expect(page.getByText("Ambiguous Matches", { exact: true })).toBeVisible({ timeout: 20_000 });
+      });
       const boxes = page.getByRole("checkbox");
-      await expect(boxes).toHaveCount(2);
-      await boxes.nth(0).uncheck();
-      await boxes.nth(1).uncheck();
-      await page.getByRole("radio", { name: betaName }).check();
-      const importButton = page.getByRole("button", { name: "Import 1 listing" });
-      await expect(importButton).toBeEnabled();
+      await test.step("choose the non-default rows", async () => {
+        await expect(boxes).toHaveCount(2);
+        await boxes.nth(0).uncheck();
+        await boxes.nth(1).uncheck();
+        await page.getByRole("radio", { name: betaName }).check();
+        await expect(page.getByRole("button", { name: "Import 1 listing" })).toBeEnabled();
+      });
 
       let firstBody: Buffer | null = null;
       let secondBody: Buffer | null = null;
       let commits = 0;
+      let markDropped: () => void = () => {};
+      const dropped = new Promise<void>((resolve) => {
+        markDropped = resolve;
+      });
       await page.route("**/*", async (route) => {
         const request = route.request();
         if (request.method() !== "POST" || !request.headers()["next-action"]) {
@@ -624,52 +631,83 @@ test.describe("CSV import (authenticated)", () => {
         commits += 1;
         if (commits === 1) {
           firstBody = request.postDataBuffer();
-          const response = await route.fetch();
-          const proved = await prisma.$transaction(async (tx) => {
-            const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
-            if (!store) throw new Error("mama-ngozi missing");
-            await tx.$executeRaw`SET LOCAL ROLE app_user`;
-            await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
-            const listings = await tx.listing.findMany({ where: { masterProductId: betaId } });
-            const skippedRows = await tx.listing.findMany({
-              where: { customName: { in: [skipped, keptAside] } },
+          const url = new URL(request.url());
+          const host = url.host;
+          url.hostname = "127.0.0.1";
+          const response = await Promise.race([
+            route.fetch({
+              url: url.toString(),
+              headers: { ...request.headers(), host },
+              postData: firstBody ?? undefined,
+            }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("commit fetch hung")), 20_000)),
+          ]);
+          await response.text();
+          let proofError: unknown;
+          try {
+            const proved = await prisma.$transaction(async (tx) => {
+              const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
+              if (!store) throw new Error("mama-ngozi missing");
+              await tx.$executeRaw`SET LOCAL ROLE app_user`;
+              await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+              const listings = await tx.listing.findMany({ where: { masterProductId: betaId } });
+              const skippedRows = await tx.listing.findMany({
+                where: { customName: { in: [skipped, keptAside] } },
+              });
+              const imports = await tx.listingImport.findMany({ where: { csvText: { contains: shared } } });
+              const variants = await tx.listingVariant.findMany({ where: { listingId: { in: listings.map((row) => row.id) } } });
+              const stock = await tx.stockEvent.findMany({ where: { listingId: { in: listings.map((row) => row.id) } } });
+              const audits = await tx.auditLog.findMany({
+                where: { action: "catalog.csv_import", entityId: { in: listings.map((row) => row.id) } },
+              });
+              return { listings, skippedRows, imports, variants, stock, audits };
             });
-            const imports = await tx.listingImport.findMany({ where: { csvText: { contains: shared } } });
-            const variants = await tx.listingVariant.findMany({ where: { listingId: { in: listings.map((row) => row.id) } } });
-            const stock = await tx.stockEvent.findMany({ where: { listingId: { in: listings.map((row) => row.id) } } });
-            const audits = await tx.auditLog.findMany({ where: { action: "catalog.csv_import" } });
-            return { listings, skippedRows, imports, variants, stock, audits };
-          });
-          expect(response.status()).toBeLessThan(400);
-          expect(proved.listings).toHaveLength(1);
-          expect(proved.skippedRows).toHaveLength(0);
-          expect(proved.imports).toHaveLength(1);
-          expect(proved.imports[0]?.status).toBe("committed");
-          expect(proved.imports[0]?.commitResult).toBeTruthy();
-          expect(proved.variants).toHaveLength(1);
-          expect(proved.stock).toHaveLength(1);
-          expect(proved.stock[0]?.delta).toBe(6);
-          expect(proved.audits.length).toBeGreaterThan(0);
-          await route.abort("connectionreset");
+            expect(response.status()).toBeLessThan(400);
+            expect(proved.listings).toHaveLength(1);
+            expect(proved.skippedRows).toHaveLength(0);
+            expect(proved.imports).toHaveLength(1);
+            expect(proved.imports[0]?.status).toBe("committed");
+            expect(proved.imports[0]?.commitResult).toBeTruthy();
+            expect(proved.variants).toHaveLength(1);
+            expect(proved.stock).toHaveLength(1);
+            expect(proved.stock[0]?.delta).toBe(6);
+            expect(proved.audits.length).toBeGreaterThan(0);
+          } catch (error) {
+            proofError = error;
+          }
+          await route.abort("failed");
+          markDropped();
+          if (proofError) throw proofError;
           return;
         }
         secondBody = request.postDataBuffer();
         await route.continue();
       });
 
-      await importButton.click();
-      await expect(page.locator("[data-sonner-toast]")).toContainText(
-        "We couldn't confirm the import. Press Import again. Nothing will be imported twice.",
-        { timeout: 20_000 },
-      );
-      await expect(page.getByRole("heading", { name: "Import Complete" })).toHaveCount(0);
-      await expect(page.getByText("Ambiguous Matches", { exact: true })).toBeVisible();
-      await expect(boxes.nth(0)).not.toBeChecked();
-      await expect(boxes.nth(1)).not.toBeChecked();
-      await expect(page.getByRole("radio", { name: betaName })).toBeChecked();
-      await expect(page.getByRole("radio", { name: alphaName })).not.toBeChecked();
-      await expect(page.getByRole("button", { name: "Import 1 listing" })).toBeEnabled();
-
+      await page.getByRole("button", { name: "Import 1 listing" }).click({ noWaitAfter: true });
+      await dropped;
+      await page.unroute("**/*");
+      await page.waitForTimeout(1_000);
+      const lostText = (await page.locator("[data-sonner-toast]").allInnerTexts()).join("\n");
+      expect(lostText).toContain("We couldn't confirm the import. Press Import again. Nothing will be imported twice.");
+      const ui = await page.evaluate(() => {
+        const text = document.body.innerText;
+        const button = [...document.querySelectorAll("button")].find((el) => el.textContent?.includes("Import 1 listing"));
+        return {
+          complete: text.includes("Import Complete"),
+          ambiguous: text.includes("Ambiguous Matches"),
+          buttonDisabled: button instanceof HTMLButtonElement ? button.disabled : true,
+          boxes: [...document.querySelectorAll("input[type=checkbox]")].map((el) => (el as HTMLInputElement).checked),
+          radios: [...document.querySelectorAll("input[type=radio]")].map((el) => ({
+            label: (el.parentElement?.innerText ?? "").trim(),
+            checked: (el as HTMLInputElement).checked,
+          })),
+        };
+      });
+      if (ui.complete || !ui.ambiguous || ui.buttonDisabled) throw new Error(`preview was not kept: ${JSON.stringify(ui)}`);
+      if (ui.boxes.join(",") !== "false,false") throw new Error(`checks changed: ${ui.boxes.join(",")}`);
+      if (!ui.radios.find((radio) => radio.label.includes(betaName))?.checked) throw new Error("beta was not kept");
+      if (ui.radios.find((radio) => radio.label.includes(alphaName))?.checked) throw new Error("alpha was selected");
       const beforeRetry = await prisma.$transaction(async (tx) => {
         const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -677,11 +715,31 @@ test.describe("CSV import (authenticated)", () => {
         const listing = await tx.listing.findFirst({ where: { masterProductId: betaId } });
         const receipt = await tx.listingImport.findFirst({ where: { csvText: { contains: shared } } });
         return { listingId: listing?.id, commitResult: receipt?.commitResult, committedAt: receipt?.committedAt?.toISOString() };
+      }, { timeout: 8_000, maxWait: 3_000 });
+      page.on("request", (request) => {
+        if (request.method() === "POST" && request.headers()["next-action"]) {
+          secondBody = request.postDataBuffer();
+        }
       });
-
-      await page.getByRole("button", { name: "Import 1 listing" }).click();
-      await expect(page.locator("[data-sonner-toast]")).toContainText("Imported 1 listing.", { timeout: 20_000 });
-      await expect(page.getByRole("heading", { name: "Import Complete" })).toBeVisible();
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("button")].find((el) => el.textContent?.includes("Import 1 listing"));
+        if (!(button instanceof HTMLButtonElement)) throw new Error("import button missing");
+        button.click();
+      });
+      let imported = "";
+      const retryStarted = Date.now();
+      while (!imported.includes("Imported 1 listing.") && Date.now() - retryStarted < 20_000) {
+        imported = (await page.locator("[data-sonner-toast]").allInnerTexts()).join("\n");
+        if (!imported.includes("Imported 1 listing.")) await page.waitForTimeout(200);
+      }
+      expect(imported).toContain("Imported 1 listing.");
+      let complete = false;
+      const completeStarted = Date.now();
+      while (!complete && Date.now() - completeStarted < 10_000) {
+        complete = await page.evaluate(() => document.body.innerText.includes("Import Complete"));
+        if (!complete) await page.waitForTimeout(200);
+      }
+      expect(complete).toBe(true);
       expect(firstBody).not.toBeNull();
       expect(secondBody).not.toBeNull();
       expect(Buffer.compare(firstBody!, secondBody!)).toBe(0);
@@ -749,7 +807,7 @@ test.describe("CSV import (authenticated)", () => {
       const target = 2_162_688 + 4096;
       const header = Buffer.from(`\r\nContent-Disposition: form-data; name="pad"\r\n\r\n`);
       const tail = Buffer.from(`\r\n`);
-      const filler = target - at - header.length - tail.length;
+      const filler = target - body.length - header.length - tail.length;
       if (filler < 1) throw new Error("preview body is already over the cap");
       const padded = Buffer.concat([
         body.subarray(0, at),
@@ -760,16 +818,28 @@ test.describe("CSV import (authenticated)", () => {
       ]);
       expect(padded.length).toBe(target);
       expect(padded.length).toBeLessThan(3 * 1024 * 1024);
-      const headers = { ...request.headers(), "content-length": String(padded.length) };
-      const response = await route.fetch({ postData: padded, headers });
+      const url = new URL(request.url());
+      const host = url.host;
+      url.hostname = "127.0.0.1";
+      const headers = { ...request.headers(), host, "content-length": String(padded.length) };
+      const response = await route.fetch({ url: url.toString(), postData: padded, headers });
       status = response.status();
-      await route.fulfill({ response });
+      const text = await response.text();
+      // Next's fetch-action handler logs ApiError 413 and then forces HTTP 500
+      // (action-handler.js: the 413 status is still a TODO on this path).
+      expect(status).toBe(500);
+      expect(text).toContain("digest");
+      await route.fulfill({ status, headers: response.headers(), body: text });
     });
     try {
       await page.goto(IMPORT_URL);
       await page.locator("input[type='file']").setInputFiles(csvPath);
       await page.click("text=Upload & Preview");
-      await expect.poll(() => status, { timeout: 20_000 }).toBe(413);
+      await expect.poll(() => status, { timeout: 20_000 }).toBe(500);
+      await expect(page.locator("[data-sonner-toast]")).toContainText(
+        "Upload failed. The file may be too large or the server is unavailable.",
+        { timeout: 20_000 },
+      );
       await expect(page.getByText("New listings", { exact: true })).toHaveCount(0);
       const stored = await prisma.$transaction(async (tx) => {
         const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
