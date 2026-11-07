@@ -89,7 +89,10 @@ The AI that shops with a customer: finds items (with photos), builds the cart, c
 _Avoid_: AI shopper, chatbot
 
 **Choice chips**:
-The tappable product options the Shopper assistant shows when more than one item fits. Tapping a chip sends that product's name and pack back as the customer's pick.
+The tappable product options the Shopper assistant shows when more than one item fits. The server also draws them when a reply names two or more products from a single search and the model did not offer a choice. Tapping a chip sends that product's name and pack back as the customer's pick.
+
+**Acceptance-led message**:
+A customer message that starts, as a whole word, with yes, ok, okay, sure, go ahead, add those, or add what you suggested. On that turn the Shopper assistant adds a product only when the previous reply or the customer's own message named it.
 
 **Confirm card**:
 The final card in the Shopper assistant's checkout, drawn by the server from a saved checkout snapshot: items, fulfillment, fees, hold amount and card. Tapping its Place order button is the only way an assistant order is placed.

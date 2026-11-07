@@ -280,6 +280,39 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(JSON.stringify(action?.output)).not.toContain("subtotalCents");
   });
 
+  it("an accepted add naming a store B product is refused whole and writes in neither store", async () => {
+    const talk = await freshCart();
+    const beforeB = await storeScoped(storeB).cartLine.count({ where: { variantId: variantB } });
+    const result = await addToCart(ctx({
+      cartId: talk.cartId,
+      conversationId: talk.conversationId,
+      acceptance: {
+        led: true,
+        customerText: "yes",
+        lastReplyText: "Egusi and Foreign Rice",
+        lastReplyEmpty: false,
+      },
+    }), {
+      items: [
+        { variant_id: variantA, qty: 1 },
+        { variant_id: variantB, qty: 1 },
+      ],
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      code: "not_shown",
+      message: "Nothing was added. Tell me which items you want, and I'll add them.",
+    });
+    expect(await storeScoped(storeA).cartLine.count({ where: { cartId: talk.cartId } })).toBe(0);
+    expect(await storeScoped(storeB).cartLine.count({ where: { variantId: variantB } })).toBe(beforeB);
+    const row = await storeScoped(storeA).aiAction.findFirst({
+      where: { conversationId: talk.conversationId, tool: "add_to_cart", ok: false },
+    });
+    expect(row?.output).toMatchObject({ ok: false, code: "not_shown" });
+    expect(await storeScoped(storeB).aiAction.findFirst({ where: { id: row?.id ?? "" } })).toBeNull();
+    expect(await storeScoped(storeB).cartLine.findFirst({ where: { variantId: variantB } })).toBeNull();
+  });
+
   it("add_to_cart returns the line total, the added total and the cart subtotal after the write", async () => {
     const cart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
     const decoy = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;

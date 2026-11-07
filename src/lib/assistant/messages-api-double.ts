@@ -287,6 +287,13 @@ function judgeToolHistory(body: Record<string, unknown>): MessagesVerdict | null
             message: "tool_use requires id and name",
           };
         }
+        if (!/^[a-zA-Z0-9_-]+$/.test(block.id) || block.id.startsWith("srvtoolu_")) {
+          return {
+            status: 400,
+            errorType: "invalid_request_error",
+            message: "tool_use id must match ^[a-zA-Z0-9_-]+$",
+          };
+        }
         if (seen.has(block.id)) {
           return {
             status: 400,
