@@ -116,6 +116,10 @@ describe("toThumbnailUrl", () => {
 });
 
 describe("failure causes", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("surfaces the upload error and a sharp conversion error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse()));
     const boom = new Error("denied");
@@ -126,6 +130,5 @@ describe("failure causes", () => {
     sharpPipeline.toBuffer.mockRejectedValueOnce(bad);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse()));
     expect(await downloadAndUploadImage("https://x.test/a", "p1", { sharp: true })).toEqual({ ok: false, reason: "convert", cause: bad });
-    vi.unstubAllGlobals();
   });
 });

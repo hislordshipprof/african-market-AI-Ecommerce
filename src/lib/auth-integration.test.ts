@@ -5,7 +5,9 @@ vi.hoisted(() => {
 });
 import { auth } from "./auth";
 import { authPrisma, storeScoped } from "./db";
+import { Client } from "pg";
 import { findOrCreateCustomer } from "./customer-auth";
+import { resolveDirectUrl } from "./env";
 import {
   getTestSentEmails,
   clearTestSentEmails,
@@ -474,4 +476,114 @@ describe("auth integration (real DB, app_runtime)", () => {
       });
     }
   });
+
+  it(
+    "concurrent first customer syncs recover a real uniqueness conflict and remain isolated by store",
+    async () => {
+      const stamp = crypto.randomUUID().slice(0, 8);
+      const email = `integ-race-${stamp}@test.example`;
+      const storeA = crypto.randomUUID();
+      const storeB = crypto.randomUUID();
+      const slugA = `integ-race-a-${stamp}`;
+      const slugB = `integ-race-b-${stamp}`;
+      const signedUp = await authPost("/sign-up/email", {
+        email,
+        password: "IntegPass-123!",
+        name: "Race Customer",
+      });
+      expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+      const signedBody = (await signedUp.json()) as {
+        user: { id: string; name: string; email: string };
+      };
+      const user = {
+        id: signedBody.user.id,
+        name: signedBody.user.name,
+        email: signedBody.user.email,
+      };
+      const client = new Client({ connectionString: resolveDirectUrl() });
+      let released = false;
+      const release = async () => {
+        if (released) return;
+        released = true;
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          // The lock transaction is already closed.
+        }
+        try {
+          await client.end();
+        } catch {
+          // The client is already closed.
+        }
+      };
+
+      try {
+        await authPrisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SET LOCAL ROLE app_user`;
+          await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+          await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeA}, 'Race A', ${slugA}, 'active', now())`;
+          await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeB}, 'Race B', ${slugB}, 'active', now())`;
+        });
+        const atStoreB = await findOrCreateCustomer(storeB, user);
+        await client.connect();
+        await client.query("BEGIN");
+        await client.query("LOCK TABLE customers IN SHARE MODE");
+        let waiting = 0;
+        const pending = Promise.all([
+          findOrCreateCustomer(storeA, user),
+          findOrCreateCustomer(storeA, user),
+        ]);
+        const deadline = Date.now() + 8_000;
+        while (Date.now() < deadline) {
+          const locks = await client.query<{ n: number }>(
+            "SELECT count(*)::int AS n FROM pg_locks WHERE relation = 'public.customers'::regclass AND NOT granted",
+          );
+          waiting = Number(locks.rows[0]?.n ?? 0);
+          if (waiting >= 2) break;
+          await new Promise((resolve) => setTimeout(resolve, 40));
+        }
+        await client.query("COMMIT");
+        await client.end();
+        released = true;
+        const [left, right] = await pending;
+        expect(waiting, "both first syncs blocked on insert").toBeGreaterThanOrEqual(2);
+        expect(left.id).toBe(right.id);
+        expect(left.id).not.toBe(atStoreB.id);
+        expect(left).toMatchObject({ name: "Race Customer", email });
+        expect(right).toMatchObject({ name: "Race Customer", email });
+
+        const rowsA = await storeScoped(storeA).customer.findMany({ where: { userId: user.id } });
+        const rowsB = await storeScoped(storeB).customer.findMany({ where: { userId: user.id } });
+        expect(rowsA).toHaveLength(1);
+        expect(rowsB).toHaveLength(1);
+        expect(rowsA[0].id).toBe(left.id);
+        expect(rowsB[0].id).toBe(atStoreB.id);
+        expect(rowsA[0].storeId).toBe(storeA);
+        expect(rowsB[0].storeId).toBe(storeB);
+
+        const crossRead = await storeScoped(storeA).customer.findMany({ where: { id: atStoreB.id } });
+        expect(crossRead).toHaveLength(0);
+        const crossWrite = await storeScoped(storeA).customer.updateMany({
+          where: { id: atStoreB.id },
+          data: { name: "cross-store write" },
+        });
+        expect(crossWrite.count).toBe(0);
+        const untouched = await storeScoped(storeB).customer.findFirst({ where: { id: atStoreB.id } });
+        expect(untouched?.name).toBe("Race Customer");
+      } finally {
+        await release();
+        await authPrisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SET LOCAL ROLE app_user`;
+          await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+          await tx.$executeRaw`DELETE FROM customers WHERE store_id IN (${storeA}, ${storeB})`;
+          await tx.$executeRaw`DELETE FROM sessions WHERE user_id = ${user.id}`;
+          await tx.$executeRaw`DELETE FROM accounts WHERE user_id = ${user.id}`;
+          await tx.$executeRaw`DELETE FROM verifications WHERE value LIKE ${"%" + email + "%"} OR value = ${user.id}`;
+          await tx.$executeRaw`DELETE FROM users WHERE id = ${user.id}`;
+          await tx.$executeRaw`DELETE FROM stores WHERE id IN (${storeA}, ${storeB})`;
+        });
+      }
+    },
+    30_000,
+  );
 });
