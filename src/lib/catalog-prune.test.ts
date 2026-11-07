@@ -951,7 +951,8 @@ describe("lane env filter script", () => {
       writeFileSync(file, body);
       chmodSync(file, 0o755);
     };
-    stub("psql", "#!/bin/bash\ncat >/dev/null\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
+    // psql -c does not read stdin. cat blocks here: execFileSync holds the stdin pipe open until the child exits.
+    stub("psql", "#!/bin/bash\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
     stub("pg_ctl", "#!/bin/bash\nexit 0\n");
     stub("pg_isready", "#!/bin/bash\nexit 0\n");
     stub("npx", `#!/bin/bash
@@ -979,6 +980,7 @@ exit 0
       "",
     ].join("\r\n"));
     execFileSync("bash", ["scripts/lane-db.sh", "zzorch", bashPath(envFile)], {
+      input: "",
       env: {
         ...process.env,
         PGBIN: bashPath(bin),
@@ -1003,7 +1005,8 @@ exit 0
     expect(child).not.toContain("secret=present");
     expect(child).not.toContain(SECRET);
     rmSync(dir, { recursive: true, force: true });
-  });
+    // Above the 15s default: a stubbed lane-db.sh is many process spawns. 60s stays under the worker heartbeat.
+  }, 60_000);
 
   it("build resume and continue run the real scripts and keep secrets out of every child", () => {
     const checkoutSession = path.join(process.cwd(), ".builder", "session-225.txt");
@@ -1052,7 +1055,8 @@ if [ "$1" = "rev-parse" ]; then printf '%s\\n' "${bashPath(root)}"; exit 0; fi
 printf 'git %s\\n' "$*" >> "$HARNESS_LOG"
 exit 0
 `);
-    stub("psql", "#!/bin/bash\ncat >/dev/null\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
+    // Same stdin deadlock as the lane-db stub: do not cat the execFileSync pipe.
+    stub("psql", "#!/bin/bash\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
     stub("pg_ctl", "#!/bin/bash\nexit 0\n");
     stub("pg_isready", "#!/bin/bash\nexit 0\n");
     stub("npx", `${childLine}exit 0\n`.replace('"$1"', '"npx"'));
@@ -1116,6 +1120,7 @@ exit 0
     // "Timeout calling onTaskUpdate" even though every test passed, so keep this run short (the CI stub above).
     const stdout = execFileSync("bash", ["-c", script], {
       encoding: "utf8",
+      input: "",
       cwd: root,
       env: { ...process.env, AGENT_ENGINE: "claude" },
     });
