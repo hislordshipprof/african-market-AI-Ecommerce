@@ -4,6 +4,7 @@ import { deleteE2eListings } from "./cleanup-listings";
 import { findListingVariants, seedCartLine } from "./listing-db";
 import { storeOwnerSignIn } from "./store-owner-auth";
 
+const OWNER_EMAIL = "owner@mama-ngozi.test";
 const LISTINGS_URL = "/store-admin/listings?store=mama-ngozi";
 
 interface CreateListingOptions {
