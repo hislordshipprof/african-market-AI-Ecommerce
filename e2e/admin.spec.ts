@@ -612,6 +612,46 @@ test.describe("Catalog review (authenticated)", () => {
       await deleteReviewProduct(idA);
     }
   });
+
+  test("a second Save in the same turn writes one audit row", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("double");
+    const saved = reviewProductName("double-saved");
+    const idA = await insertReviewProduct(nameA);
+    let actionPosts = 0;
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(saved);
+
+      await page.route("**/*", async (route) => {
+        const request = route.request();
+        if (request.method() === "POST" && request.headers()["next-action"]) actionPosts += 1;
+        await route.continue();
+      });
+      await dialog.getByRole("button", { name: "Save" }).evaluate((button) => {
+        if (button instanceof HTMLElement) {
+          button.click();
+          button.click();
+        }
+      });
+      await expect(dialog).toBeHidden({ timeout: 10000 });
+      const audits = await withPlatformCatalog((tx) =>
+        tx.auditLog.count({ where: { entityId: idA, action: "catalog.edit" } }),
+      );
+      expect(actionPosts).toBe(1);
+      expect(audits).toBe(1);
+
+      await page.reload();
+      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await expect(reviewRow(page, saved)).toBeVisible({ timeout: 10000 });
+    } finally {
+      await page.unroute("**/*").catch(() => {});
+      await deleteReviewProduct(idA);
+    }
+  });
 });
 
 test.describe("2FA enrollment (unenrolled admin)", () => {

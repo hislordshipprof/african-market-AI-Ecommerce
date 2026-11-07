@@ -75,26 +75,34 @@ function EditModal({
   const [originCountries, setOriginCountries] = useState(product.originCountries ?? "");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const saveStarted = useRef(false);
 
   function handleSave() {
     // A click or Enter during the exit still reaches this control. Ignore it.
-    if (!open || isPending) return;
+    // isPending is still false for a second click in the same turn, so the ref
+    // closes that gap and is cleared when the update settles, including an error.
+    if (!open || isPending || saveStarted.current) return;
     if (!name.trim()) {
       setError("Name is required");
       return;
     }
+    saveStarted.current = true;
     startTransition(async () => {
-      const result = await updateReviewProduct(product.id, {
-        name: name.trim(),
-        description: description.trim(),
-        unit: unit.trim(),
-        storage: storage.trim(),
-        originCountries: originCountries.trim(),
-      });
-      if (result.error) {
-        setError(result.error);
-      } else {
-        onSaved();
+      try {
+        const result = await updateReviewProduct(product.id, {
+          name: name.trim(),
+          description: description.trim(),
+          unit: unit.trim(),
+          storage: storage.trim(),
+          originCountries: originCountries.trim(),
+        });
+        if (result.error) {
+          setError(result.error);
+        } else {
+          onSaved();
+        }
+      } finally {
+        saveStarted.current = false;
       }
     });
   }
