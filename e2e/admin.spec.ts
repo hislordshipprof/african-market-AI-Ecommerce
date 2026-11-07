@@ -268,6 +268,60 @@ function reviewRow(page: Page, name: string) {
   return page.locator("table tbody tr").filter({ hasText: name });
 }
 
+type ClosingTarget = { kind: "save" } | { kind: "edit"; name: string };
+
+/** Click Cancel, then click `target` in the same turn `data-closed` appears. */
+async function clickWhileDialogCloses(page: Page, target: ClosingTarget): Promise<void> {
+  await page.evaluate((wanted) => {
+    const popup = document.querySelector("[data-slot=dialog-content]");
+    if (!(popup instanceof HTMLElement)) {
+      throw new Error("edit dialog is not open");
+    }
+    const labelOf = (button: Element) => button.textContent?.trim() ?? "";
+    const findTarget = (): HTMLElement | null => {
+      if (wanted.kind === "save") {
+        const save = [...popup.querySelectorAll("button")].find((button) => labelOf(button) === "Save");
+        return save instanceof HTMLElement ? save : null;
+      }
+      const row = [...document.querySelectorAll("table tbody tr")].find((candidate) =>
+        candidate.textContent?.includes(wanted.name),
+      );
+      const edit = row
+        ? [...row.querySelectorAll("button")].find((button) => labelOf(button) === "Edit")
+        : undefined;
+      return edit instanceof HTMLElement ? edit : null;
+    };
+    return new Promise<void>((resolve, reject) => {
+      let timer = 0;
+      const observer = new MutationObserver(() => {
+        if (!popup.hasAttribute("data-closed")) return;
+        observer.disconnect();
+        window.clearTimeout(timer);
+        const button = findTarget();
+        if (!button) {
+          reject(new Error("closing-phase target is missing"));
+          return;
+        }
+        button.click();
+        resolve();
+      });
+      timer = window.setTimeout(() => {
+        observer.disconnect();
+        reject(new Error("data-closed never appeared"));
+      }, 2000);
+      observer.observe(popup, { attributes: true, attributeFilter: ["data-closed"] });
+      const cancel = [...popup.querySelectorAll("button")].find((button) => labelOf(button) === "Cancel");
+      if (!(cancel instanceof HTMLElement)) {
+        observer.disconnect();
+        window.clearTimeout(timer);
+        reject(new Error("Cancel is missing"));
+        return;
+      }
+      cancel.click();
+    });
+  }, target);
+}
+
 test.describe("Catalog review (authenticated)", () => {
   // Sign-in uses one shared admin. Keep the cases serial so two TOTP submits
   // do not overlap. Each case still targets a product it created.
@@ -372,6 +426,191 @@ test.describe("Catalog review (authenticated)", () => {
     await freshPage.goto(`${storeUrl()}/admin/catalog/review`);
     await expect(freshPage).toHaveURL(/\/admin\/sign-in/, { timeout: 10000 });
     await context.close();
+  });
+
+  test("edit dialog never carries one product's typed values to another", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("product-a");
+    const nameB = reviewProductName("product-b");
+    const savedB = reviewProductName("saved-b");
+    const typed = reviewProductName("typed");
+    const idA = await insertReviewProduct(nameA);
+    const idB = await insertReviewProduct(nameB);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      let dialog = page.getByRole("dialog", { name: "Edit product" });
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(typed);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(page.locator("[data-slot=dialog-content]")).toHaveCount(0);
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameA);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel("Name").fill("x".repeat(501));
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog.getByRole("alert")).toBeVisible();
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameA);
+      await expect(dialog.getByRole("alert")).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+
+      await reviewRow(page, nameB).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameB);
+      await dialog.getByLabel("Name").fill(savedB);
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog).toBeHidden({ timeout: 5000 });
+
+      await page.reload();
+      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await expect(reviewRow(page, savedB)).toBeVisible({ timeout: 10000 });
+      await expect(reviewRow(page, nameA)).toBeVisible();
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      dialog = page.getByRole("dialog", { name: "Edit product" });
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameA);
+    } finally {
+      await deleteReviewProduct(idA);
+      await deleteReviewProduct(idB);
+    }
+  });
+
+  test("reopening during the closing phase starts from saved values", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("closing-a");
+    const nameB = reviewProductName("closing-b");
+    const savedB = reviewProductName("closing-saved-b");
+    const typed = reviewProductName("closing-typed");
+    const idA = await insertReviewProduct(nameA);
+    const idB = await insertReviewProduct(nameB);
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(typed);
+      await clickWhileDialogCloses(page, { kind: "edit", name: nameB });
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameB);
+      await dialog.getByLabel("Name").fill(savedB);
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(dialog).toBeHidden({ timeout: 5000 });
+
+      await page.reload();
+      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await expect(reviewRow(page, savedB)).toBeVisible({ timeout: 10000 });
+      await expect(reviewRow(page, nameA)).toBeVisible();
+      await expect(reviewRow(page, typed)).toHaveCount(0);
+
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(typed);
+      await clickWhileDialogCloses(page, { kind: "edit", name: nameA });
+      await expect(dialog.getByLabel("Name")).toHaveValue(nameA);
+    } finally {
+      await deleteReviewProduct(idA);
+      await deleteReviewProduct(idB);
+    }
+  });
+
+  test("a cancelled edit cannot be saved during the closing phase", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("cancel-save");
+    const typed = reviewProductName("cancel-typed");
+    const idA = await insertReviewProduct(nameA);
+    let actionPosts = 0;
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(typed);
+
+      await page.route("**/*", async (route) => {
+        const request = route.request();
+        if (request.method() === "POST" && request.headers()["next-action"]) actionPosts += 1;
+        await route.continue();
+      });
+      await clickWhileDialogCloses(page, { kind: "save" });
+      await expect(page.locator("[data-slot=dialog-content]")).toHaveCount(0);
+      expect(actionPosts).toBe(0);
+
+      await page.reload();
+      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await expect(reviewRow(page, nameA)).toBeVisible({ timeout: 10000 });
+      await expect(reviewRow(page, typed)).toHaveCount(0);
+    } finally {
+      await page.unroute("**/*").catch(() => {});
+      await deleteReviewProduct(idA);
+    }
+  });
+
+  test("a pending save cannot be dismissed", async ({ page }) => {
+    test.setTimeout(90_000);
+    const nameA = reviewProductName("pending");
+    const saved = reviewProductName("pending-saved");
+    const idA = await insertReviewProduct(nameA);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    try {
+      await page.goto("/admin/catalog/review?status=needs_review");
+      const dialog = page.getByRole("dialog", { name: "Edit product" });
+      await reviewRow(page, nameA).getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await dialog.getByLabel("Name").fill(saved);
+
+      await page.route("**/*", async (route) => {
+        const request = route.request();
+        if (!held && request.method() === "POST" && request.headers()["next-action"]) {
+          held = true;
+          await gate;
+        }
+        try {
+          await route.continue();
+        } catch {
+          /* the page closed the request */
+        }
+      });
+      // Playwright's click waits until the button is enabled, and the gate keeps Save and Cancel pending.
+      const clickControl = (name: string) =>
+        dialog.getByRole("button", { name }).evaluate((button) => {
+          if (button instanceof HTMLElement) button.click();
+        });
+      await clickControl("Save");
+      await expect.poll(() => held, { timeout: 10000 }).toBe(true);
+      await expect(dialog.getByRole("button", { name: "Saving…" })).toBeVisible();
+
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeVisible();
+      await page.mouse.click(8, 8);
+      await expect(dialog).toBeVisible();
+      await clickControl("Cancel");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByLabel("Name")).toHaveValue(saved);
+
+      release();
+      await expect(dialog).toBeHidden({ timeout: 10000 });
+      await page.reload();
+      await expect(page.locator("h1")).toHaveText("Catalog review", { timeout: 15000 });
+      await expect(reviewRow(page, saved)).toBeVisible({ timeout: 10000 });
+    } finally {
+      release();
+      await page.unroute("**/*").catch(() => {});
+      await deleteReviewProduct(idA);
+    }
   });
 });
 
