@@ -2768,7 +2768,13 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       expectedKey: E2E_FAKE_ANTHROPIC_KEY,
       steps: [
         { kind: "tool", toolName: "search_catalog", toolInput: { query: "pepper" } },
-        { kind: "text", text: "Scotch Bonnet Pepper and Cameroon Pepper." },
+        {
+          kind: "tool",
+          toolName: "get_cart_summary",
+          toolInput: {},
+          text: "Scotch Bonnet Pepper and Cameroon Pepper.",
+        },
+        { kind: "text", text: "Which would you like?" },
         {
           kind: "tool",
           toolName: "add_to_cart",
@@ -2803,22 +2809,23 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     };
     const asked = await send("pepper-ask", "I need pepper");
     expect(asked.status).toBe(200);
-    expect(fake.requests).toHaveLength(2);
-    expect(asked.body).toContain("\"toolName\":\"offer_choices\"");
-    expect(asked.body).toContain(scotchVariant);
-    expect(asked.body).toContain(cameroonVariant);
+    expect(fake.requests).toHaveLength(3);
+    expect(asked.body).toContain("Scotch Bonnet Pepper and Cameroon Pepper.");
+    expect(asked.body).toContain("Which would you like?");
+    const streamed = choiceVariantIds(asked.body);
+    expect(streamed).toHaveLength(2);
+    expect(streamed).toEqual(expect.arrayContaining([scotchVariant, cameroonVariant]));
     const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
     const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId } });
-    const stored = JSON.stringify(conversation?.messages ?? null);
-    expect(stored).toContain("tool-offer_choices");
-    expect(stored).toContain(scotchVariant);
-    expect(stored).toContain(cameroonVariant);
+    const saved = choiceVariantIds(JSON.stringify(conversation?.messages ?? null));
+    expect(saved).toHaveLength(2);
+    expect(saved).toEqual(expect.arrayContaining([scotchVariant, cameroonVariant]));
 
     const yes = await send("pepper-yes", "yes");
     expect(yes.status).toBe(200);
     expect(yes.body).toContain("not_shown");
     expect(await storeScoped(storeId).cartLine.count({ where: { cartId } })).toBe(0);
-    const follow = JSON.stringify(fake.requests[2]?.body ?? null);
+    const follow = JSON.stringify(fake.requests[3]?.body ?? null);
     expect(follow).toContain("tool_use");
     expect(follow).toContain("tool_result");
     expect(follow).toContain("offer_choices");
@@ -2862,6 +2869,59 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(reserved).toMatchObject({ status: 400, message: "tool_use id must match ^[a-zA-Z0-9_-]+$" });
   }, 60_000);
 });
+
+function choiceVariantIds(raw: string): string[] {
+  const chunks: Array<Record<string, unknown>> = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) continue;
+    const payload = trimmed.slice("data:".length).trim();
+    if (!payload || payload === "[DONE]") continue;
+    try {
+      const json: unknown = JSON.parse(payload);
+      if (json && typeof json === "object" && !Array.isArray(json)) chunks.push(json as Record<string, unknown>);
+    } catch {
+      continue;
+    }
+  }
+  if (chunks.length > 0) {
+    const ids = new Set(
+      chunks
+        .filter((chunk) => chunk.type === "tool-input-available" && chunk.toolName === "offer_choices" && typeof chunk.toolCallId === "string")
+        .map((chunk) => chunk.toolCallId as string),
+    );
+    const output = chunks.find((chunk) => chunk.type === "tool-output-available" && ids.has(String(chunk.toolCallId)));
+    return variantIdsOf(output?.output);
+  }
+  try {
+    return variantIdsOfStored(JSON.parse(raw) as unknown);
+  } catch {
+    return [];
+  }
+}
+
+function variantIdsOf(output: unknown): string[] {
+  if (!output || typeof output !== "object" || !Array.isArray((output as { options?: unknown }).options)) return [];
+  return (output as { options: Array<{ variantId?: unknown }> }).options.flatMap((option) =>
+    typeof option.variantId === "string" ? [option.variantId] : [],
+  );
+}
+
+function variantIdsOfStored(messages: unknown): string[] {
+  if (!Array.isArray(messages)) return [];
+  for (const message of messages) {
+    const parts = (message as { parts?: unknown[] }).parts;
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      if (!part || typeof part !== "object") continue;
+      const record = part as { type?: unknown; output?: unknown };
+      if (record.type !== "tool-offer_choices") continue;
+      const ids = variantIdsOf(record.output);
+      if (ids.length > 0 || (record.output && typeof record.output === "object" && "options" in record.output)) return ids;
+    }
+  }
+  return [];
+}
 
 function padJpeg(jpeg: Buffer, target: number): Buffer {
   const extra = target - jpeg.length;

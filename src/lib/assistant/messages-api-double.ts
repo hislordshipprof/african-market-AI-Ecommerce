@@ -487,16 +487,25 @@ function eventsFor(step: FakeAnthropicStep, model: string, toolId = "toolu_fake_
   if (step.kind === "tool") {
     const name = step.toolName ?? "ping";
     const input = JSON.stringify(step.toolInput ?? {});
+    const preamble = step.text
+      ? [
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: step.text } },
+          { type: "content_block_stop", index: 0 },
+        ]
+      : [];
+    const toolIndex = step.text ? 1 : 0;
     return [
       start,
       { type: "ping" },
+      ...preamble,
       {
         type: "content_block_start",
-        index: 0,
+        index: toolIndex,
         content_block: { type: "tool_use", id: toolId, name },
       },
-      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: input } },
-      { type: "content_block_stop", index: 0 },
+      { type: "content_block_delta", index: toolIndex, delta: { type: "input_json_delta", partial_json: input } },
+      { type: "content_block_stop", index: toolIndex },
       {
         type: "message_delta",
         delta: { stop_reason: "tool_use", stop_sequence: null },

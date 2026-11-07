@@ -329,12 +329,34 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       },
       execute: async ({ writer }) => {
         const reader = result.toUIMessageStream({ onError: () => FIXED_ERROR }).getReader();
+        const replyParts: string[] = [];
+        let openReply = "";
+        const takeReply = (chunk: unknown) => {
+          if (!chunk || typeof chunk !== "object") return;
+          const part = chunk as { type?: unknown; delta?: unknown };
+          if (part.type === "text-start") {
+            if (openReply) replyParts.push(openReply);
+            openReply = "";
+            return;
+          }
+          if (part.type === "text-delta" && typeof part.delta === "string") {
+            openReply += part.delta;
+            return;
+          }
+          if (part.type === "text-end" && openReply) {
+            replyParts.push(openReply);
+            openReply = "";
+          }
+        };
         while (true) {
           const next = await reader.read();
           if (next.done) break;
           const outgoing = scrubOutboundChunk(next.value);
-          if (outgoing) writer.write(outgoing as typeof next.value);
+          if (!outgoing) continue;
+          takeReply(outgoing);
+          writer.write(outgoing as typeof next.value);
         }
+        if (openReply) replyParts.push(openReply);
         const steps = await Promise.resolve(result.steps).catch(() => []);
         const last = steps.at(-1);
         if (steps.length >= 8 && last?.finishReason === "tool-calls") {
@@ -343,7 +365,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
           writer.write({ type: "text-end", id: "step-limit" });
           writer.write({ type: "data-step-limit", id: "step-limit", data: { text: STEP_LIMIT_TEXT } });
         } else if (await turnFinishedNormally(result)) {
-          const replyText = await Promise.resolve(result.text).catch(() => "");
+          const replyText = replyParts.join("\n");
           await writeServerChoices({
             steps,
             replyText,
