@@ -1,16 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Client } from "pg";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { storeScoped } from "../../db";
 import { customerCancelOrder, getStoreOrders } from "../../order/service";
-import { fakeCheckoutIntentCount, getCheckoutPayments, resetFakeCheckoutPayments } from "../../stripe/checkout-payments";
-import { placeOrder } from "../../checkout/service";
+import { fakeCheckoutIntentCount, fakeLastCancelKey, failNextFakePaymentCancel, getCheckoutPayments, resetFakeCheckoutPayments } from "../../stripe/checkout-payments";
+import { createPaymentIntent, placeOrder } from "../../checkout/service";
+import { checkoutTestHooks } from "../../checkout/test-hooks";
 import { confirmCheckout, mintCheckoutToken } from "./confirm";
 import { prepareCheckout, saveGuestContact, setFulfillment } from "./prepare";
 import { offerPickupSlots } from "./slots";
 
 const hasDb = !!process.env.DATABASE_URL;
+
+function openNow(): Date {
+  return new Date("2026-11-02T15:00:00.000Z");
+}
 
 describe.skipIf(!hasDb)("assistant confirm", () => {
   let raw: PrismaClient;
@@ -19,6 +25,7 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
   let conversationId = "";
 
   beforeAll(async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-02T15:00:00.000Z"), toFake: ["Date"] });
     process.env.E2E_FAKE_STRIPE = "1";
     process.env.ASSISTANT_CHAT_ENABLED = "1";
     delete process.env.VERCEL;
@@ -73,6 +80,7 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
   });
 
   afterAll(async () => {
+    vi.useRealTimers();
     if (!storeId) return;
     await storeScoped(storeId).orderLine.deleteMany({});
     await storeScoped(storeId).auditLog.deleteMany({});
@@ -93,7 +101,7 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
   });
 
   it("concurrent and repeated confirms of one token place one order and one hold", async () => {
-    const now = new Date();
+    const now = openNow();
     const offer = offerPickupSlots({
       now,
       timeZone: "America/New_York",
@@ -144,7 +152,7 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
   });
 
   it("a price change retires the hold, and placing without the attempt id still keeps the cancel window", async () => {
-    const now = new Date();
+    const now = openNow();
     const hours = {
       sun: { open: "08:00", close: "22:00" },
       mon: { open: "08:00", close: "22:00" },
@@ -262,7 +270,7 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
   });
 
   it("overlapping reserves create one provider hold, and a bad phone or a new contact never starts one", async () => {
-    const now = new Date();
+    const now = openNow();
     const hours = {
       sun: { open: "08:00", close: "22:00" },
       mon: { open: "08:00", close: "22:00" },
@@ -317,10 +325,236 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
       confirmCheckout({ ...ctx, token: minted!.token, phase: "reserve" }),
     ]);
     expect(fakeCheckoutIntentCount()).toBe(started + 1);
-    expect(first.ok && second.ok).toBe(true);
+    expect(first.ok && second.ok, JSON.stringify({ first, second })).toBe(true);
     if (!first.ok || first.kind !== "client_secret" || !second.ok || second.kind !== "client_secret") {
       throw new Error(JSON.stringify({ first, second }));
     }
     expect(first.paymentIntentId).toBe(second.paymentIntentId);
+  });
+
+  const hours = {
+    sun: { open: "08:00", close: "22:00" },
+    mon: { open: "08:00", close: "22:00" },
+    tue: { open: "08:00", close: "22:00" },
+    wed: { open: "08:00", close: "22:00" },
+    thu: { open: "08:00", close: "22:00" },
+    fri: { open: "08:00", close: "22:00" },
+    sat: { open: "08:00", close: "22:00" },
+  };
+  const fixedNow = openNow();
+
+  async function basket(name: string) {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const conversation = await storeScoped(storeId).aiConversation.create({
+      data: { storeId, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
+    });
+    const listing = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: name, price: 800, stockMode: "unlimited", confidence: 1, active: true, frozen: false, perishable: false },
+    });
+    const variant = await storeScoped(storeId).listingVariant.create({
+      data: { listingId: listing.id, label: "Each", price: 800, weightG: 100 },
+    });
+    await storeScoped(storeId).cartLine.create({ data: { storeId, cartId: cart.id, variantId: variant.id, qty: 1 } });
+    const ctx = { storeId, cartId: cart.id, conversationId: conversation.id, actorUserId: null, now: fixedNow };
+    const slot = offerPickupSlots({ now: fixedNow, timeZone: "America/New_York", hours, prepMinutes: 0, windowMinutes: 10, pickupEnabled: true }).slots.find((item) => item.id !== "asap");
+    if (!slot) throw new Error("no slot");
+    await saveGuestContact(ctx, { name: "Ada Frozen", email: "ada@example.com", phone: "2025550147" });
+    expect((await setFulfillment(ctx, slot.id)).ok).toBe(true);
+    const prepared = await prepareCheckout(ctx);
+    if (!prepared.ok || !prepared.attemptId) throw new Error(JSON.stringify(prepared));
+    const minted = await mintCheckoutToken({ storeId, cartId: cart.id, actorUserId: null, conversationId: conversation.id, attemptId: prepared.attemptId });
+    if (!minted) throw new Error("mint");
+    return { cart, conversation, ctx, prepared, minted, slot };
+  }
+
+  it("does not adopt a PaymentIntent the attempt did not create", async () => {
+    const { cart, ctx, minted, prepared } = await basket("Foreign");
+    const foreign = await getCheckoutPayments().createPaymentIntent({ amount: 500, currency: "usd" }, `foreign-${cart.id}`);
+    await storeScoped(storeId).cart.update({ where: { id: cart.id }, data: { paymentIntentId: foreign.id } });
+    const reserved = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    expect(reserved.ok, JSON.stringify(reserved)).toBe(true);
+    if (!reserved.ok || reserved.kind !== "client_secret") throw new Error("secret");
+    expect(reserved.paymentIntentId).not.toBe(foreign.id);
+    const attempt = await storeScoped(storeId).assistantCheckoutAttempt.findUnique({ where: { id: prepared.attemptId } });
+    expect(attempt?.paymentIntentId).toBe(reserved.paymentIntentId);
+    const released = await getCheckoutPayments().retrievePaymentIntent(foreign.id);
+    expect(released.status).toBe("canceled");
+  });
+
+  it("serializes contact saves so the version counts both writes", async () => {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const conversation = await storeScoped(storeId).aiConversation.create({
+      data: { storeId, cartId: cart.id, model: "claude-haiku-5-5", messages: [] },
+    });
+    const ctx = { storeId, cartId: cart.id, conversationId: conversation.id, actorUserId: null, now: fixedNow };
+    await Promise.all([
+      saveGuestContact(ctx, { name: "Ada One", email: "ada@example.com", phone: "2025550147" }),
+      saveGuestContact(ctx, { name: "Ada Two", email: "ada@example.com", phone: "2025550148" }),
+    ]);
+    const draft = await storeScoped(storeId).assistantCheckoutDraft.findUnique({ where: { conversationId: conversation.id } });
+    expect(draft?.contactVersion).toBe(2);
+    expect(["Ada One", "Ada Two"]).toContain(draft?.contactName);
+  });
+
+  it("a lock waiter does not start an expired attempt", async () => {
+    const { ctx, minted, prepared } = await basket("Expired waiter");
+    const holder = new Client({ connectionString: process.env.DATABASE_URL });
+    await holder.connect();
+    const before = fakeCheckoutIntentCount();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SET LOCAL ROLE app_user");
+      await holder.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
+      await holder.query("SELECT 1 FROM stores WHERE id = $1 FOR UPDATE", [storeId]);
+      const pending = confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+      await holder.query(
+        "UPDATE assistant_checkout_attempts SET expires_at = (clock_timestamp() AT TIME ZONE 'UTC') - interval '1 second' WHERE id = $1",
+        [prepared.attemptId],
+      );
+      await holder.query("COMMIT");
+      const result = await pending;
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expired");
+      expect(result.code).toBe("stale");
+      expect(fakeCheckoutIntentCount()).toBe(before);
+    } finally {
+      await holder.query("ROLLBACK").catch(() => undefined);
+      await holder.end();
+    }
+  });
+
+  it("places the contact frozen on the attempt", async () => {
+    const { cart, ctx, minted, prepared } = await basket("Frozen contact");
+    await storeScoped(storeId).assistantCheckoutDraft.update({
+      where: { conversationId: ctx.conversationId },
+      data: { contactName: "Different customer" },
+    });
+    const reserved = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    if (!reserved.ok || reserved.kind !== "client_secret") throw new Error(JSON.stringify(reserved));
+    await getCheckoutPayments().confirmPaymentIntent(reserved.paymentIntentId, { payment_method: "pm_card_visa" });
+    const placed = await confirmCheckout({ ...ctx, token: minted.token, phase: "complete" });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    if (!placed.ok || placed.kind !== "order") throw new Error("order");
+    const order = await storeScoped(storeId).order.findFirst({ where: { sourceCartId: cart.id } });
+    const customer = order ? await storeScoped(storeId).customer.findUnique({ where: { id: order.customerId } }) : null;
+    expect(customer?.name).toBe("Ada Frozen");
+    expect(order?.cancellableUntil).toBeTruthy();
+    const attempt = await storeScoped(storeId).assistantCheckoutAttempt.findUnique({ where: { id: prepared.attemptId } });
+    expect(attempt?.contactName).toBeNull();
+  });
+
+  it("a second prepare does not change the PaymentIntent amount", async () => {
+    const { cart, ctx, minted, prepared } = await basket("Second prepare");
+    const reserved = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    if (!reserved.ok || reserved.kind !== "client_secret") throw new Error(JSON.stringify(reserved));
+    const first = await getCheckoutPayments().retrievePaymentIntent(reserved.paymentIntentId);
+    await storeScoped(storeId).listing.updateMany({ where: { storeId, customName: "Second prepare" }, data: { price: 1100 } });
+    const again = await prepareCheckout(ctx);
+    expect(again.kind).toBe("recovery_required");
+    const second = await getCheckoutPayments().retrievePaymentIntent(reserved.paymentIntentId);
+    expect(second.amount).toBe(first.amount);
+    expect(second.id).toBe(reserved.paymentIntentId);
+    const attempt = await storeScoped(storeId).assistantCheckoutAttempt.findUnique({ where: { id: prepared.attemptId } });
+    expect(attempt?.reservedAmountCents).toBe(first.amount);
+    expect(attempt?.paymentIntentId).toBe(reserved.paymentIntentId);
+    void cart;
+  });
+
+  it("an expired attempt with no PaymentIntent lets normal checkout continue", async () => {
+    const { cart, ctx, minted, prepared } = await basket("Jam");
+    const reserved = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    if (!reserved.ok || reserved.kind !== "client_secret") throw new Error(JSON.stringify(reserved));
+    await storeScoped(storeId).assistantCheckoutAttempt.update({
+      where: { id: prepared.attemptId },
+      data: { status: "reserved", paymentIntentId: null, expiresAt: new Date(Date.now() - 60_000) },
+    });
+    await storeScoped(storeId).cart.update({ where: { id: cart.id }, data: { paymentIntentId: null } });
+    const created = await createPaymentIntent(storeId, cart.id, 800);
+    expect(created.paymentIntentId).toBeTruthy();
+    const attempt = await storeScoped(storeId).assistantCheckoutAttempt.findUnique({ where: { id: prepared.attemptId } });
+    expect(attempt?.status).toBe("superseded");
+  });
+
+  it("a stale resume does not return the old secret", async () => {
+    const { ctx, minted, prepared } = await basket("Stale resume");
+    const reserved = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    if (!reserved.ok || reserved.kind !== "client_secret") throw new Error(JSON.stringify(reserved));
+    await storeScoped(storeId).assistantCheckoutDraft.update({
+      where: { conversationId: ctx.conversationId },
+      data: { contactVersion: { increment: 1 } },
+    });
+    const again = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    expect(again.ok).toBe(false);
+    if (again.ok) throw new Error("secret");
+    expect(again).not.toHaveProperty("clientSecret");
+    const attempt = await storeScoped(storeId).assistantCheckoutAttempt.findUnique({ where: { id: prepared.attemptId } });
+    expect(attempt?.status).toBe("superseded");
+  });
+
+  it("a link that does not take the attempt releases the PaymentIntent and returns no secret", async () => {
+    const { ctx, minted, prepared } = await basket("Link no-op");
+    checkoutTestHooks.beforePersistCartPaymentIntent = async () => {
+      await storeScoped(storeId).assistantCheckoutAttempt.update({
+        where: { id: prepared.attemptId },
+        data: { status: "superseded" },
+      });
+    };
+    try {
+      const reserved = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+      expect(reserved.ok).toBe(false);
+      if (reserved.ok) throw new Error("secret");
+      expect(reserved.code).toBe("payment_unavailable");
+      expect(reserved).not.toHaveProperty("clientSecret");
+    } finally {
+      checkoutTestHooks.beforePersistCartPaymentIntent = null;
+    }
+  });
+
+  it("a failed release does not retire the attempt and the retry uses a new key", async () => {
+    const { ctx, minted, prepared } = await basket("Release retry");
+    const reserved = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    if (!reserved.ok || reserved.kind !== "client_secret") throw new Error(JSON.stringify(reserved));
+    await getCheckoutPayments().confirmPaymentIntent(reserved.paymentIntentId, { payment_method: "pm_card_visa" });
+    await storeScoped(storeId).assistantCheckoutDraft.update({
+      where: { conversationId: ctx.conversationId },
+      data: { contactVersion: { increment: 1 } },
+    });
+    failNextFakePaymentCancel();
+    const failed = await confirmCheckout({ ...ctx, token: minted.token, phase: "complete" });
+    expect(failed.ok).toBe(false);
+    if (failed.ok) throw new Error("retired");
+    expect(failed.code).toBe("payment_unavailable");
+    expect(fakeLastCancelKey()).toBe(`release-${reserved.paymentIntentId}-1`);
+    const stuck = await storeScoped(storeId).assistantCheckoutAttempt.findUnique({ where: { id: prepared.attemptId } });
+    expect(stuck?.status).toBe("awaiting_payment");
+    const retried = await confirmCheckout({ ...ctx, token: minted.token, phase: "complete" });
+    expect(retried.ok).toBe(false);
+    expect(fakeLastCancelKey()).toBe(`release-${reserved.paymentIntentId}-2`);
+    const retired = await storeScoped(storeId).assistantCheckoutAttempt.findUnique({ where: { id: prepared.attemptId } });
+    expect(retired?.status).toBe("superseded");
+  });
+
+  it("rejects a second live attempt on the same cart", async () => {
+    const { cart, prepared } = await basket("Unique");
+    await storeScoped(storeId).assistantCheckoutAttempt.update({
+      where: { id: prepared.attemptId },
+      data: { status: "reserved" },
+    });
+    await expect(storeScoped(storeId).assistantCheckoutAttempt.create({
+      data: {
+        storeId,
+        cartId: cart.id,
+        conversationId: prepared.attemptId ? (await storeScoped(storeId).assistantCheckoutAttempt.findUnique({ where: { id: prepared.attemptId } }))!.conversationId : null,
+        status: "reserved",
+        snapshotHash: "hash",
+        snapshot: {},
+        paymentKind: "new",
+        idempotencyKey: `assistant-pi:${randomUUID()}`,
+        reservedAmountCents: 800,
+        windowMinutes: 10,
+        contactVersion: 1,
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    })).rejects.toThrow();
   });
 });

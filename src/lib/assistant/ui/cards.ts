@@ -169,7 +169,7 @@ function cardsForOutput(tool: string, callId: string, input: unknown, output: un
   return [];
 }
 
-function checkoutCards(callId: string, output: unknown): AssistantCard[] {
+export function checkoutCards(callId: string, output: unknown): AssistantCard[] {
   const body = isRecord(output) ? output : {};
   const message = typeof body.message === "string" ? body.message : "Checkout is unavailable right now.";
   const lines = Array.isArray(body.lines)

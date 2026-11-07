@@ -94,6 +94,8 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     while (carts.length > 0) {
       const id = carts.pop();
       if (!id) continue;
+      await storeScoped(storeA).assistantCheckoutAttempt.deleteMany({ where: { cartId: id } });
+      await storeScoped(storeB).assistantCheckoutAttempt.deleteMany({ where: { cartId: id } });
       await storeScoped(storeA).cart.deleteMany({ where: { id } });
       await storeScoped(storeB).cart.deleteMany({ where: { id } });
     }
@@ -381,6 +383,65 @@ describe.skipIf(!hasDb)("assistant retention", () => {
     });
     expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: old.conversationId } })).toBeNull();
     expect(await storeScoped(storeA).aiConversation.findUnique({ where: { id: edge.conversationId } })).not.toBeNull();
+  });
+
+  it("supersedes an open attempt and leaves a live PaymentIntent attempt in place", async () => {
+    pinClock();
+    const old = await conversation(storeA, OLD);
+    const open = await storeScoped(storeA).assistantCheckoutAttempt.create({
+      data: {
+        storeId: storeA,
+        conversationId: old.conversationId,
+        cartId: old.cartId,
+        status: "open",
+        snapshotHash: "hash",
+        snapshot: {},
+        paymentKind: "new",
+        idempotencyKey: `assistant-pi:${randomUUID()}`,
+        reservedAmountCents: 800,
+        windowMinutes: 10,
+        contactName: "Ada",
+        contactEmail: "ada@example.com",
+        contactPhone: "2025550147",
+        contactVersion: 1,
+        expiresAt: new Date("2001-06-02T00:00:00.000Z"),
+      },
+    });
+    const liveCart = await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } });
+    carts.push(liveCart.id);
+    const liveConversation = await storeScoped(storeA).aiConversation.create({
+      data: { storeId: storeA, cartId: liveCart.id, model: "claude-haiku-5-5", messages: [], createdAt: OLD, lastMessageAt: OLD },
+    });
+    const live = await storeScoped(storeA).assistantCheckoutAttempt.create({
+      data: {
+        storeId: storeA,
+        conversationId: liveConversation.id,
+        cartId: liveCart.id,
+        status: "awaiting_payment",
+        snapshotHash: "hash",
+        snapshot: {},
+        paymentKind: "new",
+        idempotencyKey: `assistant-pi:${randomUUID()}`,
+        reservedAmountCents: 800,
+        paymentIntentId: `pi_${randomUUID().slice(0, 8)}`,
+        windowMinutes: 10,
+        contactName: "Live",
+        contactEmail: "live@example.com",
+        contactPhone: "2025550148",
+        contactVersion: 1,
+        expiresAt: new Date("2001-06-02T00:00:00.000Z"),
+      },
+    });
+    await runAssistantRetention(makeFaithfulStep());
+    const openAfter = await storeScoped(storeA).assistantCheckoutAttempt.findUnique({ where: { id: open.id } });
+    expect(openAfter?.status).toBe("superseded");
+    expect(openAfter?.conversationId).toBeNull();
+    expect(openAfter?.contactName).toBeNull();
+    const liveAfter = await storeScoped(storeA).assistantCheckoutAttempt.findUnique({ where: { id: live.id } });
+    expect(liveAfter?.status).toBe("awaiting_payment");
+    expect(liveAfter?.paymentIntentId).toBe(live.paymentIntentId);
+    expect(liveAfter?.contactName).toBe("Live");
+    expect(liveAfter?.conversationId).toBeNull();
   });
 
   it("step results are JSON-safe", async () => {

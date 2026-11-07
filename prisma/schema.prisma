@@ -479,6 +479,7 @@ model Cart {
 model PaymentIntentRelease {
   paymentIntentId String   @id @map("payment_intent_id")
   storeId         String   @map("store_id")
+  attempts        Int      @default(0)
   createdAt       DateTime @default(now()) @map("created_at")
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)

@@ -38,5 +38,9 @@ export function checkoutModelOutput(output: unknown): unknown {
     card: record.card ?? null,
     addressOnFile: record.addressOnFile === true,
     holdCents: typeof record.holdCents === "number" ? record.holdCents : null,
+    slots: Array.isArray(record.slots) ? record.slots : null,
+    lines: Array.isArray(record.lines) ? record.lines : null,
+    attemptId: typeof record.attemptId === "string" ? record.attemptId : null,
+    paymentKind: record.paymentKind ?? null,
   };
 }

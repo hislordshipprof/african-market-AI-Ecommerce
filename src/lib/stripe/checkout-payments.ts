@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type Stripe from "stripe";
 import { getStripeClient } from "./provider";
 
@@ -88,7 +88,10 @@ const detachCalls: string[] = [];
 let customerSeq = 0;
 let cardSeq = 0;
 let intentSeq = 0;
+const intentNonce = randomBytes(4).toString("hex");
 let failNext: "timeout" | "500" | null = null;
+let failNextCancel = false;
+let lastCancelKey: string | null = null;
 
 const FIXTURES: Record<string, Pick<NormalizedCard, "brand" | "last4" | "expMonth" | "expYear" | "behavior">> = {
   pm_card_visa: { brand: "visa", last4: "4242", expMonth: 12, expYear: 2034, behavior: "ok" },
@@ -122,8 +125,9 @@ export function resetFakeCheckoutPayments(): void {
   detachCalls.length = 0;
   customerSeq = 0;
   cardSeq = 0;
-  intentSeq = 0;
   failNext = null;
+  failNextCancel = false;
+  lastCancelKey = null;
 }
 
 export function fakeDetachCalls(): string[] {
@@ -136,6 +140,14 @@ export function expireFakeIdempotency(): void {
 
 export function failNextFakeCustomerCreate(kind: "timeout" | "500"): void {
   failNext = kind;
+}
+
+export function failNextFakePaymentCancel(): void {
+  failNextCancel = true;
+}
+
+export function fakeLastCancelKey(): string | null {
+  return lastCancelKey;
 }
 
 export function seedFakeCard(card: NormalizedCard): void {
@@ -268,7 +280,7 @@ export const fakeCheckoutPayments: CheckoutPayments = {
     const paymentMethodId = emptyToNull(params.payment_method);
     if (paymentMethodId) assertPaymentMethodUsable(paymentMethodId, customerId);
     intentSeq += 1;
-    const id = `pi_fake_${intentSeq}`;
+    const id = `pi_fake_${intentNonce}_${intentSeq}`;
     const metadata = (params.metadata ?? {}) as Record<string, string>;
     const transfer = params.transfer_data as { destination?: string } | undefined;
     const intent: NormalizedPaymentIntent = {
@@ -312,7 +324,12 @@ export const fakeCheckoutPayments: CheckoutPayments = {
     return requireIntent(id);
   },
 
-  async cancelPaymentIntent(id) {
+  async cancelPaymentIntent(id, idempotencyKey) {
+    lastCancelKey = idempotencyKey ?? null;
+    if (failNextCancel) {
+      failNextCancel = false;
+      throw invalid("The payment service timed out.", "api_error", 500);
+    }
     const intent = intents.get(id);
     if (!intent) throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
     if (intent.status === "canceled") return { id, status: "canceled" };

@@ -220,6 +220,19 @@
   background: var(--color-raised);
 }
 
+.summary form,
+.summary label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.summary input {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
 .summary li {
   display: flex;
   justify-content: space-between;

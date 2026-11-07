@@ -13,7 +13,7 @@ export const POST = createChatHandler({
   loadMaskedFacts: async (userId) => {
     const prefill = await loadCheckoutPrefill(userId);
     if (prefill.cardsUnavailable) {
-      return { contactOnFile: false, card: null, addressOnFile: prefill.defaultAddress !== null, savedPaymentMethodId: null };
+      return { contactOnFile: false, card: null, addressOnFile: prefill.defaultAddress !== null, savedPaymentMethodId: null, cardsUnavailable: true };
     }
     const card = prefill.cards.find((item) => item.reusable && !item.expired) ?? null;
     return {

@@ -38,11 +38,27 @@ export async function readCheckoutBody(request: Request): Promise<{ ok: true; bo
   if (Number.isFinite(declared) && declared > BODY_CAP) {
     return { ok: false, status: 413, code: "invalid_request", message: "That request is too large." };
   }
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > BODY_CAP) {
-    return { ok: false, status: 413, code: "invalid_request", message: "That request is too large." };
+  const reader = request.body?.getReader();
+  if (!reader) return { ok: true, body: {} };
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const step = await reader.read();
+    if (step.done) break;
+    total += step.value.byteLength;
+    if (total > BODY_CAP) {
+      await reader.cancel();
+      return { ok: false, status: 413, code: "invalid_request", message: "That request is too large." };
+    }
+    chunks.push(step.value);
   }
-  if (bytes.byteLength === 0) return { ok: true, body: {} };
+  if (total === 0) return { ok: true, body: {} };
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   try {
     return { ok: true, body: JSON.parse(new TextDecoder().decode(bytes)) };
   } catch {

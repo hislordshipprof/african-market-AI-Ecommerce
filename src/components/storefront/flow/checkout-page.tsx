@@ -105,6 +105,9 @@ function createHarnessStripe(): StripeJs {
   };
   return {
     elements: () => elementsApi,
+    createToken: async () => ({ token: undefined }),
+    createPaymentMethod: async () => ({ paymentMethod: undefined }),
+    confirmCardPayment: async () => ({ error: undefined }),
     confirmPayment: async (options: {
       clientSecret?: string;
       confirmParams?: { payment_method?: string };

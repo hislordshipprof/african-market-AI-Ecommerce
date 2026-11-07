@@ -217,41 +217,32 @@ type DraftReader = {
   };
 };
 
-/** The customer's current draft is the consent. A detached conversation keeps the copy on the attempt. */
-export async function consentedCheckout(
-  tx: DraftReader,
-  attempt: {
-    conversationId: string | null;
-    contactName: string | null;
-    contactEmail: string | null;
-    contactPhone: string | null;
-    contactVersion: number;
-    snapshot: unknown;
-    windowMinutes: number;
-    paymentKind: string;
-    savedPaymentMethodId: string | null;
-  },
-): Promise<{ contact: Contact; contactVersion: number; slotId: string; paymentRef: string; windowMinutes: number }> {
-  const draft = attempt.conversationId
-    ? await tx.assistantCheckoutDraft.findUnique({ where: { conversationId: attempt.conversationId } })
-    : null;
-  const storedSlot = attempt.snapshot && typeof attempt.snapshot === "object" && "slotId" in attempt.snapshot
-    && typeof (attempt.snapshot as { slotId?: unknown }).slotId === "string"
-    ? (attempt.snapshot as { slotId: string }).slotId
-    : "";
-  if (draft) {
-    return {
-      contact: {
-        name: draft.contactName ?? "",
-        email: draft.contactEmail ?? "",
-        phone: draft.contactPhone ?? "",
-      },
-      contactVersion: draft.contactVersion,
-      slotId: draft.slotId ?? "",
-      paymentRef: paymentRef(attempt.paymentKind === "saved" ? "saved" : "new", attempt.savedPaymentMethodId),
-      windowMinutes: attempt.windowMinutes,
-    };
-  }
+type FrozenAttempt = {
+  conversationId: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  contactVersion: number;
+  snapshot: unknown;
+  windowMinutes: number;
+  paymentKind: string;
+  savedPaymentMethodId: string | null;
+};
+
+function storedSlot(snapshot: unknown): string {
+  if (!snapshot || typeof snapshot !== "object" || !("slotId" in snapshot)) return "";
+  const slotId = (snapshot as { slotId?: unknown }).slotId;
+  return typeof slotId === "string" ? slotId : "";
+}
+
+/** Consent copied onto the attempt when it was drawn. The live draft is not consent. */
+export function frozenConsent(attempt: FrozenAttempt): {
+  contact: Contact;
+  contactVersion: number;
+  slotId: string;
+  paymentRef: string;
+  windowMinutes: number;
+} {
   return {
     contact: {
       name: attempt.contactName ?? "",
@@ -259,8 +250,33 @@ export async function consentedCheckout(
       phone: attempt.contactPhone ?? "",
     },
     contactVersion: attempt.contactVersion,
-    slotId: storedSlot,
+    slotId: storedSlot(attempt.snapshot),
     paymentRef: paymentRef(attempt.paymentKind === "saved" ? "saved" : "new", attempt.savedPaymentMethodId),
     windowMinutes: attempt.windowMinutes,
   };
+}
+
+/** Live draft slot and contact version, hashed only to see that the drawn card is still current. */
+export async function stalenessInputs(
+  tx: DraftReader,
+  attempt: FrozenAttempt,
+): Promise<{ contact: Contact; contactVersion: number; slotId: string; paymentRef: string; windowMinutes: number }> {
+  const frozen = frozenConsent(attempt);
+  const draft = attempt.conversationId
+    ? await tx.assistantCheckoutDraft.findUnique({ where: { conversationId: attempt.conversationId } })
+    : null;
+  if (!draft) return frozen;
+  return {
+    ...frozen,
+    contactVersion: draft.contactVersion,
+    slotId: draft.slotId ?? "",
+  };
+}
+
+/** @deprecated Use frozenConsent. Kept so older callers still compile during the ownership fix. */
+export async function consentedCheckout(
+  tx: DraftReader,
+  attempt: FrozenAttempt,
+): Promise<{ contact: Contact; contactVersion: number; slotId: string; paymentRef: string; windowMinutes: number }> {
+  return stalenessInputs(tx, attempt);
 }

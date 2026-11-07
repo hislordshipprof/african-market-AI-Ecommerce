@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { validPhone } from "../../customer-account/phone";
 import type { Contact } from "../../customer-flow/contracts";
-import { lockCart, lockStoreRow, storeScoped, storeScopedTransaction } from "../../db";
+import { lockCart, lockStoreRow, readDatabaseNow, storeScoped, storeScopedTransaction } from "../../db";
 import { newCheckoutAllowed, STRIPE_USD_MAX_CENTS, STRIPE_USD_MIN_CENTS } from "./gates";
 import { offerPickupSlots } from "./slots";
 import { buildCanonical, hashCanonical, paymentRef, readCartLines, readStoreShift, type CanonicalSnapshot } from "./snapshot";
@@ -18,6 +18,7 @@ export interface MaskedFacts {
   card: { brand: string; last4: string } | null;
   addressOnFile: boolean;
   savedPaymentMethodId: string | null;
+  cardsUnavailable?: boolean;
 }
 
 const EMPTY_FACTS: MaskedFacts = {
@@ -69,7 +70,7 @@ async function factsFor(ctx: PrepareContext): Promise<MaskedFacts> {
   try {
     return await ctx.loadMaskedFacts(ctx.actorUserId);
   } catch {
-    return { ...EMPTY_FACTS, card: null };
+    return { ...EMPTY_FACTS, cardsUnavailable: true };
   }
 }
 
@@ -106,6 +107,8 @@ export async function getFulfillmentOptions(ctx: PrepareContext): Promise<Prepar
 export async function setFulfillment(ctx: PrepareContext, slotId: string): Promise<PrepareResult> {
   const now = ctx.now ?? new Date();
   return storeScopedTransaction(ctx.storeId, async (tx) => {
+    await lockStoreRow(tx, ctx.storeId);
+    await lockCart(tx, ctx.cartId);
     const conversation = await tx.aiConversation.findUnique({ where: { id: ctx.conversationId } });
     if (!conversation || conversation.cartId !== ctx.cartId) {
       return { ok: false, kind: "missing", code: "conversation", message: "That conversation is not available." };
@@ -145,6 +148,8 @@ export async function saveGuestContact(ctx: PrepareContext, contact: AccountCont
   const conversation = await storeScoped(ctx.storeId).aiConversation.findUnique({ where: { id: ctx.conversationId } });
   if (!conversation || conversation.cartId !== ctx.cartId) return { ok: false, code: "not_found" };
   await storeScopedTransaction(ctx.storeId, async (tx) => {
+    await lockStoreRow(tx, ctx.storeId);
+    await lockCart(tx, ctx.cartId);
     const existing = await tx.assistantCheckoutDraft.findUnique({ where: { conversationId: ctx.conversationId } });
     await tx.assistantCheckoutDraft.upsert({
       where: { conversationId: ctx.conversationId },
@@ -185,20 +190,26 @@ function missing(code: string, message: string): PrepareResult {
   return { ok: false, kind: "missing", code, message };
 }
 
+function recoveryCard(attempt: { id: string; paymentKind: string; snapshot: unknown; reservedAmountCents: number }): PrepareResult {
+  const snapshot = attempt.snapshot as { lines?: PrepareResult["lines"]; holdCents?: number; cancelMinutes?: number; card?: PrepareResult["card"]; slotLabel?: string | null };
+  return {
+    ok: true,
+    kind: "recovery_required",
+    attemptId: attempt.id,
+    paymentKind: attempt.paymentKind === "saved" ? "saved" : "new",
+    lines: snapshot.lines,
+    holdCents: snapshot.holdCents ?? attempt.reservedAmountCents,
+    cancelMinutes: snapshot.cancelMinutes,
+    card: snapshot.card ?? null,
+    slotLabel: snapshot.slotLabel ?? null,
+    message: "Tap Place order to start again. The earlier card is released first.",
+  };
+}
+
 export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResult> {
   const now = ctx.now ?? new Date();
   const facts = await factsFor(ctx);
-  const inFlight = await storeScoped(ctx.storeId).assistantCheckoutAttempt.findFirst({
-    where: {
-      conversationId: ctx.conversationId,
-      cartId: ctx.cartId,
-      status: { in: ["reserved", "awaiting_payment"] },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  if (inFlight) {
-    return { ok: true, kind: "recovery_required", message: "A payment is already in progress. Use the card to finish or try again." };
-  }
+  const savedCardsNoted = facts.cardsUnavailable || Boolean(facts.savedPaymentMethodId);
   const gate = newCheckoutAllowed();
   if (!gate.ok) return missing("checkout_unavailable", "Checkout is unavailable right now.");
 
@@ -211,6 +222,12 @@ export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResul
     if (!cart) return missing("cart", "Your basket is empty.");
     if (cart.userId && cart.userId !== ctx.actorUserId) return missing("cart", "Your basket is empty.");
     if (!cart.userId && ctx.actorUserId) return missing("cart", "Your basket is empty.");
+    const inFlight = await tx.assistantCheckoutAttempt.findFirst({
+      where: { cartId: ctx.cartId, status: { in: ["reserved", "awaiting_payment"] } },
+      orderBy: { createdAt: "asc" },
+    });
+    if (inFlight) return recoveryCard(inFlight);
+    const dbNow = await readDatabaseNow(tx);
     const draft = await tx.assistantCheckoutDraft.findUnique({ where: { conversationId: ctx.conversationId } });
     let contact: Contact | null = draft && contactReady({
       name: draft.contactName ?? "",
@@ -253,13 +270,13 @@ export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResul
     if (!store || store.status !== "active" || store.stripeOnboardingStatus !== "complete") {
       return missing("checkout_unavailable", "Checkout is unavailable right now.");
     }
-    const kind = facts.savedPaymentMethodId ? "saved" as const : "new" as const;
+    const kind = "new" as const;
     const built = buildCanonical({
       lines,
       contact,
       contactVersion,
       slotId: draft.slotId,
-      paymentRef: paymentRef(kind, facts.savedPaymentMethodId),
+      paymentRef: paymentRef(kind, null),
       purchaseEpoch: cart.purchaseEpoch,
       store,
       now,
@@ -280,7 +297,7 @@ export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResul
       data: { status: "superseded" },
     });
     const id = randomUUID();
-    const snapshot = cardSnapshot(built.canonical, built.names, draft.slotId, facts.card, gate.minutes);
+    const snapshot = cardSnapshot(built.canonical, built.names, draft.slotId, null, gate.minutes);
     await tx.assistantCheckoutAttempt.create({
       data: {
         id,
@@ -292,7 +309,7 @@ export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResul
         snapshotHash: hashCanonical(built.canonical),
         snapshot: JSON.parse(JSON.stringify(snapshot)) as object,
         paymentKind: kind,
-        savedPaymentMethodId: kind === "saved" ? facts.savedPaymentMethodId : null,
+        savedPaymentMethodId: null,
         idempotencyKey: `assistant-pi:${id}`,
         reservedAmountCents: built.canonical.holdCents,
         windowMinutes: gate.minutes,
@@ -300,7 +317,7 @@ export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResul
         contactEmail: contact.email,
         contactPhone: contact.phone,
         contactVersion,
-        expiresAt: new Date(now.getTime() + 15 * 60_000),
+        expiresAt: new Date(dbNow.getTime() + 15 * 60_000),
       },
     });
     return {
@@ -314,10 +331,12 @@ export async function prepareCheckout(ctx: PrepareContext): Promise<PrepareResul
       cancelMinutes: gate.minutes,
       slotLabel: slotLabel(store, draft.slotId, now, gate.minutes),
       lines: built.names.map((line) => ({ name: line.name, qty: line.qty, lineTotalCents: line.lineTotalCents })),
-      card: facts.card,
+      card: null,
       paymentKind: kind,
       attemptId: id,
-      message: "Review the card and tap Place order. The helper cannot place it.",
+      message: savedCardsNoted
+        ? "Saved cards are not available here. Review the new card and tap Place order. The helper cannot place it."
+        : "Review the card and tap Place order. The helper cannot place it.",
     };
   });
 }

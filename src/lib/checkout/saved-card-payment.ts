@@ -20,6 +20,15 @@ import {
 import { assertAssistantAttempt, AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
 import { checkoutTestHooks } from "./test-hooks";
 
+export class SavedCardServiceUnavailableError extends Error {
+  readonly code = "cards_unavailable" as const;
+
+  constructor() {
+    super("Saved cards are unavailable right now.");
+    this.name = "SavedCardServiceUnavailableError";
+  }
+}
+
 export class SavedCardUnavailableError extends Error {
   readonly code = "saved_card_unavailable" as const;
   constructor() {
@@ -66,6 +75,13 @@ export async function cancelReplaceablePaymentIntent(
   }
 }
 
+function savedCardOutage(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { statusCode?: number; type?: string };
+  if (value.statusCode === 408 || (value.statusCode ?? 0) >= 500) return true;
+  return value.type === "StripeConnectionError" || value.type === "StripeAPIError";
+}
+
 function savedCardProviderUnavailable(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const value = error as { code?: string; statusCode?: number; message?: string; type?: string };
@@ -85,6 +101,7 @@ async function usableSavedCard(userId: string, stripeCustomerId: string, savedCa
   try {
     card = await payments.retrievePaymentMethod(savedCardId);
   } catch (error) {
+    if (savedCardOutage(error)) throw new SavedCardServiceUnavailableError();
     if (savedCardProviderUnavailable(error)) throw new SavedCardUnavailableError();
     throw error;
   }
@@ -197,16 +214,18 @@ export async function prepareSignedInPaymentIntent(
     if (!cart || (cart.userId && cart.userId !== input.actorUserId)) {
       throw new Error("Cart not found");
     }
-    const existing = cart.paymentIntentId
-      ? asExisting(await payments.retrievePaymentIntent(cart.paymentIntentId))
-      : null;
-    const generation = input.idempotencyKey ?? nextAttemptToken({
+    const existing = input.assistantAttemptId || !cart.paymentIntentId
+      ? null
+      : asExisting(await payments.retrievePaymentIntent(cart.paymentIntentId));
+    const generation = input.assistantAttemptId ?? input.idempotencyKey ?? nextAttemptToken({
       paymentIntentId: cart.paymentIntentId,
       storedToken: cart.paymentAttemptToken,
       fingerprint,
       forceNew: false,
     });
-    const attemptKey = input.idempotencyKey ?? cartPaymentIdempotencyKey(cartId, generation);
+    const attemptKey = input.assistantAttemptId
+      ? `assistant-pi:${input.assistantAttemptId}`
+      : input.idempotencyKey ?? cartPaymentIdempotencyKey(cartId, generation);
     const plan = planPaymentAttempt({
       existing,
       holdCents,
@@ -225,6 +244,9 @@ export async function prepareSignedInPaymentIntent(
     });
     if (plan.action === "blocked") {
       throw new Error("Payment already confirmed for this cart");
+    }
+    if (input.assistantAttemptId && (plan.action === "replace" || plan.action === "reuse" || plan.action === "update")) {
+      throw new AssistantCheckoutInProgressError();
     }
     if (assistantOwner && (plan.action === "replace" || (existing != null && existing.amount !== assistantOwner.reservedAmountCents))) {
       throw new AssistantCheckoutInProgressError();

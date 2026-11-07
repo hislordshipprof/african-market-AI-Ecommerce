@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { money } from "@/lib/format";
-import type { CheckoutCard } from "@/lib/assistant/ui/cards";
+import { checkoutCards, type CheckoutCard } from "@/lib/assistant/ui/cards";
 import styles from "./assistant.module.css";
 
 type CardPayload = {
@@ -12,6 +12,7 @@ type CardPayload = {
   publishableKey: string | null;
   onBehalfOf: string | null;
   amount: number | null;
+  savedPaymentMethodId: string | null;
 };
 
 export function CheckoutCardView({
@@ -26,17 +27,26 @@ export function CheckoutCardView({
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [shown, setShown] = useState(card);
+  const [incoming, setIncoming] = useState(card);
+  if (incoming !== card) {
+    setIncoming(card);
+    setShown(card);
+  }
   const cardMount = useRef<HTMLDivElement>(null);
   const stripeRef = useRef<{ submit: () => Promise<{ error?: { message?: string } }>; confirm: (secret: string) => Promise<string | null> } | null>(null);
 
-  const cardQuery = card.attemptId ? `?attemptId=${encodeURIComponent(card.attemptId)}` : "";
-
   useEffect(() => {
-    if (card.mode !== "confirm" || card.paymentKind === "saved") return;
+    if ((shown.mode !== "confirm" && shown.mode !== "recovery") || shown.paymentKind === "saved" || !shown.attemptId) return;
     const mount = cardMount.current;
     let cancelled = false;
     void (async () => {
-      const loaded = await fetch(`/api/assistant/checkout/card${cardQuery}`, { credentials: "same-origin" });
+      const loaded = await fetch("/api/assistant/checkout/card", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ attemptId: shown.attemptId }),
+      });
       const payload = await loaded.json() as CardPayload | { ok: false };
       if (cancelled || !loaded.ok || !payload.ok || payload.harness || !payload.publishableKey || !payload.amount || !payload.onBehalfOf || !mount) return;
       const stripeJs = await import("@stripe/stripe-js");
@@ -63,13 +73,18 @@ export function CheckoutCardView({
       };
     })();
     return () => { cancelled = true; };
-  }, [card.mode, card.paymentKind, cardQuery]);
+  }, [shown.mode, shown.paymentKind, shown.attemptId]);
 
   async function place() {
     setBusy(true);
     setNotice(null);
     try {
-      const loaded = await fetch(`/api/assistant/checkout/card${cardQuery}`, { credentials: "same-origin" });
+      const loaded = await fetch("/api/assistant/checkout/card", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ attemptId: shown.attemptId }),
+      });
       const payload = await loaded.json() as CardPayload | { ok: false; message?: string };
       if (!loaded.ok || !payload.ok) {
         setNotice("message" in payload && payload.message ? payload.message : "That checkout is not available.");
@@ -84,6 +99,10 @@ export function CheckoutCardView({
       }
       const reserved = await postConfirm(payload.token, "reserve");
       if (!reserved.ok) {
+        const replacement = reserved.card
+          ? checkoutCards("replacement", reserved.card).find((next) => next.kind === "checkout")
+          : undefined;
+        if (replacement && replacement.kind === "checkout") setShown(replacement);
         setNotice(reserved.message);
         return;
       }
@@ -99,12 +118,22 @@ export function CheckoutCardView({
             setNotice("You have not been charged yet. Try again.");
             return;
           }
-        } else if (card.paymentKind === "saved") {
+        } else if (reserved.intentStatus === "requires_action") {
           if (!payload.publishableKey) {
             setNotice("The card form is not available.");
             return;
           }
-          const message = await confirmSavedCard(payload.publishableKey, reserved.clientSecret);
+          const message = await nextAction(payload.publishableKey, reserved.clientSecret);
+          if (message) {
+            setNotice(message);
+            return;
+          }
+        } else if (shown.paymentKind === "saved") {
+          if (!payload.publishableKey || !payload.savedPaymentMethodId) {
+            setNotice("The card form is not available.");
+            return;
+          }
+          const message = await confirmSavedCard(payload.publishableKey, reserved.clientSecret, payload.savedPaymentMethodId);
           if (message) {
             setNotice(message);
             return;
@@ -115,6 +144,9 @@ export function CheckoutCardView({
             setNotice(message);
             return;
           }
+        } else {
+          setNotice("The card form is not ready. Try again.");
+          return;
         }
       }
       const placed = await postConfirm(payload.token, "complete");
@@ -168,10 +200,10 @@ export function CheckoutCardView({
   return (
     <article className={styles.summary} data-testid="assistant-checkout-card">
       <h3>Pickup order</h3>
-      <p>{card.message}</p>
-      {card.lines.length > 0 ? (
+      <p>{shown.message}</p>
+      {shown.lines.length > 0 ? (
         <ul>
-          {card.lines.map((line) => (
+          {shown.lines.map((line) => (
             <li key={line.name}>
               <span>{line.qty} × {line.name}</span>
               <span>{line.lineTotalCents ? money(line.lineTotalCents) : ""}</span>
@@ -179,19 +211,19 @@ export function CheckoutCardView({
           ))}
         </ul>
       ) : null}
-      {card.slotLabel ? <p>{card.slotLabel}</p> : null}
-      {card.feeCents ? <p>Fees {money(card.feeCents)}</p> : null}
-      {card.bufferCents ? <p>Buffer {money(card.bufferCents)}. The final charge may be lower.</p> : null}
-      {card.holdCents != null ? <p>Hold {money(card.holdCents)}. The final charge may be lower. Tax is $0.00.</p> : null}
-      {card.cardLabel ? <p>{card.cardLabel}</p> : null}
-      {card.mode === "confirm" && card.paymentKind !== "saved" ? <div ref={cardMount} data-testid="assistant-card-element" /> : null}
-      {card.cancelMinutes ? <p>You can cancel for {card.cancelMinutes} minutes after placing.</p> : null}
-      {card.mode === "slots" ? card.slots.map((slot) => (
+      {shown.slotLabel ? <p>{shown.slotLabel}</p> : null}
+      {shown.feeCents ? <p>Fees {money(shown.feeCents)}</p> : null}
+      {shown.bufferCents ? <p>Buffer {money(shown.bufferCents)}. The final charge may be lower.</p> : null}
+      {shown.holdCents != null ? <p>Hold {money(shown.holdCents)}. The final charge may be lower. Tax is $0.00.</p> : null}
+      {shown.cardLabel ? <p>{shown.cardLabel}</p> : null}
+      {(shown.mode === "confirm" || shown.mode === "recovery") && shown.paymentKind !== "saved" ? <div ref={cardMount} data-testid="assistant-card-element" /> : null}
+      {shown.cancelMinutes ? <p>You can cancel for {shown.cancelMinutes} minutes after placing.</p> : null}
+      {shown.mode === "slots" ? shown.slots.map((slot) => (
         <button key={slot.id} type="button" className={styles.undo} disabled={disabled} onClick={() => onChoice(`Use pickup slot ${slot.id}`)}>
           {slot.label}
         </button>
       )) : null}
-      {card.mode === "contact" ? (
+      {shown.mode === "contact" ? (
         <form action={(form) => { void saveContact(form); }}>
           <label>Name<input name="name" autoComplete="name" required maxLength={200} /></label>
           <label>Email<input name="email" type="email" autoComplete="email" required maxLength={320} /></label>
@@ -199,9 +231,9 @@ export function CheckoutCardView({
           <button type="submit" className={styles.undo} disabled={disabled || busy}>Save contact</button>
         </form>
       ) : null}
-      {card.mode === "confirm" || card.mode === "recovery" ? (
+      {shown.mode === "confirm" || shown.mode === "recovery" ? (
         <button type="button" className={styles.undo} data-testid="assistant-place-order" disabled={disabled || busy || Boolean(orderId)} onClick={() => { void place(); }}>
-          {busy ? "Placing…" : "Place order"}
+          {busy ? "Placing…" : shown.mode === "recovery" ? "Start again" : "Place order"}
         </button>
       ) : null}
       {orderId ? (
@@ -215,16 +247,24 @@ export function CheckoutCardView({
   );
 }
 
-async function confirmSavedCard(publishableKey: string, secret: string): Promise<string | null> {
+async function confirmSavedCard(publishableKey: string, secret: string, paymentMethod: string): Promise<string | null> {
   const stripeJs = await import("@stripe/stripe-js");
   const stripe = await stripeJs.loadStripe(publishableKey);
   if (!stripe) return "The card form is not available.";
   const confirmed = await stripe.confirmPayment({
     clientSecret: secret,
     redirect: "if_required",
-    confirmParams: { return_url: window.location.href },
+    confirmParams: { return_url: window.location.href, payment_method: paymentMethod },
   });
   return confirmed.error?.message ?? null;
+}
+
+async function nextAction(publishableKey: string, secret: string): Promise<string | null> {
+  const stripeJs = await import("@stripe/stripe-js");
+  const stripe = await stripeJs.loadStripe(publishableKey);
+  if (!stripe) return "The card form is not available.";
+  const acted = await stripe.handleNextAction({ clientSecret: secret });
+  return acted.error?.message ?? null;
 }
 
 async function postConfirm(token: string, phase: "reserve" | "complete") {
@@ -236,8 +276,8 @@ async function postConfirm(token: string, phase: "reserve" | "complete") {
   });
   return res.json() as Promise<
     | { ok: true; kind: "order"; orderId: string }
-    | { ok: true; kind: "client_secret"; clientSecret: string; paymentIntentId: string }
+    | { ok: true; kind: "client_secret"; clientSecret: string; paymentIntentId: string; intentStatus?: string }
     | { ok: true; kind: "saved"; paymentIntentId: string }
-    | { ok: false; message: string }
+    | { ok: false; message: string; card?: unknown }
   >;
 }

@@ -350,6 +350,16 @@ export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId:
   await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
 }
 
+/** UTC wall time from the database, read after the store and cart locks. */
+export async function readDatabaseNow(tx: Pick<PrismaClient, "$queryRaw">): Promise<Date> {
+  const rows = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS now
+  `;
+  const now = rows[0]?.now;
+  if (!now) throw new Error("Database clock is unavailable");
+  return now;
+}
+
 /** Sees an order in any store. The caller is inside a store-scoped transaction and must not insert while this is on. */
 export async function orderExistsForPaymentIntent(
   tx: Pick<PrismaClient, "order" | "$executeRaw">,
@@ -827,7 +837,8 @@ export function deleteExpiredAssistantConversations(
     const ids = doomed.map((row) => row.id);
     await tx.$executeRaw`
       UPDATE assistant_checkout_attempts
-      SET conversation_id = NULL,
+      SET status = CASE WHEN status = 'open' THEN 'superseded' ELSE status END,
+          conversation_id = NULL,
           contact_name = CASE WHEN status IN ('reserved', 'awaiting_payment') THEN contact_name ELSE NULL END,
           contact_email = CASE WHEN status IN ('reserved', 'awaiting_payment') THEN contact_email ELSE NULL END,
           contact_phone = CASE WHEN status IN ('reserved', 'awaiting_payment') THEN contact_phone ELSE NULL END

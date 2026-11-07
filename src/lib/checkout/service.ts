@@ -10,8 +10,8 @@ import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
-import { consentedCheckout, hashCanonical, liveCanonical } from "../assistant/checkout/snapshot";
-import { assertAssistantAttempt, AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
+import { frozenConsent, hashCanonical, liveCanonical, stalenessInputs } from "../assistant/checkout/snapshot";
+import { assertAssistantAttempt, AssistantAttemptExpiredError, AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
 import { computeQuote } from "./quote";
 import type {
   CheckoutQuote,
@@ -124,8 +124,17 @@ export async function quoteCheckout(
 }
 
 export { checkoutTestHooks } from "./test-hooks";
-export { SavedCardUnavailableError } from "./saved-card-payment";
-export { AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
+export { SavedCardServiceUnavailableError, SavedCardUnavailableError } from "./saved-card-payment";
+export { AssistantAttemptExpiredError, AssistantCheckoutInProgressError } from "./assistant-attempt-guard";
+
+export class HoldReleaseFailedError extends Error {
+  readonly code = "release_failed" as const;
+
+  constructor() {
+    super("The authorization could not be released.");
+    this.name = "HoldReleaseFailedError";
+  }
+}
 
 export interface CreatePaymentIntentOptions {
   actorUserId?: string | null;
@@ -136,6 +145,35 @@ export interface CreatePaymentIntentOptions {
   idempotencyKey?: string | null;
 }
 
+async function clearExpiredAssistantHold(
+  storeId: string,
+  cartId: string,
+  keepAttemptId?: string | null,
+): Promise<void> {
+  const expired = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    try {
+      await assertAssistantAttempt(tx, cartId, keepAttemptId);
+      return null;
+    } catch (error) {
+      if (error instanceof AssistantAttemptExpiredError) return error;
+      throw error;
+    }
+  });
+  if (!expired) return;
+  const pi = await getCheckoutPayments().retrievePaymentIntent(expired.paymentIntentId);
+  if (pi.status === "processing" || pi.status === "requires_capture") {
+    throw new AssistantCheckoutInProgressError();
+  }
+  const outcome = await releaseLosingHold(storeId, cartId, expired.paymentIntentId);
+  if (outcome !== "released") throw new HoldReleaseFailedError();
+  await storeScoped(storeId).assistantCheckoutAttempt.updateMany({
+    where: { id: expired.attemptId, status: { in: ["reserved", "awaiting_payment"] } },
+    data: { status: "superseded" },
+  });
+}
+
 export async function createPaymentIntent(
   storeId: string,
   cartId: string,
@@ -143,6 +181,7 @@ export async function createPaymentIntent(
   options?: CreatePaymentIntentOptions,
 ): Promise<{ clientSecret: string; paymentIntentId: string; attemptToken?: string }> {
   const store = await getStripeStore(storeId);
+  await clearExpiredAssistantHold(storeId, cartId, options?.assistantAttemptId);
   if (options?.actorUserId) {
     return prepareSignedInPaymentIntent(storeId, cartId, holdCents, {
       actorUserId: options.actorUserId,
@@ -159,6 +198,13 @@ export async function createPaymentIntent(
     const assistantOwner = await assertAssistantAttempt(tx, cartId, options?.assistantAttemptId);
     const cart = await tx.cart.findUnique({ where: { id: cartId } });
     if (!cart) throw new Error("Cart not found");
+    if (options?.assistantAttemptId) {
+      return {
+        kind: "assistant" as const,
+        purchaseEpoch: cart.purchaseEpoch,
+        key: `assistant-pi:${options.assistantAttemptId}`,
+      };
+    }
 
     if (cart.paymentIntentId) {
       const existing = await retrieveCheckoutIntent(cart.paymentIntentId);
@@ -195,6 +241,24 @@ export async function createPaymentIntent(
     });
     return { kind: "create" as const, generation, purchaseEpoch: cart.purchaseEpoch };
   }, { timeout: 20_000, maxWait: 8_000 });
+
+  if (reserved.kind === "assistant") {
+    const guestBase = guestPaymentIntentParams({
+      holdCents,
+      storeAccountId: store.stripeAccountId,
+      storeId,
+      cartId,
+    });
+    const guestParams = {
+      ...guestBase,
+      metadata: { ...guestBase.metadata, purchase_epoch: String(reserved.purchaseEpoch) },
+    };
+    const pi = checkoutPaymentsUseFake()
+      ? await getCheckoutPayments().createPaymentIntent(guestParams as unknown as Record<string, unknown>, reserved.key)
+      : await getStripeClient().paymentIntents.create(guestParams, { idempotencyKey: reserved.key });
+    if (!pi.client_secret) throw new Error("Stripe did not return a client secret");
+    return { clientSecret: pi.client_secret, paymentIntentId: pi.id };
+  }
 
   if (reserved.kind === "reuse") {
     if (reserved.reservedAmount != null && reserved.reservedAmount !== holdCents) {
@@ -370,6 +434,8 @@ export async function recordAuthorizedOrder(
         throw new BasketChangedError();
       }
       let assistantWindow: number | null = null;
+      let assistantContact: Contact | null = null;
+      let assistantSlot: string | null = null;
       const owner = await tx.assistantCheckoutAttempt.findFirst({
         where: {
           cartId: input.cartId,
@@ -388,21 +454,24 @@ export async function recordAuthorizedOrder(
         if (!attempt || attempt.cartId !== input.cartId || attempt.paymentIntentId !== input.paymentIntentId) {
           throw new BasketChangedError();
         }
-        const consent = await consentedCheckout(tx, attempt);
+        const current = await stalenessInputs(tx, attempt);
+        const frozen = frozenConsent(attempt);
         const live = await liveCanonical(tx, {
           storeId,
           cartId: input.cartId,
-          contact: consent.contact,
-          contactVersion: consent.contactVersion,
-          slotId: consent.slotId,
-          paymentRef: consent.paymentRef,
+          contact: frozen.contact,
+          contactVersion: current.contactVersion,
+          slotId: current.slotId,
+          paymentRef: frozen.paymentRef,
           now: new Date(),
-          windowMinutes: consent.windowMinutes,
+          windowMinutes: frozen.windowMinutes,
         });
-        if ("missing" in live || !consent.slotId || hashCanonical(live.canonical) !== attempt.snapshotHash) {
+        if ("missing" in live || !frozen.slotId || hashCanonical(live.canonical) !== attempt.snapshotHash) {
           throw new BasketChangedError();
         }
         assistantWindow = attempt.windowMinutes;
+        assistantContact = frozen.contact;
+        assistantSlot = frozen.slotId;
       }
 
       const variantIds = [
@@ -434,12 +503,14 @@ export async function recordAuthorizedOrder(
         }
       }
 
+      const placedContact = assistantContact ?? input.contact;
+      const placedSlot = assistantSlot ?? input.pickupSlot;
       const customer = await tx.customer.create({
         data: {
           storeId,
-          name: input.contact.name.trim(),
-          email: input.contact.email.trim().toLowerCase(),
-          phone: input.contact.phone.trim(),
+          name: placedContact.name.trim(),
+          email: placedContact.email.trim().toLowerCase(),
+          phone: placedContact.phone.trim(),
         },
       });
       const nextNumber = await getNextOrderNumber(tx, storeId);
@@ -450,7 +521,7 @@ export async function recordAuthorizedOrder(
           customerId: customer.id,
           status: "AUTHORIZED",
           fulfillment: input.fulfillment,
-          pickupSlot: input.pickupSlot !== "asap" ? input.pickupSlot : null,
+          pickupSlot: placedSlot && placedSlot !== "asap" ? placedSlot : null,
           subtotalCents: input.quote.subtotalCents,
           tipCents: input.quote.tipCents,
           bufferCents: input.quote.bufferCents,
@@ -542,15 +613,17 @@ export async function releaseLosingHold(
   storeId: string,
   cartId: string,
   paymentIntentId: string,
-): Promise<void> {
+): Promise<"released" | "order_exists" | "failed"> {
   const reserved = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     await lockCart(tx, cartId);
-    if (await orderExistsForPaymentIntent(tx, paymentIntentId)) return false;
+    if (await orderExistsForPaymentIntent(tx, paymentIntentId)) return { go: false as const, reason: "order_exists" as const };
+    const existing = await tx.paymentIntentRelease.findUnique({ where: { paymentIntentId } });
+    const n = (existing?.attempts ?? 0) + 1;
     await tx.paymentIntentRelease.upsert({
       where: { paymentIntentId },
-      create: { paymentIntentId, storeId },
-      update: {},
+      create: { paymentIntentId, storeId, attempts: n },
+      update: { attempts: n },
     });
     const cart = await tx.cart.findUnique({
       where: { id: cartId },
@@ -562,30 +635,32 @@ export async function releaseLosingHold(
         data: { paymentIntentId: null, paymentAttemptToken: null },
       });
     }
-    return true;
+    return { go: true as const, n };
   });
-  if (!reserved) return;
+  if (!reserved.go) return reserved.reason;
   if (process.env.NODE_ENV === "test" && checkoutTestHooks.beforeReleaseLosingHold) {
     await checkoutTestHooks.beforeReleaseLosingHold();
   }
+  const key = `release-${paymentIntentId}-${reserved.n}`;
   try {
-    const key = `release-${paymentIntentId}`;
     if (fakeIntent(paymentIntentId)) {
       await getCheckoutPayments().cancelPaymentIntent(paymentIntentId, key);
-      return;
+      return "released";
     }
     await getStripeClient().paymentIntents.cancel(
       paymentIntentId,
       undefined,
       { idempotencyKey: key },
     );
+    return "released";
   } catch (error) {
-    if (stripeAlreadyCanceled(error)) return;
+    if (stripeAlreadyCanceled(error)) return "released";
     console.error(JSON.stringify({
       event: "losing_hold_release_failed",
       paymentIntentId,
       message: "Platform alerted. The authorization expires on its own.",
     }));
+    return "failed";
   }
 }
 
@@ -664,6 +739,13 @@ export async function placeOrder(
   actorUserId: string | null = null,
   assistantAttemptId: string | null = null,
 ): Promise<{ token: string; quote: CheckoutQuote }> {
+  const ownedAttempt = assistantAttemptId
+    ? null
+    : await storeScoped(storeId).assistantCheckoutAttempt.findFirst({
+      where: { paymentIntentId, status: { in: ["reserved", "awaiting_payment"] } },
+      select: { id: true },
+    });
+  await clearExpiredAssistantHold(storeId, cartId, assistantAttemptId ?? ownedAttempt?.id);
   const store = await getStripeStore(storeId);
 
   if (fulfillment !== "pickup") {
@@ -842,7 +924,8 @@ export async function placeOrder(
       throw new Error("Cart is empty");
     }
     if (error instanceof BasketChangedError) {
-      await releaseLosingHold(storeId, cartId, paymentIntentId);
+      const outcome = await releaseLosingHold(storeId, cartId, paymentIntentId);
+      if (outcome === "failed") throw new HoldReleaseFailedError();
       throw error;
     }
     throw error;

@@ -92,6 +92,10 @@ export function scriptStep(messages: unknown): ScriptStep {
   const text = turn.text.toLowerCase();
   const last = turn.results.at(-1);
   if (turn.file) return fileStep(text, last);
+  if (text.includes("checkout")) {
+    const checkout = checkoutStep(last);
+    if (checkout) return checkout;
+  }
   if (!last) return openingStep(text, turn.text, messages);
   if (last.name === "search_catalog") {
     const items = itemsOf(last.output);
@@ -178,6 +182,20 @@ function retriedFailure(messages: unknown, needle: string): boolean {
   });
   if (lastUser < 0) return false;
   return list.slice(lastUser + 1).some((message) => isRecord(message) && message.role === "assistant");
+}
+
+function checkoutStep(last: { name: string; output: unknown } | undefined): ScriptStep | null {
+  if (!last) return { kind: "tool", name: "get_fulfillment_options", input: {} };
+  if (last.name === "get_fulfillment_options") {
+    const body = isRecord(last.output) ? last.output : {};
+    const slots = Array.isArray(body.slots) ? body.slots : [];
+    const slot = slots.find((item) => isRecord(item) && typeof item.id === "string" && item.id !== "asap");
+    if (!slot || !isRecord(slot) || typeof slot.id !== "string") return { kind: "text", text: "Pickup is closed right now." };
+    return { kind: "tool", name: "set_fulfillment", input: { slot_id: slot.id } };
+  }
+  if (last.name === "set_fulfillment") return { kind: "tool", name: "prepare_checkout", input: {} };
+  if (last.name === "prepare_checkout") return { kind: "text", text: "Review the card and tap Place order." };
+  return null;
 }
 
 function openingStep(lower: string, raw: string, messages: unknown): ScriptStep {
