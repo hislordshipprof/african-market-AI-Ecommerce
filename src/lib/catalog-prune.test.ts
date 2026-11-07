@@ -97,7 +97,11 @@ function parsePs(text: string): ProcRow[] {
   return rows;
 }
 
-/** Descendants of the Windows pid, from one ps snapshot. A visited set stops a parent cycle. */
+/**
+ * Descendants of the Windows pid, children before parents, from one ps snapshot.
+ * A visited set stops a parent cycle. Killing a parent with taskkill /T at the
+ * same time as kill.exe drops the signal on an MSYS child and reparents it to init.
+ */
 function descendantPids(rows: ProcRow[], rootWinPid: number): { winpids: number[]; msysPids: number[] } {
   const winpids = new Set<number>([rootWinPid]);
   const msysPids: number[] = [];
@@ -111,19 +115,16 @@ function descendantPids(rows: ProcRow[], rootWinPid: number): { winpids: number[
   }
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   const visited = new Set<number>();
-  const queue = [root.pid];
-  while (queue.length > 0) {
-    const current = queue.pop();
-    if (current === undefined || visited.has(current)) continue;
+  const walk = (current: number) => {
+    if (visited.has(current)) return;
     visited.add(current);
+    for (const kid of children.get(current) ?? []) walk(kid);
     const row = byPid.get(current);
-    if (row) {
-      msysPids.push(row.pid);
-      winpids.add(row.winpid);
-    }
-    const kids = children.get(current);
-    if (kids) for (const kid of kids) queue.push(kid);
-  }
+    if (!row) return;
+    msysPids.push(row.pid);
+    winpids.add(row.winpid);
+  };
+  walk(root.pid);
   return { winpids: [...winpids], msysPids };
 }
 
@@ -144,10 +145,10 @@ async function killProcessTree(child: ChildProcess): Promise<void> {
   }
   const listed = await runBounded(gitUsrBin("ps.exe"), ["-e"], 2_000);
   const { winpids, msysPids } = descendantPids(parsePs(listed), pid);
-  await Promise.all([
-    ...winpids.map((winpid) => runBounded("taskkill", ["/PID", String(winpid), "/T", "/F"], 2_000)),
-    ...msysPids.map((msys) => runBounded(gitUsrBin("kill.exe"), ["-KILL", String(msys)], 2_000)),
-  ]);
+  for (const msys of msysPids) {
+    await runBounded(gitUsrBin("kill.exe"), ["-KILL", String(msys)], 2_000);
+  }
+  await Promise.all([...winpids].map((winpid) => runBounded("taskkill", ["/PID", String(winpid), "/T", "/F"], 2_000)));
 }
 
 /** Async spawn. stdin is closed so a stub that reads it gets EOF. A timeout or the test's abort signal kills the process tree, then this waits for exit. */
