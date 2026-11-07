@@ -47,13 +47,6 @@ function removeTemp(dir: string): void {
   }
 }
 
-type ProcRow = { pid: number; ppid: number; winpid: number };
-
-/** Git usr/bin next to bash.exe. ps.exe and kill.exe live there; bash is not used to kill. */
-function gitUsrBin(name: string): string {
-  return path.join(path.dirname(gitBash()), name);
-}
-
 /** One process, a deadline, and no wait on the event loop. stdout is kept; a timeout kills the child. */
 function runBounded(file: string, args: string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve) => {
@@ -83,49 +76,62 @@ function runBounded(file: string, args: string[], timeoutMs: number): Promise<st
   });
 }
 
+/** Git usr/bin next to bash.exe. ps.exe and kill.exe live there. */
+function gitUsrBin(name: string): string {
+  return path.join(path.dirname(gitBash()), name);
+}
+
+type ProcRow = { pid: number; ppid: number; winpid: number };
+
 function parsePs(text: string): ProcRow[] {
   const rows: ProcRow[] = [];
   for (const line of text.split(/\r?\n/)) {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 4) continue;
-    const pid = Number(parts[0]);
+    const msysPid = Number(parts[0]);
     const ppid = Number(parts[1]);
     const winpid = Number(parts[3]);
-    if (!Number.isInteger(pid) || !Number.isInteger(ppid) || !Number.isInteger(winpid)) continue;
-    rows.push({ pid, ppid, winpid });
+    if (!Number.isInteger(msysPid) || !Number.isInteger(ppid) || !Number.isInteger(winpid)) continue;
+    rows.push({ pid: msysPid, ppid, winpid });
   }
   return rows;
 }
 
 /**
- * Descendants of the Windows pid, children before parents, from one ps snapshot.
- * A visited set stops a parent cycle. Killing a parent with taskkill /T at the
- * same time as kill.exe drops the signal on an MSYS child and reparents it to init.
+ * MSYS pids under the Windows processes we spawned, children before parents.
+ * Node's pid is not a ps WINPID: MSYS exec keeps its own. The sleeps are not
+ * Windows children of that pid either, so taskkill /T never sees them. The
+ * direct Windows child's WINPID is the bash row, and its MSYS children are the tree.
  */
-function descendantPids(rows: ProcRow[], rootWinPid: number): { winpids: number[]; msysPids: number[] } {
-  const winpids = new Set<number>([rootWinPid]);
-  const msysPids: number[] = [];
-  const root = rows.find((row) => row.winpid === rootWinPid);
-  if (!root) return { winpids: [...winpids], msysPids };
+function msysKillOrder(rows: ProcRow[], windowsPids: number[]): number[] {
+  const windows = new Set(windowsPids);
   const children = new Map<number, number[]>();
   for (const row of rows) {
     const list = children.get(row.ppid);
     if (list) list.push(row.pid);
     else children.set(row.ppid, [row.pid]);
   }
-  const byPid = new Map(rows.map((row) => [row.pid, row]));
-  const visited = new Set<number>();
-  const walk = (current: number) => {
-    if (visited.has(current)) return;
-    visited.add(current);
-    for (const kid of children.get(current) ?? []) walk(kid);
-    const row = byPid.get(current);
-    if (!row) return;
-    msysPids.push(row.pid);
-    winpids.add(row.winpid);
+  const seen = new Set<number>();
+  const order: number[] = [];
+  const walk = (msysPid: number) => {
+    if (seen.has(msysPid)) return;
+    seen.add(msysPid);
+    for (const kid of children.get(msysPid) ?? []) walk(kid);
+    order.push(msysPid);
   };
-  walk(root.pid);
-  return { winpids: [...winpids], msysPids };
+  for (const row of rows) {
+    if (windows.has(row.winpid)) walk(row.pid);
+  }
+  return order;
+}
+
+async function windowsChildPids(pid: number): Promise<number[]> {
+  const listed = await runBounded("powershell.exe", [
+    "-NoProfile",
+    "-Command",
+    `@(Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid}").ProcessId -join ' '`,
+  ], 8_000);
+  return listed.split(/\s+/).map(Number).filter((value) => Number.isInteger(value) && value > 0);
 }
 
 async function killProcessTree(child: ChildProcess): Promise<void> {
@@ -143,12 +149,14 @@ async function killProcessTree(child: ChildProcess): Promise<void> {
     }
     return;
   }
-  const listed = await runBounded(gitUsrBin("ps.exe"), ["-e"], 2_000);
-  const { winpids, msysPids } = descendantPids(parsePs(listed), pid);
-  for (const msys of msysPids) {
-    await runBounded(gitUsrBin("kill.exe"), ["-KILL", String(msys)], 2_000);
+  const [listed, kids] = await Promise.all([
+    runBounded(gitUsrBin("ps.exe"), ["-e"], 8_000),
+    windowsChildPids(pid),
+  ]);
+  for (const msysPid of msysKillOrder(parsePs(listed), [pid, ...kids])) {
+    await runBounded(gitUsrBin("kill.exe"), ["-KILL", String(msysPid)], 4_000);
   }
-  await Promise.all([...winpids].map((winpid) => runBounded("taskkill", ["/PID", String(winpid), "/T", "/F"], 2_000)));
+  await runBounded("taskkill", ["/PID", String(pid), "/T", "/F"], 8_000);
 }
 
 /** Async spawn. stdin is closed so a stub that reads it gets EOF. A timeout or the test's abort signal kills the process tree, then this waits for exit. */
@@ -181,7 +189,7 @@ function runCommand(
     const stop = async (why: string) => {
       if (settled || stopped) return;
       stopped = true;
-      // Arm the failure before the kill. A hung ps or taskkill still settles, with the same message.
+      // Arm the failure before the kill. A hung taskkill still settles, with the same message.
       backup = setTimeout(() => finish(new Error(`${why} (${stderr})`)), 5_000);
       await killProcessTree(child);
     };
