@@ -179,4 +179,55 @@ describe("isStoreOpen", () => {
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });
+
+  it("a day whose open equals its close is closed and does not open the next morning", () => {
+    const tue0200 = new Date("2026-11-03T08:00:00Z");
+    const tue0900 = new Date("2026-11-03T15:00:00Z");
+    const mon1700 = new Date("2026-11-02T23:00:00Z");
+    const mon2200 = new Date("2026-11-03T04:00:00Z");
+    const tue0800 = new Date("2026-11-03T14:00:00Z");
+
+    const midnightEqual = { tuesday: { open: "00:00", close: "00:00" } };
+    expect(isStoreOpen(midnightEqual, CHICAGO, tue0200)).toBe(false);
+    expect(isStoreOpen(midnightEqual, CHICAGO, tue0900)).toBe(false);
+
+    const stringEqual = { monday: "9:00 AM - 9:00 AM", tuesday: "Closed" };
+    expect(isStoreOpen(stringEqual, CHICAGO, mon1700)).toBe(false);
+    expect(isStoreOpen(stringEqual, CHICAGO, tue0800)).toBe(false);
+
+    const objectEqual = { monday: { open: "09:00", close: "09:00" } };
+    expect(isStoreOpen(objectEqual, CHICAGO, mon1700)).toBe(false);
+
+    const mixedTextEqual = { monday: "21:00 - 9:00 PM", tuesday: "Closed" };
+    expect(isStoreOpen(mixedTextEqual, CHICAGO, mon2200)).toBe(false);
+    expect(isStoreOpen(mixedTextEqual, CHICAGO, tue0800)).toBe(false);
+  });
+
+  it("an equal range today preserves yesterday's valid overnight window", () => {
+    const hours = {
+      monday: "20:00-02:00",
+      tuesday: { open: "09:00", close: "09:00" },
+    };
+    expect(isStoreOpen(hours, CHICAGO, new Date("2026-11-03T07:00:00Z"))).toBe(true);
+    expect(isStoreOpen(hours, CHICAGO, new Date("2026-11-03T08:00:00Z"))).toBe(false);
+    expect(isStoreOpen(hours, CHICAGO, new Date("2026-11-03T09:00:00Z"))).toBe(false);
+  });
+
+  it("midnight honors same-day and overnight boundaries", () => {
+    const midnight = new Date("2026-11-03T06:00:00Z");
+    const halfPast = new Date("2026-11-03T06:30:00Z");
+    expect(
+      isStoreOpen({ tuesday: { open: "00:00", close: "01:00" } }, CHICAGO, midnight),
+    ).toBe(true);
+    expect(
+      isStoreOpen({ tuesday: { open: "00:00", close: "01:00" } }, CHICAGO, halfPast),
+    ).toBe(true);
+    expect(
+      isStoreOpen({ monday: { open: "20:00", close: "02:00" } }, CHICAGO, midnight),
+    ).toBe(true);
+    expect(
+      isStoreOpen({ monday: { open: "20:00", close: "02:00" } }, CHICAGO, halfPast),
+    ).toBe(true);
+    expect(isStoreOpen({ monday: "23:00-00:00" }, CHICAGO, midnight)).toBe(false);
+  });
 });

@@ -125,21 +125,24 @@ export function isStoreOpen(hours: unknown, timezone: string, now?: Date): boole
       logUnparseableHours(`${todaySchedule.open}-${todaySchedule.close}`);
       return true;
     }
+    // Equal minutes are a closed range, not an overnight window. A real overnight
+    // window is only close strictly before open (20:00–02:00). An equal range adds
+    // no interval, so a previous day's overnight window can still be open.
     if (closeMin > openMin) {
       if (local.minuteOfDay >= openMin && local.minuteOfDay < closeMin) return true;
-    } else if (local.minuteOfDay >= openMin) {
-      // Overnight: open >= close means the window spans midnight (e.g. 20:00–02:00).
+    } else if (closeMin < openMin && local.minuteOfDay >= openMin) {
       return true;
     }
   }
 
   // Yesterday's overnight window can still be open after midnight.
+  // An equal range is not overnight, so it does not open this morning.
   const yesterdayDow = (local.dayOfWeek + 6) % 7;
   const yesterdaySchedule = findDaySchedule(h, yesterdayDow);
   if (yesterdaySchedule?.kind === "range") {
     const openMin = parseTimeMinutes(yesterdaySchedule.open);
     const closeMin = parseTimeMinutes(yesterdaySchedule.close);
-    if (openMin !== null && closeMin !== null && closeMin <= openMin) {
+    if (openMin !== null && closeMin !== null && closeMin < openMin) {
       if (local.minuteOfDay < closeMin) return true;
     }
   }
