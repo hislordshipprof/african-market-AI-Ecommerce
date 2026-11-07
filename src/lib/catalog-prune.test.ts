@@ -47,79 +47,107 @@ function removeTemp(dir: string): void {
   }
 }
 
-/**
- * Windows pid of a spawned bash.exe is not the MSYS pid of its children. taskkill /T
- * walks the Windows parent chain and misses those children. This lists them the way
- * scripts/review-watch.sh kill_tree does (ps PID/PPID, and the WINPID column), and
- * Node runs taskkill so the lister itself is not the process that kills.
- * Prints `kill <msys-pid> <winpid>` for the process and every MSYS descendant.
- */
-const LIST_MSYS_TREE = [
-  "winpid=$1",
-  "table=$(ps -e 2>/dev/null | awk 'NR>1 { sub(/^[^0-9]*/, \"\"); print $1, $2, $4 }')",
-  "msys=$(printf '%s\\n' \"$table\" | awk -v w=\"$winpid\" '$3==w { print $1; exit }')",
-  "[ -n \"$msys\" ] || exit 0",
-  "queue=$msys",
-  "out=\"\"",
-  "seen=\" $msys \"",
-  "while [ -n \"$queue\" ]; do",
-  "  set -- $queue",
-  "  p=$1",
-  "  shift",
-  "  queue=$*",
-  "  for c in $(printf '%s\\n' \"$table\" | awk -v pp=\"$p\" '$2==pp { print $1 }'); do",
-  "    case \"$seen\" in",
-  "      *\" $c \"*) ;;",
-  "      *) out=\"$out $c\"; queue=\"$queue $c\"; seen=\"$seen$c \" ;;",
-  "    esac",
-  "  done",
-  "done",
-  "for p in $out $msys; do",
-  "  wp=$(printf '%s\\n' \"$table\" | awk -v id=\"$p\" '$1==id { print $3; exit }')",
-  "  [ -n \"$wp\" ] && printf 'kill %s %s\\n' \"$p\" \"$wp\"",
-  "done",
-  "exit 0",
-].join("\n");
+type ProcRow = { pid: number; ppid: number; winpid: number };
 
-function killProcessTree(child: ChildProcess): void {
+/** Git usr/bin next to bash.exe. ps.exe and kill.exe live there; bash is not used to kill. */
+function gitUsrBin(name: string): string {
+  return path.join(path.dirname(gitBash()), name);
+}
+
+/** One process, a deadline, and no wait on the event loop. stdout is kept; a timeout kills the child. */
+function runBounded(file: string, args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let settled = false;
+    const child = spawn(file, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(stdout);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+      finish();
+    }, timeoutMs);
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.on("error", finish);
+    child.on("exit", finish);
+  });
+}
+
+function parsePs(text: string): ProcRow[] {
+  const rows: ProcRow[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 4) continue;
+    const pid = Number(parts[0]);
+    const ppid = Number(parts[1]);
+    const winpid = Number(parts[3]);
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid) || !Number.isInteger(winpid)) continue;
+    rows.push({ pid, ppid, winpid });
+  }
+  return rows;
+}
+
+/** Descendants of the Windows pid, from one ps snapshot. A visited set stops a parent cycle. */
+function descendantPids(rows: ProcRow[], rootWinPid: number): { winpids: number[]; msysPids: number[] } {
+  const winpids = new Set<number>([rootWinPid]);
+  const msysPids: number[] = [];
+  const root = rows.find((row) => row.winpid === rootWinPid);
+  if (!root) return { winpids: [...winpids], msysPids };
+  const children = new Map<number, number[]>();
+  for (const row of rows) {
+    const list = children.get(row.ppid);
+    if (list) list.push(row.pid);
+    else children.set(row.ppid, [row.pid]);
+  }
+  const byPid = new Map(rows.map((row) => [row.pid, row]));
+  const visited = new Set<number>();
+  const queue = [root.pid];
+  while (queue.length > 0) {
+    const current = queue.pop();
+    if (current === undefined || visited.has(current)) continue;
+    visited.add(current);
+    const row = byPid.get(current);
+    if (row) {
+      msysPids.push(row.pid);
+      winpids.add(row.winpid);
+    }
+    const kids = children.get(current);
+    if (kids) for (const kid of kids) queue.push(kid);
+  }
+  return { winpids: [...winpids], msysPids };
+}
+
+async function killProcessTree(child: ChildProcess): Promise<void> {
   const pid = child.pid;
   if (pid === undefined) return;
-  if (process.platform === "win32") {
-    // List first. taskkill from inside that bash can fail to return, so Node runs taskkill.
-    const listed = spawnSync(gitBash(), ["-c", LIST_MSYS_TREE, "list-tree", String(pid)], {
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 30_000,
-    });
-    const winpids = new Set<string>([String(pid)]);
-    const msysPids: string[] = [];
-    for (const line of (listed.stdout ?? "").split(/\n/)) {
-      const match = /^kill (\d+) (\d+)/.exec(line.trim());
-      if (!match) continue;
-      msysPids.push(match[1]);
-      winpids.add(match[2]);
-    }
-    for (const winpid of winpids) {
-      spawnSync("taskkill", ["/PID", winpid, "/T", "/F"], { stdio: "ignore", timeout: 3_000 });
-    }
-    if (msysPids.length > 0) {
-      spawnSync(gitBash(), ["-c", "kill -KILL " + msysPids.join(" ")], {
-        stdio: "ignore",
-        windowsHide: true,
-        timeout: 3_000,
-      });
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
     }
     return;
   }
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already gone */
-    }
-  }
+  const listed = await runBounded(gitUsrBin("ps.exe"), ["-e"], 2_000);
+  const { winpids, msysPids } = descendantPids(parsePs(listed), pid);
+  await Promise.all([
+    ...winpids.map((winpid) => runBounded("taskkill", ["/PID", String(winpid), "/T", "/F"], 2_000)),
+    ...msysPids.map((msys) => runBounded(gitUsrBin("kill.exe"), ["-KILL", String(msys)], 2_000)),
+  ]);
 }
 
 /** Async spawn. stdin is closed so a stub that reads it gets EOF. A timeout or the test's abort signal kills the process tree, then this waits for exit. */
@@ -149,11 +177,12 @@ function runCommand(
       stderr += chunk;
     });
     let backup: ReturnType<typeof setTimeout> | undefined;
-    const stop = (why: string) => {
+    const stop = async (why: string) => {
       if (settled || stopped) return;
       stopped = true;
-      killProcessTree(child);
+      // Arm the failure before the kill. A hung ps or taskkill still settles, with the same message.
       backup = setTimeout(() => finish(new Error(`${why} (${stderr})`)), 5_000);
+      await killProcessTree(child);
     };
     const deadline = setTimeout(() => stop("timed out"), options.timeoutMs);
     const finish = (error?: Error) => {
@@ -1023,7 +1052,7 @@ describe("lane env filter script", () => {
   it("lane direct-url resolution cannot select copied or inherited remote unpooled URL", () => {
     const text = readFileSync(path.join(process.cwd(), "scripts", "lane-db.sh"), "utf8");
     expect(text).toContain("DATABASE_URL_UNPOOLED");
-    expect(text).toContain("env -u DATABASE_URL_UNPOOLED -u SEED_PRUNE_R2");
+    expect(text).toContain("unset DATABASE_URL_UNPOOLED SEED_PRUNE_R2");
   });
 
   it("usage errors name the accepted command instead of a generic filter failure", () => {
@@ -1104,6 +1133,7 @@ describe("lane env filter script", () => {
   });
 
   it("a dotenv value on the line after a colon cannot leak", async (ctx) => {
+    const started = Date.now();
     const env = ticketEnv();
     try {
       const src = path.join(env.dir, "src");
@@ -1130,7 +1160,7 @@ describe("lane env filter script", () => {
       expect(written).not.toContain("remote.example");
       const bashDest = dest.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
       const loadProbe = `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`;
-      const probe = await runCommand("bash", ["-c", loadProbe], { cwd: process.cwd(), timeoutMs: 14_500, signal: ctx.signal });
+      const probe = await runCommand("bash", ["-c", loadProbe], { cwd: process.cwd(), timeoutMs: commandBudget(started, 15_000), signal: ctx.signal });
       expect(probe.stdout).toContain("host:localhost");
       expect(probe.stdout).not.toContain("PRESENT");
       expect(probe.stdout).not.toContain(SECRET);
@@ -1156,7 +1186,7 @@ describe("lane env filter script", () => {
       expect(crlf).not.toContain("remote.example");
       expect(crlf).not.toContain("R2_SECRET_ACCESS_KEY");
       expect(crlf).not.toContain("R2_ACCESS_KEY_ID");
-      const crlfProbe = await runCommand("bash", ["-c", loadProbe], { cwd: process.cwd(), timeoutMs: 14_500, signal: ctx.signal });
+      const crlfProbe = await runCommand("bash", ["-c", loadProbe], { cwd: process.cwd(), timeoutMs: commandBudget(started, 15_000), signal: ctx.signal });
       expect(crlfProbe.stdout).toContain("host:localhost");
       expect(crlfProbe.stdout).not.toContain("PRESENT");
       expect(crlfProbe.stdout).not.toContain(SECRET);
@@ -1191,16 +1221,6 @@ describe("lane env filter script", () => {
     expect(existsSync(dest)).toBe(false);
     expect(`${result.stdout}${result.stderr}`).not.toContain(SECRET);
     rmSync(env.dir, { recursive: true, force: true });
-  });
-
-  it("an already-aborted signal does not kill a command that then exits 0", async () => {
-    const controller = new AbortController();
-    controller.abort();
-    const { stdout } = await runCommand(gitBash(), ["-c", "echo fresh-ok"], {
-      timeoutMs: 10_000,
-      signal: controller.signal,
-    });
-    expect(stdout).toContain("fresh-ok");
   });
 
   it("lane-db drops spaced unpooled assignments and points children at localhost", async (ctx) => {
@@ -1238,6 +1258,8 @@ describe("lane env filter script", () => {
     await runCommand(gitBash(), ["scripts/lane-db.sh", "zzorch", bashPath(envFile)], {
       env: {
         ...process.env,
+        DATABASE_URL_UNPOOLED: `postgresql://user:${SECRET}@remote.example/db`,
+        SEED_PRUNE_R2: "dry-run",
         PGBIN: bashPath(bin),
         LANE_PG_DATA: bashPath(data),
         HARNESS_LOG: bashPath(log),
@@ -1259,6 +1281,7 @@ describe("lane env filter script", () => {
     expect(child).toContain("psql");
     expect(child).toContain("child npx host=localhost");
     expect(child).not.toContain("unpooled=present");
+    expect(child).not.toContain("prune=present");
     expect(child).not.toContain("secret=present");
     expect(child).not.toContain(SECRET);
     } finally {

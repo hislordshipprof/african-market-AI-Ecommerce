@@ -77,9 +77,9 @@ describe.skipIf(!hasDb || process.env.TZ_CHILD === "1")("app rate limit cleanup 
   it("a window refreshed while cleanup waits is kept", async () => {
     const key = `fresh-${Date.now()}-${Math.random()}`;
     const now = BigInt(Date.now());
-    const hour = BigInt(60 * 60 * 1000);
-    const windowStart = now - BigInt(23) * hour - BigInt(30 * 60 * 1000);
-    const cutoff = now - BigInt(23) * hour;
+    // window_start 1 is the only row below cutoff 2, so an unordered LIMIT 100 cannot skip it.
+    const windowStart = BigInt(1);
+    const cutoff = BigInt(2);
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
     try {
