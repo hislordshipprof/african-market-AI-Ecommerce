@@ -133,7 +133,7 @@ function textOf(message: ShownMessage): string {
   return message.parts
     .filter((part) => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text ?? "")
-    .join("");
+    .join("\n");
 }
 
 function statusOf(message: ShownMessage): "complete" | "failed" | null {

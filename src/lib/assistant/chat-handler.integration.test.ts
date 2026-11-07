@@ -2750,6 +2750,71 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     }
   }, 60_000);
 
+  it("a yes after two reply parts adds both named products", async () => {
+    const ofada = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Ofada Rice", price: 500, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const ofadaVariant = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: ofada.id, label: "Each", price: 500, weightG: 100 },
+    })).id;
+    const tomato = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Tomato Paste", price: 250, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const tomatoVariant = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: tomato.id, label: "Each", price: 250, weightG: 100 },
+    })).id;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "get_cart_summary", toolInput: {}, text: "Ofada Rice" },
+        { kind: "text", text: "Tomato Paste" },
+        {
+          kind: "tool",
+          toolName: "add_to_cart",
+          toolInput: {
+            items: [
+              { variant_id: ofadaVariant, qty: 1 },
+              { variant_id: tomatoVariant, qty: 1 },
+            ],
+          },
+        },
+        { kind: "text", text: "Added." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    let cookie = "";
+    const send = async (id: string, text: string) => {
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host,
+          origin: `http://${host}`,
+          "x-store-slug": slug,
+          "x-forwarded-for": "198.51.100.56",
+          ...(cookie ? { cookie } : {}),
+        },
+        body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      const body = await response.text();
+      if (!cookie) cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
+      return { status: response.status, body };
+    };
+    const proposal = await send("parts-proposal", "rice and paste");
+    expect(proposal.status).toBe(200);
+    const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
+    expect(await storeScoped(storeId).cartLine.count({ where: { cartId } })).toBe(0);
+    const yes = await send("parts-yes", "yes");
+    expect(yes.status).toBe(200);
+    const added = await storeScoped(storeId).cartLine.findMany({ where: { cartId } });
+    expect(added).toHaveLength(2);
+    expect(added).toEqual(expect.arrayContaining([
+      expect.objectContaining({ variantId: ofadaVariant, qty: 1 }),
+      expect.objectContaining({ variantId: tomatoVariant, qty: 1 }),
+    ]));
+  }, 60_000);
+
   it("one search naming two products draws saved choices with no extra model call, and the next yes adds nothing", async () => {
     const scotch = await storeScoped(storeId).listing.create({
       data: { storeId, customName: "Scotch Bonnet Pepper", price: 300, stockMode: "unlimited", frozen: false, perishable: false },
@@ -2812,12 +2877,26 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(fake.requests).toHaveLength(3);
     expect(asked.body).toContain("Scotch Bonnet Pepper and Cameroon Pepper.");
     expect(asked.body).toContain("Which would you like?");
-    const streamed = choiceVariantIds(asked.body);
+    const idsFrom = (output: unknown) => {
+      if (!output || typeof output !== "object" || !("options" in output) || !Array.isArray(output.options)) return [];
+      return output.options.flatMap((option: unknown) => (
+        option && typeof option === "object" && "variantId" in option && typeof option.variantId === "string"
+          ? [option.variantId]
+          : []
+      ));
+    };
+    const streamedParts = uiParts(asked.body);
+    const choiceCallId = streamedParts.find((part) => part.type === "tool-input-available" && part.toolName === "offer_choices")?.toolCallId;
+    const streamed = idsFrom(streamedParts.find((part) => part.type === "tool-output-available" && part.toolCallId === choiceCallId)?.output);
     expect(streamed).toHaveLength(2);
     expect(streamed).toEqual(expect.arrayContaining([scotchVariant, cameroonVariant]));
     const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
     const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId } });
-    const saved = choiceVariantIds(JSON.stringify(conversation?.messages ?? null));
+    const savedMessages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+    const savedPart = savedMessages.flatMap((message) => (
+      message && typeof message === "object" && "parts" in message && Array.isArray(message.parts) ? message.parts : []
+    )).find((part) => part && typeof part === "object" && "type" in part && part.type === "tool-offer_choices");
+    const saved = idsFrom(savedPart && typeof savedPart === "object" && "output" in savedPart ? savedPart.output : undefined);
     expect(saved).toHaveLength(2);
     expect(saved).toEqual(expect.arrayContaining([scotchVariant, cameroonVariant]));
 
@@ -2869,59 +2948,6 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(reserved).toMatchObject({ status: 400, message: "tool_use id must match ^[a-zA-Z0-9_-]+$" });
   }, 60_000);
 });
-
-function choiceVariantIds(raw: string): string[] {
-  const chunks: Array<Record<string, unknown>> = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("data:")) continue;
-    const payload = trimmed.slice("data:".length).trim();
-    if (!payload || payload === "[DONE]") continue;
-    try {
-      const json: unknown = JSON.parse(payload);
-      if (json && typeof json === "object" && !Array.isArray(json)) chunks.push(json as Record<string, unknown>);
-    } catch {
-      continue;
-    }
-  }
-  if (chunks.length > 0) {
-    const ids = new Set(
-      chunks
-        .filter((chunk) => chunk.type === "tool-input-available" && chunk.toolName === "offer_choices" && typeof chunk.toolCallId === "string")
-        .map((chunk) => chunk.toolCallId as string),
-    );
-    const output = chunks.find((chunk) => chunk.type === "tool-output-available" && ids.has(String(chunk.toolCallId)));
-    return variantIdsOf(output?.output);
-  }
-  try {
-    return variantIdsOfStored(JSON.parse(raw) as unknown);
-  } catch {
-    return [];
-  }
-}
-
-function variantIdsOf(output: unknown): string[] {
-  if (!output || typeof output !== "object" || !Array.isArray((output as { options?: unknown }).options)) return [];
-  return (output as { options: Array<{ variantId?: unknown }> }).options.flatMap((option) =>
-    typeof option.variantId === "string" ? [option.variantId] : [],
-  );
-}
-
-function variantIdsOfStored(messages: unknown): string[] {
-  if (!Array.isArray(messages)) return [];
-  for (const message of messages) {
-    const parts = (message as { parts?: unknown[] }).parts;
-    if (!Array.isArray(parts)) continue;
-    for (const part of parts) {
-      if (!part || typeof part !== "object") continue;
-      const record = part as { type?: unknown; output?: unknown };
-      if (record.type !== "tool-offer_choices") continue;
-      const ids = variantIdsOf(record.output);
-      if (ids.length > 0 || (record.output && typeof record.output === "object" && "options" in record.output)) return ids;
-    }
-  }
-  return [];
-}
 
 function padJpeg(jpeg: Buffer, target: number): Buffer {
   const extra = target - jpeg.length;
