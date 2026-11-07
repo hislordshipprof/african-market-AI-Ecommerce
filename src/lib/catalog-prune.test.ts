@@ -224,7 +224,9 @@ function runCommand(
  * dispatched by bash, so either one pushes lane-db.sh past 15s while other lanes
  * are running. scripts/catalog-prune-stub.exe is a native binary (about 30ms) that
  * behaves as psql, npx, git, gh, claude, pg_ctl or pg_isready based on its name.
- * Linux keeps the node scripts: process start is cheap there, and the exe is Windows.
+ * installWinUtils adds dirname, mktemp, cat, mv, grep, date, ls, mkdir, tail, tr, sed,
+ * cut and rm. Lane-db starts four of those; the harness starts them on every mode.
+ * Linux keeps the real binaries: process start is cheap there, and the exe is Windows.
  */
 const NATIVE_STUB = path.join(process.cwd(), "scripts", "catalog-prune-stub.exe");
 
@@ -257,6 +259,14 @@ function commandPath(bin: string): string {
   const bashDir = toBash(path.dirname(gitBash()));
   const nodeDir = toBash(path.dirname(process.execPath));
   return `${toBash(bin)}:${bashDir}:${nodeDir}:/usr/bin`;
+}
+
+const WIN_UTILS = ["dirname", "mktemp", "cat", "mv", "grep", "date", "ls", "mkdir", "tail", "tr", "sed", "cut", "rm"] as const;
+
+/** Windows only. A native exe is one CreateProcess with no MSYS DLL startup. */
+function installWinUtils(bin: string): void {
+  if (process.platform !== "win32") return;
+  for (const name of WIN_UTILS) installStub(bin, name, "");
 }
 
 function installStub(bin: string, name: string, nodeBody: string): void {
@@ -321,6 +331,28 @@ prune=\${SEED_PRUNE_R2:+present}
 printf 'child ${label} host=%s secret=%s access=%s unpooled=%s prune=%s\\n' "$host" "$secret" "$access" "$unpooled" "$prune" >> "$HARNESS_LOG"
 ${trailer}
 `;
+}
+
+/**
+ * The harness used to run seven greps per mode. Each grep is an MSYS process.
+ * [[ ]] is a builtin. A quoted pattern is literal, so the sentinel cannot hide in a regex.
+ * Failure text goes to stderr, which runCommand includes in the rejection.
+ */
+function harnessLogCheck(): string {
+  return `
+    log=$(<"$HARNESS_LOG")
+    need() { [[ $log == *"$1"* ]] || { echo "missing:$1" >&2; exit 1; }; }
+    need "child npx host=localhost"
+    need "child claude"
+    need "child review"
+    need "psql"
+    need "git fetch"
+    if [[ $log == *"secret=present"* || $log == *"access=present"* || $log == *"unpooled=present"* || $log == *"prune=present"* ]]; then
+      echo "leaked child env" >&2
+      exit 1
+    fi
+    if [[ $log == *"${SECRET}"* ]]; then echo "secret in log" >&2; exit 1; fi
+  `;
 }
 
 describe("catalog prune guard and planner", () => {
@@ -1248,6 +1280,7 @@ describe("lane env filter script", () => {
     installStub(bin, "pg_ctl", nodeExit);
     installStub(bin, "pg_isready", nodeExit);
     installStub(bin, "npx", nodeNpxLine());
+    installWinUtils(bin);
     const envFile = path.join(dir, "env");
     writeFileSync(envFile, [
       "KEEP=1",
@@ -1284,6 +1317,7 @@ describe("lane env filter script", () => {
     expect(written).not.toContain("other.example");
     expect(written).not.toContain("crlf.example");
     expect(written).not.toContain("dry-run");
+    expect(written).toContain("KEEP=1");
     expect(written).toContain("postgresql://app_owner:app_owner@localhost:");
     expect(written).toContain("/lane_zzorch");
     const child = readFileSync(log, "utf8");
@@ -1293,6 +1327,52 @@ describe("lane env filter script", () => {
     expect(child).not.toContain("prune=present");
     expect(child).not.toContain("secret=present");
     expect(child).not.toContain(SECRET);
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  it("harness log check rejects a leaked child env and a copied secret", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "t225-check-"));
+    try {
+      const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
+      const clean = ["child npx host=localhost", "child claude", "child review", "psql", "git fetch", ""].join("\n");
+      const files: Array<[string, string]> = [
+        ["clean", clean],
+        ["secretpresent", `${clean}secret=present\n`],
+        ["accesspresent", `${clean}access=present\n`],
+        ["unpooledpresent", `${clean}unpooled=present\n`],
+        ["prunepresent", `${clean}prune=present\n`],
+        ["copied", `${clean}${SECRET}\n`],
+        ["missing", clean.replace("git fetch\n", "")],
+      ];
+      for (const [name, body] of files) writeFileSync(path.join(dir, name), body);
+      const root = bashPath(dir);
+      await runCommand(gitBash(), ["-c", `
+        check() { ${harnessLogCheck()} }
+        runone() {
+          HARNESS_LOG="$1"
+          want="$2"
+          err=$(check 2>&1 >/dev/null)
+          rc=$?
+          if [ "$want" = ok ]; then
+            [ "$rc" = 0 ] || { echo "clean failed:$err" >&2; exit 1; }
+            return 0
+          fi
+          [ "$rc" != 0 ] || { echo "should have failed" >&2; exit 1; }
+          case "$err" in
+            *"$want"*) ;;
+            *) echo "wanted [$want] in [$err]" >&2; exit 1 ;;
+          esac
+        }
+        runone "${root}/clean" ok
+        runone "${root}/secretpresent" "leaked child env"
+        runone "${root}/accesspresent" "leaked child env"
+        runone "${root}/unpooledpresent" "leaked child env"
+        runone "${root}/prunepresent" "leaked child env"
+        runone "${root}/copied" "secret in log"
+        runone "${root}/missing" "missing:git fetch"
+      `], { timeoutMs: 8_000 });
     } finally {
       removeTemp(dir);
     }
@@ -1350,6 +1430,7 @@ if (args.includes("title")) { process.stdout.write("seed photos\\n"); process.ex
 process.stdout.write("OPEN\\n");
 process.exit(0);
 `);
+    installWinUtils(bin);
     const review = path.join(dir, "review.sh");
     writeFileSync(review, bashChild("review", 'echo "VERDICT: PASS"\nexit 0'));
     chmodSync(review, 0o755);
@@ -1375,16 +1456,7 @@ process.exit(0);
       export SEED_PRUNE_R2='dry-run'
       export DATABASE_URL_UNPOOLED='postgresql://user:${SECRET}@remote.example/db'
       check() {
-        grep -q "child npx host=localhost" "$HARNESS_LOG"
-        grep -q "child claude" "$HARNESS_LOG"
-        grep -q "child review" "$HARNESS_LOG"
-        grep -q "psql" "$HARNESS_LOG"
-        grep -q "git fetch" "$HARNESS_LOG"
-        if grep -Eq "secret=present|access=present|unpooled=present|prune=present" "$HARNESS_LOG"; then
-          echo "leaked child env"
-          exit 1
-        fi
-        if grep -q '${SECRET}' "$HARNESS_LOG"; then echo "secret in log"; exit 1; fi
+        ${harnessLogCheck()}
       }
       : > "$HARNESS_LOG"
       bash scripts/build-ticket.sh 225
