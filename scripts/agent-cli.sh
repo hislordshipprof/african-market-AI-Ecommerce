@@ -10,8 +10,8 @@
 # .cursor/skills/supermatt/skills/<skill>/SKILL.md, since Cursor has no plugin slash commands.
 
 _AGENT_CLI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck disable=SC1091
 _REVIEW_ENGINE_OVERRIDE="${REVIEW_ENGINE:-}"
+# shellcheck disable=SC1091
 [ -f "$_AGENT_CLI_DIR/agent-engine.env" ] && . "$_AGENT_CLI_DIR/agent-engine.env"
 AGENT_ENGINE="${AGENT_ENGINE:-${ENGINE:-claude}}"
 REVIEW_ENGINE="${_REVIEW_ENGINE_OVERRIDE:-${REVIEW_ENGINE:-$AGENT_ENGINE}}"
@@ -80,8 +80,10 @@ agent_run() {
         build|review|review2) flags+=(--effort high) ;;
       esac
       # Reviews may run on a separate Claude profile. It has no supermatt plugin, so the slash skill is rewritten
-      # to the vendored copy, as for Cursor.
+      # to the vendored copy, as for Cursor. Headless Claude exits when it ends a turn while a background subagent
+      # still runs, so reviews run with background tasks off.
       if [ "$role" = review ] || [ "$role" = review2 ]; then
+        local -x CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
         if [ -n "${REVIEW_CLAUDE_CONFIG_DIR:-}" ]; then
           [ -d "$REVIEW_CLAUDE_CONFIG_DIR" ] || { echo "No Claude profile at $REVIEW_CLAUDE_CONFIG_DIR" >&2; return 2; }
           local -x CLAUDE_CONFIG_DIR="$REVIEW_CLAUDE_CONFIG_DIR"

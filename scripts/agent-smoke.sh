@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for the headless engines in scripts/agent-engine.env. Read-only prompts; no files are changed.
 #   build  : a CURSOR_BUILD_MODEL turn, then a resume of the same session (proves fix rounds can continue)
-#   review : a REVIEW_ENGINE turn (Codex by default) that must open a vendored SuperMatt skill
+#   review : a REVIEW_ENGINE turn (Claude on the benjamin profile by default) that must open a vendored SuperMatt skill
 #   review2: the RISK second reviewer (CURSOR_REVIEW_MODEL)
 # Usage: scripts/agent-smoke.sh [build|review|review2|all]   Logs go to .builder/logs/smoke-*.
 set -uo pipefail

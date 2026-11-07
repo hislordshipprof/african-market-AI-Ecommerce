@@ -66,7 +66,7 @@ While iterating, run only the affected specs (`pnpm test:e2e e2e/<spec>.spec.ts 
 If something fails and you cannot fix it, report it as failing with the output. Never report a check you did not run.
 
 ### No agent reviews its own work
-Don't run the code review on your own code. After you push, `scripts/build-ticket.sh` runs `scripts/review-ticket.sh`: a fresh session that never saw your reasoning reviews the diff, plus Codex for money, auth and external-provider tickets. Its findings come back to you as a fix round. Reproduce each finding before changing code, and say so with evidence when one does not reproduce.
+Don't run the code review on your own code. After you push, `scripts/build-ticket.sh` runs `scripts/review-ticket.sh`: a fresh session that never saw your reasoning reviews the diff, plus a second reviewer for money, auth and external-provider tickets. Its findings come back to you as a fix round. Reproduce each finding before changing code, and say so with evidence when one does not reproduce.
 
 ## Finish
 1. Commit in small, meaningful commits. End each message with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
