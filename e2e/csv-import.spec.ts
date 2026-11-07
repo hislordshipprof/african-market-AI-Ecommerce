@@ -568,4 +568,219 @@ test.describe("CSV import (authenticated)", () => {
       await prisma.$disconnect();
     }
   });
+
+  test("a lost commit response can be pressed again without importing twice", async ({ page }) => {
+    test.setTimeout(90_000);
+    const stamp = Date.now();
+    const skipped = `E2E Lost Skip ${stamp}`;
+    const keptAside = `E2E Lost Aside ${stamp}`;
+    const shared = `E2E Lost Shared ${stamp}`;
+    const alphaName = `E2E Lost Alpha ${stamp}`;
+    const betaName = `E2E Lost Beta ${stamp}`;
+    const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    let betaId = "";
+    let alphaId = "";
+    try {
+      const products = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        const alpha = await tx.masterProduct.create({
+          data: { name: alphaName, status: "active", frozen: false, perishable: false },
+        });
+        const beta = await tx.masterProduct.create({
+          data: { name: betaName, status: "active", frozen: false, perishable: false },
+        });
+        await tx.productSynonym.create({ data: { productId: alpha.id, term: shared } });
+        await tx.productSynonym.create({ data: { productId: beta.id, term: shared } });
+        return { alpha, beta };
+      });
+      alphaId = products.alpha.id;
+      betaId = products.beta.id;
+
+      const csvPath = writeTempCsv(
+        `name,price,qty\n${skipped},2.00,1\n${keptAside},1.00,4\n${shared},3.00,6\n`,
+      );
+      await page.goto(IMPORT_URL);
+      await page.locator("input[type='file']").setInputFiles(csvPath);
+      await page.click("text=Upload & Preview");
+      await expect(page.getByText("Ambiguous Matches", { exact: true })).toBeVisible({ timeout: 20_000 });
+      const boxes = page.getByRole("checkbox");
+      await expect(boxes).toHaveCount(2);
+      await boxes.nth(0).uncheck();
+      await boxes.nth(1).uncheck();
+      await page.getByRole("radio", { name: betaName }).check();
+      const importButton = page.getByRole("button", { name: "Import 1 listing" });
+      await expect(importButton).toBeEnabled();
+
+      let firstBody: Buffer | null = null;
+      let secondBody: Buffer | null = null;
+      let commits = 0;
+      await page.route("**/*", async (route) => {
+        const request = route.request();
+        if (request.method() !== "POST" || !request.headers()["next-action"]) {
+          await route.continue();
+          return;
+        }
+        commits += 1;
+        if (commits === 1) {
+          firstBody = request.postDataBuffer();
+          const response = await route.fetch();
+          const proved = await prisma.$transaction(async (tx) => {
+            const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
+            if (!store) throw new Error("mama-ngozi missing");
+            await tx.$executeRaw`SET LOCAL ROLE app_user`;
+            await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+            const listings = await tx.listing.findMany({ where: { masterProductId: betaId } });
+            const skippedRows = await tx.listing.findMany({
+              where: { customName: { in: [skipped, keptAside] } },
+            });
+            const imports = await tx.listingImport.findMany({ where: { csvText: { contains: shared } } });
+            const variants = await tx.listingVariant.findMany({ where: { listingId: { in: listings.map((row) => row.id) } } });
+            const stock = await tx.stockEvent.findMany({ where: { listingId: { in: listings.map((row) => row.id) } } });
+            const audits = await tx.auditLog.findMany({ where: { action: "catalog.csv_import" } });
+            return { listings, skippedRows, imports, variants, stock, audits };
+          });
+          expect(response.status()).toBeLessThan(400);
+          expect(proved.listings).toHaveLength(1);
+          expect(proved.skippedRows).toHaveLength(0);
+          expect(proved.imports).toHaveLength(1);
+          expect(proved.imports[0]?.status).toBe("committed");
+          expect(proved.imports[0]?.commitResult).toBeTruthy();
+          expect(proved.variants).toHaveLength(1);
+          expect(proved.stock).toHaveLength(1);
+          expect(proved.stock[0]?.delta).toBe(6);
+          expect(proved.audits.length).toBeGreaterThan(0);
+          await route.abort("connectionreset");
+          return;
+        }
+        secondBody = request.postDataBuffer();
+        await route.continue();
+      });
+
+      await importButton.click();
+      await expect(page.locator("[data-sonner-toast]")).toContainText(
+        "We couldn't confirm the import. Press Import again. Nothing will be imported twice.",
+        { timeout: 20_000 },
+      );
+      await expect(page.getByRole("heading", { name: "Import Complete" })).toHaveCount(0);
+      await expect(page.getByText("Ambiguous Matches", { exact: true })).toBeVisible();
+      await expect(boxes.nth(0)).not.toBeChecked();
+      await expect(boxes.nth(1)).not.toBeChecked();
+      await expect(page.getByRole("radio", { name: betaName })).toBeChecked();
+      await expect(page.getByRole("radio", { name: alphaName })).not.toBeChecked();
+      await expect(page.getByRole("button", { name: "Import 1 listing" })).toBeEnabled();
+
+      const beforeRetry = await prisma.$transaction(async (tx) => {
+        const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.store_id', ${store!.id}, true)`;
+        const listing = await tx.listing.findFirst({ where: { masterProductId: betaId } });
+        const receipt = await tx.listingImport.findFirst({ where: { csvText: { contains: shared } } });
+        return { listingId: listing?.id, commitResult: receipt?.commitResult, committedAt: receipt?.committedAt?.toISOString() };
+      });
+
+      await page.getByRole("button", { name: "Import 1 listing" }).click();
+      await expect(page.locator("[data-sonner-toast]")).toContainText("Imported 1 listing.", { timeout: 20_000 });
+      await expect(page.getByRole("heading", { name: "Import Complete" })).toBeVisible();
+      expect(firstBody).not.toBeNull();
+      expect(secondBody).not.toBeNull();
+      expect(Buffer.compare(firstBody!, secondBody!)).toBe(0);
+
+      const afterRetry = await prisma.$transaction(async (tx) => {
+        const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.store_id', ${store!.id}, true)`;
+        const listings = await tx.listing.findMany({ where: { masterProductId: betaId } });
+        const alphaListings = await tx.listing.findMany({ where: { masterProductId: alphaId } });
+        const customs = await tx.listing.findMany({ where: { customName: { in: [skipped, keptAside] } } });
+        const receipt = await tx.listingImport.findFirst({ where: { csvText: { contains: shared } } });
+        return { listings, alphaListings, customs, receipt };
+      });
+      expect(afterRetry.listings).toHaveLength(1);
+      expect(afterRetry.listings[0]?.id).toBe(beforeRetry.listingId);
+      expect(afterRetry.alphaListings).toHaveLength(0);
+      expect(afterRetry.customs).toHaveLength(0);
+      expect(afterRetry.receipt?.commitResult).toEqual(beforeRetry.commitResult);
+      expect(afterRetry.receipt?.committedAt?.toISOString()).toBe(beforeRetry.committedAt);
+    } finally {
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        const ids = [alphaId, betaId].filter(Boolean);
+        if (ids.length > 0) {
+          const listings = await tx.listing.findMany({ where: { masterProductId: { in: ids } }, select: { id: true } });
+          const listingIds = listings.map((row) => row.id);
+          if (listingIds.length > 0) {
+            await tx.stockEvent.deleteMany({ where: { listingId: { in: listingIds } } });
+            await tx.listingVariant.deleteMany({ where: { listingId: { in: listingIds } } });
+            await tx.listing.deleteMany({ where: { id: { in: listingIds } } });
+          }
+          await tx.productSynonym.deleteMany({ where: { productId: { in: ids } } });
+          await tx.masterProduct.deleteMany({ where: { id: { in: ids } } });
+        }
+        await tx.listingImport.deleteMany({ where: { csvText: { contains: shared } } });
+      });
+      await prisma.$disconnect();
+    }
+  });
+
+  test("a raw action body above CSV cap plus 64 KiB is rejected without storing a preview", async ({ page }) => {
+    test.setTimeout(60_000);
+    const name = `E2E Cap ${Date.now()}`;
+    const csvPath = writeTempCsv(`name,price\n${name},1.00\n`);
+    const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    let status = 0;
+    let paddedOnce = false;
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      if (paddedOnce || request.method() !== "POST" || !request.headers()["next-action"]) {
+        await route.continue();
+        return;
+      }
+      paddedOnce = true;
+      const body = request.postDataBuffer() ?? Buffer.alloc(0);
+      const type = request.headers()["content-type"] ?? "";
+      const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type);
+      const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2];
+      if (!boundary) throw new Error("preview request has no multipart boundary");
+      const closing = Buffer.from(`--${boundary}--`);
+      const at = body.lastIndexOf(closing);
+      if (at < 0) throw new Error("preview request has no closing boundary");
+      const target = 2_162_688 + 4096;
+      const header = Buffer.from(`\r\nContent-Disposition: form-data; name="pad"\r\n\r\n`);
+      const tail = Buffer.from(`\r\n`);
+      const filler = target - at - header.length - tail.length;
+      if (filler < 1) throw new Error("preview body is already over the cap");
+      const padded = Buffer.concat([
+        body.subarray(0, at),
+        header,
+        Buffer.alloc(filler, 0x78),
+        tail,
+        body.subarray(at),
+      ]);
+      expect(padded.length).toBe(target);
+      expect(padded.length).toBeLessThan(3 * 1024 * 1024);
+      const headers = { ...request.headers(), "content-length": String(padded.length) };
+      const response = await route.fetch({ postData: padded, headers });
+      status = response.status();
+      await route.fulfill({ response });
+    });
+    try {
+      await page.goto(IMPORT_URL);
+      await page.locator("input[type='file']").setInputFiles(csvPath);
+      await page.click("text=Upload & Preview");
+      await expect.poll(() => status, { timeout: 20_000 }).toBe(413);
+      await expect(page.getByText("New listings", { exact: true })).toHaveCount(0);
+      const stored = await prisma.$transaction(async (tx) => {
+        const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
+        if (!store) throw new Error("mama-ngozi missing");
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+        return tx.listingImport.count({ where: { csvText: { contains: name } } });
+      });
+      expect(stored).toBe(0);
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
 });
