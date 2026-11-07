@@ -30,8 +30,14 @@ import { getCheckoutPayments } from "../stripe/checkout-payments";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const BASE = "http://localhost:3000/api/auth";
-const RUN = `t248-auth-${Date.now()}`;
 const password = "AccountAuth-248!";
+const issuedEmails: string[] = [];
+
+function accountEmail(label: string): string {
+  const email = `${label}-${Date.now()}-${issuedEmails.length}@example.test`;
+  issuedEmails.push(email);
+  return email;
+}
 
 class CookieJar {
   private readonly jar = new Map<string, string>();
@@ -98,10 +104,9 @@ const home = {
 };
 
 describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
-  const emails = [`a-${RUN}@example.test`, `b-${RUN}@example.test`, `c-${RUN}@example.test`, `d-${RUN}@example.test`];
-
   afterAll(async () => {
-    await authPrisma.user.deleteMany({ where: { email: { in: emails } } });
+    if (issuedEmails.length === 0) return;
+    await authPrisma.user.deleteMany({ where: { email: { in: issuedEmails } } });
   });
 
   it("refuses a signed-out caller and refuses B on A's address", async () => {
@@ -109,8 +114,8 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
     expect(signedOut.ok).toBe(false);
     if (!signedOut.ok) expect(signedOut.error).toBe(SIGN_IN_MESSAGE);
 
-    const a = await customerCookie(emails[0], "Ada");
-    const b = await customerCookie(emails[1], "Bea");
+    const a = await customerCookie(accountEmail("ada"), "Ada");
+    const b = await customerCookie(accountEmail("bea"), "Bea");
     const created = await asUser(a.cookie, () => addAddressAction(home));
     expect(created.ok).toBe(true);
     if (!created.ok) return;
@@ -149,8 +154,8 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
       if (!signedOut.ok) expect(signedOut.error).toBe(SIGN_IN_MESSAGE);
     }
 
-    const a = await customerCookie(emails[2], "Cara");
-    const b = await customerCookie(emails[3], "Bea");
+    const a = await customerCookie(accountEmail("cara"), "Cara");
+    const b = await customerCookie(accountEmail("bea"), "Bea");
     const first = await asUser(a.cookie, () => addAddressAction(home));
     const second = await asUser(a.cookie, () => addAddressAction({ ...home, label: "Work", line1: "2 Market St" }));
     expect(first.ok && second.ok).toBe(true);

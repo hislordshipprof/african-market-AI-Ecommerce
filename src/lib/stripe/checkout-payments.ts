@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type Stripe from "stripe";
 import { getStripeClient } from "./provider";
 
@@ -85,9 +85,7 @@ const cards = new Map<string, NormalizedCard>();
 const intents = new Map<string, NormalizedPaymentIntent>();
 const idempotency = new Map<string, IdempotencyRecord>();
 const detachCalls: string[] = [];
-let customerSeq = 0;
 let cardSeq = 0;
-let intentSeq = 0;
 let failNext: "timeout" | "500" | null = null;
 
 const FIXTURES: Record<string, Pick<NormalizedCard, "brand" | "last4" | "expMonth" | "expYear" | "behavior">> = {
@@ -115,9 +113,7 @@ export function resetFakeCheckoutPayments(): void {
   intents.clear();
   idempotency.clear();
   detachCalls.length = 0;
-  customerSeq = 0;
   cardSeq = 0;
-  intentSeq = 0;
   failNext = null;
 }
 
@@ -182,8 +178,7 @@ export const fakeCheckoutPayments: CheckoutPayments = {
       }
       return { id: prior.customerId };
     }
-    customerSeq += 1;
-    const id = `cus_fake_${customerSeq}`;
+    const id = `cus_fake_${process.pid}_${randomBytes(8).toString("hex")}`;
     customers.set(id, { id, metadata: params.metadata, deleted: false });
     idempotency.set(idempotencyKey, { hash, customerId: id, expired: false });
     return { id };
@@ -262,8 +257,7 @@ export const fakeCheckoutPayments: CheckoutPayments = {
     }
     const paymentMethodId = emptyToNull(params.payment_method);
     if (paymentMethodId) assertPaymentMethodUsable(paymentMethodId, customerId);
-    intentSeq += 1;
-    const id = `pi_fake_${intentSeq}`;
+    const id = `pi_fake_${process.pid}_${randomBytes(8).toString("hex")}`;
     const metadata = (params.metadata ?? {}) as Record<string, string>;
     const transfer = params.transfer_data as { destination?: string } | undefined;
     const intent: NormalizedPaymentIntent = {

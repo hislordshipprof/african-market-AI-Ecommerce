@@ -809,22 +809,25 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
 
   it("adds 20 items and then 10 more distinct items with structured tool results", async () => {
     const variants: string[] = [];
-    await Promise.all(Array.from({ length: 30 }, async (_, index) => {
-      const listing = await storeScoped(storeId).listing.create({
-        data: {
-          storeId,
-          customName: `Batch item ${index}`,
-          price: 100 + index,
-          stockMode: "unlimited",
-          frozen: false,
-          perishable: false,
-        },
-      });
-      const variant = await storeScoped(storeId).listingVariant.create({
-        data: { listingId: listing.id, label: "Each", price: 100 + index, weightG: 100 },
-      });
-      variants[index] = variant.id;
-    }));
+    for (let start = 0; start < 30; start += 10) {
+      await Promise.all(Array.from({ length: 10 }, async (_, offset) => {
+        const index = start + offset;
+        const listing = await storeScoped(storeId).listing.create({
+          data: {
+            storeId,
+            customName: `Batch item ${index}`,
+            price: 100 + index,
+            stockMode: "unlimited",
+            frozen: false,
+            perishable: false,
+          },
+        });
+        const variant = await storeScoped(storeId).listingVariant.create({
+          data: { listingId: listing.id, label: "Each", price: 100 + index, weightG: 100 },
+        });
+        variants[index] = variant.id;
+      }));
+    }
     const batchOf = (ids: string[]) => ids.map((variantId) => ({ variant_id: variantId, qty: 1 }));
     const { model, calls } = strictModel((call) => {
       if (call === 1) {

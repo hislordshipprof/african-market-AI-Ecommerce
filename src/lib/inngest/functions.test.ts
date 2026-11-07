@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as dbModule from "../db";
@@ -9,6 +9,8 @@ import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { inngest } from "./client";
 
 const hasDb = !!process.env.DATABASE_URL;
+const realFindStuck = dbModule.findStuckTransitionalOrders;
+const realFindOrphaned = dbModule.findOrphanedAuthorizedOrders;
 
 /** Tue 2026-11-03 14:00 America/New_York (UTC-5). */
 const OPEN_AT = "2026-11-03T19:00:00.000Z";
@@ -230,6 +232,20 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
 
   beforeEach(() => {
     resetFakeStripe();
+    const ownStores = () => [storeId, storeBId].filter((id) => id.length > 0);
+    vi.spyOn(dbModule, "findStuckTransitionalOrders").mockImplementation(async (opts) => {
+      if (opts?.storeIds) return realFindStuck(opts);
+      return realFindStuck({ storeIds: ownStores() });
+    });
+    vi.spyOn(dbModule, "findOrphanedAuthorizedOrders").mockImplementation(async (opts) => {
+      if (opts?.storeIds) return realFindOrphaned(opts);
+      return realFindOrphaned({ storeIds: ownStores() });
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(dbModule.findStuckTransitionalOrders).mockRestore();
+    vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
   });
 
   describe("acceptanceAlert", () => {
@@ -1070,5 +1086,179 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       where: { entityId: stuck.id, action: "reconcile_failed", entityType: "order" },
     });
     expect(failedAgain).toHaveLength(1);
+  });
+
+  it("scoped finders return no foreign order from any branch, and nothing for an empty list", async () => {
+    const slug = `inngest-foreign-${Date.now()}`;
+    const foreign = await rawPrisma.store.create({
+      data: {
+        slug,
+        name: "Inngest Foreign Store",
+        themePreset: "palm-and-shea",
+        prepTimeMinutes: 25,
+        stripeAccountId: "acct_test_inngest_foreign",
+        hours: WEEKDAY_HOURS,
+        timezone: "America/New_York",
+      },
+    });
+    try {
+      const customer = await storeScoped(foreign.id).customer.create({
+        data: { storeId: foreign.id, name: "Foreign Customer", email: `foreign-${Date.now()}@example.com`, phone: "+15559990001" },
+      });
+      const sixMinAgo = new Date(Date.now() - 6 * 60_000);
+      const twoMinAgo = new Date(Date.now() - 2 * 60_000);
+      async function foreignOrder(status: string, paymentIntentId: string, updatedAt: Date) {
+        return storeScoped(foreign.id).order.create({
+          data: {
+            storeId: foreign.id,
+            number: ++orderSeq,
+            customerId: customer.id,
+            status,
+            fulfillment: "pickup",
+            subtotalCents: 1000,
+            bufferCents: 100,
+            tipCents: 0,
+            deliveryFeeCents: 0,
+            totalAuthorizedCents: 1100,
+            totalCents: 1000,
+            paymentIntentId,
+            updatedAt,
+          },
+        });
+      }
+      const cancelling = await foreignOrder("CANCELLING", `pi_foreign_cancel_${Date.now()}`, sixMinAgo);
+      await storeScoped(foreign.id).order.update({ where: { id: cancelling.id }, data: { updatedAt: sixMinAgo } });
+      const reservedOrder = await foreignOrder("AUTHORIZED", `pi_foreign_reserved_${Date.now()}`, twoMinAgo);
+      const refundFailed = await foreignOrder("REFUND_FAILED", `pi_foreign_failed_${Date.now()}`, twoMinAgo);
+      const abandonedOrder = await foreignOrder("AUTHORIZED", `pi_foreign_abandoned_${Date.now()}`, twoMinAgo);
+      const orphan = await foreignOrder("AUTHORIZED", `pi_foreign_orphan_${Date.now()}`, twoMinAgo);
+      await storeScoped(foreign.id).order.update({
+        where: { id: orphan.id },
+        data: { createdAt: new Date(Date.now() - 120_000), inngestEventSentAt: null },
+      });
+      await storeScoped(foreign.id).refundRequest.create({
+        data: {
+          storeId: foreign.id,
+          orderId: reservedOrder.id,
+          paymentIntentId: reservedOrder.paymentIntentId!,
+          key: `refund:foreign:reserved:${reservedOrder.id}`,
+          amountCents: 500,
+          refundApplicationFee: false,
+          state: "RESERVED",
+        },
+      });
+      await storeScoped(foreign.id).refundRequest.create({
+        data: {
+          storeId: foreign.id,
+          orderId: abandonedOrder.id,
+          paymentIntentId: abandonedOrder.paymentIntentId!,
+          key: `refund:foreign:abandoned:${abandonedOrder.id}`,
+          amountCents: 500,
+          refundApplicationFee: false,
+          state: "ABANDONED",
+        },
+      });
+      const foreignIds = [cancelling.id, reservedOrder.id, refundFailed.id, abandonedOrder.id];
+      const stuckForeign = await realFindStuck({ storeIds: [foreign.id] });
+      expect(stuckForeign.map((row) => row.id).sort()).toEqual([...foreignIds].sort());
+      const stuckOwn = await realFindStuck({ storeIds: [storeId, storeBId] });
+      expect(stuckOwn.map((row) => row.id).filter((id) => foreignIds.includes(id))).toEqual([]);
+      expect(await realFindStuck({ storeIds: [] })).toEqual([]);
+      const orphanForeign = await realFindOrphaned({ storeIds: [foreign.id] });
+      expect(orphanForeign.map((row) => row.id)).toContain(orphan.id);
+      const orphanOwn = await realFindOrphaned({ storeIds: [storeId, storeBId] });
+      expect(orphanOwn.map((row) => row.id)).not.toContain(orphan.id);
+      expect(await realFindOrphaned({ storeIds: [] })).toEqual([]);
+    } finally {
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.refundRequest.deleteMany({ where: { storeId: foreign.id } }),
+        rawPrisma.auditLog.deleteMany({ where: { storeId: foreign.id } }),
+        rawPrisma.orderLine.deleteMany({ where: { storeId: foreign.id } }),
+        rawPrisma.order.deleteMany({ where: { storeId: foreign.id } }),
+        rawPrisma.customer.deleteMany({ where: { storeId: foreign.id } }),
+      ]);
+      await rawPrisma.store.delete({ where: { id: foreign.id } });
+    }
+  });
+
+  it("a scoped stuck-order sweep leaves another store's open refund request untouched", async () => {
+    const { reconcileStuckTransitional } = await import("./functions");
+    const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+    const slug = `inngest-foreign-sweep-${Date.now()}`;
+    const foreign = await rawPrisma.store.create({
+      data: {
+        slug,
+        name: "Inngest Foreign Sweep Store",
+        themePreset: "palm-and-shea",
+        prepTimeMinutes: 25,
+        stripeAccountId: "acct_test_inngest_foreign_sweep",
+        hours: WEEKDAY_HOURS,
+        timezone: "America/New_York",
+      },
+    });
+    try {
+      const customer = await storeScoped(foreign.id).customer.create({
+        data: { storeId: foreign.id, name: "Foreign Sweep Customer", email: `foreign-sweep-${Date.now()}@example.com`, phone: "+15559990002" },
+      });
+      const paymentIntentId = `pi_x_${crypto.randomUUID()}`;
+      const foreignOrder = await storeScoped(foreign.id).order.create({
+        data: {
+          storeId: foreign.id,
+          number: ++orderSeq,
+          customerId: customer.id,
+          status: "AUTHORIZED",
+          fulfillment: "pickup",
+          subtotalCents: 1000,
+          bufferCents: 100,
+          tipCents: 0,
+          deliveryFeeCents: 0,
+          totalAuthorizedCents: 1100,
+          totalCents: 1000,
+          paymentIntentId,
+        },
+      });
+      await storeScoped(foreign.id).refundRequest.create({
+        data: {
+          storeId: foreign.id,
+          orderId: foreignOrder.id,
+          paymentIntentId,
+          key: `refund:foreign:sweep:${foreignOrder.id}`,
+          amountCents: 500,
+          refundApplicationFee: false,
+          state: "RESERVED",
+        },
+      });
+      const before = await storeScoped(foreign.id).order.findUnique({ where: { id: foreignOrder.id } });
+      const auditsBefore = await storeScoped(foreign.id).auditLog.count();
+      const seen = await realFindStuck({ storeIds: [foreign.id] });
+      expect(seen.map((row) => row.id)).toContain(foreignOrder.id);
+
+      const own = await createTestOrder();
+      const sixMinAgo = new Date(Date.now() - 6 * 60_000);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: own.id }, data: { status: "CANCELLING", updatedAt: sixMinAgo } });
+      });
+      await handler({ step: makeFakeStep() });
+
+      const after = await storeScoped(foreign.id).order.findUnique({ where: { id: foreignOrder.id } });
+      expect(after!.updatedAt.getTime()).toBe(before!.updatedAt.getTime());
+      expect(after!.status).toBe("AUTHORIZED");
+      expect(await storeScoped(foreign.id).auditLog.count()).toBe(auditsBefore);
+      const reconciled = await storeScoped(storeId).order.findUnique({ where: { id: own.id } });
+      expect(reconciled!.status).toBe("CANCELLED");
+    } finally {
+      await rawPrisma.$transaction([
+        rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+        rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+        rawPrisma.refundRequest.deleteMany({ where: { storeId: foreign.id } }),
+        rawPrisma.auditLog.deleteMany({ where: { storeId: foreign.id } }),
+        rawPrisma.orderLine.deleteMany({ where: { storeId: foreign.id } }),
+        rawPrisma.order.deleteMany({ where: { storeId: foreign.id } }),
+        rawPrisma.customer.deleteMany({ where: { storeId: foreign.id } }),
+      ]);
+      await rawPrisma.store.delete({ where: { id: foreign.id } });
+    }
   });
 });

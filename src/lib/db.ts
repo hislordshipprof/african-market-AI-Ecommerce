@@ -31,7 +31,9 @@ if (!globalForPrisma.prisma) {
     ? runtimeDatabaseUrl(process.env)
     : undefined;
   const adapter = new PrismaPg(connectionUrl!);
-  globalForPrisma.prisma = new PrismaClient({ adapter });
+  // Vitest-only. Production, next start and Vercel keep Prisma's default maxWait.
+  const vitest = process.env.VITEST === "true";
+  globalForPrisma.prisma = new PrismaClient(vitest ? { adapter, transactionOptions: { maxWait: 15_000 } } : { adapter });
 }
 
 const prisma = globalForPrisma.prisma;
@@ -380,17 +382,31 @@ export async function lockListingVariantRows(tx: Pick<PrismaClient, "$queryRaw">
   `;
 }
 
-export async function findOrphanedAuthorizedOrders(): Promise<Array<{ id: string; storeId: string }>> {
+export async function findOrphanedAuthorizedOrders(opts?: {
+  storeIds?: readonly string[];
+}): Promise<Array<{ id: string; storeId: string }>> {
+  if (opts?.storeIds && opts.storeIds.length === 0) return [];
   const cutoff = new Date(Date.now() - 60_000);
+  const storeIds = opts?.storeIds;
   return platformAdminTransaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-      SELECT id, store_id FROM orders
-      WHERE status = 'AUTHORIZED'
-        AND inngest_event_sent_at IS NULL
-        AND created_at < ${cutoff}
-      ORDER BY created_at ASC
-      LIMIT 50
-    `;
+    const rows = storeIds
+      ? await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+          SELECT id, store_id FROM orders
+          WHERE status = 'AUTHORIZED'
+            AND inngest_event_sent_at IS NULL
+            AND created_at < ${cutoff}
+            AND store_id IN (${Prisma.join(storeIds)})
+          ORDER BY created_at ASC
+          LIMIT 50
+        `
+      : await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+          SELECT id, store_id FROM orders
+          WHERE status = 'AUTHORIZED'
+            AND inngest_event_sent_at IS NULL
+            AND created_at < ${cutoff}
+          ORDER BY created_at ASC
+          LIMIT 50
+        `;
     return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
   });
 }
@@ -416,38 +432,74 @@ export async function findOrderByPaymentIntent(
   });
 }
 
-export async function findStuckTransitionalOrders(): Promise<Array<{ id: string; storeId: string }>> {
+export async function findStuckTransitionalOrders(opts?: {
+  storeIds?: readonly string[];
+}): Promise<Array<{ id: string; storeId: string }>> {
+  if (opts?.storeIds && opts.storeIds.length === 0) return [];
   const cutoff = new Date(Date.now() - 5 * 60_000);
+  const storeIds = opts?.storeIds;
   return platformAdminTransaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-      SELECT id, store_id FROM (
-        SELECT id, store_id, updated_at FROM orders
-        WHERE (
-            status IN ('CAPTURING', 'CANCELLING')
-            AND updated_at < ${cutoff}
-          )
-          OR id IN (
-            SELECT order_id FROM refund_requests
-            WHERE state IN ('RESERVED', 'UNKNOWN', 'REPLAYING')
-              OR (
-                state = 'CREATED'
-                AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
+    const rows = storeIds
+      ? await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+          SELECT id, store_id FROM (
+            SELECT id, store_id, updated_at FROM orders
+            WHERE ((
+                status IN ('CAPTURING', 'CANCELLING')
+                AND updated_at < ${cutoff}
               )
-          )
-        ORDER BY updated_at ASC
-        LIMIT 50
-      ) AS in_flight
-      UNION
-      SELECT id, store_id FROM (
-        SELECT id, store_id, updated_at FROM orders
-        WHERE status = 'REFUND_FAILED'
-          OR id IN (
-            SELECT order_id FROM refund_requests WHERE state = 'ABANDONED'
-          )
-        ORDER BY updated_at ASC
-        LIMIT 50
-      ) AS refund_recovery
-    `;
+              OR id IN (
+                SELECT order_id FROM refund_requests
+                WHERE state IN ('RESERVED', 'UNKNOWN', 'REPLAYING')
+                  OR (
+                    state = 'CREATED'
+                    AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
+                  )
+              ))
+              AND store_id IN (${Prisma.join(storeIds)})
+            ORDER BY updated_at ASC
+            LIMIT 50
+          ) AS in_flight
+          UNION
+          SELECT id, store_id FROM (
+            SELECT id, store_id, updated_at FROM orders
+            WHERE (status = 'REFUND_FAILED'
+              OR id IN (
+                SELECT order_id FROM refund_requests WHERE state = 'ABANDONED'
+              ))
+              AND store_id IN (${Prisma.join(storeIds)})
+            ORDER BY updated_at ASC
+            LIMIT 50
+          ) AS refund_recovery
+        `
+      : await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+          SELECT id, store_id FROM (
+            SELECT id, store_id, updated_at FROM orders
+            WHERE (
+                status IN ('CAPTURING', 'CANCELLING')
+                AND updated_at < ${cutoff}
+              )
+              OR id IN (
+                SELECT order_id FROM refund_requests
+                WHERE state IN ('RESERVED', 'UNKNOWN', 'REPLAYING')
+                  OR (
+                    state = 'CREATED'
+                    AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
+                  )
+              )
+            ORDER BY updated_at ASC
+            LIMIT 50
+          ) AS in_flight
+          UNION
+          SELECT id, store_id FROM (
+            SELECT id, store_id, updated_at FROM orders
+            WHERE status = 'REFUND_FAILED'
+              OR id IN (
+                SELECT order_id FROM refund_requests WHERE state = 'ABANDONED'
+              )
+            ORDER BY updated_at ASC
+            LIMIT 50
+          ) AS refund_recovery
+        `;
     return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
   });
 }

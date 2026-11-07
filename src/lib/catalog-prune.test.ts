@@ -1,5 +1,5 @@
 import { DeleteObjectsCommand, S3Client } from "@aws-sdk/client-s3";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -36,6 +36,171 @@ const binding: OwnershipBinding[] = [
 
 function age(ms: number): Date {
   return new Date(NOW.getTime() - ms);
+}
+
+function removeTemp(dir: string): void {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
+function killProcessTree(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/** Async spawn. stdin is closed so a stub that reads it gets EOF. A timeout or the test's abort signal kills the process tree, then this waits for exit. */
+function runCommand(
+  file: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs: number; signal?: AbortSignal },
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    let backup: ReturnType<typeof setTimeout> | undefined;
+    const deadline = setTimeout(() => stop("timed out"), options.timeoutMs);
+    const stop = (why: string) => {
+      killProcessTree(child);
+      if (backup) return;
+      backup = setTimeout(() => finish(new Error(`${why} (${stderr})`)), 5_000);
+    };
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (backup) clearTimeout(backup);
+      options.signal?.removeEventListener("abort", onAbort);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      if (error) reject(error);
+      else resolve({ stdout, stderr });
+    };
+    const onAbort = () => stop("aborted");
+    if (options.signal) {
+      if (options.signal.aborted) onAbort();
+      else options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+    child.on("error", (error) => finish(error));
+    child.on("exit", (code, signal) => {
+      setImmediate(() => {
+        if (code === 0 && !options.signal?.aborted) finish();
+        else finish(new Error(`command failed (exit ${code ?? "null"}, signal ${signal ?? "null"}): ${stderr}`));
+      });
+    });
+  });
+}
+
+/**
+ * On Windows a bash script stub takes about 1.5s to start, and a node shebang is
+ * dispatched by bash, so either one pushes lane-db.sh past 15s while other lanes
+ * are running. scripts/catalog-prune-stub.exe is a native binary (about 30ms) that
+ * behaves as psql, npx, git, gh, claude, pg_ctl or pg_isready based on its name.
+ * Linux keeps the node scripts: process start is cheap there, and the exe is Windows.
+ */
+const NATIVE_STUB = path.join(process.cwd(), "scripts", "catalog-prune-stub.exe");
+
+/** Absolute Git bash, so Node can spawn it without depending on PATH order. */
+function gitBash(): string {
+  if (process.platform !== "win32") return "bash";
+  const listed = spawnSync("where", ["bash"], { encoding: "utf8" }).stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return listed.find((found) => /Git\\usr\\bin\\bash\.exe$/i.test(found)) ?? listed[0] ?? "bash";
+}
+const nodeExit = "#!/usr/bin/env node\nprocess.exit(0);\n";
+
+/** Prepend the stub directory. The rest of PATH stays so node, bash and coreutils resolve. */
+function commandPath(bin: string): string {
+  const toBash = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
+  return `${toBash(bin)}:${process.env.PATH ?? ""}`;
+}
+
+function installStub(bin: string, name: string, nodeBody: string): void {
+  if (process.platform === "win32") {
+    copyFileSync(NATIVE_STUB, path.join(bin, `${name}.exe`));
+    return;
+  }
+  const file = path.join(bin, name);
+  writeFileSync(file, nodeBody);
+  chmodSync(file, 0o755);
+}
+
+// Do not read stdin. A stub that waits for EOF sits on Windows until the pipe
+// closes, and that pushed lane-db.sh past 15s. The heredoc is smaller than the
+// pipe buffer, and exiting still lets local-pg.sh finish.
+const nodePsql = `#!/usr/bin/env node
+const fs = require("fs");
+if (process.env.HARNESS_LOG) fs.appendFileSync(process.env.HARNESS_LOG, "psql\\n");
+process.exit(0);
+`;
+
+function nodeNpxLine(): string {
+  return `#!/usr/bin/env node
+const fs = require("fs");
+const url = process.env.DATABASE_URL || "";
+let host = "missing";
+try { if (url) host = new URL(url).hostname || "missing"; } catch { host = "missing"; }
+const flag = (name) => (process.env[name] ? "present" : "");
+fs.appendFileSync(process.env.HARNESS_LOG, "child npx host=" + host + " secret=" + flag("R2_SECRET_ACCESS_KEY") + " unpooled=" + flag("DATABASE_URL_UNPOOLED") + " prune=" + flag("SEED_PRUNE_R2") + "\\n");
+process.exit(0);
+`;
+}
+
+function nodeChild(label: string): string {
+  return `#!/usr/bin/env node
+const fs = require("fs");
+const url = process.env.DATABASE_URL || "";
+let host = "missing";
+try { if (url) host = new URL(url).hostname || "missing"; } catch { host = "missing"; }
+const flag = (name) => (process.env[name] ? "present" : "");
+fs.appendFileSync(process.env.HARNESS_LOG, "child ${label} host=" + host + " secret=" + flag("R2_SECRET_ACCESS_KEY") + " access=" + flag("R2_ACCESS_KEY_ID") + " unpooled=" + flag("DATABASE_URL_UNPOOLED") + " prune=" + flag("SEED_PRUNE_R2") + "\\n");
+`;
+}
+
+/** review-ticket and ci-local are invoked with bash, which ignores a node shebang. */
+function bashChild(label: string, trailer: string): string {
+  return `#!/bin/bash
+url="\${DATABASE_URL:-}"
+host=missing
+if [ -n "$url" ]; then
+  rest="\${url#*@}"
+  if [ "$rest" = "$url" ]; then rest="\${url#*://}"; fi
+  host="\${rest%%[:/]*}"
+  [ -n "$host" ] || host=missing
+fi
+secret=\${R2_SECRET_ACCESS_KEY:+present}
+access=\${R2_ACCESS_KEY_ID:+present}
+unpooled=\${DATABASE_URL_UNPOOLED:+present}
+prune=\${SEED_PRUNE_R2:+present}
+printf 'child ${label} host=%s secret=%s access=%s unpooled=%s prune=%s\\n' "$host" "$secret" "$access" "$unpooled" "$prune" >> "$HARNESS_LOG"
+${trailer}
+`;
 }
 
 describe("catalog prune guard and planner", () => {
@@ -742,32 +907,35 @@ describe("lane env filter script", () => {
     expect(laneDbAt).toBeGreaterThan(prepareAt);
   });
 
-  it("build resume and continue sanitize inherited env before first child", () => {
+  it("build resume and continue sanitize inherited env before first child", async (ctx) => {
     const env = ticketEnv();
-    const src = path.join(env.dir, "src");
-    const dest = path.join(env.dir, "dest");
-    writeFileSync(src, `KEEP=1\nDATABASE_URL_UNPOOLED=postgresql://user:${SECRET}@ep-test.neon.tech/neondb\n`);
-    const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-    const script = `
-      set -euo pipefail
-      cd "${bashPath(process.cwd())}"
-      export R2_SECRET_ACCESS_KEY='${SECRET}'
-      export R2_ACCESS_KEY_ID='${ACCESS}'
-      export SEED_PRUNE_R2='${BUCKET}'
-      export DATABASE_URL_UNPOOLED='postgresql://user:${SECRET}@ep-test.neon.tech/neondb'
-      export DIRECT_URL='postgresql://app_owner:app_owner@localhost:5434/lane_t225'
-      export DATABASE_URL="$DIRECT_URL"
-      source scripts/lane-env.sh
-      prepare_lane_env 225 "${bashPath(src)}" "${bashPath(dest)}" "${bashPath(env.file)}"
-      node -e 'const keys=["R2_SECRET_ACCESS_KEY","R2_ACCESS_KEY_ID","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=keys.filter((key)=>process.env[key]); if (present.length) { console.log("present:"+present.join(",")); process.exit(1);} console.log("absent");'
-      npx tsx -e "import { resolveDirectUrl } from './src/lib/env.ts'; const host = new URL(resolveDirectUrl()).hostname; if (host !== 'localhost') { console.log('host:'+host); process.exit(1);} console.log('host:localhost');"
-    `;
-    const stdout = execFileSync("bash", ["-c", script], { encoding: "utf8" });
-    expect(stdout).toContain("absent");
-    expect(stdout).toContain("host:localhost");
-    expect(stdout).not.toContain(SECRET);
-    expect(readFileSync(dest, "utf8")).not.toContain("DATABASE_URL_UNPOOLED");
-    rmSync(env.dir, { recursive: true, force: true });
+    try {
+      const src = path.join(env.dir, "src");
+      const dest = path.join(env.dir, "dest");
+      writeFileSync(src, `KEEP=1\nDATABASE_URL_UNPOOLED=postgresql://user:${SECRET}@ep-test.neon.tech/neondb\n`);
+      const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
+      const script = `
+        set -euo pipefail
+        cd "${bashPath(process.cwd())}"
+        export R2_SECRET_ACCESS_KEY='${SECRET}'
+        export R2_ACCESS_KEY_ID='${ACCESS}'
+        export SEED_PRUNE_R2='${BUCKET}'
+        export DATABASE_URL_UNPOOLED='postgresql://user:${SECRET}@ep-test.neon.tech/neondb'
+        export DIRECT_URL='postgresql://app_owner:app_owner@localhost:5434/lane_t225'
+        export DATABASE_URL="$DIRECT_URL"
+        source scripts/lane-env.sh
+        prepare_lane_env 225 "${bashPath(src)}" "${bashPath(dest)}" "${bashPath(env.file)}"
+        node -e 'const keys=["R2_SECRET_ACCESS_KEY","R2_ACCESS_KEY_ID","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=keys.filter((key)=>process.env[key]); if (present.length) { console.log("present:"+present.join(",")); process.exit(1);} console.log("absent");'
+        npx tsx -e "import { resolveDirectUrl } from './src/lib/env.ts'; const host = new URL(resolveDirectUrl()).hostname; if (host !== 'localhost') { console.log('host:'+host); process.exit(1);} console.log('host:localhost');"
+      `;
+      const { stdout } = await runCommand("bash", ["-c", script], { timeoutMs: 59_000, signal: ctx.signal });
+      expect(stdout).toContain("absent");
+      expect(stdout).toContain("host:localhost");
+      expect(stdout).not.toContain(SECRET);
+      expect(readFileSync(dest, "utf8")).not.toContain("DATABASE_URL_UNPOOLED");
+    } finally {
+      removeTemp(env.dir);
+    }
   }, 60_000);
 
   it("lane direct-url resolution cannot select copied or inherited remote unpooled URL", () => {
@@ -818,94 +986,101 @@ describe("lane env filter script", () => {
     rmSync(env.dir, { recursive: true, force: true });
   });
 
-  it("dotenv colon assignments cannot leak write keys or a remote unpooled URL", () => {
+  it("dotenv colon assignments cannot leak write keys or a remote unpooled URL", async (ctx) => {
     const env = ticketEnv();
-    const src = path.join(env.dir, "src");
-    const dest = path.join(env.dir, "dest");
-    writeFileSync(src, [
-      "KEEP: plain",
-      `export R2_ACCESS_KEY_ID: ${ACCESS}`,
-      `R2_SECRET_ACCESS_KEY: ${SECRET}`,
-      "SEED_PRUNE_R2: dry-run",
-      `DATABASE_URL_UNPOOLED: postgresql://user:${SECRET}@remote.example/db`,
-      "DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225",
-      "",
-    ].join("\n"));
-    execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
-    const written = readFileSync(dest, "utf8");
-    expect(written).toContain("KEEP: plain");
-    expect(written).toContain("DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225");
-    expect(written).not.toContain(SECRET);
-    expect(written).not.toContain("SEED_PRUNE_R2");
-    expect(written).not.toContain("remote.example");
-    const bashDest = dest.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-    const probe = execFileSync("bash", ["-c", `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`], {
-      encoding: "utf8",
-      cwd: process.cwd(),
-    });
-    expect(probe).toContain("host:localhost");
-    expect(probe).not.toContain("PRESENT");
-    expect(probe).not.toContain(SECRET);
-    rmSync(env.dir, { recursive: true, force: true });
+    try {
+      const src = path.join(env.dir, "src");
+      const dest = path.join(env.dir, "dest");
+      writeFileSync(src, [
+        "KEEP: plain",
+        `export R2_ACCESS_KEY_ID: ${ACCESS}`,
+        `R2_SECRET_ACCESS_KEY: ${SECRET}`,
+        "SEED_PRUNE_R2: dry-run",
+        `DATABASE_URL_UNPOOLED: postgresql://user:${SECRET}@remote.example/db`,
+        "DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225",
+        "",
+      ].join("\n"));
+      execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
+      const written = readFileSync(dest, "utf8");
+      expect(written).toContain("KEEP: plain");
+      expect(written).toContain("DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225");
+      expect(written).not.toContain(SECRET);
+      expect(written).not.toContain("SEED_PRUNE_R2");
+      expect(written).not.toContain("remote.example");
+      const bashDest = dest.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
+      const { stdout: probe } = await runCommand("bash", ["-c", `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`], {
+        cwd: process.cwd(),
+        timeoutMs: 14_500,
+        signal: ctx.signal,
+      });
+      expect(probe).toContain("host:localhost");
+      expect(probe).not.toContain("PRESENT");
+      expect(probe).not.toContain(SECRET);
+    } finally {
+      removeTemp(env.dir);
+    }
   });
 
-  it("a dotenv value on the line after a colon cannot leak", () => {
+  it("a dotenv value on the line after a colon cannot leak", async (ctx) => {
     const env = ticketEnv();
-    const src = path.join(env.dir, "src");
-    const dest = path.join(env.dir, "dest");
-    writeFileSync(src, [
-      "KEEP=plain",
-      "R2_SECRET_ACCESS_KEY:",
-      SECRET,
-      "R2_ACCESS_KEY_ID:",
-      ACCESS,
-      "SEED_PRUNE_R2:",
-      "dry-run",
-      "DATABASE_URL_UNPOOLED:",
-      `postgresql://user:${SECRET}@remote.example/db`,
-      "DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225",
-      "",
-    ].join("\n"));
-    execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
-    const written = readFileSync(dest, "utf8");
-    expect(written).toContain("KEEP=plain");
-    expect(written).toContain("localhost");
-    expect(written).not.toContain(SECRET);
-    expect(written).not.toContain("dry-run");
-    expect(written).not.toContain("remote.example");
-    const bashDest = dest.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-    const loadProbe = `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`;
-    const probe = execFileSync("bash", ["-c", loadProbe], { encoding: "utf8", cwd: process.cwd() });
-    expect(probe).toContain("host:localhost");
-    expect(probe).not.toContain("PRESENT");
-    expect(probe).not.toContain(SECRET);
-    writeFileSync(src, [
-      "KEEP=plain",
-      "R2_SECRET_ACCESS_KEY:",
-      SECRET,
-      "R2_ACCESS_KEY_ID:",
-      ACCESS,
-      "SEED_PRUNE_R2:",
-      "dry-run",
-      "DATABASE_URL_UNPOOLED:",
-      `postgresql://user:${SECRET}@remote.example/db`,
-      "DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225",
-      "",
-    ].join("\r\n"));
-    execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
-    const crlf = readFileSync(dest, "utf8");
-    expect(crlf).toContain("KEEP=plain");
-    expect(crlf).toContain("localhost");
-    expect(crlf).not.toContain(SECRET);
-    expect(crlf).not.toContain("dry-run");
-    expect(crlf).not.toContain("remote.example");
-    expect(crlf).not.toContain("R2_SECRET_ACCESS_KEY");
-    expect(crlf).not.toContain("R2_ACCESS_KEY_ID");
-    const crlfProbe = execFileSync("bash", ["-c", loadProbe], { encoding: "utf8", cwd: process.cwd() });
-    expect(crlfProbe).toContain("host:localhost");
-    expect(crlfProbe).not.toContain("PRESENT");
-    expect(crlfProbe).not.toContain(SECRET);
-    rmSync(env.dir, { recursive: true, force: true });
+    try {
+      const src = path.join(env.dir, "src");
+      const dest = path.join(env.dir, "dest");
+      writeFileSync(src, [
+        "KEEP=plain",
+        "R2_SECRET_ACCESS_KEY:",
+        SECRET,
+        "R2_ACCESS_KEY_ID:",
+        ACCESS,
+        "SEED_PRUNE_R2:",
+        "dry-run",
+        "DATABASE_URL_UNPOOLED:",
+        `postgresql://user:${SECRET}@remote.example/db`,
+        "DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225",
+        "",
+      ].join("\n"));
+      execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
+      const written = readFileSync(dest, "utf8");
+      expect(written).toContain("KEEP=plain");
+      expect(written).toContain("localhost");
+      expect(written).not.toContain(SECRET);
+      expect(written).not.toContain("dry-run");
+      expect(written).not.toContain("remote.example");
+      const bashDest = dest.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
+      const loadProbe = `pnpm exec dotenv -e "${bashDest}" -- node -e 'const names=["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","SEED_PRUNE_R2","DATABASE_URL_UNPOOLED"]; const present=names.filter((name)=>process.env[name]); const chosen=process.env.DATABASE_URL_UNPOOLED||process.env.DIRECT_URL||""; let host="missing"; try{host=new URL(chosen).hostname}catch(e){} if(present.length){console.log("PRESENT"); process.exit(1)} console.log("host:"+host);'`;
+      const probe = await runCommand("bash", ["-c", loadProbe], { cwd: process.cwd(), timeoutMs: 14_500, signal: ctx.signal });
+      expect(probe.stdout).toContain("host:localhost");
+      expect(probe.stdout).not.toContain("PRESENT");
+      expect(probe.stdout).not.toContain(SECRET);
+      writeFileSync(src, [
+        "KEEP=plain",
+        "R2_SECRET_ACCESS_KEY:",
+        SECRET,
+        "R2_ACCESS_KEY_ID:",
+        ACCESS,
+        "SEED_PRUNE_R2:",
+        "dry-run",
+        "DATABASE_URL_UNPOOLED:",
+        `postgresql://user:${SECRET}@remote.example/db`,
+        "DIRECT_URL=postgresql://app_owner:app_owner@localhost:5434/lane_t225",
+        "",
+      ].join("\r\n"));
+      execFileSync(process.execPath, ["scripts/lane-env.mjs", "filter", "225", src, dest, env.file]);
+      const crlf = readFileSync(dest, "utf8");
+      expect(crlf).toContain("KEEP=plain");
+      expect(crlf).toContain("localhost");
+      expect(crlf).not.toContain(SECRET);
+      expect(crlf).not.toContain("dry-run");
+      expect(crlf).not.toContain("remote.example");
+      expect(crlf).not.toContain("R2_SECRET_ACCESS_KEY");
+      expect(crlf).not.toContain("R2_ACCESS_KEY_ID");
+      const crlfProbe = await runCommand("bash", ["-c", loadProbe], { cwd: process.cwd(), timeoutMs: 14_500, signal: ctx.signal });
+      expect(crlfProbe.stdout).toContain("host:localhost");
+      expect(crlfProbe.stdout).not.toContain("PRESENT");
+      expect(crlfProbe.stdout).not.toContain(SECRET);
+    } finally {
+      removeTemp(env.dir);
+    }
   });
 
   it("an unreadable filter source removes a stale destination", () => {
@@ -936,8 +1111,9 @@ describe("lane env filter script", () => {
     rmSync(env.dir, { recursive: true, force: true });
   });
 
-  it("lane-db drops spaced unpooled assignments and points children at localhost", () => {
+  it("lane-db drops spaced unpooled assignments and points children at localhost", async (ctx) => {
     const dir = mkdtempSync(path.join(tmpdir(), "t225-lanedb-"));
+    try {
     const bin = path.join(dir, "bin");
     const data = path.join(dir, "pg");
     mkdirSync(bin);
@@ -946,22 +1122,10 @@ describe("lane env filter script", () => {
     const log = path.join(dir, "log");
     writeFileSync(log, "");
     const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-    const stub = (name: string, body: string) => {
-      const file = path.join(bin, name);
-      writeFileSync(file, body);
-      chmodSync(file, 0o755);
-    };
-    stub("psql", "#!/bin/bash\ncat >/dev/null\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
-    stub("pg_ctl", "#!/bin/bash\nexit 0\n");
-    stub("pg_isready", "#!/bin/bash\nexit 0\n");
-    stub("npx", `#!/bin/bash
-host=$(node -e 'try{process.stdout.write(new URL(process.env.DATABASE_URL||"").hostname)}catch(e){process.stdout.write("missing")}')
-secret=\${R2_SECRET_ACCESS_KEY:+present}
-unpooled=\${DATABASE_URL_UNPOOLED:+present}
-prune=\${SEED_PRUNE_R2:+present}
-printf 'child npx host=%s secret=%s unpooled=%s prune=%s\\n' "$host" "$secret" "$unpooled" "$prune" >> "$HARNESS_LOG"
-exit 0
-`);
+    installStub(bin, "psql", nodePsql);
+    installStub(bin, "pg_ctl", nodeExit);
+    installStub(bin, "pg_isready", nodeExit);
+    installStub(bin, "npx", nodeNpxLine());
     const envFile = path.join(dir, "env");
     writeFileSync(envFile, [
       "KEEP=1",
@@ -978,14 +1142,16 @@ exit 0
       "dry-run",
       "",
     ].join("\r\n"));
-    execFileSync("bash", ["scripts/lane-db.sh", "zzorch", bashPath(envFile)], {
+    await runCommand(gitBash(), ["scripts/lane-db.sh", "zzorch", bashPath(envFile)], {
       env: {
         ...process.env,
         PGBIN: bashPath(bin),
         LANE_PG_DATA: bashPath(data),
         HARNESS_LOG: bashPath(log),
-        PATH: `${bashPath(bin)}:${process.env.PATH ?? ""}`,
+        PATH: commandPath(bin),
       },
+      timeoutMs: 14_500,
+      signal: ctx.signal,
     });
     const written = readFileSync(envFile, "utf8");
     expect(written).not.toContain("DATABASE_URL_UNPOOLED");
@@ -1002,13 +1168,16 @@ exit 0
     expect(child).not.toContain("unpooled=present");
     expect(child).not.toContain("secret=present");
     expect(child).not.toContain(SECRET);
-    rmSync(dir, { recursive: true, force: true });
+    } finally {
+      removeTemp(dir);
+    }
   });
 
-  it("build resume and continue run the real scripts and keep secrets out of every child", () => {
+  it("build resume and continue run the real scripts and keep secrets out of every child", async (ctx) => {
     const checkoutSession = path.join(process.cwd(), ".builder", "session-225.txt");
     const sessionBefore = existsSync(checkoutSession) ? readFileSync(checkoutSession) : null;
     const dir = mkdtempSync(path.join(tmpdir(), "t225-orch-"));
+    try {
     const root = path.join(dir, "repo");
     const bin = path.join(dir, "bin");
     const data = path.join(dir, "pg");
@@ -1034,55 +1203,45 @@ exit 0
     const log = path.join(dir, "log");
     writeFileSync(log, "");
     const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-    const stub = (name: string, body: string) => {
-      const file = path.join(bin, name);
-      writeFileSync(file, body);
-      chmodSync(file, 0o755);
-    };
-    const childLine = `#!/bin/bash
-host=$(node -e 'try{process.stdout.write(new URL(process.env.DATABASE_URL||"").hostname)}catch(e){process.stdout.write("missing")}')
-secret=\${R2_SECRET_ACCESS_KEY:+present}
-access=\${R2_ACCESS_KEY_ID:+present}
-unpooled=\${DATABASE_URL_UNPOOLED:+present}
-prune=\${SEED_PRUNE_R2:+present}
-printf 'child %s host=%s secret=%s access=%s unpooled=%s prune=%s\\n' "$1" "$host" "$secret" "$access" "$unpooled" "$prune" >> "$HARNESS_LOG"
-`;
-    stub("git", `#!/bin/bash
-if [ "$1" = "rev-parse" ]; then printf '%s\\n' "${bashPath(root)}"; exit 0; fi
-printf 'git %s\\n' "$*" >> "$HARNESS_LOG"
-exit 0
+    const stub = (name: string, body: string) => installStub(bin, name, body);
+    stub("git", `#!/usr/bin/env node
+const fs = require("fs");
+const args = process.argv.slice(2);
+if (args[0] === "rev-parse") { process.stdout.write(${JSON.stringify(bashPath(root))} + "\\n"); process.exit(0); }
+fs.appendFileSync(process.env.HARNESS_LOG, "git " + args.join(" ") + "\\n");
+process.exit(0);
 `);
-    stub("psql", "#!/bin/bash\ncat >/dev/null\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
-    stub("pg_ctl", "#!/bin/bash\nexit 0\n");
-    stub("pg_isready", "#!/bin/bash\nexit 0\n");
-    stub("npx", `${childLine}exit 0\n`.replace('"$1"', '"npx"'));
-    stub("claude", `${childLine}echo '{"session_id":"stub-session-0001"}'\nexit 0\n`.replace('"$1"', '"claude"'));
-    stub("gh", `#!/bin/bash
-case "$*" in
-  *blocked_by*) ;;
-  *comments*) echo "agent brief" ;;
-  *title*) echo "seed photos" ;;
-  *) echo OPEN ;;
-esac
-exit 0
+    stub("psql", nodePsql);
+    stub("pg_ctl", nodeExit);
+    stub("pg_isready", nodeExit);
+    stub("npx", `${nodeChild("npx")}process.exit(0);\n`);
+    stub("claude", `${nodeChild("claude")}process.stdout.write('{"session_id":"stub-session-0001"}\\n');\nprocess.exit(0);\n`);
+    stub("gh", `#!/usr/bin/env node
+const args = process.argv.slice(2).join(" ");
+if (args.includes("blocked_by")) process.exit(0);
+if (args.includes("comments")) { process.stdout.write("agent brief\\n"); process.exit(0); }
+if (args.includes("title")) { process.stdout.write("seed photos\\n"); process.exit(0); }
+process.stdout.write("OPEN\\n");
+process.exit(0);
 `);
     const review = path.join(dir, "review.sh");
-    writeFileSync(review, `${childLine}echo "VERDICT: PASS"\nexit 0\n`.replace('"$1"', '"review"'));
+    writeFileSync(review, bashChild("review", 'echo "VERDICT: PASS"\nexit 0'));
     chmodSync(review, 0o755);
     // build-ticket.sh runs local-ci beside each review. Without a stub it would call a missing ci-local.sh,
     // count that as a CI failure and loop through every fix round.
     const ciLocal = path.join(dir, "ci-local.sh");
-    writeFileSync(ciLocal, `${childLine}echo "local-ci PASSED on stub"\nexit 0\n`.replace('"$1"', '"ci"'));
+    writeFileSync(ciLocal, bashChild("ci", 'echo "local-ci PASSED on stub"\nexit 0'));
     chmodSync(ciLocal, 0o755);
     const script = `
       set -euo pipefail
-      export PATH="${bashPath(bin)}:$PATH"
+      export PATH="${commandPath(bin)}"
       export AGENT_ENGINE=claude
       export REVIEW_ENGINE=claude
       export PGBIN="${bashPath(bin)}"
       export LANE_PG_DATA="${bashPath(data)}"
       export WT="${bashPath(wt)}"
       export HARNESS_LOG="${bashPath(log)}"
+      export STUB_GIT_ROOT='${bashPath(root).replaceAll("/", "|")}'
       export REVIEW_TICKET="${bashPath(review)}"
       export CI_LOCAL="${bashPath(ciLocal)}"
       export R2_SECRET_ACCESS_KEY='${SECRET}'
@@ -1112,12 +1271,12 @@ exit 0
       check
       echo modes-ok
     `;
-    // This synchronous exec blocks the Vitest worker for the whole run. A block past 60 s fails the suite with
-    // "Timeout calling onTaskUpdate" even though every test passed, so keep this run short (the CI stub above).
-    const stdout = execFileSync("bash", ["-c", script], {
-      encoding: "utf8",
+    // Async so a long run cannot freeze the Vitest worker. The 180 s budget is unchanged.
+    const { stdout } = await runCommand(gitBash(), ["-c", script], {
       cwd: root,
       env: { ...process.env, AGENT_ENGINE: "claude" },
+      timeoutMs: 179_000,
+      signal: ctx.signal,
     });
     expect(stdout).toContain("modes-ok");
     expect(stdout).not.toContain("Still blocking");
@@ -1125,6 +1284,8 @@ exit 0
     expect(readFileSync(path.join(root, ".builder", "session-225.txt"), "utf8")).toBe("stub-session-0001");
     const sessionAfter = existsSync(checkoutSession) ? readFileSync(checkoutSession) : null;
     expect(sessionAfter).toEqual(sessionBefore);
-    rmSync(dir, { recursive: true, force: true });
+    } finally {
+      removeTemp(dir);
+    }
   }, 180_000);
 });

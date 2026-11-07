@@ -10,11 +10,11 @@ bad() { echo "FAIL $1"; fail=1; }
 export REVIEW_WATCH_POLL_SEC=1
 
 # 1. A reviewer that writes its verdict and then hangs is stopped after the grace period, with its child.
+# The watchdog's own message proves the grace path fired. A cap path would say "ran past 300s".
 hang_after_verdict() { printf 'VERDICT: PASS\n' > "$T/r1.md"; sleep 300 & echo $! > "$T/child1"; wait; }
-start=$SECONDS
-REVIEW_EXIT_GRACE_SEC=2 REVIEW_TIMEOUT_MIN=5 watch_run "$T/r1.md" hang_after_verdict; rc=$?
-took=$((SECONDS - start))
-[ "$rc" = 124 ] && [ "$took" -lt 30 ] && ok "hung-after-verdict stopped (rc=$rc, ${took}s)" || bad "hung-after-verdict (rc=$rc, ${took}s)"
+REVIEW_EXIT_GRACE_SEC=2 REVIEW_TIMEOUT_MIN=5 watch_run "$T/r1.md" hang_after_verdict >/dev/null 2>"$T/err1"
+rc=$?
+grep -q "verdict written 2s ago" "$T/err1" && [ "$rc" = 124 ] && ok "hung-after-verdict stopped (rc=$rc)" || bad "hung-after-verdict (rc=$rc) $(cat "$T/err1")"
 sleep 1
 kill -0 "$(cat "$T/child1")" 2>/dev/null && bad "child of hung reviewer still running" || ok "child of hung reviewer stopped"
 
@@ -30,10 +30,9 @@ REVIEW_EXIT_GRACE_SEC=2 REVIEW_TIMEOUT_MIN=5 watch_run "$T/r3.md" slow; rc=$?
 
 # 4. The total cap stops a reviewer that never writes anything. The cap is minutes, so test a 0-minute cap.
 never() { sleep 300; }
-start=$SECONDS
-REVIEW_TIMEOUT_MIN=0 watch_run "$T/none.md" never; rc=$?
-took=$((SECONDS - start))
-[ "$rc" = 124 ] && [ "$took" -lt 30 ] && ok "total cap stops a silent reviewer (${took}s)" || bad "total cap (rc=$rc, ${took}s)"
+REVIEW_TIMEOUT_MIN=0 watch_run "$T/none.md" never >/dev/null 2>"$T/err4"
+rc=$?
+grep -q "ran past 0s" "$T/err4" && [ "$rc" = 124 ] && ok "total cap stops a silent reviewer" || bad "total cap (rc=$rc) $(cat "$T/err4")"
 
 # 5. A bold verdict line (**VERDICT: PASS**) also counts as written.
 bold() { printf '**VERDICT: PASS**\n' > "$T/r5.md"; sleep 300; }
