@@ -1,14 +1,22 @@
 import { parse } from "csv-parse/sync";
+import { z } from "zod";
 import { platform, storeScoped, storeScopedTransaction, claimImportRow, lockStoreRow, IMPORT_TOKEN_TTL_MS } from "../db";
 import { CsvImportRejection } from "./csv-import-error";
-import { resolveStockMode, VALID_STOCK_MODES, type Actor } from "./service";
+import { CSV_FILE_CAP_BYTES, csvFileTooLarge } from "./csv-file-cap";
+import {
+  resolveStockMode,
+  isStockMode,
+  isStockStatus,
+  type Actor,
+  type StockMode,
+  type StockStatus,
+} from "./service";
 
 export const NON_CSV_REASON =
   "This does not look like a CSV file. Save it as CSV (UTF-8) and upload it again.";
 
 const CSV_FORMAT_REASON = "Could not parse file as CSV. Check the file format.";
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2 MB
 const MAX_ROWS = 5000;
 const MAX_NAME_LENGTH = 200;
 const MAX_PENDING_IMPORTS = 10;
@@ -19,7 +27,6 @@ const QTY_GROUPED_RE = /^\d{1,3}(,\d{3})+$/;
 const DEFAULT_WEIGHT_G = 100;
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 const PRICE_DOLLAR_RE = /^\$?\s*/;
-const VALID_STATUSES = new Set(["in_stock", "low", "out_of_stock"]);
 
 export interface CsvPreviewMatch {
   row: number;
@@ -82,9 +89,9 @@ interface ParsedRow {
   row: number;
   name: string;
   price: number;
-  stockMode?: string;
+  stockMode?: StockMode;
   qty?: number;
-  status?: string;
+  status?: StockStatus;
   /** Whole grams from a valid weight cell. Absent when the cell was empty. */
   weightG?: number;
 }
@@ -428,22 +435,30 @@ export function parseCsvText(raw: string): {
       ? undefined
       : statusCell.toLowerCase().replace(/[\s-]/g, "_");
 
-    if (stockModeRaw && !VALID_STOCK_MODES.has(stockModeRaw)) {
-      errors.push({
-        row: rowNum,
-        csvName: rawName,
-        reason: `Unrecognised stock_mode: "${stockModeCell}". Use "counted" or "status".`,
-      });
-      continue;
+    let stockMode: StockMode | undefined;
+    if (stockModeRaw !== undefined) {
+      if (!isStockMode(stockModeRaw)) {
+        errors.push({
+          row: rowNum,
+          csvName: rawName,
+          reason: `Unrecognised stock_mode: "${stockModeCell}". Use "counted" or "status".`,
+        });
+        continue;
+      }
+      stockMode = stockModeRaw;
     }
 
-    if (statusRaw && !VALID_STATUSES.has(statusRaw)) {
-      errors.push({
-        row: rowNum,
-        csvName: rawName,
-        reason: `Unrecognised status: "${statusCell}". Use "in_stock", "low", or "out_of_stock".`,
-      });
-      continue;
+    let status: StockStatus | undefined;
+    if (statusRaw !== undefined) {
+      if (!isStockStatus(statusRaw)) {
+        errors.push({
+          row: rowNum,
+          csvName: rawName,
+          reason: `Unrecognised status: "${statusCell}". Use "in_stock", "low", or "out_of_stock".`,
+        });
+        continue;
+      }
+      status = statusRaw;
     }
 
     let weightG: number | undefined;
@@ -474,9 +489,9 @@ export function parseCsvText(raw: string): {
       row: rowNum,
       name: rawName,
       price: priceCents,
-      stockMode: stockModeRaw as "counted" | "status" | undefined,
+      stockMode,
       qty,
-      status: statusRaw as "in_stock" | "low" | "out_of_stock" | undefined,
+      status,
       ...(weightG !== undefined ? { weightG } : {}),
     });
   }
@@ -624,9 +639,9 @@ interface ListingToCreate {
   masterProductId: string | null;
   customName: string | null;
   price: number;
-  stockMode: string;
+  stockMode: StockMode;
   qty: number | null;
-  status: string | null;
+  status: StockStatus | null;
   frozen: boolean;
   perishable: boolean;
   weightG: number;
@@ -924,6 +939,52 @@ export interface CommitResult {
   needsWeightCount: number;
 }
 
+const ALREADY_COMMITTED_MESSAGE = "This import has already been committed.";
+
+const commitResultSchema = z.object({
+  createdCount: z.number().int().nonnegative().max(MAX_ROWS),
+  listingIds: z.array(z.string().min(1)).min(1).max(MAX_ROWS),
+  needsWeightCount: z.number().int().nonnegative().max(MAX_ROWS),
+}).strict().superRefine((value, ctx) => {
+  if (value.createdCount !== value.listingIds.length) {
+    ctx.addIssue({ code: "custom", message: "createdCount" });
+  }
+  if (new Set(value.listingIds).size !== value.listingIds.length) {
+    ctx.addIssue({ code: "custom", message: "listingIds" });
+  }
+  if (value.needsWeightCount > value.createdCount) {
+    ctx.addIssue({ code: "custom", message: "needsWeightCount" });
+  }
+});
+
+function storedCommitResult(value: unknown): CommitResult {
+  const parsed = commitResultSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new CsvImportRejection(ALREADY_COMMITTED_MESSAGE);
+  }
+  return {
+    createdCount: parsed.data.createdCount,
+    listingIds: parsed.data.listingIds,
+    needsWeightCount: parsed.data.needsWeightCount,
+  };
+}
+
+/** Selection and catalog refusals lose to a commit that landed while this call was matching. */
+async function replayOrReject(
+  storeId: string,
+  importToken: string,
+  message: string,
+): Promise<CommitResult> {
+  const current = await storeScoped(storeId).listingImport.findUnique({
+    where: { id: importToken },
+    select: { status: true, commitResult: true },
+  });
+  if (current?.status === "committed") {
+    return storedCommitResult(current.commitResult);
+  }
+  throw new CsvImportRejection(message);
+}
+
 export async function commitImport(
   storeId: string,
   importToken: string,
@@ -939,7 +1000,7 @@ export async function commitImport(
     throw new CsvImportRejection("Import token is invalid, expired, or already used.");
   }
   if (importRecord.status === "committed") {
-    throw new CsvImportRejection("This import has already been committed.");
+    return storedCommitResult(importRecord.commitResult);
   }
 
   const context = await buildMatchContext(importRecord.csvText);
@@ -951,7 +1012,7 @@ export async function commitImport(
   ]);
 
   if (selectedRows.size === 0 && selection.ambiguousResolutions.length === 0) {
-    throw new CsvImportRejection("No rows selected for import.");
+    return replayOrReject(storeId, importToken, "No rows selected for import.");
   }
 
   const identityByRow = new Map<number, string>();
@@ -978,7 +1039,9 @@ export async function commitImport(
     if (previewedId !== undefined) {
       const sole = productMatches.length === 1 ? productMatches[0] : undefined;
       if (!sole || sole.product.id !== previewedId) {
-        throw new CsvImportRejection(
+        return replayOrReject(
+          storeId,
+          importToken,
           `Resolution for row ${rowNum} references product ${previewedId} which is not in the match list.`,
         );
       }
@@ -988,7 +1051,9 @@ export async function commitImport(
     } else if (productMatches.length === 0) {
       toCreate.push(buildListingData(row, null, context.hasQtyColumn));
     } else {
-      throw new CsvImportRejection(
+      return replayOrReject(
+        storeId,
+        importToken,
         `Row ${rowNum} ("${row.name}") matches multiple master products. Use ambiguous resolutions to pick one.`,
       );
     }
@@ -1001,7 +1066,9 @@ export async function commitImport(
     const allProducts = (matchMap.get(row.name) ?? []).map((m) => m.product);
     const selectedProduct = allProducts.find((p) => p.id === resolution.masterProductId);
     if (!selectedProduct) {
-      throw new CsvImportRejection(
+      return replayOrReject(
+        storeId,
+        importToken,
         `Resolution for row ${resolution.row} references product ${resolution.masterProductId} which is not in the match list.`,
       );
     }
@@ -1012,7 +1079,7 @@ export async function commitImport(
   const { kept: dedupedToCreate, duplicatesSkipped } = dropDuplicateBuiltItems(toCreate);
 
   if (dedupedToCreate.length === 0) {
-    throw new CsvImportRejection("No valid rows to import after re-validation.");
+    return replayOrReject(storeId, importToken, "No valid rows to import after re-validation.");
   }
 
   const committed = await storeScopedTransaction(storeId, async (tx) => {
@@ -1022,10 +1089,10 @@ export async function commitImport(
     if (!didClaim) {
       const current = await tx.listingImport.findUnique({
         where: { id: importToken },
-        select: { status: true },
+        select: { status: true, commitResult: true },
       });
       if (current?.status === "committed") {
-        throw new CsvImportRejection("This import has already been committed.");
+        return storedCommitResult(current.commitResult);
       }
       throw new CsvImportRejection("Import token has expired. Please upload the file again.");
     }
@@ -1116,21 +1183,23 @@ export async function commitImport(
       },
     });
 
-    return { ids, needsWeightCount };
+    const result = {
+      createdCount: ids.length,
+      listingIds: ids,
+      needsWeightCount,
+    };
+    await tx.listingImport.update({
+      where: { id: importToken },
+      data: { commitResult: result },
+    });
+    return result;
   }, { timeout: 60_000, maxWait: 15_000 });
 
-  return {
-    createdCount: committed.ids.length,
-    listingIds: committed.ids,
-    needsWeightCount: committed.needsWeightCount,
-  };
+  return committed;
 }
 
 export function validateFileSize(bytes: number): string | null {
-  if (bytes > MAX_FILE_BYTES) {
-    return `File exceeds the maximum size of ${MAX_FILE_BYTES / (1024 * 1024)} MB.`;
-  }
-  return null;
+  return csvFileTooLarge(bytes);
 }
 
-export { MAX_FILE_BYTES, MAX_ROWS, MAX_NAME_LENGTH, MAX_PENDING_IMPORTS };
+export { CSV_FILE_CAP_BYTES as MAX_FILE_BYTES, MAX_ROWS, MAX_NAME_LENGTH, MAX_PENDING_IMPORTS };

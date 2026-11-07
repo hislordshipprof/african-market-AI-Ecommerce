@@ -250,17 +250,12 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
       userId,
     );
     const selection = { matchedRows: [] as number[], newItemRows: [2], ambiguousResolutions: [] };
-    const results = await Promise.allSettled([
+    const results = await Promise.all([
       commitImport(storeAId, preview.importToken, selection, actor),
       commitImport(storeAId, preview.importToken, selection, actor),
     ]);
-    const fulfilled = results.filter((row) => row.status === "fulfilled");
-    const rejected = results.filter((row) => row.status === "rejected");
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    expect((rejected[0] as PromiseRejectedResult).reason.message).toBe(
-      "This import has already been committed.",
-    );
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0]!.createdCount).toBe(1);
 
     const listings = await storeScoped(storeAId).listing.findMany({
       where: { customName: `Once Bag ${RUN}` },
@@ -276,10 +271,9 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
       userId,
     );
     const retrySelection = { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] };
-    await commitImport(storeBId, again.importToken, retrySelection, actor);
-    await expect(
-      commitImport(storeBId, again.importToken, retrySelection, actor),
-    ).rejects.toThrow("This import has already been committed.");
+    const firstRetry = await commitImport(storeBId, again.importToken, retrySelection, actor);
+    const secondRetry = await commitImport(storeBId, again.importToken, retrySelection, actor);
+    expect(secondRetry).toEqual(firstRetry);
     const retries = await storeScoped(storeBId).listing.findMany({
       where: { customName: `Retry Bag ${RUN}` },
       include: { variants: true },

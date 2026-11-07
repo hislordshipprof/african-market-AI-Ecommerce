@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import Link from "next/link";
 import { toast } from "sonner";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
@@ -20,6 +21,7 @@ import {
   type PreviewActionResult,
 } from "@/lib/listing/csv-import-actions";
 import { needsWeightSentence } from "../needs-weight";
+import { CSV_FILE_CAP_BYTES, CSV_FILE_TOO_LARGE_MESSAGE } from "@/lib/listing/csv-file-cap";
 import type {
   CsvPreviewResult,
   CsvPreviewMatch,
@@ -99,9 +101,8 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
   function handleUpload() {
     if (!selectedFile) return;
 
-    const MAX_FILE_BYTES = 2 * 1024 * 1024;
-    if (selectedFile.size > MAX_FILE_BYTES) {
-      toast.error("File exceeds the maximum size of 2 MB.");
+    if (selectedFile.size > CSV_FILE_CAP_BYTES) {
+      toast.error(CSV_FILE_TOO_LARGE_MESSAGE);
       return;
     }
 
@@ -154,7 +155,14 @@ export function CsvImportUi({ storeName, storeSlug }: Props) {
     }
 
     startTransition(async () => {
-      const res = await csvCommitAction(preview.importToken, selection);
+      let res: Awaited<ReturnType<typeof csvCommitAction>>;
+      try {
+        res = await csvCommitAction(preview.importToken, selection);
+      } catch (error) {
+        if (isRedirectError(error)) throw error;
+        toast.error("We couldn't confirm the import. Press Import again. Nothing will be imported twice.");
+        return;
+      }
 
       if (res.error) {
         toast.error(res.error);
