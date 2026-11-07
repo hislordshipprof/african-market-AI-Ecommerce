@@ -197,7 +197,7 @@ export function formatR2UploadCause(cause: unknown): string {
   const name = cause.name || "Error";
   const status = uploadCauseStatus(cause);
   const statusLabel = status === undefined ? "" : ` (HTTP ${status})`;
-  const message = firstCauseLine(cause.message);
+  const message = firstCauseLine(typeof cause.message === "string" ? cause.message : "");
   const code = uploadCauseCode(cause);
   if (!message) return code ? `${name}${statusLabel}: ${code}` : `${name}${statusLabel}`;
   const codeLabel = code && !message.includes(code) ? ` (${code})` : "";

@@ -595,10 +595,13 @@ test.describe("Catalog review (authenticated)", () => {
 
       await page.keyboard.press("Escape");
       await expect(dialog).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
       await page.mouse.click(8, 8);
       await expect(dialog).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
       await clickControl("Cancel");
       await expect(dialog).toBeVisible();
+      await expect(page.locator("[data-slot=dialog-content]")).not.toHaveAttribute("data-closed", /.*/);
       await expect(dialog.getByLabel("Name")).toHaveValue(saved);
 
       release();
