@@ -11,9 +11,10 @@
 
 _AGENT_CLI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
+_REVIEW_ENGINE_OVERRIDE="${REVIEW_ENGINE:-}"
 [ -f "$_AGENT_CLI_DIR/agent-engine.env" ] && . "$_AGENT_CLI_DIR/agent-engine.env"
 AGENT_ENGINE="${AGENT_ENGINE:-${ENGINE:-claude}}"
-REVIEW_ENGINE="${REVIEW_ENGINE:-$AGENT_ENGINE}"
+REVIEW_ENGINE="${_REVIEW_ENGINE_OVERRIDE:-${REVIEW_ENGINE:-$AGENT_ENGINE}}"
 
 # Resolve the Cursor CLI's bundled node + index.js (newest installed version) so long multi-line prompts
 # never pass through cmd.exe quoting.
@@ -78,6 +79,16 @@ agent_run() {
         light)  flags+=(--model claude-sonnet-5-5 --effort medium) ;;
         build|review|review2) flags+=(--effort high) ;;
       esac
+      # Reviews may run on a separate Claude profile. It has no supermatt plugin, so the slash skill is rewritten
+      # to the vendored copy, as for Cursor.
+      if [ "$role" = review ] || [ "$role" = review2 ]; then
+        if [ -n "${REVIEW_CLAUDE_CONFIG_DIR:-}" ]; then
+          [ -d "$REVIEW_CLAUDE_CONFIG_DIR" ] || { echo "No Claude profile at $REVIEW_CLAUDE_CONFIG_DIR" >&2; return 2; }
+          local -x CLAUDE_CONFIG_DIR="$REVIEW_CLAUDE_CONFIG_DIR"
+          prompt="$(_cursor_prompt "$prompt")"
+        fi
+        [ -n "${REVIEW_CLAUDE_MODEL:-}" ] && flags+=(--model "$REVIEW_CLAUDE_MODEL")
+      fi
       if [ -n "$resume" ]; then
         claude -p --resume "$resume" "$(_spill_prompt "$prompt" "$role")" "${flags[@]}" < /dev/null > "$log" 2>&1
       else

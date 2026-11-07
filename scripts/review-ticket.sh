@@ -3,9 +3,9 @@
 # No agent reviews its own work: build-ticket.sh calls this after every build and fix round.
 # Usage: scripts/review-ticket.sh <issue>
 # Writes: .builder/review-<n>.md. Its first line is "VERDICT: PASS" or "VERDICT: BLOCKING".
-# RISK=1 (set automatically by build-ticket.sh for money, auth and external-provider tickets) also runs the
-# Codex review and merges its findings into the same file. With REVIEW_ENGINE=codex the main review is
-# Codex and the RISK second review is CURSOR_REVIEW_MODEL on AGENT_ENGINE.
+# RISK=1 (set automatically by build-ticket.sh for money, auth and external-provider tickets) also runs a
+# second review and merges its findings into the same file. When REVIEW_ENGINE differs from AGENT_ENGINE the
+# second review is CURSOR_REVIEW_MODEL on AGENT_ENGINE; when they match it is the standalone Codex review.
 set -euo pipefail
 REPO="hislordshipprof/african-market-AI-Ecommerce"
 ROOT="$(git rev-parse --show-toplevel)"
@@ -63,8 +63,8 @@ fi
 [ -s "$OUT" ] && sed -i '1s/\*//g' "$OUT"
 [ -s "$OUT" ] || printf 'VERDICT: BLOCKING\nThe independent review wrote no result; see %s\n' "$LOG" > "$OUT"
 
-if [ "${RISK:-0}" = "1" ] && [ "$REVIEW_ENGINE" = codex ]; then
-  # Codex already did the main review: the second RISK reviewer is another family on AGENT_ENGINE.
+if [ "${RISK:-0}" = "1" ] && [ "$REVIEW_ENGINE" != "$AGENT_ENGINE" ]; then
+  # The main review ran on REVIEW_ENGINE: the second RISK reviewer is a fresh session on AGENT_ENGINE.
   OUT2="$ROOT/.builder/review-$N.second.md"; rm -f "$OUT2"
   watch_run "$OUT2" agent_run review2 "$LOG.second.json" "${PROMPT//$TARGET/$OUT2}" || true
   stop_worktree_servers "$WT"
