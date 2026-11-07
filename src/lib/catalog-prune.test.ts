@@ -1,6 +1,6 @@
 import { DeleteObjectsCommand, S3Client } from "@aws-sdk/client-s3";
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { chmodSync, copyFileSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
@@ -135,15 +135,23 @@ function gitBash(): string {
 }
 const nodeExit = "#!/usr/bin/env node\nprocess.exit(0);\n";
 
-/** Prepend the stub directory. The rest of PATH stays so node, bash and coreutils resolve. */
+/**
+ * Stub directory, then Git bash and node. A full Windows PATH makes MSYS search every
+ * entry before it finds bash or node, and that alone pushed lane-db.sh past 15s.
+ */
 function commandPath(bin: string): string {
   const toBash = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-  return `${toBash(bin)}:${process.env.PATH ?? ""}`;
+  if (process.platform !== "win32") return `${toBash(bin)}:${process.env.PATH ?? ""}`;
+  const bashDir = toBash(path.dirname(gitBash()));
+  const nodeDir = toBash(path.dirname(process.execPath));
+  return `${toBash(bin)}:${bashDir}:${nodeDir}:/usr/bin`;
 }
 
 function installStub(bin: string, name: string, nodeBody: string): void {
   if (process.platform === "win32") {
-    copyFileSync(NATIVE_STUB, path.join(bin, `${name}.exe`));
+    const dest = path.join(bin, `${name}.exe`);
+    // A hard link is the already-scanned stub, so Windows does not rescan each name.
+    try { linkSync(NATIVE_STUB, dest); } catch { copyFileSync(NATIVE_STUB, dest); }
     return;
   }
   const file = path.join(bin, name);
