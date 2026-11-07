@@ -1,8 +1,6 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { editorial } from "@/lib/storefront/editorial";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import { authClient } from "@/lib/auth-client";
@@ -13,7 +11,7 @@ import type {
   FlowOrder,
   FlowStore,
 } from "@/lib/customer-flow/contracts";
-import type { CustomerProfile as RealCustomerProfile } from "@/lib/customer-auth";
+import type { StoreCustomer } from "@/lib/customer-auth";
 import { Button, EmptyState } from "../primitives";
 import {
   AddressCard,
@@ -34,7 +32,7 @@ type Props = {
   settings: FlowStore;
   catalog: FlowCatalogItem[];
   enabled: boolean;
-  customer?: RealCustomerProfile | null;
+  customer?: StoreCustomer | null;
   accountBook?: AccountBookSnapshot | null;
 };
 const message = (e: unknown) =>
@@ -43,139 +41,6 @@ function useServices({ settings, catalog, enabled }: Props) {
   return useMemo(
     () => (enabled ? createDemoServices(settings, catalog, true) : null),
     [settings, catalog, enabled],
-  );
-}
-export function AccountSignIn(props: Props) {
-  const router = useRouter();
-  const services = useServices(props);
-  const [channel, setChannel] = useState<"sms" | "email">("sms");
-  const [destination, setDestination] = useState("");
-  const [challenge, setChallenge] = useState("");
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!services) return;
-    setBusy(true);
-    setError("");
-    try {
-      if (challenge) {
-        await services.auth.verify(challenge, code);
-        router.push("/account");
-      } else {
-        const c = await services.auth.requestCode(channel, destination);
-        setChallenge(c.challengeId);
-      }
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  if (!services) return <ClosedFlow />;
-  return (
-    <div className="sf-account">
-      <FlowHeading
-        title="Welcome back"
-        description="Your markets. Your familiar favorites."
-        backHref="/account"
-        backLabel="Account"
-      />
-      <DemoNotice />
-      <div className="sf-account-signin">
-        <div className="sf-account-story">
-          <Image
-            src={editorial.market}
-            alt="Fresh produce at a neighborhood market"
-            fill
-            sizes="(max-width:700px) 100vw, 480px"
-          />
-          <div>
-            <span>Your neighborhood, your table</span>
-            <h2>
-              A taste of home.
-              <br />A market that knows you.
-            </h2>
-            <p>Good food brings us back together.</p>
-          </div>
-        </div>
-        <FlowCard
-          title={challenge ? "Check your demo code" : "Sign in to your account"}
-        >
-          <p>
-            Your demo profile is shared across markets in this browser. Messages
-            are simulated.
-          </p>
-          {error && <FlowError message={error} />}
-          <form onSubmit={submit} className="sf-account-form">
-            {!challenge ? (
-              <>
-                <label>
-                  Sign-in method
-                  <select
-                    value={channel}
-                    onChange={(e) =>
-                      setChannel(e.target.value as "sms" | "email")
-                    }
-                  >
-                    <option value="sms">Phone / SMS</option>
-                    <option value="email">Email magic link</option>
-                  </select>
-                </label>
-                <label>
-                  {channel === "sms" ? "Phone number" : "Email address"}
-                  <input
-                    required
-                    type={channel === "sms" ? "tel" : "email"}
-                    autoComplete={channel === "sms" ? "tel" : "email"}
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                  />
-                </label>
-              </>
-            ) : (
-              <>
-                <p>
-                  No message was sent. Use demo code <strong>123456</strong> for{" "}
-                  {destination}. This code expires in ten minutes.
-                </p>
-                <label>
-                  Verification code
-                  <input
-                    required
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    pattern="[0-9]{6}"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="sf-text-link"
-                  onClick={() => {
-                    setChallenge("");
-                    setCode("");
-                  }}
-                >
-                  Use a different phone or email
-                </button>
-              </>
-            )}
-            <Button disabled={busy}>
-              {busy
-                ? "Please wait..."
-                : challenge
-                  ? "Verify and continue"
-                  : channel === "sms"
-                    ? "Get demo code"
-                    : "Simulate email magic link"}
-            </Button>
-          </form>
-        </FlowCard>
-      </div>
-    </div>
   );
 }
 export function AccountFlow(props: Props) {

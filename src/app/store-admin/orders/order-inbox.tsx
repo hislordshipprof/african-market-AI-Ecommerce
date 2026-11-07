@@ -63,6 +63,12 @@ const STATUS_CONFIG: Record<
   CANCELLED: { label: "Cancelled", variant: "outline", icon: CheckCircle2 },
 };
 
+function orderCustomerLabel(name: string, phone: string | null): string {
+  const trimmed = phone?.trim() ?? "";
+  if (!trimmed) return name;
+  return `${name} · ${trimmed}`;
+}
+
 interface Props {
   initialOrders: StoreOrderRow[];
   storeName: string;
@@ -300,8 +306,10 @@ export function OrderInbox({
                   </Badge>
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  {selectedOrder.customer.name} &middot;{" "}
-                  {selectedOrder.customer.phone}
+                  {orderCustomerLabel(
+                    selectedOrder.customer.name,
+                    selectedOrder.customer.phone,
+                  )}
                 </div>
                 {selectedOrder.notes && (
                   <p className="mt-1 whitespace-pre-line text-sm italic text-muted-foreground">

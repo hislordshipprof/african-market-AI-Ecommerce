@@ -2,9 +2,9 @@ import "server-only";
 import { headers } from "next/headers";
 import { auth } from "./auth";
 import { findStore } from "./get-store";
-import { findOrCreateCustomer, type CustomerProfile } from "./customer-auth";
+import { findOrCreateCustomer, type StoreCustomer } from "./customer-auth";
 
-export async function syncCustomerForRequest(): Promise<CustomerProfile | null> {
+export async function syncCustomerForRequest(): Promise<StoreCustomer | null> {
   const reqHeaders = await headers();
 
   const session = await auth.api.getSession({
