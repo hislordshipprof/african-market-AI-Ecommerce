@@ -5,7 +5,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { storeScoped } from "../../db";
 import { customerCancelOrder, getStoreOrders } from "../../order/service";
-import { fakeCheckoutIntentCount, fakeLastCancelKey, failNextFakePaymentCancel, getCheckoutPayments, resetFakeCheckoutPayments } from "../../stripe/checkout-payments";
+import { fakeCheckoutIntentCount, fakeLastCancelKey, failNextFakePaymentCancel, getCheckoutPayments, markFakeIntentAuthenticationFailed, resetFakeCheckoutPayments } from "../../stripe/checkout-payments";
 import { createPaymentIntent, placeOrder } from "../../checkout/service";
 import { checkoutTestHooks } from "../../checkout/test-hooks";
 import { confirmCheckout, mintCheckoutToken } from "./confirm";
@@ -366,6 +366,20 @@ describe.skipIf(!hasDb)("assistant confirm", () => {
     if (!minted) throw new Error("mint");
     return { cart, conversation, ctx, prepared, minted, slot };
   }
+
+  it("a closed authentication challenge releases that PaymentIntent", async () => {
+    const { ctx, minted } = await basket("Closed challenge");
+    const reserved = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    if (!reserved.ok || reserved.kind !== "client_secret") throw new Error(JSON.stringify(reserved));
+    markFakeIntentAuthenticationFailed(reserved.paymentIntentId);
+    const again = await confirmCheckout({ ...ctx, token: minted.token, phase: "reserve" });
+    expect(again.ok, JSON.stringify(again)).toBe(false);
+    if (again.ok) throw new Error("released");
+    expect(again.message).toBe("The total changed. Review the new card.");
+    expect(again.card).toBeTruthy();
+    const released = await getCheckoutPayments().retrievePaymentIntent(reserved.paymentIntentId);
+    expect(released.status).toBe("canceled");
+  });
 
   it("does not adopt a PaymentIntent the attempt did not create", async () => {
     const { cart, ctx, minted, prepared } = await basket("Foreign");

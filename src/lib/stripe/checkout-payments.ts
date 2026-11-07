@@ -43,6 +43,8 @@ export interface NormalizedPaymentIntent {
   transfer_data: { destination: string | null } | null;
   metadata: Record<string, string>;
   capture_method: string | null;
+  /** Stripe last_payment_error.code. A closed or failed 3DS challenge sets payment_intent_authentication_failure. */
+  lastPaymentErrorCode?: string | null;
 }
 
 export interface CheckoutPayments {
@@ -115,6 +117,14 @@ function emptyToNull(value: unknown): string | null {
 
 export function fakeCheckoutIntentCount(): number {
   return intents.size;
+}
+
+/** Stripe test mode moves a closed 3DS challenge to requires_payment_method with this code. */
+export function markFakeIntentAuthenticationFailed(id: string): void {
+  const intent = intents.get(id);
+  if (!intent) throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
+  intent.status = "requires_payment_method";
+  intent.lastPaymentErrorCode = "payment_intent_authentication_failure";
 }
 
 export function resetFakeCheckoutPayments(): void {
@@ -294,9 +304,10 @@ export const fakeCheckoutPayments: CheckoutPayments = {
       client_secret: `${id}_secret_fake`,
       on_behalf_of: emptyToNull(params.on_behalf_of),
       transfer_data: transfer ? { destination: transfer.destination ?? null } : null,
-      metadata: { ...metadata },
-      capture_method: emptyToNull(params.capture_method),
-    };
+    metadata: { ...metadata },
+    capture_method: emptyToNull(params.capture_method),
+    lastPaymentErrorCode: null,
+  };
     intents.set(id, intent);
     if (key) idempotency.set(key, { hash: hashParams(params), customerId: id, expired: false });
     return intent;
@@ -443,6 +454,7 @@ function normalizeStripeIntent(intent: Stripe.PaymentIntent): NormalizedPaymentI
       : null,
     metadata: intent.metadata ?? {},
     capture_method: intent.capture_method,
+    lastPaymentErrorCode: intent.last_payment_error?.code ?? null,
   };
 }
 

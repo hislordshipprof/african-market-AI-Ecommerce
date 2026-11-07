@@ -321,7 +321,13 @@ async function resumeHeld(
     return retireAfterRelease(input, attempt);
   }
   if (pi.status === "requires_payment_method") {
-    if (stale || expired) return retireAfterRelease(input, attempt);
+    // A decline stays on this intent so the same card form can retry.
+    // A closed or failed 3DS challenge also lands here, and must not be resumed.
+    // https://docs.stripe.com/payments/3d-secure/authentication-flow
+    // https://docs.stripe.com/error-codes#payment-intent-authentication-failure
+    if (stale || expired || pi.lastPaymentErrorCode === "payment_intent_authentication_failure") {
+      return retireAfterRelease(input, attempt);
+    }
     if (!pi.client_secret) return { ok: false, code: "not_charged", message: "You have not been charged yet. Try again." };
     return {
       ok: true,

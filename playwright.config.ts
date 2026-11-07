@@ -44,6 +44,10 @@ export default defineConfig({
   // browsers per lane and starves memory. E2E_WORKERS overrides it; scripts/build-ticket.sh sets it per lane.
   workers: process.env.CI ? 1 : Number(process.env.E2E_WORKERS) || 4,
   reporter: "html",
+  // Real Stripe Payment Element evidence. The default suite uses the fake
+  // provider. This file fails hard when it runs; it is not selected unless
+  // E2E_STRIPE_SANDBOX=1, and it does not skip.
+  testIgnore: process.env.E2E_STRIPE_SANDBOX === "1" ? undefined : /assistant-checkout\.sandbox\.spec\.ts/,
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   use: {

@@ -1,35 +1,145 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { expect, test, type Page } from "@playwright/test";
+import { resolveDirectUrl } from "../src/lib/env";
 import { generateTOTP } from "./totp";
 import { storeUrl } from "./urls";
 
-const origin = storeUrl("mama-ngozi");
 const OWNER_EMAIL = "owner@mama-ngozi.test";
 const OWNER_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "CiTestPass99!";
 const SEED_TOTP_SECRET = process.env.SEED_ADMIN_TOTP_SECRET ?? "JBSWY3DPEHPK3PXP";
 
+let origin = storeUrl("mama-ngozi");
+let storeSlug = "mama-ngozi";
+let sharedStripe: { stripeOnboardingStatus: string; stripeAccountId: string | null } | undefined;
+
+function db() {
+  return new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+}
+
 test.beforeAll(async () => {
-  const raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
-  const store = await raw.store.findUnique({ where: { slug: "mama-ngozi" }, select: { id: true, stripeAccountId: true } });
-  if (!store) throw new Error("mama-ngozi is not seeded");
-  await raw.store.update({
-    where: { slug: "mama-ngozi" },
-    data: {
-      stripeOnboardingStatus: "complete",
-      stripeAccountId: store.stripeAccountId ?? "acct_e2e_mama_ngozi",
-    },
-  });
-  await raw.appRateLimit.deleteMany({ where: { key: { startsWith: "assistant:" } } });
-  await raw.$disconnect();
-  await fetch(`http://127.0.0.1:${process.env.E2E_PORT || "3200"}/api/storefront/revalidate`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${process.env.STOREFRONT_REVALIDATION_SECRET ?? "e2e-storefront-revalidate"}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ stores: [{ id: store.id, slug: "mama-ngozi" }] }),
-  });
+  const raw = db();
+  try {
+    const shared = await raw.store.findUnique({
+      where: { slug: "mama-ngozi" },
+      select: { id: true, stripeOnboardingStatus: true, stripeAccountId: true, timezone: true, prepTimeMinutes: true, minimumOrderCents: true },
+    });
+    if (!shared) throw new Error("mama-ngozi is not seeded");
+    sharedStripe = {
+      stripeOnboardingStatus: shared.stripeOnboardingStatus,
+      stripeAccountId: shared.stripeAccountId,
+    };
+    const owner = await raw.user.findUnique({ where: { email: OWNER_EMAIL }, select: { id: true } });
+    if (!owner) throw new Error("mama-ngozi owner is not seeded");
+    const slug = `asst-h-${Date.now().toString(36)}`;
+    const accountId = `acct_e2e_asst_${Date.now().toString(36)}`;
+    const store = await raw.store.create({
+      data: {
+        slug,
+        name: "Assistant Harness Market",
+        themePreset: "palm-and-shea",
+        status: "active",
+        stripeOnboardingStatus: "complete",
+        stripeAccountId: accountId,
+        pickupEnabled: true,
+        timezone: shared.timezone,
+        prepTimeMinutes: shared.prepTimeMinutes,
+        minimumOrderCents: shared.minimumOrderCents,
+        hours: {
+          monday: "9:00 AM - 11:59 PM",
+          tuesday: "9:00 AM - 11:59 PM",
+          wednesday: "9:00 AM - 11:59 PM",
+          thursday: "9:00 AM - 11:59 PM",
+          friday: "9:00 AM - 11:59 PM",
+          saturday: "9:00 AM - 11:59 PM",
+          sunday: "9:00 AM - 11:59 PM",
+        },
+      },
+    });
+    await raw.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      await tx.storeMembership.create({ data: { storeId: store.id, userId: owner.id, role: "owner" } });
+      const listing = await tx.listing.create({
+        data: {
+          storeId: store.id,
+          customName: "Egusi",
+          price: 1099,
+          stockMode: "counted",
+          qty: 40,
+          frozen: false,
+          perishable: false,
+        },
+      });
+      await tx.listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 1099, weightG: 500 } });
+    });
+    await raw.appRateLimit.deleteMany({ where: { key: { startsWith: "assistant:" } } });
+    origin = storeUrl(slug);
+    storeSlug = slug;
+    const revalidated = await fetch(`http://127.0.0.1:${process.env.E2E_PORT || "3200"}/api/storefront/revalidate`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${process.env.STOREFRONT_REVALIDATION_SECRET ?? "e2e-storefront-revalidate"}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ stores: [{ id: store.id, slug }] }),
+    });
+    if (!revalidated.ok) throw new Error(`storefront revalidate returned ${revalidated.status}`);
+  } finally {
+    await raw.$disconnect();
+  }
+});
+
+test.afterAll(async () => {
+  const raw = db();
+  try {
+    if (sharedStripe) {
+      const shared = await raw.store.findUnique({
+        where: { slug: "mama-ngozi" },
+        select: { stripeOnboardingStatus: true, stripeAccountId: true },
+      });
+      expect(shared?.stripeOnboardingStatus).toBe(sharedStripe.stripeOnboardingStatus);
+      expect(shared?.stripeAccountId).toBe(sharedStripe.stripeAccountId);
+    }
+    const store = await raw.store.findUnique({ where: { slug: storeSlug }, select: { id: true } });
+    if (!store || storeSlug === "mama-ngozi") return;
+    await raw.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      await tx.assistantCheckoutToken.deleteMany({ where: { storeId: store.id } });
+      await tx.assistantCheckoutAttempt.deleteMany({ where: { storeId: store.id } });
+      await tx.assistantCheckoutDraft.deleteMany({ where: { storeId: store.id } });
+      await tx.assistantUndoReceipt.deleteMany({ where: { storeId: store.id } });
+      await tx.aiAction.deleteMany({ where: { storeId: store.id } });
+      await tx.aiConversation.deleteMany({ where: { storeId: store.id } });
+      await tx.refundRequest.deleteMany({ where: { storeId: store.id } });
+      await tx.guestBrowserCart.deleteMany({ where: { storeId: store.id } });
+      await tx.orderLine.deleteMany({ where: { storeId: store.id } });
+      await tx.order.deleteMany({ where: { storeId: store.id } });
+      await tx.cartLine.deleteMany({ where: { storeId: store.id } });
+      await tx.cart.deleteMany({ where: { storeId: store.id } });
+      await tx.stockEvent.deleteMany({ where: { storeId: store.id } });
+      await tx.customer.deleteMany({ where: { storeId: store.id } });
+      await tx.auditLog.deleteMany({ where: { storeId: store.id } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: store.id } } });
+      await tx.listing.deleteMany({ where: { storeId: store.id } });
+      await tx.storeMembership.deleteMany({ where: { storeId: store.id } });
+    });
+    await raw.store.delete({ where: { id: store.id } });
+    const revalidated = await fetch(`http://127.0.0.1:${process.env.E2E_PORT || "3200"}/api/storefront/revalidate`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${process.env.STOREFRONT_REVALIDATION_SECRET ?? "e2e-storefront-revalidate"}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ stores: [{ id: store.id, slug: storeSlug }] }),
+    });
+    if (!revalidated.ok) throw new Error(`storefront revalidate returned ${revalidated.status}`);
+  } finally {
+    await raw.$disconnect();
+  }
 });
 
 async function say(page: Page, text: string) {
@@ -65,7 +175,7 @@ async function drawPayableCard(page: Page) {
 }
 
 async function storeOwnerOrders(page: Page) {
-  await page.goto(`${storeUrl()}/store-admin/sign-in?store=mama-ngozi`);
+  await page.goto(`${storeUrl()}/store-admin/sign-in?store=${storeSlug}`);
   await page.getByLabel("Email").fill(OWNER_EMAIL);
   await page.getByLabel("Password").fill(OWNER_PASSWORD);
   await page.click("button[type='submit']");
@@ -76,12 +186,12 @@ async function storeOwnerOrders(page: Page) {
     (url) => url.pathname.startsWith("/store-admin") && !url.pathname.includes("sign-in"),
     { timeout: 15_000 },
   );
-  await page.goto(`${storeUrl()}/store-admin/orders?store=mama-ngozi`);
+  await page.goto(`${storeUrl()}/store-admin/orders?store=${storeSlug}`);
   await expect(page.locator("h1", { hasText: "Orders" })).toBeVisible({ timeout: 15_000 });
 }
 
 test.beforeEach(async () => {
-  const raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+  const raw = db();
   await raw.appRateLimit.deleteMany({ where: { key: { startsWith: "assistant:" } } });
   await raw.$disconnect();
 });
