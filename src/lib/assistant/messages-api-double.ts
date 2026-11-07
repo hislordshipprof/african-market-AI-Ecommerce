@@ -287,6 +287,13 @@ function judgeToolHistory(body: Record<string, unknown>): MessagesVerdict | null
             message: "tool_use requires id and name",
           };
         }
+        if (!/^[a-zA-Z0-9_-]+$/.test(block.id) || block.id.startsWith("srvtoolu_")) {
+          return {
+            status: 400,
+            errorType: "invalid_request_error",
+            message: "tool_use id must match ^[a-zA-Z0-9_-]+$",
+          };
+        }
         if (seen.has(block.id)) {
           return {
             status: 400,
@@ -480,16 +487,25 @@ function eventsFor(step: FakeAnthropicStep, model: string, toolId = "toolu_fake_
   if (step.kind === "tool") {
     const name = step.toolName ?? "ping";
     const input = JSON.stringify(step.toolInput ?? {});
+    const preamble = step.text
+      ? [
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: step.text } },
+          { type: "content_block_stop", index: 0 },
+        ]
+      : [];
+    const toolIndex = step.text ? 1 : 0;
     return [
       start,
       { type: "ping" },
+      ...preamble,
       {
         type: "content_block_start",
-        index: 0,
+        index: toolIndex,
         content_block: { type: "tool_use", id: toolId, name },
       },
-      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: input } },
-      { type: "content_block_stop", index: 0 },
+      { type: "content_block_delta", index: toolIndex, delta: { type: "input_json_delta", partial_json: input } },
+      { type: "content_block_stop", index: toolIndex },
       {
         type: "message_delta",
         delta: { stop_reason: "tool_use", stop_sequence: null },

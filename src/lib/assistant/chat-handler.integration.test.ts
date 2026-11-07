@@ -27,7 +27,7 @@ import { createChatHandler } from "./chat-handler";
 import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
 import { scriptedAssistantFetch } from "./fake-model";
 import { createAssistantModel } from "./model";
-import { createFakeAnthropicFetch } from "./messages-api-double";
+import { createFakeAnthropicFetch, judgeMessagesRequest } from "./messages-api-double";
 import * as spend from "./spend";
 
 process.env.ASSISTANT_CHAT_ENABLED = "1";
@@ -2643,6 +2643,310 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(nextRequest).not.toContain(pan);
     expect(body).toContain("I cannot use that.");
   });
+
+  it("a yes after a different question adds nothing, a fresh accepted list adds, and a second yes adds nothing", async () => {
+    const ofada = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Ofada Rice", price: 500, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const ofadaVariant = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: ofada.id, label: "Each", price: 500, weightG: 100 },
+    })).id;
+    const tomato = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Tomato Paste", price: 250, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const tomatoVariant = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: tomato.id, label: "Each", price: 250, weightG: 100 },
+    })).id;
+    const addBoth = {
+      kind: "tool" as const,
+      toolName: "add_to_cart",
+      toolInput: { items: [{ variant_id: ofadaVariant, qty: 2 }, { variant_id: tomatoVariant, qty: 1 }] },
+    };
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "text", text: "Ofada Rice and Tomato Paste." },
+        { kind: "text", text: "Friday hours are 9 to 6." },
+        addBoth,
+        { kind: "text", text: "I could not add those." },
+        { kind: "text", text: "Ofada Rice and Tomato Paste." },
+        addBoth,
+        { kind: "text", text: "Added Ofada Rice and Tomato Paste." },
+        addBoth,
+        { kind: "text", text: "Nothing new." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    let cookie = "";
+    const send = async (id: string, text: string) => {
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host,
+          origin: `http://${host}`,
+          "x-store-slug": slug,
+          "x-forwarded-for": "198.51.100.54",
+          ...(cookie ? { cookie } : {}),
+        },
+        body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      const body = await response.text();
+      if (!cookie) cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
+      return { status: response.status, body };
+    };
+    const cartId = () => decodeURIComponent(cookie.slice("cart_id=".length));
+    const lines = () => storeScoped(storeId).cartLine.findMany({ where: { cartId: cartId() } });
+
+    const proposal = await send("shown-proposal", "jollof for 6");
+    expect(proposal.status).toBe(200);
+    expect(await lines()).toHaveLength(0);
+
+    const hours = await send("shown-hours", "What time do you close?");
+    expect(hours.status).toBe(200);
+    expect(hours.body).toContain("Friday hours are 9 to 6.");
+
+    const yes = await send("shown-yes", "yes");
+    expect(yes.status).toBe(200);
+    expect(yes.body).toContain("Nothing was added. Tell me which items you want, and I'll add them.");
+    expect(yes.body).toContain("not_shown");
+    expect(await lines()).toHaveLength(0);
+    const received = JSON.stringify(fake.requests);
+    expect(received).toContain("add_to_cart");
+    expect(received).toContain(ofadaVariant);
+    expect(received).toContain(tomatoVariant);
+
+    const again = await send("shown-again", "show the list again");
+    expect(again.status).toBe(200);
+    expect(again.body).toContain("Ofada Rice and Tomato Paste.");
+
+    const accept = await send("shown-accept", "Yes, add those.");
+    expect(accept.status).toBe(200);
+    const added = await lines();
+    expect(added).toHaveLength(2);
+    expect(added).toEqual(expect.arrayContaining([
+      expect.objectContaining({ variantId: ofadaVariant, qty: 2 }),
+      expect.objectContaining({ variantId: tomatoVariant, qty: 1 }),
+    ]));
+
+    const second = await send("shown-second", "yes");
+    expect(second.status).toBe(200);
+    expect(second.body).toContain("not_shown");
+    const afterSecond = await lines();
+    expect(afterSecond).toHaveLength(2);
+    expect(afterSecond).toEqual(expect.arrayContaining([
+      expect.objectContaining({ variantId: ofadaVariant, qty: 2 }),
+      expect.objectContaining({ variantId: tomatoVariant, qty: 1 }),
+    ]));
+
+    const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId: cartId() } });
+    const refusals = await storeScoped(storeId).aiAction.findMany({
+      where: { conversationId: conversation?.id ?? "", tool: "add_to_cart", ok: false },
+    });
+    expect(refusals).toHaveLength(2);
+    for (const row of refusals) {
+      expect(row.output).toMatchObject({ ok: false, code: "not_shown" });
+    }
+  }, 60_000);
+
+  it("a yes after two reply parts adds both named products", async () => {
+    const ofada = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Ofada Rice", price: 500, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const ofadaVariant = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: ofada.id, label: "Each", price: 500, weightG: 100 },
+    })).id;
+    const tomato = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Tomato Paste", price: 250, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const tomatoVariant = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: tomato.id, label: "Each", price: 250, weightG: 100 },
+    })).id;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "get_cart_summary", toolInput: {}, text: "Ofada Rice" },
+        { kind: "text", text: "Tomato Paste" },
+        {
+          kind: "tool",
+          toolName: "add_to_cart",
+          toolInput: {
+            items: [
+              { variant_id: ofadaVariant, qty: 1 },
+              { variant_id: tomatoVariant, qty: 1 },
+            ],
+          },
+        },
+        { kind: "text", text: "Added." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    let cookie = "";
+    const send = async (id: string, text: string) => {
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host,
+          origin: `http://${host}`,
+          "x-store-slug": slug,
+          "x-forwarded-for": "198.51.100.56",
+          ...(cookie ? { cookie } : {}),
+        },
+        body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      const body = await response.text();
+      if (!cookie) cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
+      return { status: response.status, body };
+    };
+    const proposal = await send("parts-proposal", "rice and paste");
+    expect(proposal.status).toBe(200);
+    const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
+    expect(await storeScoped(storeId).cartLine.count({ where: { cartId } })).toBe(0);
+    const yes = await send("parts-yes", "yes");
+    expect(yes.status).toBe(200);
+    const added = await storeScoped(storeId).cartLine.findMany({ where: { cartId } });
+    expect(added).toHaveLength(2);
+    expect(added).toEqual(expect.arrayContaining([
+      expect.objectContaining({ variantId: ofadaVariant, qty: 1 }),
+      expect.objectContaining({ variantId: tomatoVariant, qty: 1 }),
+    ]));
+  }, 60_000);
+
+  it("one search naming two products draws saved choices with no extra model call, and the next yes adds nothing", async () => {
+    const scotch = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Scotch Bonnet Pepper", price: 300, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const scotchVariant = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: scotch.id, label: "4 oz", price: 300, weightG: 113 },
+    })).id;
+    const cameroon = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Cameroon Pepper", price: 280, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const cameroonVariant = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: cameroon.id, label: "4 oz", price: 280, weightG: 113 },
+    })).id;
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "pepper" } },
+        {
+          kind: "tool",
+          toolName: "get_cart_summary",
+          toolInput: {},
+          text: "Scotch Bonnet Pepper and Cameroon Pepper.",
+        },
+        { kind: "text", text: "Which would you like?" },
+        {
+          kind: "tool",
+          toolName: "add_to_cart",
+          toolInput: {
+            items: [
+              { variant_id: scotchVariant, qty: 1 },
+              { variant_id: cameroonVariant, qty: 1 },
+            ],
+          },
+        },
+        { kind: "text", text: "I could not add those." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    let cookie = "";
+    const send = async (id: string, text: string) => {
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host,
+          origin: `http://${host}`,
+          "x-store-slug": slug,
+          "x-forwarded-for": "198.51.100.55",
+          ...(cookie ? { cookie } : {}),
+        },
+        body: JSON.stringify({ message: { id, role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      const body = await response.text();
+      if (!cookie) cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
+      return { status: response.status, body };
+    };
+    const asked = await send("pepper-ask", "I need pepper");
+    expect(asked.status).toBe(200);
+    expect(fake.requests).toHaveLength(3);
+    expect(asked.body).toContain("Scotch Bonnet Pepper and Cameroon Pepper.");
+    expect(asked.body).toContain("Which would you like?");
+    const idsFrom = (output: unknown) => {
+      if (!output || typeof output !== "object" || !("options" in output) || !Array.isArray(output.options)) return [];
+      return output.options.flatMap((option: unknown) => (
+        option && typeof option === "object" && "variantId" in option && typeof option.variantId === "string"
+          ? [option.variantId]
+          : []
+      ));
+    };
+    const streamedParts = uiParts(asked.body);
+    const choiceCallId = streamedParts.find((part) => part.type === "tool-input-available" && part.toolName === "offer_choices")?.toolCallId;
+    const streamed = idsFrom(streamedParts.find((part) => part.type === "tool-output-available" && part.toolCallId === choiceCallId)?.output);
+    expect(streamed).toHaveLength(2);
+    expect(streamed).toEqual(expect.arrayContaining([scotchVariant, cameroonVariant]));
+    const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
+    const conversation = await storeScoped(storeId).aiConversation.findFirst({ where: { cartId } });
+    const savedMessages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+    const savedPart = savedMessages.flatMap((message) => (
+      message && typeof message === "object" && "parts" in message && Array.isArray(message.parts) ? message.parts : []
+    )).find((part) => part && typeof part === "object" && "type" in part && part.type === "tool-offer_choices");
+    const saved = idsFrom(savedPart && typeof savedPart === "object" && "output" in savedPart ? savedPart.output : undefined);
+    expect(saved).toHaveLength(2);
+    expect(saved).toEqual(expect.arrayContaining([scotchVariant, cameroonVariant]));
+
+    const yes = await send("pepper-yes", "yes");
+    expect(yes.status).toBe(200);
+    expect(yes.body).toContain("not_shown");
+    expect(await storeScoped(storeId).cartLine.count({ where: { cartId } })).toBe(0);
+    const follow = JSON.stringify(fake.requests[3]?.body ?? null);
+    expect(follow).toContain("tool_use");
+    expect(follow).toContain("tool_result");
+    expect(follow).toContain("offer_choices");
+    const malformed = judgeMessagesRequest({
+      url: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      headers: {
+        "x-api-key": E2E_FAKE_ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: {
+        model: "claude-haiku-5-5",
+        max_tokens: 16,
+        messages: [{
+          role: "assistant",
+          content: [{ type: "tool_use", id: "bad id", name: "offer_choices", input: {} }],
+        }],
+      },
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+    });
+    expect(malformed).toMatchObject({ status: 400, message: "tool_use id must match ^[a-zA-Z0-9_-]+$" });
+    const reserved = judgeMessagesRequest({
+      url: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      headers: {
+        "x-api-key": E2E_FAKE_ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: {
+        model: "claude-haiku-5-5",
+        max_tokens: 16,
+        messages: [{
+          role: "assistant",
+          content: [{ type: "tool_use", id: "srvtoolu_abcdefghij0123456789", name: "offer_choices", input: {} }],
+        }],
+      },
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+    });
+    expect(reserved).toMatchObject({ status: 400, message: "tool_use id must match ^[a-zA-Z0-9_-]+$" });
+  }, 60_000);
 });
 
 function padJpeg(jpeg: Buffer, target: number): Buffer {

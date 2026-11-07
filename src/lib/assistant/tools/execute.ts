@@ -16,6 +16,7 @@ import {
 } from "../../cart/service";
 import { storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
+import { namesForListing, textNamesProduct, type AcceptanceTurn } from "../shown";
 import { listingImage } from "../../storefront/images";
 import { searchListings } from "../../storefront/service";
 import { stockBadge } from "../../storefront/stock-badge";
@@ -41,6 +42,8 @@ export interface AssistantContext {
   actorUserId: string | null;
   turnMessageId?: string;
   toolCallId?: string;
+  /** Set by the chat handler. Direct callers omit it, and then this guard does not run. */
+  acceptance?: AcceptanceTurn;
 }
 
 type ToolFailure = { ok: false; code: string; message: string; [key: string]: unknown };
@@ -55,6 +58,7 @@ const MESSAGES: Record<string, string> = {
   max_per_order: "That is the most of this item the store allows.",
   audit_failed: "Could not record this action.",
   not_enough_choices: "There are not enough choices to pick from.",
+  not_shown: "Nothing was added. Tell me which items you want, and I'll add them.",
 };
 
 function fail(code: string): ToolFailure {
@@ -362,6 +366,52 @@ function withLineMoney<T extends { ok: true; lineId: string; qty: number; added:
   };
 }
 
+async function itemsNotShown(
+  ctx: AssistantContext,
+  items: Array<{ variant_id: string; qty: number }>,
+): Promise<Array<{ variantId: string; name: string }>> {
+  const acceptance = ctx.acceptance;
+  if (!acceptance) return [];
+  const ids = [...new Set(items.map((item) => item.variant_id))];
+  const rows = await storeScoped(ctx.storeId).listingVariant.findMany({
+    where: { id: { in: ids } },
+    include: {
+      listing: {
+        include: {
+          masterProduct: true,
+          variants: { orderBy: [{ price: "asc" }, { id: "asc" }] },
+        },
+      },
+    },
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const refused = new Map<string, string>();
+  for (const item of items) {
+    const row = byId.get(item.variant_id);
+    const listing = row?.listing;
+    if (!listing || listing.storeId !== ctx.storeId) {
+      refused.set(item.variant_id, item.variant_id);
+      continue;
+    }
+    const names = namesForListing({
+      customName: listing.customName,
+      price: listing.price,
+      confidence: listing.confidence,
+      stockMode: listing.stockMode,
+      qty: listing.qty,
+      status: listing.status,
+      frozen: listing.frozen,
+      perishable: listing.perishable,
+      masterProduct: listing.masterProduct,
+      variants: listing.variants,
+    });
+    const inReply = !acceptance.lastReplyEmpty && textNamesProduct(acceptance.lastReplyText, names);
+    const inCustomer = textNamesProduct(acceptance.customerText, names);
+    if (!inReply && !inCustomer) refused.set(item.variant_id, names[0] ?? item.variant_id);
+  }
+  return [...refused].map(([variantId, name]) => ({ variantId, name }));
+}
+
 function describedAdd(applied: AppliedAddLine) {
   const master = applied.listing.masterProduct;
   const photo = listingImage({
@@ -379,6 +429,17 @@ function describedAdd(applied: AppliedAddLine) {
 
 export async function addToCart(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(addToCartInput, input);
+  if (ctx.acceptance?.led) {
+    const notShown = await itemsNotShown(ctx, parsed.items);
+    if (notShown.length > 0) {
+      return recordRead(ctx, "add_to_cart", parsed, {
+        ok: false,
+        code: "not_shown",
+        message: MESSAGES.not_shown,
+        notShown,
+      });
+    }
+  }
   return recordWrite(ctx, "add_to_cart", parsed, async (tx) => {
     const items = [];
     for (const item of parsed.items) {
