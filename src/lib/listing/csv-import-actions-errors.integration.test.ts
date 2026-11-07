@@ -850,6 +850,7 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     const name = `Retry ${RUN}`;
     const preview = await previewCsv(storeASlug, cookies.ownerA, countedCsv([[name, "4.50", 3]]));
     const thrown = cacheInvariant(storeAId);
+    consoleSpy?.mockClear();
     revalidateTagMock.mockImplementationOnce(() => {
       throw thrown;
     });
@@ -858,7 +859,6 @@ describe.skipIf(!hasDb)("csv commit action: errors and cache (real auth, app_run
     expect(first.result?.createdCount).toBe(1);
     const beforeA = await fiveTables(storeAId);
     const beforeB = await fiveTables(storeBId);
-    consoleSpy?.mockClear();
     const retry = await commitAs(storeASlug, cookies.ownerA, preview.importToken, {
       matchedRows: [],
       newItemRows: [],
