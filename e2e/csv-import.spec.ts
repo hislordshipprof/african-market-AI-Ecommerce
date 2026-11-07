@@ -708,14 +708,69 @@ test.describe("CSV import (authenticated)", () => {
       if (ui.boxes.join(",") !== "false,false") throw new Error(`checks changed: ${ui.boxes.join(",")}`);
       if (!ui.radios.find((radio) => radio.label.includes(betaName))?.checked) throw new Error("beta was not kept");
       if (ui.radios.find((radio) => radio.label.includes(alphaName))?.checked) throw new Error("alpha was selected");
-      const beforeRetry = await prisma.$transaction(async (tx) => {
-        const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.store_id', ${store!.id}, true)`;
-        const listing = await tx.listing.findFirst({ where: { masterProductId: betaId } });
-        const receipt = await tx.listingImport.findFirst({ where: { csvText: { contains: shared } } });
-        return { listingId: listing?.id, commitResult: receipt?.commitResult, committedAt: receipt?.committedAt?.toISOString() };
-      }, { timeout: 8_000, maxWait: 3_000 });
+      const snapshotPersisted = async () =>
+        prisma.$transaction(async (tx) => {
+          const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
+          if (!store) throw new Error("mama-ngozi missing");
+          await tx.$executeRaw`SET LOCAL ROLE app_user`;
+          await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+          const listings = await tx.listing.findMany({ where: { masterProductId: betaId } });
+          const alphaListings = await tx.listing.findMany({ where: { masterProductId: alphaId } });
+          const customs = await tx.listing.findMany({ where: { customName: { in: [skipped, keptAside] } } });
+          const listingIds = listings.map((row) => row.id);
+          const variants = await tx.listingVariant.findMany({ where: { listingId: { in: listingIds } } });
+          const stock = await tx.stockEvent.findMany({ where: { listingId: { in: listingIds } } });
+          const audits = await tx.auditLog.findMany({
+            where: { action: "catalog.csv_import", entityId: { in: listingIds } },
+          });
+          const receipt = await tx.listingImport.findFirst({ where: { csvText: { contains: shared } } });
+          const byId = <T extends { id: string }>(rows: T[]) => [...rows].sort((a, b) => a.id.localeCompare(b.id));
+          return {
+            listings: byId(listings).map((row) => ({
+              id: row.id,
+              masterProductId: row.masterProductId,
+              customName: row.customName,
+              price: row.price,
+              qty: row.qty,
+              stockMode: row.stockMode,
+              status: row.status,
+              active: row.active,
+            })),
+            alphaListingIds: byId(alphaListings).map((row) => row.id),
+            customListingIds: byId(customs).map((row) => row.id),
+            variants: byId(variants).map((row) => ({
+              id: row.id,
+              listingId: row.listingId,
+              label: row.label,
+              price: row.price,
+              weightG: row.weightG,
+              weightPlaceholder: row.weightPlaceholder,
+            })),
+            stock: byId(stock).map((row) => ({
+              id: row.id,
+              listingId: row.listingId,
+              type: row.type,
+              delta: row.delta,
+            })),
+            audits: byId(audits).map((row) => ({
+              id: row.id,
+              action: row.action,
+              entityType: row.entityType,
+              entityId: row.entityId,
+              before: row.before,
+              after: row.after,
+            })),
+            receipt: receipt
+              ? {
+                  id: receipt.id,
+                  status: receipt.status,
+                  commitResult: receipt.commitResult,
+                  committedAt: receipt.committedAt?.toISOString() ?? null,
+                }
+              : null,
+          };
+        }, { timeout: 8_000, maxWait: 3_000 });
+      const beforeRetry = await snapshotPersisted();
       page.on("request", (request) => {
         if (request.method() === "POST" && request.headers()["next-action"]) {
           secondBody = request.postDataBuffer();
@@ -744,22 +799,16 @@ test.describe("CSV import (authenticated)", () => {
       expect(secondBody).not.toBeNull();
       expect(Buffer.compare(firstBody!, secondBody!)).toBe(0);
 
-      const afterRetry = await prisma.$transaction(async (tx) => {
-        const store = await tx.store.findUnique({ where: { slug: "mama-ngozi" } });
-        await tx.$executeRaw`SET LOCAL ROLE app_user`;
-        await tx.$executeRaw`SELECT set_config('app.store_id', ${store!.id}, true)`;
-        const listings = await tx.listing.findMany({ where: { masterProductId: betaId } });
-        const alphaListings = await tx.listing.findMany({ where: { masterProductId: alphaId } });
-        const customs = await tx.listing.findMany({ where: { customName: { in: [skipped, keptAside] } } });
-        const receipt = await tx.listingImport.findFirst({ where: { csvText: { contains: shared } } });
-        return { listings, alphaListings, customs, receipt };
-      });
+      const afterRetry = await snapshotPersisted();
+      expect(afterRetry).toEqual(beforeRetry);
       expect(afterRetry.listings).toHaveLength(1);
-      expect(afterRetry.listings[0]?.id).toBe(beforeRetry.listingId);
-      expect(afterRetry.alphaListings).toHaveLength(0);
-      expect(afterRetry.customs).toHaveLength(0);
-      expect(afterRetry.receipt?.commitResult).toEqual(beforeRetry.commitResult);
-      expect(afterRetry.receipt?.committedAt?.toISOString()).toBe(beforeRetry.committedAt);
+      expect(afterRetry.alphaListingIds).toHaveLength(0);
+      expect(afterRetry.customListingIds).toHaveLength(0);
+      expect(afterRetry.variants).toHaveLength(1);
+      expect(afterRetry.stock).toHaveLength(1);
+      expect(afterRetry.stock[0]?.delta).toBe(6);
+      expect(afterRetry.audits.length).toBeGreaterThan(0);
+      expect(afterRetry.receipt?.status).toBe("committed");
     } finally {
       await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -801,23 +850,44 @@ test.describe("CSV import (authenticated)", () => {
       const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type);
       const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2];
       if (!boundary) throw new Error("preview request has no multipart boundary");
+      const fileMarker = Buffer.from('name="_1_file"');
+      const fileAt = body.indexOf(fileMarker);
+      if (fileAt < 0) throw new Error("preview request has no file part");
+      const headerEnd = body.indexOf("\r\n\r\n", fileAt);
+      const nextPart = headerEnd < 0 ? -1 : body.indexOf(`\r\n--${boundary}`, headerEnd + 4);
+      if (headerEnd < 0 || nextPart < 0) throw new Error("file part is not a complete multipart field");
+      const csvBytes = fs.readFileSync(csvPath);
+      const withFile = body.subarray(headerEnd + 4, nextPart).indexOf(name) >= 0
+        ? body
+        : Buffer.concat([body.subarray(0, headerEnd + 4), csvBytes, body.subarray(headerEnd + 4)]);
       const closing = Buffer.from(`--${boundary}--`);
-      const at = body.lastIndexOf(closing);
+      const at = withFile.lastIndexOf(closing);
       if (at < 0) throw new Error("preview request has no closing boundary");
       const target = 2_162_688 + 4096;
-      const header = Buffer.from(`\r\nContent-Disposition: form-data; name="pad"\r\n\r\n`);
+      const partHeader = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="pad"\r\n\r\n`);
       const tail = Buffer.from(`\r\n`);
-      const filler = target - body.length - header.length - tail.length;
+      const filler = target - withFile.length - partHeader.length - tail.length;
       if (filler < 1) throw new Error("preview body is already over the cap");
       const padded = Buffer.concat([
-        body.subarray(0, at),
-        header,
+        withFile.subarray(0, at),
+        partHeader,
         Buffer.alloc(filler, 0x78),
         tail,
-        body.subarray(at),
+        withFile.subarray(at),
       ]);
       expect(padded.length).toBe(target);
+      expect(padded.length).toBeGreaterThan(2_162_688);
       expect(padded.length).toBeLessThan(3 * 1024 * 1024);
+      const form = await new Response(padded, { headers: { "content-type": type } }).formData();
+      expect(form.has("pad")).toBe(true);
+      expect(typeof form.get("pad")).toBe("string");
+      const root = form.get("0");
+      if (typeof root !== "string") throw new Error("action root was not text");
+      JSON.parse(root);
+      const uploaded = form.get("_1_file");
+      if (!(uploaded instanceof File)) throw new Error("CSV file part was missing");
+      expect(await uploaded.text()).toContain(name);
+      expect(uploaded.size).toBe(csvBytes.length);
       const url = new URL(request.url());
       const host = url.host;
       url.hostname = "127.0.0.1";
