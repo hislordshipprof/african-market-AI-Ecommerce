@@ -39,14 +39,76 @@ function age(ms: number): Date {
 }
 
 function removeTemp(dir: string): void {
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`temp cleanup failed for ${dir}: ${message}`);
+  }
 }
+
+/**
+ * Windows pid of a spawned bash.exe is not the MSYS pid of its children. taskkill /T
+ * walks the Windows parent chain and misses those children. This lists them the way
+ * scripts/review-watch.sh kill_tree does (ps PID/PPID, and the WINPID column), and
+ * Node runs taskkill so the lister itself is not the process that kills.
+ * Prints `kill <msys-pid> <winpid>` for the process and every MSYS descendant.
+ */
+const LIST_MSYS_TREE = [
+  "winpid=$1",
+  "table=$(ps -e 2>/dev/null | awk 'NR>1 { sub(/^[^0-9]*/, \"\"); print $1, $2, $4 }')",
+  "msys=$(printf '%s\\n' \"$table\" | awk -v w=\"$winpid\" '$3==w { print $1; exit }')",
+  "[ -n \"$msys\" ] || exit 0",
+  "queue=$msys",
+  "out=\"\"",
+  "seen=\" $msys \"",
+  "while [ -n \"$queue\" ]; do",
+  "  set -- $queue",
+  "  p=$1",
+  "  shift",
+  "  queue=$*",
+  "  for c in $(printf '%s\\n' \"$table\" | awk -v pp=\"$p\" '$2==pp { print $1 }'); do",
+  "    case \"$seen\" in",
+  "      *\" $c \"*) ;;",
+  "      *) out=\"$out $c\"; queue=\"$queue $c\"; seen=\"$seen$c \" ;;",
+  "    esac",
+  "  done",
+  "done",
+  "for p in $out $msys; do",
+  "  wp=$(printf '%s\\n' \"$table\" | awk -v id=\"$p\" '$1==id { print $3; exit }')",
+  "  [ -n \"$wp\" ] && printf 'kill %s %s\\n' \"$p\" \"$wp\"",
+  "done",
+  "exit 0",
+].join("\n");
 
 function killProcessTree(child: ChildProcess): void {
   const pid = child.pid;
   if (pid === undefined) return;
   if (process.platform === "win32") {
-    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+    // List first. taskkill from inside that bash can fail to return, so Node runs taskkill.
+    const listed = spawnSync(gitBash(), ["-c", LIST_MSYS_TREE, "list-tree", String(pid)], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 30_000,
+    });
+    const winpids = new Set<string>([String(pid)]);
+    const msysPids: string[] = [];
+    for (const line of (listed.stdout ?? "").split(/\n/)) {
+      const match = /^kill (\d+) (\d+)/.exec(line.trim());
+      if (!match) continue;
+      msysPids.push(match[1]);
+      winpids.add(match[2]);
+    }
+    for (const winpid of winpids) {
+      spawnSync("taskkill", ["/PID", winpid, "/T", "/F"], { stdio: "ignore", timeout: 3_000 });
+    }
+    if (msysPids.length > 0) {
+      spawnSync(gitBash(), ["-c", "kill -KILL " + msysPids.join(" ")], {
+        stdio: "ignore",
+        windowsHide: true,
+        timeout: 3_000,
+      });
+    }
     return;
   }
   try {
@@ -77,6 +139,7 @@ function runCommand(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let stopped = false;
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
@@ -86,12 +149,13 @@ function runCommand(
       stderr += chunk;
     });
     let backup: ReturnType<typeof setTimeout> | undefined;
-    const deadline = setTimeout(() => stop("timed out"), options.timeoutMs);
     const stop = (why: string) => {
+      if (settled || stopped) return;
+      stopped = true;
       killProcessTree(child);
-      if (backup) return;
       backup = setTimeout(() => finish(new Error(`${why} (${stderr})`)), 5_000);
     };
+    const deadline = setTimeout(() => stop("timed out"), options.timeoutMs);
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -103,15 +167,14 @@ function runCommand(
       if (error) reject(error);
       else resolve({ stdout, stderr });
     };
+    // A listener never runs for a signal that is already aborted. Vitest reuses the
+    // same task signal on retry, so reading .aborted here kills a healthy second attempt.
     const onAbort = () => stop("aborted");
-    if (options.signal) {
-      if (options.signal.aborted) onAbort();
-      else options.signal.addEventListener("abort", onAbort, { once: true });
-    }
+    options.signal?.addEventListener("abort", onAbort, { once: true });
     child.on("error", (error) => finish(error));
     child.on("exit", (code, signal) => {
       setImmediate(() => {
-        if (code === 0 && !options.signal?.aborted) finish();
+        if (code === 0 && !stopped) finish();
         else finish(new Error(`command failed (exit ${code ?? "null"}, signal ${signal ?? "null"}): ${stderr}`));
       });
     });
@@ -128,10 +191,21 @@ function runCommand(
 const NATIVE_STUB = path.join(process.cwd(), "scripts", "catalog-prune-stub.exe");
 
 /** Absolute Git bash, so Node can spawn it without depending on PATH order. */
+let gitBashPath: string | undefined;
 function gitBash(): string {
-  if (process.platform !== "win32") return "bash";
+  if (gitBashPath) return gitBashPath;
+  if (process.platform !== "win32") {
+    gitBashPath = "bash";
+    return gitBashPath;
+  }
   const listed = spawnSync("where", ["bash"], { encoding: "utf8" }).stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  return listed.find((found) => /Git\\usr\\bin\\bash\.exe$/i.test(found)) ?? listed[0] ?? "bash";
+  gitBashPath = listed.find((found) => /Git\\usr\\bin\\bash\.exe$/i.test(found)) ?? listed[0] ?? "bash";
+  return gitBashPath;
+}
+
+/** Milliseconds left before the Vitest timeout, so this helper fires first. Budgets stay 15s and 180s. */
+function commandBudget(startedAt: number, testMs: number): number {
+  return Math.max(1_000, testMs - (Date.now() - startedAt) - 750);
 }
 const nodeExit = "#!/usr/bin/env node\nprocess.exit(0);\n";
 
@@ -1119,7 +1193,18 @@ describe("lane env filter script", () => {
     rmSync(env.dir, { recursive: true, force: true });
   });
 
+  it("an already-aborted signal does not kill a command that then exits 0", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const { stdout } = await runCommand(gitBash(), ["-c", "echo fresh-ok"], {
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    expect(stdout).toContain("fresh-ok");
+  });
+
   it("lane-db drops spaced unpooled assignments and points children at localhost", async (ctx) => {
+    const started = Date.now();
     const dir = mkdtempSync(path.join(tmpdir(), "t225-lanedb-"));
     try {
     const bin = path.join(dir, "bin");
@@ -1158,7 +1243,7 @@ describe("lane env filter script", () => {
         HARNESS_LOG: bashPath(log),
         PATH: commandPath(bin),
       },
-      timeoutMs: 14_500,
+      timeoutMs: commandBudget(started, 15_000),
       signal: ctx.signal,
     });
     const written = readFileSync(envFile, "utf8");
@@ -1182,6 +1267,7 @@ describe("lane env filter script", () => {
   });
 
   it("build resume and continue run the real scripts and keep secrets out of every child", async (ctx) => {
+    const started = Date.now();
     const checkoutSession = path.join(process.cwd(), ".builder", "session-225.txt");
     const sessionBefore = existsSync(checkoutSession) ? readFileSync(checkoutSession) : null;
     const dir = mkdtempSync(path.join(tmpdir(), "t225-orch-"));
@@ -1283,7 +1369,7 @@ process.exit(0);
     const { stdout } = await runCommand(gitBash(), ["-c", script], {
       cwd: root,
       env: { ...process.env, AGENT_ENGINE: "claude" },
-      timeoutMs: 179_000,
+      timeoutMs: commandBudget(started, 180_000),
       signal: ctx.signal,
     });
     expect(stdout).toContain("modes-ok");

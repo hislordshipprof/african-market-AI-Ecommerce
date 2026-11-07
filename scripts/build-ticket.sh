@@ -126,7 +126,12 @@ cd "$WT"
 # LANE_DB=neon keeps the shared dev Neon branch from .env.local instead.
 if [ "${LANE_DB:-local}" != "neon" ]; then
   [ -d node_modules ] || pnpm install --frozen-lockfile >/dev/null
-  bash "$WT/scripts/lane-db.sh" "t$N" "$WT/.env.local" 2>/dev/null || bash "$ROOT/scripts/lane-db.sh" "t$N" "$WT/.env.local"
+  # A missing worktree script used to start bash only for it to fail, then start bash again.
+  if [ -f "$WT/scripts/lane-db.sh" ]; then
+    bash "$WT/scripts/lane-db.sh" "t$N" "$WT/.env.local" 2>/dev/null || bash "$ROOT/scripts/lane-db.sh" "t$N" "$WT/.env.local"
+  else
+    bash "$ROOT/scripts/lane-db.sh" "t$N" "$WT/.env.local"
+  fi
 fi
 DB_RULE="This lane's database is a private local Postgres database (lane_t$N on localhost:5434, CI's roles, already migrated and seeded); .env.local points at it. Never point it at Neon. To reset it, run scripts/lane-db.sh t$N .env.local (or bash $ROOT/scripts/lane-db.sh if this branch lacks it)."
 
