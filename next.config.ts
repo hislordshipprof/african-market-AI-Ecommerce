@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { CSV_ACTION_BODY_LIMIT_BYTES } from "./src/lib/listing/csv-file-cap";
 import { staticSecurityHeaders } from "./src/lib/security/headers";
 
 const logoHosts = (process.env.LOGO_HOSTS ?? "")
@@ -10,7 +11,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["pdfjs-dist", "sharp"],
   experimental: {
     serverActions: {
-      bodySizeLimit: "3mb",
+      bodySizeLimit: CSV_ACTION_BODY_LIMIT_BYTES,
     },
   },
   async headers() {

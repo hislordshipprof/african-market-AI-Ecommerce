@@ -18,7 +18,7 @@ export function resolveStockMode(input: {
   status?: string;
 }): ResolvedStock {
   const explicit =
-    input.stockMode === "counted" || input.stockMode === "status" ? input.stockMode : undefined;
+    input.stockMode !== undefined && isStockMode(input.stockMode) ? input.stockMode : undefined;
   // A cell the owner filled wins over the file-level fallback. Qty 0 is filled in.
   const mode: StockMode = explicit
     ? explicit
@@ -33,13 +33,10 @@ export function resolveStockMode(input: {
   if (mode === "counted") {
     return { stockMode: "counted", qty: input.qty ?? 0, status: null };
   }
-  const status = input.status as StockStatus | undefined;
   return {
     stockMode: "status",
     qty: null,
-    status: status === "in_stock" || status === "low" || status === "out_of_stock"
-      ? status
-      : "in_stock",
+    status: input.status !== undefined && isStockStatus(input.status) ? input.status : "in_stock",
   };
 }
 
@@ -64,6 +61,17 @@ export interface Actor {
 
 /** The only stock modes a listing form or a CSV `stock_mode` cell may name. */
 export const VALID_STOCK_MODES = new Set<string>(["counted", "status"]);
+
+/** The only status cells a CSV `status` column or `resolveStockMode()` may keep. */
+export const VALID_STOCK_STATUSES = new Set<string>(["in_stock", "low", "out_of_stock"]);
+
+export function isStockMode(value: string): value is StockMode {
+  return VALID_STOCK_MODES.has(value);
+}
+
+export function isStockStatus(value: string): value is StockStatus {
+  return VALID_STOCK_STATUSES.has(value);
+}
 
 export function toActor(user: { id: string; email: string }): Actor {
   return { id: user.id, email: user.email };

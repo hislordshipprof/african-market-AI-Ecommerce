@@ -160,7 +160,8 @@ describe.skipIf(!hasDb)("csv weight actions (real auth, lane DB)", () => {
     expect(listing?.variants[0]?.price).toBe(4500);
 
     const retried = await csvCommitAction(preview.preview!.importToken, selection);
-    expect(retried.error).toBe("This import has already been committed.");
+    expect(retried.error).toBeUndefined();
+    expect(retried.result).toEqual(committed.result);
     const rows = await storeScoped(storeAId).listing.findMany({
       where: { customName: name },
       include: { variants: true },

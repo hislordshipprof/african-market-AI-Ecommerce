@@ -739,8 +739,9 @@ model ListingImport {
   rowCount    Int       @map("row_count")
   status      String    @default("pending")
   createdById String    @map("created_by_id")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  committedAt DateTime? @map("committed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  committedAt  DateTime? @map("committed_at")
+  commitResult Json?     @map("commit_result")
 
   store     Store @relation(fields: [storeId], references: [id])
   createdBy User  @relation(fields: [createdById], references: [id])

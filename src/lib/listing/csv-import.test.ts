@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import {
   parseCsvText,
@@ -11,6 +11,7 @@ import {
 import { storeScoped, platformAdmin, claimImportRow, storeScopedTransaction, withSessionTimeZone, IMPORT_TOKEN_TTL_MS, healthQueryRaw } from "../db";
 
 const stockEventCalls = vi.hoisted(() => ({ createMany: null as unknown[] | null }));
+const commitResultWrites = vi.hoisted(() => ({ failNext: false }));
 
 vi.mock("../db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../db")>();
@@ -21,26 +22,47 @@ vi.mock("../db", async (importOriginal) => {
       fn: Parameters<typeof actual.storeScopedTransaction>[1],
       opts?: Parameters<typeof actual.storeScopedTransaction>[2],
     ) => actual.storeScopedTransaction(storeId, async (tx) => {
-      if (!stockEventCalls.createMany) return fn(tx);
-      const calls = stockEventCalls.createMany;
-      const stockEvent = new Proxy(tx.stockEvent, {
-        get(target, prop, receiver) {
-          if (prop === "createMany") {
-            return (args: unknown) => {
-              calls.push(args);
-              return target.createMany(args as never);
-            };
-          }
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-      return fn({ ...tx, stockEvent });
+      let current = tx;
+      if (stockEventCalls.createMany) {
+        const calls = stockEventCalls.createMany;
+        const stockEvent = new Proxy(current.stockEvent, {
+          get(target, prop, receiver) {
+            if (prop === "createMany") {
+              return (args: unknown) => {
+                calls.push(args);
+                return target.createMany(args as never);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        current = { ...current, stockEvent };
+      }
+      if (commitResultWrites.failNext) {
+        const listingImport = new Proxy(current.listingImport, {
+          get(target, prop, receiver) {
+            if (prop === "update") {
+              return (args: { data?: object }) => {
+                if (args?.data && Object.prototype.hasOwnProperty.call(args.data, "commitResult")) {
+                  commitResultWrites.failNext = false;
+                  throw new Error("commit_result write failed");
+                }
+                return target.update(args as never);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        current = { ...current, listingImport };
+      }
+      return fn(current);
     }, opts),
   };
 });
 import { probeCrossStoreImportWrites } from "./cross-store-write";
-import { commitPairBehindStoreLock, holdStoreRow, waitForLockWaiters } from "./import-lock-test-helpers";
+import { commitPairBehindStoreLock, delayFirstQuery, holdStoreRow, waitForLockWaiters } from "./import-lock-test-helpers";
 import { createListing } from "./service";
 import type { Actor } from "./service";
 
@@ -353,6 +375,7 @@ async function expectPendingImport(storeId: string, importId: string) {
   const token = await storeScoped(storeId).listingImport.findUnique({ where: { id: importId } });
   expect(token?.status).toBe("pending");
   expect(token?.committedAt).toBeNull();
+  expect(token?.commitResult).toBeNull();
   expect(await auditsForImport(storeId, importId)).toEqual([]);
 }
 
@@ -912,50 +935,260 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(recordB).toBeNull();
   });
 
-  it("E11: double submit with same token fails", async () => {
-    const csv = `name,price\nDouble Submit T63 ${RUN},5.00\n`;
+  async function persistedImport(storeId: string, importId: string, listingIds: string[]) {
+    const scoped = storeScoped(storeId);
+    const [imports, listings, stock, audits] = await Promise.all([
+      scoped.listingImport.findUnique({ where: { id: importId } }),
+      scoped.listing.findMany({
+        where: { id: { in: listingIds } },
+        orderBy: { id: "asc" },
+        include: { variants: { orderBy: { id: "asc" } } },
+      }),
+      scoped.stockEvent.findMany({ where: { listingId: { in: listingIds } }, orderBy: { id: "asc" } }),
+      auditsForImport(storeId, importId),
+    ]);
+    return {
+      status: imports?.status,
+      committedAt: imports?.committedAt?.toISOString() ?? null,
+      commitResult: imports?.commitResult,
+      listings: listings.map((row) => ({
+        id: row.id,
+        price: row.price,
+        qty: row.qty,
+        stockMode: row.stockMode,
+        status: row.status,
+        customName: row.customName,
+        masterProductId: row.masterProductId,
+        variants: row.variants.map((variant) => ({
+          id: variant.id,
+          weightG: variant.weightG,
+          weightPlaceholder: variant.weightPlaceholder,
+          price: variant.price,
+        })),
+      })),
+      stock: stock.map((row) => ({
+        id: row.id,
+        listingId: row.listingId,
+        type: row.type,
+        delta: row.delta,
+      })),
+      audits: audits.map((row) => ({ id: row.id, after: row.after })),
+    };
+  }
+
+  it("E11: a repeat commit returns the first result and writes nothing", async () => {
+    const product = await platformAdmin.masterProduct.create({
+      data: { name: `Replay Grain ${RUN}`, status: "active", frozen: false, perishable: false, weightG: null },
+    });
+    mpIds.push(product.id);
+    const custom = `Replay Custom ${RUN}`;
+    const csv = `name,price,stock_mode,qty,weight\n${product.name},4.00,counted,6,2 lb\n${custom},5.00,status,,\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
+    expect(preview.matches.map((row) => row.masterProductId)).toEqual([product.id]);
+    expect(preview.newItems.map((row) => row.csvName)).toEqual([custom]);
+    const selection = {
+      matchedRows: [2],
+      newItemRows: [3],
+      ambiguousResolutions: [] as Array<{ row: number; masterProductId: string }>,
+      matchedIdentities: [{ row: 2, masterProductId: product.id }],
+    };
+    const first = await commitImport(storeAId, preview.importToken, selection, actor);
+    const scoped = storeScoped(storeAId);
+    const rows = await scoped.listing.findMany({
+      where: { id: { in: first.listingIds } },
+      include: { variants: true },
+    });
+    expect(rows).toHaveLength(2);
+    expect(first.createdCount).toBe(2);
+    expect([...first.listingIds].sort()).toEqual(rows.map((row) => row.id).sort());
+    const counted = rows.find((row) => row.qty === 6);
+    expect(counted?.stockMode).toBe("counted");
+    expect(counted?.masterProductId).toBe(product.id);
+    const events = await scoped.stockEvent.findMany({ where: { listingId: counted!.id } });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("recount");
+    expect(events[0]?.delta).toBe(6);
+    const variants = rows.flatMap((row) => row.variants);
+    expect(variants.filter((variant) => variant.weightPlaceholder)).toHaveLength(1);
+    expect(variants.filter((variant) => !variant.weightPlaceholder).map((variant) => variant.weightG)).toEqual([907]);
+    expect(first.needsWeightCount).toBe(1);
+    const stored = await scoped.listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(stored?.status).toBe("committed");
+    expect(stored?.commitResult).toEqual(first);
+    expect(await auditsForImport(storeAId, preview.importToken)).toHaveLength(1);
 
-    await commitImport(
-      storeAId,
-      preview.importToken,
-      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-      actor,
+    const past = new Date(Date.now() - 40 * 60 * 1000);
+    await rawPrisma.$transaction([
+      rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
+      rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.$executeRaw`UPDATE listing_imports SET created_at = ${past}, committed_at = ${past} WHERE id = ${preview.importToken}`,
+    ]);
+    const customRow = rows.find((row) => row.customName === custom);
+    await scoped.listing.update({ where: { id: customRow!.id }, data: { price: 111, status: "out_of_stock" } });
+    await scoped.listingVariant.update({
+      where: { id: customRow!.variants[0]!.id },
+      data: { weightG: 500, weightPlaceholder: false },
+    });
+    await platformAdmin.masterProduct.update({ where: { id: product.id }, data: { status: "inactive" } });
+
+    const before = await persistedImport(storeAId, preview.importToken, first.listingIds);
+    const empty = await commitImport(storeAId, preview.importToken, {
+      matchedRows: [],
+      newItemRows: [],
+      ambiguousResolutions: [],
+    }, actor);
+    expect(empty).toEqual(first);
+    expect(await persistedImport(storeAId, preview.importToken, first.listingIds)).toEqual(before);
+    const different = await commitImport(storeAId, preview.importToken, {
+      matchedRows: [],
+      newItemRows: [3],
+      ambiguousResolutions: [],
+    }, actor);
+    expect(different).toEqual(first);
+    const stale = await commitImport(storeAId, preview.importToken, {
+      matchedRows: [99],
+      newItemRows: [],
+      ambiguousResolutions: [{ row: 2, masterProductId: "missing-product" }],
+      matchedIdentities: [{ row: 2, masterProductId: "also-missing" }],
+    }, actor);
+    expect(stale).toEqual(first);
+    expect(await persistedImport(storeAId, preview.importToken, first.listingIds)).toEqual(before);
+    expect(before.commitResult).toEqual(first);
+    expect(before.committedAt).toBe(past.toISOString());
+
+    await expect(commitImport(storeBId, preview.importToken, selection, actor)).rejects.toThrow(
+      "Import token is invalid, expired, or already used.",
     );
-
-    await expect(
-      commitImport(
-        storeAId,
-        preview.importToken,
-        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-        actor,
-      ),
-    ).rejects.toThrow(/already.*committed/i);
+    expect(await storeScoped(storeBId).listing.findMany({ where: { id: { in: first.listingIds } } })).toEqual([]);
+    expect((await storeScoped(storeBId).listing.updateMany({
+      where: { id: { in: first.listingIds } },
+      data: { price: 1 },
+    })).count).toBe(0);
+    expect(await storeScoped(storeBId).listingImport.findUnique({ where: { id: preview.importToken } })).toBeNull();
   });
 
-  it("D1: concurrent double-submit — one succeeds, one fails", async () => {
-    const csv = `name,price\nConcurrent Double T63 ${RUN},8.00\n`;
+  it("two concurrent commits of one token return the same result with one audit", async () => {
+    const name = `Lock Replay ${RUN}`;
+    const csv = `name,price,qty\n${name},8.00,4\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
+    const selection = { matchedRows: [] as number[], newItemRows: [2], ambiguousResolutions: [] as Array<{ row: number; masterProductId: string }> };
+    const { first, second } = await commitPairBehindStoreLock({
+      storeId: storeAId,
+      first: () => commitImport(storeAId, preview.importToken, selection, actor),
+      second: () => commitImport(storeAId, preview.importToken, selection, actor),
+    });
+    expect(second).toEqual(first);
+    expect(first.createdCount).toBe(1);
+    expect(first.listingIds).toHaveLength(1);
+    const listings = await storeScoped(storeAId).listing.findMany({
+      where: { customName: name },
+      include: { variants: true },
+    });
+    expect(listings).toHaveLength(1);
+    expect(listings[0]?.id).toBe(first.listingIds[0]);
+    expect(listings[0]?.variants).toHaveLength(1);
+    const events = await storeScoped(storeAId).stockEvent.findMany({ where: { listingId: listings[0]!.id } });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("recount");
+    expect(events[0]?.delta).toBe(4);
+    expect(await auditsForImport(storeAId, preview.importToken)).toHaveLength(1);
+    const stored = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(stored?.commitResult).toEqual(first);
+    expect(stored?.status).toBe("committed");
+  }, 30_000);
 
-    const results = await Promise.allSettled([
-      commitImport(
-        storeAId,
-        preview.importToken,
-        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-        actor,
-      ),
-      commitImport(
-        storeAId,
-        preview.importToken,
-        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-        actor,
-      ),
-    ]);
+  it("a stale pending read replays after another caller commits before selection validation", async () => {
+    const name = `Stale Read ${RUN}`;
+    const preview = await generatePreview(storeAId, `name,price\n${name},3.00\n`, testUserId);
+    const valid = { matchedRows: [] as number[], newItemRows: [2], ambiguousResolutions: [] as Array<{ row: number; masterProductId: string }> };
+    const stale = { matchedRows: [] as number[], newItemRows: [999], ambiguousResolutions: [] as Array<{ row: number; masterProductId: string }> };
+    const delay = delayFirstQuery({ table: "master_products", value: "active", ms: 1_500 });
+    try {
+      const loser = commitImport(storeAId, preview.importToken, stale, actor);
+      const started = Date.now();
+      while (!delay.fired()) {
+        if (Date.now() - started > 5_000) throw new Error("catalog query was not paused");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const winner = await commitImport(storeAId, preview.importToken, valid, actor);
+      const replay = await loser;
+      expect(replay).toEqual(winner);
+      expect(winner.createdCount).toBe(1);
+      const listings = await storeScoped(storeAId).listing.findMany({ where: { customName: name } });
+      expect(listings).toHaveLength(1);
+      expect(listings[0]?.id).toBe(winner.listingIds[0]);
+      expect(await auditsForImport(storeAId, preview.importToken)).toHaveLength(1);
+    } finally {
+      await delay.restore();
+    }
+  }, 30_000);
 
-    const fulfilled = results.filter((r) => r.status === "fulfilled");
-    const rejected = results.filter((r) => r.status === "rejected");
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
+  it("a failed commit-result write rolls back the complete import and remains retryable", async () => {
+    const name = `Result Rollback ${RUN}`;
+    const preview = await generatePreview(storeAId, `name,price,qty\n${name},2.50,6\n`, testUserId);
+    const selection = { matchedRows: [] as number[], newItemRows: [2], ambiguousResolutions: [] as Array<{ row: number; masterProductId: string }> };
+    commitResultWrites.failNext = true;
+    try {
+      await expect(commitImport(storeAId, preview.importToken, selection, actor)).rejects.toThrow(
+        "commit_result write failed",
+      );
+    } finally {
+      commitResultWrites.failNext = false;
+    }
+    await expectPendingImport(storeAId, preview.importToken);
+    expect(await storeScoped(storeAId).listing.findMany({ where: { customName: name } })).toEqual([]);
+    expect(await storeScoped(storeAId).listingVariant.findMany({ where: { listing: { customName: name } } })).toEqual([]);
+    expect(await storeScoped(storeAId).stockEvent.findMany({ where: { listing: { customName: name } } })).toEqual([]);
+    const first = await commitImport(storeAId, preview.importToken, selection, actor);
+    const replay = await commitImport(storeAId, preview.importToken, {
+      matchedRows: [],
+      newItemRows: [],
+      ambiguousResolutions: [],
+    }, actor);
+    expect(replay).toEqual(first);
+    expect(first.createdCount).toBe(1);
+    const listings = await storeScoped(storeAId).listing.findMany({ where: { customName: name } });
+    expect(listings).toHaveLength(1);
+    const events = await storeScoped(storeAId).stockEvent.findMany({ where: { listingId: listings[0]!.id } });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.delta).toBe(6);
+    expect(await auditsForImport(storeAId, preview.importToken)).toHaveLength(1);
+    const stored = await storeScoped(storeAId).listingImport.findUnique({ where: { id: preview.importToken } });
+    expect(stored?.commitResult).toEqual(first);
+  });
+
+  it("committed imports without a valid receipt retain the legacy rejection and write nothing", async () => {
+    const cases: Array<{ label: string; value: unknown }> = [
+      { label: "sql null", value: Prisma.DbNull },
+      { label: "json null", value: Prisma.JsonNull },
+      { label: "missing fields", value: { createdCount: 1 } },
+      { label: "inconsistent counts", value: { createdCount: 2, listingIds: ["not-a-listing"], needsWeightCount: 0 } },
+    ];
+    for (const item of cases) {
+      const name = `Legacy ${item.label} ${RUN}`;
+      const preview = await generatePreview(storeAId, `name,price\n${name},1.25\n`, testUserId);
+      const selection = { matchedRows: [] as number[], newItemRows: [2], ambiguousResolutions: [] as Array<{ row: number; masterProductId: string }> };
+      const first = await commitImport(storeAId, preview.importToken, selection, actor);
+      expect(first.createdCount).toBe(1);
+      await storeScoped(storeAId).listingImport.update({
+        where: { id: preview.importToken },
+        data: { commitResult: item.value as never },
+      });
+      const before = await persistedImport(storeAId, preview.importToken, first.listingIds);
+      await expect(commitImport(storeAId, preview.importToken, {
+        matchedRows: [],
+        newItemRows: [],
+        ambiguousResolutions: [],
+      }, actor)).rejects.toThrow("This import has already been committed.");
+      const after = await persistedImport(storeAId, preview.importToken, first.listingIds);
+      expect(after.listings).toEqual(before.listings);
+      expect(after.stock).toEqual(before.stock);
+      expect(after.audits).toEqual(before.audits);
+      expect(after.status).toBe("committed");
+      expect(after.committedAt).toBe(before.committedAt);
+      expect(after.commitResult).toEqual(before.commitResult);
+      expect(after.commitResult).not.toEqual(first);
+    }
   });
 
   it("E14: a failed last write rolls back the whole commit (status mode)", async () => {
@@ -2361,24 +2594,20 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     expect(token?.status).toBe("committed");
   });
 
-  it("two commits of one token: one audit and the already-committed message", async () => {
+  it("two commits of one token: one audit and the same result", async () => {
     const csv = `name,price\nDouble Commit T199 ${RUN},8.00\n`;
     const preview = await generatePreview(storeAId, csv, testUserId);
     const selection = { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] };
-    const results = await Promise.allSettled([
-      commitImport(storeAId, preview.importToken, selection, actor),
-      commitImport(storeAId, preview.importToken, selection, actor),
-    ]);
-    const fulfilled = results.filter((row) => row.status === "fulfilled");
-    const rejected = results.filter((row) => row.status === "rejected");
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    expect((rejected[0] as PromiseRejectedResult).reason.message).toBe(
-      "This import has already been committed.",
-    );
+    const { first, second } = await commitPairBehindStoreLock({
+      storeId: storeAId,
+      first: () => commitImport(storeAId, preview.importToken, selection, actor),
+      second: () => commitImport(storeAId, preview.importToken, selection, actor),
+    });
+    expect(second).toEqual(first);
     const after = await auditFor(storeAId, preview.importToken);
     expect(after.count).toBe(1);
-  });
+    expect(await storeScoped(storeAId).listing.count({ where: { customName: `Double Commit T199 ${RUN}` } })).toBe(1);
+  }, 30_000);
 
   it("two tokens at once: the losing commit keeps its second item", async () => {
     const stamp = crypto.randomUUID();
@@ -2661,20 +2890,19 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
 
   it("expired versus committed: pending claim failure and committed token use different messages", async () => {
     const preview = await generatePreview(storeAId, `name,price\nMessage Split T199 ${RUN},5.00\n`, testUserId);
-    await commitImport(
+    const first = await commitImport(
       storeAId,
       preview.importToken,
       { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
       actor,
     );
-    await expect(
-      commitImport(
-        storeAId,
-        preview.importToken,
-        { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
-        actor,
-      ),
-    ).rejects.toThrow("This import has already been committed.");
+    const replay = await commitImport(
+      storeAId,
+      preview.importToken,
+      { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] },
+      actor,
+    );
+    expect(replay).toEqual(first);
     const claimedAgain = await storeScopedTransaction(storeAId, (tx) =>
       claimImportRow(tx, preview.importToken, IMPORT_TOKEN_TTL_MS),
     );
@@ -2797,9 +3025,8 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     const sequentialPreview = await generatePreview(storeAId, sequentialCsv, testUserId);
     const selection = { matchedRows: [], newItemRows: [2], ambiguousResolutions: [] };
     const first = await commitImport(storeAId, sequentialPreview.importToken, selection, actor);
-    await expect(
-      commitImport(storeAId, sequentialPreview.importToken, selection, actor),
-    ).rejects.toThrow(/already.*committed/i);
+    const sequentialReplay = await commitImport(storeAId, sequentialPreview.importToken, selection, actor);
+    expect(sequentialReplay).toEqual(first);
     const sequentialEvents = await storeScoped(storeAId).stockEvent.findMany({
       where: { listingId: first.listingIds[0] },
     });
@@ -2817,18 +3044,14 @@ describe.skipIf(!hasDb)("commitImport (DB integration)", () => {
     const concurrentName = `Counted Race ${RUN}`;
     const concurrentCsv = `name,price,stock_mode,qty\n${concurrentName},5.00,counted,8\n`;
     const concurrentPreview = await generatePreview(storeAId, concurrentCsv, testUserId);
-    const results = await Promise.allSettled([
+    const results = await Promise.all([
       commitImport(storeAId, concurrentPreview.importToken, selection, actor),
       commitImport(storeAId, concurrentPreview.importToken, selection, actor),
     ]);
-    const fulfilled = results.filter((result) => result.status === "fulfilled");
-    const rejected = results.filter((result) => result.status === "rejected");
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    if (fulfilled[0].status !== "fulfilled") throw new Error("expected one committed import");
-    expect(fulfilled[0].value.createdCount).toBe(1);
-    expect(fulfilled[0].value.listingIds).toHaveLength(1);
-    const listingId = fulfilled[0].value.listingIds[0];
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0].createdCount).toBe(1);
+    expect(results[0].listingIds).toHaveLength(1);
+    const listingId = results[0].listingIds[0];
     const raced = await storeScoped(storeAId).stockEvent.findMany({ where: { listingId } });
     expect(raced).toHaveLength(1);
     expect(raced[0].type).toBe("recount");
