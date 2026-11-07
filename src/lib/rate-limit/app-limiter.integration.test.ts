@@ -78,8 +78,8 @@ describe.skipIf(!hasDb || process.env.TZ_CHILD === "1")("app rate limit cleanup 
     const key = `fresh-${Date.now()}-${Math.random()}`;
     const now = BigInt(Date.now());
     const hour = BigInt(60 * 60 * 1000);
-    const windowStart = now - 23n * hour - 30n * 60n * 1000n;
-    const cutoff = now - 23n * hour;
+    const windowStart = now - BigInt(23) * hour - BigInt(30 * 60 * 1000);
+    const cutoff = now - BigInt(23) * hour;
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
     try {
