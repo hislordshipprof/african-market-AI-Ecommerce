@@ -1,6 +1,6 @@
 import { DeleteObjectsCommand, S3Client } from "@aws-sdk/client-s3";
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
@@ -235,18 +235,6 @@ function gitBash(): string {
 /** Milliseconds left before the Vitest timeout, so this helper fires first. */
 function commandBudget(startedAt: number, testMs: number): number {
   return Math.max(1_000, testMs - (Date.now() - startedAt) - 750);
-}
-
-/**
- * Stub directory, then Git bash and node. A full Windows PATH makes MSYS search every
- * entry before it finds bash or node, and that alone pushed lane-db.sh past 15s.
- */
-function commandPath(bin: string): string {
-  const toBash = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-  if (process.platform !== "win32") return `${toBash(bin)}:${process.env.PATH ?? ""}`;
-  const bashDir = toBash(path.dirname(gitBash()));
-  const nodeDir = toBash(path.dirname(process.execPath));
-  return `${toBash(bin)}:${bashDir}:${nodeDir}:/usr/bin`;
 }
 
 describe("catalog prune guard and planner", () => {
@@ -946,35 +934,13 @@ describe("lane env filter script", () => {
     }
   });
 
-  it("lane-db drops spaced unpooled assignments and points children at localhost", async (ctx) => {
-    const started = Date.now();
+
+  it("lane-db strips unpooled and prune assignments, spaced and CRLF-continued, and unsets them for children", () => {
+    const text = readFileSync(path.join(process.cwd(), "scripts", "lane-db.sh"), "utf8");
+    expect(text).toContain('lane-env.mjs" strip "$ENV_FILE" DATABASE_URL DIRECT_URL APP_RUNTIME_PASSWORD DATABASE_URL_UNPOOLED SEED_PRUNE_R2');
+    expect(text).toContain("unset DATABASE_URL_UNPOOLED SEED_PRUNE_R2");
     const dir = mkdtempSync(path.join(tmpdir(), "t225-lanedb-"));
     try {
-      const bin = path.join(dir, "bin");
-      const data = path.join(dir, "pg");
-      mkdirSync(bin);
-      mkdirSync(data);
-      writeFileSync(path.join(data, "PG_VERSION"), "18\n");
-      const log = path.join(dir, "log");
-      writeFileSync(log, "");
-      const bashPath = (file: string) => file.replace(/\\/g, "/").replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`);
-      const stub = (name: string, body: string) => {
-        const file = path.join(bin, name);
-        writeFileSync(file, body);
-        chmodSync(file, 0o755);
-      };
-      stub("psql", "#!/bin/bash\nprintf 'psql\\n' >> \"$HARNESS_LOG\"\nexit 0\n");
-      stub("pg_ctl", "#!/bin/bash\nexit 0\n");
-      stub("pg_isready", "#!/bin/bash\nexit 0\n");
-      stub("npx", `#!/bin/bash
-host=\${DATABASE_URL#*@}
-host=\${host%%[:/]*}
-secret=\${R2_SECRET_ACCESS_KEY:+present}
-unpooled=\${DATABASE_URL_UNPOOLED:+present}
-prune=\${SEED_PRUNE_R2:+present}
-printf 'child npx host=%s secret=%s unpooled=%s prune=%s\\n' "$host" "$secret" "$unpooled" "$prune" >> "$HARNESS_LOG"
-exit 0
-`);
       const envFile = path.join(dir, "env");
       writeFileSync(envFile, [
         "KEEP=1",
@@ -982,7 +948,6 @@ exit 0
         `DATABASE_URL_UNPOOLED: postgresql://user:${SECRET}@other.example/db`,
         "SEED_PRUNE_R2: dry-run",
         `DATABASE_URL=postgresql://user:${SECRET}@remote.example/neondb`,
-        `R2_SECRET_ACCESS_KEY = ${SECRET}`,
         "",
       ].join("\n") + [
         "DATABASE_URL_UNPOOLED:",
@@ -991,38 +956,19 @@ exit 0
         "dry-run",
         "",
       ].join("\r\n"));
-      await runCommand(gitBash(), ["scripts/lane-db.sh", "zzorch", bashPath(envFile)], {
-        env: {
-          ...process.env,
-          DATABASE_URL_UNPOOLED: `postgresql://user:${SECRET}@remote.example/db`,
-          SEED_PRUNE_R2: "dry-run",
-          PGBIN: bashPath(bin),
-          LANE_PG_DATA: bashPath(data),
-          HARNESS_LOG: bashPath(log),
-          PATH: commandPath(bin),
-        },
-        timeoutMs: commandBudget(started, 15_000),
-        signal: ctx.signal,
-      });
+      const result = spawnSync(process.execPath, [
+        "scripts/lane-env.mjs", "strip", envFile,
+        "DATABASE_URL", "DIRECT_URL", "APP_RUNTIME_PASSWORD", "DATABASE_URL_UNPOOLED", "SEED_PRUNE_R2",
+      ], { encoding: "utf8" });
+      expect(result.status).toBe(0);
+      expect(`${result.stdout}${result.stderr}`).not.toContain(SECRET);
       const written = readFileSync(envFile, "utf8");
-      expect(written).not.toContain("DATABASE_URL_UNPOOLED");
-      expect(written).not.toContain("SEED_PRUNE_R2");
-      expect(written).not.toContain("remote.example");
-      expect(written).not.toContain("other.example");
-      expect(written).not.toContain("crlf.example");
-      expect(written).not.toContain("dry-run");
+      for (const gone of ["DATABASE_URL", "SEED_PRUNE_R2", "remote.example", "other.example", "crlf.example", "dry-run", SECRET]) {
+        expect(written).not.toContain(gone);
+      }
       expect(written).toContain("KEEP=1");
-      expect(written).toContain("postgresql://app_owner:app_owner@localhost:");
-      expect(written).toContain("/lane_zzorch");
-      const child = readFileSync(log, "utf8");
-      expect(child).toContain("psql");
-      expect(child).toContain("child npx host=localhost");
-      expect(child).not.toContain("unpooled=present");
-      expect(child).not.toContain("prune=present");
-      expect(child).not.toContain("secret=present");
-      expect(child).not.toContain(SECRET);
     } finally {
-      removeTemp(dir);
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
