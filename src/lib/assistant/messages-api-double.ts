@@ -575,7 +575,37 @@ export function createFakeAnthropicFetch(options?: {
         headers: { "content-type": "text/event-stream" },
       });
     }
+    if (step.kind === "error") {
+      return Response.json(
+        {
+          type: "error",
+          error: { type: "overloaded_error", message: "Overloaded" },
+          request_id: "req_fake_step",
+        },
+        { status: 529, headers: { "request-id": "req_fake_step" } },
+      );
+    }
     const usage = usageOf(step);
+    if (step.kind === "tool") {
+      const content: Array<Record<string, unknown>> = [];
+      if (step.text) content.push({ type: "text", text: step.text });
+      content.push({
+        type: "tool_use",
+        id: toolId,
+        name: step.toolName ?? "ping",
+        input: step.toolInput ?? {},
+      });
+      return Response.json({
+        id: "msg_fake",
+        type: "message",
+        role: "assistant",
+        model,
+        content,
+        stop_reason: "tool_use",
+        stop_sequence: null,
+        usage,
+      });
+    }
     return Response.json({
       ...messagesSuccessBody(model, step.text ?? "ok"),
       usage,

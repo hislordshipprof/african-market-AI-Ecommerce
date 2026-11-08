@@ -199,17 +199,18 @@ Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant default
 - Languages: English first; understands Nigerian Pidgin and common Yoruba/Igbo/Hausa/Twi/Amharic/Swahili/Somali food terms via the synonym base.
 
 ### 8.2 Store copilot
-**Tools**
-| Tool | Purpose |
-|---|---|
-| `list_orders(status, window)` | New / in-progress / ready orders |
-| `build_pick_list(order_ids)` | Grouped, frozen-last pick list |
-| `mark_line_short(order_line_id, qty)` | Triggers customer prompt (requires staff confirm) |
-| `inventory_report(period)` | Movement, velocity, sell-through |
-| `low_stock_alerts()` | Items likely to run out in N days |
-| `reorder_suggestions()` | Suggested quantities from velocity (no auto-ordering in v1) |
-| `update_stock(listing_id, qty/status)` | **Requires owner confirmation** |
-| `draft_listing(photo)` | Catalog onboarding helper |
+**v1 (#142).** The owner types an owner report in the store admin. The copilot uses two tools only: `find_listings(query)` and `propose_stock_change(listing_id, kind, quantity?, status?)`. Tools read and validate. They do not write stock. After the model returns, one transaction stores the turn and the **stock proposals**. The owner taps Confirm or Dismiss. Confirm writes one `StockEvent` keyed `copilot:<proposalId>` and updates the listing. A repeat confirm returns the same result and writes nothing.
+
+| Kind | Listing | Confirm writes |
+|---|---|---|
+| `restock` | counted | `qty` increases by n, event `restock` |
+| `counter_sale` | counted | `qty` decreases by n and floors at 0, event `counter_sale`, delta is the true units |
+| `recount` | counted | `qty` becomes n, event `recount` |
+| `set_status` | status | `status` becomes the value, event `adjust`, delta 0 |
+
+"Out of" is a recount to 0 on a counted listing and `out_of_stock` on a status listing. A proposal expires 60 minutes after it is stored, measured by the database clock. Only a recount or an owner's stock edit supersedes a reservation return. A restock or counter sale does not.
+
+Later tools, not in v1: `list_orders`, `build_pick_list`, `mark_line_short`, `inventory_report`, `low_stock_alerts`, `reorder_suggestions`, `draft_listing`. The spec's `update_stock` is this propose-then-confirm flow.
 
 **Proactive messages:** "3 new orders — 2 need egusi, you have 4 left", "Palm oil 1L sold 18 this week, est. out Thursday", "Gari shortage reported twice today — please recount".
 
@@ -356,7 +357,7 @@ Listing(id, tenant_id, master_product_id?, custom_name, price, stock_mode, qty, 
         confidence, confidence_updated_at, max_per_order, active)
 ListingVariant(id, listing_id, label, price, weight_g, weight_placeholder, sku, barcode)
 ListingImport(id, store_id, csv_text, row_count, status[pending|committed], created_by_id, created_at, committed_at, commit_result?)
-StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|short|adjust|reservation|reservation_release], delta, actor, idempotency_key?, at)  # key is one per order line and moment, unique per store
+StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|counter_sale|short|adjust|reservation|reservation_release], delta, actor, idempotency_key?, at)  # key is one per order line and moment, or `copilot:<proposalId>`, unique per store
 
 Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id, source[manual|ai])
 Order(id, tenant_id, number, customer_id, status, fulfillment[delivery|pickup], address, totals..., 
@@ -367,7 +368,10 @@ Delivery(id, order_id, provider, external_id, status, quote_fee, actual_fee, tra
 DeliveryEvent(id, delivery_id, type, payload, at)
 Refund(id, order_id, amount, reason, lines, stripe_refund_id, initiated_by)
 Issue(id, order_id, type, photos, status, resolution)
-AiConversation(id, store_id, cart_id unique, customer_id?, model, tokens_in, tokens_out, cost_micros, messages, in_flight_until, created_at, last_message_at) — one shopper conversation per cart. Store copilot records stay in #142/#144.
+AiConversation(id, store_id, cart_id unique, customer_id?, model, tokens_in, tokens_out, cost_micros, messages, in_flight_until, created_at, last_message_at) — one shopper conversation per cart. Store copilot records are the tables below, not these.
+CopilotConversation(id, store_id, user_id, model, messages, in_flight_until, tokens_in, tokens_out, cost_micros, created_at, last_message_at) — one owner thread. A send past 100 stored messages starts another.
+CopilotClientMessage(id, store_id, user_id, conversation_id?, client_message_id, reply?, claimed_until) — unique per store and owner and client message id, so a repeated send replays the stored turn.
+StockProposal(id, store_id, conversation_id, listing_id, client_message_id, kind[restock|counter_sale|recount|set_status], quantity?, status_value?, before, state[pending|confirmed|rejected|expired], expires_at, decided_by_id?, decided_at?) — no foreign key to listings or stock events. The event is found by `copilot:<proposalId>`. Confirmed requires decided_by_id and decided_at.
       Attachments are stored as descriptors with no bytes. The server's safe name is the stored one, so a card-number filename sent from the sheet is
       stored as `card number removed.jpg` while the in-session chip shows `[card number removed].jpg`. There is no transcript restore, so the two never meet.
       Filename masking checks every 13-19 digit stretch of a run split by anything but a letter, and exempts a run that is one camera date and time. Digits split by letters are not treated as a card.

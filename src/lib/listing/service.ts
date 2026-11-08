@@ -3,7 +3,7 @@ import { storeScoped, storeScopedTransaction, lockStoreRow, lockListingRow, lock
 
 export type StockMode = "counted" | "status";
 export type StockStatus = "in_stock" | "low" | "out_of_stock";
-export type StockEventType = "sale" | "recount" | "restock" | "short" | "adjust";
+export type StockEventType = "sale" | "recount" | "restock" | "short" | "adjust" | "counter_sale";
 
 export interface ResolvedStock {
   stockMode: StockMode;

@@ -112,6 +112,9 @@ export function storeScoped(storeId: string) {
     aiAction: wrapDelegate(storeId, prisma.aiAction),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
+    copilotConversation: wrapDelegate(storeId, prisma.copilotConversation),
+    copilotClientMessage: wrapDelegate(storeId, prisma.copilotClientMessage),
+    stockProposal: wrapDelegate(storeId, prisma.stockProposal),
   };
 }
 
@@ -282,7 +285,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -309,6 +312,9 @@ export async function storeScopedTransaction<T>(
       aiAction: tx.aiAction,
       assistantUndoReceipt: tx.assistantUndoReceipt,
       guestBrowserCart: tx.guestBrowserCart,
+      copilotConversation: tx.copilotConversation,
+      copilotClientMessage: tx.copilotClientMessage,
+      stockProposal: tx.stockProposal,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -346,6 +352,11 @@ export async function storeScopedTransaction<T>(
  *
  * A background job that rewrites many listings holds no store lock, so it must
  * never wait: it locks with SKIP LOCKED and picks up a skipped row on its next run.
+ *
+ * Copilot confirm and the copilot turn commit take the store lock before any
+ * proposal, audit or stock row. A proposal insert takes FOR KEY SHARE on its
+ * listing and on the store. Confirm then locks the listing and claims the
+ * proposal. The turn commit locks the conversation row only after the store.
  */
 export async function lockConversationRow(tx: Pick<PrismaClient, "$queryRaw">, conversationId: string) {
   await tx.$queryRaw`SELECT id FROM ai_conversations WHERE id = ${conversationId} FOR UPDATE`;

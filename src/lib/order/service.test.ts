@@ -6,6 +6,7 @@ import { recordReconcileResult } from "../inngest/functions";
 import { acceptOrder, autoCancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markLineShort, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
 import { recordAuthorizedOrder } from "../checkout/service";
 import { updateListing } from "../listing/service";
+import { confirmProposal } from "../copilot/confirm";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
@@ -159,6 +160,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.stockProposal.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.copilotClientMessage.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.copilotConversation.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.auditLog.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.cartLine.deleteMany({ where: { storeId: { in: storeIds } } }),
@@ -3985,6 +3989,54 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       expect(await stockOf(storeId, recounted.listingId)).toEqual({
         qty: 10,
         events: [["reservation", -3], ["reservation_release", 0]],
+      });
+
+      // A copilot restock does not swallow the reservation's return. A copilot recount does.
+      const copilotChat = await storeScoped(storeId).copilotConversation.create({
+        data: { storeId, userId: SYSTEM_ACTOR_ID, model: "claude-haiku-5-5", messages: [] },
+      });
+      const restocked = await countedListing(storeId, 10, "Copilot restock");
+      const restockOrder = await placeOrder(storeId, [{ variantId: restocked.variantId, qty: 2 }]);
+      const restockProposal = await storeScoped(storeId).stockProposal.create({
+        data: {
+          storeId,
+          conversationId: copilotChat.id,
+          listingId: restocked.listingId,
+          clientMessageId: `restock-${restockOrder.orderId}`,
+          kind: "restock",
+          quantity: 5,
+          before: { qty: 8, status: null },
+          state: "pending",
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        },
+      });
+      expect(await confirmProposal(storeId, restockProposal.id, { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL })).toMatchObject({ ok: true });
+      await autoCancelOrder(storeId, restockOrder.orderId);
+      expect(await stockOf(storeId, restocked.listingId)).toEqual({
+        qty: 15,
+        events: [["reservation", -2], ["restock", 5], ["reservation_release", 2]],
+      });
+
+      const copilotRecount = await countedListing(storeId, 10, "Copilot recount");
+      const copilotRecountOrder = await placeOrder(storeId, [{ variantId: copilotRecount.variantId, qty: 3 }]);
+      const recountProposal = await storeScoped(storeId).stockProposal.create({
+        data: {
+          storeId,
+          conversationId: copilotChat.id,
+          listingId: copilotRecount.listingId,
+          clientMessageId: `recount-${copilotRecountOrder.orderId}`,
+          kind: "recount",
+          quantity: 4,
+          before: { qty: 7, status: null },
+          state: "pending",
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        },
+      });
+      expect(await confirmProposal(storeId, recountProposal.id, { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL })).toMatchObject({ ok: true });
+      await autoCancelOrder(storeId, copilotRecountOrder.orderId);
+      expect(await stockOf(storeId, copilotRecount.listingId)).toEqual({
+        qty: 4,
+        events: [["reservation", -3], ["recount", -3], ["reservation_release", 0]],
       });
 
       // An order placed before reservations existed has nothing to return.

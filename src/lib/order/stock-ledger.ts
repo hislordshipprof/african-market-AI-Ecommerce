@@ -16,8 +16,11 @@ import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 type LedgerTx = Pick<PrismaClient, "stockEvent" | "orderLine" | "$queryRaw" | "$executeRaw">;
 
-/** A human saying what is on the shelf. Newer than a reservation, it supersedes the release (D9). */
-export const CONFIRMING_EVENT_TYPES = ["recount", "restock", "adjust"];
+/**
+ * Absolute counts. Newer than a reservation, they supersede its release.
+ * A restock or counter sale is relative, so a later cancel still returns the reserved units.
+ */
+export const SUPERSEDING_EVENT_TYPES = ["recount", "adjust"];
 
 interface LedgerLine {
   id: string;
@@ -135,7 +138,7 @@ async function openLedger(tx: LedgerTx, storeId: string, lines: LedgerLine[]) {
     }),
     tx.stockEvent.groupBy({
       by: ["listingId"],
-      where: { storeId, listingId: { in: listingIds }, type: { in: CONFIRMING_EVENT_TYPES } },
+      where: { storeId, listingId: { in: listingIds }, type: { in: SUPERSEDING_EVENT_TYPES } },
       _max: { createdAt: true },
     }),
   ]);
