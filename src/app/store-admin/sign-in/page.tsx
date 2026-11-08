@@ -7,14 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Store, ShieldCheck } from "lucide-react";
-import { StorySurface } from "@/components/story-surface/story-surface";
+import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
 
 type Step = "credentials" | "totp";
 
@@ -76,7 +75,7 @@ export default function StoreAdminSignIn() {
 
   return (
     <StorySurface>
-      <Card className="border-0 shadow-2xl backdrop-blur-lg bg-card/80">
+      <StoryCard>
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-primary/10">
             <Store className="size-6 text-primary" />
@@ -158,7 +157,7 @@ export default function StoreAdminSignIn() {
             </form>
           )}
         </CardContent>
-      </Card>
+      </StoryCard>
     </StorySurface>
   );
 }

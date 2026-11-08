@@ -6,13 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { StorySurface } from "@/components/story-surface/story-surface";
+import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
 import { Mail, ArrowLeft } from "lucide-react";
 
 type Step = "form" | "sent";
@@ -65,7 +64,7 @@ export function CustomerSignIn({
 
   return (
     <StorySurface asMain={false}>
-      <Card className="border-0 shadow-xl backdrop-blur-sm bg-card/95">
+      <StoryCard>
         <CardHeader className="text-center">
           <CardTitle className="text-xl font-display">
             {step === "sent" ? "Check your email" : "Sign in"}
@@ -138,7 +137,7 @@ export function CustomerSignIn({
             </div>
           )}
         </CardContent>
-      </Card>
+      </StoryCard>
     </StorySurface>
   );
 }

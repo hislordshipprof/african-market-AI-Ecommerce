@@ -68,6 +68,55 @@ test.describe("Platform admin console", () => {
     await adminSignIn(page);
     await expect(page.locator("h1")).toHaveText("Stores");
   });
+
+  test("sign-in form works over the poster when WebGL is unavailable", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.addInitScript(() => {
+      const realGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (
+        this: HTMLCanvasElement,
+        type: string,
+        ...rest: unknown[]
+      ) {
+        if (type === "webgl" || type === "webgl2") return null;
+        return realGetContext.call(this, type, ...(rest as []));
+      } as typeof HTMLCanvasElement.prototype.getContext;
+    });
+
+    await page.goto("/admin/sign-in");
+    await expect(page.getByTestId("story-poster")).toBeVisible();
+    await page.getByLabel("Email").fill(ADMIN_EMAIL);
+    await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+    await page.click("button[type='submit']");
+
+    await expect(page.getByLabel("Verification code")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("canvas")).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+  });
+
+  // Reproduced: on software rendering the scene ran at 3 to 12 fps and typing 19
+  // characters took 3 to 14 seconds. failIfMajorPerformanceCaveat doesn't catch it.
+  test("a software WebGL renderer stays on the poster", async ({ page }) => {
+    await page.addInitScript(() => {
+      const UNMASKED_RENDERER_WEBGL = 0x9246;
+      const realGetParameter = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function (
+        this: WebGL2RenderingContext,
+        parameter: number,
+      ) {
+        if (parameter === UNMASKED_RENDERER_WEBGL) return "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device))";
+        return realGetParameter.call(this, parameter);
+      };
+    });
+
+    await page.goto("/admin/sign-in");
+    await expect(page.getByTestId("story-poster")).toBeVisible();
+    await page.waitForTimeout(3000);
+    await expect(page.locator("canvas")).toHaveCount(0);
+  });
 });
 
 test.describe("Store management (authenticated)", () => {

@@ -4,13 +4,13 @@
 
 | File | Description | Author | Source | License |
 |------|-------------|--------|--------|---------|
-| `market-spices-poster.jpg` | Colorful spices and dried goods at a market stall, Marrakesh, Morocco | Alessio Roversi ([@alessionord](https://unsplash.com/@alessionord)) | [Unsplash](https://unsplash.com/photos/colorful-spices-and-dried-goods-displayed-in-market-3dVx9j1iepM) | [Unsplash License](https://unsplash.com/license) |
+| `story/bodija-wide.webp`, `story/bodija-tall.webp` | Tomato and pepper stall at Bodija Market, Ibadan, Nigeria. Story surface background, cropped to the hands and produce and resized. Shows a real market, not a store on this platform or its owner. | Tunde Buremo | [Unsplash](https://unsplash.com/photos/a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00) | [Unsplash License](https://unsplash.com/license) |
 
 ## Programmatic Assets
 
 | Asset | Source | License |
 |-------|--------|---------|
-| Story surface 3D market scene (shelves, yams, plantains, peppers, baskets, spice sacks, palm oil bottles) | Built in-app with Three.js primitives via `@react-three/fiber` + `@react-three/drei` | N/A (original work) |
+| `story/bodija-wide-depth.webp` | Depth map of `story/bodija-wide.webp`, generated offline by `scripts/images/story-depth.py` with [Depth Anything V2 Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small) (Apache-2.0). The model is not shipped. | Derivative of the photograph above, under the [Unsplash License](https://unsplash.com/license) |
 | `product-placeholder.svg` | Designed SVG grocery bag placeholder for products without photos | N/A (original work) |
 | `categories/*.svg` | Designed SVG food illustrations for 9 category cards (tubers, grains, spices, oils, vegetables, fish & meat, snacks, drinks, pantry) | N/A (original work) |
 | `banners/*.svg` | Designed SVG hero banner backgrounds for demo stores (6 banners) | N/A (original work) |

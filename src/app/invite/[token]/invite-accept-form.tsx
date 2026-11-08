@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Card,
   CardContent,
   CardDescription,
   CardHeader,
@@ -16,7 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { QRCodeSVG } from "qrcode.react";
 import { UserPlus, ShieldCheck } from "lucide-react";
-import { StorySurface } from "@/components/story-surface/story-surface";
+import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
 
 type Step = "signup" | "totp-enroll" | "totp-verify" | "accepting";
 
@@ -145,7 +144,7 @@ export function InviteAcceptForm({
 
   return (
     <StorySurface>
-      <Card className="border-0 shadow-xl backdrop-blur-sm bg-card/95">
+      <StoryCard>
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-primary/10">
             <UserPlus className="size-6 text-primary" />
@@ -299,7 +298,7 @@ export function InviteAcceptForm({
             </div>
           )}
         </CardContent>
-      </Card>
+      </StoryCard>
     </StorySurface>
   );
 }

@@ -1,67 +1,108 @@
 "use client";
 
-import { type ReactNode } from "react";
-import { preload } from "react-dom";
+import { type ComponentProps, type ReactNode } from "react";
 import { MotionConfig, motion } from "motion/react";
-import posterSrc from "../../../public/images/market-spices-poster.jpg";
+import { cn } from "cn";
+import { Card } from "@/components/ui/card";
+import { DepthSceneGate } from "./depth-scene-gate";
+import { BODIJA_MARKET, type StoryScene } from "./scenes";
 
-/**
- * Re-enable when the 3D market scene is rebuilt at higher fidelity (#35).
- * When false the three/R3F chunk is never imported.
- */
-export const ENABLE_3D_SCENE = false;
+const WIDE_MEDIA = "(min-width: 768px)";
+const TALL_MEDIA = "(max-width: 767.98px)";
+
+/** The panel every story surface form sits on. Solid, so AA holds over any part of the photo. */
+export function StoryCard({ className, ...props }: ComponentProps<typeof Card>) {
+  return <Card className={cn("rounded-2xl border-0 bg-card shadow-2xl", className)} {...props} />;
+}
 
 export function StorySurface({
   children,
   asMain = true,
+  scene = BODIJA_MARKET,
 }: {
   children: ReactNode;
   asMain?: boolean;
+  scene?: StoryScene;
 }) {
   const Tag = asMain ? "main" : "div";
-  // The poster is the largest element, so it has to start with the document.
-  // Next/Image left this file at default priority and the paint landed after 2.5s.
-  preload(posterSrc.src, { as: "image", fetchPriority: "high" });
   return (
     <MotionConfig reducedMotion="user">
-    <Tag className="relative flex min-h-dvh items-center justify-center overflow-hidden p-4">
-      {/* Poster photograph — first paint, always visible */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
+      {/* The poster is the largest element, so it has to start with the document. */}
+      <link
+        rel="preload"
+        as="image"
+        href={scene.posterWide.src}
+        media={WIDE_MEDIA}
+        fetchPriority="high"
+      />
+      <link
+        rel="preload"
+        as="image"
+        href={scene.posterTall.src}
+        media={TALL_MEDIA}
+        fetchPriority="high"
+      />
+      {/* Phones anchor the form in thumb reach, except under a store header, where the
+          surface starts below the top of the screen and the anchor would push the form off it. */}
+      <Tag
+        className={cn(
+          "story-surface relative flex min-h-dvh flex-col items-center overflow-clip p-4 pb-6 sm:pb-10 lg:flex-row lg:justify-end lg:pr-[max(6vw,3rem)]",
+          asMain ? "justify-end" : "justify-center",
+        )}
       >
-        <motion.div
-          data-testid="story-poster"
-          className="absolute inset-0 motion-reduce:!transform-none"
-          initial={{ scale: 1.05 }}
-          animate={{ scale: 1 }}
-          transition={{ duration: 20, ease: "linear", repeat: Infinity, repeatType: "reverse" }}
-          style={{ willChange: "transform" }}
-        >
-          <img
-            src={posterSrc.src}
-            alt=""
-            fetchPriority="high"
-            decoding="sync"
-            className="absolute inset-0 h-full w-full object-cover motion-reduce:!transform-none"
-          />
-        </motion.div>
-        <div className="absolute inset-0 bg-gradient-to-br from-black/50 via-black/30 to-transparent dark:from-black/70 dark:via-black/50" />
-      </div>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-primary-deep">
+          {/* Overscan so the depth scene never samples past the edge of the photo. */}
+          <motion.div
+            data-testid="story-poster"
+            className="absolute -inset-[3%] motion-reduce:!transform-none"
+            initial={{ scale: 1.03 }}
+            animate={{ scale: 1 }}
+            transition={{ duration: 1.2, ease: [0, 0, 0, 1] }}
+          >
+            <picture>
+              <source media={WIDE_MEDIA} srcSet={scene.posterWide.src} />
+              <img
+                src={scene.posterTall.src}
+                alt=""
+                fetchPriority="high"
+                decoding="sync"
+                className="story-surface__poster absolute inset-0 h-full w-full object-cover"
+                style={{
+                  ["--story-focus-wide" as string]: `${scene.focus.x * 100}% ${scene.focus.y * 100}%`,
+                }}
+              />
+            </picture>
+            <DepthSceneGate scene={scene} />
+          </motion.div>
+          <div className="story-surface__dusk absolute inset-0" />
+          <div className="story-surface__scrim absolute inset-0 hidden lg:block" />
+        </div>
 
-      {/* Form panel — visible by default; entrance animation plays on hydration */}
-      <noscript>
-        <style>{`.story-form{opacity:1!important;transform:none!important}`}</style>
-      </noscript>
-      <motion.div
-        className="story-form relative z-10 w-full max-w-sm motion-reduce:!transform-none motion-reduce:!opacity-100"
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.4, 0.4, 0, 1] }}
-      >
-        {children}
-      </motion.div>
-    </Tag>
+        {/* Visible from the first paint. The entrance only moves it, so slow JS never hides the form. */}
+        <motion.div
+          className="relative z-10 w-full max-w-sm motion-reduce:!transform-none"
+          initial={{ y: 16 }}
+          animate={{ y: 0 }}
+          transition={{ duration: 0.5, ease: [0, 0, 0, 1] }}
+        >
+          {children}
+        </motion.div>
+
+        {/* After the form in the DOM, so a screen reader reaches the form first. */}
+        <p className="relative z-10 order-first mb-2 w-full max-w-sm lg:hidden">
+          <span className="inline-block rounded-full bg-black/70 px-3 py-1 text-xs font-medium text-white">
+            {scene.place}
+          </span>
+        </p>
+        <div className="pointer-events-none absolute bottom-12 left-[max(6vw,3rem)] z-10 hidden max-w-[min(34rem,42vw)] text-white lg:block">
+          <p className="font-display text-[clamp(1.25rem,1.6vw,1.625rem)] leading-[1.15] font-bold text-balance">
+            {scene.line}
+          </p>
+          <p className="mt-3 text-sm">
+            {scene.place} · Photo by {scene.photographer}
+          </p>
+        </div>
+      </Tag>
     </MotionConfig>
   );
 }
