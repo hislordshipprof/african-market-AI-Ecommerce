@@ -598,13 +598,33 @@ test("a text turn failing after navigation retains its original Retry", async ({
   await send(page, "mid-stream");
   await expect.poll(() => posts.length).toBe(1);
   await page.keyboard.press("Escape");
+  let releaseCart = () => {};
+  const cartGate = new Promise<void>((resolve) => { releaseCart = resolve; });
+  let heldCart = false;
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    if (!heldCart && request.method() === "POST" && request.headers()["next-action"]) {
+      heldCart = true;
+      await cartGate;
+    }
+    try {
+      await route.continue();
+    } catch {
+      /* navigation closed the request */
+    }
+  });
   await page.getByRole("link", { name: "Search", exact: true }).click();
+  await expect.poll(() => heldCart).toBe(true);
   release();
   hold = false;
   await page.getByTestId("assistant-launcher").click();
   const dialog = page.getByRole("dialog", { name: "Shop with help" });
   const retry = dialog.getByRole("button", { name: "Retry" });
   await expect(retry).toBeVisible({ timeout: 20_000 });
+  await expect(retry).toBeDisabled();
+  releaseCart();
+  await page.unroute("**/*");
+  await expect(retry).toBeEnabled();
   const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
   hold = true;
   await retry.evaluate((node) => {

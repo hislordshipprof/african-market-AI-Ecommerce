@@ -686,6 +686,7 @@ function Thread({
             <button
               type="button"
               className={styles.ghost}
+              disabled={loading || busy || !!routeError?.terminal || !!speech?.listening}
               onClick={() => {
                 if (sendLock.current.held) return;
                 void submit(retry.text, retry.messageId, retry.kind === "text");
