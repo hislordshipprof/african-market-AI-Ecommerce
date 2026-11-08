@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import { NOTIFICATION_CHANNEL_KINDS } from "./channel-kinds";
 
 export const ORDER_NOTIFY_EVENTS = ["placed", "accepted", "ready", "completed", "cancelled"] as const;
 export type OrderNotifyEvent = (typeof ORDER_NOTIFY_EVENTS)[number];
@@ -23,7 +24,7 @@ type TokenTx = {
 };
 
 /**
- * Inserts the email and SMS rows for one event. A second insert for the same
+ * Inserts one pending row per channel kind. A second insert for the same
  * order, event and channel is a no-op, including Cancelled then Refund failed
  * then Cancelled again. Returns whether any row was inserted.
  */
@@ -38,10 +39,13 @@ export async function recordOrderNotification(
     data: { trackingToken: newTrackingToken() },
   });
   const inserted = await tx.notificationLog.createMany({
-    data: [
-      { storeId, orderId, event, channel: "email", status: "pending" },
-      { storeId, orderId, event, channel: "sms", status: "pending" },
-    ],
+    data: NOTIFICATION_CHANNEL_KINDS.map((channel) => ({
+      storeId,
+      orderId,
+      event,
+      channel,
+      status: "pending",
+    })),
     skipDuplicates: true,
   });
   return inserted.count > 0;

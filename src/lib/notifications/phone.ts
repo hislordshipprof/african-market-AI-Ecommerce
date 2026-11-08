@@ -4,7 +4,8 @@ export type PhoneResult =
 
 /**
  * US numbers only (ADR-0001). 10 digits, or 11 starting with 1, become +1.
- * A leading + with any other country code is skipped. 555-01xx is fictional.
+ * A leading + is US only when it is 11 digits starting with 1. Any other
+ * country code is skipped. 555-01xx is fictional.
  */
 export function normalizeUsPhone(raw: string | null | undefined): PhoneResult {
   const trimmed = raw?.trim() ?? "";
@@ -12,12 +13,15 @@ export function normalizeUsPhone(raw: string | null | undefined): PhoneResult {
   const digits = trimmed.replace(/\D/g, "");
   const explicitPlus = trimmed.startsWith("+");
   let national = "";
-  if (digits.length === 10) {
+  if (explicitPlus) {
+    if (!(digits.length === 11 && digits.startsWith("1"))) {
+      return { ok: false, reason: "sms_non_us_number" };
+    }
+    national = digits.slice(1);
+  } else if (digits.length === 10) {
     national = digits;
   } else if (digits.length === 11 && digits.startsWith("1")) {
     national = digits.slice(1);
-  } else if (explicitPlus) {
-    return { ok: false, reason: "sms_non_us_number" };
   } else {
     return { ok: false, reason: "invalid_phone" };
   }

@@ -4,6 +4,7 @@ import { ProviderSendError } from "./provider-error";
 import { normalizeUsPhone } from "./phone";
 import { renderEmail, renderSms, type NotifyOrder, type RenderedMessage } from "./messages";
 import { smsSender, type SmsSender } from "./sms";
+import type { NotificationChannelKind } from "./channel-kinds";
 import type { OrderNotifyEvent } from "./record";
 
 export type ChannelResult =
@@ -12,7 +13,7 @@ export type ChannelResult =
   | { outcome: "failed"; reason: string; retryable: boolean };
 
 export interface NotificationChannel {
-  kind: "email" | "sms";
+  kind: NotificationChannelKind;
   prepare(
     order: NotifyOrder,
     event: OrderNotifyEvent,

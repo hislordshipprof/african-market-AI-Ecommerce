@@ -8,6 +8,8 @@ import { setStripeProvider } from "../stripe/index";
 import { fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
 import { clearTestSentSms, getTestSentSms, setSmsSenderForTests, SmsTestSender } from "../notifications/sms";
+import { NOTIFICATION_CHANNEL_KINDS } from "./channel-kinds";
+import { notificationChannels } from "./channels";
 import { findOrderForTracking } from "../notifications/lookup";
 import { ProviderSendError } from "../notifications/provider-error";
 import { sendCustomerNotification } from "../inngest/functions";
@@ -18,6 +20,7 @@ import type { Contact } from "../customer-flow/contracts";
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada", phone: "(301) 448-2210", email: "ada@example.com" };
 const PRICE = 2000;
+const RICE = 500;
 
 type NotifyEvent = "placed" | "accepted" | "ready" | "completed" | "cancelled";
 
@@ -100,12 +103,24 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     const variant = await storeScoped(storeId).listingVariant.create({
       data: { listingId: listing.id, label: "bag", price: PRICE, weightG: 100 },
     });
+    const rice = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Rice", price: RICE, stockMode: "counted", qty: 20, frozen: false, perishable: false },
+    });
+    const riceVariant = await storeScoped(storeId).listingVariant.create({
+      data: { listingId: rice.id, label: "bag", price: RICE, weightG: 100 },
+    });
     const paymentIntentId = `pi_n128_${crypto.randomUUID()}`;
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, paymentIntentId } });
     await storeScoped(storeId).cartLine.create({
       data: { storeId, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    const quote = computeQuote(0, [{ price: PRICE, qty: 1, maxPerOrder: null }], CONTACT, fulfillment);
+    await storeScoped(storeId).cartLine.create({
+      data: { storeId, cartId: cart.id, variantId: riceVariant.id, qty: 1, swapRule: "exact_only" },
+    });
+    const quote = computeQuote(0, [
+      { price: PRICE, qty: 1, maxPerOrder: null },
+      { price: RICE, qty: 1, maxPerOrder: null },
+    ], CONTACT, fulfillment);
     setAuthorizedAmount(paymentIntentId, quote.holdCents);
     const recorded = await recordAuthorizedOrder(storeId, {
       cartId: cart.id,
@@ -115,7 +130,10 @@ describe.skipIf(!hasDb)("customer notifications", () => {
       notes: null,
       paymentIntentId,
       quote,
-      lines: [{ variantId: variant.id, qty: 1, price: PRICE, swapRule: "exact_only", substituteVariantId: null }],
+      lines: [
+        { variantId: variant.id, qty: 1, price: PRICE, swapRule: "exact_only", substituteVariantId: null },
+        { variantId: riceVariant.id, qty: 1, price: RICE, swapRule: "exact_only", substituteVariantId: null },
+      ],
       minimumOrderCents: 0,
     });
     return recorded.orderId;
@@ -125,7 +143,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     const pending = await storeScoped(storeId).notificationLog.findMany({
       where: { orderId, event, status: "pending" },
     });
-    expect(pending).toHaveLength(2);
+    expect(pending.map((row) => row.channel).sort()).toEqual([...NOTIFICATION_CHANNEL_KINDS].sort());
     await handler({
       event: { data: { storeId, orderId, event } },
       step: makeFakeStep({ attempts }),
@@ -151,7 +169,10 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(placedMail.html).toContain("Powered by the Platform");
     expect(placedMail.html).toContain(String(order.number));
     expect(placedMail.html).toContain("$20.00");
-    expect(placedMail.html).toContain("$22.00");
+    expect(placedMail.html).toContain("$5.00");
+    expect(placedMail.html).toContain("Estimated total $25.00");
+    expect(placedMail.html).toContain("Card hold $27.50");
+    expect(notificationChannels.map((channel) => channel.kind)).toEqual([...NOTIFICATION_CHANNEL_KINDS]);
     expect(placedMail.html).toContain(order.trackingToken!);
     expect(placedSms.to).toBe("+13014482210");
     expect(placedSms.text).toContain("Ada's Market");
@@ -179,7 +200,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     clearTestSentSms();
     await run(orderId, "ready");
     expect(getTestSentEmails().at(-1)!.html).toContain("Ready for pickup");
-    expect(getTestSentEmails().at(-1)!.html).toContain("$20.00");
+    expect(getTestSentEmails().at(-1)!.html).toContain("Charged $25.00");
 
     expect((await completePickup(storeId, orderId)).ok).toBe(true);
     clearTestSentEmails();
