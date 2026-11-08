@@ -209,6 +209,7 @@ export function AccountFlow(props: Props) {
                         await authClient.signOut();
                         // A full load drops the router's cache, or Back shows this account
                         // to whoever uses the device next.
+                        // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- the full load is the point
                         window.location.assign("/account/sign-in");
                         return;
                       }

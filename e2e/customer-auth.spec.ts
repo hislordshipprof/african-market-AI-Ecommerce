@@ -77,7 +77,10 @@ test.describe("Customer magic-link auth", () => {
     // 10. Back must not restore the signed-out account from the router's cache (shared devices)
     await page.goBack();
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("input[autocomplete='email']")).not.toHaveValue(email);
+    const shownEmails = await page
+      .locator("input[autocomplete='email']")
+      .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
+    expect(shownEmails).not.toContain(email);
     await expect(page.getByText(email)).toHaveCount(0);
   });
 
