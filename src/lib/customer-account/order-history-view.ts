@@ -56,6 +56,10 @@ const money = (cents: number) =>
 function amountLabel(order: AccountOrderRecord): string {
   if (order.refundId && order.status === "CANCELLED") return "Refunded";
   if (order.refundId && order.status === "CANCELLING") return "Refund pending";
+  // CAPTURING writes the amount before Stripe confirms it, so it is not a charge yet.
+  if (order.capturedAmountCents != null && order.status === "CAPTURING") {
+    return `Estimated ${money(order.capturedAmountCents)}`;
+  }
   if (order.capturedAmountCents != null) return money(order.capturedAmountCents);
   if (order.status === "CANCELLED" || order.status === "CANCELLING") return "Not charged";
   if (order.status === "REFUND_FAILED") return "Refund pending";
