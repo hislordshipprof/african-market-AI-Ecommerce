@@ -170,7 +170,7 @@ function Thread({
       setAddOpen(false);
     };
     // Escape closes this menu first, wherever focus is: the sheet, and the draft in it, stay open.
-    const escape = (event: KeyboardEvent) => {
+    const onEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
@@ -179,11 +179,11 @@ function Thread({
     };
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("focusin", dismiss);
-    document.addEventListener("keydown", escape, true);
+    document.addEventListener("keydown", onEscape, true);
     return () => {
       document.removeEventListener("pointerdown", dismiss);
       document.removeEventListener("focusin", dismiss);
-      document.removeEventListener("keydown", escape, true);
+      document.removeEventListener("keydown", onEscape, true);
     };
   }, [addOpen]);
   const tilesRef = useRef(tiles);
