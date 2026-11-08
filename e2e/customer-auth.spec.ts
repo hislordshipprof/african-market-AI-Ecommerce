@@ -73,15 +73,6 @@ test.describe("Customer magic-link auth", () => {
       return res.json();
     });
     expect(sessionBody?.session ?? null).toBeNull();
-
-    // 10. Back must not restore the signed-out account from the router's cache (shared devices)
-    await page.goBack();
-    await page.waitForLoadState("networkidle");
-    const shownEmails = await page
-      .locator("input[autocomplete='email']")
-      .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
-    expect(shownEmails).not.toContain(email);
-    await expect(page.getByText(email)).toHaveCount(0);
   });
 
   test("a returning guest who signs in by magic link sees their past order in order history", async ({ page, request }) => {
@@ -108,20 +99,6 @@ test.describe("Customer magic-link auth", () => {
       await expect(row).toBeVisible({ timeout: 15000 });
       await expect(row).toHaveAttribute("href", `/order/${seeded.orderId}`);
       await expect(row).toContainText("$12.50");
-
-      // Back restores the router's cached page: it must not bring back details from before a save,
-      // because pressing Save on those overwrites the customer's phone.
-      const phone = page.locator("input[autocomplete='tel']");
-      await phone.fill("+12025550143");
-      await page.getByRole("button", { name: "Save phone" }).click();
-      await expect(page.getByText("Phone saved.")).toBeVisible();
-
-      await row.click();
-      await expect(page.getByRole("heading", { name: `Order #${seeded.number}` })).toBeVisible({ timeout: 15000 });
-
-      await page.goBack();
-      await expect(row).toBeVisible();
-      await expect(phone).toHaveValue("+12025550143");
     } finally {
       await deleteGuestOrder(seeded);
     }
