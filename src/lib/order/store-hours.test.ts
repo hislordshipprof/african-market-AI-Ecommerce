@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { isStoreOpen } from "./store-hours";
+import { isStoreOpen, nextOpening, openMinutesDeadline } from "./store-hours";
 
 const NY = "America/New_York";
 const CHICAGO = "America/Chicago";
@@ -57,8 +57,12 @@ describe("isStoreOpen", () => {
     expect(isStoreOpen(hours, NY, sat)).toBe(true);
   });
 
-  it("returns false when the store has no hours", () => {
-    expect(isStoreOpen(null, NY)).toBe(false);
+  it("returns true when the store has no hours, or hours that are not an object", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(isStoreOpen(null, NY)).toBe(true);
+    expect(isStoreOpen([], NY)).toBe(true);
+    expect(isStoreOpen("9-5", NY)).toBe(true);
+    spy.mockRestore();
   });
 
   it("returns false at exactly closing time (boundary)", () => {
@@ -229,5 +233,68 @@ describe("isStoreOpen", () => {
       isStoreOpen({ monday: { open: "20:00", close: "02:00" } }, CHICAGO, halfPast),
     ).toBe(true);
     expect(isStoreOpen({ monday: "23:00-00:00" }, CHICAGO, midnight)).toBe(false);
+  });
+});
+
+describe("nextOpening and openMinutesDeadline", () => {
+  it("next opening and the open-minute deadlines agree with isStoreOpen across overnight, DST and the closing minute", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const at = (iso: string) => new Date(iso);
+    const iso = (d: Date | null) => d?.toISOString() ?? null;
+    const weekdays = {
+      mon: { open: "09:00", close: "17:00" },
+      tue: { open: "09:00", close: "17:00" },
+      wed: { open: "09:00", close: "17:00" },
+      thu: { open: "09:00", close: "17:00" },
+      fri: { open: "09:00", close: "17:00" },
+    };
+
+    // AC1: Tue 20:00 CST opens Wed 09:00 CST; 15 and 30 open minutes after that.
+    expect(iso(nextOpening(weekdays, CHICAGO, at("2026-11-04T02:00:00Z")))).toBe("2026-11-04T15:00:00.000Z");
+    expect(iso(openMinutesDeadline(weekdays, CHICAGO, at("2026-11-04T15:00:00Z"), 15))).toBe("2026-11-04T15:15:00.000Z");
+    expect(iso(openMinutesDeadline(weekdays, CHICAGO, at("2026-11-04T15:00:00Z"), 30))).toBe("2026-11-04T15:30:00.000Z");
+
+    // E1: overnight window, open at 01:00, next opening 22:00 the same day from 03:00.
+    const overnight = { monday: "10:00 PM - 2:00 AM", tuesday: "10:00 PM - 2:00 AM" };
+    expect(iso(nextOpening(overnight, CHICAGO, at("2026-11-03T07:00:00Z")))).toBe("2026-11-03T07:00:00.000Z");
+    expect(iso(nextOpening(overnight, CHICAGO, at("2026-11-03T09:00:00Z")))).toBe("2026-11-04T04:00:00.000Z");
+
+    // E2 spring-forward (2026-03-08): 02:30 does not exist, so 03:00 CDT is the first open minute.
+    const spring = { sunday: { open: "02:30", close: "10:00" } };
+    expect(iso(nextOpening(spring, CHICAGO, at("2026-03-08T06:00:00Z")))).toBe("2026-03-08T08:00:00.000Z");
+    expect(iso(openMinutesDeadline(spring, CHICAGO, at("2026-03-08T08:00:00Z"), 30))).toBe("2026-03-08T08:30:00.000Z");
+    // E2 fall-back (2026-11-01): the first 01:00 CDT opens; the repeated hour counts real minutes.
+    const fall = { sunday: { open: "01:00", close: "03:00" } };
+    expect(iso(nextOpening(fall, CHICAGO, at("2026-11-01T04:00:00Z")))).toBe("2026-11-01T06:00:00.000Z");
+    expect(iso(openMinutesDeadline(fall, CHICAGO, at("2026-11-01T06:00:00Z"), 90))).toBe("2026-11-01T07:30:00.000Z");
+
+    // E6: 17:00 is closed (next opening Wed 09:00); 16:59 is open with one minute left that day.
+    expect(iso(nextOpening(weekdays, CHICAGO, at("2026-11-03T23:00:00Z")))).toBe("2026-11-04T15:00:00.000Z");
+    expect(iso(nextOpening(weekdays, CHICAGO, at("2026-11-03T22:59:00Z")))).toBe("2026-11-03T22:59:00.000Z");
+    expect(iso(openMinutesDeadline(weekdays, CHICAGO, at("2026-11-03T22:59:00Z"), 15))).toBe("2026-11-04T15:14:00.000Z");
+    // E25: 16:59:45 gets 15 seconds that day.
+    expect(iso(openMinutesDeadline(weekdays, CHICAGO, at("2026-11-03T22:59:45Z"), 15))).toBe("2026-11-04T15:14:45.000Z");
+
+    // Straddling the 20:00 close: placed 19:50 alerts 09:05 and cancels 09:20; 19:59:30 alerts 09:14:30.
+    const daily = { monday: "09:00-20:00", tuesday: "09:00-20:00", wednesday: "09:00-20:00" };
+    expect(iso(openMinutesDeadline(daily, CHICAGO, at("2026-11-04T01:50:00Z"), 15))).toBe("2026-11-04T15:05:00.000Z");
+    expect(iso(openMinutesDeadline(daily, CHICAGO, at("2026-11-04T01:50:00Z"), 30))).toBe("2026-11-04T15:20:00.000Z");
+    expect(iso(openMinutesDeadline(daily, CHICAGO, at("2026-11-04T01:59:30Z"), 15))).toBe("2026-11-04T15:14:30.000Z");
+    // A mid-minute order at an open store keeps exact seconds.
+    expect(iso(openMinutesDeadline(daily, CHICAGO, at("2026-11-03T18:03:27Z"), 15))).toBe("2026-11-03T18:18:27.000Z");
+    expect(iso(openMinutesDeadline(daily, CHICAGO, at("2026-11-03T18:03:27Z"), 30))).toBe("2026-11-03T18:33:27.000Z");
+
+    // A schedule that never opens yields null, without throwing or hanging.
+    const allClosed = { mon: "Closed", tue: { closed: true }, wed: "Closed", thu: "Closed", fri: "Closed", sat: "Closed", sun: "Closed" };
+    for (const never of [{}, allClosed]) {
+      expect(nextOpening(never, CHICAGO, at("2026-11-04T02:00:00Z"))).toBeNull();
+      expect(openMinutesDeadline(never, CHICAGO, at("2026-11-04T02:00:00Z"), 15)).toBeNull();
+    }
+    // Each answer agrees with isStoreOpen at the instant it returns, and one minute before.
+    expect(isStoreOpen(weekdays, CHICAGO, at("2026-11-04T15:00:00Z"))).toBe(true);
+    expect(isStoreOpen(weekdays, CHICAGO, at("2026-11-04T14:59:00Z"))).toBe(false);
+    expect(isStoreOpen(spring, CHICAGO, at("2026-03-08T08:00:00Z"))).toBe(true);
+    expect(isStoreOpen(spring, CHICAGO, at("2026-03-08T07:59:00Z"))).toBe(false);
+    spy.mockRestore();
   });
 });
