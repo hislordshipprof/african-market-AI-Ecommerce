@@ -206,18 +206,20 @@ export const fakeCheckoutPayments: CheckoutPayments = {
     return [...cards.values()]
       .filter((card) => card.customer === customerId && !card.detached && card.type === "card")
       .sort((a, b) => b.created - a.created)
-      .slice(0, 100);
+      .slice(0, 100)
+      .map((card) => ({ ...card }));
   },
 
   async retrievePaymentMethod(id) {
     const card = cards.get(id);
     if (!card) throw invalid(`No such payment_method: '${id}'`, "resource_missing", 404);
-    return card;
+    return { ...card };
   },
 
   async detachPaymentMethod(id) {
     const card = cards.get(id);
-    if (!card || card.detached || !card.customer) {
+    if (!card) throw invalid(`No such payment_method: '${id}'`, "resource_missing", 404);
+    if (card.detached || !card.customer) {
       throw invalid(
         "The payment method you provided is not attached to a customer so detachment is impossible.",
         undefined,

@@ -13,8 +13,8 @@ import {
   saveAccountPhone,
   setDefaultAddress,
 } from "./address-book";
-import { CARD_NOT_FOUND } from "./consent";
-import { listAccountCards, removeAccountCard } from "./saved-cards";
+import { CARD_NOT_FOUND, CARDS_UNAVAILABLE } from "./consent";
+import { listAccountCards, removeAccountCard, type AccountCard } from "./saved-cards";
 import { loadCheckoutPrefill } from "./checkout-profile";
 
 async function requireUserId(): Promise<string> {
@@ -133,16 +133,38 @@ export async function setDefaultAddressAction(addressId: string) {
   }
 }
 
+// Only these three fields are safe to log: a provider's message can echo the API key.
+function logCardFailure(event: string, error: unknown): void {
+  const source = error instanceof Error && error.cause !== undefined ? error.cause : error;
+  const { type, code, statusCode } = (source ?? {}) as { type?: unknown; code?: unknown; statusCode?: unknown };
+  console.error(JSON.stringify({ event, type, code, statusCode }));
+}
+
+function publicCardError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message === SIGN_IN_MESSAGE || message === CARD_NOT_FOUND) return message;
+  logCardFailure("saved_card_removal_failed", error);
+  return CARDS_UNAVAILABLE;
+}
+
+async function cardsAfterRemoval(userId: string) {
+  try {
+    return { ok: true as const, ...(await listAccountCards(userId)) };
+  } catch (error) {
+    logCardFailure("saved_card_list_refresh_failed", error);
+    return { ok: true as const, unavailable: true, cards: [] as AccountCard[] };
+  }
+}
+
 export async function removeCardAction(paymentMethodId: string) {
   try {
     const userId = await requireUserId();
     const id = parseInput(z.string().min(1).max(200), paymentMethodId);
     if (!id.ok) return { ok: false as const, error: CARD_NOT_FOUND };
     await removeAccountCard(userId, id.data);
-    const cards = await listAccountCards(userId);
-    return { ok: true as const, ...cards };
+    return await cardsAfterRemoval(userId);
   } catch (error) {
-    return failed(error);
+    return { ok: false as const, error: publicCardError(error) };
   }
 }
 
