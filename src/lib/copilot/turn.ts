@@ -202,7 +202,7 @@ async function deleteEmpty(storeId: string, conversationId: string): Promise<voi
 
 function spokenReply(text: string, drafts: Draft[]): string {
   const trimmed = text.trim();
-  if (drafts.length > 0 && /should I draft|nothing would change|did not draft|didn't draft|will not draft/i.test(trimmed)) {
+  if (drafts.length > 0 && /should I draft|nothing would change|did not draft|didn't draft|will not draft|which one|I'll draft|I will draft|reply with the name/i.test(trimmed)) {
     return "";
   }
   if (drafts.length === 0 && /\b(drafted|draft is waiting)\b/i.test(trimmed)) {
