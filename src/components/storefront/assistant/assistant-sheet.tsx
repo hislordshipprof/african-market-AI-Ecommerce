@@ -497,6 +497,8 @@ function Thread({
     const session = (speechRef.current?.session ?? 0) + 1;
     const started = beginSpeech(draft, session);
     publishSpeech(started);
+    // A full draft has no room for speech: no recognizer, no permission prompt, no audio.
+    if (!started.accepting) return;
     const recognizer = new Ctor();
     recognizerRef.current = recognizer;
     try {
