@@ -5,6 +5,14 @@
  */
 .story-surface {
   color: var(--foreground);
+  /* WCAG 1.4.11: a field's edge needs 3:1 against the card. The line token is decorative. */
+  --input: color-mix(in oklab, var(--foreground) 48%, var(--card));
+}
+
+/* The stock ring is a half-transparent tint, under 3:1 on the card. */
+.story-surface :is(input, button, a):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .story-surface ::selection {
@@ -12,9 +20,9 @@
   color: var(--primary-foreground);
 }
 
-/* The tall crop keeps the vendor in frame on a phone. The wide crop's focus comes from the scene. */
+/* The tall crop keeps the hands in frame on a phone. The wide crop's focus comes from the scene. */
 .story-surface__poster {
-  object-position: 38% 50%;
+  object-position: 62% 50%;
 }
 
 @media (min-width: 768px) {
@@ -44,13 +52,12 @@
     --card: var(--store-surface, #16211a);
     --card-foreground: var(--store-ink, #eef2ec);
     --primary: var(--store-primary, #6cc08f);
-    --primary-foreground: var(--store-on-primary, #1d3a2b);
+    --primary-foreground: var(--store-on-primary, #0b0b0b);
     --secondary: var(--store-soft, #1b2e23);
     --secondary-foreground: var(--store-ink, #eef2ec);
     --muted: var(--store-raised, #1f2c24);
     --muted-foreground: var(--store-muted, #a3b1a7);
     --border: var(--store-line, #2a3a30);
-    --input: var(--store-line, #2a3a30);
     --ring: var(--store-primary, #6cc08f);
     --destructive: var(--store-deal, #f0707e);
   }

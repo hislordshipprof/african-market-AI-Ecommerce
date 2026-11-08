@@ -4,7 +4,7 @@
 
 | File | Description | Author | Source | License |
 |------|-------------|--------|--------|---------|
-| `story/bodija-wide.webp`, `story/bodija-tall.webp` | Tomato and pepper stall at Bodija Market, Ibadan, Nigeria. Story surface background, cropped and resized. Shows a real market, not a store on this platform or its owner. | Tunde Buremo | [Unsplash](https://unsplash.com/photos/a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00) | [Unsplash License](https://unsplash.com/license) |
+| `story/bodija-wide.webp`, `story/bodija-tall.webp` | Tomato and pepper stall at Bodija Market, Ibadan, Nigeria. Story surface background, cropped to the hands and produce and resized. Shows a real market, not a store on this platform or its owner. | Tunde Buremo | [Unsplash](https://unsplash.com/photos/a-group-of-people-standing-around-a-table-filled-with-tomatoes-cnVn4Gg4b00) | [Unsplash License](https://unsplash.com/license) |
 
 ## Programmatic Assets
 

@@ -156,7 +156,7 @@ export default function DepthScene(props: {
     <Canvas
       flat
       linear
-      dpr={[1, 1.5]}
+      dpr={[1, 2]}
       // The parent carries a percentage overscan and an entrance scale. Measure the
       // layout box, not the transformed one, or the photo stops lining up with the poster.
       resize={{ offsetSize: true }}

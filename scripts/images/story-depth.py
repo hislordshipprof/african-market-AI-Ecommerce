@@ -17,12 +17,13 @@ import onnxruntime as ort
 from PIL import Image, ImageFilter
 
 # Crops are fractions of the source: (left, top, right, bottom).
-WIDE_CROP = (0.0, 0.32, 1.0, 0.82)  # 16:10. Stall, vendor and umbrellas, for tablets and up.
-TALL_CROP = (0.205, 0.32, 0.74, 1.0)  # Vendor in the top third, above a bottom-anchored form.
-WIDE_SIZE = (2000, 1250)
-TALL_SIZE = (780, 1248)
-DEPTH_SIZE = (1000, 625)
-MODEL_INPUT = (826, 518)  # Depth Anything needs multiples of 14.
+# Both lead with hands and produce, under the faces and the stall's signage.
+WIDE_CROP = (0.0, 0.4825, 1.0, 0.9325)  # 16:9, for tablets and up.
+TALL_CROP = (0.2125, 0.48, 0.6625, 1.0)  # Hands and peppers above a bottom-anchored form.
+WIDE_SIZE = (2400, 1350)
+TALL_SIZE = (1024, 1480)
+DEPTH_SIZE = (1000, 563)
+MODEL_INPUT = (826, 462)  # Depth Anything needs multiples of 14.
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -56,8 +57,8 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     source = Image.open(args.source).convert("RGB")
     wide = crop(source, WIDE_CROP, WIDE_SIZE)
-    wide.save(args.out / "bodija-wide.webp", quality=74, method=6)
-    crop(source, TALL_CROP, TALL_SIZE).save(args.out / "bodija-tall.webp", quality=70, method=6)
+    wide.save(args.out / "bodija-wide.webp", quality=76, method=6)
+    crop(source, TALL_CROP, TALL_SIZE).save(args.out / "bodija-tall.webp", quality=72, method=6)
     estimate_depth(wide, args.model).save(args.out / "bodija-wide-depth.webp", quality=80, method=6)
 
 
