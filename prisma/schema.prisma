@@ -514,11 +514,16 @@ model Customer {
   phone            String?
   marketingConsent Boolean  @default(false) @map("marketing_consent")
   notes            String?
+  /// The account Customer at this store that claimed this guest row (Claimed order). Set once.
+  claimedByCustomerId String?   @map("claimed_by_customer_id")
+  claimedAt           DateTime? @map("claimed_at")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   store  Store    @relation(fields: [storeId], references: [id])
   user   User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  claimedBy     Customer?  @relation("CustomerClaim", fields: [claimedByCustomerId, storeId], references: [id, storeId], onDelete: Restrict, onUpdate: Cascade)
+  claimedGuests Customer[] @relation("CustomerClaim")
   orders Order[]
   carts  Cart[]
   aiConversations AiConversation[]
@@ -526,6 +531,7 @@ model Customer {
   @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, email])
+  @@index([storeId, claimedByCustomerId])
   @@index([userId])
   @@map("customers")
 }

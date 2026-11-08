@@ -8,6 +8,8 @@ import { authPrisma, storeScoped } from "./db";
 import { Client } from "pg";
 import { findOrCreateCustomer } from "./customer-auth";
 import { resolveDirectUrl } from "./env";
+import { syncCustomerForStore } from "./customer-claim";
+import { listAccountOrders } from "./customer-account/order-history";
 import {
   getTestSentEmails,
   clearTestSentEmails,
@@ -75,6 +77,8 @@ describe("auth integration (real DB, app_runtime)", () => {
   const staffEmail = `integ-staff-${suffix}@test.example`;
   const adminEmail = `integ-admin-${suffix}@test.example`;
   const storeSlug = `integ-store-${suffix}`;
+  const adaEmail = `ada-claim-${suffix}@example.com`;
+  const unprovenEmail = `unproven-claim-${suffix}@example.com`;
 
   let storeId: string;
   let staffUserId: string;
@@ -127,6 +131,8 @@ describe("auth integration (real DB, app_runtime)", () => {
         staffEmail,
         adminEmail,
         `integ-unknown-${suffix}@test.example`,
+        adaEmail,
+        unprovenEmail,
       ];
       for (const email of emails) {
         await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
@@ -586,4 +592,172 @@ describe("auth integration (real DB, app_runtime)", () => {
     },
     30_000,
   );
+  async function sessionUserFrom(cookies: string) {
+    const session = await auth.api.getSession({
+      headers: new Headers({ cookie: cookies }),
+      query: { disableCookieCache: true },
+    });
+    if (!session) throw new Error("No session for cookies");
+    return session.user;
+  }
+
+  async function seedGuestOrder(
+    store: string,
+    input: { number: number; email: string; name: string; phone: string; createdAt: Date },
+  ) {
+    const db = storeScoped(store);
+    const guest = await db.customer.create({
+      data: { storeId: store, name: input.name, email: input.email, phone: input.phone },
+    });
+    const order = await db.order.create({
+      data: {
+        storeId: store,
+        number: input.number,
+        customerId: guest.id,
+        status: "AUTHORIZED",
+        subtotalCents: 1000 + input.number,
+        tipCents: 200,
+        bufferCents: 100,
+        totalAuthorizedCents: 1300 + input.number,
+        createdAt: input.createdAt,
+      },
+    });
+    return { guestId: guest.id, orderId: order.id };
+  }
+
+  // Claimed guest rows point at the account Customer (ON DELETE RESTRICT): delete orders, then guests, then the rest.
+  async function deleteClaimFixtures(storeIds: string[]) {
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      for (const id of storeIds) {
+        await tx.$executeRaw`DELETE FROM orders WHERE store_id = ${id}`;
+        await tx.$executeRaw`DELETE FROM customers WHERE store_id = ${id} AND claimed_by_customer_id IS NOT NULL`;
+        await tx.$executeRaw`DELETE FROM customers WHERE store_id = ${id}`;
+      }
+    });
+  }
+
+  it("magic-link sign-in claims this store's guest orders by verified email, once, and nothing else", async () => {
+    const storeBId = crypto.randomUUID();
+    const storeBSlug = `integ-claim-b-${suffix}`;
+    await authPrisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeBId}, 'Integ Claim B', ${storeBSlug}, 'active', now())`;
+    });
+    const hour = 60 * 60 * 1000;
+    const now = Date.now();
+    try {
+      const first = await seedGuestOrder(storeId, {
+        number: 1, email: adaEmail, name: "Ada Guest", phone: "+15550001001", createdAt: new Date(now - 3 * hour),
+      });
+      const second = await seedGuestOrder(storeId, {
+        number: 2, email: adaEmail, name: "Ada O.", phone: "+15550001002", createdAt: new Date(now - 2 * hour),
+      });
+      const bob = await seedGuestOrder(storeId, {
+        number: 3, email: `bob-claim-${suffix}@example.com`, name: "Bob", phone: "+15550001003", createdAt: new Date(now - hour),
+      });
+      const atB = await seedGuestOrder(storeBId, {
+        number: 1, email: adaEmail, name: "Ada at B", phone: "+15550001004", createdAt: new Date(now - hour),
+      });
+      const ordersBefore = await storeScoped(storeId).order.findMany({
+        where: { id: { in: [first.orderId, second.orderId] } },
+        include: { customer: { select: { name: true, phone: true, email: true } } },
+        orderBy: { number: "asc" },
+      });
+
+      const mixedCase = adaEmail.replace("ada-claim", "Ada-Claim").replace("example.com", "Example.COM");
+      const sent = await authPost(
+        "/sign-in/magic-link",
+        { email: mixedCase, callbackURL: "/account" },
+        undefined,
+        { "x-store-slug": storeSlug, host: `${storeSlug}.localhost:3000` },
+      );
+      expect(sent.status).toBe(200);
+      const verifyRes = await authGet(extractVerifyUrl(), undefined, {
+        host: `${storeSlug}.localhost:3000`,
+        "x-store-slug": storeSlug,
+      });
+      const user = await sessionUserFrom(collectCookies(verifyRes));
+
+      const account = await syncCustomerForStore(storeId, user);
+      const linkedAfterFirst = await storeScoped(storeId).customer.findMany({
+        where: { claimedByCustomerId: account.id },
+        orderBy: { id: "asc" },
+      });
+      expect(linkedAfterFirst.map((row) => row.id).sort()).toEqual([first.guestId, second.guestId].sort());
+      expect(linkedAfterFirst.every((row) => row.claimedAt instanceof Date)).toBe(true);
+
+      const again = await syncCustomerForStore(storeId, user);
+      expect(again.id).toBe(account.id);
+      const linkedAfterSecond = await storeScoped(storeId).customer.findMany({
+        where: { claimedByCustomerId: account.id },
+        orderBy: { id: "asc" },
+      });
+      expect(linkedAfterSecond.map((row) => [row.id, row.claimedAt?.getTime()])).toEqual(
+        linkedAfterFirst.map((row) => [row.id, row.claimedAt?.getTime()]),
+      );
+
+      const bobRow = await storeScoped(storeId).customer.findFirst({ where: { id: bob.guestId } });
+      expect(bobRow?.claimedByCustomerId).toBeNull();
+      const bRowBefore = await storeScoped(storeBId).customer.findFirst({ where: { id: atB.guestId } });
+      expect(bRowBefore?.claimedByCustomerId).toBeNull();
+
+      const direct = await storeScoped(storeId).order.create({
+        data: {
+          storeId, number: 4, customerId: account.id, status: "COMPLETED", subtotalCents: 500,
+          bufferCents: 50, totalAuthorizedCents: 550, capturedAmountCents: 480, createdAt: new Date(now),
+        },
+      });
+      const history = await listAccountOrders(storeId, account.id);
+      expect(history.map((row) => row.id)).toEqual([direct.id, second.orderId, first.orderId]);
+
+      const ordersAfter = await storeScoped(storeId).order.findMany({
+        where: { id: { in: [first.orderId, second.orderId] } },
+        include: { customer: { select: { name: true, phone: true, email: true } } },
+        orderBy: { number: "asc" },
+      });
+      expect(ordersAfter).toEqual(ordersBefore);
+
+      const accountB = await syncCustomerForStore(storeBId, user);
+      expect(accountB.id).not.toBe(account.id);
+      const bRowAfter = await storeScoped(storeBId).customer.findFirst({ where: { id: atB.guestId } });
+      expect(bRowAfter?.claimedByCustomerId).toBe(accountB.id);
+      expect((await listAccountOrders(storeBId, accountB.id)).map((row) => row.id)).toEqual([atB.orderId]);
+      expect(await listAccountOrders(storeId, accountB.id)).toEqual([]);
+    } finally {
+      await deleteClaimFixtures([storeId, storeBId]);
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRaw`DELETE FROM stores WHERE id = ${storeBId}`;
+      });
+    }
+  });
+
+  it("an account whose email is not proven claims nothing", async () => {
+    try {
+      const guest = await seedGuestOrder(storeId, {
+        number: 11, email: unprovenEmail, name: "Real Owner", phone: "+15550001011", createdAt: new Date(),
+      });
+      const signUp = await authPost("/sign-up/email", {
+        email: unprovenEmail,
+        password: "IntegPass-123!",
+        name: "Squatter",
+      });
+      expect(signUp.status).toBe(200);
+      const user = await sessionUserFrom(collectCookies(signUp));
+      expect(user.emailVerified).toBe(false);
+
+      const account = await syncCustomerForStore(storeId, user);
+
+      const row = await storeScoped(storeId).customer.findFirst({ where: { id: guest.guestId } });
+      expect(row?.claimedByCustomerId).toBeNull();
+      expect(row?.claimedAt).toBeNull();
+      expect(await listAccountOrders(storeId, account.id)).toEqual([]);
+    } finally {
+      await deleteClaimFixtures([storeId]);
+    }
+  });
 });
