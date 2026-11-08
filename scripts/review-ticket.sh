@@ -3,9 +3,9 @@
 # No agent reviews its own work: build-ticket.sh calls this after every build and fix round.
 # Usage: scripts/review-ticket.sh <issue>
 # Writes: .builder/review-<n>.md. Its first line is "VERDICT: PASS" or "VERDICT: BLOCKING".
-# RISK=1 (set automatically by build-ticket.sh for money, auth and external-provider tickets) also runs the
-# Codex review and merges its findings into the same file. With REVIEW_ENGINE=codex the main review is
-# Codex and the RISK second review is CURSOR_REVIEW_MODEL on AGENT_ENGINE.
+# RISK=1 (set automatically by build-ticket.sh for money, auth and external-provider tickets) also runs a
+# second review, a fresh session on AGENT_ENGINE (CURSOR_REVIEW_MODEL on Cursor), and merges its findings into
+# the same file.
 set -euo pipefail
 REPO="hislordshipprof/african-market-AI-Ecommerce"
 ROOT="$(git rev-parse --show-toplevel)"
@@ -50,6 +50,7 @@ Hunt for what breaks in production:
 - whether the necessary tests would catch a regression: test doubles must enforce the provider's real rules, and each external path needs a real sandbox test. Judge test helpers by what real inputs produce, not by hypothetical input.
 $ROUND_RULE
 Reproduce what you can: run the affected unit, integration and sandbox tests yourself, and the affected e2e specs with E2E_PORT=$LANE_PORT; stop any server you start.
+Run every reader and validator in the foreground and wait for it. Do not end your turn until $TARGET exists: a turn that ends first counts as no review.
 Write your result to $TARGET. The FIRST line must be exactly 'VERDICT: PASS' (no blocking findings) or 'VERDICT: BLOCKING'. Then list every finding with: severity (blocking = security, data isolation, money or data loss, a failed acceptance criterion, or broken build/CI; otherwise non-blocking), file:line, the concrete failure scenario, and how to reproduce it."
 
 # The watchdog stops a reviewer that wrote its verdict but never exited, or ran too long (review-watch.sh).
@@ -63,8 +64,7 @@ fi
 [ -s "$OUT" ] && sed -i '1s/\*//g' "$OUT"
 [ -s "$OUT" ] || printf 'VERDICT: BLOCKING\nThe independent review wrote no result; see %s\n' "$LOG" > "$OUT"
 
-if [ "${RISK:-0}" = "1" ] && [ "$REVIEW_ENGINE" = codex ]; then
-  # Codex already did the main review: the second RISK reviewer is another family on AGENT_ENGINE.
+if [ "${RISK:-0}" = "1" ]; then
   OUT2="$ROOT/.builder/review-$N.second.md"; rm -f "$OUT2"
   watch_run "$OUT2" agent_run review2 "$LOG.second.json" "${PROMPT//$TARGET/$OUT2}" || true
   stop_worktree_servers "$WT"
@@ -72,17 +72,6 @@ if [ "${RISK:-0}" = "1" ] && [ "$REVIEW_ENGINE" = codex ]; then
   head -1 "$OUT2" | grep -q '^VERDICT: PASS' || sed -i '1s/^VERDICT: PASS/VERDICT: BLOCKING/' "$OUT"
   printf '\n\n## Second review (independent, %s)\n\n' "${CURSOR_REVIEW_MODEL:-$AGENT_ENGINE}" >> "$OUT"
   cat "$OUT2" >> "$OUT"
-elif [ "${RISK:-0}" = "1" ]; then
-  cd "$ROOT"
-  bash scripts/codex-review.sh "$N" >/dev/null 2>&1 || true
-  CODEX="$ROOT/.builder/codex-review-$N.md"
-  if [ -s "$CODEX" ]; then
-    if ! grep -q "NO BLOCKING FINDINGS" "$CODEX"; then
-      sed -i '1s/^VERDICT: PASS/VERDICT: BLOCKING/' "$OUT"
-    fi
-    printf '\n\n## Codex review (independent, ${CODEX_REVIEW_MODEL:-gpt-6.1-sol} ${CODEX_REVIEW_EFFORT:-high})\n\n' >> "$OUT"
-    cat "$CODEX" >> "$OUT"
-  fi
 fi
 
 head -1 "$OUT"
