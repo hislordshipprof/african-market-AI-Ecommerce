@@ -51,12 +51,14 @@ const money = (cents: number) =>
  * Never the hold: an amount that is not captured yet reads as an estimate, not a charge.
  * refundId alone does not mean refunded: the order service also writes it on a failed refund
  * (REFUND_FAILED, still charged) and a pending one (CANCELLING). Only CANCELLED has settled.
+ * REFUND_FAILED can have no capture when the provider reports nothing received.
  */
 function amountLabel(order: AccountOrderRecord): string {
   if (order.refundId && order.status === "CANCELLED") return "Refunded";
   if (order.refundId && order.status === "CANCELLING") return "Refund pending";
   if (order.capturedAmountCents != null) return money(order.capturedAmountCents);
   if (order.status === "CANCELLED" || order.status === "CANCELLING") return "Not charged";
+  if (order.status === "REFUND_FAILED") return "Refund pending";
   return `Estimated ${money(order.subtotalCents + order.tipCents + order.deliveryFeeCents)}`;
 }
 

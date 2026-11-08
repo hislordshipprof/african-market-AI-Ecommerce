@@ -23,6 +23,7 @@ describe("account order history amount", () => {
   // one still pending, not only on one that settled. Telling that customer "Refunded" is false.
   it("says Refunded only when the refund settled", () => {
     expect(amount({ status: "REFUND_FAILED", refundId: "re_1", capturedAmountCents: 1875 })).toBe("$18.75");
+    expect(amount({ status: "REFUND_FAILED", refundId: "re_1", capturedAmountCents: null })).toBe("Refund pending");
     expect(amount({ status: "CANCELLING", refundId: "re_1", capturedAmountCents: 3000 })).toBe("Refund pending");
     expect(amount({ status: "CANCELLING", refundId: "re_1", capturedAmountCents: null })).toBe("Refund pending");
     expect(amount({ status: "CANCELLED", refundId: "re_1", capturedAmountCents: null })).toBe("Refunded");
