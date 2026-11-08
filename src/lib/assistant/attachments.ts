@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { generateId } from "ai";
-import { scrubCardNumbers } from "./card-scrub";
+import { scrubCardNumbers, scrubFileNameCards } from "./card-scrub";
 import type { PdfRead } from "./pdf-document";
 
 export const TEXT_BODY_CAP = 16 * 1024;
@@ -194,15 +194,16 @@ function keepExtension(name: string, mediaType: string): string {
 }
 
 export function safeAttachmentName(filename: string, index: number, mediaType: string): string {
-  const base = filename.split(/[/\\]/).pop() ?? "";
+  const base = filename.normalize("NFKC").split(/[/\\]/).pop() ?? "";
   const cleaned = base
-    .normalize("NFKC")
-    .replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "")
+    .replace(/[\p{Cc}\p{Cf}]/gu, "")
     .replace(/[^0-9A-Za-z ._()\-]/g, "")
     .trim();
   const fallback = mediaType === "application/pdf" ? `document-${index}.pdf` : `photo-${index}.jpg`;
-  const named = cleaned.length > 0 ? cleaned : fallback;
-  const scrubbed = scrubCardNumbers(keepExtension(named, mediaType)).text.replace(/\s+/g, " ").trim();
+  // A name with nothing left but dots or an extension has no name to keep.
+  const named = /[0-9A-Za-z]/.test(cleaned.replace(/\.[0-9A-Za-z]{1,8}$/, "")) ? cleaned : fallback;
+  // Scrub before the length cut, so the cut cannot leave part of a card behind.
+  const scrubbed = scrubFileNameCards(named).text.replace(/\s+/g, " ").trim();
   const capped = keepExtension(scrubbed.length > 0 ? scrubbed : fallback, mediaType);
   return capped.length > 0 ? capped : fallback;
 }

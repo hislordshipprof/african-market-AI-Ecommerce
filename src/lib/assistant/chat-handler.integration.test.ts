@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -78,7 +78,7 @@ function assertSafePrompt(prompt: unknown) {
     throw new Error("card digits reached the model");
   }
   const breakpoints = json.split("cacheControl").length - 1;
-  if (breakpoints > 4) throw new Error("more than 4 cache breakpoints");
+  if (breakpoints > 2) throw new Error("more than 2 cache breakpoints");
 }
 
 function strictModel(reply: (call: number) => Array<Record<string, unknown>>) {
@@ -2171,6 +2171,81 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(replay.status).toBe(200);
     expect(await replay.text()).toContain("Here is what I found.");
     expect(calls).toBe(afterFirst);
+  }, 60_000);
+
+  it("the current file turn gets its files and breakpoint by id, not by TURN text or by being last", async () => {
+    const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const digest = createHash("sha256").update(jpeg).digest("hex");
+    await storeScoped(storeId).aiConversation.create({
+      data: {
+        storeId,
+        cartId: cart.id,
+        model: "claude-haiku-5-5",
+        messages: [
+          { id: "prose-a-0001", role: "user", parts: [{ type: "text", text: "see TURN:fid-0001" }] },
+          { id: "reply-a-0001", role: "assistant", metadata: { status: "complete" }, parts: [{ type: "text", text: "Noted." }] },
+          {
+            id: "fid-0001",
+            role: "user",
+            parts: [
+              { type: "text", text: "rice from the photo" },
+              { type: "data-attachment", data: { name: "list.jpg", mediaType: "image/jpeg", bytes: jpeg.length, digest, index: 1 } },
+            ],
+          },
+          { id: "reply-f-0001", role: "assistant", metadata: { status: "failed" }, parts: [{ type: "text", text: "partial" }] },
+          { id: "later-b-0001", role: "user", parts: [{ type: "text", text: "plantain on the side" }] },
+          { id: "reply-b-0001", role: "assistant", metadata: { status: "complete" }, parts: [{ type: "text", text: "Here you go." }] },
+        ] as unknown as never,
+      },
+    });
+    const { model, prompts } = strictModel(() => [
+      { type: "stream-start", warnings: [] },
+      { type: "text-start", id: "t" },
+      { type: "text-delta", id: "t", delta: "I found some of the list." },
+      { type: "text-end", id: "t" },
+      { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+    ]);
+    const handler = createChatHandler({ model });
+    const retry = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.230",
+        cookie: `cart_id=${encodeURIComponent(cart.id)}`,
+      },
+      body: JSON.stringify({
+        message: {
+          id: "fid-0001",
+          role: "user",
+          parts: [
+            { type: "text", text: "rice from the photo" },
+            { type: "file", mediaType: "image/jpeg", filename: "list.jpg", url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      }),
+    }));
+    expect(retry.status).toBe(200);
+    expect(await retry.text()).toContain("I found some of the list.");
+    type PromptMessage = { role: string; content: unknown; providerOptions?: unknown };
+    const prompt = prompts[0] as PromptMessage[];
+    const users = prompt.filter((message) => message.role === "user");
+    const withFiles = users.filter((message) => JSON.stringify(message.content).includes('"type":"file"'));
+    expect(withFiles).toHaveLength(1);
+    expect(JSON.stringify(withFiles[0]?.content)).toContain("rice from the photo");
+    expect(withFiles[0]?.providerOptions).toEqual({ anthropic: { cacheControl: { type: "ephemeral" } } });
+    const prose = users[0];
+    expect(JSON.stringify(prose?.content)).toContain("see TURN:fid-0001");
+    expect(JSON.stringify(prose?.content)).not.toContain('"type":"file"');
+    expect(prose?.providerOptions).toBeUndefined();
+    const later = users.findIndex((message) => JSON.stringify(message.content).includes("plantain on the side"));
+    expect(later).toBeGreaterThan(users.indexOf(withFiles[0]!));
+    const json = JSON.stringify(prompt);
+    expect(json.split("TURN:").length - 1).toBe(1);
+    expect(json.split("cacheControl").length - 1).toBe(2);
   }, 60_000);
 
   it("a files-only retry resends its files once and a completed id replays without bytes", async () => {

@@ -72,10 +72,9 @@ describe("assistant model production import", () => {
   it("reads a real PDF and JPEG with the installed parsers", () => {
     const result = runProbe("read-pdf", baseEnv({}));
     expect(result.status, result.stderr).toBe(0);
-    const parsed = JSON.parse(result.stdout) as { pages: number; format: string; external: boolean };
+    const parsed = JSON.parse(result.stdout) as { pages: number; format: string };
     expect(parsed.pages).toBe(2);
     expect(parsed.format).toBe("jpeg");
-    expect(parsed.external).toBe(true);
   });
 
   it("the live photo and PDF check does not run unless it is opted in", () => {

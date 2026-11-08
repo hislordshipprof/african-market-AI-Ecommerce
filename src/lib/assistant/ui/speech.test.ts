@@ -69,6 +69,21 @@ describe("assistant speech", () => {
     expect(state.draft).toHaveLength(2000);
     expect(state.notice).toBe(SPEECH_LIMIT_MESSAGE);
     expect(state.listening).toBe(false);
+
+    const exact = applyFinal(beginSpeech("a".repeat(1979), 1), 1, 0, "b".repeat(20));
+    expect(exact.draft).toBe(`${"a".repeat(1979)} ${"b".repeat(20)}`);
+    expect(exact.notice).toBe(SPEECH_LIMIT_MESSAGE);
+    expect(exact.listening).toBe(false);
+
+    const under = applyFinal(beginSpeech("a".repeat(1978), 1), 1, 0, "b".repeat(20));
+    expect(under.draft).toHaveLength(1999);
+    expect(under.notice).toBeNull();
+    expect(under.listening).toBe(true);
+
+    const full = beginSpeech("x".repeat(2000), 1);
+    expect(full.listening).toBe(false);
+    expect(full.accepting).toBe(false);
+    expect(full.notice).toBe(SPEECH_LIMIT_MESSAGE);
   });
 
   it("replaces the same final after the limit clamp", () => {
@@ -94,7 +109,7 @@ describe("assistant speech", () => {
       onerror: null,
       onend: null,
     };
-    let state = beginSpeech("a".repeat(1990), 1);
+    let state = beginSpeech("a".repeat(1979), 1);
     bindRecognizer(recognizer, {
       lang: "en-US",
       session: 1,
@@ -118,6 +133,14 @@ describe("assistant speech", () => {
     });
     expect(stops).toHaveLength(1);
     expect(state.accepting).toBe(true);
+    recognizer.onresult?.({
+      resultIndex: 0,
+      results: [{ isFinal: true, 0: { transcript: "c".repeat(40) } }],
+    });
+    expect(state.draft).toHaveLength(2000);
+    expect(state.draft.endsWith("c".repeat(20))).toBe(true);
+    expect(state.accepting).toBe(true);
+    expect(stops).toHaveLength(1);
   });
 
   it("picks the page language, then the browser language, then en-US", () => {

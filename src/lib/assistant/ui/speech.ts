@@ -54,8 +54,9 @@ function compose(prefix: string, spoken: string): string {
   return `${prefix.trimEnd()} ${spoken}`;
 }
 
+/** Reaching the limit exactly counts: the draft is full, so listening stops there. */
 function clamp(text: string): { text: string; limited: boolean } {
-  if (text.length <= LIMIT) return { text, limited: false };
+  if (text.length < LIMIT) return { text, limited: false };
   return { text: text.slice(0, LIMIT), limited: true };
 }
 
@@ -72,19 +73,25 @@ function paint(state: SpeechState, finals: ReadonlyMap<number, string>, prefix =
   };
 }
 
+/** True when a draft has no room left for speech. The mic must not start then. */
+function speechDraftFull(draft: string): boolean {
+  return draft.length >= LIMIT;
+}
+
 export function beginSpeech(prefix: string, session: number): SpeechState {
+  const full = speechDraftFull(prefix);
   return {
     session,
-    listening: true,
-    accepting: true,
+    listening: !full,
+    accepting: !full,
     prefix,
     finals: new Map(),
     settled: new Set(),
     interim: "",
     interimIndex: 0,
     committed: new Map(),
-    draft: prefix,
-    notice: null,
+    draft: full ? prefix.slice(0, LIMIT) : prefix,
+    notice: full ? SPEECH_LIMIT_MESSAGE : null,
   };
 }
 

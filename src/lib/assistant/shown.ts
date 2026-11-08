@@ -1,4 +1,5 @@
 import { projectStorefrontListing } from "../storefront/service";
+import { replyStatus } from "./replay";
 
 /** Phrases the owner settled. Longer phrases are matched first. */
 const ACCEPTANCE_PHRASES = [
@@ -120,7 +121,7 @@ export function acceptanceForTurn(
 }
 
 export function replyCountsAsEmpty(message: ShownMessage): boolean {
-  if (statusOf(message) === "failed") return true;
+  if (replyStatus(message) === "failed") return true;
   return message.parts.some((part) => {
     const name = toolNameOf(part);
     if (!name || !outputOk(part.output)) return false;
@@ -134,13 +135,6 @@ function textOf(message: ShownMessage): string {
     .filter((part) => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text ?? "")
     .join("\n");
-}
-
-function statusOf(message: ShownMessage): "complete" | "failed" | null {
-  const meta = message.metadata;
-  if (!meta || typeof meta !== "object") return null;
-  const status = (meta as { status?: unknown }).status;
-  return status === "complete" || status === "failed" ? status : null;
 }
 
 function toolNameOf(part: ShownPart): string | null {

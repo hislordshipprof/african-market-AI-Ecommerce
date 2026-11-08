@@ -77,18 +77,51 @@ function drop(session: Session) {
   sessions.delete(session.key);
 }
 
+/** Combined length of the sent-photo data URLs a same-store chat keeps for previews. */
+const PREVIEW_URL_BUDGET = 8_388_608;
+
+function heldDataUrl(part: UIMessage["parts"][number]): part is Extract<UIMessage["parts"][number], { type: "file" }> {
+  return part.type === "file" && typeof part.url === "string" && part.url.startsWith("data:");
+}
+
+/**
+ * Which held image parts keep their preview: newest first while the combined URL
+ * length fits the budget. The newest turn with photos is always kept whole.
+ */
+function keptPreviews(messages: UIMessage[]): Set<string> {
+  const kept = new Set<string>();
+  let used = 0;
+  let newestTurn = true;
+  for (let m = messages.length - 1; m >= 0; m -= 1) {
+    const parts = messages[m]?.parts ?? [];
+    const images = parts.flatMap((part, p) => (heldDataUrl(part) && part.mediaType.startsWith("image/") ? [{ part, p }] : []));
+    if (images.length === 0) continue;
+    for (let i = images.length - 1; i >= 0; i -= 1) {
+      const { part, p } = images[i]!;
+      if (!newestTurn && used + part.url.length > PREVIEW_URL_BUDGET) return kept;
+      used += part.url.length;
+      kept.add(`${m}:${p}`);
+    }
+    newestTurn = false;
+  }
+  return kept;
+}
+
 function releaseFileBytes(chat: Chat<UIMessage>, keepImages = false) {
-  const next = chat.messages.map((message) => ({
-    ...message,
-    parts: message.parts.map((part) => {
-      if (part.type !== "file" || typeof part.url !== "string" || !part.url.startsWith("data:")) return part;
-      if (keepImages && part.mediaType.startsWith("image/")) return part;
-      return { ...part, url: "" };
-    }),
-  }));
-  const held = JSON.stringify(chat.messages);
-  if (JSON.stringify(next) === held) return;
-  chat.messages = next;
+  const kept = keepImages ? keptPreviews(chat.messages) : new Set<string>();
+  let changed = false;
+  const next = chat.messages.map((message, m) => {
+    if (!message.parts.some(heldDataUrl)) return message;
+    return {
+      ...message,
+      parts: message.parts.map((part, p) => {
+        if (!heldDataUrl(part) || kept.has(`${m}:${p}`)) return part;
+        changed = true;
+        return { ...part, url: "" };
+      }),
+    };
+  });
+  if (changed) chat.messages = next;
 }
 
 function isAbort(error: unknown): boolean {

@@ -106,6 +106,11 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await composer.press("Enter");
   const chip = page.getByLabel("Choice chips").getByRole("button").first();
   await expect(chip).toBeVisible({ timeout: 20_000 });
+  // Start from a fixed point: the reply has finished and focus is back in the composer.
+  const sheet = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(sheet.locator('[class*="bubble"]').filter({ hasText: "Pick one." })).toBeVisible({ timeout: 20_000 });
+  await expect(sheet.locator('[class*="typing"]')).toHaveCount(0);
+  await composer.focus();
   for (let step = 0; step < 8; step += 1) {
     if (await chip.evaluate((element) => element === document.activeElement)) break;
     await page.keyboard.press("Shift+Tab");
@@ -125,9 +130,11 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
   await expect(page.getByTestId("assistant-launcher")).toBeVisible();
   await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(dialog.locator('[class*="addedRow"]')).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="typing"]')).toHaveCount(0);
   await page.getByTestId("assistant-composer").fill("show my basket");
   await page.getByTestId("assistant-composer").press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
   await expect(dialog.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
   await expect(dialog.locator('[class*="summary"]').getByText(/to reach the .+ minimum order/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
@@ -361,6 +368,16 @@ test("a photo does not change the basket until the customer taps", async ({ page
   expect(followUps[0]).not.toContain("data:");
   await expect(sentPhoto).toBeVisible();
   await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("0");
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
+  const chip = dialog.getByLabel("Choice chips").getByRole("button").first();
+  await expect(chip).toBeEnabled();
+  const picked = (await chip.innerText()).trim();
+  await chip.click();
+  await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("1", { timeout: 20_000 });
+  const addedName = (await dialog.locator('[class*="addedRow"]').getByRole("heading").first().innerText()).trim();
+  expect(picked.startsWith(`${addedName} (`)).toBe(true);
+  const fileReplies = dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" });
+  await expect(fileReplies).toHaveCount(1);
   let pdfPost = "";
   page.on("request", (request) => {
     if (request.url().includes("/api/assistant/chat") && request.method() === "POST") pdfPost = request.postData() ?? "";
@@ -371,6 +388,8 @@ test("a photo does not change the basket until the customer taps", async ({ page
   await page.getByTestId("assistant-send").click();
   await expect.poll(() => pdfPost.includes("data:application/pdf;base64,JVBER")).toBe(true);
   expect(pdfPost).not.toContain("data:application/pdf;base64,\"");
+  // The PDF was read by the production build: the scripted file reply arrives as a new bubble.
+  await expect(fileReplies).toHaveCount(2, { timeout: 20_000 });
 });
 
 test("a final after a rejected send keeps the restored draft", async ({ page }) => {
@@ -557,7 +576,7 @@ test("a transparent photo stays dark ink on white and keeps the scrubbed name", 
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles({
-    name: "4242424242424242\u202e.png",
+    name: "4242\u200e4242\u200b42424242\u202e.png",
     mimeType: "image/png",
     buffer: png,
   });
@@ -568,7 +587,9 @@ test("a transparent photo stays dark ink on white and keeps the scrubbed name", 
   await page.getByTestId("assistant-send").click();
   await expect.poll(() => posts.length).toBe(1);
   const body = posts[0] ?? "";
-  expect(body).toContain('"filename":"photo.jpg"');
+  expect(body).toContain('"filename":"[card number removed].jpg"');
+  const withoutBytes = body.replace(/data:[^"]*/g, "");
+  for (const leak of ["4242", "‎", "​", "‮"]) expect(withoutBytes).not.toContain(leak);
   const encoded = body.match(/data:image\/jpeg;base64,([A-Za-z0-9+/=]+)/)?.[1];
   expect(encoded).toBeTruthy();
   const { data, info } = await sharp(Buffer.from(encoded ?? "", "base64")).raw().toBuffer({ resolveWithObject: true });
