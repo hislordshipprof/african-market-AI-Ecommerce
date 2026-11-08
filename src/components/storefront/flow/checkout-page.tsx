@@ -443,16 +443,10 @@ function RealCheckoutForm({
                 onChange={(event) => setSaveCard(event.target.checked)}
               />
               <span>
-                Save this card
+                Save this card for next time
                 <small>{SAVED_CARD_PURPOSE}</small>
               </span>
             </label>
-          ) : null}
-          {prefill?.defaultAddress ? (
-            <p className={styles.muted}>
-              Default address: {prefill.defaultAddress.label}, {prefill.defaultAddress.line1},{" "}
-              {prefill.defaultAddress.city} {prefill.defaultAddress.state} {prefill.defaultAddress.zip}
-            </p>
           ) : null}
         </>
       }
