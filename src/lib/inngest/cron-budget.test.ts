@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assistantRetention, reconcileStuckTransitional, sweepOrphanedAuthorized } from "./functions";
+import { assistantRetention, dailyConfidence, inngestFunctions, reconcileStuckTransitional, sweepOrphanedAuthorized } from "./functions";
 
 function cronOf(fn: { opts: { triggers?: Array<{ cron?: string }> } }): string | undefined {
   return fn.opts.triggers?.find((trigger) => trigger.cron)?.cron;
@@ -18,11 +18,14 @@ describe("Inngest cron budget (ADR-0016)", () => {
     const orphan = cronOf(sweepOrphanedAuthorized);
     const reconcile = cronOf(reconcileStuckTransitional);
     const retention = cronOf(assistantRetention);
+    const confidence = cronOf(dailyConfidence);
     expect(orphan).toBe("*/15 * * * *");
     expect(reconcile).toBe("*/15 * * * *");
     expect(retention).toBe("TZ=UTC 17 3 * * *");
-    const total = monthlyRuns(orphan!) + monthlyRuns(reconcile!) + monthlyRuns(retention!);
-    expect(total).toBe(5_790);
+    expect(confidence).toBe("TZ=UTC 23 9 * * *");
+    expect(inngestFunctions).toContain(dailyConfidence);
+    const total = monthlyRuns(orphan!) + monthlyRuns(reconcile!) + monthlyRuns(retention!) + monthlyRuns(confidence!);
+    expect(total).toBe(5_820);
     expect(total).toBeLessThan(35_000);
   });
 });

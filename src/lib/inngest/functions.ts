@@ -6,6 +6,7 @@ import { isStoreOpen } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { runAssistantRetention } from "../assistant/retention";
+import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing/confidence-job";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -198,10 +199,34 @@ export const assistantRetention = inngest.createFunction(
     }),
 );
 
+export const dailyConfidence = inngest.createFunction(
+  {
+    id: "listing/daily-confidence",
+    singleton: { mode: "skip" },
+    // A cap for one handler invocation, under Vercel's 300 seconds. The batch's own time budget bounds one step.
+    checkpointing: { maxRuntime: "240s" },
+    triggers: [{ cron: "TZ=UTC 23 9 * * *" }],
+  },
+  async ({ step }) => {
+    let cursor: string | null = null;
+    let batch = 0;
+    while (true) {
+      const previous: string | null = cursor;
+      const page: ConfidenceBatchResult = await step.run(`recompute-confidence-${batch}`, () =>
+        recomputeConfidenceBatch(previous),
+      );
+      if (page.nextCursor === null) return;
+      cursor = page.nextCursor;
+      batch += 1;
+    }
+  },
+);
+
 export const inngestFunctions = [
   acceptanceAlert,
   autoCancel,
   sweepOrphanedAuthorized,
   reconcileStuckTransitional,
   assistantRetention,
+  dailyConfidence,
 ];
