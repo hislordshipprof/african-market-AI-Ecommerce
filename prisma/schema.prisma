@@ -371,15 +371,18 @@ model StockEvent {
   type      String
   delta     Int
   actorId   String   @map("actor_id")
+  idempotencyKey String? @map("idempotency_key")
   createdAt DateTime @default(now()) @map("created_at")
 
   store   Store   @relation(fields: [storeId], references: [id])
   listing Listing @relation(fields: [listingId], references: [id])
   actor   User    @relation(fields: [actorId], references: [id])
 
+  @@unique([storeId, idempotencyKey])
   @@index([storeId])
   @@index([listingId])
   @@index([actorId])
+  @@index([storeId, listingId, createdAt])
   @@map("stock_events")
 }
 

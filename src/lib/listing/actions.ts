@@ -24,6 +24,7 @@ const listingFormSchema = z.strictObject({
   price: z.string().max(40).nullable(),
   stockMode: z.string().max(20).nullable(),
   qty: z.string().max(20).nullable(),
+  qtyLoaded: z.string().max(20).nullable(),
   status: z.string().max(40).nullable(),
   frozen: z.string().max(10).nullable(),
   perishable: z.string().max(10).nullable(),
@@ -37,6 +38,7 @@ const LISTING_FIELDS = [
   "price",
   "stockMode",
   "qty",
+  "qtyLoaded",
   "status",
   "frozen",
   "perishable",
@@ -127,6 +129,7 @@ export async function updateListingAction(formData: FormData) {
   const priceRaw = fields.price;
   const stockMode = fields.stockMode;
   const qtyRaw = fields.qty;
+  const qtyLoadedRaw = fields.qtyLoaded;
   const status = fields.status;
   const frozen = fields.frozen;
   const perishable = fields.perishable;
@@ -146,6 +149,9 @@ export async function updateListingAction(formData: FormData) {
   if (qtyRaw !== null) {
     const q = Number(qtyRaw);
     if (!isFinite(q) || q < 0) return { error: "Quantity must be a non-negative number" };
+  }
+  if (qtyLoadedRaw !== null && !Number.isFinite(Number(qtyLoadedRaw))) {
+    return { error: "Quantity must be a non-negative number" };
   }
 
   let parsedVariants: ReturnType<typeof parseVariantsJson> | undefined;
@@ -173,6 +179,7 @@ export async function updateListingAction(formData: FormData) {
       ...(priceRaw !== null && { price: Number(priceRaw) }),
       ...(stockMode !== null && { stockMode: stockMode as StockMode }),
       ...(qtyRaw !== null && { qty: Number(qtyRaw) }),
+      ...(qtyLoadedRaw !== null && { qtyLoaded: Number(qtyLoadedRaw) }),
       ...(status !== null && { status: status as StockStatus }),
       ...(frozen !== null && { frozen: frozen === "true" }),
       ...(perishable !== null && { perishable: perishable === "true" }),

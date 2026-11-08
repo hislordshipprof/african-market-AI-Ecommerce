@@ -5,6 +5,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, platformAdmin, platformSessionUser } from "./db";
 import { Client } from "pg";
 import { backendPid, pgError, waitForLockWait } from "./listing/lock-wait-test-helpers";
+import { acceptOrder, markLineShort } from "./order/service";
+import { countedListing, placeOrder, stockOf } from "./order/stock-ledger-test-helpers";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -94,6 +96,10 @@ describe.skipIf(!hasDb)("Listing RLS isolation", () => {
       rawPrisma.auditLog.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
       rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
       rawPrisma.stockEvent.deleteMany({ where: { actorId: testUserId } }),
+      rawPrisma.cartLine.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+      rawPrisma.cart.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+      rawPrisma.order.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
+      rawPrisma.customer.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
       rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } }),
       rawPrisma.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
     ]);
@@ -235,6 +241,33 @@ describe.skipIf(!hasDb)("Listing RLS isolation", () => {
     });
     expect(after).toEqual(before);
   });
+
+  it("store B cannot read or write order stock events or short store A's line", async () => {
+    const { listingId, variantId } = await countedListing(storeAId, 10, "Ledger isolation");
+    const placed = await placeOrder(storeAId, [{ variantId, qty: 3 }]);
+    await acceptOrder(storeAId, placed.orderId, 15);
+    const lineId = placed.lineIds[0]!;
+    const key = `reservation:${lineId}`;
+    const held = { qty: 7, events: [["reservation", -3]] };
+    expect(await stockOf(storeAId, listingId)).toEqual(held);
+
+    expect(await storeScoped(storeBId).stockEvent.findMany({ where: { idempotencyKey: key } })).toEqual([]);
+    await expectStockEventRls(() => storeScoped(storeBId).stockEvent.create({
+      data: { storeId: storeBId, listingId, type: "sale", delta: -1, actorId: testUserId, idempotencyKey: `sale:${lineId}` },
+    }));
+    expect(await markLineShort(storeBId, lineId, 1)).toEqual({ ok: false, error: "Order line not found" });
+    expect(await stockOf(storeAId, listingId)).toEqual(held);
+    const line = await storeScoped(storeAId).orderLine.findUniqueOrThrow({ where: { id: lineId } });
+    expect(line).toMatchObject({ status: "pending", qtyPicked: 0 });
+
+    // The same key in another store neither collides nor reveals store A's row.
+    const own = await countedListing(storeBId, 5, "Own listing");
+    const sameKey = await storeScoped(storeBId).stockEvent.create({
+      data: { storeId: storeBId, listingId: own.listingId, type: "reservation", delta: -1, actorId: testUserId, idempotencyKey: key },
+    });
+    expect(sameKey.idempotencyKey).toBe(key);
+    expect(await stockOf(storeAId, listingId)).toEqual(held);
+  }, 30_000);
 
   it("store B cannot re-point its stock event to store A's listing or a missing listing", async () => {
     const listingB = await storeScoped(storeBId).listing.create({

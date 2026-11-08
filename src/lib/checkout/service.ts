@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent } from "../db";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
@@ -10,6 +10,7 @@ import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { platformFeeCentsForCapture } from "../order/platform-fee";
+import { reserveOrderStock } from "../order/stock-ledger";
 import { validPhone } from "../customer-account/phone";
 import type {
   CheckoutQuote,
@@ -462,6 +463,10 @@ export async function recordAuthorizedOrder(
         }
       }
 
+      // Before any insert that references these rows. Stock is read under this lock,
+      // not from the rows above, which were read before it.
+      const lockedStock = await lockListingRows(tx, [...new Set(owned.map((variant) => variant.listingId))]);
+
       const customer = await tx.customer.create({
         data: {
           storeId,
@@ -489,7 +494,7 @@ export async function recordAuthorizedOrder(
           notes: input.notes || null,
         },
       });
-      await tx.orderLine.createMany({
+      const orderLines = await tx.orderLine.createManyAndReturn({
         data: input.lines.map((line) => ({
           storeId,
           orderId: order.id,
@@ -499,7 +504,18 @@ export async function recordAuthorizedOrder(
           unitPriceCents: line.price,
           swapRule: line.swapRule,
         })),
+        select: { id: true, listingVariantId: true, qtyOrdered: true },
       });
+      await reserveOrderStock(
+        tx,
+        storeId,
+        orderLines.map((line) => ({
+          id: line.id,
+          listingId: ownedById.get(line.listingVariantId)!.listingId,
+          qtyOrdered: line.qtyOrdered,
+        })),
+        lockedStock,
+      );
       await tx.cartLine.deleteMany({ where: { cartId: input.cartId } });
       await tx.cart.update({
         where: { id: input.cartId },

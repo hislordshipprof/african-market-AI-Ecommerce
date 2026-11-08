@@ -78,6 +78,10 @@ _Avoid_: default weight, fake weight
 **Stock confidence**:
 How sure the platform is that a listing's recorded stock is still true, given that counter sales are invisible to it.
 
+**Stock reservation**:
+The counted units an order holds from the moment it is placed. Capture converts them to a sale, and a cancel returns them, each exactly once. Holding units never refuses an order: it takes what is recorded, down to zero.
+_Avoid_: Stock hold (a hold is the card authorization), stock lock
+
 **Counter sale**:
 A sale made in person at the store, outside the platform.
 _Avoid_: Offline sale, POS sale

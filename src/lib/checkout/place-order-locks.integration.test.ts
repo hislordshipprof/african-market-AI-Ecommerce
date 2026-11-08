@@ -191,77 +191,6 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     return res.rows.map((row) => Number(row.pid));
   }
 
-  function asPids(value: unknown): number[] {
-    if (Array.isArray(value)) return value.map(Number).filter((pid) => pid > 0);
-    if (typeof value !== "string") return [];
-    return value.replace(/[{}]/g, "").split(",").map(Number).filter((pid) => pid > 0);
-  }
-
-  /**
-   * Pids holding this row's update lock. Null when the row is free or the probe
-   * is only queued on a table lock, so a parallel DDL wait is not mistaken for
-   * the row holder. Granted row locks are not listed in pg_locks.
-   */
-  async function pidsHoldingRowUpdate(
-    storeId: string,
-    table: "listings" | "stores",
-    id: string,
-  ): Promise<number[] | null> {
-    const client = new Client({ connectionString: process.env.DATABASE_URL });
-    await client.connect();
-    const sql = table === "listings"
-      ? "SELECT 1 FROM listings WHERE id = $1 FOR UPDATE"
-      : "SELECT 1 FROM stores WHERE id = $1 FOR UPDATE";
-    let probePid = 0;
-    try {
-      await client.query("BEGIN");
-      await client.query("SET LOCAL ROLE app_user");
-      await client.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
-      await client.query("SET LOCAL lock_timeout = '250ms'");
-      const who = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-      probePid = Number(who.rows[0]?.pid ?? 0);
-      let holders: number[] | null = null;
-      let sawRelation = false;
-      let settled = false;
-      const attempt = client.query(sql, [id]).then(
-        () => {
-          settled = true;
-        },
-        (err: unknown) => {
-          settled = true;
-          const code = pgCode(err);
-          if (code !== "55P03" && code !== "57014") throw err;
-        },
-      );
-      const start = Date.now();
-      while (!settled && Date.now() - start < 300) {
-        const pending = await monitor.query<{ locktype: string }>(
-          "SELECT locktype FROM pg_locks WHERE pid = $1 AND NOT granted",
-          [probePid],
-        );
-        if (pending.rows.some((row) => row.locktype === "relation")) {
-          sawRelation = true;
-          break;
-        }
-        const waiting = await monitor.query<{ blockers: unknown }>(
-          "SELECT pg_blocking_pids($1::int) AS blockers",
-          [probePid],
-        );
-        const found = asPids(waiting.rows[0]?.blockers);
-        if (found.length > 0) {
-          holders = found;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      await attempt;
-      return sawRelation ? null : holders;
-    } finally {
-      await client.query("ROLLBACK").catch(() => undefined);
-      await client.end().catch(() => undefined);
-    }
-  }
-
   async function assertCartHeldBy(storeId: string, cartId: string, ownerPid: number) {
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
@@ -796,13 +725,20 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       .map((variant) => ({
         id: variant.id,
         label: variant.label,
-        price: variant.label === "V0" ? nextPrice : PRICE,
+        // V1 is outside the cart, so the save writes its audit row without changing the basket.
+        price: variant.label === "V1" ? nextPrice : PRICE,
         weightG: 100,
         sku: null,
         barcode: null,
       }));
   }
 
+  /**
+   * Stops the first writer while it holds what it holds, starts the second until it waits on
+   * the first, then lets both run. A save that took the listing without the store deadlocks
+   * here: it waits on the store for its audit row while checkout holds the store and waits on
+   * the listing.
+   */
   async function raceSave(entry: "listing" | "variants", first: "save" | "checkout") {
     const storeId = await makeStore(`${entry}-${first}`);
     const scoped = storeScoped(storeId);
@@ -811,7 +747,8 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
         storeId,
         customName: `${entry} ${first}`,
         price: PRICE,
-        stockMode: "unlimited",
+        stockMode: "counted",
+        qty: 10,
         frozen: false,
         perishable: false,
       },
@@ -832,112 +769,56 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     const removed = created.find((variant) => variant.label === "V2")!;
     const save = () =>
       entry === "listing"
-        ? updateListing({ storeId, listingId: listing.id, variants: payload, actor })
+        ? updateListing({ storeId, listingId: listing.id, qty: 20, variants: payload, actor })
         : updateVariants({ storeId, listingId: listing.id, variants: payload, actor });
     const checkout = () => recordAuthorizedOrder(storeId, input);
-    // V2 is removed and is not in the order. KEY SHARE stops the save after it
-    // has locked the listing and before it writes, so the overlap stays put.
-    const variantHolder = hold(storeId, async (client) => {
-      const locked = await client.query("SELECT id FROM listing_variants WHERE id = $1 FOR KEY SHARE", [removed.id]);
-      if (locked.rowCount !== 1) throw new Error("holder missed the removed variant");
+    // KEY SHARE on the removed variant stops a save after its listing lock. KEY SHARE on the
+    // cart stops checkout after its store lock.
+    const pause = hold(storeId, async (client) => {
+      const locked = first === "save"
+        ? await client.query("SELECT id FROM listing_variants WHERE id = $1 FOR KEY SHARE", [removed.id])
+        : await client.query("SELECT id FROM carts WHERE id = $1 FOR KEY SHARE", [cart.id]);
+      if (locked.rowCount !== 1) throw new Error("holder missed its row");
     });
-    let pauseHolder: ReturnType<typeof hold> | null = null;
-    let saveRun: Promise<unknown> | null = null;
-    let checkoutRun: Promise<unknown> | null = null;
-    let saveFailure: unknown = null;
-    const variantPid = await variantHolder.ready();
+    const pausePid = await pause.ready();
     let saved: unknown;
     let recorded: { created: boolean; orderId: string } | undefined;
-    const watchSave = () => {
-      saveRun = save().catch((err: unknown) => {
-        saveFailure = err;
-        throw err;
-      });
-    };
-    const saveWaitingOnVariant = async () => {
-      if (saveFailure) throw saveFailure;
-      return pidsBlockedBy(variantPid);
-    };
+    let firstRun: Promise<unknown> | null = null;
+    let secondRun: Promise<unknown> | null = null;
     try {
-      if (first === "save") {
-        // Checkout locks the store before the cart. Holding the cart keeps that
-        // store lock visible until the save's listing lock has been observed.
-        const cartHolder = hold(storeId, async (client) => {
-          const locked = await client.query("SELECT id FROM carts WHERE id = $1 FOR KEY SHARE", [cart.id]);
-          if (locked.rowCount !== 1) throw new Error("holder missed the cart");
-        });
-        pauseHolder = cartHolder;
-        const cartPid = await cartHolder.ready();
-        watchSave();
-        let savePid = 0;
-        await poll("save holds the listing while it waits on the removed variant", async () => {
-          const waiting = await saveWaitingOnVariant();
-          if (waiting.length === 0) return false;
-          const holders = await pidsHoldingRowUpdate(storeId, "listings", listing.id);
-          const hit = holders ? waiting.find((pid) => holders.includes(pid)) : undefined;
-          if (!hit) return false;
-          savePid = hit;
-          return true;
-        }, 8_000);
-        checkoutRun = checkout();
-        let checkoutPid = 0;
-        await poll("checkout waits on the cart after locking the store", async () => {
-          const waiting = await pidsBlockedBy(cartPid);
-          const hit = waiting[0];
-          if (!hit) return false;
-          checkoutPid = hit;
-          return true;
-        });
-        await poll("that checkout holds the store while the save is still waiting", async () => {
-          const waiting = await saveWaitingOnVariant();
-          if (!waiting.includes(savePid)) return false;
-          const holders = await pidsHoldingRowUpdate(storeId, "stores", storeId);
-          return holders?.includes(checkoutPid) ?? false;
-        }, 8_000);
-      } else {
-        pauseHolder = hold(storeId, async (client) => {
-          const locked = await client.query("SELECT 1 FROM stores WHERE id = $1 FOR KEY SHARE", [storeId]);
-          if (locked.rowCount !== 1) throw new Error("holder missed the store");
-        });
-        const storePid = await pauseHolder.ready();
-        checkoutRun = checkout();
-        let checkoutPid = 0;
-        await poll("checkout waits on the store before the save starts", async () => {
-          const waiting = await pidsBlockedBy(storePid);
-          const hit = waiting[0];
-          if (!hit) return false;
-          checkoutPid = hit;
-          return true;
-        });
-        watchSave();
-        await poll("save holds the listing while checkout is still waiting on the store", async () => {
-          const checkoutStillWaiting = await pidsBlockedBy(storePid);
-          if (!checkoutStillWaiting.includes(checkoutPid)) return false;
-          const waiting = await saveWaitingOnVariant();
-          if (waiting.length === 0) return false;
-          const holders = await pidsHoldingRowUpdate(storeId, "listings", listing.id);
-          return holders ? waiting.some((pid) => holders.includes(pid)) : false;
-        }, 8_000);
-      }
-      pauseHolder?.release();
-      variantHolder.release();
-      [saved, recorded] = (await Promise.all([saveRun, checkoutRun])) as [
-        unknown,
-        { created: boolean; orderId: string },
-      ];
+      firstRun = first === "save" ? save() : checkout();
+      let firstPid = 0;
+      await poll(`${first} stops on the holder`, async () => {
+        firstPid = (await pidsBlockedBy(pausePid))[0] ?? 0;
+        return firstPid > 0;
+      });
+      secondRun = first === "save" ? checkout() : save();
+      await poll("the second writer waits on the first", async () => (await pidsBlockedBy(firstPid)).length > 0);
+      pause.release();
+      const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+      saved = first === "save" ? firstResult : secondResult;
+      recorded = (first === "save" ? secondResult : firstResult) as { created: boolean; orderId: string };
     } finally {
-      pauseHolder?.release();
-      variantHolder.release();
-      await Promise.allSettled([variantHolder.done, pauseHolder?.done, saveRun, checkoutRun]);
+      pause.release();
+      await Promise.allSettled([pause.done, firstRun, secondRun]);
     }
     expect(saved).toBeTruthy();
     expect(recorded?.created).toBe(true);
+    const counted = entry === "listing";
+    // A count after the reservation is the truth. A reservation after the count takes from it.
+    const finalQty = !counted ? 8 : first === "save" ? 18 : 20;
+    const stock = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: listing.id } });
+    expect(stock.qty).toBe(finalQty);
+    const reservations = await storeScoped(storeId).stockEvent.findMany({
+      where: { listingId: listing.id, type: "reservation" },
+    });
+    expect(reservations.map((event) => event.delta)).toEqual([-2]);
     const listingRow = await storeScoped(storeId).listing.findUnique({
       where: { id: listing.id },
       include: { variants: true },
     });
     expect(listingRow?.variants.map((variant) => variant.label).sort()).toEqual(["V0", "V1"]);
-    expect(listingRow?.variants.find((variant) => variant.label === "V0")?.price).toBe(750);
+    expect(listingRow?.variants.find((variant) => variant.label === "V1")?.price).toBe(750);
     const order = await storeScoped(storeId).order.findUnique({
       where: { id: recorded!.orderId },
       include: { lines: true },
@@ -948,12 +829,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     expect(order?.totalAuthorizedCents).toBe(input.quote.holdCents);
   }
 
-  it("checkout and a variant save on the same listing both commit", async () => {
-    await raceSave("listing", "checkout");
-    await raceSave("listing", "save");
-  }, 60_000);
-
-  it("both variant-save entry points commit real changes with checkout in both orders", async () => {
+  it("checkout and an owner save on the same listing both commit, in either order", async () => {
     await raceSave("listing", "save");
     await raceSave("listing", "checkout");
     await raceSave("variants", "save");

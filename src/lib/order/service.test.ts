@@ -3,7 +3,10 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { recordReconcileResult } from "../inngest/functions";
-import { acceptOrder, autoCancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
+import { acceptOrder, autoCancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markLineShort, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
+import { recordAuthorizedOrder } from "../checkout/service";
+import { updateListing } from "../listing/service";
+import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
@@ -159,6 +162,8 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.auditLog.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.cartLine.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.cart.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.orderLine.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.order.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.customer.deleteMany({ where: { storeId: { in: storeIds } } }),
@@ -509,21 +514,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.cancelledAt).toBeTruthy();
 
     expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
-  });
-
-  it("M3: autoCancelOrder does NOT create cancel_restore StockEvents (stock not reserved at checkout, see #141)", async () => {
-    const order = await createTestOrder();
-
-    const beforeCount = await storeScoped(storeId).stockEvent.count({
-      where: { type: "cancel_restore" },
-    });
-
-    await autoCancelOrder(storeId, order.id);
-
-    const afterCount = await storeScoped(storeId).stockEvent.count({
-      where: { type: "cancel_restore" },
-    });
-    expect(afterCount).toBe(beforeCount);
   });
 
   it("autoCancelOrder creates auto_cancel AuditLog entry", async () => {
@@ -961,10 +951,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       });
     }
 
-    const beforeCount = await storeScoped(storeId).stockEvent.count({
-      where: { type: "cancel_restore" },
-    });
-
     const result = await markReady(storeId, order.id);
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -983,12 +969,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "void_zero_amount" },
     });
     expect(logs.length).toBe(1);
-
-    // M3: void path must NOT create cancel_restore stock events (stock not reserved at checkout, see #141)
-    const afterCount = await storeScoped(storeId).stockEvent.count({
-      where: { type: "cancel_restore" },
-    });
-    expect(afterCount).toBe(beforeCount);
   });
 
   it("K3: markReady voids authorization when final amount is below Stripe minimum (50 cents USD)", async () => {
@@ -1390,8 +1370,6 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("CANCELLED");
     expect(updated!.cancelledAt).toBeTruthy();
-
-    // M3: no cancel_restore stock events (stock not reserved at checkout, see #141)
 
     const logs = await storeScoped(storeId).auditLog.findMany({
       where: { entityId: order.id, action: "reconcile_cancel" },
@@ -3894,5 +3872,181 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "refund_failed" },
     });
     expect(logs).toHaveLength(1);
+  });
+
+  describe("stock ledger", () => {
+    async function pickAll(orderId: string) {
+      await acceptOrder(storeId, orderId, 15);
+      const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId } });
+      for (const line of lines) await markLinePicked(storeId, line.id);
+    }
+
+    async function statusOf(orderId: string) {
+      return (await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } })).status;
+    }
+
+    it("placement reserves and capture settles once, for pickup and delivery", async () => {
+      for (const [fulfillment, finalStatus] of [["pickup", "AWAITING_PICKUP"], ["delivery", "READY"]] as const) {
+        const { listingId, variantId } = await countedListing(storeId, 10);
+        const named = await countedListing(storeId, 8, "Named substitute");
+        const placed = await placeOrder(storeId, [{ variantId, qty: 3, substituteVariantId: named.variantId }]);
+        // Checkout only offers pickup today; markReady reads the order's fulfillment.
+        await storeScoped(storeId).order.update({ where: { id: placed.orderId }, data: { fulfillment } });
+        expect(await stockOf(storeId, listingId)).toEqual({ qty: 7, events: [["reservation", -3]] });
+
+        const replay = await recordAuthorizedOrder(storeId, placed.input);
+        expect(replay).toEqual({ orderId: placed.orderId, created: false });
+        expect(await stockOf(storeId, listingId)).toEqual({ qty: 7, events: [["reservation", -3]] });
+
+        await pickAll(placed.orderId);
+        expect((await markReady(storeId, placed.orderId)).ok).toBe(true);
+        expect(await statusOf(placed.orderId)).toBe(finalStatus);
+        expect(await stockOf(storeId, listingId)).toEqual({
+          qty: 7,
+          events: [["reservation", -3], ["reservation_release", 3], ["sale", -3]],
+        });
+        // A substitute the line never used keeps its stock.
+        expect(await stockOf(storeId, named.listingId)).toEqual({ qty: 8, events: [] });
+      }
+
+      // An order placed before reservations existed sells from stock with nothing to release.
+      const legacy = await countedListing(storeId, 10, "Before this shipped");
+      orderSeq += 1000; // Placed orders above took the next numbers.
+      const order = await createTestOrder("PICKING");
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.orderLine.deleteMany({ where: { orderId: order.id } });
+        await tx.orderLine.create({
+          data: {
+            storeId,
+            orderId: order.id,
+            listingVariantId: legacy.variantId,
+            qtyOrdered: 2,
+            qtyPicked: 2,
+            status: "picked",
+            unitPriceCents: 1000,
+          },
+        });
+      });
+      expect((await markReady(storeId, order.id)).ok).toBe(true);
+      expect(await stockOf(storeId, legacy.listingId)).toEqual({ qty: 8, events: [["sale", -2]] });
+    }, 30_000);
+
+    it("a cancel that runs twice restores only what the order took", async () => {
+      const { listingId, variantId } = await countedListing(storeId, 3);
+      const placed = await placeOrder(storeId, [{ variantId, qty: 5 }]);
+      expect(await stockOf(storeId, listingId)).toEqual({ qty: 0, events: [["reservation", -3]] });
+
+      expect(await autoCancelOrder(storeId, placed.orderId)).toEqual({ ok: true });
+      const cancelled = { qty: 3, events: [["reservation", -3], ["reservation_release", 3]] };
+      expect(await stockOf(storeId, listingId)).toEqual(cancelled);
+
+      expect((await autoCancelOrder(storeId, placed.orderId)).ok).toBe(false);
+      expect(await stockOf(storeId, listingId)).toEqual(cancelled);
+
+      // The other routes to Cancelled return stock the same way.
+      const voided = await countedListing(storeId, 10, "Void");
+      const voidOrder = await placeOrder(storeId, [{ variantId: voided.variantId, qty: 2 }]);
+      await acceptOrder(storeId, voidOrder.orderId, 15);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.orderLine.updateMany({ where: { orderId: voidOrder.orderId }, data: { status: "refunded" } });
+        await tx.order.update({ where: { id: voidOrder.orderId }, data: { status: "PICKING" } });
+      });
+      expect(await markReady(storeId, voidOrder.orderId)).toMatchObject({ ok: true, voided: true });
+      expect((await stockOf(storeId, voided.listingId)).qty).toBe(10);
+
+      const expired = await countedListing(storeId, 10, "Expired hold");
+      const expiredOrder = await placeOrder(storeId, [{ variantId: expired.variantId, qty: 2 }]);
+      await pickAll(expiredOrder.orderId);
+      cancelledPayments.add(expiredOrder.paymentIntentId);
+      expect((await markReady(storeId, expiredOrder.orderId)).ok).toBe(false);
+      expect(await statusOf(expiredOrder.orderId)).toBe("CANCELLED");
+      expect((await stockOf(storeId, expired.listingId)).qty).toBe(10);
+
+      const released = await countedListing(storeId, 10, "Released hold");
+      const releasedOrder = await placeOrder(storeId, [{ variantId: released.variantId, qty: 2 }]);
+      await pickAll(releasedOrder.orderId);
+      setNextCaptureFailure(releasedOrder.paymentIntentId, 10);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await markReady(storeId, releasedOrder.orderId);
+        await expireCaptureBackoff(releasedOrder.orderId);
+      }
+      expect(await statusOf(releasedOrder.orderId)).toBe("CANCELLED");
+      expect((await stockOf(storeId, released.listingId)).qty).toBe(10);
+
+      // An owner's count after the reservation is the truth: cancelling must not add to it.
+      const recounted = await countedListing(storeId, 10, "Recounted");
+      const recountedOrder = await placeOrder(storeId, [{ variantId: recounted.variantId, qty: 3 }]);
+      await updateListing({
+        storeId,
+        listingId: recounted.listingId,
+        qty: 10,
+        actor: { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL },
+      });
+      await autoCancelOrder(storeId, recountedOrder.orderId);
+      expect(await stockOf(storeId, recounted.listingId)).toEqual({
+        qty: 10,
+        events: [["reservation", -3], ["reservation_release", 0]],
+      });
+
+      // An order placed before reservations existed has nothing to return.
+      const legacy = await countedListing(storeId, 10, "Before this shipped");
+      orderSeq += 1000; // Placed orders above took the next numbers.
+      const order = await createTestOrder();
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.orderLine.updateMany({ where: { orderId: order.id }, data: { listingVariantId: legacy.variantId } });
+      });
+      await autoCancelOrder(storeId, order.id);
+      expect(await stockOf(storeId, legacy.listingId)).toEqual({ qty: 10, events: [] });
+    }, 30_000);
+
+    it("the reconcile sweep settles stock once after Stripe captured", async () => {
+      const { listingId, variantId } = await countedListing(storeId, 10);
+      const placed = await placeOrder(storeId, [{ variantId, qty: 3 }]);
+      await pickAll(placed.orderId);
+      // Stripe captured, then the finalize transaction was lost: the order stays CAPTURING.
+      await fakeStripeProvider.capturePaymentIntent(placed.paymentIntentId, 3000, "sweep-cap");
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: placed.orderId }, data: { status: "CAPTURING", capturedAmountCents: 3000 } });
+      });
+
+      const settled = { qty: 7, events: [["reservation", -3], ["reservation_release", 3], ["sale", -3]] };
+      expect(await reconcileStuckOrder(storeId, placed.orderId)).toEqual({ ok: true, action: "finalized_capture" });
+      expect(await statusOf(placed.orderId)).toBe("AWAITING_PICKUP");
+      expect(await stockOf(storeId, listingId)).toEqual(settled);
+
+      expect(await reconcileStuckOrder(storeId, placed.orderId)).toEqual({ ok: true, action: "already_resolved" });
+      expect(await stockOf(storeId, listingId)).toEqual(settled);
+    }, 30_000);
+
+    it("marking a line short converts the reservation and cannot repeat", async () => {
+      const { listingId, variantId } = await countedListing(storeId, 10);
+      const placed = await placeOrder(storeId, [{ variantId, qty: 5 }]);
+      await acceptOrder(storeId, placed.orderId, 15);
+      const lineId = placed.lineIds[0]!;
+
+      for (const bad of [5, 6, -1, 1.5]) {
+        expect((await markLineShort(storeId, lineId, bad)).ok).toBe(false);
+      }
+      expect((await stockOf(storeId, listingId)).qty).toBe(5);
+
+      expect(await markLineShort(storeId, lineId, 2)).toEqual({ ok: true, orderStatus: "PICKING" });
+      const shorted = { qty: 5, events: [["reservation", -5], ["reservation_release", 3], ["short", -3]] };
+      expect(await stockOf(storeId, listingId)).toEqual(shorted);
+      const line = await storeScoped(storeId).orderLine.findUniqueOrThrow({ where: { id: lineId } });
+      expect(line).toMatchObject({ status: "short", qtyPicked: 2 });
+      expect(await statusOf(placed.orderId)).toBe("PICKING");
+
+      expect((await markLineShort(storeId, lineId, 2)).ok).toBe(false);
+      expect(await stockOf(storeId, listingId)).toEqual(shorted);
+
+      // A later cancel returns only the two units the short left reserved.
+      await storeScoped(storeId).order.update({ where: { id: placed.orderId }, data: { status: "CANCELLING" } });
+      cancelledPayments.add(placed.paymentIntentId);
+      await reconcileStuckOrder(storeId, placed.orderId);
+      expect(await stockOf(storeId, listingId)).toEqual({
+        qty: 7,
+        events: [["reservation", -5], ["reservation_release", 3], ["short", -3], ["reservation_release", 2]],
+      });
+    }, 30_000);
   });
 });

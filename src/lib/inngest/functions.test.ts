@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Client } from "pg";
 import * as dbModule from "../db";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
@@ -246,6 +247,86 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
   afterEach(() => {
     vi.mocked(dbModule.findStuckTransitionalOrders).mockRestore();
     vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
+  });
+
+  describe("dailyConfidence", () => {
+    const ownStoreIds = () => [storeId, storeBId].sort();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    async function runJob(at: Date) {
+      const { dailyConfidence } = await import("./functions");
+      const spy = vi.spyOn(dbModule, "findStoreIdsAfter").mockImplementation(async (cursor) =>
+        ownStoreIds().filter((id) => !cursor || id > cursor),
+      );
+      try {
+        await withMockedTime(at, () =>
+          (dailyConfidence as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn({
+            step: makeFakeStep(),
+          }),
+        );
+      } finally {
+        spy.mockRestore();
+      }
+    }
+
+    async function idleListing(owner: string, name: string, createdAt: Date, active = true) {
+      return storeScoped(owner).listing.create({
+        data: { storeId: owner, customName: name, price: 100, stockMode: "counted", qty: 5, active, createdAt, frozen: false, perishable: false },
+      });
+    }
+
+    it("the daily confidence job keeps decaying an idle listing across runs in each store", async () => {
+      const now = new Date();
+      const eightDaysAgo = new Date(now.getTime() - 8 * dayMs);
+      const a = await idleListing(storeId, "Idle A", eightDaysAgo);
+      const b = await idleListing(storeBId, "Idle B", eightDaysAgo);
+      const inactive = await idleListing(storeId, "Inactive", eightDaysAgo, false);
+
+      await runJob(now);
+
+      const firstA = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: a.id } });
+      const firstB = await storeScoped(storeBId).listing.findUniqueOrThrow({ where: { id: b.id } });
+      expect(firstA.confidence).toBeLessThan(0.6);
+      expect(firstA.confidence).toBeGreaterThanOrEqual(0.3);
+      expect(firstB.confidence).toBeLessThan(0.6);
+      expect(firstA.confidenceUpdatedAt.getTime()).toBe(now.getTime());
+      expect(firstB.confidenceUpdatedAt.getTime()).toBe(now.getTime());
+
+      const nextDay = new Date(now.getTime() + dayMs);
+      await runJob(nextDay);
+
+      const secondA = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: a.id } });
+      expect(secondA.confidence).toBeLessThan(firstA.confidence);
+      expect(secondA.confidenceUpdatedAt.getTime()).toBe(nextDay.getTime());
+      const untouched = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: inactive.id } });
+      expect(untouched.confidence).toBe(1);
+      expect(untouched.confidenceUpdatedAt.getTime()).toBe(inactive.confidenceUpdatedAt.getTime());
+    }, 30_000);
+
+    it("the daily confidence job skips a listing an order holds and finishes", async () => {
+      const now = new Date();
+      const eightDaysAgo = new Date(now.getTime() - 8 * dayMs);
+      const held = await idleListing(storeId, "Held", eightDaysAgo);
+      const free = await idleListing(storeId, "Free", eightDaysAgo);
+      const holder = new Client({ connectionString: process.env.DATABASE_URL });
+      await holder.connect();
+      try {
+        await holder.query("BEGIN");
+        await holder.query("SET LOCAL ROLE app_user");
+        await holder.query("SELECT set_config('app.store_id', $1, true)", [storeId]);
+        await holder.query("SELECT 1 FROM listings WHERE id = $1 FOR UPDATE", [held.id]);
+
+        await runJob(now);
+
+        const heldRow = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: held.id } });
+        const freeRow = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: free.id } });
+        expect(heldRow.confidence).toBe(1);
+        expect(freeRow.confidence).toBeLessThan(0.6);
+      } finally {
+        await holder.query("ROLLBACK").catch(() => undefined);
+        await holder.end();
+      }
+    }, 30_000);
   });
 
   describe("acceptanceAlert", () => {

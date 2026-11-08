@@ -4,9 +4,12 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { OverRefundError } from "../stripe/errors";
-import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount } from "../stripe/fake";
+import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
 import { autoCancelOrder, reconcileStuckOrder } from "./service";
-import { reconcileRefundRequest, REPLAY_LEASE_MS, submitRefund } from "./refund-requests";
+import { evaluateOrderRefundState, reconcileRefundRequest, REPLAY_LEASE_MS, submitRefund } from "./refund-requests";
+import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
+import { updateListing } from "../listing/service";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 
 const reviewFault = vi.hoisted(() => ({ failAlert: false }));
 
@@ -73,8 +76,13 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.auditLog.deleteMany({ where: { storeId } });
+      await tx.stockEvent.deleteMany({ where: { storeId } });
+      await tx.cartLine.deleteMany({ where: { storeId } });
+      await tx.cart.deleteMany({ where: { storeId } });
       await tx.order.deleteMany({ where: { storeId } });
       await tx.customer.deleteMany({ where: { storeId } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId } } });
+      await tx.listing.deleteMany({ where: { storeId } });
       await tx.store.deleteMany({ where: { id: storeId } });
     });
     await raw.$disconnect();
@@ -114,6 +122,61 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     });
     return created;
   }
+
+  it("Cancelling to Refund failed to Cancelled releases the reservation once", async () => {
+    const { listingId, variantId } = await countedListing(storeId, 10);
+    const placed = await placeOrder(storeId, [{ variantId, qty: 3 }]);
+    const pi = placed.paymentIntentId;
+    await fakeStripeProvider.capturePaymentIntent(pi, 3000, `cap-${placed.orderId}`);
+    await storeScoped(storeId).order.update({
+      where: { id: placed.orderId },
+      data: { status: "REFUND_FAILED", capturedAmountCents: 3000 },
+    });
+    const held = { qty: 7, events: [["reservation", -3]] };
+
+    // Refund failed: the customer is still charged, so the reservation stays held.
+    const failed = await fakeStripeProvider.refundPayment(pi, 3000, `failed-${placed.orderId}`);
+    setRefundStatus(failed.refundId, "failed");
+    await evaluateOrderRefundState(placed.orderId);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("REFUND_FAILED");
+    expect(await stockOf(storeId, listingId)).toEqual(held);
+
+    await fakeStripeProvider.refundPayment(pi, 3000, `covered-${placed.orderId}`);
+    await evaluateOrderRefundState(placed.orderId);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("CANCELLED");
+    const released = { qty: 10, events: [["reservation", -3], ["reservation_release", 3]] };
+    expect(await stockOf(storeId, listingId)).toEqual(released);
+
+    // The second pass through Cancelled gets past the status guard. Only the key stops a second release.
+    await storeScoped(storeId).order.update({
+      where: { id: placed.orderId },
+      data: { status: "REFUND_FAILED", capturedAmountCents: 3000 },
+    });
+    await evaluateOrderRefundState(placed.orderId);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("CANCELLED");
+    expect(await stockOf(storeId, listingId)).toEqual(released);
+
+    // A superseded release moves nothing, so nothing but its key stops a second row.
+    const recounted = await countedListing(storeId, 10, "Recounted");
+    const second = await placeOrder(storeId, [{ variantId: recounted.variantId, qty: 3 }]);
+    await updateListing({
+      storeId,
+      listingId: recounted.listingId,
+      qty: 10,
+      actor: { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL },
+    });
+    await fakeStripeProvider.capturePaymentIntent(second.paymentIntentId, 3000, `cap-${second.orderId}`);
+    await fakeStripeProvider.refundPayment(second.paymentIntentId, 3000, `covered-${second.orderId}`);
+    const superseded = { qty: 10, events: [["reservation", -3], ["reservation_release", 0]] };
+    for (let pass = 0; pass < 2; pass++) {
+      await storeScoped(storeId).order.update({
+        where: { id: second.orderId },
+        data: { status: "REFUND_FAILED", capturedAmountCents: 3000 },
+      });
+      await evaluateOrderRefundState(second.orderId);
+      expect(await stockOf(storeId, recounted.listingId)).toEqual(superseded);
+    }
+  }, 30_000);
 
   it("a replay after a partial dashboard refund reuses the stored amount, then refunds the rest", async () => {
     const { order, pi } = await readyToRefund();

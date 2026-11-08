@@ -155,14 +155,17 @@ interface ListingFormFields {
 function buildListingFormData(
   fields: ListingFormFields,
   variants: VariantFormRow[],
-  listingId?: string,
+  editing?: Listing,
 ) {
+  const listingId = editing?.id;
   const fd = new FormData();
   if (listingId) fd.set("listingId", listingId);
   fd.set("customName", fields.name);
   fd.set("price", String(Math.round(parseFloat(fields.price || "0") * 100)));
   fd.set("stockMode", fields.stockMode);
   if (fields.stockMode === "counted") fd.set("qty", fields.qty);
+  // Orders move qty while this form is open. The loaded number tells the server the owner left it alone.
+  if (fields.stockMode === "counted" && editing?.qty != null) fd.set("qtyLoaded", String(editing.qty));
   if (fields.stockMode === "status") fd.set("status", fields.status);
   fd.set("frozen", String(fields.frozen));
   fd.set("perishable", String(fields.perishable));
@@ -310,7 +313,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
 
   function handleUpdate() {
     if (!editListing) return;
-    const fd = buildListingFormData(formFields, variants, editListing.id);
+    const fd = buildListingFormData(formFields, variants, editListing);
 
     startTransition(async () => {
       const result = await updateListingAction(fd);
