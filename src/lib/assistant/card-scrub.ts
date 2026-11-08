@@ -72,14 +72,14 @@ const DATE_TIME = /^(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01
 
 /**
  * The whole run is one camera date and time (`IMG_20240115_000000`, `2024-01-15 00.00.00`),
- * with at most a short counter before it and a copy number after it. No card has 14 or 17
+ * with at most a short counter or copy number on each side. No card has 14 or 17
  * digits starting 19 or 20, and about 1 in 10 of these names would pass Luhn. Any other
  * digits in the run end the exemption, so a card beside a date is still checked.
  */
 function isCameraStamp(groups: string[]): boolean {
   const last = groups.length - 1;
   const froms = (groups[0]?.length ?? 0) <= 4 ? [0, 1] : [0];
-  const tos = (groups[last]?.length ?? 0) <= 3 ? [last + 1, last] : [last + 1];
+  const tos = (groups[last]?.length ?? 0) <= 4 ? [last + 1, last] : [last + 1];
   return froms.some((from) => tos.some((to) => DATE_TIME.test(groups.slice(from, to).join(""))));
 }
 

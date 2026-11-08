@@ -169,11 +169,21 @@ function Thread({
       if (event.target instanceof Node && addWrap.current?.contains(event.target)) return;
       setAddOpen(false);
     };
+    // Escape closes this menu first, wherever focus is: the sheet, and the draft in it, stay open.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setAddOpen(false);
+      addWrap.current?.querySelector("button")?.focus();
+    };
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("focusin", dismiss);
+    document.addEventListener("keydown", escape, true);
     return () => {
       document.removeEventListener("pointerdown", dismiss);
       document.removeEventListener("focusin", dismiss);
+      document.removeEventListener("keydown", escape, true);
     };
   }, [addOpen]);
   const tilesRef = useRef(tiles);
@@ -794,18 +804,7 @@ function Thread({
           </div>
         ) : null}
         <div className={styles.tools}>
-          <div
-            ref={addWrap}
-            className={styles.addWrap}
-            onKeyDown={(event) => {
-              if (event.key !== "Escape" || !addOpen) return;
-              // Escape closes this menu first. The sheet, and the draft in it, stay open.
-              event.preventDefault();
-              event.stopPropagation();
-              setAddOpen(false);
-              addWrap.current?.querySelector("button")?.focus();
-            }}
-          >
+          <div ref={addWrap} className={styles.addWrap}>
             <button
               type="button"
               className={styles.tool}

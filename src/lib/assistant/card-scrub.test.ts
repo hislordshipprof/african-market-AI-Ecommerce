@@ -65,6 +65,7 @@ describe("card number scrubber", () => {
       "photo 2 20230117_005628.jpg",
       "20230117_00-56-28.jpg",
       "20230117 00.56.28.jpg",
+      "20230117_005628_0001.jpg",
     ];
     for (const name of cameraNames) expect(scrubFileNameCards(name).text).toBe(name);
   });
