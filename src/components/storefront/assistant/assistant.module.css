@@ -106,7 +106,9 @@
 .sentPhoto {
   position: relative;
   display: block;
-  width: min(220px, 100%);
+  /* A fixed width, not a percentage: the bubble takes its width from this photo. */
+  width: 220px;
+  max-width: 100%;
   margin-bottom: 8px;
   overflow: hidden;
   border-radius: 12px;
@@ -470,6 +472,10 @@
   color: var(--color-ink);
   text-align: start;
   cursor: pointer;
+}
+
+.addWrap {
+  display: contents;
 }
 
 /* Floats above Add, so opening it adds no height to the composer. */

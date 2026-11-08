@@ -161,6 +161,21 @@ function Thread({
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const [tiles, setTiles] = useState<Array<PreparedFile & { preview: string }>>([]);
   const [addOpen, setAddOpen] = useState(false);
+  const addWrap = useRef<HTMLDivElement>(null);
+  // The menu floats over the sheet, so a tap or focus anywhere else closes it. That covers Send too.
+  useEffect(() => {
+    if (!addOpen) return;
+    const dismiss = (event: Event) => {
+      if (event.target instanceof Node && addWrap.current?.contains(event.target)) return;
+      setAddOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("focusin", dismiss);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("focusin", dismiss);
+    };
+  }, [addOpen]);
   const tilesRef = useRef(tiles);
   useEffect(() => {
     tilesRef.current = tiles;
@@ -741,7 +756,6 @@ function Thread({
             }
             changeDraft(next);
           }}
-          onFocus={() => setAddOpen(false)}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={() => { composing.current = false; }}
           onKeyDown={onKeyDown}
@@ -780,24 +794,37 @@ function Thread({
           </div>
         ) : null}
         <div className={styles.tools}>
-          <button
-            type="button"
-            className={styles.tool}
-            aria-label="Add a photo or PDF"
-            aria-expanded={addOpen}
-            disabled={!!routeError?.terminal}
-            onClick={() => setAddOpen((openMenu) => !openMenu)}
+          <div
+            ref={addWrap}
+            className={styles.addWrap}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || !addOpen) return;
+              // Escape closes this menu first. The sheet, and the draft in it, stay open.
+              event.preventDefault();
+              event.stopPropagation();
+              setAddOpen(false);
+              addWrap.current?.querySelector("button")?.focus();
+            }}
           >
-            Add
-          </button>
-          {/* Right after Add in the DOM, so focus goes Add, then the menu. It floats, so it adds no height. */}
-          {addOpen ? (
-            <div className={styles.addMenu}>
-              <button type="button" onClick={() => cameraInput.current?.click()}>Camera</button>
-              <button type="button" onClick={() => photoInput.current?.click()}>Photos</button>
-              <button type="button" onClick={() => pdfInput.current?.click()}>PDF</button>
-            </div>
-          ) : null}
+            <button
+              type="button"
+              className={styles.tool}
+              aria-label="Add a photo or PDF"
+              aria-expanded={addOpen}
+              disabled={!!routeError?.terminal}
+              onClick={() => setAddOpen((openMenu) => !openMenu)}
+            >
+              Add
+            </button>
+            {/* Right after Add in the DOM, so focus goes Add, then the menu. It floats, so it adds no height. */}
+            {addOpen ? (
+              <div className={styles.addMenu}>
+                <button type="button" onClick={() => cameraInput.current?.click()}>Camera</button>
+                <button type="button" onClick={() => photoInput.current?.click()}>Photos</button>
+                <button type="button" onClick={() => pdfInput.current?.click()}>PDF</button>
+              </div>
+            ) : null}
+          </div>
           {micReady ? (
             <button
               type="button"
