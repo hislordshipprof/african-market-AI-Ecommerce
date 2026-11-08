@@ -397,6 +397,11 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
       expect(foreign).toEqual({ ok: false, error: CARD_NOT_FOUND });
       expect((await stripe.paymentMethods.retrieve(bCard.id)).customer).toBe(bCustomer);
 
+      const log = vi.spyOn(console, "error");
+      const crafted = await asUser(a.cookie, () => removeCardAction("../x"));
+      expect(crafted).toEqual({ ok: false, error: CARD_NOT_FOUND });
+      expect(log).not.toHaveBeenCalled();
+
       const detach = vi.spyOn(stripe.paymentMethods, "detach");
       const retrieve = vi.spyOn(stripe.paymentMethods, "retrieve");
       let staleCustomer: unknown;

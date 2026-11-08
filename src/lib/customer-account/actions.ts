@@ -159,7 +159,9 @@ async function cardsAfterRemoval(userId: string) {
 export async function removeCardAction(paymentMethodId: string) {
   try {
     const userId = await requireUserId();
-    const id = parseInput(z.string().min(1).max(200), paymentMethodId);
+    // Stripe ids are letters, digits and underscores. Its edge answers other ids with a
+    // 400 that says nothing about a card, which would read as an outage and fill the log.
+    const id = parseInput(z.string().min(1).max(200).regex(/^[A-Za-z0-9_]+$/), paymentMethodId);
     if (!id.ok) return { ok: false as const, error: CARD_NOT_FOUND };
     await removeAccountCard(userId, id.data);
     return await cardsAfterRemoval(userId);
