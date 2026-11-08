@@ -122,7 +122,23 @@ function emptyToNull(value: unknown): string | null {
   return String(value);
 }
 
+let fakeCalls = 0;
+const intentModes = new Map<string, "test" | "live">();
+
+/** Stripe keeps test and live objects apart: a PaymentIntent made with one key is "No such payment_intent" to the other. */
+function keyMode(): "test" | "live" {
+  const key = process.env.STRIPE_SECRET_KEY ?? "";
+  return key === "" || key.startsWith("sk_test_") || key.startsWith("rk_test_") ? "test" : "live";
+}
+
+/** Every call the fake has served since the last reset. */
+export function fakeCheckoutCallCount(): number {
+  return fakeCalls;
+}
+
 export function resetFakeCheckoutPayments(): void {
+  fakeCalls = 0;
+  intentModes.clear();
   customers.clear();
   cards.clear();
   intents.clear();
@@ -169,7 +185,7 @@ function rememberCard(id: string, customer: string | null): NormalizedCard {
   return card;
 }
 
-export const fakeCheckoutPayments: CheckoutPayments = {
+const fakeMethods: CheckoutPayments = {
   async createCustomer(params, idempotencyKey) {
     if (ledger.failNext === "timeout") {
       ledger.failNext = null;
@@ -292,6 +308,7 @@ export const fakeCheckoutPayments: CheckoutPayments = {
       capture_method: emptyToNull(params.capture_method),
     };
     intents.set(id, intent);
+    intentModes.set(id, keyMode());
     if (key) idempotency.set(key, { hash: hashParams(params), customerId: id, expired: false });
     return intent;
   },
@@ -319,8 +336,7 @@ export const fakeCheckoutPayments: CheckoutPayments = {
   },
 
   async cancelPaymentIntent(id) {
-    const intent = intents.get(id);
-    if (!intent) throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
+    const intent = requireIntent(id);
     if (intent.status === "canceled") return { id, status: "canceled" };
     if (intent.status === "succeeded" || intent.status === "processing") {
       throw invalid(`You cannot cancel a PaymentIntent in status ${intent.status}.`);
@@ -370,9 +386,22 @@ export const fakeCheckoutPayments: CheckoutPayments = {
   },
 };
 
+/** Counts every call, so a test can prove a path made none. */
+export const fakeCheckoutPayments: CheckoutPayments = Object.fromEntries(
+  Object.entries(fakeMethods).map(([name, method]) => [
+    name,
+    (...args: unknown[]) => {
+      fakeCalls += 1;
+      return (method as (...a: unknown[]) => unknown)(...args);
+    },
+  ]),
+) as unknown as CheckoutPayments;
+
 function requireIntent(id: string): NormalizedPaymentIntent {
   const intent = intents.get(id);
-  if (!intent) throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
+  if (!intent || intentModes.get(id) !== keyMode()) {
+    throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
+  }
   return intent;
 }
 

@@ -1,11 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { addLine } from "../cart/service";
 import { healthQueryRaw, storeScoped } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 
-const { retrieve, cancel, paymentIntents } = vi.hoisted(() => {
+const { retrieve, cancel, paymentIntents, getStripeClient } = vi.hoisted(() => {
   const paymentIntents = new Map<string, Record<string, unknown>>();
   function usesConnectedAccount(arg: unknown): boolean {
     return Boolean(
@@ -32,12 +32,11 @@ const { retrieve, cancel, paymentIntents } = vi.hoisted(() => {
     fixture.status = "canceled";
     return fixture;
   });
-  return { retrieve, cancel, paymentIntents };
+  const getStripeClient = vi.fn(() => ({ paymentIntents: { retrieve, cancel } }));
+  return { retrieve, cancel, paymentIntents, getStripeClient };
 });
 
-vi.mock("../stripe/provider", () => ({
-  getStripeClient: () => ({ paymentIntents: { retrieve, cancel } }),
-}));
+vi.mock("../stripe/provider", () => ({ getStripeClient }));
 
 vi.mock("../inngest/send", () => ({
   sendOrderAuthorized: vi.fn().mockResolvedValue(undefined),
@@ -49,9 +48,11 @@ import {
   BasketChangedError,
   checkoutTestHooks,
   computeQuote,
+  createPaymentIntent,
   placeOrder,
   recordAuthorizedOrder,
 } from "./service";
+import { fakeCheckoutCallCount, getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "ada@t236-orch.test" };
@@ -1532,5 +1533,138 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     vi.mocked(sendOrderAuthorized).mockClear();
     await placeWithThrowingHooks("hooks-vercel", "1");
   }, 20_000);
-});
 
+  async function seedCartWithoutIntent(label: string, hours: unknown) {
+    const store = await makeStore(label);
+    await raw.store.update({
+      where: { id: store.id },
+      data: { hours: hours === null ? Prisma.DbNull : (hours as Prisma.InputJsonValue), timezone: "America/Chicago" },
+    });
+    const variant = await makeVariant(store.id);
+    const cart = await storeScoped(store.id).cart.create({ data: { storeId: store.id } });
+    await storeScoped(store.id).cartLine.create({
+      data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
+    });
+    return { store, cart, hold: holdFor(500, 1) };
+  }
+
+  it("a closed store records an AUTHORIZED order with acceptanceClockStartsAt at the next opening; a store that can't take orders is refused before any Stripe call", async () => {
+    const weekdays = {
+      mon: { open: "09:00", close: "17:00" },
+      tue: { open: "09:00", close: "17:00" },
+      wed: { open: "09:00", close: "17:00" },
+      thu: { open: "09:00", close: "17:00" },
+      fri: { open: "09:00", close: "17:00" },
+    };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // AC1: Tue 2026-11-03 20:00 CST. The hold amount is untouched for a queued order.
+      vi.setSystemTime(new Date("2026-11-04T02:00:00Z"));
+      const queued = await seedPricedCart("queued");
+      await raw.store.update({
+        where: { id: queued.store.id },
+        data: { hours: weekdays, timezone: "America/Chicago", prepTimeMinutes: 30 },
+      });
+      const placed = await placeOrder(queued.store.id, 0, queued.cart.id, CONTACT, "pickup", null, null, queued.paymentIntentId);
+      const row = await storeScoped(queued.store.id).order.findUnique({ where: { id: placed.token } });
+      expect(row?.status).toBe("AUTHORIZED");
+      expect(row?.acceptanceClockStartsAt?.toISOString()).toBe("2026-11-04T15:00:00.000Z");
+      expect(row?.totalAuthorizedCents).toBe(queued.amount);
+
+      // AC5: no open day, and an opening more than 6 days out (Mon 17:00 CST, opens next Mon).
+      vi.stubEnv("E2E_FAKE_STRIPE", "1");
+      resetFakeCheckoutPayments();
+      getStripeClient.mockClear();
+      vi.setSystemTime(new Date("2026-11-02T23:00:00Z"));
+      for (const hours of [{}, { mon: { open: "09:00", close: "17:00" } }]) {
+        const refused = await seedCartWithoutIntent("refused", hours);
+        await expect(createPaymentIntent(refused.store.id, refused.cart.id, refused.hold)).rejects.toThrow(
+          "This store isn't taking orders right now",
+        );
+        const cart = await storeScoped(refused.store.id).cart.findUnique({ where: { id: refused.cart.id } });
+        expect(cart?.paymentIntentId).toBeNull();
+      }
+      expect(fakeCheckoutCallCount()).toBe(0);
+      expect(getStripeClient).not.toHaveBeenCalled();
+      vi.unstubAllEnvs();
+
+      // E21: hours saved as {} between placeOrder's replay lookups and the locked write.
+      const raced = await seedPricedCart("raced");
+      checkoutTestHooks.afterPostReadLookupMiss = async () => {
+        await raw.store.update({ where: { id: raced.store.id }, data: { hours: {} } });
+      };
+      await expect(
+        placeOrder(raced.store.id, 0, raced.cart.id, CONTACT, "pickup", null, null, raced.paymentIntentId),
+      ).rejects.toThrow("This store isn't taking orders right now");
+      expect(await counts(raced.store.id)).toEqual({ orders: 0, customers: 0 });
+      expect(cancel.mock.calls.filter((call) => call[0] === raced.paymentIntentId)).toHaveLength(1);
+      expect(paymentIntents.get(raced.paymentIntentId)?.status).toBe("canceled");
+
+      // E22: a retried submit of an order already recorded still gets its token.
+      const recorded = await seedPricedCart("recorded");
+      const first = await placeOrder(recorded.store.id, 0, recorded.cart.id, CONTACT, "pickup", null, null, recorded.paymentIntentId);
+      await raw.store.update({ where: { id: recorded.store.id }, data: { hours: {} } });
+      const retried = await placeOrder(recorded.store.id, 0, recorded.cart.id, CONTACT, "pickup", null, null, recorded.paymentIntentId);
+      expect(retried.token).toBe(first.token);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  }, 30_000);
+
+  it("live or mixed Stripe keys without CHECKOUT_LIVE_MODE=true make zero Stripe calls and create no PaymentIntent or Order", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      vi.stubEnv("E2E_FAKE_STRIPE", "1");
+      expect(process.env.VERCEL).toBeUndefined();
+      resetFakeCheckoutPayments();
+      getStripeClient.mockClear();
+      const refusedCases: Array<[string, string, string | undefined]> = [
+        ["sk_live_t167", "pk_live_t167", undefined],
+        ["rk_live_t167", "pk_live_t167", "false"],
+        ["sk_live_t167", "pk_live_t167", "TRUE"],
+        ["sk_live_t167", "pk_live_t167", "1"],
+        ["sk_live_t167", "pk_live_t167", " true"],
+        ["sk_test_t167", "pk_live_t167", "true"],
+        ["sk_live_t167", "pk_test_t167", "true"],
+      ];
+      for (const [secret, publishable, flag] of refusedCases) {
+        const seeded = await seedCartWithoutIntent("live-refused", null);
+        vi.stubEnv("STRIPE_SECRET_KEY", secret);
+        vi.stubEnv("STRIPE_PUBLISHABLE_KEY", publishable);
+        vi.stubEnv("CHECKOUT_LIVE_MODE", flag);
+        await expect(createPaymentIntent(seeded.store.id, seeded.cart.id, seeded.hold)).rejects.toThrow(
+          "This store isn't taking online payments yet.",
+        );
+        await expect(
+          placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, "pi_fake_t167"),
+        ).rejects.toThrow("This store isn't taking online payments yet.");
+        expect(await counts(seeded.store.id)).toEqual({ orders: 0, customers: 0 });
+        const cart = await storeScoped(seeded.store.id).cart.findUnique({ where: { id: seeded.cart.id } });
+        expect(cart?.paymentIntentId).toBeNull();
+      }
+      expect(fakeCheckoutCallCount()).toBe(0);
+      expect(spy.mock.calls.map((call) => String(call[0])).join("\n")).not.toMatch(/sk_|rk_|pk_/);
+
+      const allowedCases: Array<[string, string, string | undefined]> = [
+        ["sk_test_t167", "pk_test_t167", undefined],
+        ["sk_live_t167", "pk_live_t167", "true"],
+      ];
+      for (const [secret, publishable, flag] of allowedCases) {
+        const seeded = await seedCartWithoutIntent("live-allowed", null);
+        vi.stubEnv("STRIPE_SECRET_KEY", secret);
+        vi.stubEnv("STRIPE_PUBLISHABLE_KEY", publishable);
+        vi.stubEnv("CHECKOUT_LIVE_MODE", flag);
+        const intent = await createPaymentIntent(seeded.store.id, seeded.cart.id, seeded.hold);
+        await getCheckoutPayments().confirmPaymentIntent(intent.paymentIntentId, { payment_method: "pm_card_visa" });
+        const placed = await placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, intent.paymentIntentId);
+        const row = await storeScoped(seeded.store.id).order.findUnique({ where: { id: placed.token } });
+        expect(row?.status).toBe("AUTHORIZED");
+      }
+      expect(getStripeClient).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      spy.mockRestore();
+    }
+  }, 30_000);
+});

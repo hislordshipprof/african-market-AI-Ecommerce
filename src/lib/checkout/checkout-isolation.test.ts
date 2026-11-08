@@ -281,6 +281,11 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
     const orders = await scoped.order.findMany();
     expect(orders.every((o) => o.storeId === storeBId)).toBe(true);
     expect(orders.find((o) => o.id === orderAId)).toBeUndefined();
+    const clock = await scoped.order.findMany({
+      where: { id: orderAId },
+      select: { acceptanceClockStartsAt: true },
+    });
+    expect(clock).toEqual([]);
   });
 
   it("cross-store order insert is rejected by RLS", async () => {
@@ -296,9 +301,18 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
           subtotalCents: 100,
           bufferCents: 10,
           totalAuthorizedCents: 110,
+          acceptanceClockStartsAt: new Date("2026-11-04T15:00:00Z"),
         },
       }),
     ).rejects.toThrow();
+    const before = await storeScoped(storeAId).order.findUnique({ where: { id: orderAId } });
+    const updated = await storeScoped(storeBId).order.updateMany({
+      where: { id: orderAId },
+      data: { acceptanceClockStartsAt: new Date("2030-01-01T00:00:00Z") },
+    });
+    expect(updated.count).toBe(0);
+    const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderAId } });
+    expect(after?.acceptanceClockStartsAt).toEqual(before?.acceptanceClockStartsAt);
   });
 
   // --- OrderLine isolation ---
