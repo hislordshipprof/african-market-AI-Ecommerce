@@ -129,7 +129,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     if (!cartLimit.ok) return rateLimited(cartLimit.retryAfter);
 
     const headers = new Headers();
-    if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId));
+    if (cookieCart !== cartId) headers.append("set-cookie", serializeCartCookie(cartId, request.headers));
     const lookedUp = await storeScoped(store.id).aiConversation.findUnique({
       where: { storeId_cartId: { storeId: store.id, cartId } },
     });

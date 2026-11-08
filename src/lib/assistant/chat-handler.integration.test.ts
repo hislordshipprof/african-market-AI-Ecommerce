@@ -153,7 +153,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     vi.restoreAllMocks();
   });
 
-  function request(text: string, init?: { ip?: string; cookie?: string; origin?: string; extra?: Record<string, unknown>; id?: string }) {
+  function request(text: string, init?: { ip?: string; cookie?: string; origin?: string; extra?: Record<string, unknown>; id?: string; proto?: string }) {
     return new Request(`http://${host}/api/assistant/chat`, {
       method: "POST",
       headers: {
@@ -163,6 +163,7 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
         "x-store-slug": slug,
         "x-forwarded-for": init?.ip ?? "203.0.113.10",
         ...(init?.cookie ? { cookie: init.cookie } : {}),
+        ...(init?.proto ? { "x-forwarded-proto": init.proto } : {}),
       },
       body: userBody(text, init?.extra, init?.id),
     });
@@ -231,6 +232,39 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(JSON.stringify(conversation?.messages)).toContain("add two egusi");
     const actions = await storeScoped(storeId).aiAction.count({ where: { conversationId: conversation?.id } });
     expect(actions).toBe(2);
+  });
+
+  it("the cart cookie is Secure on HTTPS and on Vercel, and not on plain HTTP, in production", async () => {
+    const { model } = strictModel(() => [
+      { type: "stream-start", warnings: [] },
+      { type: "text-start", id: "text-1" },
+      { type: "text-delta", id: "text-1", delta: "Hello." },
+      { type: "text-end", id: "text-1" },
+      { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+    ]);
+    const handler = createChatHandler({ model });
+    const secure = /;\s*Secure\s*(;|$)/i;
+    async function guestCookie(vercel: string, proto: string, ip: string) {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("VERCEL", vercel);
+      const response = await handler(request("hello", { ip, proto }));
+      expect(response.status).toBe(200);
+      await response.text();
+      const cookie = response.headers.get("set-cookie") ?? "";
+      expect(cookie).toMatch(/^cart_id=[^;]+;/);
+      return cookie;
+    }
+
+    const http = await guestCookie("", "http", "203.0.113.31");
+    expect(http).not.toMatch(secure);
+    expect(http).toMatch(/;\s*HttpOnly\s*(;|$)/i);
+    expect(http).toMatch(/;\s*SameSite=Lax\s*(;|$)/i);
+    expect(http).toMatch(/;\s*Path=\/\s*(;|$)/i);
+    expect(http).toMatch(/;\s*Max-Age=2592000\s*(;|$)/i);
+    expect(http).not.toMatch(/Domain=/i);
+
+    expect(await guestCookie("", "https", "203.0.113.32")).toMatch(secure);
+    expect(await guestCookie("1", "http", "203.0.113.33")).toMatch(secure);
   });
 
   it("a second turn reuses the conversation and sends prior messages", async () => {
