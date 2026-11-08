@@ -130,14 +130,28 @@ export function CopilotPanel({
   return (
     <div className="flex min-h-[calc(100dvh-4.75rem)] flex-col gap-8">
       <div className="flex flex-col gap-6">
-        <div>
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <h2 className="font-display text-[1.375rem] leading-tight font-bold text-balance text-foreground">
             Report stock
           </h2>
-          <p className="mt-2 max-w-[65ch] text-base leading-6 text-muted-foreground">
-            Say what came in, what you sold at the counter, or what you counted. The shelf stays put until you tap Confirm.
-          </p>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pending}
+            className="min-h-11 rounded-full px-4"
+            onClick={() => {
+              setConversationId(null);
+              setMessages([]);
+              setNotice(null);
+              setProposals((current) => current.filter((card) => card.state === "pending"));
+            }}
+          >
+            New chat
+          </Button>
         </div>
+        <p className="max-w-[65ch] text-base leading-6 text-muted-foreground">
+          Say what came in, what you sold at the counter, or what you counted. The shelf stays put until you tap Confirm.
+        </p>
 
         {proposals.length === 0 && messages.length === 0 ? (
           <p className="rounded-xl border border-border bg-card px-4 py-5 text-base text-muted-foreground">

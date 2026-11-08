@@ -31,6 +31,6 @@ export function modelHistory(messages: readonly StoredMessage[]): Array<{ role: 
   if (start < 0) return [];
   return recent.slice(start).map((message) => ({
     role: message.role === "owner" ? "user" : "assistant",
-    content: message.summary ? `${message.text}\n${message.summary}` : message.text,
+    content: message.text,
   }));
 }
