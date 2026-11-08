@@ -16,6 +16,7 @@ import {
   AUTH_SUBMIT,
   AuthError,
   BackArrow,
+  NETWORK_ERROR,
   PasswordInput,
   focusField,
   totpDigits,
@@ -25,7 +26,9 @@ import {
 type Step = "credentials" | "totp";
 
 const ERROR_ID = "admin-sign-in-error";
+const DESCRIPTION_ID = "admin-sign-in-description";
 const EMAIL_ID = "admin-email";
+const PASSWORD_ID = "admin-password";
 const TOTP_ID = "admin-totp";
 
 // Mouse and trackpad only: on a phone this would open the keyboard over the page.
@@ -68,7 +71,7 @@ export default function AdminSignIn() {
       if (result.error) {
         setError(credentialsErrorMessage(result.error));
         setLoading(false);
-        focusField(EMAIL_ID);
+        focusField(PASSWORD_ID);
       } else if ((result.data as Record<string, unknown>)?.twoFactorRedirect) {
         setStep("totp");
         setLoading(false);
@@ -76,9 +79,9 @@ export default function AdminSignIn() {
         router.push("/admin/stores");
       }
     } catch {
-      setError("Sign-in failed. Check your credentials.");
+      setError(NETWORK_ERROR);
       setLoading(false);
-      focusField(EMAIL_ID);
+      focusField(PASSWORD_ID);
     }
   }
 
@@ -100,7 +103,7 @@ export default function AdminSignIn() {
         router.push("/admin/stores");
       }
     } catch {
-      setError("Verification failed. Try again.");
+      setError(NETWORK_ERROR);
       setLoading(false);
       focusField(TOTP_ID);
     }
@@ -124,19 +127,20 @@ export default function AdminSignIn() {
               Back to sign in
             </button>
           )}
-          <h1 className="font-display text-[1.75rem] leading-tight font-bold">Platform Admin</h1>
-          <CardDescription className="text-base">
+          <h1 className="font-display text-[1.75rem] leading-tight font-bold">
+            {step === "credentials" ? "Platform Admin" : "Confirm it's you"}
+          </h1>
+          <CardDescription id={DESCRIPTION_ID} className="text-base">
             {step === "credentials"
               ? "Sign in to manage stores and the catalog."
-              : `Enter the 6-digit code from your authenticator app to finish signing in as ${email}.`}
+              : `Last step: enter the 6-digit code from your authenticator app to finish signing in as ${email}.`}
           </CardDescription>
         </CardHeader>
 
         <CardContent className="px-6 sm:px-8">
-          {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
-
           {step === "credentials" && (
             <form onSubmit={handleCredentials} className="flex flex-col gap-4">
+              {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={EMAIL_ID}>Email</Label>
                 <Input
@@ -153,9 +157,9 @@ export default function AdminSignIn() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label htmlFor="admin-password">Password</Label>
+                <Label htmlFor={PASSWORD_ID}>Password</Label>
                 <PasswordInput
-                  id="admin-password"
+                  id={PASSWORD_ID}
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -172,6 +176,7 @@ export default function AdminSignIn() {
 
           {step === "totp" && (
             <form onSubmit={handleTotp} className="flex flex-col gap-4">
+              {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={TOTP_ID}>Verification code</Label>
                 <Input
@@ -187,7 +192,8 @@ export default function AdminSignIn() {
                   className={AUTH_CODE_INPUT}
                   autoComplete="one-time-code"
                   placeholder="000000"
-                  {...errorProps}
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? `${DESCRIPTION_ID} ${ERROR_ID}` : DESCRIPTION_ID}
                 />
               </div>
 

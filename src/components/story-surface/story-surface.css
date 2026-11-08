@@ -10,7 +10,7 @@
 }
 
 /* The stock ring is a half-transparent tint, under 3:1 on the card. */
-.story-surface :is(input, button, a):focus-visible {
+.story-surface :is(input, button, a, summary):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
@@ -49,30 +49,30 @@
   html:has(.story-surface),
   body:has(.story-surface) {
     color-scheme: dark;
-    background-color: var(--store-bg, #0f1712);
+    background-color: var(--store-bg, #0F1712);
   }
 
   .story-surface {
     color-scheme: dark;
-    --background: var(--store-bg, #0f1712);
-    --foreground: var(--store-ink, #eef2ec);
-    --card: var(--store-surface, #16211a);
-    --card-foreground: var(--store-ink, #eef2ec);
-    --primary: var(--store-primary, #6cc08f);
-    --primary-foreground: var(--store-on-primary, #0b0b0b);
-    --secondary: var(--store-soft, #1b2e23);
-    --secondary-foreground: var(--store-ink, #eef2ec);
-    --muted: var(--store-raised, #1f2c24);
-    --muted-foreground: var(--store-muted, #a3b1a7);
-    --border: var(--store-line, #2a3a30);
-    --ring: var(--store-primary, #6cc08f);
-    --destructive: var(--store-deal, #f0707e);
+    --background: var(--store-bg, #0F1712);
+    --foreground: var(--store-ink, #EEF2EC);
+    --card: var(--store-surface, #16211A);
+    --card-foreground: var(--store-ink, #EEF2EC);
+    --primary: var(--store-primary, #6CC08F);
+    --primary-foreground: var(--store-on-primary, #0B0B0B);
+    --secondary: var(--store-soft, #1B2E23);
+    --secondary-foreground: var(--store-ink, #EEF2EC);
+    --muted: var(--store-raised, #1F2C24);
+    --muted-foreground: var(--store-muted, #A3B1A7);
+    --border: var(--store-line, #2A3A30);
+    --ring: var(--store-primary, #6CC08F);
+    --destructive: var(--store-deal, #F0707E);
   }
 
   /* Multiply keeps the photo's color and contrast. A flat black overlay turns it to mud. */
   .story-surface__dusk {
     display: block;
-    background: #7d8c88;
+    background: #7D8C88;
     mix-blend-mode: multiply;
   }
 }

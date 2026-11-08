@@ -42,7 +42,7 @@ export function StorySurface({
         media={TALL_MEDIA}
         fetchPriority="high"
       />
-      <Tag className="story-surface relative flex min-h-dvh items-end justify-center overflow-hidden p-4 pb-6 sm:pb-10 lg:items-center lg:justify-end lg:pr-[max(6vw,3rem)]">
+      <Tag className="story-surface relative flex min-h-dvh flex-col items-center justify-end overflow-hidden p-4 pb-6 sm:pb-10 lg:flex-row lg:justify-end lg:pr-[max(6vw,3rem)]">
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-primary-deep">
           {/* Overscan so the depth scene never samples past the edge of the photo. */}
           <motion.div
@@ -82,8 +82,13 @@ export function StorySurface({
         </motion.div>
 
         {/* After the form in the DOM, so a screen reader reaches the form first. */}
+        <p className="relative z-10 order-first mb-2 w-full max-w-sm lg:hidden">
+          <span className="inline-block rounded-full bg-black/70 px-3 py-1 text-xs font-medium text-white">
+            {scene.place}
+          </span>
+        </p>
         <div className="pointer-events-none absolute bottom-12 left-[max(6vw,3rem)] z-10 hidden max-w-[min(34rem,42vw)] text-white lg:block">
-          <p className="font-display text-[clamp(1.5rem,2.2vw,2rem)] leading-[1.1] font-bold text-balance">
+          <p className="font-display text-[clamp(1.25rem,1.6vw,1.625rem)] leading-[1.15] font-bold text-balance">
             {scene.line}
           </p>
           <p className="mt-3 text-sm">

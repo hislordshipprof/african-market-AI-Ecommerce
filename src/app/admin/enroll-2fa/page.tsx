@@ -18,6 +18,7 @@ import {
   AuthError,
   BackArrow,
   CopyRow,
+  NETWORK_ERROR,
   PasswordInput,
   focusField,
   totpDigits,
@@ -25,13 +26,14 @@ import {
 } from "../auth-form-parts";
 
 const ERROR_ID = "admin-enroll-error";
+const BACK_ID = "enroll-back";
 const PASSWORD_ID = "enroll-password";
 const CODE_ID = "enroll-code";
 const SESSION_ENDED = "Your session ended. Go back and sign in again.";
 
 // The submit button that had focus is gone after the step changes. Focus lands on the
-// instructions, because focusing the code field would open a phone keyboard over the QR code.
-const focusOnMount = (instructions: HTMLDivElement | null) => instructions?.focus();
+// first instruction, because focusing the code field would open a phone keyboard over the page.
+const focusOnMount = (instruction: HTMLParagraphElement | null) => instruction?.focus();
 
 function setupKeyFrom(totpUri: string): string | null {
   try {
@@ -39,6 +41,15 @@ function setupKeyFrom(totpUri: string): string | null {
   } catch {
     return null;
   }
+}
+
+function QrCode({ value }: { value: string }) {
+  return (
+    // A QR code has to stay dark on white to scan, in both color schemes.
+    <div className="mx-auto w-fit rounded-xl bg-white p-3">
+      <QRCodeSVG value={value} size={152} level="M" title="Authenticator setup code" />
+    </div>
+  );
 }
 
 export default function Enroll2FA() {
@@ -62,6 +73,10 @@ export default function Enroll2FA() {
       if (result.error) {
         if (result.error.status === 401) {
           setError(SESSION_ENDED);
+          focusField(BACK_ID);
+        } else if (result.error.code === "INVALID_PASSWORD") {
+          setError("That password isn't right. Try again.");
+          focusField(PASSWORD_ID);
         } else {
           setError(result.error.message ?? "Failed to start enrollment");
           focusField(PASSWORD_ID);
@@ -73,7 +88,7 @@ export default function Enroll2FA() {
         setTotpUri(data.totpURI ?? null);
       }
     } catch {
-      setError("Failed to start enrollment");
+      setError(NETWORK_ERROR);
     } finally {
       setEnrolling(false);
     }
@@ -96,7 +111,7 @@ export default function Enroll2FA() {
         router.push("/admin/stores");
       }
     } catch {
-      setError("Verification failed. Try again.");
+      setError(NETWORK_ERROR);
       setLoading(false);
       focusField(CODE_ID);
     }
@@ -110,7 +125,7 @@ export default function Enroll2FA() {
     <StorySurface>
       <StoryCard className="gap-6 py-8">
         <CardHeader className="px-6 sm:px-8">
-          <Link href="/admin/sign-in" className={AUTH_BACK}>
+          <Link id={BACK_ID} href="/admin/sign-in" className={AUTH_BACK}>
             <BackArrow />
             Back to sign in
           </Link>
@@ -119,28 +134,15 @@ export default function Enroll2FA() {
           </h1>
           {!totpUri && (
             <CardDescription className="text-base">
-              Required for all platform administrators. Step 1 of 2: confirm your password.
-            </CardDescription>
-          )}
-          {totpUri && (
-            <CardDescription ref={focusOnMount} tabIndex={-1} className="text-base outline-none">
-              <span className="md:hidden">
-                Step 2 of 2: add this account to an authenticator app, such as Google Authenticator or
-                1Password. You&apos;ll enter a code from the app each time you sign in.
-              </span>
-              <span className="hidden md:inline">
-                Step 2 of 2: scan this code with an authenticator app, such as Google Authenticator or
-                1Password. You&apos;ll enter a code from the app each time you sign in.
-              </span>
+              Required for all platform administrators. Confirm your password to start.
             </CardDescription>
           )}
         </CardHeader>
 
         <CardContent className="px-6 sm:px-8">
-          {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
-
           {!totpUri && (
             <form onSubmit={startEnrollment} className="flex flex-col gap-4">
+              {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={PASSWORD_ID}>Current password</Label>
                 <PasswordInput
@@ -159,39 +161,50 @@ export default function Enroll2FA() {
           )}
 
           {totpUri && (
-            <div className="flex flex-col gap-4">
-              {/* A phone can't scan its own screen, so it leads with the app. */}
-              <a
-                href={totpUri}
-                className="flex h-12 items-center justify-center rounded-full bg-primary text-base font-semibold text-primary-foreground md:hidden"
-              >
-                Open in authenticator app
-              </a>
-              <p className="text-center text-sm text-muted-foreground md:hidden">
-                Or scan from another device
-              </p>
-              {/* A QR code has to stay dark on white to scan, in both color schemes. */}
-              <div className="mx-auto rounded-xl bg-white p-3">
-                <QRCodeSVG value={totpUri} size={152} level="M" title="Authenticator setup code" />
-              </div>
-              <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-6">
+              <section className="flex flex-col gap-3">
+                <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
+                  1. <span className="md:hidden">Add this account to</span>
+                  <span className="hidden md:inline">Scan this code with</span> an authenticator app, such
+                  as Google Authenticator or 1Password.
+                </p>
+                {/* A phone can't scan its own screen, so it leads with the app. */}
+                <a
+                  href={totpUri}
+                  className="flex h-11 items-center justify-center rounded-full border border-input text-sm font-medium md:hidden"
+                >
+                  Open in authenticator app
+                </a>
+                <div className="hidden md:block">
+                  <QrCode value={totpUri} />
+                </div>
                 <CopyRow label="Setup link" display={totpUri} value={totpUri} />
                 {setupKey && (
                   <details>
                     <summary className="flex h-11 cursor-pointer items-center justify-center rounded-full text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-                      Can&apos;t scan? Enter a setup key
+                      <span className="md:hidden">Use another device or a setup key</span>
+                      <span className="hidden md:inline">Can&apos;t scan? Enter a setup key</span>
                     </summary>
-                    <CopyRow
-                      wrap
-                      label="Setup key"
-                      display={setupKey.replace(/(.{4})(?=.)/g, "$1 ")}
-                      value={setupKey}
-                    />
+                    <div className="flex flex-col gap-3">
+                      <div className="md:hidden">
+                        <QrCode value={totpUri} />
+                      </div>
+                      <CopyRow
+                        wrap
+                        label="Setup key"
+                        display={setupKey.replace(/(.{4})(?=.)/g, "$1 ")}
+                        value={setupKey}
+                      />
+                    </div>
                   </details>
                 )}
-              </div>
+              </section>
 
-              <form onSubmit={verifyCode} className="flex flex-col gap-4">
+              <form onSubmit={verifyCode} className="flex flex-col gap-3">
+                <p className="text-base font-medium">
+                  2. Enter the 6-digit code the app shows. You&apos;ll use a new one each time you sign in.
+                </p>
+                {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
                 <div className="flex flex-col gap-2">
                   <Label htmlFor={CODE_ID}>Verification code</Label>
                   <Input

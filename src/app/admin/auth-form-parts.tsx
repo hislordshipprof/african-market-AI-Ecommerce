@@ -22,6 +22,8 @@ export function totpDigits(value: string): string {
   return value.replace(/\D/g, "").slice(0, 6);
 }
 
+export const NETWORK_ERROR = "Couldn't reach the server. Check your connection and try again.";
+
 export function totpErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
   if (error.code === "INVALID_CODE") {
     return "That code didn't match. Codes change every 30 seconds, so enter the newest one.";
@@ -43,11 +45,7 @@ export function BackArrow() {
 
 export function AuthError({ id, children }: { id: string; children: string }) {
   return (
-    <div
-      id={id}
-      role="alert"
-      className="mb-4 flex gap-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
-    >
+    <div id={id} role="alert" className="flex gap-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
       <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       {children}
     </div>
