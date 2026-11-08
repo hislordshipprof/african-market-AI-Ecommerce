@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import type { ReviewProduct } from "@/lib/admin/catalog-actions";
 import {
   approveProduct,
@@ -59,10 +59,12 @@ function wrapTabFocus(e: React.KeyboardEvent<HTMLElement>) {
 
 function EditModal({
   product,
+  open,
   onClose,
   onSaved,
 }: {
   product: ReviewProduct;
+  open: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -73,36 +75,57 @@ function EditModal({
   const [originCountries, setOriginCountries] = useState(product.originCountries ?? "");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const saveStarted = useRef(false);
 
   function handleSave() {
+    // A click or Enter during the exit still reaches this control. Ignore it.
+    // isPending is still false for a second click in the same turn, so the ref
+    // closes that gap and is cleared when the update settles, including an error.
+    if (!open || isPending || saveStarted.current) return;
     if (!name.trim()) {
       setError("Name is required");
       return;
     }
+    saveStarted.current = true;
     startTransition(async () => {
-      const result = await updateReviewProduct(product.id, {
-        name: name.trim(),
-        description: description.trim(),
-        unit: unit.trim(),
-        storage: storage.trim(),
-        originCountries: originCountries.trim(),
-      });
-      if (result.error) {
-        setError(result.error);
-      } else {
-        onSaved();
+      try {
+        const result = await updateReviewProduct(product.id, {
+          name: name.trim(),
+          description: description.trim(),
+          unit: unit.trim(),
+          storage: storage.trim(),
+          originCountries: originCountries.trim(),
+        });
+        if (result.error) {
+          setError(result.error);
+        } else {
+          onSaved();
+        }
+      } finally {
+        saveStarted.current = false;
       }
     });
   }
 
   return (
     <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !isPending) onClose();
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !isPending) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-lg" showCloseButton={false} aria-modal="true" onKeyDown={wrapTabFocus}>
+      <DialogContent
+        className="sm:max-w-lg"
+        showCloseButton={false}
+        aria-modal="true"
+        onKeyDown={(event) => {
+          if (!open && event.key === "Enter") {
+            event.preventDefault();
+            return;
+          }
+          wrapTabFocus(event);
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="text-lg font-bold">Edit product</DialogTitle>
           <DialogDescription className="dark:text-[#a0a8a3]">
@@ -158,10 +181,18 @@ function EditModal({
           </label>
         </div>
         <DialogFooter className="border-[#e2e4e9] bg-transparent dark:border-[#333]">
-          <Button type="button" variant="ghost" className="dark:text-white dark:hover:bg-[#222]" onClick={() => !isPending && onClose()} aria-disabled={isPending}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="dark:text-white dark:hover:bg-[#222]"
+            onClick={() => {
+              if (open && !isPending) onClose();
+            }}
+            aria-disabled={isPending}
+          >
             Cancel
           </Button>
-          <Button type="button" onClick={() => !isPending && handleSave()} aria-disabled={isPending}>
+          <Button type="button" onClick={handleSave} aria-disabled={isPending || !open}>
             {isPending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
@@ -183,8 +214,23 @@ export function ReviewTable({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [editingProduct, setEditingProduct] = useState<ReviewProduct | null>(null);
+  const editSession = useRef(0);
+  // The product stays after close so the exit animation still has its fields.
+  // The next open replaces it and remounts the form.
+  const [editing, setEditing] = useState<{ product: ReviewProduct; session: number } | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  function openProduct(product: ReviewProduct) {
+    editSession.current += 1;
+    setEditing({ product, session: editSession.current });
+    setEditOpen(true);
+  }
+
+  function closeEdit(session: number) {
+    if (session !== editSession.current) return;
+    setEditOpen(false);
+  }
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -256,12 +302,14 @@ export function ReviewTable({
         </div>
       )}
 
-      {editingProduct && (
+      {editing && (
         <EditModal
-          product={editingProduct}
-          onClose={() => setEditingProduct(null)}
+          key={editing.session}
+          product={editing.product}
+          open={editOpen}
+          onClose={() => closeEdit(editing.session)}
           onSaved={() => {
-            setEditingProduct(null);
+            closeEdit(editing.session);
             router.refresh();
           }}
         />
@@ -302,7 +350,7 @@ export function ReviewTable({
               </button>
               <button
                 type="button"
-                onClick={() => setEditingProduct(p)}
+                onClick={() => openProduct(p)}
                 disabled={isPending}
                 className="rounded-full border border-[#DCDFD6] px-3 py-2 text-xs font-medium text-[#15201A] hover:bg-[#f0f0f0] dark:border-[#333] dark:text-white dark:hover:bg-[#222]"
               >
@@ -370,7 +418,7 @@ export function ReviewTable({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEditingProduct(p)}
+                      onClick={() => openProduct(p)}
                       disabled={isPending}
                       className="rounded-full border border-[#DCDFD6] px-3 py-1.5 text-xs font-medium text-[#15201A] hover:bg-[#f0f0f0] dark:border-[#444] dark:text-white dark:hover:bg-[#222]"
                     >
