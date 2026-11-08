@@ -25,7 +25,6 @@ async function main() {
     process.stdout.write(JSON.stringify({
       pages: read.ok ? read.pages : 0,
       format: meta.format ?? "",
-      external: readFileSync(new URL("../../../next.config.ts", import.meta.url), "utf8").includes("pdfjs-dist"),
     }));
     return;
   }

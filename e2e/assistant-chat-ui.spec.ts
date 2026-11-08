@@ -106,6 +106,11 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await composer.press("Enter");
   const chip = page.getByLabel("Choice chips").getByRole("button").first();
   await expect(chip).toBeVisible({ timeout: 20_000 });
+  // Start from a fixed point: the reply has finished and focus is back in the composer.
+  const sheet = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(sheet.locator('[class*="bubble"]').filter({ hasText: "Pick one." })).toBeVisible({ timeout: 20_000 });
+  await expect(sheet.locator('[class*="typing"]')).toHaveCount(0);
+  await composer.focus();
   for (let step = 0; step < 8; step += 1) {
     if (await chip.evaluate((element) => element === document.activeElement)) break;
     await page.keyboard.press("Shift+Tab");
@@ -361,6 +366,15 @@ test("a photo does not change the basket until the customer taps", async ({ page
   expect(followUps[0]).not.toContain("data:");
   await expect(sentPhoto).toBeVisible();
   await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("0");
+  await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
+  const chip = dialog.getByLabel("Choice chips").getByRole("button").first();
+  await expect(chip).toBeEnabled();
+  const picked = (await chip.innerText()).trim().replace(/ \([^)]*\)$/, "");
+  await chip.click();
+  await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("1", { timeout: 20_000 });
+  await expect(dialog.locator('[class*="addedRow"]').getByText(picked, { exact: true })).toBeVisible();
+  const fileReplies = dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" });
+  await expect(fileReplies).toHaveCount(1);
   let pdfPost = "";
   page.on("request", (request) => {
     if (request.url().includes("/api/assistant/chat") && request.method() === "POST") pdfPost = request.postData() ?? "";
@@ -371,6 +385,8 @@ test("a photo does not change the basket until the customer taps", async ({ page
   await page.getByTestId("assistant-send").click();
   await expect.poll(() => pdfPost.includes("data:application/pdf;base64,JVBER")).toBe(true);
   expect(pdfPost).not.toContain("data:application/pdf;base64,\"");
+  // The PDF was read by the production build: the scripted file reply arrives as a new bubble.
+  await expect(fileReplies).toHaveCount(2, { timeout: 20_000 });
 });
 
 test("a final after a rejected send keeps the restored draft", async ({ page }) => {

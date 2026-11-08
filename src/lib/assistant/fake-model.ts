@@ -87,11 +87,53 @@ function itemsOf(output: unknown): Array<{ listingId?: string; variantId?: strin
   return output.items.filter(isRecord);
 }
 
+type OfferedChoice = { name: string; packLabel: string; listingId: string; variantId: string };
+
+/**
+ * A chip tap sends exactly "<name> (<pack>)" for an option an earlier offer_choices
+ * returned. Only that exact text is a pick, so other scripted turns are unaffected.
+ */
+function pickedChoice(messages: unknown, text: string): OfferedChoice | null {
+  const list = Array.isArray(messages) ? messages : [];
+  const names = new Map<string, string>();
+  let offered: OfferedChoice[] = [];
+  for (const message of list) {
+    if (!isRecord(message)) continue;
+    for (const block of blocksOf(message.content)) {
+      if (message.role === "assistant" && block.type === "tool_use" && typeof block.id === "string") {
+        names.set(block.id, typeof block.name === "string" ? block.name : "");
+      }
+      if (message.role !== "user" || block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+      if (names.get(block.tool_use_id) !== "offer_choices") continue;
+      const output = parseOutput(block.content);
+      if (!isRecord(output) || !Array.isArray(output.options)) continue;
+      offered = output.options.filter((option): option is OfferedChoice => (
+        isRecord(option)
+        && typeof option.name === "string"
+        && typeof option.packLabel === "string"
+        && typeof option.listingId === "string"
+        && typeof option.variantId === "string"
+      ));
+    }
+  }
+  const wanted = text.trim();
+  return offered.find((option) => `${option.name} (${option.packLabel})` === wanted) ?? null;
+}
+
 export function scriptStep(messages: unknown): ScriptStep {
   const turn = currentTurn(messages);
   const text = turn.text.toLowerCase();
   const last = turn.results.at(-1);
   if (turn.file) return fileStep(text, last);
+  const pick = pickedChoice(messages, turn.text);
+  if (pick && !last) return { kind: "tool", name: "search_catalog", input: { query: pick.name } };
+  if (pick && last?.name === "search_catalog") {
+    const items = itemsOf(last.output) as Array<{ listingId?: string; variantId?: string; name?: string }>;
+    const match = items.find((item) => item.listingId === pick.listingId && item.variantId === pick.variantId)
+      ?? items.find((item) => item.name === pick.name && item.variantId);
+    if (!match?.variantId) return { kind: "text", text: "I could not find that one." };
+    return { kind: "tool", name: "add_to_cart", input: { items: [{ variant_id: match.variantId, qty: 1 }] } };
+  }
   if (!last) return openingStep(text, turn.text, messages);
   if (last.name === "search_catalog") {
     const items = itemsOf(last.output);

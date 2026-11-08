@@ -370,6 +370,13 @@ Issue(id, order_id, type, photos, status, resolution)
 AiConversation(id, store_id, cart_id unique, customer_id?, model, tokens_in, tokens_out, cost_micros, messages, in_flight_until, created_at, last_message_at) — one shopper conversation per cart. Store copilot records stay in #142/#144.
 AiAction(id, store_id, conversation_id, tool, input, output, ok, created_at)
 AssistantSpendDay(day, cost_micros, cap_alerted_at) — platform ledger, no store id; retention never deletes it
+AssistantFileTurn(id, key, at_ms) — platform rate-limit row, no store id and no RLS (same pattern as rate_limits; GRANT to app_user).
+      Key `assistant:files:cart:<cartId>`; 10 file turns per cart per rolling hour. Under pg_advisory_xact_lock(hashtextextended(key, 0))
+      it deletes rows with at_ms <= now - window, counts the rest, and inserts one row if under the limit. The check runs before
+      file preparation and the turn lease, so every file request that passes body validation and is not a completed-id replay
+      takes a row: including ones that then get 409 assistant_busy, attachment_conflict or an unreadable/locked file, and every
+      Retry of a failed (uncompleted) file id. Completed-id replays and text turns insert nothing. A cart's expired rows are
+      pruned only on that cart's next file turn, so an abandoned cart can leave up to 10 small rows.
 AuditLog(id, tenant_id, actor, action, entity, before, after, at)
 ```
 
