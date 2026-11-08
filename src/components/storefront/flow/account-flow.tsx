@@ -126,10 +126,10 @@ export function AccountFlow(props: Props) {
       {error && <FlowError message={error} />}
       <FlowToast message={saved} onClose={() => setSaved("")} />
       {customer && accountOrders.length > 0 && (
-        <a className="sf-text-link sf-account-jump" href="#account-orders">
+        <Link className="sf-text-link sf-account-jump" href="#account-orders">
           <ArrowDown aria-hidden="true" />
-          Your orders ({accountOrders.length})
-        </a>
+          Your orders
+        </Link>
       )}
       {loading ? (
         <FlowLoading />
