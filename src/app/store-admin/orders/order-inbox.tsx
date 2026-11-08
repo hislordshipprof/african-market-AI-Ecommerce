@@ -69,6 +69,14 @@ function orderCustomerLabel(name: string, phone: string | null): string {
   return `${name} · ${trimmed}`;
 }
 
+function AccountBadge() {
+  return (
+    <Badge variant="outline" title="Linked to a customer account">
+      Account
+    </Badge>
+  );
+}
+
 interface Props {
   initialOrders: StoreOrderRow[];
   storeName: string;
@@ -305,11 +313,14 @@ export function OrderInbox({
                       selectedOrder.status}
                   </Badge>
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  {orderCustomerLabel(
-                    selectedOrder.customer.name,
-                    selectedOrder.customer.phone,
-                  )}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                  <span>
+                    {orderCustomerLabel(
+                      selectedOrder.customer.name,
+                      selectedOrder.customer.phone,
+                    )}
+                  </span>
+                  {selectedOrder.hasAccount && <AccountBadge />}
                 </div>
                 {selectedOrder.notes && (
                   <p className="mt-1 whitespace-pre-line text-sm italic text-muted-foreground">
@@ -488,7 +499,7 @@ export function OrderInbox({
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                               <span className="text-sm font-bold tabular-nums text-foreground">
                                 #{order.number}
                               </span>
@@ -497,6 +508,7 @@ export function OrderInbox({
                               >
                                 {config?.label ?? order.status}
                               </Badge>
+                              {order.hasAccount && <AccountBadge />}
                             </div>
                             <div className="mt-0.5 flex items-baseline gap-1 text-xs text-muted-foreground">
                               <span className="min-w-0 truncate">
