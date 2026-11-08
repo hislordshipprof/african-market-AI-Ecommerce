@@ -32,19 +32,41 @@ describe("card number scrubber", () => {
       "4242.4242.4242.4242.png",
       "4242424242424242 (1).png",
       "4242424242424242_2.png",
+      // Glued to other digits.
+      "14242424242424242.png",
+      "124242 4242 4242 4242.png",
+      "4242 4242 4242 424299.png",
+      "4242 4242 4242 4242123.png",
+      // Beside or inside what looks like a date and time.
+      "20240115_000000_4242424242424242.png",
+      "20240115_000000424_2424242424242.png",
     ];
     for (const name of split) {
       expect(postedPhotoName(name)).toMatch(/^\[card number removed\]/);
-      expect(postedPhotoName(name)).not.toContain("4242");
-      expect(safeAttachmentName(name, 1, "image/jpeg")).not.toContain("4242");
+      expect(postedPhotoName(name)).not.toMatch(/4242/);
+      expect(safeAttachmentName(name, 1, "image/jpeg")).not.toMatch(/4242/);
     }
-    // A Luhn-valid YYYYMMDD_HHMMSS is a camera name, not a card: nothing written that way is one.
+    expect(scrubFileNameCards("20240115_222300_3122003222.jpg").removed).toBe(1);
+    expect(scrubFileNameCards("2024-01-15 22.23.00 3122003222.jpg").removed).toBe(1);
+    // The server cuts long names too. It must scrub first, or the cut can leave part of a card.
+    expect(safeAttachmentName(`${"a".repeat(64)} 4242 4242 4242 4242.png`, 1, "image/jpeg")).not.toMatch(/4242/);
+    // Luhn-valid dates and times are camera names, not cards: no card has these lengths and starts.
     expect(luhnValid("20240115000000")).toBe(true);
-    expect(postedPhotoName("IMG_20240115_000000.jpg")).toBe("IMG_20240115_000000.jpg");
-    expect(scrubFileNameCards("2024-01-15 00.00.00.jpg").text).toBe("2024-01-15 00.00.00.jpg");
-    expect(scrubFileNameCards("IMG_20240115_000000 (1).jpg").text).toBe("IMG_20240115_000000 (1).jpg");
-    expect(scrubFileNameCards("20240115_000000_4242424242424242.jpg").removed).toBe(1);
-    expect(scrubFileNameCards("20240115000000.jpg").removed).toBe(1);
+    expect(luhnValid("20230117005628")).toBe(true);
+    const cameraNames = [
+      "IMG_20240115_000000.jpg",
+      "IMG20240115000000.jpg",
+      "2024-01-15 00.00.00.jpg",
+      "IMG_20240115_000000 (1).jpg",
+      "2023-01-17_005628.jpg",
+      "signal-2023-01-17-005628.jpg",
+      "IMG_0001_20230117_005628.jpg",
+      "(1) 20230117_005628.jpg",
+      "photo 2 20230117_005628.jpg",
+      "20230117_00-56-28.jpg",
+      "20230117 00.56.28.jpg",
+    ];
+    for (const name of cameraNames) expect(scrubFileNameCards(name).text).toBe(name);
   });
 
   it("masks a Luhn-valid card and leaves the surrounding text", () => {
