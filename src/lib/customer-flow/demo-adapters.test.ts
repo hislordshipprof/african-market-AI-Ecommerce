@@ -17,6 +17,8 @@ const store: FlowStore = {
   insulatedPackaging: true,
   closed: false,
   opensAt: "9 am",
+  readyAt: "9:30 AM",
+  takingOrders: true,
 };
 const catalog = [
   {

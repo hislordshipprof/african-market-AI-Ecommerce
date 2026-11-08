@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition, useSyncExternalStore } from "react";
 import { Trash2, ArrowRight } from "lucide-react";
+import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
 import { QuickAddStepper } from "../quick-add-stepper";
 import { useCart } from "../cart-provider";
 import { Button, Chip, EmptyState } from "../primitives";
@@ -130,8 +131,14 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
           <div className={styles.stack}>
             <FlowCard title={settings.name}>
               <p className={styles.muted}>
-                Prepared with care · About {settings.prepTimeMinutes} minutes{" "}
-                {settings.closed && `after opening at ${settings.opensAt}`}
+                {settings.takingOrders ? (
+                  <>
+                    Prepared with care · About {settings.prepTimeMinutes} minutes{" "}
+                    {settings.closed && `after opening at ${settings.opensAt}`}
+                  </>
+                ) : (
+                  STORE_NOT_TAKING_ORDERS
+                )}
               </p>
               <ul className={styles.lines}>
                 {lines.map((line) => {

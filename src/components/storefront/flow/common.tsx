@@ -87,6 +87,21 @@ export function ClosedFlow() {
     </div>
   );
 }
+/** Checkout refused: a heading that says why, no payment form, and a way back to the store. */
+export function CheckoutUnavailable({ message }: { message: string }) {
+  return (
+    <div className="sf-container flow-page">
+      <FlowHeading title="Checkout" />
+      <div className="flow-closed">
+        <h2>{message}</h2>
+        <p>Your basket is saved. Keep exploring the store and check back soon.</p>
+        <Link href="/" className="sf-button">
+          Explore the store <ArrowUpRight size={18} aria-hidden />
+        </Link>
+      </div>
+    </div>
+  );
+}
 export function FeeLine({
   label,
   cents,

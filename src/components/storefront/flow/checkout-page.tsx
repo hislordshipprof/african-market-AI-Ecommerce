@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, ShoppingBag, Truck } from "lucide-react";
+import { Clock, MapPin, ShoppingBag, Truck } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import {
   Elements,
@@ -982,11 +982,15 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           </div>
           <FlowCard title="When works for you?">
             {settings.closed && (
-              <p className={styles.notice}>
-                The market is closed. Opens {settings.opensAt}. Order now to
-                join the queue; estimated ready about {settings.prepTimeMinutes}{" "}
-                minutes after opening.
-              </p>
+              <div className={styles.queueNotice}>
+                <Clock size={18} aria-hidden />
+                <p>
+                  <strong>
+                    Opens {settings.opensAt} · ready about {settings.readyAt}
+                  </strong>
+                  The market is closed. Order now to join the queue.
+                </p>
+              </div>
             )}
             <div className={styles.options}>
               <Chip

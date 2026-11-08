@@ -1,9 +1,8 @@
+import { STORE_NOT_TAKING_ORDERS } from "../customer-flow/contracts";
 import { nextOpening } from "./store-hours";
 
 /** A card hold lasts 7 days, so an order never waits more than 6 days for opening. */
 export const MAX_QUEUE_MS = 6 * 24 * 60 * 60_000;
-
-export const STORE_NOT_TAKING_ORDERS = "This store isn't taking orders right now";
 
 export class StoreNotTakingOrdersError extends Error {
   readonly code = "store_not_taking_orders" as const;
