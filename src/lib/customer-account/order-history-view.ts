@@ -47,9 +47,14 @@ export function customerStatusLabel(status: string): string {
 const money = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 
-/** Never the hold: an amount that is not captured yet reads as an estimate, not a charge. */
+/**
+ * Never the hold: an amount that is not captured yet reads as an estimate, not a charge.
+ * refundId alone does not mean refunded: the order service also writes it on a failed refund
+ * (REFUND_FAILED, still charged) and a pending one (CANCELLING). Only CANCELLED has settled.
+ */
 function amountLabel(order: AccountOrderRecord): string {
-  if (order.refundId) return "Refunded";
+  if (order.refundId && order.status === "CANCELLED") return "Refunded";
+  if (order.refundId && order.status === "CANCELLING") return "Refund pending";
   if (order.capturedAmountCents != null) return money(order.capturedAmountCents);
   if (order.status === "CANCELLED" || order.status === "CANCELLING") return "Not charged";
   return `Estimated ${money(order.subtotalCents + order.tipCents + order.deliveryFeeCents)}`;
