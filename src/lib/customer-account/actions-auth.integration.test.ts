@@ -245,6 +245,9 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
     expect(logged).toContain("StripeAuthenticationError");
     expect(logged).not.toContain("keyLikeText");
     expect(logged).not.toContain(paymentMethodId);
+
+    vi.spyOn(auth.api, "getSession").mockRejectedValueOnce(new Error(providerText) as never);
+    await expectVisibleFailure();
   });
 
   it("refuses a signed-out caller and refuses B on A's address", async () => {
