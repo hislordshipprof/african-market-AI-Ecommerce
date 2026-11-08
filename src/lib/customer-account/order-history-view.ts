@@ -40,7 +40,7 @@ const CUSTOMER_STATUS_LABELS: Record<OrderStatus, string> = {
 };
 
 /** `orders.status` is a free string with no database check, so an unknown value still gets a label. */
-function customerStatusLabel(status: string): string {
+export function customerStatusLabel(status: string): string {
   return CUSTOMER_STATUS_LABELS[status as OrderStatus] ?? "In progress";
 }
 

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight } from "lucide-react";
+import { ArrowDown, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import { authClient } from "@/lib/auth-client";
@@ -125,6 +125,12 @@ export function AccountFlow(props: Props) {
       {!customer && <DemoNotice />}
       {error && <FlowError message={error} />}
       <FlowToast message={saved} onClose={() => setSaved("")} />
+      {customer && accountOrders.length > 0 && (
+        <a className="sf-text-link sf-account-jump" href="#account-orders">
+          <ArrowDown aria-hidden="true" />
+          Your orders ({accountOrders.length})
+        </a>
+      )}
       {loading ? (
         <FlowLoading />
       ) : (
@@ -301,10 +307,11 @@ export function AccountFlow(props: Props) {
               )}
             </div>
           )}
+          <div id="account-orders" className="sf-account-orders">
           <FlowCard title={`Orders from ${props.settings.name}`}>
-            <p>
+            <p className="sf-account-orders-intro">
               {customer
-                ? "Orders placed at this market with your email appear here, including any from before you had an account."
+                ? `Orders placed at this market with ${profile?.email || "your email"} appear here, including any from before you had an account.`
                 : "Order history is limited to this market and browser. Your demo profile is shared across markets."}
             </p>
             {customer && accountOrders.length ? (
@@ -373,6 +380,7 @@ export function AccountFlow(props: Props) {
               </EmptyState>
             )}
           </FlowCard>
+          </div>
         </>
       )}
     </div>

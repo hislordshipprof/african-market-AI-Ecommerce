@@ -33,6 +33,7 @@ import {
   Package,
   RefreshCw,
   ShoppingBag,
+  UserCheck,
 } from "lucide-react";
 import {
   fetchOrdersAction,
@@ -69,11 +70,14 @@ function orderCustomerLabel(name: string, phone: string | null): string {
   return `${name} · ${trimmed}`;
 }
 
+/** Not a status, so it does not look like one. */
 function AccountBadge() {
   return (
-    <Badge variant="outline" title="Linked to a customer account">
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+      <UserCheck className="size-3" aria-hidden="true" />
+      <span className="sr-only">Linked to a customer </span>
       Account
-    </Badge>
+    </span>
   );
 }
 
