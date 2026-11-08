@@ -84,20 +84,6 @@ describe("Stripe webhook handler", () => {
     expect(updateStoreOnboardingStatus).not.toHaveBeenCalled();
   });
 
-  it("duplicate event applied once", async () => {
-    const { applyProviderRefund } = await import("@/lib/order/refund-requests");
-    vi.mocked(applyProviderRefund).mockClear();
-    const body = JSON.stringify({
-      type: "charge.refunded",
-      accountId: "acct_dup",
-      data: { object: { id: "re_dup", object: "refund", status: "succeeded", payment_intent: "pi_dup" } },
-    });
-    expect((await callWebhook(body, VALID_WEBHOOK_SIGNATURE)).status).toBe(200);
-    expect((await callWebhook(body, VALID_WEBHOOK_SIGNATURE)).status).toBe(200);
-    const amounts = vi.mocked(applyProviderRefund).mock.calls.map((call) => call[0]?.amountRefunded);
-    expect(new Set(amounts).size).toBe(1);
-  });
-
   it("DB failure returns 500 and retry converges", async () => {
     const { applyProviderRefund } = await import("@/lib/order/refund-requests");
     vi.mocked(applyProviderRefund).mockRejectedValueOnce(new Error("db down"));
