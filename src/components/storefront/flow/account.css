@@ -97,6 +97,10 @@
 .sf-account-orders {
   scroll-margin-top: 140px;
 }
+/* Focused by the jump button so Tab continues from the list; not an interactive control. */
+.sf-account-orders:focus {
+  outline: none;
+}
 .sf-account-order--real {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 18px;
