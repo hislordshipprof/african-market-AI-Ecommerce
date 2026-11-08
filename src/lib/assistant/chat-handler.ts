@@ -36,6 +36,8 @@ import {
   assistantChatEnabled,
 } from "./contract";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
+import { writeServerChoices } from "./server-choices";
+import { acceptanceForTurn } from "./shown";
 import { clientIp } from "./client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { requireSameOrigin } from "../security/same-origin";
@@ -210,13 +212,15 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       return jsonError(503, "assistant_unavailable", FIXED_ERROR);
     }
 
-    const tools = assistantTools({
+    const turnCtx = {
       storeId: store.id,
       cartId,
       conversationId: turn.id,
       actorUserId: userId,
       turnMessageId: parsed.id,
-    });
+      acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
+    };
+    const tools = assistantTools(turnCtx);
     const history = (await usableHistory(withUser, tools)).slice(-30);
     if (!history.some((message) => message.id === parsed.id)) {
       const current = withUser.find((message) => message.id === parsed.id);
@@ -325,12 +329,34 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       },
       execute: async ({ writer }) => {
         const reader = result.toUIMessageStream({ onError: () => FIXED_ERROR }).getReader();
+        const replyParts: string[] = [];
+        let openReply = "";
+        const takeReply = (chunk: unknown) => {
+          if (!chunk || typeof chunk !== "object") return;
+          const part = chunk as { type?: unknown; delta?: unknown };
+          if (part.type === "text-start") {
+            if (openReply) replyParts.push(openReply);
+            openReply = "";
+            return;
+          }
+          if (part.type === "text-delta" && typeof part.delta === "string") {
+            openReply += part.delta;
+            return;
+          }
+          if (part.type === "text-end" && openReply) {
+            replyParts.push(openReply);
+            openReply = "";
+          }
+        };
         while (true) {
           const next = await reader.read();
           if (next.done) break;
           const outgoing = scrubOutboundChunk(next.value);
-          if (outgoing) writer.write(outgoing as typeof next.value);
+          if (!outgoing) continue;
+          takeReply(outgoing);
+          writer.write(outgoing as typeof next.value);
         }
+        if (openReply) replyParts.push(openReply);
         const steps = await Promise.resolve(result.steps).catch(() => []);
         const last = steps.at(-1);
         if (steps.length >= 8 && last?.finishReason === "tool-calls") {
@@ -338,6 +364,29 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
           writer.write({ type: "text-delta", id: "step-limit", delta: STEP_LIMIT_TEXT });
           writer.write({ type: "text-end", id: "step-limit" });
           writer.write({ type: "data-step-limit", id: "step-limit", data: { text: STEP_LIMIT_TEXT } });
+        } else if (await turnFinishedNormally(result)) {
+          const replyText = replyParts.join("\n");
+          await writeServerChoices({
+            steps,
+            replyText,
+            ctx: turnCtx,
+            write: (chunk) => {
+              if (chunk.type === "tool-input-available") {
+                writer.write({
+                  type: "tool-input-available",
+                  toolCallId: chunk.toolCallId,
+                  toolName: chunk.toolName,
+                  input: chunk.input,
+                });
+                return;
+              }
+              writer.write({
+                type: "tool-output-available",
+                toolCallId: chunk.toolCallId,
+                output: chunk.output,
+              });
+            },
+          });
         }
       },
     });
@@ -350,6 +399,15 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       },
     });
   };
+}
+
+async function turnFinishedNormally(result: { finishReason: PromiseLike<string> }): Promise<boolean> {
+  try {
+    const reason = await result.finishReason;
+    return reason !== "error" && reason !== "other";
+  } catch {
+    return false;
+  }
 }
 
 async function persistTurn(args: {

@@ -9,7 +9,10 @@ set -euo pipefail
 PGBIN="${PGBIN:-/c/Program Files/PostgreSQL/18/bin}"
 LANE_PG_PORT="${LANE_PG_PORT:-5434}"
 LANE_PG_DATA="${LANE_PG_DATA:-$LOCALAPPDATA/african-markets-pg/data}"
-LANE_PG_DATA="$(cygpath -u "$LANE_PG_DATA" 2>/dev/null || echo "$LANE_PG_DATA")"
+# A path that is already a unix path does not need cygpath. Windows paths still convert.
+case "$LANE_PG_DATA" in
+  [A-Za-z]:* | *\\*) LANE_PG_DATA="$(cygpath -u "$LANE_PG_DATA" 2>/dev/null || echo "$LANE_PG_DATA")" ;;
+esac
 export PGPASSWORD=postgres
 
 if [ ! -f "$LANE_PG_DATA/PG_VERSION" ]; then

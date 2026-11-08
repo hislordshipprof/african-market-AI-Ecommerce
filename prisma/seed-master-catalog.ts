@@ -169,6 +169,41 @@ async function observePrisma(prisma: PrismaClient): Promise<DatabaseIdentity> {
   return { host: row.host, port: String(row.port), database: row.database };
 }
 
+const UPLOAD_CAUSE_LINE_MAX = 200;
+
+function firstCauseLine(value: string): string {
+  const line = value
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .find((part) => part.length > 0) ?? "";
+  return line.length > UPLOAD_CAUSE_LINE_MAX ? line.slice(0, UPLOAD_CAUSE_LINE_MAX) : line;
+}
+
+function uploadCauseCode(error: Error): string | undefined {
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && code.trim() ? code : undefined;
+}
+
+function uploadCauseStatus(error: Error): number | undefined {
+  const status = (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode;
+  return typeof status === "number" && Number.isInteger(status) ? status : undefined;
+}
+
+/** One line for an R2 upload failure. Never the error object, its response, or credentials. */
+export function formatR2UploadCause(cause: unknown): string {
+  if (typeof cause === "string") return firstCauseLine(cause) || "unknown cause";
+  if (!(cause instanceof Error)) return "unknown cause";
+
+  const name = cause.name || "Error";
+  const status = uploadCauseStatus(cause);
+  const statusLabel = status === undefined ? "" : ` (HTTP ${status})`;
+  const message = firstCauseLine(typeof cause.message === "string" ? cause.message : "");
+  const code = uploadCauseCode(cause);
+  if (!message) return code ? `${name}${statusLabel}: ${code}` : `${name}${statusLabel}`;
+  const codeLabel = code && !message.includes(code) ? ` (${code})` : "";
+  return `${name}${statusLabel}: ${message}${codeLabel}`;
+}
+
 export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCatalogDeps = {}) {
   const startedAt = (deps.now ?? (() => new Date()))();
   const log = deps.log ?? ((line: string) => console.log(line));
@@ -260,8 +295,9 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
           imageUploads++;
           totalUploadBytes += img.bytes;
         } else if (img.reason === "upload") {
-          log(`R2 upload failed for ${row.id}`);
-          failures.push({ id: row.id, reason: "R2 upload failed" });
+          const cause = formatR2UploadCause(img.cause);
+          log(`R2 upload failed for ${row.id}: ${cause}`);
+          failures.push({ id: row.id, reason: `R2 upload failed: ${cause}` });
         } else {
           imageSkips++;
           failures.push({ id: row.id, reason: "download/convert failed" });

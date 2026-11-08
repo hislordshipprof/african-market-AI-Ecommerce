@@ -64,4 +64,28 @@ describe("fake payment status machine", () => {
     expect(fresh.id).not.toBe(first.id);
     expect(fresh.status).toBe("requires_payment_method");
   });
+
+  it("fake customer and intent ids never repeat after reset, and an idempotent replay keeps its id", async () => {
+    const customer = await fakeCheckoutPayments.createCustomer({ metadata: { user_id: "user-1" } }, "cus-key");
+    const replayCustomer = await fakeCheckoutPayments.createCustomer({ metadata: { user_id: "user-1" } }, "cus-key");
+    expect(replayCustomer.id).toBe(customer.id);
+    expect(customer.id.startsWith("cus_fake_")).toBe(true);
+    await expect(
+      fakeCheckoutPayments.createCustomer({ metadata: { user_id: "user-2" } }, "cus-key"),
+    ).rejects.toMatchObject({ code: "idempotency_error" });
+
+    const intent = await fakeCheckoutPayments.createPaymentIntent({ amount: 500, currency: "usd" }, "pi-key");
+    const replayIntent = await fakeCheckoutPayments.createPaymentIntent({ amount: 500, currency: "usd" }, "pi-key");
+    expect(replayIntent.id).toBe(intent.id);
+    expect(intent.id.startsWith("pi_fake_")).toBe(true);
+    await expect(
+      fakeCheckoutPayments.createPaymentIntent({ amount: 700, currency: "usd" }, "pi-key"),
+    ).rejects.toMatchObject({ code: "idempotency_error" });
+
+    resetFakeCheckoutPayments();
+    const freshCustomer = await fakeCheckoutPayments.createCustomer({ metadata: { user_id: "user-1" } }, "cus-key");
+    const freshIntent = await fakeCheckoutPayments.createPaymentIntent({ amount: 500, currency: "usd" }, "pi-key");
+    expect(freshCustomer.id).not.toBe(customer.id);
+    expect(freshIntent.id).not.toBe(intent.id);
+  });
 });

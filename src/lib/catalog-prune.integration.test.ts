@@ -1,16 +1,53 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Client } from "pg";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { catalogPruneMode } from "./catalog-prune";
 import { createFakeR2 } from "./catalog-prune-fake-r2";
 import { readCatalogImageReferences, withReferenceReadClient } from "./catalog-prune-reader";
 import { resolveDirectUrl } from "./env";
 import { storeScopedTransaction } from "./db";
 import { seedMasterCatalog, uncoordinatedCatalogWriters } from "../../prisma/seed-master-catalog";
+
+const catalogUploadGate = vi.hoisted(() => ({
+  download: null as null | (() => Promise<{ ok: false; reason: "upload"; cause: unknown }>),
+  list: null as null | (() => Promise<unknown[]>),
+}));
+
+vi.mock("./catalog-image", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./catalog-image")>();
+  return {
+    ...actual,
+    downloadAndUploadImage: (
+      sourceUrl: string,
+      productId: string,
+      options?: Parameters<typeof actual.downloadAndUploadImage>[2],
+    ) =>
+      catalogUploadGate.download
+        ? catalogUploadGate.download()
+        : actual.downloadAndUploadImage(sourceUrl, productId, options),
+  };
+});
+
+vi.mock("./catalog-prune-execute", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./catalog-prune-execute")>();
+  return {
+    ...actual,
+    listCatalogObjects: (
+      client: Parameters<typeof actual.listCatalogObjects>[0],
+      bucket: string,
+      prefix?: string,
+    ) =>
+      catalogUploadGate.list
+        ? catalogUploadGate.list()
+        : actual.listCatalogObjects(client, bucket, prefix),
+  };
+});
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t225${Date.now().toString(36)}`;
@@ -22,7 +59,7 @@ const CSV_HEADER = "id,english_name,local_names,search_synonyms,category,subcate
 const old = new Date(NOW.getTime() - 30 * DAY);
 const fresh = new Date(NOW.getTime() - 60 * 60 * 1000);
 
-function csv(rows: { id: string; confidence: string }[]): string {
+function csv(rows: { id: string; confidence: string; imageUrl?: string }[]): string {
   const dir = mkdtempSync(path.join(tmpdir(), "t225-csv-"));
   const file = path.join(dir, "rows.csv");
   const lines = [CSV_HEADER];
@@ -30,6 +67,7 @@ function csv(rows: { id: string; confidence: string }[]): string {
     const cols = Array.from({ length: 22 }, () => "");
     cols[0] = row.id;
     cols[1] = row.id;
+    cols[15] = row.imageUrl ?? "";
     cols[20] = row.confidence;
     lines.push(cols.join(","));
   }
@@ -107,6 +145,43 @@ describe.skipIf(!hasDb)("catalog prune on the lane database", () => {
     process.env.R2_SECRET_ACCESS_KEY = "sentinel-secret-value";
     process.env.R2_BUCKET = BUCKET;
   }
+
+  it("a non-string R2 upload error does not abort later catalog rows", async () => {
+    const cause = await repeatedMessageUploadError();
+    expect(Array.isArray((cause as { message?: unknown }).message)).toBe(true);
+    catalogUploadGate.download = async () => ({ ok: false, reason: "upload", cause });
+    catalogUploadGate.list = async () => [];
+    configureBucket();
+    delete process.env.SEED_PRUNE_R2;
+    const badId = `${RUN}-cause-bad`;
+    const laterId = `${RUN}-cause-later`;
+    masterIds.push(badId, laterId);
+    const logs: string[] = [];
+    try {
+      await seedMasterCatalog(prisma, {
+        csvPath: csv([
+          { id: badId, confidence: "high", imageUrl: "https://images.example/bad.png" },
+          { id: laterId, confidence: "high" },
+        ]),
+        now: () => NOW,
+        log: (line) => logs.push(line),
+      });
+      expect(logs).toContain(`R2 upload failed for ${badId}: AccessDenied (HTTP 403)`);
+      expect(logs.some((line) => line.startsWith("Image failures"))).toBe(true);
+      const rows = await asAdmin(prisma, (tx) =>
+        tx.masterProduct.findMany({
+          where: { id: { in: [badId, laterId] } },
+          select: { id: true, imageUrl: true },
+        }),
+      );
+      expect(rows.map((row) => row.id).sort()).toEqual([badId, laterId].sort());
+      expect(rows.find((row) => row.id === badId)?.imageUrl).toBeNull();
+    } finally {
+      catalogUploadGate.download = null;
+      catalogUploadGate.list = null;
+      restoreEnv();
+    }
+  });
 
   it("default seed with R2 configured lists only and never sends DeleteObjects", async () => {
     configureBucket();
@@ -710,4 +785,40 @@ async function asAdmin<T>(prisma: PrismaClient, fn: (tx: PrismaClient) => Promis
 function assign(key: string, value: string | undefined) {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;
+}
+
+/** Real S3 client error for a 403 body with two Message tags. SDK 3.1161 leaves message as an array. */
+async function repeatedMessageUploadError(): Promise<unknown> {
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>one</Message><Message>two</Message></Error>`;
+  const server = createServer((_req, res) => {
+    res.writeHead(403, { "content-type": "application/xml" });
+    res.end(body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("upload-cause repro server has no port");
+  }
+  const client = new S3Client({
+    region: "auto",
+    endpoint: `http://127.0.0.1:${address.port}`,
+    forcePathStyle: true,
+    credentials: { accessKeyId: "repro", secretAccessKey: "repro-secret" },
+  });
+  try {
+    await client.send(new PutObjectCommand({
+      Bucket: "bucket",
+      Key: "catalog/a.webp",
+      Body: Buffer.from("x"),
+    }));
+    throw new Error("expected the repeated Message body to fail the upload");
+  } catch (error) {
+    if (error instanceof Error && error.message === "expected the repeated Message body to fail the upload") throw error;
+    return error;
+  } finally {
+    client.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }
