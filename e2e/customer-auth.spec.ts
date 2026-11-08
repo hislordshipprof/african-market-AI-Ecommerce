@@ -99,6 +99,8 @@ test.describe("Customer magic-link auth", () => {
       await expect(row).toBeVisible({ timeout: 15000 });
       await expect(row).toHaveAttribute("href", `/order/${seeded.orderId}`);
       await expect(row).toContainText("$12.50");
+      await row.click();
+      await expect(page.getByRole("heading", { name: `Order #${seeded.number}` })).toBeVisible({ timeout: 15000 });
     } finally {
       await deleteGuestOrder(seeded);
     }
