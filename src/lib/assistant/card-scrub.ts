@@ -26,18 +26,11 @@ function windowPasses(digits: string): boolean {
   return false;
 }
 
-/** Filenames also split digit groups with `_` and `.` (`4242_4242_4242_4242.png`). */
-export const FILENAME_CARD_SEPARATORS = " -_.";
-
 /**
  * Mask Luhn-valid card numbers. The whole run is replaced, including separators,
  * so no digits of the number remain.
  */
-export function scrubCardNumbers(
-  text: string,
-  options: { separators?: string } = {},
-): { text: string; removed: number } {
-  const separators = options.separators ?? " -";
+export function scrubCardNumbers(text: string): { text: string; removed: number } {
   const normalized = text.normalize("NFKC");
   let removed = 0;
   let out = "";
@@ -57,7 +50,7 @@ export function scrubCardNumbers(
         continue;
       }
       const separator = normalized[i];
-      if (separators.includes(separator) && isDigit(normalized, i + 1)) {
+      if ((separator === " " || separator === "-") && isDigit(normalized, i + 1)) {
         i += 1;
         continue;
       }
@@ -71,6 +64,54 @@ export function scrubCardNumbers(
     }
   }
   return { text: out, removed };
+}
+
+/** In a filename any punctuation, space or symbol can split a number. A letter ends it. */
+const NAME_DIGIT_RUN = /\d(?:[^\p{L}\p{N}]*\d)*/gu;
+const CAMERA_DATE = /^(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$/;
+const CAMERA_TIME = /^(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?:\d{3})?$/;
+
+/**
+ * How many leading digit groups are a camera's date and time (`IMG_20240115_000000`,
+ * `2024-01-15 00.00.00`). No card is written in that grouping or starts 19 or 20 at
+ * that length, and about 1 in 10 such names would pass Luhn.
+ */
+function cameraStampGroups(groups: string[]): number {
+  const [date = "", time = ""] = groups;
+  if (CAMERA_DATE.test(date) && CAMERA_TIME.test(time)) return 2;
+  const parts = groups.slice(0, 6);
+  const grouped = parts.map((part) => part.length).join() === "4,2,2,2,2,2";
+  if (grouped && CAMERA_DATE.test(parts.slice(0, 3).join("")) && CAMERA_TIME.test(parts.slice(3).join(""))) return 6;
+  return 0;
+}
+
+function runHoldsCard(run: string): boolean {
+  const all = run.match(/\d+/g) ?? [];
+  const groups = all.slice(cameraStampGroups(all));
+  for (let start = 0; start < groups.length; start += 1) {
+    if ((groups[start]?.length ?? 0) > 19 && windowPasses(groups[start] ?? "")) return true;
+    let digits = "";
+    for (let end = start; end < groups.length && digits.length <= 19; end += 1) {
+      digits += groups[end];
+      if (luhnValid(digits)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Card numbers in a filename, where the digits can be split by anything but a letter
+ * and a suffix such as " (1)" can follow them. Candidates start and end on digit groups.
+ * The whole run is replaced.
+ */
+export function scrubFileNameCards(name: string): { text: string; removed: number } {
+  let removed = 0;
+  const text = name.normalize("NFKC").replace(NAME_DIGIT_RUN, (run) => {
+    if (!runHoldsCard(run)) return run;
+    removed += 1;
+    return "[card number removed]";
+  });
+  return { text, removed };
 }
 
 function isDigit(text: string, index: number): boolean {

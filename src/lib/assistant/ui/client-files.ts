@@ -1,16 +1,16 @@
-import { FILENAME_CARD_SEPARATORS, scrubCardNumbers } from "../card-scrub";
+import { scrubFileNameCards } from "../card-scrub";
 
 const NAME_CAP = 80;
 
 /**
  * Stem and extension of a customer's filename with nothing unsafe left: the last path
  * segment only, no control or format characters (bidi, LRM/RLM/ALM, zero-width, BOM),
- * and card numbers masked even when `_` or `.` split the digits.
+ * and card numbers masked however the digits are split.
  */
 function safeNameParts(name: string): { stem: string; ext: string } {
   const segment = name.normalize("NFKC").split(/[/\\]/).pop() ?? "";
   const cleaned = segment.replace(/[\p{Cc}\p{Cf}]/gu, "").replace(/\s+/g, " ").trim();
-  const scrubbed = scrubCardNumbers(cleaned, { separators: FILENAME_CARD_SEPARATORS }).text;
+  const scrubbed = scrubFileNameCards(cleaned).text;
   const dot = scrubbed.lastIndexOf(".");
   const rawExt = dot > 0 ? scrubbed.slice(dot) : "";
   const ext = /^\.[a-z0-9]{1,8}$/i.test(rawExt) ? rawExt : "";
