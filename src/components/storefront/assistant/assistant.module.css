@@ -140,7 +140,7 @@
   /* Drawn over the photo, not the bubble: a light line with a dark lift reads on any image. */
   background: rgb(255 255 255 / 92%);
   box-shadow: 0 1px 3px rgb(0 0 0 / 45%);
-  animation: scan 1.6s var(--ease-std) infinite alternate;
+  animation: scan 1.3s var(--ease-std) infinite alternate;
 }
 
 @keyframes scan {
@@ -366,6 +366,7 @@
 
 .tiles {
   display: flex;
+  scroll-snap-type: x mandatory;
   gap: 8px;
   overflow-x: auto;
   min-width: 0;
@@ -373,6 +374,7 @@
 
 /* A low, wide tile: on a small phone the tools below it have to stay on screen. */
 .tile {
+  scroll-snap-align: start;
   flex: 0 0 min(264px, 100%);
   box-sizing: border-box;
   display: grid;
@@ -434,7 +436,7 @@
   background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
   background-size: 50% 100%;
   background-repeat: no-repeat;
-  animation: preparing 1.2s var(--ease-std) infinite;
+  animation: preparing 1.3s var(--ease-std) infinite;
 }
 
 @keyframes preparing {
