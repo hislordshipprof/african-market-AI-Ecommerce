@@ -68,7 +68,7 @@ export async function recordReconcileResult(storeId: string, orderId: string): P
 const ALERT_OPEN_MINUTES = 15;
 const CANCEL_OPEN_MINUTES = 30;
 /** Inside the 7-day card hold and Inngest's 7-day Free-plan run limit. Normal queued orders cancel by 6 d 30 min. */
-export const HOLD_SAFETY_CAP_MS = (6 * 24 + 12) * 60 * 60_000;
+const HOLD_SAFETY_CAP_MS = (6 * 24 + 12) * 60 * 60_000;
 /** Re-sleeps after the first sleep when edited hours push the deadline later. Then the cap applies. */
 const MAX_RESLEEPS = 10;
 
@@ -88,19 +88,27 @@ const CANCEL_TIMER: TimerSpec = { name: "cancel", openMinutes: CANCEL_OPEN_MINUT
  * The timer's deadline from the order row and the store's current hours:
  * `openMinutes` open minutes after the acceptance clock (created_at for orders
  * placed before #167), never later than created_at + HOLD_SAFETY_CAP_MS.
- * An invalid zone falls back to wall-clock minutes from the clock.
+ * An invalid zone falls back to wall-clock minutes from the clock, logged on
+ * the run's first plan only, so once per timer run.
  */
 function timerDeadline(
   order: { createdAt: Date; acceptanceClockStartsAt: Date | null },
   store: { hours: unknown; timezone: string } | null,
   spec: TimerSpec,
-  log: { storeId: string; orderId: string },
+  log: { storeId: string; orderId: string; firstPlan: boolean },
 ): number {
   const clockStart = order.acceptanceClockStartsAt ?? order.createdAt;
   const cap = order.createdAt.getTime() + HOLD_SAFETY_CAP_MS;
   let deadline: number;
   if (!store || !isValidTimezone(store.timezone)) {
-    console.error(JSON.stringify({ event: "acceptance_timer_invalid_timezone", timer: spec.name, ...log }));
+    if (log.firstPlan) {
+      console.error(JSON.stringify({
+        event: "acceptance_timer_invalid_timezone",
+        timer: spec.name,
+        storeId: log.storeId,
+        orderId: log.orderId,
+      }));
+    }
     deadline = clockStart.getTime() + spec.openMinutes * 60_000;
   } else {
     deadline = openMinutesDeadline(store.hours, store.timezone, clockStart, spec.openMinutes)?.getTime() ?? cap;
@@ -127,7 +135,7 @@ async function planTimer(
     where: { id: storeId },
     select: { hours: true, timezone: true },
   });
-  let deadline = timerDeadline(order, store, spec, { storeId, orderId });
+  let deadline = timerDeadline(order, store, spec, { storeId, orderId, firstPlan: previousIso === null });
   const previous = previousIso ? new Date(previousIso).getTime() : null;
   if (iteration > MAX_RESLEEPS && previous !== null && deadline > previous) {
     console.error(JSON.stringify({ event: "acceptance_timer_resleep_limit", timer: spec.name, storeId, orderId }));
