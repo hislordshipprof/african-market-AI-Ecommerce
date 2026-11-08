@@ -1,6 +1,7 @@
 import { storeUrl, E2E_PORT } from "./urls";
 import { test, expect } from "@playwright/test";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
+import { deleteGuestOrder, insertGuestOrder } from "./order-fixture";
 
 const base = storeUrl("mama-ngozi");
 const apiBase = `http://localhost:${E2E_PORT}`;
@@ -72,6 +73,35 @@ test.describe("Customer magic-link auth", () => {
       return res.json();
     });
     expect(sessionBody?.session ?? null).toBeNull();
+  });
+
+  test("a returning guest who signs in by magic link sees their past order in order history", async ({ page, request }) => {
+    const guestEmail = `e2e-returning-guest-${Date.now()}@test.example`;
+    const seeded = await insertGuestOrder({
+      email: guestEmail,
+      name: "Returning Guest",
+      phone: "+15550007070",
+    });
+    try {
+      await page.goto(`${base}/account/sign-in`);
+      await page.getByLabel("Email address").fill(guestEmail);
+      await page.getByRole("button", { name: "Send sign-in link" }).click();
+      await expect(page.locator("[data-slot='card-title']")).toContainText("Check your email", { timeout: 10000 });
+
+      const tokenRes = await request.get(
+        `${apiBase}/api/e2e/magic-link-token?email=${encodeURIComponent(guestEmail)}`,
+      );
+      expect(tokenRes.ok()).toBe(true);
+      const { token } = await tokenRes.json();
+      await page.goto(`${base}/api/auth/magic-link/verify?token=${token}&callbackURL=/account`);
+
+      const row = page.getByRole("link", { name: new RegExp(`Order #${seeded.number}\\b`) });
+      await expect(row).toBeVisible({ timeout: 15000 });
+      await expect(row).toHaveAttribute("href", `/order/${seeded.orderId}`);
+      await expect(row).toContainText("$12.50");
+    } finally {
+      await deleteGuestOrder(seeded);
+    }
   });
 
   test("signed-out header opens sign-in for this store", async ({ page }) => {

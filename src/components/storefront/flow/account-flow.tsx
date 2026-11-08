@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import { authClient } from "@/lib/auth-client";
@@ -27,6 +28,7 @@ import { FlowToast } from "./feedback";
 import { RealAccountBook } from "./account-book";
 import { savePhoneAction } from "@/lib/customer-account/actions";
 import type { AccountBookSnapshot } from "@/lib/customer-account/checkout-profile";
+import { ACCOUNT_ORDER_LIMIT, type AccountOrderRow } from "@/lib/customer-account/order-history-view";
 import "./account.css";
 type Props = {
   settings: FlowStore;
@@ -34,6 +36,7 @@ type Props = {
   enabled: boolean;
   customer?: StoreCustomer | null;
   accountBook?: AccountBookSnapshot | null;
+  accountOrders?: AccountOrderRow[] | null;
 };
 const message = (e: unknown) =>
   e instanceof Error ? e.message : "Something went wrong. Please try again.";
@@ -47,6 +50,7 @@ export function AccountFlow(props: Props) {
   const router = useRouter();
   const services = useServices(props);
   const { customer, accountBook } = props;
+  const accountOrders = props.accountOrders ?? [];
   const realProfile: CustomerProfile | null = customer
     ? {
         id: customer.id,
@@ -146,8 +150,14 @@ export function AccountFlow(props: Props) {
                       setBusy(true);
                       setError("");
                       void savePhoneAction(profile.phone).then((result) => {
-                        if (result.ok) setSaved("Phone saved.");
-                        else setError(result.error);
+                        if (result.ok) {
+                          setSaved("Phone saved.");
+                          // Back restores the router's cached page: without this it brings back the
+                          // old phone, and pressing Save on that overwrites the new one.
+                          router.refresh();
+                        } else {
+                          setError(result.error);
+                        }
                         setBusy(false);
                       });
                       return;
@@ -197,7 +207,10 @@ export function AccountFlow(props: Props) {
                     onClick={async () => {
                       if (customer) {
                         await authClient.signOut();
-                        router.push("/account/sign-in");
+                        // A full load drops the router's cache, or Back shows this account
+                        // to whoever uses the device next.
+                        // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- the full load is the point
+                        window.location.assign("/account/sign-in");
                         return;
                       }
                       await services?.auth.signOut();
@@ -298,12 +311,35 @@ export function AccountFlow(props: Props) {
             </div>
           )}
           <FlowCard title={`Orders from ${props.settings.name}`}>
-            <p>
+            <p className="sf-account-orders-intro">
               {customer
-                ? "Orders you place at this market appear here."
+                ? `Orders placed at this market with ${profile?.email || "your email"} appear here, including any from before you had an account.`
                 : "Order history is limited to this market and browser. Your demo profile is shared across markets."}
             </p>
-            {orders.length ? (
+            {customer && accountOrders.length ? (
+              <div className="sf-account-list">
+                {accountOrders.map((o) => (
+                  <Link className="sf-account-order sf-account-order--real" href={o.href} key={o.id}>
+                    <span className="sf-account-order-main">
+                      <strong>Order #{o.number}</strong>
+                      <small>
+                        {o.dateLabel} · {o.itemsLabel}
+                      </small>
+                    </span>
+                    <span className="sf-account-order-end">
+                      <strong>{o.amountLabel}</strong>
+                      <small>{o.statusLabel}</small>
+                    </span>
+                    <ChevronRight aria-hidden="true" className="sf-account-order-chevron" />
+                  </Link>
+                ))}
+                {accountOrders.length >= ACCOUNT_ORDER_LIMIT && (
+                  <p className="sf-account-order-cap">
+                    Showing your {ACCOUNT_ORDER_LIMIT} most recent orders.
+                  </p>
+                )}
+              </div>
+            ) : orders.length ? (
               <div className="sf-account-list">
                 {orders.map((o) => (
                   <Link
@@ -336,7 +372,7 @@ export function AccountFlow(props: Props) {
                 title="Your first market haul awaits"
                 description={
                   customer
-                    ? "Orders you place at this market will appear here."
+                    ? "Orders placed with your email will appear here."
                     : "Your demo orders from this market will appear here."
                 }
               >

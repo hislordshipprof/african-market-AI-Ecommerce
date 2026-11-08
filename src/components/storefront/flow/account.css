@@ -78,6 +78,76 @@
 .sf-account-order:hover {
   color: var(--color-primary);
 }
+.sf-account-orders-intro {
+  overflow-wrap: anywhere;
+}
+.sf-account-order--real {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 18px;
+  align-items: center;
+  column-gap: 12px;
+  /* Keyboard focus must not land under the sticky header or the fixed bottom nav. */
+  scroll-margin-block: 140px 110px;
+}
+/* The focus ring sits outside the row: keep it off the paragraph above the first one. */
+.sf-account-order--real:first-child {
+  margin-top: 8px;
+}
+.sf-account-order--real:focus-visible {
+  border-radius: 8px;
+}
+.sf-account-order--real:hover {
+  color: inherit;
+}
+.sf-account-order--real:hover .sf-account-order-main strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sf-account-order--real:hover .sf-account-order-chevron {
+  color: var(--color-ink);
+}
+.sf-account-order--real:active {
+  background: var(--color-soft);
+}
+.sf-account-order--real small {
+  font-size: 14px;
+}
+.sf-account-order-main {
+  min-width: 0;
+}
+.sf-account-order-end {
+  text-align: right;
+}
+.sf-account-order-end strong {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.sf-account-order-chevron {
+  width: 18px;
+  height: 18px;
+  color: var(--muted-foreground);
+}
+/* Small phones and 200% zoom: stack instead of squeezing the number and the date. */
+@media (max-width: 380px) {
+  .sf-account-order--real {
+    grid-template-columns: minmax(0, 1fr) 18px;
+    row-gap: 8px;
+  }
+  .sf-account-order-end {
+    grid-row: 2;
+    text-align: left;
+  }
+  .sf-account-order-chevron {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+}
+.sf-account-order-cap {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
 .sf-account-order small,
 .sf-account-address-result small {
   display: block;

@@ -5,6 +5,7 @@ import { ClosedFlow, FlowCard, FlowHeading } from "@/components/storefront/flow/
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { storeScoped } from "@/lib/db";
+import { customerStatusLabel } from "@/lib/customer-account/order-history-view";
 
 async function getRealOrder(storeId: string, orderId: string) {
   return storeScoped(storeId).order.findUnique({
@@ -66,7 +67,7 @@ export default async function OrderPage({
             </FlowCard>
           )}
           <FlowCard title="Order details">
-            <p><strong>Status:</strong> {realOrder.status}</p>
+            <p><strong>Status:</strong> {customerStatusLabel(realOrder.status)}</p>
             <p><strong>Fulfillment:</strong> {realOrder.fulfillment}</p>
             {realOrder.customer && (
               <p><strong>Customer:</strong> {realOrder.customer.name}</p>

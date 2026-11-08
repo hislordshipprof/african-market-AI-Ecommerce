@@ -40,6 +40,9 @@ A customer's single login, which works at every store on the platform.
 **Guest**:
 A customer who checks out with name, email and phone but no account.
 
+**Claimed order**:
+A guest order at a store that is linked to a customer's account because the account's verified email matches the email given at checkout. The order keeps the contact details it was placed with.
+
 **Address book**:
 The addresses a customer saves on their account and can reuse at any store. A store sees an address only when that customer uses it on an order.
 _Avoid_: Wallet

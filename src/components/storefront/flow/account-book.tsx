@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { USPS_STATE_CODES } from "@/lib/customer-account/address-validation";
 import {
@@ -39,6 +40,8 @@ function fromAddress(address: AccountAddressView): FormState {
 }
 
 export function RealAccountBook({ initial }: { initial: AccountBookSnapshot }) {
+  // Each save refreshes the router, or Back restores a cached page from before it.
+  const router = useRouter();
   const [addresses, setAddresses] = useState(initial.addresses);
   const [cards, setCards] = useState(initial.cards);
   const [cardsUnavailable, setCardsUnavailable] = useState(initial.cardsUnavailable);
@@ -75,6 +78,7 @@ export function RealAccountBook({ initial }: { initial: AccountBookSnapshot }) {
     setAddresses(result.addresses);
     setForm(EMPTY);
     setEditingId(null);
+    router.refresh();
   }
 
   async function run(task: () => Promise<{ ok: true; addresses: AccountAddressView[] } | { ok: false; error: string }>) {
@@ -87,6 +91,7 @@ export function RealAccountBook({ initial }: { initial: AccountBookSnapshot }) {
       return;
     }
     setAddresses(result.addresses);
+    router.refresh();
   }
 
   async function removeCard(card: AccountCard) {
@@ -100,6 +105,7 @@ export function RealAccountBook({ initial }: { initial: AccountBookSnapshot }) {
     }
     setCards(result.cards);
     setCardsUnavailable(result.unavailable);
+    router.refresh();
   }
 
   return (

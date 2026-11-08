@@ -1,7 +1,8 @@
 import { betterAuth, APIError } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
-import { authPrisma, platform, platformAdmin } from "./db";
+import { authPrisma, platform } from "./db";
+import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
 import { sendEmail } from "./email/send";
 import { magicLinkMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
@@ -101,43 +102,6 @@ export function validateAuthSecret(
 validateAuthSecret();
 
 const baseUrl = resolveAuthBaseUrl();
-
-function userIsPrivileged(user: {
-  role: string;
-  twoFactorEnabled: boolean;
-  memberships: { id: string }[];
-}): boolean {
-  if (user.role !== "customer" || user.twoFactorEnabled) return true;
-  return user.memberships.length > 0;
-}
-
-async function isPrivilegedUser(userId: string): Promise<boolean> {
-  const user = await authPrisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true, twoFactorEnabled: true },
-  });
-  if (!user) return false;
-  const memberships = await platformAdmin.storeMembership.findMany({
-    where: { userId },
-    select: { id: true },
-    take: 1,
-  });
-  return userIsPrivileged({ ...user, memberships });
-}
-
-async function isPrivilegedEmail(email: string): Promise<boolean> {
-  const user = await authPrisma.user.findFirst({
-    where: { email },
-    select: { id: true, role: true, twoFactorEnabled: true },
-  });
-  if (!user) return false;
-  const memberships = await platformAdmin.storeMembership.findMany({
-    where: { userId: user.id },
-    select: { id: true },
-    take: 1,
-  });
-  return userIsPrivileged({ ...user, memberships });
-}
 
 function requestHeaders(ctx: unknown): Headers | null {
   if (!ctx || typeof ctx !== "object") return null;

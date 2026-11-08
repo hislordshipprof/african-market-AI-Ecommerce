@@ -231,6 +231,31 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
     });
   });
 
+  it("store B cannot read, set, or point claimedByCustomerId at store A customers", async () => {
+    const fromB = await storeScoped(storeBId).customer.updateMany({
+      where: { id: customerAId },
+      data: { claimedByCustomerId: customerBId, claimedAt: new Date() },
+    });
+    expect(fromB.count).toBe(0);
+
+    // Run from store A so RLS allows the row: only the composite FK can refuse a store-B target.
+    let caught: unknown;
+    try {
+      await storeScoped(storeAId).customer.updateMany({
+        where: { id: customerAId },
+        data: { claimedByCustomerId: customerBId, claimedAt: new Date() },
+      });
+    } catch (error) {
+      caught = error;
+    }
+    const text = customerRlsErrorText(caught);
+    // Prisma reports Postgres 23503 (foreign_key_violation) as P2003.
+    expect(text).toContain("P2003");
+    expect(text).toContain("customers_claimed_by_customer_id_store_id_fkey");
+    const row = await storeScoped(storeAId).customer.findFirst({ where: { id: customerAId } });
+    expect(row?.claimedByCustomerId).toBeNull();
+  });
+
   // --- Order isolation ---
 
   it("store A can read its own orders", async () => {

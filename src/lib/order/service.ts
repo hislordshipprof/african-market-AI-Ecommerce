@@ -240,7 +240,7 @@ const ACTIVE_STATUSES: OrderStatus[] = [
 ];
 
 const ORDER_WITH_LINES = {
-  customer: { select: { name: true, phone: true } },
+  customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
   lines: {
     include: {
       listingVariant: {
@@ -261,7 +261,7 @@ const ORDER_WITH_LINES = {
 } as const;
 
 export async function getStoreOrders(storeId: string) {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const orders = await storeScopedTransaction(storeId, async (tx) => {
     const resolved = await tx.auditLog.findMany({
       where: { action: "refund_resolved_manually", entityType: "order" },
       select: { entityId: true },
@@ -280,6 +280,13 @@ export async function getStoreOrders(storeId: string) {
       orderBy: { createdAt: "desc" },
     });
   });
+  // This payload reaches a client component. A user id is the same at every store, so it
+  // would let two stores' admins match one person: send only whether an account is linked.
+  return orders.map(({ customer: { userId, claimedByCustomerId, ...customer }, ...order }) => ({
+    ...order,
+    customer,
+    hasAccount: userId !== null || claimedByCustomerId !== null,
+  }));
 }
 
 export type StoreOrderRow = Awaited<ReturnType<typeof getStoreOrders>>[number];
