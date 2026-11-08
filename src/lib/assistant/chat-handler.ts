@@ -230,28 +230,16 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     let modelMessages: ModelMessage[];
     try {
       let attachmentIndex = 0;
-      const visible = sentHistory.map((message) => {
-        if (message.id !== parsed.id) return message;
-        return {
-          ...message,
-          parts: message.parts.map((part) => {
-            if (part.type !== "data-attachment") return part;
-            const data = part.data as Record<string, unknown>;
-            return { ...part, data: { ...data, turnId: parsed.id } };
-          }),
-        };
-      });
-      modelMessages = await convertToModelMessages(visible, {
+      modelMessages = await convertToModelMessages(sentHistory, {
         tools,
         convertDataPart: (part) => {
           if (part.type !== "data-attachment") return undefined;
-          const data = part.data as AttachmentDescriptor & { index?: number; turnId?: string };
+          const data = part.data as AttachmentDescriptor & { index?: number };
           attachmentIndex += 1;
-          const note = attachmentNote(data, data.index ?? attachmentIndex);
-          return { type: "text", text: data.turnId === parsed.id ? `${note}\nTURN:${parsed.id}` : note };
+          return { type: "text", text: attachmentNote(data, data.index ?? attachmentIndex) };
         },
       });
-      if (prepared.length > 0) overlayCurrentFiles(modelMessages, parsed.id, scrubbed, prepared);
+      if (prepared.length > 0) overlayCurrentFiles(modelMessages, sentHistory, parsed.id, scrubbed, prepared);
     } catch {
       console.error("[assistant] message could not be prepared", turn.id);
       await releaseLease(store.id, turn.id);
@@ -638,19 +626,32 @@ function scrubUiMessages(messages: UIMessage[]): UIMessage[] {
   }));
 }
 
-function overlayCurrentFiles(messages: ModelMessage[], turnId: string, text: string, files: PreparedAttachment[]) {
-  const marker = `TURN:${turnId}`;
-  for (const message of messages) {
-    if (message.role !== "user" || !Array.isArray(message.content)) continue;
-    const marked = message.content.some((part) => part.type === "text" && part.text.includes(marker));
-    if (!marked) continue;
-    message.content = [
-      ...files.map((file) => ({ type: "file" as const, data: file.modelBytes, mediaType: file.modelMediaType })),
-      ...(text ? [{ type: "text" as const, text }] : []),
-    ];
-    message.providerOptions = { anthropic: { cacheControl: { type: "ephemeral" } } };
-    return;
+/**
+ * The current turn gets the file bytes and the message cache breakpoint. Model messages
+ * carry no ids, but each UI user message becomes exactly one model user message, so the
+ * current one is found by its ordinal among user messages. It need not be last: on a
+ * retry, later turns can follow it. A mapping that does not line up throws, so the turn
+ * fails closed instead of reaching the model without its files.
+ */
+function overlayCurrentFiles(
+  messages: ModelMessage[],
+  sent: UIMessage[],
+  turnId: string,
+  text: string,
+  files: PreparedAttachment[],
+) {
+  const sentUsers = sent.filter((message) => message.role === "user");
+  const modelUsers = messages.filter((message) => message.role === "user");
+  const ordinal = sentUsers.findIndex((message) => message.id === turnId);
+  const current = modelUsers[ordinal];
+  if (ordinal < 0 || sentUsers.length !== modelUsers.length || !current) {
+    throw new Error("current file turn not found in model messages");
   }
+  current.content = [
+    ...files.map((file) => ({ type: "file" as const, data: file.modelBytes, mediaType: file.modelMediaType })),
+    ...(text ? [{ type: "text" as const, text }] : []),
+  ];
+  current.providerOptions = { anthropic: { cacheControl: { type: "ephemeral" } } };
 }
 
 async function releaseLease(storeId: string, conversationId: string) {
