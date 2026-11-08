@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Keyboa
 import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
-import { ArrowUp, Mic, Square } from "lucide-react";
+import { ArrowUp, FileText, Mic, Square, X } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
@@ -660,10 +660,10 @@ function Thread({
           Jump to latest
         </button>
       ) : null}
-      {messages.length === 0 ? (
+      {messages.length === 0 && tiles.length === 0 ? (
         <p className={styles.bubble}>What are you cooking or restocking?</p>
       ) : null}
-      {messages.length === 0 ? (
+      {messages.length === 0 && tiles.length === 0 ? (
         <div className={styles.starters}>
           {STARTERS.map((starter) => (
             <button
@@ -741,6 +741,7 @@ function Thread({
             }
             changeDraft(next);
           }}
+          onFocus={() => setAddOpen(false)}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={() => { composing.current = false; }}
           onKeyDown={onKeyDown}
@@ -755,16 +756,25 @@ function Thread({
                 aria-busy={tile.status === "pending" ? true : undefined}
               >
                 {tile.status === "pending" ? (
-                  <span
-                    className={styles.preparing}
-                    data-kind={tile.mediaType === "application/pdf" ? "pdf" : "photo"}
-                    aria-hidden="true"
-                  />
-                ) : tile.preview && tile.mediaType === "image/jpeg" ? <img src={tile.preview} alt="" /> : null}
-                <p>{tile.name}</p>
-                <p>{tile.status === "pending" ? "Preparing…" : tile.mediaType === "application/pdf" ? "PDF" : "Photo"}</p>
-                {tile.message ? <p>{tile.message}</p> : null}
-                <button type="button" onClick={() => removeTile(tile.id)}>Remove {tile.name}</button>
+                  <span className={styles.preparing} aria-hidden="true" />
+                ) : tile.preview && tile.mediaType === "image/jpeg" ? (
+                  <img src={tile.preview} alt="" />
+                ) : (
+                  <span className={styles.tileGlyph} aria-hidden="true"><FileText size={20} /></span>
+                )}
+                <div className={styles.tileText}>
+                  <p className={styles.tileName}>{tile.name}</p>
+                  <p>{tile.status === "pending" ? "Preparing…" : tile.mediaType === "application/pdf" ? "PDF" : "Photo"}</p>
+                </div>
+                <button
+                  type="button"
+                  className={styles.tileRemove}
+                  aria-label={`Remove ${tile.name}`}
+                  onClick={() => removeTile(tile.id)}
+                >
+                  <X size={18} aria-hidden="true" />
+                </button>
+                {tile.message ? <p className={styles.tileMessage}>{tile.message}</p> : null}
               </div>
             ))}
           </div>
@@ -780,6 +790,14 @@ function Thread({
           >
             Add
           </button>
+          {/* Right after Add in the DOM, so focus goes Add, then the menu. It floats, so it adds no height. */}
+          {addOpen ? (
+            <div className={styles.addMenu}>
+              <button type="button" onClick={() => cameraInput.current?.click()}>Camera</button>
+              <button type="button" onClick={() => photoInput.current?.click()}>Photos</button>
+              <button type="button" onClick={() => pdfInput.current?.click()}>PDF</button>
+            </div>
+          ) : null}
           {micReady ? (
             <button
               type="button"
@@ -803,13 +821,6 @@ function Thread({
           </button>
         </div>
         </div>
-        {addOpen ? (
-          <div className={styles.addMenu}>
-            <button type="button" onClick={() => cameraInput.current?.click()}>Camera</button>
-            <button type="button" onClick={() => photoInput.current?.click()}>Photos</button>
-            <button type="button" onClick={() => pdfInput.current?.click()}>PDF</button>
-          </div>
-        ) : null}
         <p className={styles.note}>{FILE_NOTE}</p>
         {speech?.listening ? <p className={styles.note}>{LISTENING_NOTE}</p> : null}
       </form>

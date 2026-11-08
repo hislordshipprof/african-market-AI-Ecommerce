@@ -368,6 +368,8 @@ DeliveryEvent(id, delivery_id, type, payload, at)
 Refund(id, order_id, amount, reason, lines, stripe_refund_id, initiated_by)
 Issue(id, order_id, type, photos, status, resolution)
 AiConversation(id, store_id, cart_id unique, customer_id?, model, tokens_in, tokens_out, cost_micros, messages, in_flight_until, created_at, last_message_at) — one shopper conversation per cart. Store copilot records stay in #142/#144.
+      Attachments are stored as descriptors with no bytes. The server's safe name is the stored one, so a card-number filename is
+      stored as `card number removed.jpg` while the in-session chip shows `[card number removed].jpg`. There is no transcript restore, so the two never meet.
 AiAction(id, store_id, conversation_id, tool, input, output, ok, created_at)
 AssistantSpendDay(day, cost_micros, cap_alerted_at) — platform ledger, no store id; retention never deletes it
 AssistantFileTurn(id, key, at_ms) — platform rate-limit row, no store id and no RLS (same pattern as rate_limits; GRANT to app_user).

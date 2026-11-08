@@ -30,7 +30,12 @@
   min-height: 0;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  /* Usually only the log scrolls. On a very short screen the whole sheet can, so no control is out of reach. */
+  overflow: hidden auto;
+}
+
+.log:not(:empty) {
+  min-height: 96px;
 }
 
 .log {
@@ -107,10 +112,14 @@
   border-radius: 12px;
 }
 
+/* A very tall or very wide photo is cropped, so it cannot take over the thread. */
 .sentPhoto img {
   display: block;
   width: 100%;
   height: auto;
+  min-height: 64px;
+  max-height: 320px;
+  object-fit: cover;
 }
 
 .sentPhoto[data-scanning="on"]::before {
@@ -360,29 +369,57 @@
   min-width: 0;
 }
 
+/* A low, wide tile: on a small phone the tools below it have to stay on screen. */
 .tile {
-  flex: 0 0 160px;
+  flex: 0 0 min(264px, 100%);
+  box-sizing: border-box;
   display: grid;
-  gap: 4px;
-  padding: 8px;
+  grid-template-columns: 48px minmax(0, 1fr) 44px;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  min-width: 0;
+  padding: 6px;
   border: 1px solid var(--color-line);
   border-radius: 12px;
   font: 400 13px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.tileText {
+  min-width: 0;
+}
+
+.tileName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-ink);
+}
+
+.tileMessage {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+
+.tileGlyph {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--color-raised);
+  color: var(--color-ink);
 }
 
 /* The slot a photo's thumbnail will fill, so the tile keeps its size when it is ready. */
 .preparing {
   position: relative;
   display: block;
-  height: 4px;
+  width: 48px;
+  height: 48px;
   overflow: hidden;
-  border-radius: 999px;
-  background: var(--color-raised);
-}
-
-.preparing[data-kind="photo"] {
-  height: 72px;
   border-radius: 8px;
+  background: var(--color-raised);
 }
 
 /* Preparing has no real progress signal, so the bar is indeterminate. */
@@ -404,27 +441,55 @@
 }
 
 .tile img {
-  width: 100%;
-  height: 72px;
+  width: 48px;
+  height: 48px;
   object-fit: cover;
   border-radius: 8px;
 }
 
-.tile button,
+.tileRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
 .addMenu button {
   min-height: 44px;
+  padding: 0 16px;
   border: 0;
   border-radius: 999px;
   background: var(--color-soft);
   color: var(--color-ink);
+  text-align: start;
+  cursor: pointer;
 }
 
+/* Floats above Add, so opening it adds no height to the composer. */
 .addMenu {
+  position: absolute;
+  z-index: 2;
+  bottom: calc(100% + 8px);
+  inset-inline-end: 0;
   display: grid;
   gap: 8px;
+  min-width: 180px;
+  padding: 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: 0 8px 18px rgb(21 32 26 / 16%);
 }
 
 .tools {
+  position: relative;
   display: flex;
   justify-content: flex-end;
   align-items: center;
