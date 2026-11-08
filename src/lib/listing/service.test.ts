@@ -15,6 +15,7 @@ import {
   type CreateVariantInput,
 } from "./service";
 import { platformAdmin } from "../db";
+import { stockBadge } from "../storefront/stock-badge";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -959,5 +960,65 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
     expect(statusQty).toMatchObject({ stockMode: "status", qty: null, status: "low" });
     expect(await storeScoped(storeId).stockEvent.findMany({ where: { listingId: countedBlank.id } })).toEqual([]);
     expect(await storeScoped(storeId).stockEvent.findMany({ where: { listingId: statusQty.id } })).toEqual([]);
+  });
+
+  it("an owner stock change lifts confidence out of ask-store", async () => {
+    const listing = await createListing({
+      storeId,
+      customName: "Decayed Crate",
+      price: 100,
+      stockMode: "counted",
+      qty: 4,
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1", price: 100, weightG: 100 }],
+      actor,
+    });
+    const before = new Date("2026-01-01T00:00:00.000Z");
+    await storeScoped(storeId).listing.update({
+      where: { id: listing.id },
+      data: { confidence: 0.1, confidenceUpdatedAt: before },
+    });
+    const badgeOf = (row: { confidence: number; stockMode: string; qty: number | null; status: string | null }) => stockBadge(row);
+    const decayed = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: listing.id } });
+    expect(badgeOf(decayed)).toBe("ask-store");
+
+    await updateListing({ storeId, listingId: listing.id, qty: 9, actor });
+
+    const after = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: listing.id } });
+    expect(after.confidence).toBe(1);
+    expect(after.confidenceUpdatedAt.getTime()).toBeGreaterThan(before.getTime());
+    expect(badgeOf(after)).toBe("in-stock");
+  });
+
+  it("saving another field from a stale form keeps the reservation and confidence", async () => {
+    const listing = await createListing({
+      storeId,
+      customName: "Stale Form Crate",
+      price: 100,
+      stockMode: "counted",
+      qty: 10,
+      frozen: false,
+      perishable: false,
+      variants: [{ label: "1", price: 100, weightG: 100 }],
+      actor,
+    });
+    const reservedQty = 7;
+    await storeScoped(storeId).listing.update({
+      where: { id: listing.id },
+      data: { qty: reservedQty, confidence: 0.5 },
+    });
+
+    // The form loaded 10 before the order reserved 3. The owner changed only the price.
+    await updateListing({ storeId, listingId: listing.id, price: 250, qty: 10, qtyLoaded: 10, actor });
+
+    const after = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: listing.id } });
+    expect(after).toMatchObject({ price: 250, qty: reservedQty, confidence: 0.5 });
+    expect(await storeScoped(storeId).stockEvent.count({ where: { listingId: listing.id, type: "adjust" } })).toBe(0);
+
+    // A number the owner did type is still a count.
+    await updateListing({ storeId, listingId: listing.id, qty: 12, qtyLoaded: 10, actor });
+    const counted = await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: listing.id } });
+    expect(counted).toMatchObject({ qty: 12, confidence: 1 });
   });
 });
