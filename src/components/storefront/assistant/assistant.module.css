@@ -97,12 +97,43 @@
   font: 600 14px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
-.photo {
+/* A sent photo. The wrapper hosts the scan line, which an <img> cannot. */
+.sentPhoto {
+  position: relative;
   display: block;
   width: min(220px, 100%);
-  height: auto;
-  border-radius: 12px;
   margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.sentPhoto img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sentPhoto[data-scanning="on"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 12%);
+}
+
+.sentPhoto[data-scanning="on"]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 2px;
+  background: var(--color-on-primary);
+  box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-on-primary) 55%, transparent);
+  animation: scan 1.6s var(--ease-std) infinite alternate;
+}
+
+@keyframes scan {
+  from { top: 0; }
+  to { top: calc(100% - 2px); }
 }
 
 .fileChip,
@@ -116,6 +147,11 @@
 
 .interim {
   opacity: 0.7;
+}
+
+/* On the store colour, a chip takes the bubble's own foreground (AA on every preset). */
+.user .fileChip {
+  color: inherit;
 }
 
 .jump {
@@ -299,16 +335,21 @@
   background: var(--color-surface);
 }
 
+/* No files: textarea and tools share one row. With files: textarea, tiles, tools. */
 .composerRow {
-  display: flex;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
   gap: 8px;
   min-width: 0;
 }
 
-.composerRow textarea {
-  flex: 1;
-  min-width: 0;
+.composerRow[data-files="on"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.composerRow[data-files="on"] .tools {
+  justify-self: end;
 }
 
 .tiles {
@@ -326,6 +367,29 @@
   border: 1px solid var(--color-line);
   border-radius: 12px;
   font: 400 13px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.tile[data-status="pending"] {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Preparing has no real progress signal, so the bar is indeterminate. */
+.tile[data-status="pending"]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: preparing 1.2s var(--ease-std) infinite;
+}
+
+@keyframes preparing {
+  from { background-position: -100% 0; }
+  to { background-position: 200% 0; }
 }
 
 .tile img {
@@ -484,5 +548,17 @@
   .skeleton,
   .tool[aria-pressed="true"] {
     animation: none;
+  }
+
+  /* Still visible, just still: a full bar while preparing, a resting line while reading. */
+  .tile[data-status="pending"]::after {
+    animation: none;
+    background: var(--color-primary);
+    opacity: 0.6;
+  }
+
+  .sentPhoto[data-scanning="on"]::after {
+    animation: none;
+    top: 50%;
   }
 }

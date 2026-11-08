@@ -22,7 +22,7 @@ import {
   subscribeSessionMemory,
 } from "@/lib/assistant/ui/chat-session";
 import { refreshStoreCart } from "@/lib/assistant/ui/cart-bridge";
-import { dataUrl, displayFileName, fileNotice, jpegBlob, pdfPages, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
+import { dataUrl, displayFileName, fileNotice, jpegBlob, pdfPages, postedPhotoName, roomFor, withinByteCap, type PreparedFile } from "@/lib/assistant/ui/client-files";
 import { createSendLock, outgoingMessage, settleSend } from "@/lib/assistant/ui/send";
 import {
   abortSpeech,
@@ -189,6 +189,7 @@ function Thread({
   const undoState = memory.labels;
   const liveRef = useRef<HTMLParagraphElement>(null);
   const busy = status === "submitted" || status === "streaming";
+  const lastUserIndex = messages.findLastIndex((message) => message.role === "user");
   const routeError: RouteView | null = error ? viewFor(error) : null;
   const fileRetry = Boolean(
     inflight &&
@@ -458,7 +459,7 @@ function Thread({
         const url = await dataUrl(blob);
         placeTile(reservedTile.id, generation, {
           ...reservedTile,
-          filename: "photo.jpg",
+          filename: postedPhotoName(file.name || "file"),
           url,
           preview,
           status: "ready",
@@ -630,6 +631,7 @@ function Thread({
           <MessageView
             key={message.id}
             message={message}
+            scanning={busy && index === lastUserIndex}
             undoState={undoState}
             disabled={!!routeError?.terminal || busy}
             turnFailed={status === "error" && message.role === "assistant" && index === messages.length - 1}
@@ -717,31 +719,12 @@ function Thread({
         }}
       >
         <label className="sr-only" htmlFor="assistant-composer">Message</label>
-        {tiles.length > 0 ? (
-          <div className={styles.tiles}>
-            {tiles.map((tile) => (
-              <div key={tile.id} className={styles.tile} data-status={tile.status}>
-                {tile.preview && tile.mediaType === "image/jpeg" ? <img src={tile.preview} alt="" /> : null}
-                <p>{tile.name}</p>
-                <p>{tile.mediaType === "application/pdf" ? "PDF" : "Photo"}</p>
-                {tile.message ? <p>{tile.message}</p> : null}
-                <button type="button" onClick={() => removeTile(tile.id)}>Remove {tile.name}</button>
-              </div>
-            ))}
-          </div>
-        ) : null}
         {speech?.interim ? <p className={styles.interim}>{speech.interim}</p> : null}
-        {addOpen ? (
-          <div className={styles.addMenu}>
-            <button type="button" onClick={() => cameraInput.current?.click()}>Camera</button>
-            <button type="button" onClick={() => photoInput.current?.click()}>Photos</button>
-            <button type="button" onClick={() => pdfInput.current?.click()}>PDF</button>
-          </div>
-        ) : null}
         <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
         <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
         <input ref={pdfInput} type="file" accept="application/pdf" hidden onChange={(event) => { void takeFiles(event.target.files); event.target.value = ""; }} />
-        <div className={styles.composerRow}>
+        {/* One stable tree in reading order: textarea, tiles, tools. The textarea never remounts. */}
+        <div className={styles.composerRow} data-files={tiles.length > 0 ? "on" : undefined}>
         <textarea
           id="assistant-composer"
           ref={composer}
@@ -762,6 +745,25 @@ function Thread({
           onCompositionEnd={() => { composing.current = false; }}
           onKeyDown={onKeyDown}
         />
+        {tiles.length > 0 ? (
+          <div className={styles.tiles}>
+            {tiles.map((tile) => (
+              <div
+                key={tile.id}
+                className={styles.tile}
+                data-status={tile.status}
+                aria-busy={tile.status === "pending" ? true : undefined}
+              >
+                {tile.preview && tile.mediaType === "image/jpeg" ? <img src={tile.preview} alt="" /> : null}
+                <p>{tile.name}</p>
+                <p>{tile.mediaType === "application/pdf" ? "PDF" : "Photo"}</p>
+                {tile.status === "pending" ? <span className="sr-only">Preparing…</span> : null}
+                {tile.message ? <p>{tile.message}</p> : null}
+                <button type="button" onClick={() => removeTile(tile.id)}>Remove {tile.name}</button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className={styles.tools}>
           <button
             type="button"
@@ -796,6 +798,13 @@ function Thread({
           </button>
         </div>
         </div>
+        {addOpen ? (
+          <div className={styles.addMenu}>
+            <button type="button" onClick={() => cameraInput.current?.click()}>Camera</button>
+            <button type="button" onClick={() => photoInput.current?.click()}>Photos</button>
+            <button type="button" onClick={() => pdfInput.current?.click()}>PDF</button>
+          </div>
+        ) : null}
         <p className={styles.note}>{FILE_NOTE}</p>
         {speech?.listening ? <p className={styles.note}>{LISTENING_NOTE}</p> : null}
       </form>
@@ -803,11 +812,20 @@ function Thread({
   );
 }
 
+function searchesShelves(part: UIMessage["parts"][number]): boolean {
+  if (part.type === "tool-search_catalog") return true;
+  return part.type === "dynamic-tool" && part.toolName === "search_catalog";
+}
+
+/** Reads only this turn: the reply after the last customer message, never an earlier one. */
 function waitingLabel(messages: UIMessage[]): string {
-  const lastUser = [...messages].reverse().find((message) => message.role === "user");
-  if (lastUser?.parts.some((part) => part.type === "file")) return "Reading your list";
-  const assistant = [...messages].reverse().find((message) => message.role === "assistant");
-  if (assistant && JSON.stringify(assistant.parts).includes("search_catalog")) return "Checking the shelves";
+  let lastUser = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") { lastUser = index; break; }
+  }
+  const reply = messages.slice(lastUser + 1).find((message) => message.role === "assistant");
+  if (reply?.parts.some(searchesShelves)) return "Checking the shelves";
+  if (lastUser >= 0 && messages[lastUser]?.parts.some((part) => part.type === "file")) return "Reading your list";
   return "Working";
 }
 
@@ -824,6 +842,7 @@ function viewFor(error: Error): RouteView {
 
 function MessageView({
   message,
+  scanning,
   undoState,
   disabled,
   turnFailed,
@@ -833,6 +852,7 @@ function MessageView({
   onClose,
 }: {
   message: UIMessage;
+  scanning: boolean;
   undoState: Record<string, "undone" | "already_removed">;
   disabled: boolean;
   turnFailed: boolean;
@@ -846,26 +866,43 @@ function MessageView({
     const text = textOf(message);
     return (
       <div className={`${styles.bubble} ${styles.user}`}>
-        {files.map((file) => (
+        {files.map((file, index) => (
           file.mediaType.startsWith("image/") && file.url
-            ? <img key={file.url} className={styles.photo} src={file.url} alt="" />
-            : <p key={`${file.filename ?? "file"}-${file.url}`} className={styles.fileChip}>{file.filename ?? "PDF"}</p>
+            ? (
+              <span
+                key={`file-${index}`}
+                className={styles.sentPhoto}
+                data-scanning={scanning ? "on" : undefined}
+              >
+                <img src={file.url} alt="" />
+              </span>
+            )
+            : (
+              <p key={`file-${index}`} className={styles.fileChip}>
+                {file.filename ?? (file.mediaType.startsWith("image/") ? "Photo" : "PDF")}
+              </p>
+            )
         ))}
         {text ? <p>{text}</p> : null}
       </div>
     );
   }
+  // Every addition in this turn folds into one row, at the place of the first one.
+  const partCards = message.parts.map((part) => (part.type === "text" ? [] : cardsFromParts([part], { turnFailed })));
+  const turnAdded = partCards.flat().filter((card) => card.kind === "added");
+  const firstAdded = partCards.findIndex((cards) => cards.some((card) => card.kind === "added"));
   return (
     <div className={styles.message}>
       {message.parts.map((part, index) => {
         if (part.type === "text") {
           return part.text ? <p key={`${message.id}-text-${index}`} className={styles.bubble}>{part.text}</p> : null;
         }
-        const cards = cardsFromParts([part], { turnFailed });
-        if (cards.length === 0) return null;
+        const cards = partCards[index] ?? [];
+        const added = index === firstAdded ? turnAdded : [];
+        if (cards.length === 0 && added.length === 0) return null;
         const products = cards.filter((card) => card.kind === "product");
-        const added = cards.filter((card) => card.kind === "added");
         const rest = cards.filter((card) => card.kind !== "product" && card.kind !== "added");
+        if (products.length === 0 && added.length === 0 && rest.length === 0) return null;
         return (
           <div key={`${message.id}-cards-${index}`}>
             {products.length > 0 ? (
