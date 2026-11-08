@@ -358,7 +358,6 @@ function RealCheckoutForm({
   }, [line1, fulfillment, confirmed]);
 
   useEffect(() => {
-    if (fulfillment === "store-delivery" && !delivery) return;
     let active = true;
     const timer = setTimeout(() => {
       quoteCheckoutAction(contact, fulfillment, delivery).then((result) => {

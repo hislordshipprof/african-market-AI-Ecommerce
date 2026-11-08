@@ -3364,6 +3364,27 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     }
   });
 
+  it("reconcile after a restart registers a checkout harness hold before the first retrieve", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const harness = `pi_fake_${order.id}`;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { paymentIntentId: harness, capturedAmountCents: 5500 },
+      });
+    });
+    resetFakeStripe();
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("CI", "true");
+    try {
+      const result = await reconcileStuckOrder(storeId, order.id);
+      expect(result).toEqual({ ok: true, action: "finalized_capture" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("reconcile after a restart registers a seeded hold before the first retrieve", async () => {
     const order = await createTestOrder("CAPTURING");
     const seeded = `pi_seed_${order.id}`;

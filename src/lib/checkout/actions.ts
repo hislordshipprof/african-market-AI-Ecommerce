@@ -93,7 +93,12 @@ export async function quoteCheckoutAction(
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
-  const request = readDelivery(input.fulfillment, delivery);
+  // A store-delivery visit with no confirmed address is still a quote: the fee
+  // stays visible and Pay can ask the shopper to confirm. Payment and placement
+  // keep refusing that payload.
+  const request = input.fulfillment === "store-delivery" && delivery == null
+    ? null
+    : readDelivery(input.fulfillment, delivery);
   if (request && "error" in request) return { ok: false, error: request.error };
   try {
     const store = await getStore();

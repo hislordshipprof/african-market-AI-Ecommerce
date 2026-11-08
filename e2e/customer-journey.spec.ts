@@ -131,7 +131,7 @@ test.describe("Customer journey demo", () => {
 });
 
 test("store delivery payment with a confirmed address leads to tracking", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   const slug = `delivery-${Date.now().toString(36)}`;
   const name = `Delivery Yam ${slug}`;
   const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
@@ -200,7 +200,19 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     await page.getByLabel("State").fill("TX");
     await page.getByLabel("ZIP").fill("77002");
     await page.getByRole("button", { name: "Confirm address" }).click();
-    await expect(page.getByText(/3700 MAIN ST/)).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /7\.5 mi/ })).toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: /Store delivery/ }).click();
+    const estimating = page.getByRole("button", { name: /Pay · \$49\.00/ });
+    await expect(estimating).toBeEnabled({ timeout: 10_000 });
+    await estimating.click();
+    await expect(page.getByText("Confirm your delivery address.")).toBeVisible();
+    await page.getByLabel("Street address").fill("3700 Main St");
+    await page.getByLabel("City").fill("Houston");
+    await page.getByLabel("State").fill("TX");
+    await page.getByLabel("ZIP").fill("77002");
+    await page.getByRole("button", { name: "Confirm address" }).click();
+    await expect(page.getByRole("status").filter({ hasText: /7\.5 mi/ })).toBeVisible();
     await page.getByLabel("Full name").fill("Ada Buyer");
     await page.getByLabel("Phone number (required)").fill("2025550100");
     await page.getByLabel("Email (required)").fill("ada-delivery@example.com");

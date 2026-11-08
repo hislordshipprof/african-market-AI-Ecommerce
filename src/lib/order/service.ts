@@ -519,7 +519,9 @@ async function settleUnconfirmedCapture(
 }
 
 async function registerE2EPayment(paymentIntentId: string, authorizedCents: number): Promise<void> {
-  if (stripeProviderKind() !== "fake" || !paymentIntentId.startsWith("pi_seed_")) return;
+  if (stripeProviderKind() !== "fake") return;
+  // pi_seed_ is an order fixture. pi_fake_ is the checkout harness intent.
+  if (!paymentIntentId.startsWith("pi_seed_") && !paymentIntentId.startsWith("pi_fake_")) return;
   const { ensureAuthorizedAmount } = await import("../stripe/fake");
   ensureAuthorizedAmount(paymentIntentId, authorizedCents);
 }
