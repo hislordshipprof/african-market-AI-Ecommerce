@@ -77,22 +77,48 @@ export async function listAccountCards(userId: string, now = new Date()): Promis
   };
 }
 
+function cardsUnavailable(cause: unknown): Error {
+  return new Error(CARDS_UNAVAILABLE, { cause });
+}
+
+function isDetached(card: NormalizedCard): boolean {
+  return !card.customer || card.detached;
+}
+
+async function readCardForRemoval(paymentMethodId: string): Promise<NormalizedCard> {
+  try {
+    return await getCheckoutPayments().retrievePaymentMethod(paymentMethodId);
+  } catch (error) {
+    if (missingCustomer(error)) throw new Error(CARD_NOT_FOUND);
+    throw cardsUnavailable(error);
+  }
+}
+
+// Stripe's not-attached error has no code, and its message is prose. So a 400 only means
+// "go and look": the card itself says whether it is detached. A PaymentMethod keeps no
+// record of its previous customer, so a detached card belongs to nobody.
+async function detachOrConfirmDetached(paymentMethodId: string, stripeCustomerId: string | null): Promise<void> {
+  try {
+    await getCheckoutPayments().detachPaymentMethod(paymentMethodId);
+  } catch (error) {
+    if (missingCustomer(error)) throw new Error(CARD_NOT_FOUND);
+    const { type, statusCode } = error as { type?: string; statusCode?: number };
+    if (type !== "StripeInvalidRequestError" || statusCode !== 400) throw cardsUnavailable(error);
+    const current = await readCardForRemoval(paymentMethodId);
+    if (isDetached(current)) return;
+    if (current.customer !== stripeCustomerId) throw new Error(CARD_NOT_FOUND);
+    throw cardsUnavailable(error);
+  }
+}
+
 export async function removeAccountCard(userId: string, paymentMethodId: string): Promise<void> {
   if (!configured()) throw new Error(CARDS_UNAVAILABLE);
   const stripeCustomerId = await readStripeCustomerId(userId);
-  const payments = getCheckoutPayments();
-  let card: NormalizedCard;
-  try {
-    card = await payments.retrievePaymentMethod(paymentMethodId);
-  } catch (error) {
-    if (missingCustomer(error)) throw new Error(CARD_NOT_FOUND);
-    throw error;
-  }
+  const card = await readCardForRemoval(paymentMethodId);
   if (card.customer && card.customer !== stripeCustomerId) {
     throw new Error(CARD_NOT_FOUND);
   }
-  if (!card.customer || card.detached) return;
-  await payments.detachPaymentMethod(paymentMethodId);
+  if (!isDetached(card)) await detachOrConfirmDetached(paymentMethodId, stripeCustomerId);
   await customerScoped(userId).cardSaveConsent.deleteMany({
     where: { userId, paymentMethodId },
   });

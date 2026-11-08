@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
@@ -24,9 +24,10 @@ import { authPrisma, customerScoped } from "../db";
 import { clearTestSentEmails, getTestSentEmails } from "../email/send";
 import { addAddressAction, accountBookAction, editAddressAction, removeAddressAction, removeCardAction, savePhoneAction, setDefaultAddressAction } from "./actions";
 import { ADDRESS_NOT_FOUND, SIGN_IN_MESSAGE } from "./address-validation";
-import { SAVED_CARD_PURPOSE, SAVED_CARD_TERMS_VERSION } from "./consent";
+import { CARD_NOT_FOUND, CARDS_UNAVAILABLE, SAVED_CARD_PURPOSE, SAVED_CARD_TERMS_VERSION } from "./consent";
 import { ensureStripeCustomer } from "./stripe-customer";
-import { getCheckoutPayments } from "../stripe/checkout-payments";
+import { CheckoutProviderError, fakeCheckoutPayments, fakeDetachCalls, getCheckoutPayments, type NormalizedCard } from "../stripe/checkout-payments";
+import { getStripeClient } from "../stripe/provider";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const BASE = "http://localhost:3000/api/auth";
@@ -103,10 +104,147 @@ const home = {
   zip: "96813",
 };
 
+function useFakeStripe(): void {
+  vi.stubEnv("E2E_FAKE_STRIPE", "1");
+  vi.stubEnv("VERCEL", "");
+}
+
+async function savedCardWithConsent(userId: string): Promise<{ paymentMethodId: string; customerId: string }> {
+  const customerId = await ensureStripeCustomer(userId);
+  const payments = getCheckoutPayments();
+  const intent = await payments.createPaymentIntent({
+    amount: 100,
+    currency: "usd",
+    customer: customerId,
+    setup_future_usage: "on_session",
+    capture_method: "manual",
+  });
+  const confirmed = await payments.confirmPaymentIntent(intent.id, { payment_method: "pm_card_visa" });
+  const paymentMethodId = confirmed.payment_method!;
+  await customerScoped(userId).cardSaveConsent.create({
+    data: {
+      userId,
+      paymentIntentId: intent.id,
+      paymentMethodId,
+      stripeCustomerId: customerId,
+      termsVersion: SAVED_CARD_TERMS_VERSION,
+      purpose: SAVED_CARD_PURPOSE,
+    },
+  });
+  return { paymentMethodId, customerId };
+}
+
+function consentCount(userId: string, paymentMethodId: string): Promise<number> {
+  return customerScoped(userId).cardSaveConsent.count({ where: { paymentMethodId } });
+}
+
 describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
   afterAll(async () => {
     if (issuedEmails.length === 0) return;
     await authPrisma.user.deleteMany({ where: { email: { in: issuedEmails } } });
+  });
+
+  it("a removal that read the card as attached succeeds when another removal detached it first", async () => {
+    useFakeStripe();
+    const a = await customerCookie(accountEmail("rae"), "Rae");
+    const raced = await savedCardWithConsent(a.id);
+    const retrieve = vi.spyOn(fakeCheckoutPayments, "retrievePaymentMethod");
+    const detach = vi.spyOn(fakeCheckoutPayments, "detachPaymentMethod");
+
+    let stale: NormalizedCard | undefined;
+    let winner: Awaited<ReturnType<typeof removeCardAction>> | undefined;
+    retrieve.mockImplementationOnce(async (id) => {
+      stale = await fakeCheckoutPayments.retrievePaymentMethod(id);
+      winner = await asUser(a.cookie, () => removeCardAction(id));
+      return stale;
+    });
+    const loser = await asUser(a.cookie, () => removeCardAction(raced.paymentMethodId));
+
+    expect(stale?.customer).toBe(raced.customerId);
+    expect(detach).toHaveBeenCalledTimes(2);
+    expect(fakeDetachCalls().filter((id) => id === raced.paymentMethodId)).toHaveLength(1);
+    expect(winner).toMatchObject({ ok: true });
+    expect(loser).toMatchObject({ ok: true });
+    for (const result of [winner, loser]) {
+      if (result?.ok) expect(result.cards.some((card) => card.id === raced.paymentMethodId)).toBe(false);
+    }
+    expect(await consentCount(a.id, raced.paymentMethodId)).toBe(0);
+
+    const interrupted = await savedCardWithConsent(a.id);
+    retrieve.mockImplementationOnce(async (id) => {
+      const snapshot = await fakeCheckoutPayments.retrievePaymentMethod(id);
+      await getCheckoutPayments().detachPaymentMethod(id);
+      return snapshot;
+    });
+    const settled = await asUser(a.cookie, () => removeCardAction(interrupted.paymentMethodId));
+    expect(settled).toMatchObject({ ok: true });
+    expect(await consentCount(a.id, interrupted.paymentMethodId)).toBe(0);
+  });
+
+  it("a customer cannot touch another customer's consent for a detached card, and the owner's retry clears it", async () => {
+    useFakeStripe();
+    const a = await customerCookie(accountEmail("ama"), "Ama");
+    const b = await customerCookie(accountEmail("ben"), "Ben");
+    const { paymentMethodId } = await savedCardWithConsent(a.id);
+    await getCheckoutPayments().detachPaymentMethod(paymentMethodId);
+    const detach = vi.spyOn(fakeCheckoutPayments, "detachPaymentMethod");
+
+    const asOther = await asUser(b.cookie, () => removeCardAction(paymentMethodId));
+    expect(asOther).toMatchObject({ ok: true });
+    if (asOther.ok) expect(asOther.cards.some((card) => card.id === paymentMethodId)).toBe(false);
+    const other = customerScoped(b.id).cardSaveConsent;
+    expect(await other.findMany({ where: { paymentMethodId } })).toEqual([]);
+    expect(await other.deleteMany({ where: { paymentMethodId } })).toEqual({ count: 0 });
+    expect(await consentCount(a.id, paymentMethodId)).toBe(1);
+
+    const retry = await asUser(a.cookie, () => removeCardAction(paymentMethodId));
+    expect(retry).toMatchObject({ ok: true });
+    expect(await consentCount(a.id, paymentMethodId)).toBe(0);
+    expect(detach).not.toHaveBeenCalled();
+  });
+
+  it("a detach failure with the card still attached stays a failure, keeps consent and shows no provider text", async () => {
+    useFakeStripe();
+    const a = await customerCookie(accountEmail("ike"), "Ike");
+    const { paymentMethodId } = await savedCardWithConsent(a.id);
+    const readCard = fakeCheckoutPayments.retrievePaymentMethod;
+    const detach = vi.spyOn(fakeCheckoutPayments, "detachPaymentMethod");
+    const retrieve = vi.spyOn(fakeCheckoutPayments, "retrievePaymentMethod");
+    const providerText = "Invalid API Key provided: sk_test_keyLikeText123";
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    async function expectVisibleFailure(): Promise<void> {
+      const result = await asUser(a.cookie, () => removeCardAction(paymentMethodId));
+      expect(result).toEqual({ ok: false, error: CARDS_UNAVAILABLE });
+      const book = await asUser(a.cookie, () => accountBookAction());
+      expect(book.ok && book.cards.some((card) => card.id === paymentMethodId)).toBe(true);
+      expect(await consentCount(a.id, paymentMethodId)).toBe(1);
+    }
+
+    detach.mockRejectedValueOnce(new CheckoutProviderError("StripeInvalidRequestError", providerText, undefined, 400));
+    await expectVisibleFailure();
+
+    detach.mockRejectedValueOnce(new CheckoutProviderError("StripeInvalidRequestError", "Bad request", undefined, 400));
+    retrieve
+      .mockImplementationOnce(readCard)
+      .mockRejectedValueOnce(new CheckoutProviderError("StripeAPIError", providerText, undefined, 500));
+    await expectVisibleFailure();
+
+    log.mockClear();
+    retrieve.mockClear();
+    detach.mockRejectedValueOnce(new CheckoutProviderError("StripeAuthenticationError", providerText, undefined, 401));
+    await expectVisibleFailure();
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    const logged = log.mock.calls.flat().join(" ");
+    expect(logged).toContain("401");
+    expect(logged).toContain("StripeAuthenticationError");
+    expect(logged).not.toContain("keyLikeText");
+    expect(logged).not.toContain(paymentMethodId);
   });
 
   it("refuses a signed-out caller and refuses B on A's address", async () => {
@@ -207,6 +345,7 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
       });
       const foreignCard = await asUser(b.cookie, () => removeCardAction(paymentMethodId!));
       expect(foreignCard.ok).toBe(false);
+      if (!foreignCard.ok) expect(foreignCard.error).toBe(CARD_NOT_FOUND);
       const removed = await asUser(a.cookie, () => removeCardAction(paymentMethodId!));
       expect(removed.ok).toBe(true);
       if (removed.ok) expect(removed.cards.some((card) => card.id === paymentMethodId)).toBe(false);
@@ -229,5 +368,59 @@ describe.skipIf(!hasDb)("account actions use the fresh session user", () => {
     const revoked = await asUser(a.cookie, () => accountBookAction());
     expect(revoked.ok).toBe(false);
     if (!revoked.ok) expect(revoked.error).toBe(SIGN_IN_MESSAGE);
+  });
+
+  describe.skipIf(!process.env.STRIPE_SECRET_KEY)("against the Stripe sandbox", () => {
+    const sandboxCustomers: string[] = [];
+
+    afterAll(async () => {
+      for (const id of sandboxCustomers) {
+        try { await getStripeClient().customers.del(id); } catch { /* already gone */ }
+      }
+    }, 60_000);
+
+    it("real Stripe: a stale read plus the real not-attached error reports success, and another customer's card stays attached", async () => {
+      vi.stubEnv("E2E_FAKE_STRIPE", "");
+      const a = await customerCookie(accountEmail("sia"), "Sia");
+      const b = await customerCookie(accountEmail("tem"), "Tem");
+      const aCustomer = await ensureStripeCustomer(a.id);
+      const bCustomer = await ensureStripeCustomer(b.id);
+      sandboxCustomers.push(aCustomer, bCustomer);
+      const stripe = getStripeClient();
+      const aCard = await stripe.paymentMethods.attach("pm_card_visa", { customer: aCustomer });
+      const bCard = await stripe.paymentMethods.attach("pm_card_visa", { customer: bCustomer });
+
+      const foreign = await asUser(a.cookie, () => removeCardAction(bCard.id));
+      expect(foreign).toEqual({ ok: false, error: CARD_NOT_FOUND });
+      expect((await stripe.paymentMethods.retrieve(bCard.id)).customer).toBe(bCustomer);
+
+      const log = vi.spyOn(console, "error");
+      const crafted = await asUser(a.cookie, () => removeCardAction("../x"));
+      expect(crafted).toEqual({ ok: false, error: CARD_NOT_FOUND });
+      expect(log).not.toHaveBeenCalled();
+
+      const detach = vi.spyOn(stripe.paymentMethods, "detach");
+      const retrieve = vi.spyOn(stripe.paymentMethods, "retrieve");
+      let staleCustomer: unknown;
+      let winner: Awaited<ReturnType<typeof removeCardAction>> | undefined;
+      retrieve.mockImplementationOnce((async (id: string) => {
+        const snapshot = await stripe.paymentMethods.retrieve(id);
+        staleCustomer = snapshot.customer;
+        winner = await asUser(a.cookie, () => removeCardAction(id));
+        return snapshot;
+      }) as never);
+
+      const loser = await asUser(a.cookie, () => removeCardAction(aCard.id));
+
+      expect(staleCustomer).toBe(aCustomer);
+      expect(winner).toMatchObject({ ok: true });
+      expect(loser).toMatchObject({ ok: true });
+      if (loser.ok) expect(loser.cards.some((card) => card.id === aCard.id)).toBe(false);
+      expect(detach).toHaveBeenCalledTimes(2);
+      const second = detach.mock.settledResults[1];
+      expect(second?.type).toBe("rejected");
+      expect(second?.value).toMatchObject({ type: "StripeInvalidRequestError", statusCode: 400 });
+      expect((await stripe.paymentMethods.retrieve(aCard.id)).customer).toBeNull();
+    }, 60_000);
   });
 });
