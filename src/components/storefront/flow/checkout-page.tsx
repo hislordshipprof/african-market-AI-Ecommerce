@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, ShoppingBag, Truck } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
@@ -20,6 +20,7 @@ import {
   quoteCheckoutAction,
   createPaymentIntentAction,
   placeOrderAction,
+  confirmAddressAction,
 } from "@/lib/checkout/actions";
 import type {
   CheckoutInput,
@@ -127,6 +128,135 @@ function createHarnessStripe(): StripeJs {
   } as unknown as StripeJs;
 }
 
+interface AddressSuggestion {
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+  label: string;
+}
+
+interface ConfirmedDelivery {
+  formatted: string;
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+  withinRadius: boolean;
+  distanceMi: number;
+  message: string | null;
+}
+
+function StoreDeliveryFields({
+  line1,
+  setLine1,
+  line2,
+  setLine2,
+  city,
+  setCity,
+  region,
+  setRegion,
+  zip,
+  setZip,
+  suggestions,
+  onPick,
+  onConfirm,
+  confirming,
+  confirmed,
+  leaveAtDoor,
+  setLeaveAtDoor,
+  frozen,
+  onEdit,
+}: {
+  line1: string;
+  setLine1: (value: string) => void;
+  line2: string;
+  setLine2: (value: string) => void;
+  city: string;
+  setCity: (value: string) => void;
+  region: string;
+  setRegion: (value: string) => void;
+  zip: string;
+  setZip: (value: string) => void;
+  suggestions: AddressSuggestion[];
+  onPick: (row: AddressSuggestion) => void;
+  onConfirm: () => void;
+  confirming: boolean;
+  confirmed: ConfirmedDelivery | null;
+  leaveAtDoor: boolean;
+  setLeaveAtDoor: (value: boolean) => void;
+  frozen: boolean;
+  onEdit: () => void;
+}) {
+  return (
+    <div>
+      <label className={styles.field}>
+        Street address
+        <input
+          autoComplete="address-line1"
+          value={line1}
+          onChange={(event) => {
+            setLine1(event.target.value);
+            onEdit();
+          }}
+        />
+      </label>
+      <label className={styles.field}>
+        Apartment, suite (optional)
+        <input
+          autoComplete="address-line2"
+          maxLength={60}
+          value={line2}
+          onChange={(event) => setLine2(event.target.value)}
+        />
+      </label>
+      <label className={styles.field}>
+        City
+        <input autoComplete="address-level2" value={city} onChange={(event) => { setCity(event.target.value); onEdit(); }} />
+      </label>
+      <label className={styles.field}>
+        State
+        <input autoComplete="address-level1" maxLength={40} value={region} onChange={(event) => { setRegion(event.target.value); onEdit(); }} />
+      </label>
+      <label className={styles.field}>
+        ZIP
+        <input autoComplete="postal-code" maxLength={10} value={zip} onChange={(event) => { setZip(event.target.value); onEdit(); }} />
+      </label>
+      {suggestions.map((row) => (
+        <button
+          type="button"
+          className={styles.addressResult}
+          key={row.label}
+          onClick={() => onPick(row)}
+        >
+          <MapPin size={20} />
+          <span>{row.label}</span>
+        </button>
+      ))}
+      <Button type="button" onClick={onConfirm} disabled={confirming}>
+        {confirming ? "Checking address…" : "Confirm address"}
+      </Button>
+      {confirmed && (
+        <p role="status">
+          {confirmed.formatted}
+          {confirmed.withinRadius
+            ? ` · ${confirmed.distanceMi.toFixed(1)} mi`
+            : ` — ${confirmed.message}`}
+        </p>
+      )}
+      <label className={styles.check}>
+        <input
+          type="checkbox"
+          checked={!frozen && leaveAtDoor}
+          disabled={frozen}
+          onChange={(event) => setLeaveAtDoor(event.target.checked)}
+        />
+        Leave at door
+      </label>
+    </div>
+  );
+}
+
 function RealCheckoutForm({
   settings,
   catalog,
@@ -140,7 +270,7 @@ function RealCheckoutForm({
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
-  const fulfillment: Fulfillment = "pickup";
+  const [fulfillment, setFulfillment] = useState<Fulfillment>("pickup");
   const prefill = stripeConfig.prefill ?? null;
   const cardView = checkoutCardView({
     signedIn: Boolean(stripeConfig.signedIn),
@@ -163,6 +293,16 @@ function RealCheckoutForm({
   const [showCardForm, setShowCardForm] = useState(cardView.showCardForm);
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [line1, setLine1] = useState("");
+  const [line2, setLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [region, setRegion] = useState("");
+  const [zip, setZip] = useState("");
+  const [leaveAtDoor, setLeaveAtDoor] = useState(false);
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
+  const [confirmed, setConfirmed] = useState<ConfirmedDelivery | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const suggestAbort = useRef<AbortController | null>(null);
   const [schedule, setSchedule] = useState(false);
   const [slot, setSlot] = useState("asap");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
@@ -180,24 +320,57 @@ function RealCheckoutForm({
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
   );
-  const currentKey = JSON.stringify(contact);
+  const delivery = fulfillment === "store-delivery" && confirmed
+    ? {
+        line1: confirmed.line1,
+        line2: line2 || null,
+        city: confirmed.city,
+        state: confirmed.state,
+        zip: confirmed.zip,
+        leaveAtDoor: !frozen && leaveAtDoor,
+      }
+    : undefined;
+  const currentKey = JSON.stringify({ contact, fulfillment, delivery });
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
+    if (line1.trim().length < 3 || fulfillment !== "store-delivery") return;
+    const controller = new AbortController();
+    suggestAbort.current = controller;
+    const timer = setTimeout(() => {
+      fetch(`/api/address/suggest?q=${encodeURIComponent(line1)}`, { signal: controller.signal })
+        .then((response) => response.json())
+        .then((body: { suggestions?: AddressSuggestion[] }) => {
+          if (!controller.signal.aborted) setSuggestions(body.suggestions ?? []);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setSuggestions([]);
+        });
+    }, 300);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [line1, fulfillment]);
+
+  useEffect(() => {
+    if (fulfillment === "store-delivery" && !delivery) return;
     let active = true;
     const timer = setTimeout(() => {
-      quoteCheckoutAction(contact, "pickup").then((result) => {
+      quoteCheckoutAction(contact, fulfillment, delivery).then((result) => {
         if (!active) return;
         if (result.ok) {
           setQuote(result.quote);
-          setQuoteKey(JSON.stringify(contact));
+          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery }));
         } else {
           setError(result.error);
         }
       });
     }, 300);
     return () => { active = false; clearTimeout(timer); };
-  }, [contact]);
+    // currentKey already covers contact, fulfillment, and the confirmed address.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentKey]);
 
   const [slots] = useState(() => {
     const first = new Date();
@@ -224,10 +397,16 @@ function RealCheckoutForm({
       setError("Choose a pickup time within the next six days.");
       return;
     }
+    if (fulfillment === "store-delivery" && !delivery) {
+      setError("Confirm your delivery address.");
+      return;
+    }
     if (payState !== "idle" || !stripe || !elements) return;
+    suggestAbort.current?.abort();
+    setSuggestions([]);
     setPayState("pending");
     try {
-      const quoteResult = await quoteCheckoutAction(contact, "pickup");
+      const quoteResult = await quoteCheckoutAction(contact, fulfillment, delivery);
       if (!quoteResult.ok) {
         if (quoteResult.code === "basket_already_ordered") {
           setErrorHref("/account");
@@ -256,7 +435,7 @@ function RealCheckoutForm({
       const payingSavedCard = Boolean(selectedCardId) && !showCardForm;
       const piResult = await createPaymentIntentAction(
         contact,
-        "pickup",
+        fulfillment,
         stripeConfig.signedIn
           ? {
               saveCard: payingSavedCard ? false : saveCard,
@@ -264,6 +443,7 @@ function RealCheckoutForm({
               attemptToken,
             }
           : undefined,
+        delivery,
       );
       if (!piResult.ok) {
         if (piResult.code === "basket_already_ordered") {
@@ -300,7 +480,7 @@ function RealCheckoutForm({
         confirmError = confirmed.error;
       } else {
         await Promise.resolve(elements.update({
-          amount: latest.holdCents,
+          amount: piResult.holdCents,
           setupFutureUsage: saveCard ? "on_session" : null,
         }));
         const { error: submitError } = await elements.submit();
@@ -318,9 +498,10 @@ function RealCheckoutForm({
       const orderResult = await placeOrderAction(
         piResult.paymentIntentId,
         contact,
-        "pickup",
+        fulfillment,
         notes,
         schedule ? slot : "asap",
+        delivery,
       );
       if (!orderResult.ok) {
         setErrorHref(orderResult.code === "basket_already_ordered" ? "/account" : null);
@@ -356,7 +537,72 @@ function RealCheckoutForm({
       lines={lines}
       subtotal={subtotal}
       fulfillment={fulfillment}
-      setFulfillment={() => {}}
+      setFulfillment={setFulfillment}
+      deliveryEditor={
+        <StoreDeliveryFields
+          line1={line1}
+          setLine1={setLine1}
+          line2={line2}
+          setLine2={setLine2}
+          city={city}
+          setCity={setCity}
+          region={region}
+          setRegion={setRegion}
+          zip={zip}
+          setZip={setZip}
+          suggestions={suggestions}
+          onPick={(row) => {
+            setLine1(row.line1);
+            setCity(row.city);
+            setRegion(row.state);
+            setZip(row.zip);
+            setSuggestions([]);
+            setConfirmed(null);
+          }}
+          onConfirm={() => {
+            setConfirming(true);
+            confirmAddressAction({
+              line1,
+              line2: line2 || null,
+              city,
+              state: region,
+              zip,
+              leaveAtDoor: !frozen && leaveAtDoor,
+            }).then((result) => {
+              setConfirming(false);
+              if (!result.ok) {
+                setConfirmed(null);
+                setError(result.error);
+                return;
+              }
+              setError("");
+              setConfirmed({
+                formatted: result.formatted,
+                line1: result.line1,
+                city: result.city,
+                state: result.state,
+                zip: result.zip,
+                withinRadius: result.withinRadius,
+                distanceMi: result.distanceMi,
+                message: result.message,
+              });
+              setLine1(result.line1);
+              setCity(result.city);
+              setRegion(result.state);
+              setZip(result.zip);
+            });
+          }}
+          confirming={confirming}
+          confirmed={confirmed}
+          leaveAtDoor={leaveAtDoor}
+          setLeaveAtDoor={setLeaveAtDoor}
+          frozen={frozen}
+          onEdit={() => {
+            setConfirmed(null);
+            setSuggestions([]);
+          }}
+        />
+      }
       contact={contact}
       setContact={setContact}
       address={undefined}
@@ -578,6 +824,7 @@ interface CheckoutLayoutProps {
   payLabel: string;
   isRealPayment: boolean;
   outcomeSelector?: React.ReactNode;
+  deliveryEditor?: React.ReactNode;
 }
 
 function CheckoutLayout(props: CheckoutLayoutProps) {
@@ -591,7 +838,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
-    onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector,
+    onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
     signedIn = false, identityLocked = false,
   } = props;
 
@@ -625,14 +872,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   <ShoppingBag size={18} />
                   Pickup · Free
                 </Chip>
-                {!isRealPayment && settings.storeDeliveryEnabled && (
+                {settings.storeDeliveryEnabled && (
                   <Chip
                     type="button"
                     selected={fulfillment === "store-delivery"}
                     onClick={() => setFulfillment("store-delivery")}
                   >
                     <Truck size={18} />
-                    Store delivery · {money(settings.storeDeliveryFeeCents)}
+                    Store delivery · {settings.storeDeliveryFeeCents === 0 ? "Free" : money(settings.storeDeliveryFeeCents)}
                   </Chip>
                 )}
                 {!isRealPayment && (
@@ -669,6 +916,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   address={settings.address}
                   title="Collect from the market"
                 />
+              ) : deliveryEditor ? (
+                deliveryEditor
               ) : (
                 <>
                   <label className={styles.field}>

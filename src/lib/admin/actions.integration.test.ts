@@ -24,6 +24,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { updateStore } from "./actions";
+import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { auth } from "../auth";
 import { authPrisma, storeScopedTransaction } from "../db";
 
@@ -126,5 +127,37 @@ describe("store hours schema", () => {
     const storedResult = await updateStore({}, storeForm(storeId, storedShape));
     expect(storedResult).toMatchObject({ success: true, storeId });
     expect(await readHours(storeId)).toEqual(storedShape);
+  });
+
+  it("platform admin turns on store delivery with a confirmed store address", async () => {
+    setAddressProvider(fakeAddressBackend());
+    const data = storeForm(storeId, storedShape);
+    data.set("addressLine1", "4600 Silver Hill Rd");
+    data.set("city", "Washington");
+    data.set("state", "DC");
+    data.set("zip", "20233");
+    data.set("storeDeliveryFee", "5.00");
+    data.set("storeDeliveryEnabled", "on");
+    const saved = await updateStore({}, data);
+    expect(saved).toMatchObject({ success: true, storeId });
+    const store = await authPrisma.store.findUnique({ where: { id: storeId } });
+    expect(store?.storeDeliveryEnabled).toBe(true);
+    expect(store?.storeDeliveryFeeCents).toBe(500);
+    expect(store?.lat).toBeCloseTo(38.845, 2);
+    expect(store?.lng).toBeCloseTo(-76.928, 2);
+
+    const bad = storeForm(storeId, storedShape);
+    bad.set("addressLine1", "999 Imaginary Road");
+    bad.set("city", "Nowhere");
+    bad.set("state", "DC");
+    bad.set("zip", "20233");
+    bad.set("storeDeliveryFee", "5.00");
+    bad.set("storeDeliveryEnabled", "on");
+    const refused = await updateStore({}, bad);
+    expect(refused.fieldErrors?.addressLine1).toBeTruthy();
+    const still = await authPrisma.store.findUnique({ where: { id: storeId } });
+    expect(still?.addressLine1).toBe("4600 Silver Hill Rd");
+    expect(still?.lat).toBeCloseTo(38.845, 2);
+    setAddressProvider(null);
   });
 });

@@ -166,6 +166,12 @@ How a customer gets an order: store delivery, courier delivery, or pickup.
 **Store delivery**:
 Delivery done by the store's own driver, at a fee the store sets.
 
+**Delivery radius**:
+The straight-line distance, in miles, from the store's confirmed coordinates. An address at exactly that distance is inside the area.
+
+**Leave at door**:
+The customer asked the store to leave the order without a handoff. Frozen items cannot use it.
+
 **Courier delivery**:
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.
 

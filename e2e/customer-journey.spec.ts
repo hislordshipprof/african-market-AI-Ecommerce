@@ -1,6 +1,9 @@
 import { storeUrl } from "./urls";
 import { addItemToCart } from "./checkout-helpers";
 import { test, expect, type Page } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { resolveDirectUrl } from "../src/lib/env";
 
 const base = storeUrl("mama-ngozi");
 
@@ -125,4 +128,88 @@ test.describe("Customer journey demo", () => {
       page.getByRole("heading", { name: "Checkout" }),
     ).toBeVisible();
   });
+});
+
+test("store delivery payment with a confirmed address leads to tracking", async ({ page }) => {
+  const slug = `delivery-${Date.now().toString(36)}`;
+  const name = `Delivery Yam ${slug}`;
+  const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+  const store = await prisma.store.create({
+    data: {
+      slug,
+      name: "Delivery Lane",
+      themePreset: "palm-and-shea",
+      stripeOnboardingStatus: "complete",
+      pickupEnabled: true,
+      storeDeliveryEnabled: true,
+      storeDeliveryFeeCents: 500,
+      deliveryRadiusMi: 8,
+      minimumOrderCents: 0,
+      addressLine1: "8400 Park Place Blvd",
+      city: "Houston",
+      state: "TX",
+      zip: "77017",
+      lat: 29.693857800118,
+      lng: -95.266257879374,
+    },
+  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      const listing = await tx.listing.create({
+        data: {
+          storeId: store.id,
+          customName: name,
+          price: 4000,
+          stockMode: "unlimited",
+          frozen: false,
+          perishable: false,
+        },
+      });
+      await tx.listingVariant.create({
+        data: { listingId: listing.id, label: "Each", price: 4000, weightG: 200 },
+      });
+    });
+    await page.context().addCookies([{
+      name: "e2e_stripe_harness",
+      value: "1",
+      url: `http://localhost:${process.env.E2E_PORT || "3000"}`,
+    }]);
+    await page.goto(`/?store=${slug}`);
+    await page.getByRole("button", { name: `Add ${name} to cart` }).click();
+    await page.goto(`/checkout?store=${slug}`);
+    await page.getByRole("button", { name: /Store delivery/ }).click();
+    await page.getByLabel("Street address").fill("3700 Main St");
+    await page.getByLabel("City").fill("Houston");
+    await page.getByLabel("State").fill("TX");
+    await page.getByLabel("ZIP").fill("77002");
+    await page.getByRole("button", { name: "Confirm address" }).click();
+    await expect(page.getByText(/3700 MAIN ST/)).toBeVisible();
+    await page.getByLabel("Full name").fill("Ada Buyer");
+    await page.getByLabel("Phone number (required)").fill("2025550100");
+    await page.getByLabel("Email (required)").fill("ada-delivery@example.com");
+    const pay = page.getByRole("button", { name: /Pay · \$49\.00/ });
+    await expect(pay).toBeVisible();
+    await pay.click();
+    await expect(page).toHaveURL(/\/order\/.+placed=1/, { timeout: 20_000 });
+    const order = await prisma.order.findFirst({ where: { storeId: store.id } });
+    expect(order?.fulfillment).toBe("store-delivery");
+    expect(order?.deliveryFeeCents).toBe(500);
+  } finally {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.orderLine.deleteMany({ where: { storeId: store.id } });
+      await tx.order.deleteMany({ where: { storeId: store.id } });
+      await tx.customer.deleteMany({ where: { storeId: store.id } });
+      await tx.cartLine.deleteMany({ where: { storeId: store.id } });
+      await tx.cart.deleteMany({ where: { storeId: store.id } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: store.id } } });
+      await tx.listing.deleteMany({ where: { storeId: store.id } });
+      await tx.auditLog.deleteMany({ where: { storeId: store.id } });
+    });
+    await prisma.store.delete({ where: { id: store.id } });
+    await prisma.$disconnect();
+  }
 });

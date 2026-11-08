@@ -331,6 +331,15 @@ export function OrderInbox({
                     {selectedOrder.notes}
                   </p>
                 )}
+                {selectedOrder.fulfillment === "store-delivery" && selectedOrder.deliveryLine1 && (
+                  <p className="mt-2 text-sm text-foreground">
+                    {selectedOrder.deliveryLine1}
+                    {selectedOrder.deliveryLine2 ? `, ${selectedOrder.deliveryLine2}` : ""}
+                    {", "}
+                    {selectedOrder.deliveryCity}, {selectedOrder.deliveryState} {selectedOrder.deliveryZip}
+                    {selectedOrder.leaveAtDoor ? " · Leave at door" : ""}
+                  </p>
+                )}
                 {selectedOrder.status === "REFUND_FAILED" && (
                   <p className="mt-2 text-sm text-destructive">
                     {REFUND_FAILED_STAFF_COPY}

@@ -14,13 +14,18 @@ export const getFlowContext = cache(async () => {
     id: store.id,
     slug: store.slug,
     name: store.name,
-    address: "123 Market Street, Silver Spring, MD 20910 (demo address)",
+    address: [store.addressLine1, store.city, store.state, store.zip].filter(Boolean).join(", ")
+      || store.neighborhood
+      || "this market",
     minimumOrderCents: store.minimumOrderCents,
     pickupEnabled: store.pickupEnabled,
-    storeDeliveryEnabled: store.slug === "mama-ngozi",
+    storeDeliveryEnabled: store.storeDeliveryEnabled
+      && store.lat != null
+      && store.lng != null
+      && Number(store.deliveryRadiusMi) > 0,
     deliveryRadiusMi: Number(store.deliveryRadiusMi),
     prepTimeMinutes: store.prepTimeMinutes,
-    storeDeliveryFeeCents: 499,
+    storeDeliveryFeeCents: store.storeDeliveryFeeCents,
     autoRefundLimitCents: store.autoRefundLimitCents,
     insulatedPackaging: store.slug === "mama-ngozi",
     closed: false,

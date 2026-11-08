@@ -20,7 +20,7 @@ describe("security headers", () => {
     expect(policy).toContain("https://js.stripe.com");
     expect(policy).toContain("https://hooks.stripe.com");
     expect(policy).toContain("https://api.stripe.com");
-    expect(policy).toContain("https://maps.googleapis.com");
+    expect(policy).not.toContain("maps.googleapis.com");
     expect(ENFORCED_CSP).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
   });
 
