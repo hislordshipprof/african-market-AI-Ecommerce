@@ -4,6 +4,7 @@
 @import "../components/storefront/storefront.css";
 @import "../components/storefront/flow/flow.css";
 @import "../components/storefront/motion.css";
+@import "../components/story-surface/story-surface.css";
 
 @custom-variant dark (&:is(.dark *));
 

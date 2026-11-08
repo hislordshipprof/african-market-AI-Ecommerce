@@ -2,7 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { CircleAlert } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { authClient } from "@/lib/auth-client";
+import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
+import { Button } from "@/components/ui/button";
+import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+// The submit button that had focus is gone after the step changes.
+const focusOnMount = (input: HTMLInputElement | null) => input?.focus();
 
 export default function Enroll2FA() {
   const router = useRouter();
@@ -58,83 +68,89 @@ export default function Enroll2FA() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center">
-      <div className="w-full max-w-sm rounded-lg border border-[#e2e4e9] bg-white p-8 shadow-sm">
-        <h1 className="mb-2 text-center text-xl font-bold text-[#15201A]">
-          Set up two-factor authentication
-        </h1>
-        <p className="mb-6 text-center text-sm text-[#55625A]">
-          Two-factor authentication is required for all platform administrators.
-        </p>
+    <StorySurface>
+      <StoryCard className="gap-6 py-8">
+        <CardHeader className="px-8">
+          <h1 className="font-display text-2xl leading-tight font-bold text-balance">
+            Set up two-factor authentication
+          </h1>
+          <CardDescription className="text-sm">
+            Two-factor authentication is required for all platform administrators.
+          </CardDescription>
+        </CardHeader>
 
-        {error && (
-          <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {!totpUri && (
-          <form onSubmit={startEnrollment}>
-            <label className="mb-1 block text-sm font-medium text-[#15201A]">
-              Current password
-            </label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mb-4 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
-              autoComplete="current-password"
-              placeholder="Enter your password"
-            />
-            <button
-              type="submit"
-              disabled={enrolling}
-              className="w-full rounded-full bg-[#1F5A43] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
+        <CardContent className="px-8">
+          {error && (
+            <div
+              role="alert"
+              className="mb-4 flex gap-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
             >
-              {enrolling ? "Setting up..." : "Begin setup"}
-            </button>
-          </form>
-        )}
+              <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              {error}
+            </div>
+          )}
 
-        {totpUri && (
-          <div>
-            <div className="mb-4 rounded-md bg-[#f8f9fa] p-4">
-              <p className="mb-2 text-sm font-medium text-[#15201A]">
-                Scan this URI in your authenticator app, or enter the secret manually:
+          {!totpUri && (
+            <form onSubmit={startEnrollment} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="enroll-password">Current password</Label>
+                <Input
+                  id="enroll-password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-11"
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                />
+              </div>
+              <Button type="submit" disabled={enrolling} className="mt-2 h-11 w-full rounded-full">
+                {enrolling ? "Setting up..." : "Begin setup"}
+              </Button>
+            </form>
+          )}
+
+          {totpUri && (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                Scan this code in your authenticator app. If you can&apos;t scan it, paste the setup
+                link instead.
               </p>
-              <code className="block break-all rounded bg-white px-2 py-1 text-xs text-[#55625A]">
+              {/* A QR code has to stay dark on white to scan, in both color schemes. */}
+              <div className="mx-auto rounded-xl bg-white p-3">
+                <QRCodeSVG value={totpUri} size={168} level="M" title="Authenticator setup code" />
+              </div>
+              <code className="block rounded-lg bg-muted px-3 py-2 text-xs break-all text-muted-foreground">
                 {totpUri}
               </code>
-            </div>
 
-            <form onSubmit={verifyCode}>
-              <label className="mb-1 block text-sm font-medium text-[#15201A]">
-                Verification code
-              </label>
-              <input
-                type="text"
-                required
-                inputMode="numeric"
-                pattern="[0-9]{6}"
-                maxLength={6}
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                className="mb-4 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-center text-lg tracking-[0.3em] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
-                autoComplete="one-time-code"
-                placeholder="000000"
-              />
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full rounded-full bg-[#1F5A43] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
-              >
-                {loading ? "Verifying..." : "Verify and continue"}
-              </button>
-            </form>
-          </div>
-        )}
-      </div>
-    </main>
+              <form onSubmit={verifyCode} className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="enroll-code">Verification code</Label>
+                  <Input
+                    ref={focusOnMount}
+                    id="enroll-code"
+                    type="text"
+                    required
+                    inputMode="numeric"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    className="h-11 text-center text-lg tracking-[0.3em] md:text-lg"
+                    autoComplete="one-time-code"
+                    placeholder="000000"
+                  />
+                </div>
+                <Button type="submit" disabled={loading} className="mt-2 h-11 w-full rounded-full">
+                  {loading ? "Verifying..." : "Verify and continue"}
+                </Button>
+              </form>
+            </div>
+          )}
+        </CardContent>
+      </StoryCard>
+    </StorySurface>
   );
 }

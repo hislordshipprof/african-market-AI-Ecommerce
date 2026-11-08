@@ -68,6 +68,34 @@ test.describe("Platform admin console", () => {
     await adminSignIn(page);
     await expect(page.locator("h1")).toHaveText("Stores");
   });
+
+  test("sign-in form works over the poster when WebGL is unavailable", async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.addInitScript(() => {
+      const realGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (
+        this: HTMLCanvasElement,
+        type: string,
+        ...rest: unknown[]
+      ) {
+        if (type === "webgl" || type === "webgl2") return null;
+        return realGetContext.call(this, type, ...(rest as []));
+      } as typeof HTMLCanvasElement.prototype.getContext;
+    });
+
+    await page.goto("/admin/sign-in");
+    await expect(page.getByTestId("story-poster")).toBeVisible();
+    await page.getByLabel("Email").fill(ADMIN_EMAIL);
+    await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+    await page.click("button[type='submit']");
+
+    await expect(page.getByLabel("Verification code")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("canvas")).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+  });
 });
 
 test.describe("Store management (authenticated)", () => {

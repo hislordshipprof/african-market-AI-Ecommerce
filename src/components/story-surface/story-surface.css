@@ -1,0 +1,59 @@
+/*
+ * Story surfaces follow the visitor's color scheme on their own, including on the
+ * platform admin host, which has no store theme. On a store host the --store-* values
+ * already hold the store's light or dark theme, so they win over these fallbacks.
+ */
+.story-surface {
+  color: var(--foreground);
+}
+
+/* The tall crop keeps the vendor in frame on a phone. The wide crop's focus comes from the scene. */
+.story-surface__poster {
+  object-position: 38% 50%;
+}
+
+@media (min-width: 768px) {
+  .story-surface__poster {
+    object-position: var(--story-focus-wide);
+  }
+}
+
+.story-surface__scrim {
+  background: linear-gradient(
+    to top right,
+    rgb(8 14 10 / 0.82),
+    rgb(8 14 10 / 0.42) 26%,
+    rgb(8 14 10 / 0) 52%
+  );
+}
+
+.story-surface__dusk {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .story-surface {
+    color-scheme: dark;
+    --background: var(--store-bg, #0f1712);
+    --foreground: var(--store-ink, #eef2ec);
+    --card: var(--store-surface, #16211a);
+    --card-foreground: var(--store-ink, #eef2ec);
+    --primary: var(--store-primary, #6cc08f);
+    --primary-foreground: var(--store-on-primary, #1d3a2b);
+    --secondary: var(--store-soft, #1b2e23);
+    --secondary-foreground: var(--store-ink, #eef2ec);
+    --muted: var(--store-raised, #1f2c24);
+    --muted-foreground: var(--store-muted, #a3b1a7);
+    --border: var(--store-line, #2a3a30);
+    --input: var(--store-line, #2a3a30);
+    --ring: var(--store-primary, #6cc08f);
+    --destructive: var(--store-deal, #f0707e);
+  }
+
+  /* Multiply keeps the photo's color and contrast. A flat black overlay turns it to mud. */
+  .story-surface__dusk {
+    display: block;
+    background: #56676a;
+    mix-blend-mode: multiply;
+  }
+}

@@ -2,9 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { CircleAlert } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
+import { Button } from "@/components/ui/button";
+import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Step = "credentials" | "totp";
+
+// The submit button that had focus is gone after the step changes.
+const focusOnMount = (input: HTMLInputElement | null) => input?.focus();
 
 export default function AdminSignIn() {
   const router = useRouter();
@@ -63,87 +72,88 @@ export default function AdminSignIn() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center">
-      <div className="w-full max-w-sm rounded-lg border border-[#e2e4e9] bg-white p-8 shadow-sm">
-        <h1 className="mb-6 text-center text-xl font-bold text-[#15201A]">
-          Platform Admin
-        </h1>
+    <StorySurface>
+      <StoryCard className="gap-6 py-8">
+        <CardHeader className="px-8">
+          <h1 className="font-display text-2xl leading-tight font-bold">Platform Admin</h1>
+          <CardDescription className="text-sm">
+            {step === "credentials"
+              ? "Sign in to manage stores and the catalog."
+              : "Enter the 6-digit code from your authenticator app."}
+          </CardDescription>
+        </CardHeader>
 
-        {error && (
-          <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {step === "credentials" && (
-          <form onSubmit={handleCredentials}>
-            <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-[#15201A]">
-              Email
-            </label>
-            <input
-              id="admin-email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mb-4 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
-              autoComplete="email"
-            />
-
-            <label htmlFor="admin-password" className="mb-1 block text-sm font-medium text-[#15201A]">
-              Password
-            </label>
-            <input
-              id="admin-password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mb-6 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-sm focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
-              autoComplete="current-password"
-            />
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-full bg-[#1F5A43] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
+        <CardContent className="px-8">
+          {error && (
+            <div
+              role="alert"
+              className="mb-4 flex gap-2 rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
             >
-              {loading ? "Signing in..." : "Sign in"}
-            </button>
-          </form>
-        )}
+              <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              {error}
+            </div>
+          )}
 
-        {step === "totp" && (
-          <form onSubmit={handleTotp}>
-            <p className="mb-4 text-sm text-[#55625A]">
-              Enter the 6-digit code from your authenticator app.
-            </p>
-            <label htmlFor="admin-totp" className="mb-1 block text-sm font-medium text-[#15201A]">
-              Verification code
-            </label>
-            <input
-              id="admin-totp"
-              type="text"
-              required
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              value={totpCode}
-              onChange={(e) => setTotpCode(e.target.value)}
-              className="mb-6 w-full rounded-md border border-[#e2e4e9] px-3 py-2 text-center text-lg tracking-[0.3em] focus:border-[#1F5A43] focus:outline-none focus:ring-1 focus:ring-[#1F5A43]"
-              autoComplete="one-time-code"
-            />
+          {step === "credentials" && (
+            <form onSubmit={handleCredentials} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="admin-email">Email</Label>
+                <Input
+                  id="admin-email"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-11"
+                  autoComplete="email"
+                />
+              </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-full bg-[#1F5A43] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#123726] disabled:opacity-50"
-            >
-              {loading ? "Verifying..." : "Verify"}
-            </button>
-          </form>
-        )}
-      </div>
-    </main>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="admin-password">Password</Label>
+                <Input
+                  id="admin-password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-11"
+                  autoComplete="current-password"
+                />
+              </div>
+
+              <Button type="submit" disabled={loading} className="mt-2 h-11 w-full rounded-full">
+                {loading ? "Signing in..." : "Sign in"}
+              </Button>
+            </form>
+          )}
+
+          {step === "totp" && (
+            <form onSubmit={handleTotp} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="admin-totp">Verification code</Label>
+                <Input
+                  ref={focusOnMount}
+                  id="admin-totp"
+                  type="text"
+                  required
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value)}
+                  className="h-11 text-center text-lg tracking-[0.3em] md:text-lg"
+                  autoComplete="one-time-code"
+                />
+              </div>
+
+              <Button type="submit" disabled={loading} className="mt-2 h-11 w-full rounded-full">
+                {loading ? "Verifying..." : "Verify"}
+              </Button>
+            </form>
+          )}
+        </CardContent>
+      </StoryCard>
+    </StorySurface>
   );
 }
