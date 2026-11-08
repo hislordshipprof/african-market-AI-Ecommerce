@@ -82,7 +82,14 @@ agent_run() {
       # Reviews may run on a separate Claude profile. It has no supermatt plugin, so the slash skill is rewritten
       # to the vendored copy, as for Cursor. Headless Claude exits when it ends a turn while a background subagent
       # still runs, so reviews run with background tasks off.
-      if [ "$role" = review ] || [ "$role" = review2 ]; then
+      # AGENT_CLAUDE_CONFIG_DIR puts every role on one Claude profile (owner 2026-11-07: the Ben profile for everything).
+      if [ -n "${AGENT_CLAUDE_CONFIG_DIR:-}" ]; then
+        [ -d "$AGENT_CLAUDE_CONFIG_DIR" ] || { echo "No Claude profile at $AGENT_CLAUDE_CONFIG_DIR" >&2; return 2; }
+        local -x CLAUDE_CONFIG_DIR="$AGENT_CLAUDE_CONFIG_DIR"
+        local -x CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+        prompt="$(_cursor_prompt "$prompt")"
+        [ "$role" = review ] || [ "$role" = review2 ] && [ -n "${REVIEW_CLAUDE_MODEL:-}" ] && flags+=(--model "$REVIEW_CLAUDE_MODEL")
+      elif [ "$role" = review ] || [ "$role" = review2 ]; then
         local -x CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
         if [ -n "${REVIEW_CLAUDE_CONFIG_DIR:-}" ]; then
           [ -d "$REVIEW_CLAUDE_CONFIG_DIR" ] || { echo "No Claude profile at $REVIEW_CLAUDE_CONFIG_DIR" >&2; return 2; }
