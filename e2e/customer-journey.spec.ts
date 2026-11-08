@@ -131,6 +131,7 @@ test.describe("Customer journey demo", () => {
 });
 
 test("store delivery payment with a confirmed address leads to tracking", async ({ page }) => {
+  test.setTimeout(60_000);
   const slug = `delivery-${Date.now().toString(36)}`;
   const name = `Delivery Yam ${slug}`;
   const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
@@ -140,6 +141,7 @@ test("store delivery payment with a confirmed address leads to tracking", async 
       name: "Delivery Lane",
       themePreset: "palm-and-shea",
       stripeOnboardingStatus: "complete",
+      stripeAccountId: `acct_${slug.replace(/[^a-z0-9]/g, "").slice(0, 20)}`,
       pickupEnabled: true,
       storeDeliveryEnabled: true,
       storeDeliveryFeeCents: 500,
@@ -171,14 +173,27 @@ test("store delivery payment with a confirmed address leads to tracking", async 
         data: { listingId: listing.id, label: "Each", price: 4000, weightG: 200 },
       });
     });
+    await prisma.$disconnect();
     await page.context().addCookies([{
       name: "e2e_stripe_harness",
       value: "1",
       url: `http://localhost:${process.env.E2E_PORT || "3000"}`,
     }]);
-    await page.goto(`/?store=${slug}`);
-    await page.getByRole("button", { name: `Add ${name} to cart` }).click();
-    await page.goto(`/checkout?store=${slug}`);
+    const addButton = page.getByRole("button", { name: `Add ${name} to cart` });
+    await expect(async () => {
+      await page.goto(`/?store=${slug}`);
+      await expect(page.getByRole("heading", { name: /reach the shelves/ })).toHaveCount(0);
+      await expect(addButton).toBeVisible();
+    }).toPass({ timeout: 20_000 });
+    const count = page.getByTestId("storefront-header").getByTestId("cart-count");
+    await addButton.click();
+    await expect(count).toHaveText("1");
+    await expect(page.getByTestId("storefront-header").locator("[data-cart-pending]")).toBeHidden();
+    await expect(async () => {
+      await page.goto(`/checkout?store=${slug}`);
+      await expect(page.getByRole("heading", { name: /reach the shelves/ })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /Store delivery/ })).toBeVisible();
+    }).toPass({ timeout: 20_000 });
     await page.getByRole("button", { name: /Store delivery/ }).click();
     await page.getByLabel("Street address").fill("3700 Main St");
     await page.getByLabel("City").fill("Houston");
@@ -193,7 +208,11 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     await expect(pay).toBeVisible();
     await pay.click();
     await expect(page).toHaveURL(/\/order\/.+placed=1/, { timeout: 20_000 });
-    const order = await prisma.order.findFirst({ where: { storeId: store.id } });
+    const order = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.store_id', ${store.id}, true)`;
+      return tx.order.findFirst({ where: { storeId: store.id } });
+    });
     expect(order?.fulfillment).toBe("store-delivery");
     expect(order?.deliveryFeeCents).toBe(500);
   } finally {

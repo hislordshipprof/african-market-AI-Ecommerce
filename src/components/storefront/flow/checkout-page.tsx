@@ -106,6 +106,10 @@ function createHarnessStripe(): StripeJs {
   };
   return {
     elements: () => elementsApi,
+    // @stripe/react-stripe-js rejects a Stripe object that lacks these.
+    createToken: async () => ({ token: undefined }),
+    createPaymentMethod: async () => ({ paymentMethod: undefined }),
+    confirmCardPayment: async () => ({ error: undefined }),
     confirmPayment: async (options: {
       clientSecret?: string;
       confirmParams?: { payment_method?: string };
@@ -401,7 +405,11 @@ function RealCheckoutForm({
       setError("Confirm your delivery address.");
       return;
     }
-    if (payState !== "idle" || !stripe || !elements) return;
+    if (payState !== "idle") return;
+    if (!stripe || !elements) {
+      setError("Payment is still loading. Try again in a moment.");
+      return;
+    }
     suggestAbort.current?.abort();
     setSuggestions([]);
     setPayState("pending");

@@ -61,7 +61,7 @@ export function getAddressProvider(env: NodeJS.ProcessEnv = process.env): Addres
     if (!warned) {
       warned = true;
       console.warn(
-        "E2E_FAKE_ADDRESS=1 is selecting the fake address provider. Refusing this on Vercel and on production without CI.",
+        "E2E_FAKE_ADDRESS=1 is selecting the fake address provider.",
       );
     }
     return fakeAddressBackend();

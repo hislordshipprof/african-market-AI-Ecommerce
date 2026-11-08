@@ -80,13 +80,28 @@ interface IdempotencyRecord {
   expired: boolean;
 }
 
-const customers = new Map<string, FakeCustomer>();
-const cards = new Map<string, NormalizedCard>();
-const intents = new Map<string, NormalizedPaymentIntent>();
-const idempotency = new Map<string, IdempotencyRecord>();
-const detachCalls: string[] = [];
-let cardSeq = 0;
-let failNext: "timeout" | "500" | null = null;
+interface FakeLedger {
+  customers: Map<string, FakeCustomer>;
+  cards: Map<string, NormalizedCard>;
+  intents: Map<string, NormalizedPaymentIntent>;
+  idempotency: Map<string, IdempotencyRecord>;
+  detachCalls: string[];
+  cardSeq: number;
+  failNext: "timeout" | "500" | null;
+}
+
+// Server actions and route handlers can load this module twice. The fake
+// ledger has to be one process-wide store or confirm cannot see the intent.
+const ledger: FakeLedger = ((globalThis as { __fakeCheckoutLedger?: FakeLedger }).__fakeCheckoutLedger ??= {
+  customers: new Map(),
+  cards: new Map(),
+  intents: new Map(),
+  idempotency: new Map(),
+  detachCalls: [],
+  cardSeq: 0,
+  failNext: null,
+});
+const { customers, cards, intents, idempotency, detachCalls } = ledger;
 
 const FIXTURES: Record<string, Pick<NormalizedCard, "brand" | "last4" | "expMonth" | "expYear" | "behavior">> = {
   pm_card_visa: { brand: "visa", last4: "4242", expMonth: 12, expYear: 2034, behavior: "ok" },
@@ -113,8 +128,8 @@ export function resetFakeCheckoutPayments(): void {
   intents.clear();
   idempotency.clear();
   detachCalls.length = 0;
-  cardSeq = 0;
-  failNext = null;
+  ledger.cardSeq = 0;
+  ledger.failNext = null;
 }
 
 export function fakeDetachCalls(): string[] {
@@ -126,7 +141,7 @@ export function expireFakeIdempotency(): void {
 }
 
 export function failNextFakeCustomerCreate(kind: "timeout" | "500"): void {
-  failNext = kind;
+  ledger.failNext = kind;
 }
 
 export function seedFakeCard(card: NormalizedCard): void {
@@ -156,13 +171,13 @@ function rememberCard(id: string, customer: string | null): NormalizedCard {
 
 export const fakeCheckoutPayments: CheckoutPayments = {
   async createCustomer(params, idempotencyKey) {
-    if (failNext === "timeout") {
-      failNext = null;
+    if (ledger.failNext === "timeout") {
+      ledger.failNext = null;
       const error = new CheckoutProviderError("StripeConnectionError", "Request timed out", "timeout", 408);
       throw error;
     }
-    if (failNext === "500") {
-      failNext = null;
+    if (ledger.failNext === "500") {
+      ledger.failNext = null;
       throw new CheckoutProviderError("StripeAPIError", "Internal server error", "api_error", 500);
     }
     const hash = hashParams(params);
@@ -336,10 +351,10 @@ export const fakeCheckoutPayments: CheckoutPayments = {
       throw invalid("Your card was declined.", "card_declined", 402);
     }
     if (intent.setup_future_usage && intent.customer) {
-      cardSeq += 1;
+      ledger.cardSeq += 1;
       const saved: NormalizedCard = {
         ...card,
-        id: `pm_fake_${cardSeq}`,
+        id: `pm_fake_${ledger.cardSeq}`,
         customer: intent.customer,
         detached: false,
         allowRedisplay: "always",
