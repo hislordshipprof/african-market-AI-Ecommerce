@@ -6,6 +6,8 @@ import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
+import { scheduleOrderNotification } from "../inngest/notify";
+import { newTrackingToken, recordOrderNotification } from "../notifications/record";
 import { scheduleAfterResponse } from "../schedule-after-response";
 import { checkoutTestHooks } from "./test-hooks";
 import { cartPaymentIdempotencyKey } from "../customer-account/consent";
@@ -514,7 +516,7 @@ export async function recordAuthorizedOrder(
   input: RecordAuthorizedOrderInput,
 ): Promise<{ orderId: string; created: boolean }> {
   try {
-    return await storeScopedTransaction(storeId, async (tx) => {
+    const recorded = await storeScopedTransaction(storeId, async (tx) => {
       const lockedStore = await lockStoreRow(tx, storeId);
 
       const existing = await tx.order.findUnique({
@@ -530,7 +532,7 @@ export async function recordAuthorizedOrder(
             throw new Error("Cart not found");
           }
         }
-        return { orderId: existing.id, created: false };
+        return { orderId: existing.id, created: false as const, notify: false };
       }
 
       if (input.lines.length === 0) {
@@ -668,6 +670,7 @@ export async function recordAuthorizedOrder(
           deliveryLng: delivering ? cart.deliveryLng : null,
           deliveryDistanceMi: distanceMi,
           leaveAtDoor: delivering ? cart.leaveAtDoor : false,
+          trackingToken: newTrackingToken(),
         },
       });
       const orderLines = await tx.orderLine.createManyAndReturn({
@@ -701,8 +704,11 @@ export async function recordAuthorizedOrder(
           purchaseEpoch: { increment: 1 },
         },
       });
-      return { orderId: order.id, created: true };
+      const notify = await recordOrderNotification(tx, storeId, order.id, "placed");
+      return { orderId: order.id, created: true as const, notify };
     }, { timeout: 40_000, maxWait: 8_000 });
+    if (recorded.notify) scheduleOrderNotification(storeId, recorded.orderId, "placed");
+    return { orderId: recorded.orderId, created: recorded.created };
   } catch (err) {
     if (paymentIntentTaken(err)) {
       throw new Error("PaymentIntent is already recorded");

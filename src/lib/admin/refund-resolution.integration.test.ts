@@ -276,6 +276,9 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     const resolved = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(resolved?.status).toBe("CANCELLED");
     expect(resolved?.notes).toBe(note);
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(2);
+    await resolveRefundFailed(orderId, note, 600, 600);
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId, event: "cancelled" } })).toBe(2);
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;

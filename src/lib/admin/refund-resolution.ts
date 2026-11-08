@@ -11,6 +11,8 @@ import { findOpenRefundRequest, reconcileOpenRefundRequests, requestIsOpen } fro
 import { releaseOrderStock } from "../order/stock-ledger";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { failedAtLabel } from "./failed-at";
+import { recordOrderNotification } from "../notifications/record";
+import { scheduleOrderNotification } from "../inngest/notify";
 
 export type RefundFailedRow = {
   orderId: string;
@@ -199,7 +201,9 @@ export async function resolveRefundFailed(
     .map((row) => row.id)
     .sort();
 
+  let notifyCancel = false;
   return storeScopedTransaction(order.storeId, async (tx) => {
+    notifyCancel = false;
     await lockStoreRow(tx, order.storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status !== "REFUND_FAILED") {
@@ -292,6 +296,7 @@ export async function resolveRefundFailed(
       });
     }
     const displayedStale = displayedOwedCents !== capturedCents - fresh.refundedCents;
+    notifyCancel = await recordOrderNotification(tx, order.storeId, orderId, "cancelled");
     return {
       ok: true as const,
       ...(displayedStale
@@ -299,6 +304,7 @@ export async function resolveRefundFailed(
         : {}),
     };
   }, { timeout: 20_000 }).then((result) => {
+    if (notifyCancel) scheduleOrderNotification(order.storeId, orderId, "cancelled");
     if (result.ok && !result.message) revalidatePath("/admin/orders");
     return result;
   });

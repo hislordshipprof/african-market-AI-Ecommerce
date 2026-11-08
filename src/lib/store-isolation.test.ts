@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, platform, platformAdmin, authPrisma } from "./db";
+import { isRlsRejection } from "./listing/cross-store-write";
 import { runtimeDatabaseUrl } from "./env";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -684,3 +685,66 @@ describe.skipIf(!hasRuntime)(
     });
   },
 );
+
+describe.skipIf(!hasDb)("notification logs: storeScoped(A) reads only A's rows and cannot write a row for B", () => {
+  const slugA = "notify-rls-a";
+  const slugB = "notify-rls-b";
+  let storeAId = "";
+  let storeBId = "";
+  let orderBId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    const storeA = await raw.store.create({
+      data: { slug: slugA, name: "Notify RLS A", themePreset: "palm-and-shea" },
+    });
+    const storeB = await raw.store.create({
+      data: { slug: slugB, name: "Notify RLS B", themePreset: "palm-and-shea" },
+    });
+    storeAId = storeA.id;
+    storeBId = storeB.id;
+    const customer = await storeScoped(storeBId).customer.create({
+      data: { storeId: storeBId, name: "RLS Buyer", email: "notify-rls-b@example.com" },
+    });
+    const order = await storeScoped(storeBId).order.create({
+      data: {
+        storeId: storeBId,
+        customerId: customer.id,
+        status: "AUTHORIZED",
+        fulfillment: "pickup",
+        subtotalCents: 100,
+        bufferCents: 0,
+        totalCents: 100,
+        totalAuthorizedCents: 100,
+        number: 1,
+      },
+    });
+    orderBId = order.id;
+    await storeScoped(storeBId).notificationLog.create({
+      data: { storeId: storeBId, orderId: order.id, event: "placed", channel: "email", status: "pending" },
+    });
+  });
+
+  afterAll(async () => {
+    for (const id of [storeAId, storeBId]) {
+      if (!id) continue;
+      const scoped = storeScoped(id);
+      await scoped.notificationLog.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.customer.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter(Boolean) } } });
+    await raw.$disconnect();
+  });
+
+  it("notification logs: storeScoped(A) reads only A's rows and cannot write a row for B", async () => {
+    expect(await storeScoped(storeAId).notificationLog.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeAId).notificationLog.create({
+        data: { storeId: storeBId, orderId: orderBId, event: "placed", channel: "sms", status: "pending" },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect(await storeScoped(storeBId).notificationLog.count({ where: { orderId: orderBId } })).toBe(1);
+  });
+});

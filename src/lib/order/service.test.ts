@@ -1241,6 +1241,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "reconcile_capture" },
     });
     expect(logs.length).toBe(1);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(2);
+    await reconcileStuckOrder(storeId, order.id);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(2);
   });
 
   it("K1: sweep finalizes CAPTURING order when Phase 3 DB failure (Stripe succeeded)", async () => {
@@ -3503,6 +3506,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       const result = await markReady(storeId, order.id);
       expect(result).toEqual({ ok: true, capturedAmountCents: 0, voided: true });
       expect(cancelledPayments.has(seeded)).toBe(true);
+      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+      await markReady(storeId, order.id);
+      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
     } finally {
       vi.unstubAllEnvs();
     }

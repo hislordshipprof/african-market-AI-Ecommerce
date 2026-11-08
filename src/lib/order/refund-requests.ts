@@ -10,6 +10,8 @@ import {
 import type { RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { releaseOrderStock } from "./stock-ledger";
+import { recordOrderNotification } from "../notifications/record";
+import { scheduleOrderNotification } from "../inngest/notify";
 
 /** Inside Stripe's 24h idempotency window. Coordinator default, pending owner confirmation. */
 export const REFUND_REQUEST_ABANDON_MS = 23 * 60 * 60 * 1000;
@@ -406,7 +408,9 @@ function baselineBody(after: Prisma.JsonValue): { refundedCents: number; counted
 export async function evaluateOrderRefundState(orderId: string): Promise<void> {
   const located = await platformAdminTransaction((tx) => tx.order.findUnique({ where: { id: orderId } }));
   if (!located?.paymentIntentId) return;
+  let notifyCancel = false;
   const recorded = await storeScopedTransaction(located.storeId, async (tx) => {
+    notifyCancel = false;
     const fresh: string[] = [];
     await lockStoreRow(tx, located.storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -502,6 +506,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
         });
       }
       await releaseOrderStock(tx, order.storeId, orderId);
+      notifyCancel = await recordOrderNotification(tx, order.storeId, orderId, "cancelled");
       return;
     }
     const failedRefunds = listed.filter((refund) => refund.status === "failed" || refund.status === "canceled");
@@ -529,6 +534,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
     }
     return fresh;
   }, { timeout: 20_000 });
+  if (notifyCancel) scheduleOrderNotification(located.storeId, orderId, "cancelled");
   for (const refundId of recorded ?? []) {
     console.error(
       `Refund failed for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,

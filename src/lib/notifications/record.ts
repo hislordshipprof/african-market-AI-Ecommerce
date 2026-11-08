@@ -1,0 +1,48 @@
+import { randomBytes } from "node:crypto";
+import type { Prisma } from "@prisma/client";
+
+export const ORDER_NOTIFY_EVENTS = ["placed", "accepted", "ready", "completed", "cancelled"] as const;
+export type OrderNotifyEvent = (typeof ORDER_NOTIFY_EVENTS)[number];
+
+export function isOrderNotifyEvent(value: string): value is OrderNotifyEvent {
+  return (ORDER_NOTIFY_EVENTS as readonly string[]).includes(value);
+}
+
+/** 32 random bytes, base64url, 43 characters. Never regenerated once written. */
+export function newTrackingToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+type TokenTx = {
+  order: {
+    updateMany: (args: Prisma.OrderUpdateManyArgs) => Promise<{ count: number }>;
+  };
+  notificationLog: {
+    createMany: (args: Prisma.NotificationLogCreateManyArgs) => Promise<{ count: number }>;
+  };
+};
+
+/**
+ * Inserts the email and SMS rows for one event. A second insert for the same
+ * order, event and channel is a no-op, including Cancelled then Refund failed
+ * then Cancelled again. Returns whether any row was inserted.
+ */
+export async function recordOrderNotification(
+  tx: TokenTx,
+  storeId: string,
+  orderId: string,
+  event: OrderNotifyEvent,
+): Promise<boolean> {
+  await tx.order.updateMany({
+    where: { id: orderId, trackingToken: null },
+    data: { trackingToken: newTrackingToken() },
+  });
+  const inserted = await tx.notificationLog.createMany({
+    data: [
+      { storeId, orderId, event, channel: "email", status: "pending" },
+      { storeId, orderId, event, channel: "sms", status: "pending" },
+    ],
+    skipDuplicates: true,
+  });
+  return inserted.count > 0;
+}

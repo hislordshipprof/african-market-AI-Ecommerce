@@ -276,6 +276,14 @@ export function resolveStoreTheme(
   };
 }
 
+/** Light primary for a preset. Unknown presets use Palm and Shea. */
+export function presetPrimary(preset: string): string {
+  if ((VALID_PRESETS as readonly string[]).includes(preset)) {
+    return presets[preset as ThemePreset].light.primary;
+  }
+  return presets["palm-and-shea"].light.primary;
+}
+
 export const VALID_PRESETS: readonly ThemePreset[] = [
   "palm-and-shea",
   "cocoa-and-bottle-green",
