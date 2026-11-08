@@ -126,8 +126,9 @@
   inset-inline: 0;
   top: 0;
   height: 2px;
-  background: var(--color-on-primary);
-  box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-on-primary) 55%, transparent);
+  /* Drawn over the photo, not the bubble: a light line with a dark lift reads on any image. */
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 45%);
   animation: scan 1.6s var(--ease-std) infinite alternate;
 }
 
@@ -369,18 +370,28 @@
   font: 400 13px/1.3 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
-.tile[data-status="pending"] {
+/* The slot a photo's thumbnail will fill, so the tile keeps its size when it is ready. */
+.preparing {
   position: relative;
+  display: block;
+  height: 4px;
   overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-raised);
+}
+
+.preparing[data-kind="photo"] {
+  height: 72px;
+  border-radius: 8px;
 }
 
 /* Preparing has no real progress signal, so the bar is indeterminate. */
-.tile[data-status="pending"]::after {
+.preparing::after {
   content: "";
   position: absolute;
   inset-inline: 0;
   bottom: 0;
-  height: 3px;
+  height: 4px;
   background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
   background-size: 50% 100%;
   background-repeat: no-repeat;
@@ -550,15 +561,14 @@
     animation: none;
   }
 
-  /* Still visible, just still: a full bar while preparing, a resting line while reading. */
-  .tile[data-status="pending"]::after {
+  /* Nothing moves. "Preparing…" and the dimmed photo still show the state. */
+  .preparing::after {
     animation: none;
-    background: var(--color-primary);
-    opacity: 0.6;
+    background-position: 50% 0;
   }
 
   .sentPhoto[data-scanning="on"]::after {
     animation: none;
-    top: 50%;
+    display: none;
   }
 }

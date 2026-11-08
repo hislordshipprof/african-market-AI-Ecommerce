@@ -754,10 +754,15 @@ function Thread({
                 data-status={tile.status}
                 aria-busy={tile.status === "pending" ? true : undefined}
               >
-                {tile.preview && tile.mediaType === "image/jpeg" ? <img src={tile.preview} alt="" /> : null}
+                {tile.status === "pending" ? (
+                  <span
+                    className={styles.preparing}
+                    data-kind={tile.mediaType === "application/pdf" ? "pdf" : "photo"}
+                    aria-hidden="true"
+                  />
+                ) : tile.preview && tile.mediaType === "image/jpeg" ? <img src={tile.preview} alt="" /> : null}
                 <p>{tile.name}</p>
-                <p>{tile.mediaType === "application/pdf" ? "PDF" : "Photo"}</p>
-                {tile.status === "pending" ? <span className="sr-only">Preparing…</span> : null}
+                <p>{tile.status === "pending" ? "Preparing…" : tile.mediaType === "application/pdf" ? "PDF" : "Photo"}</p>
                 {tile.message ? <p>{tile.message}</p> : null}
                 <button type="button" onClick={() => removeTile(tile.id)}>Remove {tile.name}</button>
               </div>
@@ -874,7 +879,7 @@ function MessageView({
                 className={styles.sentPhoto}
                 data-scanning={scanning ? "on" : undefined}
               >
-                <img src={file.url} alt="" />
+                <img src={file.url} alt="Photo you sent" />
               </span>
             )
             : (
