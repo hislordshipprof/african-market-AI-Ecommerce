@@ -53,9 +53,30 @@ describe("createSender", () => {
     expect(sender).not.toBeInstanceOf(ResendSender);
   });
 
-  it("returns TestSender when CI=true without RESEND_API_KEY", () => {
-    const sender = createSender({ CI: "true", NODE_ENV: "production" });
-    expect(sender).not.toBeInstanceOf(ResendSender);
+  it("returns TestSender when CI=true without RESEND_API_KEY", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
+    try {
+      clearTestSentEmails();
+      const sender = createSender({ CI: "true", NODE_ENV: "production" });
+      expect(sender).not.toBeInstanceOf(ResendSender);
+      const result = await sender.send({
+        to: "ci-shopper@example.com",
+        subject: "Your sign-in link",
+        html: "<p>CI sink</p>",
+      });
+      expect(result.id).toMatch(/^test-/);
+      expect(getTestSentEmails()).toEqual([
+        {
+          to: "ci-shopper@example.com",
+          subject: "Your sign-in link",
+          html: "<p>CI sink</p>",
+        },
+      ]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      clearTestSentEmails();
+    }
   });
 
   it("returns TestSender in development without RESEND_API_KEY", () => {

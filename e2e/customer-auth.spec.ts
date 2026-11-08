@@ -1,5 +1,6 @@
 import { storeUrl, E2E_PORT } from "./urls";
 import { test, expect } from "@playwright/test";
+import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 
 const base = storeUrl("mama-ngozi");
 const apiBase = `http://localhost:${E2E_PORT}`;
@@ -89,6 +90,62 @@ test.describe("Customer magic-link auth", () => {
       page.getByRole("alert").filter({ hasText: "expired" }),
     ).toContainText("This link has expired. Send a new one.");
   });
+});
+
+test("signed-out production account redirects with demo flows disabled", async ({ page }) => {
+  test.setTimeout(240_000);
+
+  async function boot(env: Record<string, string>) {
+    const port = await reservePort(laneSmokePort());
+    const running = await startSpawnedServer({
+      command: `pnpm exec next start -p ${port}`,
+      shell: true,
+      cwd: process.cwd(),
+      port,
+      env: {
+        ...process.env,
+        CI: "",
+        E2E_STORE_OVERRIDE: "",
+        E2E_FAKE_STRIPE: "",
+        NODE_ENV: "production",
+        ...env,
+      },
+      healthUrl: `http://127.0.0.1:${port}/api/health`,
+      healthOk: (status) => status === 200 || status === 503,
+    });
+    return { running, origin: `http://mama-ngozi.localhost:${port}` };
+  }
+
+  async function expectRealSignIn(origin: string) {
+    await page.goto(`${origin}/account`);
+    await expect(page).toHaveURL(/\/account\/sign-in$/);
+    await expect(page.getByText("Explore the demo.")).toHaveCount(0);
+    await expect(page.getByText("demo code")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Send sign-in link" })).toBeVisible();
+    await expect(page.getByText("Sign in to Mama Ngozi African Market")).toBeVisible();
+  }
+
+  const productionOverride = await boot({
+    VERCEL: "1",
+    VERCEL_ENV: "production",
+    NEXT_PUBLIC_DEMO_FLOWS: "1",
+  });
+  try {
+    await expectRealSignIn(productionOverride.origin);
+  } finally {
+    await productionOverride.running.stop();
+  }
+
+  const unflagged = await boot({
+    VERCEL: "1",
+    VERCEL_ENV: "",
+    NEXT_PUBLIC_DEMO_FLOWS: "",
+  });
+  try {
+    await expectRealSignIn(unflagged.origin);
+  } finally {
+    await unflagged.running.stop();
+  }
 });
 
 test.describe("sign-in reduced motion", () => {

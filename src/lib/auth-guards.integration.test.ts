@@ -35,8 +35,13 @@ const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-c1`;
 const password = "GuardPass-123!";
 
-async function authPost(path: string, body: unknown, cookies?: string): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+async function authPost(
+  path: string,
+  body: unknown,
+  cookies?: string,
+  extra?: Record<string, string>,
+): Promise<Response> {
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...extra };
   if (cookies) headers.cookie = cookies;
   return auth.handler(
     new Request(`${BASE}${path}`, {
@@ -278,4 +283,272 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     asStore(cookies);
     await expect(requireStoreOwner()).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
   });
+});
+
+type LiveSession = { id: string; userId: string; twoFactorVerified: boolean };
+
+async function readSession(cookies: string): Promise<LiveSession | null> {
+  const res = await authGet(`${BASE}/get-session`, cookies);
+  const body = (await res.json()) as {
+    session: { id: string; twoFactorVerified: boolean } | null;
+    user: { id: string };
+  } | null;
+  if (!body?.session) return null;
+  return {
+    id: body.session.id,
+    userId: body.user.id,
+    twoFactorVerified: body.session.twoFactorVerified,
+  };
+}
+
+async function waitForNextTotpWindow(): Promise<void> {
+  const periodMs = 30_000;
+  const waitMs = periodMs - (Date.now() % periodMs) + 400;
+  await new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
+async function insertStore(slug: string): Promise<string> {
+  const id = crypto.randomUUID();
+  await authPrisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${id}, ${slug}, ${slug}, 'active', now())`;
+  });
+  return id;
+}
+
+async function insertOwnerMembership(storeId: string, userId: string): Promise<void> {
+  await authPrisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeId}, ${userId}, 'owner', now())`;
+  });
+}
+
+async function removeAuthFixtures(emails: string[], storeIds: string[]): Promise<void> {
+  await authPrisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    for (const storeId of storeIds) {
+      await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id = ${storeId}`;
+      await tx.$executeRaw`DELETE FROM customers WHERE store_id = ${storeId}`;
+    }
+    for (const email of emails) {
+      await tx.$executeRaw`DELETE FROM two_factors WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+      await tx.$executeRaw`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+      await tx.$executeRaw`DELETE FROM accounts WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+      await tx.$executeRaw`DELETE FROM verifications WHERE value LIKE ${"%" + email + "%"} OR value IN (SELECT id FROM users WHERE email = ${email})`;
+      await tx.$executeRaw`DELETE FROM users WHERE email = ${email}`;
+    }
+    for (const storeId of storeIds) {
+      await tx.$executeRaw`DELETE FROM stores WHERE id = ${storeId}`;
+    }
+  });
+}
+
+async function customerMagicSession(email: string, slug: string): Promise<LiveSession & { cookies: string }> {
+  clearTestSentEmails();
+  const sent = await authPost(
+    "/sign-in/magic-link",
+    { email, callbackURL: "/account" },
+    undefined,
+    { "x-store-slug": slug, host: `${slug}.localhost:3000` },
+  );
+  expect(sent.status, await sent.clone().text()).toBe(200);
+  const html = getTestSentEmails().at(-1)?.html ?? "";
+  const href = html.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+  expect(href).toBeTruthy();
+  const verifyRes = await authGet(href!);
+  const cookies = collectCookies(verifyRes);
+  expect(cookies).toContain("session_token");
+  const session = await readSession(cookies);
+  expect(session).toMatchObject({ twoFactorVerified: false });
+  return { cookies, ...session! };
+}
+
+async function unverifiedPasswordSession(email: string): Promise<LiveSession & { cookies: string }> {
+  const signedIn = await passwordSignIn(email);
+  expect(signedIn.status, await signedIn.clone().text()).toBe(200);
+  const cookies = collectCookies(signedIn);
+  const session = await readSession(cookies);
+  expect(session).toMatchObject({ twoFactorVerified: false });
+  return { cookies, ...session! };
+}
+
+describe("session cleanup stays inside one account", () => {
+  it(
+    "a staff TOTP sign-in keeps a customer's session and ends only the staff account's own unverified sessions",
+    async () => {
+      const stamp = crypto.randomUUID().slice(0, 8);
+      const ownerEmail = `ac7-owner-${stamp}@test.example`;
+      const customerAEmail = `ac7-a-${stamp}@test.example`;
+      const customerBEmail = `ac7-b-${stamp}@test.example`;
+      const emails = [ownerEmail, customerAEmail, customerBEmail];
+      const storeIds: string[] = [];
+      try {
+        await signUp(ownerEmail, "AC7 Owner");
+        await signUp(customerAEmail, "AC7 Customer A");
+        await signUp(customerBEmail, "AC7 Customer B");
+        const storeA = await insertStore(`ac7-a-${stamp}`);
+        const storeB = await insertStore(`ac7-b-${stamp}`);
+        storeIds.push(storeA, storeB);
+
+        const customerA = await customerMagicSession(customerAEmail, `ac7-a-${stamp}`);
+        const customerB = await customerMagicSession(customerBEmail, `ac7-b-${stamp}`);
+        expect(customerA.userId).not.toBe(customerB.userId);
+
+        const oldDevice = await unverifiedPasswordSession(ownerEmail);
+        const enrollment = await unverifiedPasswordSession(ownerEmail);
+        expect(oldDevice.id).not.toBe(enrollment.id);
+        expect(oldDevice.userId).toBe(enrollment.userId);
+        expect(oldDevice.userId).not.toBe(customerA.userId);
+        expect(await readSession(oldDevice.cookies)).toMatchObject({
+          id: oldDevice.id,
+          userId: oldDevice.userId,
+          twoFactorVerified: false,
+        });
+        expect(await readSession(enrollment.cookies)).toMatchObject({
+          id: enrollment.id,
+          userId: enrollment.userId,
+          twoFactorVerified: false,
+        });
+
+        await insertOwnerMembership(storeA, oldDevice.userId);
+        const secret = await enableTotp(enrollment.cookies);
+        expect(await readSession(oldDevice.cookies)).toMatchObject({
+          id: oldDevice.id,
+          twoFactorVerified: false,
+        });
+        expect(await readSession(enrollment.cookies)).toMatchObject({
+          id: enrollment.id,
+          twoFactorVerified: false,
+        });
+
+        const verified = await verifyTotp(generateTOTP(secret), enrollment.cookies);
+        expect(verified.status, await verified.clone().text()).toBe(200);
+        const verifiedCookies = collectCookies(verified);
+        const verifiedSession = await readSession(verifiedCookies);
+        expect(verifiedSession).toMatchObject({
+          userId: oldDevice.userId,
+          twoFactorVerified: true,
+        });
+        expect(verifiedSession!.id).not.toBe(oldDevice.id);
+        expect(verifiedSession!.id).not.toBe(enrollment.id);
+        expect(await readSession(oldDevice.cookies)).toBeNull();
+        expect(await readSession(customerA.cookies)).toMatchObject({
+          id: customerA.id,
+          userId: customerA.userId,
+        });
+        expect(await readSession(customerB.cookies)).toMatchObject({
+          id: customerB.id,
+          userId: customerB.userId,
+        });
+
+        await waitForNextTotpWindow();
+        const challenge = await passwordSignIn(ownerEmail);
+        expect(challenge.status, await challenge.clone().text()).toBe(200);
+        expect((await challenge.json()).twoFactorRedirect).toBe(true);
+        const signedInAgain = await verifyTotp(generateTOTP(secret), collectCookies(challenge));
+        expect(signedInAgain.status, await signedInAgain.clone().text()).toBe(200);
+        const newestCookies = collectCookies(signedInAgain);
+        const newest = await readSession(newestCookies);
+        expect(newest).toMatchObject({
+          userId: oldDevice.userId,
+          twoFactorVerified: true,
+        });
+        expect(newest!.id).not.toBe(verifiedSession!.id);
+        expect(await readSession(verifiedCookies)).toMatchObject({
+          id: verifiedSession!.id,
+          userId: oldDevice.userId,
+          twoFactorVerified: true,
+        });
+        expect(await readSession(newestCookies)).toMatchObject({
+          id: newest!.id,
+          twoFactorVerified: true,
+        });
+        expect(await readSession(customerA.cookies)).toMatchObject({ id: customerA.id });
+        expect(await readSession(customerB.cookies)).toMatchObject({ id: customerB.id });
+      } finally {
+        await removeAuthFixtures(emails, storeIds);
+      }
+    },
+    90_000,
+  );
+
+  it(
+    "parallel TOTP sign-ins keep both verified sessions and unrelated customer sessions",
+    async () => {
+      const stamp = crypto.randomUUID().slice(0, 8);
+      const ownerEmail = `ac7-parallel-${stamp}@test.example`;
+      const customerAEmail = `ac7-parallel-a-${stamp}@test.example`;
+      const customerBEmail = `ac7-parallel-b-${stamp}@test.example`;
+      const emails = [ownerEmail, customerAEmail, customerBEmail];
+      const storeIds: string[] = [];
+      try {
+        await signUp(ownerEmail, "AC7 Parallel Owner");
+        await signUp(customerAEmail, "AC7 Parallel Customer A");
+        await signUp(customerBEmail, "AC7 Parallel Customer B");
+        const storeA = await insertStore(`ac7-pa-${stamp}`);
+        const storeB = await insertStore(`ac7-pb-${stamp}`);
+        storeIds.push(storeA, storeB);
+        const enrollment = await unverifiedPasswordSession(ownerEmail);
+        await insertOwnerMembership(storeA, enrollment.userId);
+        const secret = await enableTotp(enrollment.cookies);
+        const enrolled = await verifyTotp(generateTOTP(secret), enrollment.cookies);
+        expect(enrolled.status, await enrolled.clone().text()).toBe(200);
+        const existingCookies = collectCookies(enrolled);
+        const existing = await readSession(existingCookies);
+        expect(existing).toMatchObject({
+          userId: enrollment.userId,
+          twoFactorVerified: true,
+        });
+
+        const customerA = await customerMagicSession(customerAEmail, `ac7-pa-${stamp}`);
+        const customerB = await customerMagicSession(customerBEmail, `ac7-pb-${stamp}`);
+        expect(customerA.userId).not.toBe(customerB.userId);
+        expect(customerA.userId).not.toBe(enrollment.userId);
+
+        await waitForNextTotpWindow();
+        const [firstChallenge, secondChallenge] = await Promise.all([
+          passwordSignIn(ownerEmail),
+          passwordSignIn(ownerEmail),
+        ]);
+        expect(firstChallenge.status, await firstChallenge.clone().text()).toBe(200);
+        expect(secondChallenge.status, await secondChallenge.clone().text()).toBe(200);
+        expect((await firstChallenge.json()).twoFactorRedirect).toBe(true);
+        expect((await secondChallenge.json()).twoFactorRedirect).toBe(true);
+        const firstCookies = collectCookies(firstChallenge);
+        const secondCookies = collectCookies(secondChallenge);
+        const code = generateTOTP(secret);
+        const [firstVerified, secondVerified] = await Promise.all([
+          verifyTotp(code, firstCookies),
+          verifyTotp(code, secondCookies),
+        ]);
+        expect(firstVerified.status, await firstVerified.clone().text()).toBe(200);
+        expect(secondVerified.status, await secondVerified.clone().text()).toBe(200);
+        const firstSession = await readSession(collectCookies(firstVerified));
+        const secondSession = await readSession(collectCookies(secondVerified));
+        expect(firstSession).toMatchObject({
+          userId: enrollment.userId,
+          twoFactorVerified: true,
+        });
+        expect(secondSession).toMatchObject({
+          userId: enrollment.userId,
+          twoFactorVerified: true,
+        });
+        expect(firstSession!.id).not.toBe(secondSession!.id);
+        expect(firstSession!.id).not.toBe(existing!.id);
+        expect(secondSession!.id).not.toBe(existing!.id);
+        expect(await readSession(existingCookies)).toMatchObject({
+          id: existing!.id,
+          twoFactorVerified: true,
+        });
+        expect(await readSession(customerA.cookies)).toMatchObject({ id: customerA.id });
+        expect(await readSession(customerB.cookies)).toMatchObject({ id: customerB.id });
+      } finally {
+        await removeAuthFixtures(emails, storeIds);
+      }
+    },
+    90_000,
+  );
 });

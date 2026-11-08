@@ -1,17 +1,18 @@
 import { storeScoped } from "./db";
 import { Prisma } from "@prisma/client";
 
-export interface CustomerProfile {
+export interface StoreCustomer {
   id: string;
   name: string;
   email: string | null;
   phone: string | null;
 }
 
+// The re-read after a unique violation needs its own transaction: Postgres aborts the failed one (25P02).
 export async function findOrCreateCustomer(
   storeId: string,
   user: { id: string; name: string; email: string },
-): Promise<CustomerProfile> {
+): Promise<StoreCustomer> {
   const db = storeScoped(storeId);
 
   const existing = await db.customer.findFirst({
