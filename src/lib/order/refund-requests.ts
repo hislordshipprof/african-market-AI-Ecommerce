@@ -9,6 +9,7 @@ import {
 } from "../stripe/errors";
 import type { RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
+import { releaseOrderStock } from "./stock-ledger";
 
 /** Inside Stripe's 24h idempotency window. Coordinator default, pending owner confirmation. */
 export const REFUND_REQUEST_ABANDON_MS = 23 * 60 * 60 * 1000;
@@ -500,6 +501,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
           }),
         });
       }
+      await releaseOrderStock(tx, order.storeId, orderId);
       return;
     }
     const failedRefunds = listed.filter((refund) => refund.status === "failed" || refund.status === "canceled");

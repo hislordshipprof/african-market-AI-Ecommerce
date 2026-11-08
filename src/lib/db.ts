@@ -318,7 +318,7 @@ export async function storeScopedTransaction<T>(
  * Explicit row-lock order. A transaction that takes more than one of these
  * locks takes them in this order:
  *
- *   store row → cart row → cart lines → listing row → listing variants (id order)
+ *   store row → cart row → cart lines → listing rows (id order) → listing variants (id order)
  *
  * A platform-customer profile lock is taken in its own transaction and
  * released before this order starts. Checkout does not lock the profile
@@ -330,13 +330,21 @@ export async function storeScopedTransaction<T>(
  * FOR UPDATE deadlocks when another transaction holds the same key-share
  * (two checkouts inserting a customer, then both locking the store).
  *
+ * Every transaction that locks a listing row takes the store lock first.
+ * The stock ledger holds the store and waits on listings, and a listing save
+ * inserts audit and stock rows whose foreign key takes key-share on the store.
+ * A save that held the listing without the store would wait on the ledger
+ * while the ledger waits on it (40P01).
+ *
  * This is the order of explicit competing locks, not every lock Postgres
  * takes. Order-line inserts take an implicit key-share on listing variants
- * after the cart lock. A listing save may take an implicit key-share on the
- * store row (audit-log foreign key) after the listing lock. Those implicit
- * locks are not upgraded to FOR UPDATE in the same transaction, so they are
- * not part of this order. Checkout does not lock variants FOR UPDATE, and
- * cart or listing writes do not take a store lock just to match this list.
+ * after the listing locks. Those implicit locks are not upgraded to FOR UPDATE
+ * in the same transaction, so they are not part of this order. Checkout does
+ * not lock variants FOR UPDATE, and cart writes do not take a store lock just
+ * to match this list.
+ *
+ * A background job that rewrites many listings holds no store lock, so it must
+ * never wait: it locks with SKIP LOCKED and picks up a skipped row on its next run.
  */
 export async function lockConversationRow(tx: Pick<PrismaClient, "$queryRaw">, conversationId: string) {
   await tx.$queryRaw`SELECT id FROM ai_conversations WHERE id = ${conversationId} FOR UPDATE`;
@@ -369,6 +377,120 @@ export async function getNextOrderNumber(tx: Pick<PrismaClient, "$queryRaw">, st
 
 export async function lockListingRow(tx: Pick<PrismaClient, "$queryRaw">, listingId: string) {
   await tx.$queryRaw`SELECT 1 FROM listings WHERE id = ${listingId} FOR UPDATE`;
+}
+
+export interface LockedListingStock {
+  id: string;
+  stockMode: string;
+  qty: number | null;
+}
+
+/** Locks listing rows in id order and returns the stock read under that lock. */
+export async function lockListingRows(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  listingIds: string[],
+): Promise<LockedListingStock[]> {
+  if (listingIds.length === 0) return [];
+  const rows = await tx.$queryRaw<Array<{ id: string; stock_mode: string; qty: number | null }>>`
+    SELECT id, stock_mode, qty FROM listings
+    WHERE id IN (${Prisma.join(listingIds)})
+    ORDER BY id
+    FOR UPDATE
+  `;
+  return rows.map((row) => ({ id: row.id, stockMode: row.stock_mode, qty: row.qty }));
+}
+
+/** Writes quantities the ledger computed under `lockListingRows`, in one statement. */
+export async function writeListingQuantities(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  rows: Array<{ id: string; qty: number }>,
+  now: Date,
+): Promise<void> {
+  if (rows.length === 0) return;
+  await tx.$executeRaw`
+    UPDATE listings AS l
+    SET qty = v.qty, updated_at = ${now}
+    FROM (VALUES ${Prisma.join(rows.map((row) => Prisma.sql`(${row.id}::text, ${row.qty}::int)`))}) AS v(id, qty)
+    WHERE l.id = v.id
+  `;
+}
+
+export interface StockEventRollup {
+  listingId: string;
+  type: string;
+  /** Sum of deltas since `windowStart`. */
+  delta: number;
+  /** Newest event of this type, at any age. */
+  createdAt: Date;
+}
+
+/** One row per listing and type for a store, so the daily job needs no per-listing query. */
+export async function readStockEventRollups(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  types: string[],
+  windowStart: Date,
+): Promise<StockEventRollup[]> {
+  const rows = await tx.$queryRaw<Array<{ listing_id: string; type: string; delta: number; created_at: Date }>>`
+    SELECT
+      listing_id,
+      type,
+      COALESCE(SUM(delta) FILTER (WHERE created_at >= ${windowStart}), 0)::int AS delta,
+      MAX(created_at) AS created_at
+    FROM stock_events
+    WHERE store_id = ${storeId} AND type = ANY(${types}::text[])
+    GROUP BY listing_id, type
+  `;
+  return rows.map((row) => ({
+    listingId: row.listing_id,
+    type: row.type,
+    delta: row.delta,
+    createdAt: new Date(row.created_at),
+  }));
+}
+
+/**
+ * Locks first and never waits, so the job cannot deadlock with an order holding a listing.
+ * A skipped row is picked up on the next daily run. Comparing to the value read keeps an
+ * owner's fresh 1.0 without comparing two servers' clocks. The cast drops the ISO string's
+ * zone, as the column has none.
+ */
+export async function writeConfidenceScores(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  rows: Array<{ id: string; confidence: number; readAt: string }>,
+  now: Date,
+): Promise<void> {
+  const ids = rows.map((row) => row.id);
+  const scores = rows.map((row) => row.confidence);
+  const readAts = rows.map((row) => row.readAt);
+  await tx.$executeRaw`
+    WITH scored AS (
+      SELECT * FROM unnest(${ids}::text[], ${scores}::float8[], ${readAts}::text[])
+        AS input(id, confidence, read_at)
+    ), locked AS (
+      SELECT l.id, scored.confidence
+      FROM listings l
+      JOIN scored ON scored.id = l.id
+      WHERE l.active AND l.confidence_updated_at = scored.read_at::timestamp(3)
+      ORDER BY l.id
+      FOR NO KEY UPDATE OF l SKIP LOCKED
+    )
+    UPDATE listings l
+    SET confidence = locked.confidence, confidence_updated_at = ${now}
+    FROM locked
+    WHERE l.id = locked.id
+  `;
+}
+
+/** One page of store ids in id order, for jobs that visit every store. `stores_read` is open to every role. */
+export async function findStoreIdsAfter(cursor: string | null, take: number): Promise<string[]> {
+  const rows = await platform.store.findMany({
+    ...(cursor ? { where: { id: { gt: cursor } } } : {}),
+    orderBy: { id: "asc" },
+    select: { id: true },
+    take,
+  });
+  return rows.map((row) => row.id);
 }
 
 /** Locks variant rows in id order before a removal check, so a concurrent cart insert waits. */

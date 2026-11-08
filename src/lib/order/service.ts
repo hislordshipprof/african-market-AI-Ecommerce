@@ -7,6 +7,7 @@ import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
 import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
+import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -29,6 +30,9 @@ const MAX_CAPTURE_ATTEMPTS = 5;
 type TransitionalStatus = "CAPTURING" | "CANCELLING";
 
 const CAPTURE_STATUS_CHANGED = "Order status changed during capture";
+
+/** Stock writes wait on listing locks, so these transactions cannot use Prisma's 5-second default. */
+const LEDGER_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
 
 /** A capture result may report this amount only when the order row already stored it. */
 function storedCaptureAmount(
@@ -106,8 +110,9 @@ async function finalizeCancelledOrder(
         data: systemAuditData(storeId, orderId, action, options?.after ?? {}),
       });
     }
+    await releaseOrderStock(tx, storeId, orderId);
     return { wrote: true };
-  });
+  }, LEDGER_TRANSACTION);
 }
 
 /** Refund whatever of a captured charge is still unrefunded. The request ledger owns the attempt. */
@@ -352,6 +357,46 @@ export async function markLinePicked(
 
     return { ok: true, orderStatus: "PICKING" };
   });
+}
+
+/**
+ * A picker found fewer than ordered. Service only until #13 adds the staff action:
+ * `short` is not a resolved line status, so nothing can capture such an order yet.
+ */
+export async function markLineShort(
+  storeId: string,
+  lineId: string,
+  qtyFound: number,
+): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
+  return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+
+    const line = await tx.orderLine.findUnique({ where: { id: lineId } });
+    if (!line) return { ok: false, error: "Order line not found" };
+    if (line.status !== "pending") {
+      return { ok: false, error: `Line already resolved (${line.status})` };
+    }
+    if (!Number.isInteger(qtyFound) || qtyFound < 0 || qtyFound >= line.qtyOrdered) {
+      return { ok: false, error: "Quantity found must be a whole number below the quantity ordered" };
+    }
+
+    const order = await tx.order.findUnique({ where: { id: line.orderId } });
+    if (!order) return { ok: false, error: "Order not found" };
+    if (order.status !== "ACCEPTED" && order.status !== "PICKING") {
+      return { ok: false, error: `Cannot mark lines short for order in status ${order.status}` };
+    }
+
+    await tx.orderLine.update({
+      where: { id: lineId },
+      data: { status: "short", qtyPicked: qtyFound },
+    });
+    if (order.status === "ACCEPTED") {
+      await tx.order.update({ where: { id: order.id }, data: { status: "PICKING" } });
+    }
+    await settleShortLine(tx, storeId, lineId, line.qtyOrdered - qtyFound);
+
+    return { ok: true, orderStatus: "PICKING" };
+  }, LEDGER_TRANSACTION);
 }
 
 type CaptureRetryResult =
@@ -1010,8 +1055,9 @@ export async function markReady(
         capturedAmountCents: captureResult.amountCaptured,
       },
     });
+    await settleCapturedStock(tx, storeId, orderId);
     return { ok: true as const, capturedAmountCents: captureResult.amountCaptured };
-  });
+  }, LEDGER_TRANSACTION);
 
   if (!finalize.ok) return finalize;
 
@@ -1118,7 +1164,7 @@ export async function autoCancelOrder(
     }
   }
 
-  // Phase 3: one cancellation write. Stock restore stays deferred to #141.
+  // Phase 3: one cancellation write, which also returns the order's reserved stock.
   const finalize = await finalizeCancelledOrder(storeId, orderId, validation.action, { from: ["CANCELLING"] });
   if (!finalize.wrote) return { ok: false, error: "Order status changed during cancellation" };
 
@@ -1314,7 +1360,8 @@ async function finalizeCaptureFromSweep(
     await tx.auditLog.create({
       data: systemAuditData(storeId, orderId, "reconcile_capture"),
     });
-  });
+    await settleCapturedStock(tx, storeId, orderId);
+  }, LEDGER_TRANSACTION);
 
   return { ok: true, action: "finalized_capture" };
 }

@@ -31,6 +31,7 @@ import { applyProviderRefund, clearReplayCallsForTests, evaluateOrderRefundState
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { failedAtLabel } from "./failed-at";
 import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction } from "./refund-resolution";
+import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
 import { parseRepaidDollars } from "./repaid-dollars";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -208,8 +209,13 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.auditLog.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
+      await tx.stockEvent.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
+      await tx.cartLine.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
+      await tx.cart.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
       await tx.order.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
       await tx.customer.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } });
+      await tx.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
       await tx.storeMembership.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } });
       await tx.store.deleteMany({ where: { id: { in: [storeAId, storeBId] } } });
     });
@@ -2385,5 +2391,25 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       clock.mockRestore();
       setStripeProvider(fakeStripeProvider);
     }
+  });
+
+  // Last in this file: a placed order takes the next number, and earlier tests use fixed numbers.
+  it("manual resolution releases the reservation", async () => {
+    asAdmin(cookiesAdmin);
+    const { listingId, variantId } = await countedListing(storeAId, 10);
+    const placed = await placeOrder(storeAId, [{ variantId, qty: 3 }]);
+    await fakeStripeProvider.capturePaymentIntent(placed.paymentIntentId, 3000, `cap-${placed.orderId}`);
+    await storeScoped(storeAId).order.update({
+      where: { id: placed.orderId },
+      data: { status: "REFUND_FAILED", capturedAmountCents: 3000 },
+    });
+    expect(await stockOf(storeAId, listingId)).toEqual({ qty: 7, events: [["reservation", -3]] });
+
+    expect(await resolveRefundFailed(placed.orderId, "Paid by Zelle", 3000, 3000)).toEqual({ ok: true });
+
+    expect(await stockOf(storeAId, listingId)).toEqual({
+      qty: 10,
+      events: [["reservation", -3], ["reservation_release", 3]],
+    });
   });
 });
