@@ -1,4 +1,4 @@
-import { Prisma, lockListingRow, lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
+import { Prisma, lockListingRow, lockStoreRow, storeScoped, storeScopedTransaction, txQuery } from "../db";
 import { cardFromParts, listingLabel } from "./cards";
 import {
   QTY_COLUMN_MAX,
@@ -93,11 +93,11 @@ export async function confirmProposal(storeId: string, proposalId: string, actor
       if (proposal.state === "confirmed") return confirmedResult(tx, proposal, listing);
       if (proposal.state !== "pending") return { ok: false, code: "not_found" };
 
-      const clock = await tx.$queryRaw<Array<{ expired: boolean }>>`
+      const clock = await txQuery<Array<{ expired: boolean }>>(tx, Prisma.sql`
         SELECT expires_at <= (clock_timestamp() AT TIME ZONE 'UTC') AS expired
         FROM stock_proposals
         WHERE id = ${proposalId}
-      `;
+      `);
       if (clock[0]?.expired) {
         await tx.stockProposal.update({ where: { id: proposalId }, data: { state: "expired" } });
         return { ok: false, code: "expired" };
@@ -114,14 +114,14 @@ export async function confirmProposal(storeId: string, proposalId: string, actor
         return { ok: false, code: "too_large" };
       }
 
-      const claimed = await tx.$queryRaw<Array<{ id: string }>>`
+      const claimed = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
         UPDATE stock_proposals
         SET state = 'confirmed', decided_by_id = ${actor.id}, decided_at = ${now}
         WHERE id = ${proposalId}
           AND state = 'pending'
           AND expires_at > (clock_timestamp() AT TIME ZONE 'UTC')
         RETURNING id
-      `;
+      `);
       if (claimed.length === 0) {
         const again = await tx.stockProposal.findUnique({ where: { id: proposalId } });
         if (again?.state === "confirmed") return confirmedResult(tx, again, listing);
@@ -223,12 +223,12 @@ export async function rejectProposal(storeId: string, proposalId: string, actor:
     const now = new Date();
     const proposal = await tx.stockProposal.findUnique({ where: { id: proposalId } });
     if (!proposal || proposal.state !== "pending") return { ok: false, code: "not_found" };
-    const claimed = await tx.$queryRaw<Array<{ id: string }>>`
+    const claimed = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
       UPDATE stock_proposals
       SET state = 'rejected', decided_by_id = ${actor.id}, decided_at = ${now}
       WHERE id = ${proposalId} AND state = 'pending'
       RETURNING id
-    `;
+    `);
     if (claimed.length === 0) return { ok: false, code: "not_found" };
     await tx.auditLog.create({
       data: {

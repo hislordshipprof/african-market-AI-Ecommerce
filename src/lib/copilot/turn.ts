@@ -7,7 +7,7 @@ import {
 } from "../assistant/model";
 import { AssistantConfigError } from "../assistant/errors";
 import { claimCapAlert, assistantSpendState, utcDay } from "../assistant/spend";
-import { lockStoreRow, Prisma as DbPrisma, storeScoped, storeScopedRawQuery, storeScopedTransaction } from "../db";
+import { lockStoreRow, Prisma as DbPrisma, storeScoped, storeScopedRawQuery, storeScopedTransaction, txExecute, txQuery } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { cardFromParts, loadProposalCards } from "./cards";
 import { modelHistory, parseStoredMessages, type StoredMessage } from "./messages";
@@ -101,7 +101,7 @@ async function readReplay(storeId: string, userId: string, messageId: string): P
 }
 
 async function claimMessage(storeId: string, userId: string, messageId: string): Promise<"claimed" | "busy" | SendResult> {
-  const inserted = await storeScopedTransaction(storeId, (tx) => tx.$queryRaw<Array<{ id: string }>>`
+  const inserted = await storeScopedTransaction(storeId, (tx) => txQuery<Array<{ id: string }>>(tx, DbPrisma.sql`
     INSERT INTO copilot_client_messages (
       id, store_id, user_id, client_message_id, claimed_until, created_at
     ) VALUES (
@@ -111,11 +111,11 @@ async function claimMessage(storeId: string, userId: string, messageId: string):
     )
     ON CONFLICT (store_id, user_id, client_message_id) DO NOTHING
     RETURNING id
-  `);
+  `));
   if (inserted.length > 0) return "claimed";
   const stored = await readReplay(storeId, userId, messageId);
   if (stored) return stored;
-  const taken = await storeScopedTransaction(storeId, (tx) => tx.$queryRaw<Array<{ id: string }>>`
+  const taken = await storeScopedTransaction(storeId, (tx) => txQuery<Array<{ id: string }>>(tx, DbPrisma.sql`
     UPDATE copilot_client_messages
     SET claimed_until = (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 seconds'
     WHERE store_id = ${storeId}
@@ -124,22 +124,22 @@ async function claimMessage(storeId: string, userId: string, messageId: string):
       AND reply IS NULL
       AND claimed_until <= (clock_timestamp() AT TIME ZONE 'UTC')
     RETURNING id
-  `);
+  `));
   return taken.length > 0 ? "claimed" : "busy";
 }
 
 async function releaseClaim(storeId: string, userId: string, messageId: string): Promise<void> {
-  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+  await storeScopedTransaction(storeId, (tx) => txExecute(tx, DbPrisma.sql`
     DELETE FROM copilot_client_messages
     WHERE store_id = ${storeId}
       AND user_id = ${userId}
       AND client_message_id = ${messageId}
       AND reply IS NULL
-  `);
+  `));
 }
 
 async function insertConversation(storeId: string, userId: string, model: string, id: string): Promise<boolean> {
-  const rows = await storeScopedTransaction(storeId, (tx) => tx.$queryRaw<Array<{ id: string }>>`
+  const rows = await storeScopedTransaction(storeId, (tx) => txQuery<Array<{ id: string }>>(tx, DbPrisma.sql`
     INSERT INTO copilot_conversations (
       id, store_id, user_id, model, messages, created_at, last_message_at
     ) VALUES (
@@ -149,7 +149,7 @@ async function insertConversation(storeId: string, userId: string, model: string
     )
     ON CONFLICT (id) DO NOTHING
     RETURNING id
-  `);
+  `));
   return rows.length > 0;
 }
 
@@ -174,30 +174,30 @@ async function ensureConversation(
 }
 
 async function takeLease(storeId: string, conversationId: string): Promise<string | null> {
-  const rows = await storeScopedTransaction(storeId, (tx) => tx.$queryRaw<Array<{ token: string }>>`
+  const rows = await storeScopedTransaction(storeId, (tx) => txQuery<Array<{ token: string }>>(tx, DbPrisma.sql`
     UPDATE copilot_conversations
     SET in_flight_until = (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 seconds'
     WHERE id = ${conversationId}
       AND (in_flight_until IS NULL OR in_flight_until <= (clock_timestamp() AT TIME ZONE 'UTC'))
     RETURNING to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') AS token
-  `);
+  `));
   return rows[0]?.token ?? null;
 }
 
 async function releaseLease(storeId: string, conversationId: string, token: string): Promise<void> {
-  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+  await storeScopedTransaction(storeId, (tx) => txExecute(tx, DbPrisma.sql`
     UPDATE copilot_conversations
     SET in_flight_until = NULL
     WHERE id = ${conversationId}
       AND to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') = ${token}
-  `);
+  `));
 }
 
 async function deleteEmpty(storeId: string, conversationId: string): Promise<void> {
-  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+  await storeScopedTransaction(storeId, (tx) => txExecute(tx, DbPrisma.sql`
     DELETE FROM copilot_conversations
     WHERE id = ${conversationId} AND messages = '[]'::jsonb
-  `);
+  `));
 }
 
 function visibleReply(text: string, drafts: Draft[], capped: boolean): string {
@@ -362,26 +362,26 @@ async function commitTurn(input: {
 
   await storeScopedTransaction(input.storeId, async (tx) => {
     await lockStoreRow(tx, input.storeId);
-    const held = await tx.$queryRaw<Array<{ id: string }>>`
+    const held = await txQuery<Array<{ id: string }>>(tx, DbPrisma.sql`
       SELECT id FROM copilot_conversations
       WHERE id = ${input.conversationId}
         AND to_char(in_flight_until, 'YYYY-MM-DD HH24:MI:SS.MS') = ${input.token}
       FOR UPDATE
-    `;
+    `);
     if (held.length === 0) throw new TurnLost();
 
     if (proposals.length > 0) {
-      await tx.$executeRaw`
+      await txExecute(tx, DbPrisma.sql`
         UPDATE stock_proposals
         SET state = 'expired'
         WHERE store_id = ${input.storeId}
           AND state = 'pending'
           AND listing_id IN (${DbPrisma.join(proposals.map((proposal) => proposal.draft.listingId))})
-      `;
+      `);
     }
     for (const proposal of proposals) {
       const before = JSON.stringify({ qty: proposal.draft.beforeQty, status: proposal.draft.beforeStatus });
-      await tx.$executeRaw`
+      await txExecute(tx, DbPrisma.sql`
         INSERT INTO stock_proposals (
           id, store_id, conversation_id, listing_id, client_message_id,
           kind, quantity, status_value, before, state, expires_at, created_at
@@ -392,7 +392,7 @@ async function commitTurn(input: {
           (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 minutes',
           (clock_timestamp() AT TIME ZONE 'UTC')
         )
-      `;
+      `);
       await tx.auditLog.create({
         data: {
           storeId: input.storeId,
@@ -409,21 +409,21 @@ async function commitTurn(input: {
         },
       });
     }
-    await tx.$executeRaw`
+    await txExecute(tx, DbPrisma.sql`
       UPDATE copilot_conversations
       SET messages = ${JSON.stringify(nextMessages)}::jsonb,
           last_message_at = (clock_timestamp() AT TIME ZONE 'UTC'),
           in_flight_until = NULL
       WHERE id = ${input.conversationId}
-    `;
-    const receipt = await tx.$executeRaw`
+    `);
+    const receipt = await txExecute(tx, DbPrisma.sql`
       UPDATE copilot_client_messages
       SET reply = ${input.reply}, conversation_id = ${input.conversationId}
       WHERE store_id = ${input.storeId}
         AND user_id = ${input.userId}
         AND client_message_id = ${input.messageId}
         AND reply IS NULL
-    `;
+    `);
     if (receipt === 0) throw new TurnLost();
   }, WRITE_TRANSACTION);
 

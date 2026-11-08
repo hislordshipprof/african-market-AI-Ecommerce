@@ -1,26 +1,37 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "@/lib/copilot/actions";
-import type { StockProposalCard } from "@/lib/copilot/types";
 import type { StoredMessage } from "@/lib/copilot/messages";
+import type { StockProposalCard } from "@/lib/copilot/types";
 
-const KIND_LABEL: Record<StockProposalCard["kind"], string> = {
+const KIND: Record<StockProposalCard["kind"], string> = {
   restock: "Restock",
   counter_sale: "Counter sale",
   recount: "Recount",
   set_status: "Status",
 };
 
-function changeLine(card: StockProposalCard): string {
+function shelfLine(card: StockProposalCard): string {
   if (card.kind === "set_status") {
-    const from = card.beforeStatus?.replaceAll("_", " ") ?? "unknown";
-    const to = card.afterStatus?.replaceAll("_", " ") ?? "unknown";
-    return `${from} to ${to}`;
+    const from = (card.beforeStatus ?? "unknown").replaceAll("_", " ");
+    const to = (card.afterStatus ?? "unknown").replaceAll("_", " ");
+    return `${from} → ${to}`;
   }
-  const amount = card.kind === "recount" ? `to ${card.quantity ?? 0}` : `${card.quantity ?? 0}`;
-  return `${KIND_LABEL[card.kind]} ${amount}: ${card.beforeQty ?? 0} to ${card.afterQty ?? 0}`;
+  return `${card.beforeQty ?? 0} → ${card.afterQty ?? 0}`;
+}
+
+function plain(text: string): string {
+  return text.replaceAll("**", "").replaceAll("`", "");
+}
+
+function stateLine(state: StockProposalCard["state"]): string {
+  if (state === "confirmed") return "On the shelf";
+  if (state === "rejected") return "Dismissed";
+  if (state === "expired") return "Expired. Send it again.";
+  return "Waiting for you";
 }
 
 export function CopilotPanel({
@@ -37,11 +48,16 @@ export function CopilotPanel({
   const [proposals, setProposals] = useState(initialProposals);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<null | { kind: "send" } | { kind: "confirm" | "dismiss"; id: string }>(null);
   const [pending, startTransition] = useTransition();
+  const trimmed = text.trim();
+  const waiting = proposals.filter((card) => card.state === "pending");
+  const settled = proposals.filter((card) => card.state !== "pending");
 
   function send() {
     const draft = text;
     const messageId = crypto.randomUUID();
+    setBusy({ kind: "send" });
     startTransition(async () => {
       const result = await sendCopilotMessage({
         conversationId: conversationId ?? undefined,
@@ -50,6 +66,7 @@ export function CopilotPanel({
       });
       if (!result.ok) {
         setNotice(result.message);
+        setBusy(null);
         return;
       }
       setNotice(null);
@@ -61,20 +78,24 @@ export function CopilotPanel({
         { role: "assistant", text: result.reply },
       ]);
       setProposals((current) => [...result.proposals, ...current]);
+      setBusy(null);
     });
   }
 
   function decide(proposalId: string, action: "confirm" | "dismiss") {
+    setBusy({ kind: action, id: proposalId });
     startTransition(async () => {
       if (action === "dismiss") {
         const result = await rejectStockProposal({ proposalId });
-        if (!result.ok) {
-          setNotice("That change is no longer waiting.");
-          setProposals((current) => current.map((card) => card.id === proposalId ? { ...card, state: "expired" } : card));
-          return;
+        if (result.ok) {
+          setNotice(null);
+          setProposals((current) => current.map((card) => (
+            card.id === proposalId ? { ...card, state: "rejected" } : card
+          )));
+        } else {
+          setNotice("That change is no longer waiting. Refresh the page if it already moved.");
         }
-        setNotice(null);
-        setProposals((current) => current.map((card) => card.id === proposalId ? { ...card, state: "rejected" } : card));
+        setBusy(null);
         return;
       }
       const result = await confirmStockProposal({ proposalId });
@@ -85,32 +106,126 @@ export function CopilotPanel({
             ? "That change expired. Send it again."
             : "That change is no longer waiting.");
         if (result.code === "expired" || result.code === "stale") {
-          setProposals((current) => current.map((card) => card.id === proposalId ? { ...card, state: "expired" } : card));
+          setProposals((current) => current.map((card) => (
+            card.id === proposalId ? { ...card, state: "expired" } : card
+          )));
         }
+        setBusy(null);
         return;
       }
       setNotice(null);
       setProposals((current) => current.map((card) => card.id === proposalId ? result.proposal : card));
+      setBusy(null);
     });
   }
 
+  function confirmLabel(card: StockProposalCard): string {
+    if (card.kind === "set_status") {
+      const status = (card.afterStatus ?? "updated").replaceAll("_", " ");
+      return `Mark ${status}`;
+    }
+    return `Put ${card.afterQty ?? 0} on the shelf`;
+  }
+
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">Report stock</h2>
-        <p className="text-sm text-muted-foreground">
-          Type what came in or what you counted. Nothing changes until you tap Confirm.
-        </p>
+    <div className="flex min-h-[calc(100dvh-4.75rem)] flex-col gap-8">
+      <div className="flex flex-col gap-6">
+        <div>
+          <h2 className="font-display text-[1.375rem] leading-tight font-bold text-balance text-foreground">
+            Report stock
+          </h2>
+          <p className="mt-2 max-w-[65ch] text-base leading-6 text-muted-foreground">
+            Say what came in, what you sold at the counter, or what you counted. The shelf stays put until you tap Confirm.
+          </p>
+        </div>
+
+        {proposals.length === 0 && messages.length === 0 ? (
+          <p className="rounded-xl border border-border bg-card px-4 py-5 text-base text-muted-foreground">
+            Nothing waiting. Tell the copilot what came in or what you counted.
+          </p>
+        ) : null}
+        {settled.length > 0 ? (
+        <section aria-label="Settled changes" className="flex flex-col gap-3">
+          {settled.map((card) => (
+            <article key={card.id} className="rounded-xl border border-border bg-card px-4 py-4">
+              <h3 className="font-display text-xl leading-tight font-bold text-foreground">{card.listingName}</h3>
+              <p className="mt-2 font-display text-[1.75rem] leading-none font-bold tracking-tight text-foreground tabular-nums">
+                {shelfLine(card)}
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground">{KIND[card.kind]} · {stateLine(card.state)}</p>
+            </article>
+          ))}
+        </section>
+        ) : null}
+
+        {messages.length > 0 ? (
+          <section aria-label="Conversation" className="flex flex-col gap-3">
+            {messages.map((message, index) => (
+              <p
+                key={`${message.role}-${index}`}
+                className={message.role === "owner"
+                  ? "max-w-[65ch] whitespace-pre-wrap rounded-xl bg-muted px-4 py-3 text-base leading-6 text-foreground"
+                  : "max-w-[65ch] whitespace-pre-wrap text-base leading-6 text-foreground"}
+              >
+                <span className="mb-1 block text-[0.8125rem] font-semibold">{message.role === "owner" ? "You" : "Copilot"}</span>
+                {plain(message.text)}
+              </p>
+            ))}
+          </section>
+        ) : null}
       </div>
 
       <form
-        className="flex flex-col gap-3"
+        className="-mx-4 mt-auto border-t border-border bg-background px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!pending && text.trim()) send();
+          if (!pending && trimmed) send();
         }}
       >
-        <label htmlFor="copilot-report" className="text-sm font-medium text-foreground">
+        {waiting.length > 0 ? (
+          <div className="mb-4 flex flex-col gap-3" aria-label="Waiting for you">
+            {waiting.map((card) => {
+              const writing = busy?.kind === "confirm" && busy.id === card.id;
+              return (
+                <article key={card.id} className="rounded-xl border border-border bg-card px-4 py-4">
+                  <h3 className="font-display text-xl leading-tight font-bold text-foreground">{card.listingName}</h3>
+                  <p className="mt-2 font-display text-[1.75rem] leading-none font-bold tracking-tight text-foreground tabular-nums">
+                    {shelfLine(card)}
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {KIND[card.kind]} · {writing ? "Writing the shelf…" : stateLine(card.state)}
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      disabled={pending}
+                      className="min-h-12 rounded-full px-6"
+                      onClick={() => decide(card.id, "confirm")}
+                    >
+                      {confirmLabel(card)}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={pending}
+                      className="min-h-12 rounded-full px-6"
+                      onClick={() => decide(card.id, "dismiss")}
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+        {notice ? (
+          <p className="mb-3 flex items-start gap-2 text-sm text-destructive" role="alert">
+            <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>{notice}</span>
+          </p>
+        ) : null}
+        <label htmlFor="copilot-report" className="text-[0.8125rem] font-semibold text-foreground">
           Stock report
         </label>
         <textarea
@@ -118,53 +233,22 @@ export function CopilotPanel({
           name="report"
           value={text}
           maxLength={1000}
-          rows={3}
+          rows={2}
           disabled={pending}
+          autoComplete="off"
           onChange={(event) => setText(event.target.value)}
           placeholder="Got 20 bags of gari"
-          className="min-h-24 w-full rounded-lg border border-border bg-card px-3 py-3 text-base text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="mt-2 min-h-16 w-full resize-none rounded-xl border border-border bg-card px-3 py-3 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         />
-        <Button type="submit" disabled={pending || text.trim().length === 0} className="min-h-11 self-start px-4">
-          {pending ? "Sending" : "Send"}
-        </Button>
-      </form>
-
-      {notice ? <p className="text-sm text-destructive" role="status">{notice}</p> : null}
-
-      <section className="flex flex-col gap-3" aria-label="Proposed changes">
-        {proposals.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No changes waiting.</p>
-        ) : proposals.map((card) => (
-          <article key={card.id} className="rounded-lg border border-border bg-card p-4">
-            <h3 className="text-base font-semibold text-foreground">{card.listingName}</h3>
-            <p className="mt-1 text-sm text-foreground">{changeLine(card)}</p>
-            <p className="mt-1 text-xs capitalize text-muted-foreground">{card.state}</p>
-            {card.state === "pending" ? (
-              <div className="mt-3 flex gap-2">
-                <Button type="button" disabled={pending} className="min-h-11 px-4" onClick={() => decide(card.id, "confirm")}>
-                  Confirm
-                </Button>
-                <Button type="button" variant="outline" disabled={pending} className="min-h-11 px-4" onClick={() => decide(card.id, "dismiss")}>
-                  Dismiss
-                </Button>
-              </div>
-            ) : null}
-          </article>
-        ))}
-      </section>
-
-      <section className="flex flex-col gap-3" aria-label="Conversation">
-        {messages.map((message, index) => (
-          <p
-            key={`${message.role}-${index}`}
-            className={message.role === "owner"
-              ? "whitespace-pre-wrap rounded-lg bg-primary/10 px-3 py-2 text-sm text-foreground"
-              : "whitespace-pre-wrap text-sm text-foreground"}
-          >
-            {message.text}
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-[0.8125rem] text-muted-foreground tabular-nums" aria-live="polite">
+            {text.length > 0 ? `${text.length} / 1000` : "Up to 1,000 characters"}
           </p>
-        ))}
-      </section>
+          <Button type="submit" disabled={pending || trimmed.length === 0} className="min-h-12 rounded-full px-6">
+            {busy?.kind === "send" ? "Sending" : "Send"}
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }

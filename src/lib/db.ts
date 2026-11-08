@@ -366,6 +366,15 @@ export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId:
   await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
 }
 
+/** Tagged SQL on an open transaction. Callers outside this file cannot call $queryRaw. */
+export function txQuery<T>(tx: Pick<PrismaClient, "$queryRaw">, query: Prisma.Sql): Promise<T> {
+  return tx.$queryRaw<T>(query);
+}
+
+export function txExecute(tx: Pick<PrismaClient, "$executeRaw">, query: Prisma.Sql): Promise<number> {
+  return tx.$executeRaw(query);
+}
+
 /** Sees an order in any store. The caller is inside a store-scoped transaction and must not insert while this is on. */
 export async function orderExistsForPaymentIntent(
   tx: Pick<PrismaClient, "order" | "$executeRaw">,

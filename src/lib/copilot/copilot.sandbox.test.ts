@@ -66,18 +66,16 @@ describe.skipIf(!live)("copilot live sandbox", () => {
       "out of palm oil",
       "counted 15 bags of rice",
     ];
-    let conversationId: string | undefined;
     for (const text of reports) {
       const sent = await sendCopilotTurn({
         storeId,
         userId,
         email: "live@example.com",
-        conversationId,
         messageId: crypto.randomUUID(),
         text,
       });
       expect(sent.ok, JSON.stringify(sent)).toBe(true);
-      if (sent.ok) conversationId = sent.conversationId;
+      if (sent.ok) expect(sent.proposals, sent.reply).toHaveLength(1);
     }
     const proposals = await storeScoped(storeId).stockProposal.findMany({ orderBy: { createdAt: "asc" } });
     expect(proposals).toEqual(expect.arrayContaining([

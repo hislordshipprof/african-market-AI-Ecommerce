@@ -14,10 +14,10 @@ export default async function CopilotPage() {
         <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
           <Link
             href={`/store-admin?store=${session.store.slug}`}
-            className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground"
-            aria-label="Back to the dashboard"
+            className="flex min-h-11 items-center gap-2 rounded-lg bg-primary px-3 text-primary-foreground"
           >
             <Store className="size-5" />
+            <span className="text-sm font-semibold">Dashboard</span>
           </Link>
           <div>
             <h1 className="text-base font-semibold text-foreground">{session.store.name}</h1>
