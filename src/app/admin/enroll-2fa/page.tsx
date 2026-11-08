@@ -40,7 +40,7 @@ const ENROLL_ERRORS = { INVALID_PASSWORD: "That password isn't right. Try again.
 const ENROLL_CODE_ERRORS = {
   ...TOTP_ERRORS,
   INVALID_CODE:
-    "That code didn't match. If you ran setup more than once, delete the old entry in your app and add this one.",
+    "That code didn't match. Enter the newest one. If you ran setup more than once, delete the old entry in your app and add this one.",
 };
 
 // The submit button that had focus is gone after the step changes. Focus lands on the

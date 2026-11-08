@@ -67,9 +67,15 @@ export function fieldValue(form: HTMLFormElement, id: string): string {
   return (form.elements.namedItem(id) as HTMLInputElement).value;
 }
 
-/** The submit button is disabled while pending, so a failure would otherwise drop focus to the page. */
+/**
+ * The submit button is disabled while pending, so a failure would otherwise drop focus to
+ * the page. Selecting the old value means a retry replaces it: a typed code would be
+ * ignored by the 6-digit cap, and a password would silently append to the failed one.
+ */
 export function focusField(id: string) {
-  document.getElementById(id)?.focus();
+  const field = document.getElementById(id);
+  field?.focus();
+  if (field instanceof HTMLInputElement) field.select();
 }
 
 export function BackArrow() {
