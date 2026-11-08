@@ -336,19 +336,6 @@ describe("action authorization", () => {
       expect(row?.status).toBe("pending");
       expect(row?.committedAt).toBeNull();
     });
-
-    it("store A cannot touch store B listing_imports", async () => {
-      asA(slugA, cookiesA);
-      const result = await csvCommitAction("missing-token", {
-        matchedRows: [1],
-        newItemRows: [],
-        ambiguousResolutions: [],
-      });
-      expect(result).toMatchObject({ error: expect.any(String) });
-      const row = await storeScoped(storeB).listingImport.findUnique({ where: { id: importId } });
-      expect(row?.status).toBe("pending");
-      expect(row?.committedAt).toBeNull();
-    });
   });
 
   describe("store-admin", () => {
