@@ -328,7 +328,7 @@ export async function acceptOrder(
     return { ok: true as const, notify };
   });
   if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "accepted");
-  return result.ok ? { ok: true } : result;
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
 export async function markLinePicked(
@@ -1114,7 +1114,7 @@ export async function completePickup(
     return { ok: true as const, notify };
   });
   if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "completed");
-  return result.ok ? { ok: true } : result;
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
 export async function autoCancelOrder(
