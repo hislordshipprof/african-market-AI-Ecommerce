@@ -72,8 +72,8 @@ export async function draftUnambiguousReport(storeId: string, book: DraftBook, t
   } catch {
     return;
   }
-  if (matches.length !== 1) return;
-  const listing = matches[0];
+  const listing = pickMatch(matches, intent.query);
+  if (!listing) return;
   const input = proposalFor(intent, listing);
   if (!input) return;
   try {
@@ -81,6 +81,18 @@ export async function draftUnambiguousReport(storeId: string, book: DraftBook, t
   } catch {
     // The model's own reply stands when the draft does not fit.
   }
+}
+
+function pickMatch(matches: Array<{ id: string; name: string; stockMode: string }>, query: string) {
+  if (matches.length === 1) return matches[0];
+  const needle = query.toLowerCase();
+  const exact = matches.filter((match) => match.name.toLowerCase() === needle);
+  if (exact.length === 1) return exact[0];
+  const prefixed = matches.filter((match) => {
+    const name = match.name.toLowerCase();
+    return name.startsWith(needle) || needle.startsWith(name);
+  });
+  return prefixed.length === 1 ? prefixed[0] : undefined;
 }
 
 function readIntent(text: string): { query: string; kind: ProposalKind | "low"; quantity?: number } | null {
