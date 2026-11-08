@@ -78,6 +78,39 @@
 .sf-account-order:hover {
   color: var(--color-primary);
 }
+.sf-account-order:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+.sf-account-order--real {
+  align-items: center;
+  gap: 12px;
+}
+.sf-account-order-main {
+  flex: 1;
+  min-width: 0;
+}
+.sf-account-order-end {
+  flex-shrink: 0;
+  text-align: right;
+}
+.sf-account-order-end strong {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.sf-account-order-chevron {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--muted-foreground);
+}
+.sf-account-order-cap {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
 .sf-account-order small,
 .sf-account-address-result small {
   display: block;

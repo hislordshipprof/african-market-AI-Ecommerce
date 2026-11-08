@@ -78,6 +78,50 @@ export async function insertInboxOrder(input: {
   });
 }
 
+/** A completed guest order with its own guest Customer, the way checkout stores it (lowercased email). */
+export async function insertGuestOrder(input: {
+  email: string;
+  name: string;
+  phone: string;
+}): Promise<{ orderId: string; guestCustomerId: string; number: number }> {
+  return withMama(async (tx, storeId) => {
+    await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
+    const max = await tx.order.aggregate({ where: { storeId }, _max: { number: true } });
+    const number = (max._max.number ?? 0) + 1;
+    const listing = await tx.listing.findFirstOrThrow({
+      where: { storeId, variants: { some: {} } },
+      include: { variants: { take: 1 } },
+    });
+    const guest = await tx.customer.create({
+      data: { storeId, name: input.name, email: input.email.trim().toLowerCase(), phone: input.phone },
+    });
+    const order = await tx.order.create({
+      data: {
+        storeId,
+        number,
+        customerId: guest.id,
+        status: "COMPLETED",
+        fulfillment: "pickup",
+        subtotalCents: 1250,
+        bufferCents: 125,
+        totalAuthorizedCents: 1375,
+        capturedAmountCents: 1250,
+        lines: {
+          create: { listingVariantId: listing.variants[0].id, qtyOrdered: 1, unitPriceCents: 1250 },
+        },
+      },
+    });
+    return { orderId: order.id, guestCustomerId: guest.id, number };
+  });
+}
+
+export async function deleteGuestOrder(input: { orderId: string; guestCustomerId: string }): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, id: input.orderId } });
+    await tx.customer.deleteMany({ where: { storeId, id: input.guestCustomerId } });
+  });
+}
+
 export async function setInboxOrderStatus(number: number, status: string): Promise<void> {
   await withMama(async (tx, storeId) => {
     await tx.order.updateMany({ where: { storeId, number }, data: { status } });

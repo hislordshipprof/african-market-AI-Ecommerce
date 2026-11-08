@@ -1,19 +1,5 @@
 import { storeScoped } from "../db";
-
-export const ACCOUNT_ORDER_LIMIT = 50;
-
-export type AccountOrderRecord = {
-  id: string;
-  number: number;
-  status: string;
-  createdAt: Date;
-  subtotalCents: number;
-  tipCents: number;
-  deliveryFeeCents: number;
-  capturedAmountCents: number | null;
-  refundId: string | null;
-  itemCount: number;
-};
+import { ACCOUNT_ORDER_LIMIT, type AccountOrderRecord } from "./order-history-view";
 
 /**
  * This store's orders on the account Customer plus those on guest rows it claimed,
