@@ -207,7 +207,9 @@ export function AccountFlow(props: Props) {
                     onClick={async () => {
                       if (customer) {
                         await authClient.signOut();
-                        router.push("/account/sign-in");
+                        // A full load drops the router's cache, or Back shows this account
+                        // to whoever uses the device next.
+                        window.location.assign("/account/sign-in");
                         return;
                       }
                       await services?.auth.signOut();

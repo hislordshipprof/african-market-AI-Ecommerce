@@ -73,6 +73,12 @@ test.describe("Customer magic-link auth", () => {
       return res.json();
     });
     expect(sessionBody?.session ?? null).toBeNull();
+
+    // 10. Back must not restore the signed-out account from the router's cache (shared devices)
+    await page.goBack();
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator("input[autocomplete='email']")).not.toHaveValue(email);
+    await expect(page.getByText(email)).toHaveCount(0);
   });
 
   test("a returning guest who signs in by magic link sees their past order in order history", async ({ page, request }) => {
