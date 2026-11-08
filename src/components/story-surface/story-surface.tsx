@@ -80,7 +80,7 @@ export function StorySurface({
 
         {/* Visible from the first paint. The entrance only moves it, so slow JS never hides the form. */}
         <motion.div
-          className="relative z-10 w-full max-w-sm motion-reduce:!transform-none"
+          className="relative z-10 w-full max-w-md motion-reduce:!transform-none"
           initial={{ y: 16 }}
           animate={{ y: 0 }}
           transition={{ duration: 0.5, ease: [0, 0, 0, 1] }}
@@ -89,7 +89,7 @@ export function StorySurface({
         </motion.div>
 
         {/* After the form in the DOM, so a screen reader reaches the form first. */}
-        <p className="relative z-10 order-first mb-2 w-full max-w-sm lg:hidden">
+        <p className="relative z-10 order-first mb-2 w-full max-w-md lg:hidden">
           <span className="inline-block rounded-full bg-black/70 px-3 py-1 text-xs font-medium text-white">
             {scene.place}
           </span>
