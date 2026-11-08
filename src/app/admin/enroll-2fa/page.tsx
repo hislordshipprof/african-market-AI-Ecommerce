@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 import { authClient } from "@/lib/auth-client";
@@ -11,6 +12,7 @@ import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  AUTHENTICATOR_ENTRY,
   AUTH_BACK,
   AUTH_CODE_HINT,
   AUTH_CODE_INPUT,
@@ -25,6 +27,7 @@ import {
   fieldValue,
   focusField,
   totpDigits,
+  useHydrated,
 } from "../auth-form-parts";
 
 const ERROR_ID = "admin-enroll-error";
@@ -33,6 +36,12 @@ const PASSWORD_ID = "enroll-password";
 const CODE_ID = "enroll-code";
 const SESSION_ENDED = "Your session ended. Go back and sign in again.";
 const ENROLL_ERRORS = { INVALID_PASSWORD: "That password isn't right. Try again." };
+// Starting setup again replaces the secret, so an entry saved earlier can never match.
+const ENROLL_CODE_ERRORS = {
+  ...TOTP_ERRORS,
+  INVALID_CODE:
+    "That code didn't match. If you ran setup more than once, delete the old entry in your app and add this one.",
+};
 
 // The submit button that had focus is gone after the step changes. Focus lands on the
 // first instruction, because focusing the code field would open a phone keyboard over the page.
@@ -57,6 +66,7 @@ function QrCode({ value }: { value: string }) {
 
 export default function Enroll2FA() {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [totpUri, setTotpUri] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -104,7 +114,7 @@ export default function Enroll2FA() {
         code,
       });
       if (result.error) {
-        setError(authErrorMessage(result.error, TOTP_ERRORS, "Invalid code"));
+        setError(authErrorMessage(result.error, ENROLL_CODE_ERRORS, "Invalid code"));
         setLoading(false);
         focusField(CODE_ID);
       } else {
@@ -153,7 +163,7 @@ export default function Enroll2FA() {
                   {...errorProps}
                 />
               </div>
-              <Button type="submit" disabled={enrolling} className={AUTH_SUBMIT}>
+              <Button type="submit" disabled={enrolling || !hydrated} className={AUTH_SUBMIT}>
                 {enrolling ? "Setting up..." : "Begin setup"}
               </Button>
             </form>
@@ -165,7 +175,8 @@ export default function Enroll2FA() {
                 <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
                   1. <span className="md:hidden">Add this account to</span>
                   <span className="hidden md:inline">Scan this code with</span> an authenticator app, such
-                  as Google Authenticator or 1Password.
+                  as Google Authenticator or 1Password. Keep this page open until you&apos;ve entered the
+                  code.
                 </p>
                 {/* A phone can't scan its own screen, so it leads with the app. */}
                 <a
@@ -179,10 +190,11 @@ export default function Enroll2FA() {
                 </div>
                 <CopyRow label="Setup link" display={totpUri} value={totpUri} />
                 {setupKey && (
-                  <details>
-                    <summary className="flex h-11 cursor-pointer items-center justify-center rounded-full text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                  <details className="group">
+                    <summary className="flex h-11 cursor-pointer list-none items-center justify-center gap-1.5 rounded-full text-sm font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground [&::-webkit-details-marker]:hidden">
                       <span className="md:hidden">Use another device or a setup key</span>
                       <span className="hidden md:inline">Can&apos;t scan? Enter a setup key</span>
+                      <ChevronDown aria-hidden="true" className="size-4 group-open:rotate-180" />
                     </summary>
                     <div className="flex flex-col gap-3">
                       <div className="md:hidden">
@@ -201,7 +213,8 @@ export default function Enroll2FA() {
 
               <form onSubmit={verifyCode} className="flex flex-col gap-3">
                 <p className="text-base font-medium">
-                  2. Enter the 6-digit code the app shows. You&apos;ll use a new one each time you sign in.
+                  2. Enter the 6-digit code the app shows for {AUTHENTICATOR_ENTRY}. You&apos;ll use a new one
+                  each time you sign in.
                 </p>
                 {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
                 <div className="flex flex-col gap-2">
@@ -223,7 +236,7 @@ export default function Enroll2FA() {
                 </div>
                 <Button type="submit" disabled={loading} className={AUTH_SUBMIT}>
                   {verified
-                    ? "Two-factor is on. Opening stores..."
+                    ? "Two-factor is on"
                     : loading
                       ? "Verifying..."
                       : "Verify and continue"}

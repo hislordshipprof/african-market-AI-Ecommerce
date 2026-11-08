@@ -46,7 +46,7 @@ export function StorySurface({
           surface starts below the top of the screen and the anchor would push the form off it. */}
       <Tag
         className={cn(
-          "story-surface relative flex min-h-dvh flex-col items-center overflow-hidden p-4 pb-6 sm:pb-10 lg:flex-row lg:justify-end lg:pr-[max(6vw,3rem)]",
+          "story-surface relative flex min-h-dvh flex-col items-center overflow-clip p-4 pb-6 sm:pb-10 lg:flex-row lg:justify-end lg:pr-[max(6vw,3rem)]",
           asMain ? "justify-end" : "justify-center",
         )}
       >

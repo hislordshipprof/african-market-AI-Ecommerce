@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ComponentProps } from "react";
+import { useEffect, useState, useSyncExternalStore, type ComponentProps } from "react";
 import { ArrowLeft, Check, CircleAlert, Copy, Eye, EyeOff } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
@@ -24,10 +24,25 @@ export function totpDigits(value: string): string {
 
 export const NETWORK_ERROR = "Couldn't reach the server. Check your connection and try again.";
 
+// The name authenticator apps show for this account: the issuer in src/lib/auth.ts.
+export const AUTHENTICATOR_ENTRY = "African Markets Platform";
+
 export const TOTP_ERRORS: Record<string, string> = {
   INVALID_CODE: "That code didn't match. Codes change every 30 seconds, so enter the newest one.",
   INVALID_TWO_FACTOR_COOKIE: "This sign-in timed out. Go back and sign in again.",
+  TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE: "Too many wrong codes. Go back and sign in again.",
+  ACCOUNT_TEMPORARILY_LOCKED: "Too many wrong codes, so this account is locked for now. Try again in 15 minutes.",
 };
+
+const subscribeToNothing = () => () => {};
+
+/**
+ * Before hydration a submit would be the browser's own, which reloads the page and wipes
+ * what was typed. Keeping the submit button disabled until then blocks that, Enter included.
+ */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(subscribeToNothing, () => true, () => false);
+}
 
 /** Says what to do next, in place of the server's raw wording. */
 export function authErrorMessage(
@@ -35,11 +50,13 @@ export function authErrorMessage(
   byCode: Record<string, string>,
   fallback: string,
 ): string {
-  if (error.status === 429) return "Too many attempts. Wait a minute and try again.";
+  const known = error.code ? byCode[error.code] : undefined;
+  if (known) return known;
+  if (error.status === 429) return "Too many attempts. Wait a few minutes and try again.";
   if (error.status !== undefined && error.status >= 500) {
     return "Something went wrong on our side. Try again in a moment.";
   }
-  return (error.code ? byCode[error.code] : undefined) ?? error.message ?? fallback;
+  return error.message ?? fallback;
 }
 
 /**

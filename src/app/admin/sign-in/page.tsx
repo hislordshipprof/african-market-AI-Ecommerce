@@ -9,6 +9,7 @@ import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  AUTHENTICATOR_ENTRY,
   AUTH_BACK,
   AUTH_CODE_HINT,
   AUTH_CODE_INPUT,
@@ -23,6 +24,7 @@ import {
   fieldValue,
   focusField,
   totpDigits,
+  useHydrated,
 } from "../auth-form-parts";
 
 type Step = "credentials" | "totp";
@@ -48,6 +50,7 @@ const focusOnMount = (input: HTMLInputElement | null) => input?.focus();
 
 export default function AdminSignIn() {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
   const [totpCode, setTotpCode] = useState("");
@@ -133,7 +136,7 @@ export default function AdminSignIn() {
           <CardDescription id={DESCRIPTION_ID} className="text-base [overflow-wrap:anywhere]">
             {step === "credentials"
               ? "Sign in to manage stores and the catalog."
-              : `Last step: enter the 6-digit code from your authenticator app to finish signing in as ${email}.`}
+              : `Last step: enter the 6-digit code for ${AUTHENTICATOR_ENTRY} from your authenticator app to finish signing in as ${email}.`}
           </CardDescription>
         </CardHeader>
 
@@ -165,7 +168,7 @@ export default function AdminSignIn() {
                 />
               </div>
 
-              <Button type="submit" disabled={loading} className={AUTH_SUBMIT}>
+              <Button type="submit" disabled={loading || !hydrated} className={AUTH_SUBMIT}>
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
