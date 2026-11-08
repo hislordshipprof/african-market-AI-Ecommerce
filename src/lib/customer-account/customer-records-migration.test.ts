@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const MIGRATIONS = path.resolve(__dirname, "../../../prisma/migrations");
 const SCHEMA = "tmp_t248_account";
-const REPLAY_LOCK = 199031248;
+const REPLAY_LOCK = 199031030;
 const connectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
 
 describe.skipIf(!connectionString)("customer account records migration", () => {
