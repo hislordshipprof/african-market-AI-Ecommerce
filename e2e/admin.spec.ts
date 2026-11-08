@@ -96,6 +96,27 @@ test.describe("Platform admin console", () => {
     await expect(page.locator("canvas")).toHaveCount(0);
     expect(pageErrors).toEqual([]);
   });
+
+  // Reproduced: on software rendering the scene ran at 3 to 12 fps and typing 19
+  // characters took 3 to 14 seconds. failIfMajorPerformanceCaveat doesn't catch it.
+  test("a software WebGL renderer stays on the poster", async ({ page }) => {
+    await page.addInitScript(() => {
+      const UNMASKED_RENDERER_WEBGL = 0x9246;
+      const realGetParameter = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function (
+        this: WebGL2RenderingContext,
+        parameter: number,
+      ) {
+        if (parameter === UNMASKED_RENDERER_WEBGL) return "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device))";
+        return realGetParameter.call(this, parameter);
+      };
+    });
+
+    await page.goto("/admin/sign-in");
+    await expect(page.getByTestId("story-poster")).toBeVisible();
+    await page.waitForTimeout(3000);
+    await expect(page.locator("canvas")).toHaveCount(0);
+  });
 });
 
 test.describe("Store management (authenticated)", () => {

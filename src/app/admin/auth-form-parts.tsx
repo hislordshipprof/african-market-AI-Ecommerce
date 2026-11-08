@@ -24,14 +24,30 @@ export function totpDigits(value: string): string {
 
 export const NETWORK_ERROR = "Couldn't reach the server. Check your connection and try again.";
 
-export function totpErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
-  if (error.code === "INVALID_CODE") {
-    return "That code didn't match. Codes change every 30 seconds, so enter the newest one.";
+export const TOTP_ERRORS: Record<string, string> = {
+  INVALID_CODE: "That code didn't match. Codes change every 30 seconds, so enter the newest one.",
+  INVALID_TWO_FACTOR_COOKIE: "This sign-in timed out. Go back and sign in again.",
+};
+
+/** Says what to do next, in place of the server's raw wording. */
+export function authErrorMessage(
+  error: { status?: number; code?: string; message?: string },
+  byCode: Record<string, string>,
+  fallback: string,
+): string {
+  if (error.status === 429) return "Too many attempts. Wait a minute and try again.";
+  if (error.status !== undefined && error.status >= 500) {
+    return "Something went wrong on our side. Try again in a moment.";
   }
-  if (error.code === "INVALID_TWO_FACTOR_COOKIE") {
-    return "This sign-in timed out. Go back and sign in again.";
-  }
-  return error.message ?? fallback;
+  return (error.code ? byCode[error.code] : undefined) ?? error.message ?? fallback;
+}
+
+/**
+ * Sign-in fields are uncontrolled, and read here on submit. The form paints well before
+ * hydration on a slow phone, and React would wipe what was typed into a controlled field.
+ */
+export function fieldValue(form: HTMLFormElement, id: string): string {
+  return (form.elements.namedItem(id) as HTMLInputElement).value;
 }
 
 /** The submit button is disabled while pending, so a failure would otherwise drop focus to the page. */

@@ -8,7 +8,7 @@ import type { StoryScene } from "./scenes";
 // Offsets are in photo widths at the near plane. The poster's 3% overscan hides the
 // edge of the photo, so the sum of these has to stay under 0.06 (half is applied at
 // each extreme, either side of the focal plane).
-const POINTER_RANGE = new Vector2(0.028, 0.016);
+const POINTER_RANGE = new Vector2(0.022, 0.012);
 const DRIFT = 0.006;
 const WAKE = 0.02;
 const WAKE_SECONDS = 2.6;

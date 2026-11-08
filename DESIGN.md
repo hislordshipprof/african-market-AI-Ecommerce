@@ -234,7 +234,7 @@ The shared background is `StorySurface` (`src/components/story-surface/`, #35). 
 - **Crop:** hands and produce lead. Faces and stall signage stay out of frame, so food is the hero and nobody stares at the visitor.
 - **Composition:** phones anchor the form at the bottom, in thumb reach, under the hands and peppers. From 1024px the form sits right of the stall, with the scene's line at 20 to 26px at the lower left, so it never outranks the form's 28px heading. Below 1024px the line gives way to a small tag naming the place.
 - **Panel:** forms sit on `StoryCard`, a solid `card` fill, so AA holds over any part of the photo. Glass is not used here.
-- **Color scheme:** the surface follows `prefers-color-scheme` on its own, on the platform host too. Dark multiplies a cool dusk tone (`#7D8C88`) over the photo, which keeps the produce appetizing, instead of a flat black overlay.
+- **Color scheme:** the surface follows `prefers-color-scheme` on its own, on the platform host too. Dark multiplies a warm dusk tone (`#94897F`) over the photo, which keeps the produce appetizing, instead of a flat black overlay.
 - **Motion:** the form is visible from first paint and only slides 16px, 500ms ease-out. The poster settles over 1.2s, once. Nothing loops except the scene's drift.
 
 **The Reduced Motion Rule.** Under `prefers-reduced-motion`, all transitions and animations are off. State changes still happen instantly.

@@ -15,6 +15,10 @@
   outline-offset: 2px;
 }
 
+.story-surface [aria-invalid="true"]:focus-visible {
+  outline-color: var(--destructive);
+}
+
 .story-surface ::selection {
   background: var(--primary);
   color: var(--primary-foreground);
@@ -22,7 +26,7 @@
 
 /* The tall crop keeps the hands in frame on a phone. The wide crop's focus comes from the scene. */
 .story-surface__poster {
-  object-position: 62% 50%;
+  object-position: 85% 50%;
 }
 
 @media (min-width: 768px) {
@@ -32,7 +36,10 @@
 }
 
 .story-surface__scrim {
-  background: linear-gradient(
+  background:
+    /* Quiets the brightest cloth, above the form. */
+    linear-gradient(to bottom left, rgb(8 14 10 / 0.55), rgb(8 14 10 / 0) 34%),
+    linear-gradient(
     to top right,
     rgb(8 14 10 / 0.9),
     rgb(8 14 10 / 0.68) 24%,
@@ -72,7 +79,7 @@
   /* Multiply keeps the photo's color and contrast. A flat black overlay turns it to mud. */
   .story-surface__dusk {
     display: block;
-    background: #7D8C88;
+    background: #94897F;
     mix-blend-mode: multiply;
   }
 }

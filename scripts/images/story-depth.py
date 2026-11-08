@@ -22,7 +22,7 @@ from PIL import Image, ImageFilter
 WIDE_CROP = (0.0625, 0.5365, 0.9375, 0.93)  # 16:9, for tablets and up.
 TALL_CROP = (0.25, 0.55, 0.62, 1.0)  # Hands and peppers above a bottom-anchored form.
 WIDE_SIZE = (2367, 1331)
-TALL_SIZE = (1001, 1521)
+TALL_SIZE = (828, 1258)  # Smaller than the source: this is the phone's LCP image.
 DEPTH_SIZE = (1000, 563)
 MODEL_INPUT = (826, 462)  # Depth Anything needs multiples of 14.
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -47,7 +47,7 @@ def estimate_depth(image: Image.Image, model: Path) -> Image.Image:
     normalized = np.clip((disparity - low) / (high - low), 0, 1)
     depth = Image.fromarray((normalized * 255).astype(np.uint8)).resize(DEPTH_SIZE, Image.Resampling.BICUBIC)
     # Grow near silhouettes a little so the background stretches at an edge, not the subject.
-    return depth.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(2))
+    return depth.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(3))
 
 
 def main() -> None:
@@ -61,7 +61,7 @@ def main() -> None:
     source = Image.open(args.source).convert("RGB")
     wide = crop(source, WIDE_CROP, WIDE_SIZE)
     wide.save(args.out / "bodija-wide.webp", quality=82, method=6)
-    crop(source, TALL_CROP, TALL_SIZE).save(args.out / "bodija-tall.webp", quality=76, method=6)
+    crop(source, TALL_CROP, TALL_SIZE).save(args.out / "bodija-tall.webp", quality=66, method=6)
     estimate_depth(wide, args.model).save(args.out / "bodija-wide-depth.webp", quality=80, method=6)
 
 

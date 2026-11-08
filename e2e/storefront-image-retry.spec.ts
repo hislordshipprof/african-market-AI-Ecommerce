@@ -16,7 +16,6 @@ const denied = [
   "/api/catalog-image/catalog/x.jpg?Retry=1",
   "/api/catalog-image/catalog/x.jpg?retry=1&",
   "/images/products/garri-yellow.webp?v=1",
-  "/images/market-spices-poster.jpg?retry=1",
   "/images/market-bodija.webp?retry=1",
   "/favicon.ico?retry=1",
 ];

@@ -44,6 +44,10 @@ function subscribeToSceneAllowed(onChange: () => void): () => void {
   };
 }
 
+// failIfMajorPerformanceCaveat alone lets these through, and on one the scene ran at
+// 3 to 12 fps and made typing in the form take seconds.
+const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|software|basic render/i;
+
 /** Only called once the scene is allowed, so a poster-only visitor never creates a WebGL context. */
 function canRenderDepthScene(): boolean {
   try {
@@ -51,8 +55,10 @@ function canRenderDepthScene(): boolean {
       .createElement("canvas")
       .getContext("webgl2", { failIfMajorPerformanceCaveat: true });
     if (!gl) return false;
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
     gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return true;
+    return !SOFTWARE_RENDERER.test(renderer);
   } catch {
     return false;
   }

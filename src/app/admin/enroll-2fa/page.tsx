@@ -20,9 +20,11 @@ import {
   CopyRow,
   NETWORK_ERROR,
   PasswordInput,
+  TOTP_ERRORS,
+  authErrorMessage,
+  fieldValue,
   focusField,
   totpDigits,
-  totpErrorMessage,
 } from "../auth-form-parts";
 
 const ERROR_ID = "admin-enroll-error";
@@ -30,6 +32,7 @@ const BACK_ID = "enroll-back";
 const PASSWORD_ID = "enroll-password";
 const CODE_ID = "enroll-code";
 const SESSION_ENDED = "Your session ended. Go back and sign in again.";
+const ENROLL_ERRORS = { INVALID_PASSWORD: "That password isn't right. Try again." };
 
 // The submit button that had focus is gone after the step changes. Focus lands on the
 // first instruction, because focusing the code field would open a phone keyboard over the page.
@@ -47,14 +50,13 @@ function QrCode({ value }: { value: string }) {
   return (
     // A QR code has to stay dark on white to scan, in both color schemes.
     <div className="mx-auto w-fit rounded-xl bg-white p-3">
-      <QRCodeSVG value={value} size={152} level="M" title="Authenticator setup code" />
+      <QRCodeSVG value={value} size={136} level="M" title="Authenticator setup code" />
     </div>
   );
 }
 
 export default function Enroll2FA() {
   const router = useRouter();
-  const [password, setPassword] = useState("");
   const [totpUri, setTotpUri] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -62,8 +64,9 @@ export default function Enroll2FA() {
   const [enrolling, setEnrolling] = useState(false);
   const [verified, setVerified] = useState(false);
 
-  async function startEnrollment(e: React.FormEvent) {
+  async function startEnrollment(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const password = fieldValue(e.currentTarget, PASSWORD_ID);
     setEnrolling(true);
     setError("");
     try {
@@ -74,11 +77,8 @@ export default function Enroll2FA() {
         if (result.error.status === 401) {
           setError(SESSION_ENDED);
           focusField(BACK_ID);
-        } else if (result.error.code === "INVALID_PASSWORD") {
-          setError("That password isn't right. Try again.");
-          focusField(PASSWORD_ID);
         } else {
-          setError(result.error.message ?? "Failed to start enrollment");
+          setError(authErrorMessage(result.error, ENROLL_ERRORS, "Failed to start enrollment"));
           focusField(PASSWORD_ID);
         }
         return;
@@ -89,6 +89,7 @@ export default function Enroll2FA() {
       }
     } catch {
       setError(NETWORK_ERROR);
+      focusField(PASSWORD_ID);
     } finally {
       setEnrolling(false);
     }
@@ -103,7 +104,7 @@ export default function Enroll2FA() {
         code,
       });
       if (result.error) {
-        setError(totpErrorMessage(result.error, "Invalid code"));
+        setError(authErrorMessage(result.error, TOTP_ERRORS, "Invalid code"));
         setLoading(false);
         focusField(CODE_ID);
       } else {
@@ -123,14 +124,14 @@ export default function Enroll2FA() {
 
   return (
     <StorySurface>
-      <StoryCard className="gap-6 py-8">
+      <StoryCard className="gap-5 py-6">
         <CardHeader className="px-6 sm:px-8">
           <Link id={BACK_ID} href="/admin/sign-in" className={AUTH_BACK}>
             <BackArrow />
             Back to sign in
           </Link>
           <h1 className="font-display text-[1.75rem] leading-tight font-bold text-balance">
-            Set up <span className="whitespace-nowrap">two-factor</span> authentication
+            Set up <span className="whitespace-nowrap">two-factor</span>
           </h1>
           {!totpUri && (
             <CardDescription className="text-base">
@@ -148,8 +149,6 @@ export default function Enroll2FA() {
                 <PasswordInput
                   id={PASSWORD_ID}
                   required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
                   {...errorProps}
                 />
@@ -161,7 +160,7 @@ export default function Enroll2FA() {
           )}
 
           {totpUri && (
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-5">
               <section className="flex flex-col gap-3">
                 <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
                   1. <span className="md:hidden">Add this account to</span>

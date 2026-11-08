@@ -42,7 +42,14 @@ export function StorySurface({
         media={TALL_MEDIA}
         fetchPriority="high"
       />
-      <Tag className="story-surface relative flex min-h-dvh flex-col items-center justify-end overflow-hidden p-4 pb-6 sm:pb-10 lg:flex-row lg:justify-end lg:pr-[max(6vw,3rem)]">
+      {/* Phones anchor the form in thumb reach, except under a store header, where the
+          surface starts below the top of the screen and the anchor would push the form off it. */}
+      <Tag
+        className={cn(
+          "story-surface relative flex min-h-dvh flex-col items-center overflow-hidden p-4 pb-6 sm:pb-10 lg:flex-row lg:justify-end lg:pr-[max(6vw,3rem)]",
+          asMain ? "justify-end" : "justify-center",
+        )}
+      >
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-primary-deep">
           {/* Overscan so the depth scene never samples past the edge of the photo. */}
           <motion.div

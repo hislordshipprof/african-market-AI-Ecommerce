@@ -18,9 +18,11 @@ import {
   BackArrow,
   NETWORK_ERROR,
   PasswordInput,
+  TOTP_ERRORS,
+  authErrorMessage,
+  fieldValue,
   focusField,
   totpDigits,
-  totpErrorMessage,
 } from "../auth-form-parts";
 
 type Step = "credentials" | "totp";
@@ -30,6 +32,9 @@ const DESCRIPTION_ID = "admin-sign-in-description";
 const EMAIL_ID = "admin-email";
 const PASSWORD_ID = "admin-password";
 const TOTP_ID = "admin-totp";
+const CREDENTIALS_ERRORS = {
+  INVALID_EMAIL_OR_PASSWORD: "That email and password don't match. Check both and try again.",
+};
 
 // Mouse and trackpad only: on a phone this would open the keyboard over the page.
 const focusEmailOnDesktop = (input: HTMLInputElement | null) => {
@@ -41,35 +46,30 @@ const focusEmailOnDesktop = (input: HTMLInputElement | null) => {
 // The submit button that had focus is gone after the step changes.
 const focusOnMount = (input: HTMLInputElement | null) => input?.focus();
 
-function credentialsErrorMessage(error: { code?: string; message?: string }): string {
-  if (error.code === "INVALID_EMAIL_OR_PASSWORD") {
-    return "That email and password don't match. Check both and try again.";
-  }
-  return error.message ?? "Sign-in failed";
-}
-
 export default function AdminSignIn() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleCredentials(e: React.FormEvent) {
+  async function handleCredentials(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const submittedEmail = fieldValue(e.currentTarget, EMAIL_ID);
+    const password = fieldValue(e.currentTarget, PASSWORD_ID);
+    setEmail(submittedEmail);
     setError("");
     setLoading(true);
 
     try {
       const result = await authClient.signIn.email({
-        email,
+        email: submittedEmail,
         password,
       });
 
       if (result.error) {
-        setError(credentialsErrorMessage(result.error));
+        setError(authErrorMessage(result.error, CREDENTIALS_ERRORS, "Sign-in failed"));
         setLoading(false);
         focusField(PASSWORD_ID);
       } else if ((result.data as Record<string, unknown>)?.twoFactorRedirect) {
@@ -96,7 +96,7 @@ export default function AdminSignIn() {
       });
 
       if (result.error) {
-        setError(totpErrorMessage(result.error, "Invalid code"));
+        setError(authErrorMessage(result.error, TOTP_ERRORS, "Invalid code"));
         setLoading(false);
         focusField(TOTP_ID);
       } else {
@@ -120,7 +120,7 @@ export default function AdminSignIn() {
   return (
     <StorySurface>
       <StoryCard className="gap-6 py-8">
-        <CardHeader className="px-6 sm:px-8">
+        <CardHeader className="grid-cols-[minmax(0,1fr)] px-6 sm:px-8">
           {step === "totp" && (
             <button type="button" onClick={backToCredentials} className={`${AUTH_BACK} cursor-pointer`}>
               <BackArrow />
@@ -130,7 +130,7 @@ export default function AdminSignIn() {
           <h1 className="font-display text-[1.75rem] leading-tight font-bold">
             {step === "credentials" ? "Platform Admin" : "Confirm it's you"}
           </h1>
-          <CardDescription id={DESCRIPTION_ID} className="text-base">
+          <CardDescription id={DESCRIPTION_ID} className="text-base [overflow-wrap:anywhere]">
             {step === "credentials"
               ? "Sign in to manage stores and the catalog."
               : `Last step: enter the 6-digit code from your authenticator app to finish signing in as ${email}.`}
@@ -148,8 +148,7 @@ export default function AdminSignIn() {
                   id={EMAIL_ID}
                   type="email"
                   required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  defaultValue={email}
                   className={AUTH_INPUT}
                   autoComplete="email"
                   {...errorProps}
@@ -161,8 +160,6 @@ export default function AdminSignIn() {
                 <PasswordInput
                   id={PASSWORD_ID}
                   required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
                   {...errorProps}
                 />
