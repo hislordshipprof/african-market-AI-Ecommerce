@@ -165,7 +165,7 @@ function buildListingFormData(
   fd.set("stockMode", fields.stockMode);
   if (fields.stockMode === "counted") fd.set("qty", fields.qty);
   // Orders move qty while this form is open. The loaded number tells the server the owner left it alone.
-  if (editing && fields.stockMode === "counted") fd.set("qtyLoaded", String(editing.qty ?? 0));
+  if (fields.stockMode === "counted" && editing?.qty != null) fd.set("qtyLoaded", String(editing.qty));
   if (fields.stockMode === "status") fd.set("status", fields.status);
   fd.set("frozen", String(fields.frozen));
   fd.set("perishable", String(fields.perishable));
