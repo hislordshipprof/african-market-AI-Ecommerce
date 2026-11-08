@@ -4038,6 +4038,15 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
 
       expect((await markLineShort(storeId, lineId, 2)).ok).toBe(false);
       expect(await stockOf(storeId, listingId)).toEqual(shorted);
+
+      // A later cancel returns only the two units the short left reserved.
+      await storeScoped(storeId).order.update({ where: { id: placed.orderId }, data: { status: "CANCELLING" } });
+      cancelledPayments.add(placed.paymentIntentId);
+      await reconcileStuckOrder(storeId, placed.orderId);
+      expect(await stockOf(storeId, listingId)).toEqual({
+        qty: 7,
+        events: [["reservation", -5], ["reservation_release", 3], ["short", -3], ["reservation_release", 2]],
+      });
     }, 30_000);
   });
 });

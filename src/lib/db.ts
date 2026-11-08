@@ -471,7 +471,7 @@ export async function writeConfidenceScores(
       SELECT l.id, scored.confidence
       FROM listings l
       JOIN scored ON scored.id = l.id
-      WHERE l.active AND l.confidence_updated_at = scored.read_at::timestamp(3)
+      WHERE l.confidence_updated_at = scored.read_at::timestamp(3)
       ORDER BY l.id
       FOR NO KEY UPDATE OF l SKIP LOCKED
     )

@@ -8,6 +8,8 @@ import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setRefu
 import { autoCancelOrder, reconcileStuckOrder } from "./service";
 import { evaluateOrderRefundState, reconcileRefundRequest, REPLAY_LEASE_MS, submitRefund } from "./refund-requests";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
+import { updateListing } from "../listing/service";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 
 const reviewFault = vi.hoisted(() => ({ failAlert: false }));
 
@@ -153,6 +155,27 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     await evaluateOrderRefundState(placed.orderId);
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("CANCELLED");
     expect(await stockOf(storeId, listingId)).toEqual(released);
+
+    // A superseded release moves nothing, so nothing but its key stops a second row.
+    const recounted = await countedListing(storeId, 10, "Recounted");
+    const second = await placeOrder(storeId, [{ variantId: recounted.variantId, qty: 3 }]);
+    await updateListing({
+      storeId,
+      listingId: recounted.listingId,
+      qty: 10,
+      actor: { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL },
+    });
+    await fakeStripeProvider.capturePaymentIntent(second.paymentIntentId, 3000, `cap-${second.orderId}`);
+    await fakeStripeProvider.refundPayment(second.paymentIntentId, 3000, `covered-${second.orderId}`);
+    const superseded = { qty: 10, events: [["reservation", -3], ["reservation_release", 0]] };
+    for (let pass = 0; pass < 2; pass++) {
+      await storeScoped(storeId).order.update({
+        where: { id: second.orderId },
+        data: { status: "REFUND_FAILED", capturedAmountCents: 3000 },
+      });
+      await evaluateOrderRefundState(second.orderId);
+      expect(await stockOf(storeId, recounted.listingId)).toEqual(superseded);
+    }
   }, 30_000);
 
   it("a replay after a partial dashboard refund reuses the stored amount, then refunds the rest", async () => {

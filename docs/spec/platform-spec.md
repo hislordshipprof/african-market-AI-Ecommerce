@@ -123,7 +123,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 ### 6.2 Catalog & inventory
 - Listing = master product + store price + variants + stock.
 - Stock modes per listing: **Counted** (quantity tracked) or **Status** (In / Low / Out) for stores without counts.
-- **Stock confidence score (0–1)** per listing, from: last manual confirmation, recent sales velocity, recent shortage reports, time since restock. Decays daily. Shown internally; drives storefront badge and AI behavior.
+- **Stock confidence score (0–1)** per listing, from: last manual confirmation, recent sales velocity, recent shortage reports, time since restock. Decays daily. Shown internally; drives storefront badge and AI behavior. Elapsed time alone stops at 0.30, so a quiet owner's listing shows Limited and stays buyable; only shortage evidence goes lower. An owner's stock change restores it to 1.0 at once.
 - Quick stock check: phone list "Confirm these 10 fast movers" each morning (30 seconds).
 - Bulk price update, variant management, perishable flag, weight per unit, frozen flag, max qty per order.
 - **CSV import** (owner only; staff and customers are sent away and nothing is written):
@@ -250,17 +250,17 @@ Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_ST
 
 | Transition | Trigger | Side effects |
 |---|---|---|
-| → AUTHORIZED | Stripe PaymentIntent `requires_capture` | Notify store (stock reservation deferred to #141) |
+| → AUTHORIZED | Stripe PaymentIntent `requires_capture` | Notify store. Reserve counted stock: `qty` falls by the units available, up to the ordered quantity, with a `reservation` stock event. Placement never refuses on stock. |
 | → ACCEPTED | Store tap / auto | Customer notified with prep ETA |
 | → SUBSTITUTION_PENDING | Picker marks short | Customer prompt; timer |
 | → CAPTURING | All lines resolved | Set transitional status; Stripe capture in flight |
-| → READY / AWAITING_PICKUP | Stripe capture succeeded | Delivery re-quote (delivery) or customer notified (pickup). #141 sale stock events fire on this transition for both Ready and Awaiting pickup. |
+| → READY / AWAITING_PICKUP | Stripe capture succeeded | Delivery re-quote (delivery) or customer notified (pickup). The reservation converts to a sale in the same transaction, for both Ready and Awaiting pickup: a `reservation_release` and a `sale` stock event per line, so stock is not deducted twice. |
 | → COURIER_REQUESTED | Ready (or Ready-in-X timer) | Create delivery with provider |
 | → COURIER_ASSIGNED | Provider webhook | Courier name/ETA to store & customer |
 | fallback | No assignment in 10 min or provider error | Cancel with provider A, create with provider B |
 | → PICKED_UP | Provider webhook | Live map starts |
 | → DELIVERED | Provider webhook + proof | Proof stored; payout eligibility |
-| → CANCELLED | Customer (before ACCEPTED) / store / system | Release auth or refund (stock restore deferred to #141 as matched pair with reservation) |
+| → CANCELLED | Customer (before ACCEPTED) / store / system | Release auth or refund. Return what the order still holds with one `reservation_release` per line, exactly once. A count newer than the reservation supersedes the return (delta 0), so stock is not counted twice. While the order is Refund failed the reservation stays held. |
 
 Unanswered store: if not ACCEPTED within 15 min while the store is inside its hours, alert owner (store web push with #129; until then, audit record only); at 30 min auto-cancel and void authorization. A day marked `Closed` or `{ closed: true }` is closed. A range whose open and close are the same time contributes no opening interval, on its own day or the following day, and does not suppress a valid overnight interval from the previous day. A range that cannot be parsed counts as open so a malformed schedule does not hide the alert.
 
@@ -356,7 +356,7 @@ Listing(id, tenant_id, master_product_id?, custom_name, price, stock_mode, qty, 
         confidence, confidence_updated_at, max_per_order, active)
 ListingVariant(id, listing_id, label, price, weight_g, weight_placeholder, sku, barcode)
 ListingImport(id, store_id, csv_text, row_count, status[pending|committed], created_by_id, created_at, committed_at, commit_result?)
-StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|short|adjust], delta, actor, at)
+StockEvent(id, tenant_id, listing_id, type[sale|recount|restock|short|adjust|reservation|reservation_release], delta, actor, idempotency_key?, at)  # key is one per order line and moment, unique per store
 
 Cart(id, tenant_id, customer_id, source[manual|ai]) / CartLine(cart_id, variant_id, qty, swap_rule, sub_variant_id, source[manual|ai])
 Order(id, tenant_id, number, customer_id, status, fulfillment[delivery|pickup], address, totals..., 

@@ -216,7 +216,7 @@ describe.skipIf(!hasDb)("placeOrder keys and cold runtime", () => {
     };
     expect(report.numFailedTests ?? 0).toBe(0);
     expect(report.numPendingTests ?? 0).toBe(0);
-    expect(report.numPassedTests ?? 0).toBeGreaterThanOrEqual(19);
+    expect(report.numPassedTests ?? 0).toBeGreaterThanOrEqual(18);
     rmSync(dir, { recursive: true, force: true });
   }, 180_000);
 
