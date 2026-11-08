@@ -78,28 +78,8 @@
 .sf-account-order:hover {
   color: var(--color-primary);
 }
-.sf-account-jump {
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 44px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.sf-account-jump svg {
-  width: 16px;
-  height: 16px;
-}
 .sf-account-orders-intro {
   overflow-wrap: anywhere;
-}
-.sf-account-orders {
-  scroll-margin-top: 140px;
-}
-/* Focused by the jump button so Tab continues from the list; not an interactive control. */
-.sf-account-orders:focus {
-  outline: none;
 }
 .sf-account-order--real {
   display: grid;

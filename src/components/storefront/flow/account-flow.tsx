@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import { authClient } from "@/lib/auth-client";
 import type {
@@ -69,7 +69,6 @@ export function AccountFlow(props: Props) {
   const [results, setResults] = useState<FlowAddress[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const ordersRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (customer || !services) return;
     let active = true;
@@ -116,12 +115,6 @@ export function AccountFlow(props: Props) {
       setBusy(false);
     }
   }
-  // Scroll and move focus, so Tab continues from the list. A hash link would add a history
-  // entry the App Router does not restore on Back, and does nothing once the hash is set.
-  function jumpToOrders() {
-    ordersRef.current?.scrollIntoView();
-    ordersRef.current?.focus({ preventScroll: true });
-  }
   if (!customer && !services) return <ClosedFlow />;
   return (
     <div className="sf-account">
@@ -132,12 +125,6 @@ export function AccountFlow(props: Props) {
       {!customer && <DemoNotice />}
       {error && <FlowError message={error} />}
       <FlowToast message={saved} onClose={() => setSaved("")} />
-      {customer && accountOrders.length > 0 && (
-        <button type="button" className="sf-text-link sf-account-jump" onClick={jumpToOrders}>
-          <ArrowDown aria-hidden="true" />
-          Your orders
-        </button>
-      )}
       {loading ? (
         <FlowLoading />
       ) : (
@@ -314,7 +301,6 @@ export function AccountFlow(props: Props) {
               )}
             </div>
           )}
-          <div ref={ordersRef} tabIndex={-1} className="sf-account-orders">
           <FlowCard title={`Orders from ${props.settings.name}`}>
             <p className="sf-account-orders-intro">
               {customer
@@ -387,7 +373,6 @@ export function AccountFlow(props: Props) {
               </EmptyState>
             )}
           </FlowCard>
-          </div>
         </>
       )}
     </div>
