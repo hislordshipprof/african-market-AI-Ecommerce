@@ -338,7 +338,7 @@ function RealCheckoutForm({
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
-    if (line1.trim().length < 3 || fulfillment !== "store-delivery") return;
+    if (confirmed || line1.trim().length < 3 || fulfillment !== "store-delivery") return;
     const controller = new AbortController();
     suggestAbort.current = controller;
     const timer = setTimeout(() => {
@@ -355,7 +355,7 @@ function RealCheckoutForm({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [line1, fulfillment]);
+  }, [line1, fulfillment, confirmed]);
 
   useEffect(() => {
     if (fulfillment === "store-delivery" && !delivery) return;
@@ -584,6 +584,7 @@ function RealCheckoutForm({
                 return;
               }
               setError("");
+              setSuggestions([]);
               setConfirmed({
                 formatted: result.formatted,
                 line1: result.line1,
@@ -906,7 +907,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 Order weight: {(weightG / 453.592).toFixed(1)} lb. Delivery
                 radius: {settings.deliveryRadiusMi} miles.
               </p>
-              {!courierEligible && (
+              {!isRealPayment && !courierEligible && (
                 <p className={styles.error}>
                   Courier is unavailable: orders and individual items must be 50
                   lb or less; frozen goods also require confirmed insulated
