@@ -8,7 +8,8 @@ import type { StoryScene } from "./scenes";
 const DepthScene = dynamic(() => import("./depth-scene"), { ssr: false });
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-const WIDE_ENOUGH = "(min-width: 768px)";
+// The height check keeps a phone held sideways on the poster.
+const WIDE_ENOUGH = "(min-width: 768px) and (min-height: 500px)";
 
 type NetworkInformation = EventTarget & { saveData?: boolean; effectiveType?: string };
 
@@ -92,7 +93,6 @@ function SceneLoader({ scene }: { scene: StoryScene }) {
   if (phase === "waiting" || phase === "off") return null;
   return (
     <motion.div
-      data-testid="story-depth-scene"
       className="absolute inset-0"
       initial={{ opacity: 0 }}
       animate={{ opacity: phase === "live" ? 1 : 0 }}

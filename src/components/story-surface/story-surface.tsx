@@ -43,7 +43,7 @@ export function StorySurface({
         fetchPriority="high"
       />
       <Tag className="story-surface relative flex min-h-dvh items-end justify-center overflow-hidden p-4 pb-6 sm:pb-10 lg:items-center lg:justify-end lg:pr-[max(6vw,3rem)]">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[#16211A]">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-primary-deep">
           {/* Overscan so the depth scene never samples past the edge of the photo. */}
           <motion.div
             data-testid="story-poster"
@@ -71,15 +71,6 @@ export function StorySurface({
           <div className="story-surface__scrim absolute inset-0 hidden lg:block" />
         </div>
 
-        <div className="pointer-events-none absolute bottom-12 left-[max(6vw,3rem)] z-10 hidden max-w-[min(34rem,42vw)] text-white lg:block">
-          <p className="font-display text-[clamp(2.25rem,3.6vw,3.5rem)] leading-[1.05] font-bold text-balance">
-            {scene.line}
-          </p>
-          <p className="mt-3 text-sm">
-            {scene.place} · Photo by {scene.photographer}
-          </p>
-        </div>
-
         {/* Visible from the first paint. The entrance only moves it, so slow JS never hides the form. */}
         <motion.div
           className="relative z-10 w-full max-w-sm motion-reduce:!transform-none"
@@ -89,6 +80,16 @@ export function StorySurface({
         >
           {children}
         </motion.div>
+
+        {/* After the form in the DOM, so a screen reader reaches the form first. */}
+        <div className="pointer-events-none absolute bottom-12 left-[max(6vw,3rem)] z-10 hidden max-w-[min(34rem,42vw)] text-white lg:block">
+          <p className="font-display text-[clamp(2.25rem,3.6vw,3.5rem)] leading-[1.05] font-bold text-balance">
+            {scene.line}
+          </p>
+          <p className="mt-3 text-sm">
+            {scene.place} · Photo by {scene.photographer}
+          </p>
+        </div>
       </Tag>
     </MotionConfig>
   );

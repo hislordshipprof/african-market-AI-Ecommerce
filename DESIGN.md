@@ -228,6 +228,14 @@ Taken from the DoorDash, Instacart and Weee! teardowns (`research/ui/delivery-ap
 - Under reduced motion, the scene is frozen to its poster and nothing moves.
 - Images must be licensed for commercial use (record the source and license in `public/images/CREDITS.md`) or rendered by us. No AI-generated faces of real-looking people. Never stereotyped "Africa" clichés: real market textures, foods and colors from the research.
 
+The shared background is `StorySurface` (`src/components/story-surface/`, #35). Every story surface uses it; never build a second one.
+- **Scene:** a depth-parallax photograph, not modeled food. A real market photo and an offline depth map (`scripts/images/story-depth.py`) render through a small shader in React Three Fiber. The depth follows the pointer, with one slow breath as it wakes and a faint drift after that. Primitive shapes standing in for food are not acceptable.
+- **Poster first:** the canvas stays transparent until its first frame has drawn, then fades in over the poster it matches pixel for pixel at rest. Under 768px wide or 500px tall, under reduced motion, on save-data, without a capable WebGL2 GPU, or after any scene failure, the visitor keeps the poster and no canvas exists. Phones get their own tall crop.
+- **Composition:** phones anchor the form at the bottom, in thumb reach, under the vendor. From 1024px the form sits right of the stall, with the scene's line in display type at the lower left.
+- **Panel:** forms sit on `StoryCard`, a solid `card` fill, so AA holds over any part of the photo. Glass is not used here.
+- **Color scheme:** the surface follows `prefers-color-scheme` on its own, on the platform host too. Dark multiplies a cool dusk tone over the photo, which keeps its color, instead of a flat black overlay.
+- **Motion:** the form is visible from first paint and only slides 16px, 500ms ease-out. The poster settles over 1.2s, once. Nothing loops except the scene's drift.
+
 **The Reduced Motion Rule.** Under `prefers-reduced-motion`, all transitions and animations are off. State changes still happen instantly.
 
 ## Do's and Don'ts

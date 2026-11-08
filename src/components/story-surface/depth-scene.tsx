@@ -41,7 +41,7 @@ const FRAGMENT = /* glsl */ `
     float stepHeight = 1.0 / float(STEPS);
     float height = 1.0;
     vec2 sampleAt = uv + uOffset * (height - FOCAL_PLANE);
-    float gap = height - texture2D(uDepth, sampleAt).r;
+    float gap = height - textureLod(uDepth, sampleAt, 0.0).r;
     float previousHeight = height;
     float previousGap = gap;
     for (int i = 0; i < STEPS && gap > 0.0; i++) {
@@ -49,7 +49,7 @@ const FRAGMENT = /* glsl */ `
       previousGap = gap;
       height -= stepHeight;
       sampleAt = uv + uOffset * (height - FOCAL_PLANE);
-      gap = height - texture2D(uDepth, sampleAt).r;
+      gap = height - textureLod(uDepth, sampleAt, 0.0).r;
     }
     float hit = clamp(previousGap / max(previousGap - gap, 0.0001), 0.0, 1.0);
     sampleAt = uv + uOffset * (mix(previousHeight, height, hit) - FOCAL_PLANE);

@@ -11,8 +11,9 @@ import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// The submit button that had focus is gone after the step changes.
-const focusOnMount = (input: HTMLInputElement | null) => input?.focus();
+// The submit button that had focus is gone after the step changes. Focus lands on the
+// instructions, because focusing the code field would open a phone keyboard over the QR code.
+const focusOnMount = (instructions: HTMLParagraphElement | null) => instructions?.focus();
 
 export default function Enroll2FA() {
   const router = useRouter();
@@ -72,7 +73,7 @@ export default function Enroll2FA() {
       <StoryCard className="gap-6 py-8">
         <CardHeader className="px-8">
           <h1 className="font-display text-2xl leading-tight font-bold text-balance">
-            Set up two-factor authentication
+            Set up <span className="whitespace-nowrap">two-factor</span> authentication
           </h1>
           <CardDescription className="text-sm">
             Two-factor authentication is required for all platform administrators.
@@ -113,7 +114,7 @@ export default function Enroll2FA() {
 
           {totpUri && (
             <div className="flex flex-col gap-4">
-              <p className="text-sm text-muted-foreground">
+              <p ref={focusOnMount} tabIndex={-1} className="text-sm text-muted-foreground outline-none">
                 Scan this code in your authenticator app. If you can&apos;t scan it, paste the setup
                 link instead.
               </p>
@@ -129,7 +130,6 @@ export default function Enroll2FA() {
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="enroll-code">Verification code</Label>
                   <Input
-                    ref={focusOnMount}
                     id="enroll-code"
                     type="text"
                     required

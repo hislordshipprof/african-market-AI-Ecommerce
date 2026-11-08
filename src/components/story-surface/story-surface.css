@@ -7,6 +7,11 @@
   color: var(--foreground);
 }
 
+.story-surface ::selection {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
 /* The tall crop keeps the vendor in frame on a phone. The wide crop's focus comes from the scene. */
 .story-surface__poster {
   object-position: 38% 50%;
@@ -21,9 +26,9 @@
 .story-surface__scrim {
   background: linear-gradient(
     to top right,
-    rgb(8 14 10 / 0.82),
-    rgb(8 14 10 / 0.42) 26%,
-    rgb(8 14 10 / 0) 52%
+    rgb(8 14 10 / 0.9),
+    rgb(8 14 10 / 0.68) 24%,
+    rgb(8 14 10 / 0) 54%
   );
 }
 
