@@ -705,13 +705,9 @@ async function replayCompletedTurn(
   });
   if (!existing) return null;
   const prior = asMessages(existing.messages);
-  const index = prior.findIndex((message) => message.role === "user" && message.id === clientId);
-  if (index < 0) return null;
-  const rest = prior.slice(index + 1);
-  const nextUser = rest.findIndex((message) => message.role === "user");
-  const span = nextUser === -1 ? rest : rest.slice(0, nextUser);
-  const assistant = span.find((message) => message.role === "assistant");
-  if (assistant && replyStatus(assistant) === "complete") return replayAssistantMessage(assistant, headers);
+  if (!prior.some((message) => message.role === "user" && message.id === clientId)) return null;
+  const completed = completedAssistant(prior, clientId);
+  if (completed) return replayAssistantMessage(completed, headers);
   const recovered = await storeScopedTransaction(storeId, async (tx) => {
     await lockConversationRow(tx, existing.id);
     const fresh = await tx.aiConversation.findUnique({ where: { id: existing.id } });
