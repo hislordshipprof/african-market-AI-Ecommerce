@@ -26,11 +26,18 @@ function windowPasses(digits: string): boolean {
   return false;
 }
 
+/** Filenames also split digit groups with `_` and `.` (`4242_4242_4242_4242.png`). */
+export const FILENAME_CARD_SEPARATORS = " -_.";
+
 /**
  * Mask Luhn-valid card numbers. The whole run is replaced, including separators,
  * so no digits of the number remain.
  */
-export function scrubCardNumbers(text: string): { text: string; removed: number } {
+export function scrubCardNumbers(
+  text: string,
+  options: { separators?: string } = {},
+): { text: string; removed: number } {
+  const separators = options.separators ?? " -";
   const normalized = text.normalize("NFKC");
   let removed = 0;
   let out = "";
@@ -50,7 +57,7 @@ export function scrubCardNumbers(text: string): { text: string; removed: number 
         continue;
       }
       const separator = normalized[i];
-      if ((separator === " " || separator === "-") && isDigit(normalized, i + 1)) {
+      if (separators.includes(separator) && isDigit(normalized, i + 1)) {
         i += 1;
         continue;
       }

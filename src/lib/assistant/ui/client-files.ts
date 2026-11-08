@@ -1,11 +1,39 @@
-import { scrubCardNumbers } from "../card-scrub";
+import { FILENAME_CARD_SEPARATORS, scrubCardNumbers } from "../card-scrub";
 
-const BIDI = /[\u202A-\u202E\u2066-\u2069]/g;
+const NAME_CAP = 80;
 
-/** The name shown on a tile. Card digits and bidi controls never reach the button. */
+/**
+ * Stem and extension of a customer's filename with nothing unsafe left: the last path
+ * segment only, no control or format characters (bidi, LRM/RLM/ALM, zero-width, BOM),
+ * and card numbers masked even when `_` or `.` split the digits.
+ */
+function safeNameParts(name: string): { stem: string; ext: string } {
+  const segment = name.normalize("NFKC").split(/[/\\]/).pop() ?? "";
+  const cleaned = segment.replace(/[\p{Cc}\p{Cf}]/gu, "").replace(/\s+/g, " ").trim();
+  const scrubbed = scrubCardNumbers(cleaned, { separators: FILENAME_CARD_SEPARATORS }).text;
+  const dot = scrubbed.lastIndexOf(".");
+  const rawExt = dot > 0 ? scrubbed.slice(dot) : "";
+  const ext = /^\.[a-z0-9]{1,8}$/i.test(rawExt) ? rawExt : "";
+  const stem = (dot > 0 ? scrubbed.slice(0, dot) : dot === 0 ? "" : scrubbed).replace(/^[.\s]+|[.\s]+$/g, "");
+  return { stem: stem || "file", ext };
+}
+
+/** Cut by code points, so an emoji at the cut never leaves a lone surrogate. */
+function withExtension(stem: string, ext: string): string {
+  const room = Math.max(1, NAME_CAP - ext.length);
+  const cut = Array.from(stem).slice(0, room).join("").trim();
+  return `${cut || "file"}${ext}`;
+}
+
+/** The name shown on a tile. Card digits, bidi and format characters never reach the button. */
 export function displayFileName(name: string): string {
-  const cleaned = name.replace(BIDI, "").replace(/[\r\n]/g, " ").replace(/\s+/g, " ").trim();
-  return scrubCardNumbers(cleaned || "file").text.slice(0, 80);
+  const { stem, ext } = safeNameParts(name);
+  return withExtension(stem, ext);
+}
+
+/** The name posted with a photo. The bytes were re-encoded, so the extension is `.jpg`. */
+export function postedPhotoName(name: string): string {
+  return withExtension(safeNameParts(name).stem, ".jpg");
 }
 
 export const FILE_CAP = 3;

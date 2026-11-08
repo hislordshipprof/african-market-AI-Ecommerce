@@ -557,7 +557,7 @@ test("a transparent photo stays dark ink on white and keeps the scrubbed name", 
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles({
-    name: "4242424242424242\u202e.png",
+    name: "4242\u200e4242\u200b42424242\u202e.png",
     mimeType: "image/png",
     buffer: png,
   });
@@ -568,7 +568,9 @@ test("a transparent photo stays dark ink on white and keeps the scrubbed name", 
   await page.getByTestId("assistant-send").click();
   await expect.poll(() => posts.length).toBe(1);
   const body = posts[0] ?? "";
-  expect(body).toContain('"filename":"photo.jpg"');
+  expect(body).toContain('"filename":"[card number removed].jpg"');
+  const withoutBytes = body.replace(/data:[^"]*/g, "");
+  for (const leak of ["4242", "‎", "​", "‮"]) expect(withoutBytes).not.toContain(leak);
   const encoded = body.match(/data:image\/jpeg;base64,([A-Za-z0-9+/=]+)/)?.[1];
   expect(encoded).toBeTruthy();
   const { data, info } = await sharp(Buffer.from(encoded ?? "", "base64")).raw().toBuffer({ resolveWithObject: true });
