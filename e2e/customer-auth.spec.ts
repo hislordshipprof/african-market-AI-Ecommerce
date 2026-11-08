@@ -100,8 +100,19 @@ test.describe("Customer magic-link auth", () => {
       await expect(row).toHaveAttribute("href", `/order/${seeded.orderId}`);
       await expect(row).toContainText("$12.50");
 
+      // Back restores the router's cached page: it must not bring back details from before a save,
+      // because pressing Save on those overwrites the customer's phone.
+      const phone = page.locator("input[autocomplete='tel']");
+      await phone.fill("+12025550143");
+      await page.getByRole("button", { name: "Save phone" }).click();
+      await expect(page.getByText("Phone saved.")).toBeVisible();
+
       await row.click();
       await expect(page.getByRole("heading", { name: `Order #${seeded.number}` })).toBeVisible({ timeout: 15000 });
+
+      await page.goBack();
+      await expect(row).toBeVisible();
+      await expect(phone).toHaveValue("+12025550143");
     } finally {
       await deleteGuestOrder(seeded);
     }

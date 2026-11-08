@@ -150,8 +150,14 @@ export function AccountFlow(props: Props) {
                       setBusy(true);
                       setError("");
                       void savePhoneAction(profile.phone).then((result) => {
-                        if (result.ok) setSaved("Phone saved.");
-                        else setError(result.error);
+                        if (result.ok) {
+                          setSaved("Phone saved.");
+                          // Back restores the router's cached page: without this it brings back the
+                          // old phone, and pressing Save on that overwrites the new one.
+                          router.refresh();
+                        } else {
+                          setError(result.error);
+                        }
                         setBusy(false);
                       });
                       return;
