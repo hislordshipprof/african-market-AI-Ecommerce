@@ -73,7 +73,10 @@ const HOLD_SAFETY_CAP_MS = (6 * 24 + 12) * 60 * 60_000;
 const MAX_RESLEEPS = 10;
 
 /** JSON-safe: Inngest serializes step.run results, so no Date crosses a step. */
-type TimerPlan = { kind: "done" } | { kind: "act" } | { kind: "sleep"; deadlineIso: string };
+type TimerPlan =
+  | { kind: "done" }
+  | { kind: "act" }
+  | { kind: "sleep"; deadlineIso: string; zoneFallbackLogged: boolean };
 
 interface TimerSpec {
   name: "alert" | "cancel";
@@ -88,32 +91,20 @@ const CANCEL_TIMER: TimerSpec = { name: "cancel", openMinutes: CANCEL_OPEN_MINUT
  * The timer's deadline from the order row and the store's current hours:
  * `openMinutes` open minutes after the acceptance clock (created_at for orders
  * placed before #167), never later than created_at + HOLD_SAFETY_CAP_MS.
- * An invalid zone falls back to wall-clock minutes from the clock, logged on
- * the run's first plan only, so once per timer run.
+ * An invalid zone falls back to wall-clock minutes from the clock.
  */
 function timerDeadline(
   order: { createdAt: Date; acceptanceClockStartsAt: Date | null },
   store: { hours: unknown; timezone: string } | null,
   spec: TimerSpec,
-  log: { storeId: string; orderId: string; firstPlan: boolean },
-): number {
+): { deadline: number; zoneInvalid: boolean } {
   const clockStart = order.acceptanceClockStartsAt ?? order.createdAt;
   const cap = order.createdAt.getTime() + HOLD_SAFETY_CAP_MS;
-  let deadline: number;
   if (!store || !isValidTimezone(store.timezone)) {
-    if (log.firstPlan) {
-      console.error(JSON.stringify({
-        event: "acceptance_timer_invalid_timezone",
-        timer: spec.name,
-        storeId: log.storeId,
-        orderId: log.orderId,
-      }));
-    }
-    deadline = clockStart.getTime() + spec.openMinutes * 60_000;
-  } else {
-    deadline = openMinutesDeadline(store.hours, store.timezone, clockStart, spec.openMinutes)?.getTime() ?? cap;
+    return { deadline: Math.min(clockStart.getTime() + spec.openMinutes * 60_000, cap), zoneInvalid: true };
   }
-  return Math.min(deadline, cap);
+  const open = openMinutesDeadline(store.hours, store.timezone, clockStart, spec.openMinutes)?.getTime() ?? cap;
+  return { deadline: Math.min(open, cap), zoneInvalid: false };
 }
 
 async function planTimer(
@@ -122,6 +113,7 @@ async function planTimer(
   spec: TimerSpec,
   previousIso: string | null,
   iteration: number,
+  zoneFallbackLogged: boolean,
 ): Promise<TimerPlan> {
   const order = await storeScopedTransaction(storeId, async (tx) => {
     return tx.order.findUnique({
@@ -135,7 +127,12 @@ async function planTimer(
     where: { id: storeId },
     select: { hours: true, timezone: true },
   });
-  let deadline = timerDeadline(order, store, spec, { storeId, orderId, firstPlan: previousIso === null });
+  const planned = timerDeadline(order, store, spec);
+  let deadline = planned.deadline;
+  // Once per timer run, whichever plan first finds the zone invalid.
+  if (planned.zoneInvalid && !zoneFallbackLogged) {
+    console.error(JSON.stringify({ event: "acceptance_timer_invalid_timezone", timer: spec.name, storeId, orderId }));
+  }
   const previous = previousIso ? new Date(previousIso).getTime() : null;
   if (iteration > MAX_RESLEEPS && previous !== null && deadline > previous) {
     console.error(JSON.stringify({ event: "acceptance_timer_resleep_limit", timer: spec.name, storeId, orderId }));
@@ -144,7 +141,11 @@ async function planTimer(
   // Woke at the deadline it slept to, or hours now give an earlier one: act.
   if (previous !== null && deadline <= previous) return { kind: "act" };
   if (deadline <= Date.now()) return { kind: "act" };
-  return { kind: "sleep", deadlineIso: new Date(deadline).toISOString() };
+  return {
+    kind: "sleep",
+    deadlineIso: new Date(deadline).toISOString(),
+    zoneFallbackLogged: zoneFallbackLogged || planned.zoneInvalid,
+  };
 }
 
 type TimerStep = {
@@ -159,13 +160,15 @@ type TimerStep = {
  */
 async function waitForTimer(step: TimerStep, storeId: string, orderId: string, spec: TimerSpec): Promise<boolean> {
   let previousIso: string | null = null;
+  let zoneFallbackLogged = false;
   for (let i = 0; i <= MAX_RESLEEPS + 2; i++) {
     const plan = (await step.run(`${spec.name}-plan-${i}`, () =>
-      planTimer(storeId, orderId, spec, previousIso, i),
+      planTimer(storeId, orderId, spec, previousIso, i, zoneFallbackLogged),
     )) as TimerPlan;
     if (plan.kind !== "sleep") return plan.kind === "act";
     await step.sleepUntil(`${spec.name}-sleep-${i}`, new Date(plan.deadlineIso));
     previousIso = plan.deadlineIso;
+    zoneFallbackLogged = plan.zoneFallbackLogged;
   }
   // Unreachable: past the re-sleep limit the deadline is the cap, which ends the loop.
   return true;
