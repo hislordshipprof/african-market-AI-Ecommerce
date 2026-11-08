@@ -24,7 +24,7 @@ PGPASSWORD=app_owner "$PGBIN/psql" -w -h localhost -p "$LANE_PG_PORT" -U app_own
 URL="postgresql://app_owner:app_owner@localhost:$LANE_PG_PORT/$DB"
 node "$ROOT/scripts/lane-env.mjs" strip "$ENV_FILE" DATABASE_URL DIRECT_URL APP_RUNTIME_PASSWORD DATABASE_URL_UNPOOLED SEED_PRUNE_R2
 tmp="$(mktemp)"
-{ cat "$ENV_FILE"; echo "DATABASE_URL=$URL"; echo "DIRECT_URL=$URL"; echo "APP_RUNTIME_PASSWORD=app_runtime_ci"; } > "$tmp"
+{ cat "$ENV_FILE"; [ -n "$(tail -c1 "$ENV_FILE")" ] && echo; echo "DATABASE_URL=$URL"; echo "DIRECT_URL=$URL"; echo "APP_RUNTIME_PASSWORD=app_runtime_ci"; } > "$tmp"
 mv "$tmp" "$ENV_FILE"
 unset DATABASE_URL_UNPOOLED SEED_PRUNE_R2
 
