@@ -10,9 +10,12 @@ NAME="$1"; ENV_FILE="$2"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PGBIN="${PGBIN:-/c/Program Files/PostgreSQL/18/bin}"
 LANE_PG_PORT="${LANE_PG_PORT:-5434}"
-DB="lane_$(echo "$NAME" | tr -c 'a-zA-Z0-9_\n' '_')"
+DB="lane_${NAME//[^a-zA-Z0-9_]/_}"
 
-bash "$ROOT/scripts/local-pg.sh" >/dev/null
+# A subshell forks this bash. A second bash process is another MSYS startup, which is
+# what pushes the lane past 15s when other lanes are busy. Exports stay in the subshell.
+# shellcheck disable=SC1091
+( source "$ROOT/scripts/local-pg.sh" ) >/dev/null
 PGPASSWORD=app_owner "$PGBIN/psql" -w -h localhost -p "$LANE_PG_PORT" -U app_owner -d postgres -qtA -v ON_ERROR_STOP=1 \
   -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" -c "CREATE DATABASE $DB"
 PGPASSWORD=app_owner "$PGBIN/psql" -w -h localhost -p "$LANE_PG_PORT" -U app_owner -d "$DB" -qtA -v ON_ERROR_STOP=1 \
@@ -26,11 +29,10 @@ mv "$tmp" "$ENV_FILE"
 unset DATABASE_URL_UNPOOLED SEED_PRUNE_R2
 
 # Same steps and test-only seed values as hosted CI. Generate first: the seed must use this checkout's schema.
+# The two names are already unset, so a separate env process would only add a startup.
 npx prisma generate >/dev/null
-env -u DATABASE_URL_UNPOOLED -u SEED_PRUNE_R2 \
-  DATABASE_URL="$URL" DIRECT_URL="$URL" APP_RUNTIME_PASSWORD=app_runtime_ci npx prisma migrate deploy >/dev/null
+DATABASE_URL="$URL" DIRECT_URL="$URL" APP_RUNTIME_PASSWORD=app_runtime_ci npx prisma migrate deploy >/dev/null
 SEED_TEST_ADMIN=1 SEED_ADMIN_PASSWORD='CiTestPass99!' SEED_ADMIN_TOTP_SECRET=JBSWY3DPEHPK3PXP \
-  env -u DATABASE_URL_UNPOOLED -u SEED_PRUNE_R2 \
   DATABASE_URL="$URL" DIRECT_URL="$URL" APP_RUNTIME_PASSWORD=app_runtime_ci \
   BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-ci-e2e-test-secret-do-not-use-in-prod}" npx tsx prisma/seed.ts >/dev/null
 echo "lane-db: $DB ready (migrated + seeded); $ENV_FILE now points at it"
