@@ -986,9 +986,10 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 <Clock size={18} aria-hidden />
                 <p>
                   <strong>
-                    Opens {settings.opensAt} · ready about {settings.readyAt}
+                    <span>Opens {settings.opensAt} ·</span>{" "}
+                    <span>ready about {settings.readyAt}</span>
                   </strong>
-                  The market is closed. Order now to join the queue.
+                  The store is closed. Order now to join the queue.
                 </p>
               </div>
             )}
@@ -1224,6 +1225,13 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               <FlowError title="Let's review that" message={error}>
                 {errorHref ? <Link className="sf-text-link" href={errorHref}>View your orders</Link> : null}
               </FlowError>
+            )}
+            {isRealPayment && settings.closed && (
+              <p className={styles.muted}>
+                The store opens {settings.opensAt}. Your card is held now and
+                charged after picking. If the store doesn&rsquo;t accept your
+                order, the hold is released.
+              </p>
             )}
             <PayButton
               type="submit"

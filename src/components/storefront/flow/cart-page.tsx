@@ -132,10 +132,9 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
             <FlowCard title={settings.name}>
               <p className={styles.muted}>
                 {settings.takingOrders ? (
-                  <>
-                    Prepared with care · About {settings.prepTimeMinutes} minutes{" "}
-                    {settings.closed && `after opening at ${settings.opensAt}`}
-                  </>
+                  settings.closed
+                    ? `Closed now · opens ${settings.opensAt} · ready about ${settings.readyAt}`
+                    : `Prepared with care · About ${settings.prepTimeMinutes} minutes`
                 ) : (
                   STORE_NOT_TAKING_ORDERS
                 )}
@@ -275,7 +274,7 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
                   Review unavailable items and quantities above.
                 </p>
               )}
-              {remaining || invalid ? (
+              {remaining || invalid || !settings.takingOrders ? (
                 <Button disabled className={styles.full}>
                   Continue to checkout
                 </Button>
@@ -297,7 +296,7 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
             <small>Subtotal</small>
             <strong>{money(subtotal)}</strong>
           </div>
-          {remaining || invalid ? (
+          {remaining || invalid || !settings.takingOrders ? (
             <Button disabled>Checkout</Button>
           ) : (
             <Link className="sf-button" href="/checkout">

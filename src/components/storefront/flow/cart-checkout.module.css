@@ -296,8 +296,8 @@
   border-radius: 12px;
   background: var(--color-bg);
   color: var(--color-muted);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.5;
 }
 .queueNotice svg {
   flex: none;
@@ -306,11 +306,16 @@
 }
 .queueNotice strong {
   display: block;
+  margin-bottom: 2px;
   color: var(--color-ink);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
+}
+/* Breaks between the opening and the ready time, so the dot never starts a line. */
+.queueNotice strong span {
+  display: inline-block;
 }
 .error {
   min-width: 0;

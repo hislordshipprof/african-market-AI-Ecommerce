@@ -281,10 +281,28 @@
   font: 700 30px/1.2 var(--font-display);
   margin: 24px 0 12px;
 }
+.flow-closed h1 {
+  font: 700 30px/1.2 var(--font-display);
+  margin: 0 0 12px;
+  text-wrap: balance;
+}
 .flow-closed p {
   color: var(--color-muted);
   line-height: 1.6;
   margin-bottom: 24px;
+}
+.flow-closed h1 + p {
+  text-wrap: balance;
+}
+.flow-closed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 20px;
+}
+.flow-closed-actions .sf-text-link {
+  min-height: 44px;
 }
 .flow-success-mark {
   display: inline-grid;
