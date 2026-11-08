@@ -130,9 +130,11 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
   await expect(page.getByTestId("assistant-launcher")).toBeVisible();
   await page.getByTestId("assistant-launcher").click();
+  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  await expect(dialog.locator('[class*="addedRow"]')).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator('[class*="typing"]')).toHaveCount(0);
   await page.getByTestId("assistant-composer").fill("show my basket");
   await page.getByTestId("assistant-composer").press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
   await expect(dialog.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
   await expect(dialog.locator('[class*="summary"]').getByText(/to reach the .+ minimum order/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
@@ -369,10 +371,11 @@ test("a photo does not change the basket until the customer taps", async ({ page
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "Here is what I found." })).toBeVisible({ timeout: 20_000 });
   const chip = dialog.getByLabel("Choice chips").getByRole("button").first();
   await expect(chip).toBeEnabled();
-  const picked = (await chip.innerText()).trim().replace(/ \([^)]*\)$/, "");
+  const picked = (await chip.innerText()).trim();
   await chip.click();
   await expect(page.getByRole("banner").getByTestId("cart-count")).toHaveText("1", { timeout: 20_000 });
-  await expect(dialog.locator('[class*="addedRow"]').getByText(picked, { exact: true })).toBeVisible();
+  const addedName = (await dialog.locator('[class*="addedRow"]').getByRole("heading").first().innerText()).trim();
+  expect(picked.startsWith(`${addedName} (`)).toBe(true);
   const fileReplies = dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" });
   await expect(fileReplies).toHaveCount(1);
   let pdfPost = "";
