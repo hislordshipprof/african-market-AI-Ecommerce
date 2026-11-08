@@ -83,7 +83,7 @@ export function StorySurface({
 
         {/* After the form in the DOM, so a screen reader reaches the form first. */}
         <div className="pointer-events-none absolute bottom-12 left-[max(6vw,3rem)] z-10 hidden max-w-[min(34rem,42vw)] text-white lg:block">
-          <p className="font-display text-[clamp(1.75rem,2.8vw,2.5rem)] leading-[1.1] font-bold text-balance">
+          <p className="font-display text-[clamp(1.5rem,2.2vw,2rem)] leading-[1.1] font-bold text-balance">
             {scene.line}
           </p>
           <p className="mt-3 text-sm">

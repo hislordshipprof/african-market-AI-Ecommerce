@@ -1,14 +1,21 @@
 "use client";
 
-import { useState } from "react";
-import { Check, CircleAlert, Copy } from "lucide-react";
+import { useEffect, useState, type ComponentProps } from "react";
+import { ArrowLeft, Check, CircleAlert, Copy, Eye, EyeOff } from "lucide-react";
+import { cn } from "cn";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export const AUTH_INPUT = "h-12 text-base md:text-base";
 export const AUTH_CODE_INPUT = "h-12 text-center text-lg tracking-[0.3em] md:text-lg";
-export const AUTH_SUBMIT = "mt-2 h-12 w-full rounded-full text-base font-semibold";
-export const AUTH_QUIET_ACTION =
-  "flex h-11 w-full items-center justify-center rounded-full text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline";
+// The stock 50% disabled fill drops the pending label below AA.
+export const AUTH_SUBMIT =
+  "mt-2 h-12 w-full cursor-pointer rounded-full text-base font-semibold disabled:opacity-80";
+// Above the heading on purpose: down by the submit button, a second tap on the button
+// would land on this link after the step changes.
+export const AUTH_BACK =
+  "-ml-2 mb-1 inline-flex h-11 w-fit items-center gap-1.5 rounded-full px-2 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline";
+export const AUTH_CODE_HINT = "Enter all 6 digits";
 
 /** Authenticator apps show codes as "123 456", and a paste should still work. */
 export function totpDigits(value: string): string {
@@ -25,6 +32,15 @@ export function totpErrorMessage(error: { code?: string; message?: string }, fal
   return error.message ?? fallback;
 }
 
+/** The submit button is disabled while pending, so a failure would otherwise drop focus to the page. */
+export function focusField(id: string) {
+  document.getElementById(id)?.focus();
+}
+
+export function BackArrow() {
+  return <ArrowLeft aria-hidden="true" className="size-4" />;
+}
+
 export function AuthError({ id, children }: { id: string; children: string }) {
   return (
     <div
@@ -38,8 +54,42 @@ export function AuthError({ id, children }: { id: string; children: string }) {
   );
 }
 
-export function CopyRow({ label, display, value }: { label: string; display: string; value: string }) {
+export function PasswordInput({ className, ...props }: ComponentProps<typeof Input>) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="relative">
+      <Input {...props} type={shown ? "text" : "password"} className={cn(AUTH_INPUT, "pr-12", className)} />
+      <button
+        type="button"
+        onClick={() => setShown((value) => !value)}
+        aria-label={shown ? "Hide characters" : "Show characters"}
+        className="absolute inset-y-0 right-0 flex w-12 cursor-pointer items-center justify-center rounded-r-lg text-muted-foreground hover:text-foreground"
+      >
+        {shown ? <EyeOff aria-hidden="true" className="size-5" /> : <Eye aria-hidden="true" className="size-5" />}
+      </button>
+    </div>
+  );
+}
+
+export function CopyRow({
+  label,
+  display,
+  value,
+  wrap = false,
+}: {
+  label: string;
+  display: string;
+  value: string;
+  /** Show the whole value, for something a person has to read and type. */
+  wrap?: boolean;
+}) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+
+  useEffect(() => {
+    if (state !== "copied") return;
+    const timer = window.setTimeout(() => setState("idle"), 2000);
+    return () => window.clearTimeout(timer);
+  }, [state]);
 
   async function copy() {
     try {
@@ -51,24 +101,26 @@ export function CopyRow({ label, display, value }: { label: string; display: str
   }
 
   return (
-    <div className="flex items-center gap-1 rounded-lg bg-muted py-1 pr-1 pl-3">
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-muted-foreground">{label}</p>
-        <code className="block truncate text-xs">{display}</code>
+    <div className="rounded-lg bg-muted py-1 pr-1 pl-3">
+      <div className="flex items-center gap-1">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+          <code className={cn("block", wrap ? "text-sm break-words" : "truncate text-xs")}>{display}</code>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={copy}
+          aria-label={`Copy ${label.toLowerCase()}`}
+          className="size-11 shrink-0 cursor-pointer rounded-full"
+        >
+          {state === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+        </Button>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={copy}
-        aria-label={`Copy ${label.toLowerCase()}`}
-        className="size-11 shrink-0 rounded-full"
-      >
-        {state === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-      </Button>
-      <span role="status" className="sr-only">
+      <p role="status" className={cn("pr-2 text-xs", state === "failed" ? "pb-1 text-destructive" : "sr-only")}>
         {state === "copied" && `${label} copied`}
         {state === "failed" && `Couldn't copy the ${label.toLowerCase()}. Select it and copy by hand.`}
-      </span>
+      </p>
     </div>
   );
 }

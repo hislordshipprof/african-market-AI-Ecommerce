@@ -9,11 +9,15 @@ import { CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  AUTH_BACK,
+  AUTH_CODE_HINT,
   AUTH_CODE_INPUT,
   AUTH_INPUT,
-  AUTH_QUIET_ACTION,
   AUTH_SUBMIT,
   AuthError,
+  BackArrow,
+  PasswordInput,
+  focusField,
   totpDigits,
   totpErrorMessage,
 } from "../auth-form-parts";
@@ -21,6 +25,8 @@ import {
 type Step = "credentials" | "totp";
 
 const ERROR_ID = "admin-sign-in-error";
+const EMAIL_ID = "admin-email";
+const TOTP_ID = "admin-totp";
 
 // Mouse and trackpad only: on a phone this would open the keyboard over the page.
 const focusEmailOnDesktop = (input: HTMLInputElement | null) => {
@@ -31,6 +37,13 @@ const focusEmailOnDesktop = (input: HTMLInputElement | null) => {
 
 // The submit button that had focus is gone after the step changes.
 const focusOnMount = (input: HTMLInputElement | null) => input?.focus();
+
+function credentialsErrorMessage(error: { code?: string; message?: string }): string {
+  if (error.code === "INVALID_EMAIL_OR_PASSWORD") {
+    return "That email and password don't match. Check both and try again.";
+  }
+  return error.message ?? "Sign-in failed";
+}
 
 export default function AdminSignIn() {
   const router = useRouter();
@@ -53,8 +66,9 @@ export default function AdminSignIn() {
       });
 
       if (result.error) {
-        setError(result.error.message ?? "Sign-in failed");
+        setError(credentialsErrorMessage(result.error));
         setLoading(false);
+        focusField(EMAIL_ID);
       } else if ((result.data as Record<string, unknown>)?.twoFactorRedirect) {
         setStep("totp");
         setLoading(false);
@@ -64,6 +78,7 @@ export default function AdminSignIn() {
     } catch {
       setError("Sign-in failed. Check your credentials.");
       setLoading(false);
+      focusField(EMAIL_ID);
     }
   }
 
@@ -80,12 +95,14 @@ export default function AdminSignIn() {
       if (result.error) {
         setError(totpErrorMessage(result.error, "Invalid code"));
         setLoading(false);
+        focusField(TOTP_ID);
       } else {
         router.push("/admin/stores");
       }
     } catch {
       setError("Verification failed. Try again.");
       setLoading(false);
+      focusField(TOTP_ID);
     }
   }
 
@@ -101,6 +118,12 @@ export default function AdminSignIn() {
     <StorySurface>
       <StoryCard className="gap-6 py-8">
         <CardHeader className="px-6 sm:px-8">
+          {step === "totp" && (
+            <button type="button" onClick={backToCredentials} className={`${AUTH_BACK} cursor-pointer`}>
+              <BackArrow />
+              Back to sign in
+            </button>
+          )}
           <h1 className="font-display text-[1.75rem] leading-tight font-bold">Platform Admin</h1>
           <CardDescription className="text-base">
             {step === "credentials"
@@ -115,10 +138,10 @@ export default function AdminSignIn() {
           {step === "credentials" && (
             <form onSubmit={handleCredentials} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <Label htmlFor="admin-email">Email</Label>
+                <Label htmlFor={EMAIL_ID}>Email</Label>
                 <Input
                   ref={focusEmailOnDesktop}
-                  id="admin-email"
+                  id={EMAIL_ID}
                   type="email"
                   required
                   value={email}
@@ -131,13 +154,11 @@ export default function AdminSignIn() {
 
               <div className="flex flex-col gap-2">
                 <Label htmlFor="admin-password">Password</Label>
-                <Input
+                <PasswordInput
                   id="admin-password"
-                  type="password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className={AUTH_INPUT}
                   autoComplete="current-password"
                   {...errorProps}
                 />
@@ -152,18 +173,20 @@ export default function AdminSignIn() {
           {step === "totp" && (
             <form onSubmit={handleTotp} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <Label htmlFor="admin-totp">Verification code</Label>
+                <Label htmlFor={TOTP_ID}>Verification code</Label>
                 <Input
                   ref={focusOnMount}
-                  id="admin-totp"
+                  id={TOTP_ID}
                   type="text"
                   required
                   inputMode="numeric"
                   pattern="[0-9]{6}"
+                  title={AUTH_CODE_HINT}
                   value={totpCode}
                   onChange={(e) => setTotpCode(totpDigits(e.target.value))}
                   className={AUTH_CODE_INPUT}
                   autoComplete="one-time-code"
+                  placeholder="000000"
                   {...errorProps}
                 />
               </div>
@@ -171,9 +194,6 @@ export default function AdminSignIn() {
               <Button type="submit" disabled={loading} className={AUTH_SUBMIT}>
                 {loading ? "Verifying..." : "Verify"}
               </Button>
-              <button type="button" onClick={backToCredentials} className={AUTH_QUIET_ACTION}>
-                Back to sign in
-              </button>
             </form>
           )}
         </CardContent>

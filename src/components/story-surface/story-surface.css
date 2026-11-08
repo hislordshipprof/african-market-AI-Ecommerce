@@ -45,6 +45,13 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  /* So overscroll and the browser's own scrollbars don't flash light around the surface. */
+  html:has(.story-surface),
+  body:has(.story-surface) {
+    color-scheme: dark;
+    background-color: var(--store-bg, #0f1712);
+  }
+
   .story-surface {
     color-scheme: dark;
     --background: var(--store-bg, #0f1712);
@@ -65,7 +72,7 @@
   /* Multiply keeps the photo's color and contrast. A flat black overlay turns it to mud. */
   .story-surface__dusk {
     display: block;
-    background: #56676a;
+    background: #7d8c88;
     mix-blend-mode: multiply;
   }
 }
