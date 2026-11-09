@@ -69,16 +69,19 @@ export async function confirmDeliveryAddress(
   }
   const located = await getAddressProvider().locate(parts);
   if (!located.ok) return { ok: false, code: located.code, message: messageFor(located.code) };
-  await writeGeocodeCache(parts, located.match, now);
   const matched = {
     line1: located.match.line1,
     city: located.match.city,
     state: located.match.state,
     zip: located.match.zip,
   };
-  if (addressCacheKey(parts) !== addressCacheKey(matched)) {
-    await writeGeocodeCache(matched, located.match, now);
-  }
+  // The matched key first: checkout sends the matched fields, and a later
+  // cache hit on the typed key must imply the matched key is stored too.
+  const stored =
+    (await writeGeocodeCache(matched, located.match, now)) &&
+    (addressCacheKey(parts) === addressCacheKey(matched) ||
+      (await writeGeocodeCache(parts, located.match, now)));
+  if (!stored) return { ok: false, code: "unavailable", message: messageFor("unavailable") };
   return decide(located.match, store);
 }
 

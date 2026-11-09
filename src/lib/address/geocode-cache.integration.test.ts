@@ -1,9 +1,21 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authPrisma } from "../db";
 import { addressCacheKey } from "./geo";
 import { confirmDeliveryAddress, lookupConfirmed } from "./confirm";
 import { fakeLocate } from "./fake";
 import { setAddressProvider } from "./provider";
+
+const writes = vi.hoisted(() => ({ fail: false }));
+vi.mock("../db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../db")>();
+  return {
+    ...actual,
+    upsertAddressGeocode: async (...args: Parameters<typeof actual.upsertAddressGeocode>) => {
+      if (writes.fail) throw new Error("cache write refused");
+      return actual.upsertAddressGeocode(...args);
+    },
+  };
+});
 
 const hasDb = !!process.env.DATABASE_URL;
 const STORE = { lat: 29.693857800118, lng: -95.266257879374, radiusMi: 8 };
@@ -42,5 +54,18 @@ describe.skipIf(!hasDb)("geocode cache", () => {
       expect(again.ok).toBe(true);
     }
     expect(calls).toBe(1);
+  });
+
+  it("confirm fails visibly when the confirmed address cannot be cached", async () => {
+    const parts = { line1: "8505 Fenton St", city: "Silver Spring", state: "MD", zip: "20910" };
+    await authPrisma.$executeRaw`DELETE FROM address_geocodes WHERE key = ${addressCacheKey(parts)}`;
+    writes.fail = true;
+    try {
+      const refused = await confirmDeliveryAddress(parts, STORE, { limit: true, ip: "203.0.113.51" });
+      expect(refused).toMatchObject({ ok: false, code: "unavailable" });
+    } finally {
+      writes.fail = false;
+    }
+    expect(await lookupConfirmed(parts, STORE)).toBeNull();
   });
 });
