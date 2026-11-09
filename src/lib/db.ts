@@ -1149,3 +1149,107 @@ export async function findVerifiedOwnerLink(
   if (!row) return null;
   return { storeId: row.store_id, userId: row.user_id, role: row.role, storeName: row.name };
 }
+
+/**
+ * Replaces the member's link with an unverified one carrying a fresh code
+ * hash, expiring on the database clock, plus an audit row. Returns the row id.
+ */
+export async function upsertPendingOwnerLink(input: {
+  storeId: string;
+  userId: string;
+  actorEmail: string;
+  phoneNumber: string;
+  waId: string;
+  codeHash: string;
+  ttlMinutes: number;
+  auditAfter: Prisma.InputJsonValue;
+}): Promise<string> {
+  if (!Number.isInteger(input.ttlMinutes) || input.ttlMinutes <= 0) {
+    throw new Error("Link code TTL must be a positive integer.");
+  }
+  // Integer is validated above. Prisma.raw does not bind it as a parameter.
+  const ttl = Prisma.raw(`INTERVAL '${input.ttlMinutes} minutes'`);
+  return storeScopedTransaction(input.storeId, async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      INSERT INTO owner_whatsapp_links (
+        id, store_id, user_id, phone_number, wa_id, verified, verified_at,
+        verification_code_hash, verification_expires_at, verification_attempts, created_at, updated_at
+      ) VALUES (
+        ${crypto.randomUUID()}, ${input.storeId}, ${input.userId}, ${input.phoneNumber}, ${input.waId}, false, NULL,
+        ${input.codeHash}, (now() AT TIME ZONE 'UTC') + ${ttl}, 0, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
+      )
+      ON CONFLICT (store_id, user_id) DO UPDATE SET
+        phone_number = EXCLUDED.phone_number,
+        wa_id = EXCLUDED.wa_id,
+        verified = false,
+        verified_at = NULL,
+        verification_code_hash = EXCLUDED.verification_code_hash,
+        verification_expires_at = EXCLUDED.verification_expires_at,
+        verification_attempts = 0,
+        updated_at = EXCLUDED.updated_at
+      RETURNING id
+    `;
+    const id = rows[0]?.id;
+    if (!id) throw new Error("owner link upsert returned no row");
+    await tx.auditLog.create({
+      data: {
+        storeId: input.storeId,
+        actorId: input.userId,
+        actorEmail: input.actorEmail,
+        action: "whatsapp_link.start",
+        entityType: "owner_whatsapp_link",
+        entityId: id,
+        after: input.auditAfter,
+      },
+    });
+    return id;
+  });
+}
+
+/** Deletes the member's link, with an audit row when one existed. */
+export async function deleteOwnerLinkForMember(storeId: string, userId: string, actorEmail: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    const removed = await tx.$queryRaw<Array<{ id: string }>>`
+      DELETE FROM owner_whatsapp_links
+      WHERE store_id = ${storeId} AND user_id = ${userId}
+      RETURNING id
+    `;
+    if (!removed[0]) return;
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: userId,
+        actorEmail,
+        action: "whatsapp_link.remove",
+        entityType: "owner_whatsapp_link",
+        entityId: removed[0].id,
+      },
+    });
+  });
+}
+
+/** The member's link for the store admin page; `code_live` is judged on the database clock. */
+export async function readOwnerLink(storeId: string, userId: string): Promise<{
+  phoneNumber: string;
+  verified: boolean;
+  verifiedAt: Date | null;
+  codeLive: boolean;
+} | null> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.$queryRaw<Array<{ phone_number: string; verified: boolean; verified_at: Date | null; code_live: boolean }>>`
+      SELECT phone_number, verified, verified_at,
+        (verification_code_hash IS NOT NULL
+          AND verification_expires_at > (now() AT TIME ZONE 'UTC')) AS code_live
+      FROM owner_whatsapp_links
+      WHERE store_id = ${storeId} AND user_id = ${userId}
+    `,
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    phoneNumber: row.phone_number,
+    verified: row.verified,
+    verifiedAt: row.verified_at,
+    codeLive: row.code_live === true,
+  };
+}

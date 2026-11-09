@@ -1,11 +1,17 @@
-import { findVerifiedOwnerLink, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
+import {
+  deleteOwnerLinkForMember,
+  findVerifiedOwnerLink,
+  platformAdminTransaction,
+  readOwnerLink,
+  storeScoped,
+  upsertPendingOwnerLink,
+} from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { generateLinkCode, hashLinkCode, LINK_CODE_TTL_MINUTES, phoneKey } from "./code";
 import { WhatsAppNotConfiguredError, whatsappErrorCode } from "./errors";
 import { canSendWhatsApp, sendWhatsAppMessage } from "./index";
 import { e164Digits, lastFour, normalizeOwnerPhone } from "./phone";
 import { ownerLinkCodeMessage } from "./templates";
-import { Prisma } from "@prisma/client";
 
 export const NOT_SET_UP_ERROR = "WhatsApp isn't set up yet";
 export const SEND_FAILED_ERROR = "We couldn't send the code. Check the number and try again.";
@@ -14,7 +20,6 @@ export const TOO_MANY_CODES_ERROR = "Too many codes sent. Try again in an hour."
 const HOUR_MS = 60 * 60 * 1000;
 const SENDS_PER_STORE_PER_HOUR = 5;
 const SENDS_PER_NUMBER_PER_HOUR = 3;
-const TTL = Prisma.raw(`INTERVAL '${LINK_CODE_TTL_MINUTES} minutes'`);
 
 export interface OwnerLinkView {
   phoneNumber: string;
@@ -54,40 +59,15 @@ export async function startOwnerLink(owner: Owner, rawPhone: string): Promise<{ 
   const codeHash = hashLinkCode(owner.storeId, owner.userId, code);
   const digits = e164Digits(phone.e164);
 
-  const linkId = await storeScopedTransaction(owner.storeId, async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`
-      INSERT INTO owner_whatsapp_links (
-        id, store_id, user_id, phone_number, wa_id, verified, verified_at,
-        verification_code_hash, verification_expires_at, verification_attempts, created_at, updated_at
-      ) VALUES (
-        ${crypto.randomUUID()}, ${owner.storeId}, ${owner.userId}, ${phone.e164}, ${digits}, false, NULL,
-        ${codeHash}, (now() AT TIME ZONE 'UTC') + ${TTL}, 0, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
-      )
-      ON CONFLICT (store_id, user_id) DO UPDATE SET
-        phone_number = EXCLUDED.phone_number,
-        wa_id = EXCLUDED.wa_id,
-        verified = false,
-        verified_at = NULL,
-        verification_code_hash = EXCLUDED.verification_code_hash,
-        verification_expires_at = EXCLUDED.verification_expires_at,
-        verification_attempts = 0,
-        updated_at = EXCLUDED.updated_at
-      RETURNING id
-    `;
-    const id = rows[0]?.id;
-    if (!id) throw new Error("owner link upsert returned no row");
-    await tx.auditLog.create({
-      data: {
-        storeId: owner.storeId,
-        actorId: owner.userId,
-        actorEmail: owner.actorEmail,
-        action: "whatsapp_link.start",
-        entityType: "owner_whatsapp_link",
-        entityId: id,
-        after: { phoneLastFour: lastFour(phone.e164) },
-      },
-    });
-    return id;
+  const linkId = await upsertPendingOwnerLink({
+    storeId: owner.storeId,
+    userId: owner.userId,
+    actorEmail: owner.actorEmail,
+    phoneNumber: phone.e164,
+    waId: digits,
+    codeHash,
+    ttlMinutes: LINK_CODE_TTL_MINUTES,
+    auditAfter: { phoneLastFour: lastFour(phone.e164) },
   });
 
   let waId: string | null;
@@ -118,46 +98,12 @@ export async function startOwnerLink(owner: Owner, rawPhone: string): Promise<{ 
 }
 
 export async function removeOwnerLink(owner: Owner): Promise<{ ok: true }> {
-  await storeScopedTransaction(owner.storeId, async (tx) => {
-    const removed = await tx.$queryRaw<Array<{ id: string }>>`
-      DELETE FROM owner_whatsapp_links
-      WHERE store_id = ${owner.storeId} AND user_id = ${owner.userId}
-      RETURNING id
-    `;
-    if (removed[0]) {
-      await tx.auditLog.create({
-        data: {
-          storeId: owner.storeId,
-          actorId: owner.userId,
-          actorEmail: owner.actorEmail,
-          action: "whatsapp_link.remove",
-          entityType: "owner_whatsapp_link",
-          entityId: removed[0].id,
-        },
-      });
-    }
-  });
+  await deleteOwnerLinkForMember(owner.storeId, owner.userId, owner.actorEmail);
   return { ok: true };
 }
 
-export async function getOwnerLink(storeId: string, userId: string): Promise<OwnerLinkView | null> {
-  const rows = await storeScopedTransaction(storeId, (tx) =>
-    tx.$queryRaw<Array<{ phone_number: string; verified: boolean; verified_at: Date | null; code_live: boolean }>>`
-      SELECT phone_number, verified, verified_at,
-        (verification_code_hash IS NOT NULL
-          AND verification_expires_at > (now() AT TIME ZONE 'UTC')) AS code_live
-      FROM owner_whatsapp_links
-      WHERE store_id = ${storeId} AND user_id = ${userId}
-    `,
-  );
-  const row = rows[0];
-  if (!row) return null;
-  return {
-    phoneNumber: row.phone_number,
-    verified: row.verified,
-    verifiedAt: row.verified_at,
-    codeLive: row.code_live === true,
-  };
+export function getOwnerLink(storeId: string, userId: string): Promise<OwnerLinkView | null> {
+  return readOwnerLink(storeId, userId);
 }
 
 /**

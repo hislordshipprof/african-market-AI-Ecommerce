@@ -114,6 +114,9 @@ _Avoid_: Store AI, store assistant
 **Daily digest**:
 The Store copilot's end-of-day summary for a store owner.
 
+**Linked WhatsApp number**:
+The WhatsApp number a store owner has verified for their store; the Store copilot recognises the owner by it on the platform's WhatsApp number.
+
 ## Ordering and fulfillment
 
 **Order**:
