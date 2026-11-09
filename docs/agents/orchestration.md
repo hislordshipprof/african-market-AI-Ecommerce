@@ -106,7 +106,7 @@ The coordinator is one interactive session that never writes product code. Every
 
 ## Commit attribution
 
-Commits carry no AI co-author (owner rule, 2026-11-09). `scripts/strip-ai-coauthors.sh` removes `Co-Authored-By:` trailers that credit Claude or Cursor. `.githooks/commit-msg` runs it on every commit once `core.hooksPath` is `.githooks` (`build-ticket.sh` sets this), and `merge-ticket.sh` runs it on the squash message it gives GitHub. Tests: `bash scripts/strip-ai-coauthors.test.sh`.
+Commits carry no AI co-author and no session link (owner rule, 2026-11-09). `scripts/strip-ai-coauthors.sh` removes `Co-Authored-By:` trailers that credit Claude or Cursor, `Claude-Session:` trailers and the "Generated with Claude Code" line. `.githooks/commit-msg` runs it on every commit once `core.hooksPath` is `.githooks` (`build-ticket.sh` sets this), and `merge-ticket.sh` runs it on the squash message it gives GitHub. Tests: `bash scripts/strip-ai-coauthors.test.sh`.
 
 ## Time limits
 

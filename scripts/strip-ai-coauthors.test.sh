@@ -7,7 +7,11 @@ fail=0
 eq() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1"; printf 'want:\n%s\ngot:\n%s\n' "$2" "$3"; fail=1; fi; }
 
 got=$(printf 'Fix the refund race (#307)\n\nA lost race now reports success.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://example.test/s\n' | bash "$F")
-eq "the Claude trailer goes, the rest of the message stays" "$(printf 'Fix the refund race (#307)\n\nA lost race now reports success.\n\nClaude-Session: https://example.test/s')" "$got"
+eq "the co-author and session link go, the rest of the message stays" "$(printf 'Fix the refund race (#307)\n\nA lost race now reports success.')" "$got"
+
+got=$(printf 'Subject\n\nBody.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_x\nClaude-Session: https://claude.ai/code/session_x\n' | bash "$F")
+eq "the Generated-with line and the session trailer go" "$(printf 'Subject\n\nBody.\n\n\nhttps://claude.ai/code/session_x')" "$got"
+printf 'S\n\nClaude-Session: https://example.test/s\n' | bash "$F" --check && { echo "FAIL --check missed a session link"; fail=1; } || echo "ok   --check reports a session link"
 
 got=$(printf 'Subject\n\n* one\n\nCo-authored-by: Cursor <cursoragent@cursor.com>\n\n* two\n\n---------\n\nCo-authored-by: Claude Fable 5.2 <noreply@anthropic.com>\n' | bash "$F")
 eq "every AI trailer in a squash message goes, in any letter case" "$(printf 'Subject\n\n* one\n\n\n* two\n\n---------')" "$got"
