@@ -405,4 +405,32 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     expect(kept).toMatchObject({ ok: true, listing: { qty: 15 } });
     expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: palmId } })).qty).toBe(7);
   }, 60_000);
+
+  it("an ambiguous report stays a question and does not draft a card", async () => {
+    const ofada = await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Ofada Rice", price: 500, stockMode: "counted", qty: 9 },
+    });
+    const question = "Which one do you mean, Rice or Ofada Rice?";
+    const qtyBefore = (await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: riceId } })).qty;
+    const proposalsBefore = await storeScoped(storeAId).stockProposal.count({
+      where: { listingId: { in: [riceId, ofada.id] } },
+    });
+    try {
+      script([{ kind: "text", text: question }]);
+      const sent = await sendCopilotMessage({
+        messageId: crypto.randomUUID(),
+        text: "got 10 bags of rice",
+      });
+      expect(sent.ok).toBe(true);
+      if (!sent.ok) return;
+      expect(sent.proposals).toEqual([]);
+      expect(sent.reply).toBe(question);
+      expect(await storeScoped(storeAId).stockProposal.count({
+        where: { listingId: { in: [riceId, ofada.id] } },
+      })).toBe(proposalsBefore);
+      expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: riceId } })).qty).toBe(qtyBefore);
+    } finally {
+      await storeScoped(storeAId).listing.delete({ where: { id: ofada.id } }).catch(() => undefined);
+    }
+  });
 });

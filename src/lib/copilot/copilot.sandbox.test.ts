@@ -59,7 +59,7 @@ describe.skipIf(!live)("copilot live sandbox", () => {
     await authPrisma.store.delete({ where: { id: storeId } }).catch(() => undefined);
   });
 
-  it("drafts the three owner reports and spends under five cents", async () => {
+  it("live Haiku turns owner reports into the right proposals", async () => {
     const before = await dayCost();
     const reports = [
       "got 20 bags of gari",

@@ -12,7 +12,7 @@ import { takeRateLimit } from "../rate-limit/app-limiter";
 import { cardFromParts, loadProposalCards } from "./cards";
 import { modelHistory, parseStoredMessages, type StoredMessage } from "./messages";
 import { COPILOT_SYSTEM_PROMPT } from "./prompt";
-import { copilotTools, createDraftBook, draftUnambiguousReport, type Draft } from "./tools";
+import { copilotTools, createDraftBook, type Draft } from "./tools";
 import {
   CONVERSATION_MAX,
   FIXED_ERROR,
@@ -200,17 +200,6 @@ async function deleteEmpty(storeId: string, conversationId: string): Promise<voi
   `));
 }
 
-function spokenReply(text: string, drafts: Draft[]): string {
-  const trimmed = text.trim();
-  if (drafts.length > 0 && /should I draft|nothing would change|did not draft|didn't draft|will not draft|which one|I'll draft|I will draft|reply with the name/i.test(trimmed)) {
-    return "";
-  }
-  if (drafts.length === 0 && /\b(drafted|draft is waiting)\b/i.test(trimmed)) {
-    return "I didn't draft a change. Name the item and a whole number, or say it is out.";
-  }
-  return trimmed;
-}
-
 function visibleReply(text: string, drafts: Draft[], capped: boolean): string {
   const trimmed = text.trim();
   if (trimmed) {
@@ -295,11 +284,9 @@ export async function sendCopilotTurn(input: {
       timeout: { totalMs: MODEL_TIMEOUT_MS },
       providerOptions: assistantProviderOptions(modelId),
     });
-    if (book.drafts.length === 0) await draftUnambiguousReport(input.storeId, book, text);
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
     const capped = steps >= STEP_CAP || result.finishReason === "length" || book.overflow;
-    const spoken = spokenReply(result.text, book.drafts);
-    const reply = visibleReply(spoken, book.drafts, capped);
+    const reply = visibleReply(result.text, book.drafts, capped);
     const summary = book.drafts.length
       ? `Drafted: ${book.drafts.map((draft) => `${draft.listingName} ${draft.kind} ${draft.quantity ?? draft.statusValue}`).join("; ")}.`
       : undefined;
