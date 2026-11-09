@@ -22,7 +22,10 @@ export default async function WhatsAppPage() {
     const since = link.verifiedAt
       ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: session.store.timezone }).format(link.verifiedAt)
       : null;
-    state = { kind: "linked", phone: link.phoneNumber, display: displayNumber(link.phoneNumber), since };
+    const pending = link.codeLive && link.pendingPhoneNumber
+      ? { phone: link.pendingPhoneNumber, display: displayNumber(link.pendingPhoneNumber) }
+      : null;
+    state = { kind: "linked", phone: link.phoneNumber, display: displayNumber(link.phoneNumber), since, pending };
   } else {
     state = {
       kind: link.codeLive ? "waiting" : "expired",

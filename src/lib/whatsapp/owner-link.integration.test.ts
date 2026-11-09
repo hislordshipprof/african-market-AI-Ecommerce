@@ -31,9 +31,11 @@ import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
 import { startWhatsAppLinkAction } from "./actions";
 import { fakeWhatsAppProvider, getFakeOutbox, noteInbound, resetFake } from "./fake";
+import { WhatsAppApiError } from "./errors";
 import { NOT_LINKED_REPLY, WRONG_CODE_REPLY } from "./inbound";
+import { ownerMessageReply } from "./owner-handler";
 import { setWhatsAppProvider } from "./index";
-import { getOwnerLink, resolveOwnerByPhone } from "./owner-link";
+import { getOwnerLink, resolveOwnerByPhone, SEND_FAILED_ERROR } from "./owner-link";
 import { signWhatsAppBody } from "./signature";
 import type { OutboundMessage } from "./types";
 
@@ -141,11 +143,10 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
   let ada = "";
   let ownerB = "";
   let cookiesA = "";
+  let cookiesB = "";
 
-  beforeAll(async () => {
-    ada = await signUp(emailA, "Ada");
-    ownerB = await signUp(emailB, "Bola");
-    const signedIn = await authPost("/sign-in/email", { email: emailA, password });
+  async function signInWithTotp(email: string): Promise<string> {
+    const signedIn = await authPost("/sign-in/email", { email, password });
     expect(signedIn.status, await signedIn.clone().text()).toBe(200);
     const cookies = collectCookies(signedIn);
     const enabled = await authPost("/two-factor/enable", { password }, cookies);
@@ -154,7 +155,22 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     if (!secret) throw new Error("TOTP URI has no secret");
     const verified = await authPost("/two-factor/verify-totp", { code: generateTOTP(secret) }, cookies);
     expect(verified.status, await verified.clone().text()).toBe(200);
-    cookiesA = collectCookies(verified) || cookies;
+    return collectCookies(verified) || cookies;
+  }
+
+  /** The signed-in owner links `phone` at their store through the action and a signed reply. */
+  async function linkAs(cookies: string, slug: string, phone: { typed: string; digits: string }): Promise<void> {
+    headerState.set("cookie", cookies);
+    headerState.set("x-store-slug", slug);
+    expect(await startWhatsAppLinkAction(phoneForm(phone.typed))).toEqual({ ok: true });
+    expect((await deliverText(phone.digits, lastCodeTo(phone.digits))).status).toBe(200);
+  }
+
+  beforeAll(async () => {
+    ada = await signUp(emailA, "Ada");
+    ownerB = await signUp(emailB, "Bola");
+    cookiesA = await signInWithTotp(emailA);
+    cookiesB = await signInWithTotp(emailB);
 
     storeA = crypto.randomUUID();
     storeB = crypto.randomUUID();
@@ -315,5 +331,65 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     expect((await storeScoped(storeA).ownerWhatsAppLink.findUnique({
       where: { storeId_userId: { storeId: storeA, userId: ada } },
     }))?.verified).toBe(false);
+  });
+
+  it("a pending code at another store does not capture a verified owner's messages; the right code still moves the number", async () => {
+    const phone = randomUsNumber();
+    await linkAs(cookiesA, slugA, phone);
+    expect(await resolveOwnerByPhone(phone.e164)).toMatchObject({ storeId: storeA, userId: ada });
+
+    // Store B's owner enters Ada's number.
+    headerState.set("cookie", cookiesB);
+    headerState.set("x-store-slug", slugB);
+    expect(await startWhatsAppLinkAction(phoneForm(phone.typed))).toEqual({ ok: true });
+    const codeB = lastCodeTo(phone.digits);
+    const whereB = { storeId_userId: { storeId: storeB, userId: ownerB } };
+
+    const other = codeB === "123456" ? "654321" : "123456";
+    for (let i = 0; i < 6; i++) expect((await deliverText(phone.digits, other)).status).toBe(200);
+    const texts = textsTo(phone.digits);
+    expect(texts.slice(1)).toEqual(Array(6).fill(ownerMessageReply({ storeName: storeNameA })));
+    const pendingB = await storeScoped(storeB).ownerWhatsAppLink.findUnique({ where: whereB });
+    expect(pendingB).toMatchObject({ verified: false, verificationAttempts: 0 });
+    expect(pendingB?.verificationCodeHash).not.toBeNull();
+    expect(await resolveOwnerByPhone(phone.e164)).toMatchObject({ storeId: storeA, userId: ada });
+
+    // The holder of the number replies with B's code: newest wins.
+    expect((await deliverText(phone.digits, codeB)).status).toBe(200);
+    expect(await resolveOwnerByPhone(phone.e164)).toEqual({ storeId: storeB, userId: ownerB, membership: { role: "owner" } });
+    expect(await storeScoped(storeA).ownerWhatsAppLink.count()).toBe(0);
+    await storeScoped(storeB).ownerWhatsAppLink.deleteMany({});
+  });
+
+  it("a failed send leaves the verified link as it was, for a new number and for the same number", async () => {
+    // Store B: store A's five sends an hour are used by the tests above.
+    const phone = randomUsNumber();
+    await linkAs(cookiesB, slugB, phone);
+    const where = { storeId_userId: { storeId: storeB, userId: ownerB } };
+    const before = await storeScoped(storeB).ownerWhatsAppLink.findUnique({ where });
+    expect(before?.verified).toBe(true);
+
+    setWhatsAppProvider({ send: async () => { throw new WhatsAppApiError(130429, 429); } });
+    for (const entered of [randomUsNumber().typed, phone.typed]) {
+      expect(await startWhatsAppLinkAction(phoneForm(entered))).toEqual({ error: SEND_FAILED_ERROR });
+      const after = await storeScoped(storeB).ownerWhatsAppLink.findUnique({ where });
+      expect(after).toMatchObject({
+        phoneNumber: before?.phoneNumber,
+        waId: before?.waId,
+        verified: true,
+        verifiedAt: before?.verifiedAt,
+        verificationCodeHash: null,
+        verificationExpiresAt: null,
+      });
+      expect(await resolveOwnerByPhone(phone.e164)).toMatchObject({ storeId: storeB, userId: ownerB });
+    }
+
+    // A delivered code for a new number that is never answered also keeps the old link.
+    setWhatsAppProvider(fakeWhatsAppProvider);
+    const next = randomUsNumber();
+    expect(await startWhatsAppLinkAction(phoneForm(next.typed))).toEqual({ ok: true });
+    expect(await getOwnerLink(storeB, ownerB)).toMatchObject({ phoneNumber: phone.e164, verified: true, codeLive: true });
+    expect(await resolveOwnerByPhone(phone.e164)).toMatchObject({ storeId: storeB, userId: ownerB });
+    expect(await resolveOwnerByPhone(next.e164)).toBeNull();
   });
 });

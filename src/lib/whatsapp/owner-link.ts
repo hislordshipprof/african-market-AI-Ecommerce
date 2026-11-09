@@ -23,6 +23,8 @@ const SENDS_PER_NUMBER_PER_HOUR = 3;
 
 export interface OwnerLinkView {
   phoneNumber: string;
+  /** Number the last code was sent to; equals phoneNumber until a verified owner changes number. */
+  pendingPhoneNumber: string | null;
   verified: boolean;
   verifiedAt: Date | null;
   /** A code was sent and can still be used. */
@@ -40,10 +42,14 @@ function logLink(event: string, storeId: string, phone: string, extra: Record<st
 }
 
 /**
- * Starts (or restarts) linking the owner's number: replaces the owner's row
- * with an unverified one carrying a fresh code hash, then sends the code by
- * the authentication template. The answer is the same whether or not the
- * number is linked at another store. A failed send clears the code.
+ * Starts (or restarts) linking the owner's number: records it as the pending
+ * number with a fresh code hash, then sends the code by the authentication
+ * template. A verified link keeps its number and stays verified until the new
+ * code is answered, so a failed or unanswered send never unlinks the owner.
+ * The answer is the same whether or not the number is linked at another store.
+ *
+ * Follow-up writes are keyed on this call's code hash, so a concurrent start
+ * for the same owner (which replaced the hash) is never undone by this one.
  */
 export async function startOwnerLink(owner: Owner, rawPhone: string): Promise<{ ok: true } | { error: string }> {
   const phone = normalizeOwnerPhone(rawPhone);
@@ -74,9 +80,15 @@ export async function startOwnerLink(owner: Owner, rawPhone: string): Promise<{ 
   try {
     ({ waId } = await sendWhatsAppMessage(ownerLinkCodeMessage(digits, code)));
   } catch (error) {
+    // No live code for an undelivered message; the linked number is untouched.
     await storeScoped(owner.storeId).ownerWhatsAppLink.updateMany({
-      where: { id: linkId, verified: false },
-      data: { verificationCodeHash: null, verificationExpiresAt: null },
+      where: { id: linkId, verificationCodeHash: codeHash },
+      data: {
+        verificationCodeHash: null,
+        verificationExpiresAt: null,
+        pendingPhoneNumber: null,
+        pendingWaId: null,
+      },
     });
     logLink("whatsapp_link_send_failed", owner.storeId, phone.e164, { code: whatsappErrorCode(error) });
     return { error: error instanceof WhatsAppNotConfiguredError ? NOT_SET_UP_ERROR : SEND_FAILED_ERROR };
@@ -85,8 +97,8 @@ export async function startOwnerLink(owner: Owner, rawPhone: string): Promise<{ 
   if (waId && waId !== digits) {
     try {
       await storeScoped(owner.storeId).ownerWhatsAppLink.updateMany({
-        where: { id: linkId, verified: false },
-        data: { waId },
+        where: { id: linkId, verificationCodeHash: codeHash },
+        data: { pendingWaId: waId },
       });
     } catch {
       // The digits still match for most numbers; the owner can resend.

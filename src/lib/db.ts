@@ -1036,16 +1036,25 @@ export type OwnerLinkCodeOutcome =
   | { kind: "verified"; storeId: string; userId: string; storeName: string };
 
 /**
- * Tries a 6-digit code against the sender's pending links (newest first, at
- * most five rows). The code decides the store. A match verifies in one UPDATE
- * guarded by the database clock; any older verified link for the same sender
- * is deleted first, with an audit row on the store that lost it. A miss
- * counts an attempt on each pending row and voids a code at the limit.
+ * Tries a 6-digit code against the codes sent to this sender (newest first,
+ * at most five rows, at any store, verified rows included when they are
+ * changing number). The code decides the store. A match moves the pending
+ * number into the link and verifies it in one UPDATE guarded by the database
+ * clock; any other verified link for the same sender is deleted first, with
+ * an audit row on the store that lost it.
+ *
+ * A miss counts an attempt on each candidate and voids a code at the limit,
+ * unless `countMisses` is false. The inbound path passes false when the
+ * sender is already a verified owner: only the holder of the number can send
+ * from it, and the code was delivered to that same account, so a miss there
+ * is ordinary chat, not guessing. Counting it would let one owner's messages
+ * void another store's pending code.
  */
 export async function verifyOwnerLinkByCode(
   tx: RawTx,
   waId: string,
   code: string,
+  options: { countMisses: boolean } = { countMisses: true },
 ): Promise<OwnerLinkCodeOutcome> {
   const candidates = await tx.$queryRaw<Array<{
     id: string;
@@ -1057,7 +1066,7 @@ export async function verifyOwnerLinkByCode(
     SELECT id, store_id, user_id, verification_code_hash,
       (verification_expires_at > (now() AT TIME ZONE 'UTC')) AS live
     FROM owner_whatsapp_links
-    WHERE wa_id = ${waId} AND verified = false AND verification_code_hash IS NOT NULL
+    WHERE pending_wa_id = ${waId} AND verification_code_hash IS NOT NULL
     ORDER BY updated_at DESC, id
     LIMIT 5
     FOR UPDATE
@@ -1070,6 +1079,7 @@ export async function verifyOwnerLinkByCode(
   const match = candidates.find((row, index) => matches[index] && row.live === true);
 
   if (!match) {
+    if (!options.countMisses) return { kind: "wrong_or_expired" };
     const ids = candidates.map((row) => row.id);
     await tx.$executeRaw`
       UPDATE owner_whatsapp_links
@@ -1080,6 +1090,12 @@ export async function verifyOwnerLinkByCode(
         verification_expires_at = CASE
           WHEN verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
           ELSE verification_expires_at END,
+        pending_phone_number = CASE
+          WHEN verified AND verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
+          ELSE pending_phone_number END,
+        pending_wa_id = CASE
+          WHEN verified AND verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
+          ELSE pending_wa_id END,
         updated_at = (now() AT TIME ZONE 'UTC')
       WHERE id IN (${Prisma.join(ids)})
     `;
@@ -1095,12 +1111,17 @@ export async function verifyOwnerLinkByCode(
     UPDATE owner_whatsapp_links
     SET verified = true,
       verified_at = (now() AT TIME ZONE 'UTC'),
+      phone_number = pending_phone_number,
+      wa_id = pending_wa_id,
+      pending_phone_number = NULL,
+      pending_wa_id = NULL,
       verification_code_hash = NULL,
       verification_expires_at = NULL,
       verification_attempts = 0,
       updated_at = (now() AT TIME ZONE 'UTC')
     WHERE id = ${match.id}
-      AND verified = false
+      AND pending_wa_id = ${waId}
+      AND verification_code_hash = ${match.verification_code_hash}
       AND verification_expires_at > (now() AT TIME ZONE 'UTC')
     RETURNING store_id, user_id
   `;
@@ -1151,8 +1172,10 @@ export async function findVerifiedOwnerLink(
 }
 
 /**
- * Replaces the member's link with an unverified one carrying a fresh code
- * hash, expiring on the database clock, plus an audit row. Returns the row id.
+ * Starts a code for `phoneNumber`: sets the pending number and a fresh code
+ * hash expiring on the database clock, plus an audit row. A verified link
+ * keeps its number and stays verified until the new code is answered; a row
+ * that was never verified shows the new number. Returns the row id.
  */
 export async function upsertPendingOwnerLink(input: {
   storeId: string;
@@ -1172,17 +1195,20 @@ export async function upsertPendingOwnerLink(input: {
   return storeScopedTransaction(input.storeId, async (tx) => {
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
       INSERT INTO owner_whatsapp_links (
-        id, store_id, user_id, phone_number, wa_id, verified, verified_at,
+        id, store_id, user_id, phone_number, wa_id, pending_phone_number, pending_wa_id, verified, verified_at,
         verification_code_hash, verification_expires_at, verification_attempts, created_at, updated_at
       ) VALUES (
-        ${crypto.randomUUID()}, ${input.storeId}, ${input.userId}, ${input.phoneNumber}, ${input.waId}, false, NULL,
+        ${crypto.randomUUID()}, ${input.storeId}, ${input.userId}, ${input.phoneNumber}, ${input.waId},
+        ${input.phoneNumber}, ${input.waId}, false, NULL,
         ${input.codeHash}, (now() AT TIME ZONE 'UTC') + ${ttl}, 0, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC')
       )
       ON CONFLICT (store_id, user_id) DO UPDATE SET
-        phone_number = EXCLUDED.phone_number,
-        wa_id = EXCLUDED.wa_id,
-        verified = false,
-        verified_at = NULL,
+        phone_number = CASE WHEN owner_whatsapp_links.verified
+          THEN owner_whatsapp_links.phone_number ELSE EXCLUDED.phone_number END,
+        wa_id = CASE WHEN owner_whatsapp_links.verified
+          THEN owner_whatsapp_links.wa_id ELSE EXCLUDED.wa_id END,
+        pending_phone_number = EXCLUDED.pending_phone_number,
+        pending_wa_id = EXCLUDED.pending_wa_id,
         verification_code_hash = EXCLUDED.verification_code_hash,
         verification_expires_at = EXCLUDED.verification_expires_at,
         verification_attempts = 0,
@@ -1231,13 +1257,20 @@ export async function deleteOwnerLinkForMember(storeId: string, userId: string, 
 /** The member's link for the store admin page; `code_live` is judged on the database clock. */
 export async function readOwnerLink(storeId: string, userId: string): Promise<{
   phoneNumber: string;
+  pendingPhoneNumber: string | null;
   verified: boolean;
   verifiedAt: Date | null;
   codeLive: boolean;
 } | null> {
   const rows = await storeScopedTransaction(storeId, (tx) =>
-    tx.$queryRaw<Array<{ phone_number: string; verified: boolean; verified_at: Date | null; code_live: boolean }>>`
-      SELECT phone_number, verified, verified_at,
+    tx.$queryRaw<Array<{
+      phone_number: string;
+      pending_phone_number: string | null;
+      verified: boolean;
+      verified_at: Date | null;
+      code_live: boolean;
+    }>>`
+      SELECT phone_number, pending_phone_number, verified, verified_at,
         (verification_code_hash IS NOT NULL
           AND verification_expires_at > (now() AT TIME ZONE 'UTC')) AS code_live
       FROM owner_whatsapp_links
@@ -1248,6 +1281,7 @@ export async function readOwnerLink(storeId: string, userId: string): Promise<{
   if (!row) return null;
   return {
     phoneNumber: row.phone_number,
+    pendingPhoneNumber: row.pending_phone_number,
     verified: row.verified,
     verifiedAt: row.verified_at,
     codeLive: row.code_live === true,

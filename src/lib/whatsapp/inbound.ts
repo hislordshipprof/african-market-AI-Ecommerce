@@ -41,13 +41,15 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
 
   const outcome = await platformAdminTransaction(async (tx): Promise<Outcome> => {
     if (!(await claimInboundWhatsAppMessage(tx, message.id))) return { kind: "duplicate" };
+    // A verified owner's six-digit text is a code only if it matches a code
+    // sent to them; otherwise it is an ordinary message and counts no attempt.
+    const owner = await findVerifiedOwnerLink(tx, message.from);
     const text = message.text?.trim() ?? "";
     if (LINK_CODE_PATTERN.test(text)) {
-      const verified = await verifyOwnerLinkByCode(tx, message.from, text);
+      const verified = await verifyOwnerLinkByCode(tx, message.from, text, { countMisses: !owner });
       if (verified.kind === "verified") return { kind: "verified", storeName: verified.storeName };
-      if (verified.kind === "wrong_or_expired") return { kind: "wrong_code" };
+      if (verified.kind === "wrong_or_expired" && !owner) return { kind: "wrong_code" };
     }
-    const owner = await findVerifiedOwnerLink(tx, message.from);
     if (owner) return { kind: "owner", storeName: owner.storeName };
     return { kind: "unlinked" };
   });

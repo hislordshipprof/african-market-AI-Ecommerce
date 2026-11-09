@@ -14,7 +14,14 @@ import { removeWhatsAppLinkAction, startWhatsAppLinkAction } from "@/lib/whatsap
 export type LinkState =
   | { kind: "none" }
   | { kind: "waiting" | "expired"; phone: string; display: string }
-  | { kind: "linked"; phone: string; display: string; since: string | null };
+  | {
+      kind: "linked";
+      phone: string;
+      display: string;
+      since: string | null;
+      /** A live code for a number change or re-check; the link above stays until it is answered. */
+      pending: { phone: string; display: string } | null;
+    };
 
 interface Props {
   storeName: string;
@@ -29,6 +36,28 @@ function ErrorNote({ message }: { message: string }) {
       <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
       <span>{message}</span>
     </p>
+  );
+}
+
+function ReplySteps({ display }: { display: string }) {
+  return (
+    <ol className="space-y-2 text-sm text-foreground">
+      <li className="flex gap-3">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">1</span>
+        <span>Open WhatsApp on {display}.</span>
+      </li>
+      <li className="flex gap-3">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">2</span>
+        <span>Find our message with your 6-digit code.</span>
+      </li>
+      <li className="flex gap-3">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">3</span>
+        <span>
+          <strong className="font-semibold">Reply to that message with the code</strong> within 10 minutes, then tap
+          &ldquo;I&apos;ve replied&rdquo;.
+        </span>
+      </li>
+    </ol>
   );
 }
 
@@ -145,25 +174,7 @@ export function WhatsAppLinkForm({ storeName, storeSlug, configured, state }: Pr
               <ErrorNote message="WhatsApp isn't set up yet. You can link your number once the platform's WhatsApp account is connected." />
             )}
 
-            {state.kind === "waiting" && !editing && (
-              <ol className="space-y-2 text-sm text-foreground">
-                <li className="flex gap-3">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">1</span>
-                  <span>Open WhatsApp on {state.display}.</span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">2</span>
-                  <span>Find our message with your 6-digit code.</span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">3</span>
-                  <span>
-                    <strong className="font-semibold">Reply to that message with the code</strong> within 10 minutes, then
-                    tap &ldquo;I&apos;ve replied&rdquo;.
-                  </span>
-                </li>
-              </ol>
-            )}
+            {state.kind === "waiting" && !editing && <ReplySteps display={state.display} />}
 
             {state.kind === "expired" && !editing && (
               <p className="text-sm text-muted-foreground">
@@ -177,6 +188,19 @@ export function WhatsAppLinkForm({ storeName, storeSlug, configured, state }: Pr
                 Messages from this number to the platform&apos;s WhatsApp number reach {storeName}. If this isn&apos;t
                 your number, remove it.
               </p>
+            )}
+
+            {state.kind === "linked" && state.pending && !editing && (
+              <div className="space-y-3 rounded-lg bg-muted/60 p-4">
+                <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-foreground">
+                  {state.pending.phone === state.phone ? "Code sent again" : `New number ${state.pending.display}`}
+                  <Badge variant="secondary">Waiting for your reply</Badge>
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {state.display} stays linked until you reply with the new code.
+                </p>
+                <ReplySteps display={state.pending.display} />
+              </div>
             )}
 
             {showForm && (
@@ -217,16 +241,16 @@ export function WhatsAppLinkForm({ storeName, storeSlug, configured, state }: Pr
 
             {state.kind !== "none" && !editing && (
               <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-                {state.kind === "waiting" && (
+                {(state.kind === "waiting" || (state.kind === "linked" && state.pending)) && (
                   <Button className="h-11 rounded-full px-5" onClick={() => router.refresh()} disabled={pending}>
                     I&apos;ve replied
                   </Button>
                 )}
-                {state.kind !== "linked" && (
+                {(state.kind !== "linked" || state.pending) && (
                   <Button
                     variant={state.kind === "expired" ? "default" : "outline"}
                     className="h-11 rounded-full px-5"
-                    onClick={() => sendCode(state.phone)}
+                    onClick={() => sendCode(state.kind === "linked" && state.pending ? state.pending.phone : state.phone)}
                     disabled={!configured || pending}
                   >
                     Send a new code

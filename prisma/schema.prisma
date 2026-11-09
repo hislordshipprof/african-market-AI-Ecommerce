@@ -826,6 +826,9 @@ model OwnerWhatsAppLink {
   userId                String    @map("user_id")
   phoneNumber           String    @map("phone_number")
   waId                  String    @map("wa_id")
+  /// Number a live or last-sent code is for. The linked number above changes only when it is verified.
+  pendingPhoneNumber    String?   @map("pending_phone_number")
+  pendingWaId           String?   @map("pending_wa_id")
   verified              Boolean   @default(false)
   optInAlerts           Boolean   @default(false) @map("opt_in_alerts")
   optInDigest           Boolean   @default(false) @map("opt_in_digest")
@@ -841,6 +844,7 @@ model OwnerWhatsAppLink {
 
   @@unique([storeId, userId])
   @@index([waId])
+  @@index([pendingWaId])
   @@map("owner_whatsapp_links")
 }
 
