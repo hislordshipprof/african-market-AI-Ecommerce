@@ -3,6 +3,8 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
+import { linkCodeMatches, MAX_LINK_CODE_ATTEMPTS } from "./whatsapp/code";
+import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "./system-actor";
 
 /** One TTL for preview cleanup and the import-token claim. */
 export const IMPORT_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -111,6 +113,7 @@ export function storeScoped(storeId: string) {
     aiAction: wrapDelegate(storeId, prisma.aiAction),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
+    ownerWhatsAppLink: wrapDelegate(storeId, prisma.ownerWhatsAppLink),
   };
 }
 
@@ -995,4 +998,154 @@ export async function claimAssistantCapDay(day: string): Promise<boolean> {
     `;
     return rows.length > 0;
   });
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp inbound (#143). Called inside one platformAdminTransaction, so the
+// claim and the verification write commit or roll back together. Each query
+// selects only what the inbound path needs.
+
+type RawTx = Pick<PrismaClient, "$queryRaw" | "$executeRaw">;
+
+const WHATSAPP_INBOUND_RETENTION = Prisma.raw("INTERVAL '8 days'");
+const WHATSAPP_INBOUND_CLEANUP_BATCH = 100;
+
+/** True for the first delivery of a message id; false for a redelivery. */
+export async function claimInboundWhatsAppMessage(tx: RawTx, messageId: string): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    INSERT INTO whatsapp_inbound_messages (id, received_at)
+    VALUES (${messageId}, (now() AT TIME ZONE 'UTC'))
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id
+  `;
+  if (rows.length === 0) return false;
+  await tx.$executeRaw`
+    DELETE FROM whatsapp_inbound_messages
+    WHERE id IN (
+      SELECT id FROM whatsapp_inbound_messages
+      WHERE received_at < (now() AT TIME ZONE 'UTC') - ${WHATSAPP_INBOUND_RETENTION}
+      LIMIT ${WHATSAPP_INBOUND_CLEANUP_BATCH}
+    )
+  `;
+  return true;
+}
+
+export type OwnerLinkCodeOutcome =
+  | { kind: "no_pending" }
+  | { kind: "wrong_or_expired" }
+  | { kind: "verified"; storeId: string; userId: string; storeName: string };
+
+/**
+ * Tries a 6-digit code against the sender's pending links (newest first, at
+ * most five rows). The code decides the store. A match verifies in one UPDATE
+ * guarded by the database clock; any older verified link for the same sender
+ * is deleted first, with an audit row on the store that lost it. A miss
+ * counts an attempt on each pending row and voids a code at the limit.
+ */
+export async function verifyOwnerLinkByCode(
+  tx: RawTx,
+  waId: string,
+  code: string,
+): Promise<OwnerLinkCodeOutcome> {
+  const candidates = await tx.$queryRaw<Array<{
+    id: string;
+    store_id: string;
+    user_id: string;
+    verification_code_hash: string | null;
+    live: boolean;
+  }>>`
+    SELECT id, store_id, user_id, verification_code_hash,
+      (verification_expires_at > (now() AT TIME ZONE 'UTC')) AS live
+    FROM owner_whatsapp_links
+    WHERE wa_id = ${waId} AND verified = false AND verification_code_hash IS NOT NULL
+    ORDER BY updated_at DESC, id
+    LIMIT 5
+    FOR UPDATE
+  `;
+  if (candidates.length === 0) return { kind: "no_pending" };
+
+  const matches = candidates.map((row) =>
+    linkCodeMatches({ storeId: row.store_id, userId: row.user_id, codeHash: row.verification_code_hash }, code),
+  );
+  const match = candidates.find((row, index) => matches[index] && row.live === true);
+
+  if (!match) {
+    const ids = candidates.map((row) => row.id);
+    await tx.$executeRaw`
+      UPDATE owner_whatsapp_links
+      SET verification_attempts = verification_attempts + 1,
+        verification_code_hash = CASE
+          WHEN verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
+          ELSE verification_code_hash END,
+        verification_expires_at = CASE
+          WHEN verification_attempts + 1 >= ${MAX_LINK_CODE_ATTEMPTS} THEN NULL
+          ELSE verification_expires_at END,
+        updated_at = (now() AT TIME ZONE 'UTC')
+      WHERE id IN (${Prisma.join(ids)})
+    `;
+    return { kind: "wrong_or_expired" };
+  }
+
+  const replaced = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+    DELETE FROM owner_whatsapp_links
+    WHERE wa_id = ${waId} AND verified AND id <> ${match.id}
+    RETURNING id, store_id
+  `;
+  const updated = await tx.$queryRaw<Array<{ store_id: string; user_id: string }>>`
+    UPDATE owner_whatsapp_links
+    SET verified = true,
+      verified_at = (now() AT TIME ZONE 'UTC'),
+      verification_code_hash = NULL,
+      verification_expires_at = NULL,
+      verification_attempts = 0,
+      updated_at = (now() AT TIME ZONE 'UTC')
+    WHERE id = ${match.id}
+      AND verified = false
+      AND verification_expires_at > (now() AT TIME ZONE 'UTC')
+    RETURNING store_id, user_id
+  `;
+  const row = updated[0];
+  if (!row) return { kind: "wrong_or_expired" };
+
+  const owner = await tx.$queryRaw<Array<{ email: string; name: string }>>`
+    SELECT u.email, s.name
+    FROM users u, stores s
+    WHERE u.id = ${row.user_id} AND s.id = ${row.store_id}
+  `;
+  await tx.$executeRaw`
+    INSERT INTO audit_logs (id, store_id, actor_id, actor_email, action, entity_type, entity_id, created_at)
+    VALUES (${crypto.randomUUID()}, ${row.store_id}, ${row.user_id}, ${owner[0]?.email ?? SYSTEM_ACTOR_EMAIL},
+      'whatsapp_link.verify', 'owner_whatsapp_link', ${match.id}, (now() AT TIME ZONE 'UTC'))
+  `;
+  for (const lost of replaced) {
+    await tx.$executeRaw`
+      INSERT INTO audit_logs (id, store_id, actor_id, actor_email, action, entity_type, entity_id, created_at)
+      VALUES (${crypto.randomUUID()}, ${lost.store_id}, ${SYSTEM_ACTOR_ID}, ${SYSTEM_ACTOR_EMAIL},
+        'whatsapp_link.replaced', 'owner_whatsapp_link', ${lost.id}, (now() AT TIME ZONE 'UTC'))
+    `;
+  }
+  return { kind: "verified", storeId: row.store_id, userId: row.user_id, storeName: owner[0]?.name ?? "" };
+}
+
+/**
+ * The verified link for a sender whose membership is still `owner`. Matches
+ * Meta's wa_id, or the E.164 number the owner entered.
+ */
+export async function findVerifiedOwnerLink(
+  tx: RawTx,
+  waId: string,
+): Promise<{ storeId: string; userId: string; role: string; storeName: string } | null> {
+  const e164 = `+${waId}`;
+  const rows = await tx.$queryRaw<Array<{ store_id: string; user_id: string; role: string; name: string }>>`
+    SELECT l.store_id, l.user_id, m.role, s.name
+    FROM owner_whatsapp_links l
+    JOIN store_memberships m ON m.store_id = l.store_id AND m.user_id = l.user_id
+    JOIN stores s ON s.id = l.store_id
+    WHERE l.verified AND (l.wa_id = ${waId} OR l.phone_number = ${e164}) AND m.role = 'owner'
+    ORDER BY l.verified_at DESC
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return { storeId: row.store_id, userId: row.user_id, role: row.role, storeName: row.name };
 }
