@@ -4,9 +4,17 @@ import { z } from "zod";
 import { requireStoreOwner } from "../store-admin/session";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
+import { chooseListing } from "./choices";
 import { confirmProposal, rejectProposal } from "./confirm";
 import { sendCopilotTurn } from "./turn";
-import { FIXED_ERROR, MESSAGE_MAX, type ConfirmResult, type RejectResult, type SendResult } from "./types";
+import {
+  FIXED_ERROR,
+  MESSAGE_MAX,
+  type ChooseResult,
+  type ConfirmResult,
+  type RejectResult,
+  type SendResult,
+} from "./types";
 
 const sendSchema = z.strictObject({
   conversationId: z.string().min(1).max(200).optional(),
@@ -16,6 +24,12 @@ const sendSchema = z.strictObject({
 
 const proposalSchema = z.strictObject({
   proposalId: z.string().min(1).max(200),
+});
+
+const chooseSchema = z.strictObject({
+  conversationId: z.string().min(1).max(200),
+  messageId: z.string().min(1).max(200),
+  listingId: z.string().min(1).max(200),
 });
 
 const invalidRequest: SendResult = {
@@ -71,6 +85,19 @@ export async function rejectStockProposal(input: unknown): Promise<RejectResult>
     });
   } catch (error) {
     console.error("[copilot] dismiss failed", { errorType: error instanceof Error ? error.name : "Error" });
+    return { ok: false, code: "not_found" };
+  }
+}
+
+/** The owner taps one listing of a "Which one?" choice. Drafts a pending proposal; no model call. */
+export async function chooseProposalListing(input: unknown): Promise<ChooseResult> {
+  const session = await requireStoreOwner();
+  const parsed = parseInput(chooseSchema, input);
+  if (!parsed.ok) return { ok: false, code: "not_found" };
+  try {
+    return await chooseListing(session.store.id, { id: session.user.id, email: session.user.email }, parsed.data);
+  } catch (error) {
+    console.error("[copilot] choose failed", { errorType: error instanceof Error ? error.name : "Error" });
     return { ok: false, code: "not_found" };
   }
 }

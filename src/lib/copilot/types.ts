@@ -38,6 +38,37 @@ export interface StockProposalCard {
   state: ProposalDisplayState;
 }
 
+/** One listing the owner can tap when a report matched several. */
+export interface ChoiceCandidate {
+  listingId: string;
+  name: string;
+}
+
+/** A report that matched several listings. Stored on the assistant message; nothing is drafted until a tap. */
+export interface ListingChoice {
+  candidates: ChoiceCandidate[];
+  kind: ProposalKind;
+  quantity: number | null;
+  statusValue: string | null;
+  /** True when no listing matched every word and these are look-alikes. */
+  nearOnly: boolean;
+  /** Database clock, UTC. */
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ChoiceCard extends ListingChoice {
+  chosenListingId: string | null;
+  open: boolean;
+}
+
+export interface PanelMessage {
+  role: "owner" | "assistant";
+  text: string;
+  messageId?: string;
+  choices?: ChoiceCard[];
+}
+
 export type SendCode =
   | "not_found"
   | "busy"
@@ -47,7 +78,13 @@ export type SendCode =
   | "invalid_request";
 
 export type SendResult =
-  | { ok: true; conversationId: string; reply: string; proposals: StockProposalCard[] }
+  | {
+    ok: true;
+    conversationId: string;
+    reply: string;
+    proposals: StockProposalCard[];
+    choices: ChoiceCard[];
+  }
   | { ok: false; code: SendCode; message: string; retryAfter?: number };
 
 export type ConfirmCode = "not_found" | "expired" | "stale" | "too_large";
@@ -55,6 +92,10 @@ export type ConfirmCode = "not_found" | "expired" | "stale" | "too_large";
 export type ConfirmResult =
   | { ok: true; proposal: StockProposalCard; listing: { qty: number | null; status: string | null } }
   | { ok: false; code: ConfirmCode };
+
+export type ChooseResult =
+  | { ok: true; proposal: StockProposalCard }
+  | { ok: false; code: "not_found" | "expired" | "stale" };
 
 export type RejectResult = { ok: true } | { ok: false; code: "not_found" };
 

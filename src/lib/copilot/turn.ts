@@ -9,10 +9,12 @@ import { AssistantConfigError } from "../assistant/errors";
 import { claimCapAlert, assistantSpendState, utcDay } from "../assistant/spend";
 import { lockStoreRow, Prisma as DbPrisma, storeScoped, storeScopedRawQuery, storeScopedTransaction, txExecute, txQuery } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
-import { cardFromParts, loadProposalCards } from "./cards";
+import { loadProposalCards } from "./cards";
+import { choiceCards } from "./choices";
 import { modelHistory, parseStoredMessages, type StoredMessage } from "./messages";
 import { COPILOT_SYSTEM_PROMPT } from "./prompt";
-import { copilotTools, createDraftBook, type Draft } from "./tools";
+import { databaseClock, insertProposalRows } from "./proposals";
+import { copilotTools, createDraftBook, type Draft, type PendingChoice } from "./tools";
 import {
   CONVERSATION_MAX,
   FIXED_ERROR,
@@ -26,6 +28,9 @@ import {
   STEP_CAP,
   UNAVAILABLE_MESSAGE,
   WRITE_TRANSACTION,
+  type ChoiceCard,
+  type ListingChoice,
+  type PanelMessage,
   type SendResult,
 } from "./types";
 
@@ -97,7 +102,20 @@ async function readReplay(storeId: string, userId: string, messageId: string): P
   const row = rows[0];
   if (!row?.reply || !row.conversation_id) return null;
   const proposals = await loadProposalCards(storeId, { messageId });
-  return { ok: true, conversationId: row.conversation_id, reply: row.reply, proposals };
+  const choices = await turnChoices(storeId, row.conversation_id, messageId);
+  return { ok: true, conversationId: row.conversation_id, reply: row.reply, proposals, choices };
+}
+
+async function turnChoices(storeId: string, conversationId: string, messageId: string): Promise<ChoiceCard[]> {
+  const conversation = await storeScoped(storeId).copilotConversation.findUnique({
+    where: { id: conversationId },
+    select: { messages: true },
+  });
+  const turn = parseStoredMessages(conversation?.messages).filter((message) => (
+    message.role === "assistant" && message.messageId === messageId
+  ));
+  const [cards] = await choiceCards(storeId, conversationId, turn);
+  return cards?.choices ?? [];
 }
 
 async function claimMessage(storeId: string, userId: string, messageId: string): Promise<"claimed" | "busy" | SendResult> {
@@ -200,20 +218,23 @@ async function deleteEmpty(storeId: string, conversationId: string): Promise<voi
   `));
 }
 
-function visibleReply(text: string, drafts: Draft[], capped: boolean): string {
-  const trimmed = text.trim();
+export const NOTHING_DRAFTED = "Nothing was drafted.";
+
+/** The model's text, plus fixed lines chosen from what the turn produced. The model's text is never inspected. */
+function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], capped: boolean): string {
+  const parts: string[] = [];
+  const trimmed = text.trim().slice(0, 4000);
   if (trimmed) {
-    if (capped && !trimmed.includes("Send the rest in a new message.")) {
-      return `${trimmed}\n\nSend the rest in a new message.`.slice(0, 4000);
-    }
-    return trimmed.slice(0, 4000);
+    parts.push(trimmed);
+  } else if (drafts.length > 0) {
+    const names = drafts.map((draft) => draft.listingName).join(", ");
+    parts.push(`I drafted ${drafts.length === 1 ? "a change" : "changes"} for ${names}.`);
+  } else if (choices.length > 0) {
+    parts.push("More than one item matches. Pick one below.");
   }
-  if (drafts.length === 0) {
-    return "I didn't catch a stock change. Name the item and a whole number, or open Products.";
-  }
-  const names = drafts.map((draft) => draft.listingName).join(", ");
-  const noun = drafts.length === 1 ? "a change" : "changes";
-  return `I drafted ${noun} for ${names}. Send the rest in a new message.`;
+  if (capped) parts.push("Send the rest in a new message.");
+  if (drafts.length === 0 && choices.length === 0) parts.push(NOTHING_DRAFTED);
+  return parts.join("\n\n");
 }
 
 export async function sendCopilotTurn(input: {
@@ -286,10 +307,7 @@ export async function sendCopilotTurn(input: {
     });
     const steps = Array.isArray(result.steps) ? result.steps.length : 0;
     const capped = steps >= STEP_CAP || result.finishReason === "length" || book.overflow;
-    const reply = visibleReply(result.text, book.drafts, capped);
-    const summary = book.drafts.length
-      ? `Drafted: ${book.drafts.map((draft) => `${draft.listingName} ${draft.kind} ${draft.quantity ?? draft.statusValue}`).join("; ")}.`
-      : undefined;
+    const reply = visibleReply(result.text, book.drafts, book.choices, capped);
     const stored = await commitTurn({
       storeId: input.storeId,
       userId: input.userId,
@@ -299,9 +317,9 @@ export async function sendCopilotTurn(input: {
       messageId: input.messageId,
       text,
       reply,
-      summary,
       existing: conversation.messages,
       drafts: book.drafts,
+      choices: book.choices,
     });
     committed = true;
     return stored;
@@ -334,31 +352,12 @@ async function commitTurn(input: {
   messageId: string;
   text: string;
   reply: string;
-  summary?: string;
   existing: StoredMessage[];
   drafts: Draft[];
+  choices: PendingChoice[];
 }): Promise<SendResult> {
-  const proposals = input.drafts.map((draft) => ({
-    id: crypto.randomUUID(),
-    draft,
-    card: cardFromParts({
-      id: "",
-      listingId: draft.listingId,
-      listingName: draft.listingName,
-      kind: draft.kind,
-      quantity: draft.quantity,
-      statusValue: draft.statusValue,
-      before: { qty: draft.beforeQty, status: draft.beforeStatus },
-      state: "pending",
-    }),
-  }));
-  for (const proposal of proposals) proposal.card.id = proposal.id;
-
-  const nextMessages: StoredMessage[] = [
-    ...input.existing,
-    { role: "owner", text: input.text },
-    { role: "assistant", text: input.reply, ...(input.summary ? { summary: input.summary } : {}) },
-  ];
+  let proposals: Awaited<ReturnType<typeof insertProposalRows>> = [];
+  let choices: ListingChoice[] = [];
 
   await storeScopedTransaction(input.storeId, async (tx) => {
     await lockStoreRow(tx, input.storeId);
@@ -370,45 +369,26 @@ async function commitTurn(input: {
     `);
     if (held.length === 0) throw new TurnLost();
 
-    if (proposals.length > 0) {
-      await txExecute(tx, DbPrisma.sql`
-        UPDATE stock_proposals
-        SET state = 'expired'
-        WHERE store_id = ${input.storeId}
-          AND state = 'pending'
-          AND listing_id IN (${DbPrisma.join(proposals.map((proposal) => proposal.draft.listingId))})
-      `);
-    }
-    for (const proposal of proposals) {
-      const before = JSON.stringify({ qty: proposal.draft.beforeQty, status: proposal.draft.beforeStatus });
-      await txExecute(tx, DbPrisma.sql`
-        INSERT INTO stock_proposals (
-          id, store_id, conversation_id, listing_id, client_message_id,
-          kind, quantity, status_value, before, state, expires_at, created_at
-        ) VALUES (
-          ${proposal.id}, ${input.storeId}, ${input.conversationId}, ${proposal.draft.listingId}, ${input.messageId},
-          ${proposal.draft.kind}, ${proposal.draft.quantity}, ${proposal.draft.statusValue}, ${before}::jsonb,
-          'pending',
-          (clock_timestamp() AT TIME ZONE 'UTC') + interval '60 minutes',
-          (clock_timestamp() AT TIME ZONE 'UTC')
-        )
-      `);
-      await tx.auditLog.create({
-        data: {
-          storeId: input.storeId,
-          actorId: input.userId,
-          actorEmail: input.email,
-          action: "copilot.stock_proposed",
-          entityType: "stock_proposal",
-          entityId: proposal.id,
-          after: {
-            kind: proposal.draft.kind,
-            quantity: proposal.draft.quantity,
-            status: proposal.draft.statusValue,
-          },
-        },
-      });
-    }
+    const clock = await databaseClock(tx);
+    choices = input.choices.map((choice) => ({ ...choice, createdAt: clock.now, expiresAt: clock.expires }));
+    proposals = await insertProposalRows(tx, {
+      storeId: input.storeId,
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      userId: input.userId,
+      email: input.email,
+    }, input.drafts);
+
+    const nextMessages: StoredMessage[] = [
+      ...input.existing,
+      { role: "owner", text: input.text },
+      {
+        role: "assistant",
+        text: input.reply,
+        messageId: input.messageId,
+        ...(choices.length > 0 ? { choices } : {}),
+      },
+    ];
     await txExecute(tx, DbPrisma.sql`
       UPDATE copilot_conversations
       SET messages = ${JSON.stringify(nextMessages)}::jsonb,
@@ -431,13 +411,14 @@ async function commitTurn(input: {
     ok: true,
     conversationId: input.conversationId,
     reply: input.reply,
-    proposals: proposals.map((proposal) => proposal.card),
+    proposals,
+    choices: choices.map((choice) => ({ ...choice, chosenListingId: null, open: true })),
   };
 }
 
 export async function loadCopilotPanel(storeId: string, userId: string): Promise<{
   conversationId: string | null;
-  messages: StoredMessage[];
+  messages: PanelMessage[];
   proposals: Awaited<ReturnType<typeof loadProposalCards>>;
 }> {
   const conversation = await storeScoped(storeId).copilotConversation.findFirst({
@@ -448,7 +429,7 @@ export async function loadCopilotPanel(storeId: string, userId: string): Promise
   const proposals = await loadProposalCards(storeId, { conversationId: conversation.id });
   return {
     conversationId: conversation.id,
-    messages: parseStoredMessages(conversation.messages),
+    messages: await choiceCards(storeId, conversation.id, parseStoredMessages(conversation.messages)),
     proposals,
   };
 }
