@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { upsertMasterProduct, parseLocalNames, type CsvRow } from "../../prisma/master-catalog-upsert";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -36,7 +36,7 @@ describe.skipIf(!hasDb)("upsertMasterProduct (DB integration)", () => {
     });
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
   });
   afterAll(async () => {

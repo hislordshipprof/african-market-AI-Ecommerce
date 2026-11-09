@@ -3,7 +3,7 @@
 // storeScoped all run for real against the database.
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 
 const state = vi.hoisted(() => ({
   session: null as null | { user: Record<string, unknown>; session: Record<string, unknown> },
@@ -70,7 +70,7 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
   let variantId: string;
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     storeA = await raw.store.create({ data: { slug: slugA, name: "Act147 A", themePreset: "palm-and-shea" } });
     storeB = await raw.store.create({ data: { slug: slugB, name: "Act147 B", themePreset: "palm-and-shea" } });

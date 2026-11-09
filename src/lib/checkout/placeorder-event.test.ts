@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 
 vi.mock("../inngest/send", () => ({
@@ -25,8 +25,7 @@ describe.skipIf(!hasKey || !hasDb)("placeOrder fires Inngest event", () => {
   const cartsCreated: string[] = [];
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const stripe = (await import("stripe")).default;

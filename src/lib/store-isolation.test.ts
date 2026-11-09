@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, platform, platformAdmin, authPrisma } from "./db";
 import { runtimeDatabaseUrl } from "./env";
 
@@ -12,8 +12,7 @@ describe.skipIf(!hasDb)("Store isolation (RLS) via storeScoped", () => {
   let storeBId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({
@@ -168,8 +167,7 @@ describe.skipIf(!hasDb)("Platform admin RLS (DB-backed)", () => {
   let testStoreId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const store = await rawPrisma.store.upsert({
@@ -265,8 +263,7 @@ describe.skipIf(!hasDb)("StoreMembership and StoreInvite RLS", () => {
   let testUserId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({
@@ -433,8 +430,7 @@ describe.skipIf(!hasDb)("Stripe Connect column RLS isolation", () => {
   let storeBId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({
@@ -531,8 +527,7 @@ describe.skipIf(!hasRuntime)(
 
     beforeAll(async () => {
       const runtimeUrl = runtimeDatabaseUrl(process.env);
-      const adapter = new PrismaPg(runtimeUrl);
-      runtimePrisma = new PrismaClient({ adapter });
+      runtimePrisma = testPrismaClient(runtimeUrl);
       await runtimePrisma.$connect();
     });
 
@@ -570,8 +565,7 @@ describe.skipIf(!hasRuntime)(
     });
 
     it("through storeScoped reads only own store rows", async () => {
-      const ownerAdapter = new PrismaPg(process.env.DATABASE_URL!);
-      const ownerPrisma = new PrismaClient({ adapter: ownerAdapter });
+      const ownerPrisma = testPrismaClient();
       await ownerPrisma.$connect();
 
       const store = await ownerPrisma.store.findFirst({
@@ -602,12 +596,10 @@ describe.skipIf(!hasRuntime)(
 
     beforeAll(async () => {
       const runtimeUrl = runtimeDatabaseUrl(process.env);
-      const runtimeAdapter = new PrismaPg(runtimeUrl);
-      runtimePrisma = new PrismaClient({ adapter: runtimeAdapter });
+      runtimePrisma = testPrismaClient(runtimeUrl);
       await runtimePrisma.$connect();
 
-      const ownerAdapter = new PrismaPg(process.env.DATABASE_URL!);
-      ownerPrisma = new PrismaClient({ adapter: ownerAdapter });
+      ownerPrisma = testPrismaClient();
       await ownerPrisma.$connect();
 
       const store = await ownerPrisma.store.upsert({

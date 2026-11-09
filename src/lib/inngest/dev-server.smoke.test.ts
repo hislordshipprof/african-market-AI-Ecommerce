@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { sendOrderAuthorized } from "./send";
 
@@ -29,7 +29,7 @@ describe.skipIf(!enabled)("Inngest Dev Server smoke", () => {
   });
 
   it("a real authorized order starts acceptance and auto-cancel on the Dev Server", async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     const store = await raw.store.findUniqueOrThrow({ where: { slug: "mama-ngozi" } });
     const customer = await storeScoped(store.id).customer.findFirstOrThrow({ where: { storeId: store.id } });
     const order = await storeScoped(store.id).order.create({

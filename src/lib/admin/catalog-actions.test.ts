@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 
 vi.mock("./session", () => ({
   requirePlatformAdmin: vi.fn().mockResolvedValue({
@@ -42,7 +42,7 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     asAdmin((tx) => tx.auditLog.findMany({ where: { entityId: id, action } }));
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     await asAdmin((tx) =>
       tx.user.upsert({

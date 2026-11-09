@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import Stripe from "stripe";
 import { NextRequest } from "next/server";
 import { storeScoped, storeScopedTransaction } from "../db";
@@ -22,7 +22,7 @@ describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
     secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim() || "whsec_test_ticket_186";
     vi.stubEnv("STRIPE_WEBHOOK_SECRET", secret);
     if (!process.env.STRIPE_SECRET_KEY) vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_placeholder");
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     const a = await raw.store.create({
       data: {

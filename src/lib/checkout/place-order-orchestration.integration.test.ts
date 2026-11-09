@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { addLine } from "../cart/service";
 import { healthQueryRaw, storeScoped } from "../db";
 import type { Contact } from "../customer-flow/contracts";
@@ -78,7 +78,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   const storeIds: string[] = [];
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     const login = (await healthQueryRaw`SELECT current_user, session_user`) as Array<{
       current_user: string;

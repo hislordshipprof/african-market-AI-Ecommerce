@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import * as dbModule from "../db";
 import { storeScoped, storeScopedTransaction } from "../db";
@@ -98,8 +98,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
   let variantId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
     setStripeProvider(fakeStripeProvider);
 

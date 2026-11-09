@@ -5,7 +5,7 @@ vi.mock("next/cache", () => ({
   revalidateTag: () => {},
 }));
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { runtimeDatabaseUrl } from "../env";
@@ -31,7 +31,7 @@ describe.skipIf(!hasDb)("placeholder weight on import (lane DB, app_runtime)", (
   let ambigId = "";
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     const storeA = await raw.store.create({
       data: { slug: `ph-a-${RUN}`, name: `Placeholder A ${RUN}`, themePreset: "palm-and-shea" },
