@@ -51,6 +51,7 @@ model Store {
   assistantUndoReceipts AssistantUndoReceipt[]
   guestBrowserCarts GuestBrowserCart[]
   paymentIntentReleases PaymentIntentRelease[]
+  ownerWhatsAppLinks OwnerWhatsAppLink[]
 
   @@map("stores")
 }
@@ -227,6 +228,8 @@ model StoreMembership {
 
   store Store @relation(fields: [storeId], references: [id])
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  whatsAppLink OwnerWhatsAppLink?
 
   @@unique([storeId, userId])
   @@index([userId])
@@ -813,4 +816,43 @@ model CardSaveConsent {
   @@index([userId])
   @@index([userId, paymentMethodId])
   @@map("card_save_consents")
+}
+
+/// A store owner's WhatsApp number (#143). Store-owned with RLS. The partial
+/// unique index on wa_id WHERE verified lives in the migration only.
+model OwnerWhatsAppLink {
+  id                    String    @id @default(cuid())
+  storeId               String    @map("store_id")
+  userId                String    @map("user_id")
+  phoneNumber           String    @map("phone_number")
+  waId                  String    @map("wa_id")
+  /// Number a live or last-sent code is for. The linked number above changes only when it is verified.
+  pendingPhoneNumber    String?   @map("pending_phone_number")
+  pendingWaId           String?   @map("pending_wa_id")
+  verified              Boolean   @default(false)
+  optInAlerts           Boolean   @default(false) @map("opt_in_alerts")
+  optInDigest           Boolean   @default(false) @map("opt_in_digest")
+  verificationCodeHash  String?   @map("verification_code_hash")
+  verificationExpiresAt DateTime? @map("verification_expires_at")
+  verificationAttempts  Int       @default(0) @map("verification_attempts")
+  verifiedAt            DateTime? @map("verified_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  store      Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  membership StoreMembership @relation(fields: [storeId, userId], references: [storeId, userId], onDelete: Cascade)
+
+  @@unique([storeId, userId])
+  @@index([waId])
+  @@index([pendingWaId])
+  @@map("owner_whatsapp_links")
+}
+
+/// Processed inbound WhatsApp message ids. Not store-owned (no store_id, no RLS).
+model WhatsAppInboundMessage {
+  id         String   @id
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  @@index([receivedAt])
+  @@map("whatsapp_inbound_messages")
 }

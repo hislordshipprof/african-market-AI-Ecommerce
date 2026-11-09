@@ -373,6 +373,7 @@ AiConversation(id, store_id, cart_id unique, customer_id?, model, tokens_in, tok
       Filename masking checks every 13-19 digit stretch of a run split by anything but a letter, and exempts a run that is one camera date and time. Digits split by letters are not treated as a card.
 AiAction(id, store_id, conversation_id, tool, input, output, ok, created_at)
 AssistantSpendDay(day, cost_micros, cap_alerted_at) — platform ledger, no store id; retention never deletes it
+OwnerWhatsAppLink(id, store_id, user_id, phone_number, wa_id, verified, opt_in_alerts, opt_in_digest, verification_code_hash?, verification_expires_at?, verification_attempts, verified_at?) — the Linked WhatsApp number (#143); one per membership, at most one verified per wa_id platform-wide
 AssistantFileTurn(id, key, at_ms) — platform rate-limit row, no store id and no RLS (same pattern as rate_limits; GRANT to app_user).
       Key `assistant:files:cart:<cartId>`; 10 file turns per cart per rolling hour. Under pg_advisory_xact_lock(hashtextextended(key, 0))
       it deletes rows with at_ms <= now - window, counts the rest, and inserts one row if under the limit. The check runs before

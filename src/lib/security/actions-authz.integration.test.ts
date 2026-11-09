@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateTOTP } from "../../../e2e/totp";
 
 vi.hoisted(() => {
@@ -34,6 +34,9 @@ import { approveProduct } from "../admin/catalog-actions";
 import { resolveRefundFailedAction } from "../admin/refund-resolution";
 import { auth } from "../auth";
 import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction } from "../db";
+import { removeWhatsAppLinkAction, startWhatsAppLinkAction } from "../whatsapp/actions";
+import { fakeWhatsAppProvider, getFakeOutbox, resetFake } from "../whatsapp/fake";
+import { setWhatsAppProvider } from "../whatsapp/index";
 
 const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-az`;
@@ -42,6 +45,7 @@ const emailA = `authz-a-${suffix}@test.example`;
 const emailB = `authz-b-${suffix}@test.example`;
 const slugA = `az-a-${suffix}`;
 const slugB = `az-b-${suffix}`;
+const slugC = `az-c-${suffix}`;
 
 function collectCookies(res: Response): string {
   return (res.headers.getSetCookie?.() ?? []).join("; ");
@@ -86,6 +90,7 @@ const oneVariant = [{ label: "bag", price: 100, weightG: 500 }];
 describe("action authorization", () => {
   let storeA = "";
   let storeB = "";
+  let storeC = "";
   let ownerA = "";
   let ownerB = "";
   let cookiesA = "";
@@ -114,6 +119,7 @@ describe("action authorization", () => {
 
     storeA = crypto.randomUUID();
     storeB = crypto.randomUUID();
+    storeC = crypto.randomUUID();
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
@@ -121,6 +127,10 @@ describe("action authorization", () => {
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeB}, 'Authz B', ${slugB}, 'active', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeA}, ${ownerA}, 'owner', now())`;
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeB}, ${ownerB}, 'owner', now())`;
+      // Store C: A is staff there, B owns it.
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeC}, 'Authz C', ${slugC}, 'active', now())`;
+      await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeC}, ${ownerB}, 'owner', now())`;
+      await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeC}, ${ownerA}, 'staff', now())`;
     });
 
     const product = await platformAdmin.masterProduct.create({
@@ -221,6 +231,7 @@ describe("action authorization", () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.$executeRaw`DELETE FROM owner_whatsapp_links WHERE store_id IN (${storeA}, ${storeB}, ${storeC})`;
       await tx.$executeRaw`DELETE FROM refund_requests WHERE store_id = ${storeB}`;
       await tx.$executeRaw`DELETE FROM order_lines WHERE store_id = ${storeB}`;
       await tx.$executeRaw`DELETE FROM orders WHERE store_id = ${storeB}`;
@@ -231,7 +242,7 @@ describe("action authorization", () => {
       await tx.$executeRaw`DELETE FROM listing_imports WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM store_invites WHERE store_id IN (${storeA}, ${storeB})`;
       await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id IN (${storeA}, ${storeB}) OR actor_id IN (${ownerA}, ${ownerB})`;
-      await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id IN (${storeA}, ${storeB})`;
+      await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id IN (${storeA}, ${storeB}, ${storeC})`;
       await tx.$executeRaw`DELETE FROM master_products WHERE id = ${productId}`;
       for (const userId of [ownerA, ownerB]) {
         await tx.$executeRaw`DELETE FROM two_factors WHERE user_id = ${userId}`;
@@ -240,7 +251,7 @@ describe("action authorization", () => {
       }
       await tx.$executeRaw`DELETE FROM verifications WHERE value LIKE ${"%" + emailA + "%"} OR value LIKE ${"%" + emailB + "%"}`;
       await tx.$executeRaw`DELETE FROM users WHERE id IN (${ownerA}, ${ownerB})`;
-      await tx.$executeRaw`DELETE FROM stores WHERE id IN (${storeA}, ${storeB})`;
+      await tx.$executeRaw`DELETE FROM stores WHERE id IN (${storeA}, ${storeB}, ${storeC})`;
     });
   });
 
@@ -428,5 +439,61 @@ describe("action authorization", () => {
       expect(refund?.state).toBe("RESERVED");
       expect(refund?.amountCents).toBe(500);
     });
+  });
+
+  describe("whatsapp link", () => {
+    let linkB = "";
+
+    beforeAll(async () => {
+      const link = await storeScoped(storeB).ownerWhatsAppLink.create({
+        data: { storeId: storeB, userId: ownerB, phoneNumber: "+14045550199", waId: "14045550199", verified: true },
+      });
+      linkB = link.id;
+    });
+
+    beforeEach(() => {
+      setWhatsAppProvider(fakeWhatsAppProvider);
+      resetFake();
+    });
+
+    afterEach(() => {
+      setWhatsAppProvider(null);
+      vi.unstubAllEnvs();
+    });
+
+    async function expectNothingWritten() {
+      expect(getFakeOutbox()).toHaveLength(0);
+      const kept = await storeScoped(storeB).ownerWhatsAppLink.findUnique({ where: { id: linkB } });
+      expect(kept).toMatchObject({ phoneNumber: "+14045550199", verified: true });
+      expect(await storeScoped(storeB).ownerWhatsAppLink.count()).toBe(1);
+      expect(await storeScoped(storeC).ownerWhatsAppLink.count()).toBe(0);
+    }
+
+    it("guest is refused with no write", async () => {
+      asGuest(slugB);
+      await expect(startWhatsAppLinkAction(phoneForm())).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
+      await expect(removeWhatsAppLinkAction()).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
+      await expectNothingWritten();
+    });
+
+    it("store A cannot touch store B owner_whatsapp_links", async () => {
+      asA(slugB, cookiesA);
+      await expect(startWhatsAppLinkAction(phoneForm())).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
+      await expect(removeWhatsAppLinkAction()).rejects.toThrow(/REDIRECT:\/store-admin\/sign-in/);
+      await expectNothingWritten();
+    });
+
+    it("staff is refused with no write", async () => {
+      asA(slugC, cookiesA);
+      await expect(startWhatsAppLinkAction(phoneForm())).rejects.toThrow(/REDIRECT:\/store-admin\?store=/);
+      await expect(removeWhatsAppLinkAction()).rejects.toThrow(/REDIRECT:\/store-admin\?store=/);
+      await expectNothingWritten();
+    });
+
+    function phoneForm(): FormData {
+      const form = new FormData();
+      form.set("phone", "+14045550188");
+      return form;
+    }
   });
 });
