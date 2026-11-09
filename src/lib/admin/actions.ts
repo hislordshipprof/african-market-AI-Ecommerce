@@ -298,7 +298,12 @@ async function coordinatesForStore(
     lng: number | null;
   } | null,
 ): Promise<{ lat: number | null; lng: number | null } | { error: string }> {
-  if (previous && addressStamp(values) === addressStamp(previous)) {
+  if (
+    previous &&
+    previous.lat != null &&
+    previous.lng != null &&
+    addressStamp(values) === addressStamp(previous)
+  ) {
     return { lat: previous.lat, lng: previous.lng };
   }
   if (!values.addressLine1) return { lat: null, lng: null };

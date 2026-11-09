@@ -160,4 +160,33 @@ describe("store hours schema", () => {
     expect(still?.lat).toBeCloseTo(38.845, 2);
     setAddressProvider(null);
   });
+
+  it("turning on store delivery geocodes again when the saved address has no coordinates", async () => {
+    const fake = fakeAddressBackend();
+    setAddressProvider({ ...fake, locate: async () => ({ ok: false, code: "unavailable" }) });
+    const off = storeForm(storeId, storedShape);
+    off.set("addressLine1", "8505 Fenton St");
+    off.set("city", "Silver Spring");
+    off.set("state", "MD");
+    off.set("zip", "20910");
+    off.set("storeDeliveryFee", "5.00");
+    expect(await updateStore({}, off)).toMatchObject({ success: true, storeId });
+    const saved = await authPrisma.store.findUnique({ where: { id: storeId } });
+    expect(saved?.addressLine1).toBe("8505 Fenton St");
+    expect(saved?.lat).toBeNull();
+
+    setAddressProvider(fake);
+    const on = storeForm(storeId, storedShape);
+    on.set("addressLine1", "8505 Fenton St");
+    on.set("city", "Silver Spring");
+    on.set("state", "MD");
+    on.set("zip", "20910");
+    on.set("storeDeliveryFee", "5.00");
+    on.set("storeDeliveryEnabled", "on");
+    expect(await updateStore({}, on)).toMatchObject({ success: true, storeId });
+    const enabled = await authPrisma.store.findUnique({ where: { id: storeId } });
+    expect(enabled?.storeDeliveryEnabled).toBe(true);
+    expect(enabled?.lat).toBeCloseTo(38.996, 2);
+    setAddressProvider(null);
+  });
 });
