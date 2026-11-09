@@ -1,22 +1,31 @@
 # Handoff: African Markets Platform
 
-Written 2026-11-08. Main is at `f8e5f02`. All branches are pushed. Every build lane, CI run and queue has been stopped. Nothing is running on the dev machine except the local dev server on port 3005.
+Written 2026-11-08, updated 2026-11-09 from GitHub (PR heads and `local-ci` statuses). Main is at `dc69434` (the handoff commit, #407; code is unchanged since `f8e5f02`). All branches are pushed. Every build lane, CI run and queue has been stopped. Nothing is running on the dev machine except the local dev server on port 3005.
 
 Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/`, `docs/agents/` (builder, orchestration, issue tracker, labels).
 
+## What changed in the 2026-11-09 update
+
+- **#402 is ready to merge.** `local-ci` passed on `eb7ab40` at 23:58 UTC on 2026-11-08, the same head the review passed on. The first version of this file said CI had not run.
+- **#404 and #405 show a `pending` local-ci status that is stale.** They were posted at 00:56 and 00:58 UTC on 2026-11-09, just before everything was stopped ("running" on #405, "queued for the machine-wide local-ci lock" on #404). No run is behind them. Nothing clears a pending status when a run is killed, so they will sit there until the next run on that head.
+- **The PR numbers on four rows were attached to the wrong tickets.** Corrected below: #371 is #367, #359 is #247, #341 is #146, #313 is #207.
+- No PR has merged and no head has moved since the handoff was written. #401 and #389 are still open.
+
 ## Open PRs and where each one stands
 
-| PR | Ticket | State | What's left |
-|---|---|---|---|
-| #402 | #128 Customer notifications (email + SMS) | Review **PASS** on head `eb7ab40` (`.builder/review-128.md` on the dev machine). Local CI has not run yet. | Run local CI on `eb7ab40`, then merge. Follow-ups are in #403. |
-| #384 | #167 Closed-store checkout queueing + `CHECKOUT_LIVE_MODE` | Review passed. A local CI run was in progress when everything stopped. An older local-ci status on the PR is a failure. | Run local CI again, then merge. Follow-ups are in #383. |
-| #404 | #142 Store copilot v1 (text reports, one-tap confirm) | Stopped mid fix round after about 5 hours. The rounds kept churning on one case: the owner's report matches several listings and the model asks which one. | Diagnose that case properly before any more rounds (max 3 rounds per ticket). Follow-ups are in #406. |
-| #405 | #133 Store delivery checkout (settings, address, frozen-item guard) | Stopped mid build/fix after about 4 hours. Latest commit `174d0a6`. | Review the current head, fix what's real, and finish. The address lookup is Photon + US Census per ADR-0017 (comment on #133). |
-| #359 | #367 Low-stock explicit add | Waiting on an owner decision: one extra round, or merge as is. | Owner decision. |
-| #341 | #247 Shopper assistant A3 agentic checkout | Waiting on an owner decision. | Owner decision. |
-| #313 | #146 Golden evaluation set | Waiting on an owner decision about the recipe test rule. A main-merge commit was pushed today. | Owner decision. |
-| #371 | #207 Migrate-diff fail-closed | Open. | Review and CI, then merge. |
-| #46 | #5 Custom domains | Labeled `needs keys`. | Needs Vercel custom-domain setup from the owner. |
+`local-ci` is the status on the PR's current head, read on 2026-11-09.
+
+| PR | Ticket | Head | local-ci | State | What's left |
+|---|---|---|---|---|---|
+| #402 | #128 Customer notifications (email + SMS) | `eb7ab40` | passed | Review **PASS** on this head (`.builder/review-128.md` on the dev machine). | Confirm the review file's first or last line is exactly `VERDICT: PASS`, then merge. Follow-ups are in #403. |
+| #384 | #167 Closed-store checkout queueing + `CHECKOUT_LIVE_MODE` | `5702432` | **failed: test** (2026-11-08 15:30 UTC) | Review passed. A later CI run was in progress when everything stopped and posted nothing. | Run local CI again. If the test step fails again, fix it before merging. Follow-ups are in #383. |
+| #404 | #142 Store copilot v1 (text reports, one-tap confirm) | `8cfd3f8` | stale pending | Stopped mid fix round after about 5 hours. The rounds kept churning on one case: the owner's report matches several listings and the model asks which one. | Diagnose that case properly before any more rounds (max 3 rounds per ticket). Follow-ups are in #406. |
+| #405 | #133 Store delivery checkout (settings, address, frozen-item guard) | `174d0a6` | stale pending | Stopped mid build/fix after about 4 hours. | Review the current head, fix what's real, and finish. The address lookup is Photon + US Census per ADR-0017 (comment on #133). |
+| #371 | #367 Low-stock explicit add | `5be0bda` | passed | Waiting on an owner decision: one extra round, or merge as is. | Owner decision. |
+| #359 | #247 Shopper assistant A3 agentic checkout | `1285960` | passed | Waiting on an owner decision. | Owner decision. |
+| #341 | #146 Golden evaluation set | `bd0b775` | none on this head | Waiting on an owner decision about the recipe test rule. The head is the main-merge commit pushed on 2026-11-08. | Owner decision, then local CI on the new head. |
+| #313 | #207 Migrate-diff fail-closed | `03f91e2` | passed (2026-11-05) | Open. The branch is well behind main. | Review, then merge. |
+| #46 | #5 Custom domains | `7930905` | not checked | Labeled `needs keys`. | Needs Vercel custom-domain setup from the owner. |
 
 ## Blocked tickets and what unblocks them
 
@@ -30,7 +39,9 @@ Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/
   - #26 is blocked by #19 and #24.
   - #25 is blocked by #24.
 - **Unblocked and ready:** #143, #134, #124, #65, plus the follow-up issues labeled `ready-for-agent`.
-- **Main health:** #401 and #389 report main failing the full local CI on `5410838` and `46c9927`. Check these first.
+- **Main health:** #401 and #389 are still open. Check these first. Both failed at the test step after one retry:
+  - #401 (`5410838`): `src/lib/admin/catalog-actions.test.ts` could not start a Prisma transaction in time, in `beforeAll` and `afterAll`. This looks like connection-pool pressure under the full run, not a product bug.
+  - #389 (`46c9927`): `src/lib/stripe/contract.test.ts`, the asynchronously failing refund stayed `succeeded` on the Stripe sandbox. This depends on sandbox timing.
 
 ## Owner decisions still open
 
