@@ -46,6 +46,51 @@ ticket_round_after_review() {
   printf '%s\n' autofix
 }
 
+# Builder time. Fix rounds on #70 and #142 ran 8 and 5 hours because nothing stopped them. Two limits now apply:
+# one session is capped (BUILD_TIMEOUT_MIN, default 90), and all of a ticket's builder sessions together have a
+# budget (LANE_BUDGET_MIN, default 300), so --continue cannot restart the clock.
+
+# _log_stamp_epoch <log-file>: the start time in a log's name (…-YYYYmmdd-HHMMSS.json), as epoch seconds.
+_log_stamp_epoch() {
+  local s
+  s=$(basename "$1" | sed -nE 's/.*-([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})([0-9]{2})\.json$/\1-\2-\3 \4:\5:\6/p')
+  [ -n "$s" ] && date -d "$s" +%s 2>/dev/null
+}
+
+# ticket_builder_minutes <logs-dir> <issue>: minutes of builder sessions so far (build, fix and continue logs,
+# ticket-<n>-*.json). A session runs from the time in its log's name to the log's last write.
+ticket_builder_minutes() {
+  local dir="$1" n="$2" f start end total=0
+  for f in "$dir"/ticket-"$n"-*.json; do
+    [ -f "$f" ] || continue
+    start=$(_log_stamp_epoch "$f") || continue
+    end=$(stat -c %Y "$f" 2>/dev/null) || continue
+    [ "$end" -gt "$start" ] && total=$(( total + end - start ))
+  done
+  echo $(( total / 60 ))
+}
+
+# ticket_session_cap <session-cap-min> <budget-min> <used-min>: minutes the next session may run; 0 = none left.
+ticket_session_cap() {
+  local cap="$1" left=$(( $2 - $3 ))
+  [ "$left" -lt "$cap" ] && cap="$left"
+  [ "$cap" -gt 0 ] || cap=0
+  echo "$cap"
+}
+
+# ticket_lane_age_min <logs-dir> <issue>: minutes since the lane started: its oldest plan log, or its oldest
+# builder log when it was never planned here. Measured from the start, never from the current fix round.
+ticket_lane_age_min() {
+  local dir="$1" n="$2" f t first=""
+  for f in "$dir"/plan-"$n"-*.json "$dir"/ticket-"$n"-*.json; do
+    [ -f "$f" ] || continue
+    t=$(_log_stamp_epoch "$f") || continue
+    if [ -z "$first" ] || [ "$t" -lt "$first" ]; then first="$t"; fi
+  done
+  [ -n "$first" ] || { echo 0; return 0; }
+  echo $(( ( $(date +%s) - first ) / 60 ))
+}
+
 # Sourced by scripts/ticket-rounds.test.sh. Executing the file runs the orchestrator below.
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
   return 0
@@ -66,6 +111,32 @@ FINDINGS="${3:-}"
 cd "$ROOT"
 mkdir -p .builder/logs
 . "$ROOT/scripts/agent-cli.sh"
+. "$ROOT/scripts/review-watch.sh"
+
+# The round cap covers every mode. It used to cover --resume only, so a plain rerun or --continue could keep a
+# builder working on a ticket that had already used its 3 rounds.
+prior=$(ticket_review_count "$ROOT/.builder/logs" "$N")
+if [ "$(ticket_resume_allowed "$prior")" != yes ]; then
+  echo "Refusing to run #$N ($MODE): $prior review rounds already exist (review-$N-*.json, excluding .second.json). A ticket stops at 3 rounds. There is no override."
+  exit 1
+fi
+
+# run_session <agent_run arguments...>: one builder session, stopped at its cap. Returns 124 when it was
+# stopped, 125 when the ticket had no builder time left to start it.
+run_session() {
+  local used cap
+  used=$(ticket_builder_minutes "$ROOT/.builder/logs" "$N")
+  cap=$(ticket_session_cap "${BUILD_TIMEOUT_MIN:-90}" "${LANE_BUDGET_MIN:-300}" "$used")
+  if [ "$cap" = 0 ]; then
+    echo "Ticket #$N has used $used of its ${LANE_BUDGET_MIN:-300} builder minutes. No further session. Diagnose the whole behaviour first; the owner can raise LANE_BUDGET_MIN for one run."
+    return 125
+  fi
+  echo "Builder session for #$N: capped at $cap min ($used of ${LANE_BUDGET_MIN:-300} builder minutes used; lane age $(ticket_lane_age_min "$ROOT/.builder/logs" "$N") min)."
+  local rc=0
+  WATCH_WHAT="builder session" run_capped "$cap" agent_run "$@" || rc=$?
+  [ "$rc" != 124 ] || echo "Builder session for #$N was stopped at its $cap-minute cap. No review or fix round follows. Read its log before any --continue."
+  return "$rc"
+}
 # Claude keeps the original file name; other engines get their own (their session ids differ).
 SESSION_FILE="$ROOT/.builder/session-$N.txt"
 [ "$AGENT_ENGINE" = "claude" ] || SESSION_FILE="$ROOT/.builder/session-$N.$AGENT_ENGINE.txt"
@@ -196,7 +267,7 @@ Fix test-first. In a fix round run only the unit, integration and e2e specs affe
 $FAST_RULE}"
   [ -n "$sid" ] || prompt="$FRESH_CONTEXT
 $prompt"
-  agent_run "$ROLE" "$LOG" "$prompt" "$sid" || status=$?
+  run_session "$ROLE" "$LOG" "$prompt" "$sid" || status=$?
   save_session
 }
 
@@ -209,21 +280,16 @@ When implement reports the work ready: push the branch and open a PR to main ('C
 ${KEYLESS:-}
 $RULES${FAST_RULE:+
 $FAST_RULE}"
-    agent_run "$ROLE" "$LOG" "$PROMPT" || status=$?
+    run_session "$ROLE" "$LOG" "$PROMPT" || status=$?
     ;;
   --resume)
-    prior=$(ticket_review_count "$ROOT/.builder/logs" "$N")
-    if [ "$(ticket_resume_allowed "$prior")" != yes ]; then
-      echo "Refusing --resume for #$N: $prior review rounds already exist (review-$N-*.json, excluding .second.json). A ticket stops at 3 rounds. There is no override."
-      exit 1
-    fi
     [ -n "$FINDINGS" ] || { echo "--resume needs the finding text"; exit 1; }
     run_fix "$FINDINGS"
     ;;
   --continue)
     SID=$(cat "$SESSION_FILE" 2>/dev/null || true)
-    if [ -n "$SID" ]; then agent_run "$ROLE" "$LOG" "Continue where you stopped. $RULES${FAST_RULE:+ $FAST_RULE}" "$SID" || status=$?
-    else agent_run "$ROLE" "$LOG" "$FRESH_CONTEXT Then continue the work to done. $RULES${FAST_RULE:+ $FAST_RULE}" || status=$?; fi
+    if [ -n "$SID" ]; then run_session "$ROLE" "$LOG" "Continue where you stopped. $RULES${FAST_RULE:+ $FAST_RULE}" "$SID" || status=$?
+    else run_session "$ROLE" "$LOG" "$FRESH_CONTEXT Then continue the work to done. $RULES${FAST_RULE:+ $FAST_RULE}" || status=$?; fi
     ;;
   *) echo "unknown mode $MODE"; exit 1 ;;
 esac
@@ -284,6 +350,12 @@ if [ "${SKIP_REVIEW:-0}" != "1" ] && [ -z "${status:-}" ]; then
       echo "A newer push superseded this run of #$N; the coordinator decides. See $CI_LOG"; break
     fi
     [ "$verdict" = "VERDICT: PASS" ] && [ "$ci" = pass ] && break
+    # The review passed and CI never reached the code (uncommitted or unpushed work, database or checkout setup).
+    # There is nothing for a builder to fix, so no fix round and no second review are spent on it.
+    if [ "$verdict" = "VERDICT: PASS" ] && [ "$ci" = fail ] && grep -q "local-ci SETUP" "$CI_LOG"; then
+      echo "Review passed for #$N but local-ci failed in setup, not in the code. No fix round. Fix the cause, then rerun scripts/ci-local.sh in the worktree. See $CI_LOG"
+      break
+    fi
     action=$(ticket_round_after_review "$MODE" "$prior" "$count")
     if [ "$action" != autofix ]; then
       if [ "$action" = unrecorded ]; then
@@ -308,9 +380,15 @@ $(tail -80 "$CI_LOG")
 \`\`\`"
     fi
     cd "$WT"
+    head_before=$(git -C "$WT" rev-parse HEAD)
     run_fix "$findings"
     cd "$ROOT"
     [ -z "${status:-}" ] || break
+    # Nothing new to review or test: a second review of the same commit would return the same findings.
+    if [ "$(git -C "$WT" rev-parse HEAD)" = "$head_before" ]; then
+      echo "The fix round for #$N made no commit. No second review of the same commit. The coordinator decides. See $LOG"
+      break
+    fi
     # A fast-path builder that stopped for a replan inside a fix round: do not re-review the same HEAD.
     if [ "$FAST" = "1" ] && [ -f "$REPLAN" ]; then
       echo "Fast path stopped: replan required for #$N. $(cat "$REPLAN")"; exit 4
@@ -319,6 +397,7 @@ $(tail -80 "$CI_LOG")
 fi
 
 echo "Run finished (exit ${status:-0}). Log: $LOG"
+echo "Lane #$N: age $(ticket_lane_age_min "$ROOT/.builder/logs" "$N") min since it started; $(ticket_builder_minutes "$ROOT/.builder/logs" "$N") of ${LANE_BUDGET_MIN:-300} builder minutes used."
 [ -f "$ROOT/.builder/review-$N.md" ] && head -1 "$ROOT/.builder/review-$N.md"
 [ -f "$REPORT" ] && head -40 "$REPORT" || echo "No report written; check the log."
 exit "${status:-0}"

@@ -70,13 +70,22 @@ watch_run() {
       kill_tree "$pid"; stopped=1; break
     fi
     if [ $((SECONDS - start)) -ge "$cap" ]; then
-      echo "review watchdog: reviewer ran past ${cap}s; stopping it" >&2
+      echo "review watchdog: ${WATCH_WHAT:-reviewer} ran past ${cap}s; stopping it" >&2
       kill_tree "$pid"; stopped=1; break
     fi
   done
   wait "$pid" 2>/dev/null || rc=$?
   [ "$stopped" = 1 ] && return 124
   return "$rc"
+}
+
+# run_capped <minutes> <command...>
+# The same watchdog for sessions that write no verdict (plan, build, fix, ship): only the total cap applies.
+# Until 2026-11-09 only reviews had a cap, and builders on fix rounds ran for 5 and 8 hours.
+# Returns the command's exit status, or 124 when it was stopped at the cap.
+run_capped() {
+  local mins="$1"; shift
+  WATCH_WHAT="${WATCH_WHAT:-agent session}" REVIEW_TIMEOUT_MIN="$mins" watch_run "" "$@"
 }
 
 # stop_worktree_servers <worktree>

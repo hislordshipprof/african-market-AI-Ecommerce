@@ -17,7 +17,7 @@ Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/
 
 | PR | Ticket | Head | local-ci | State | What's left |
 |---|---|---|---|---|---|
-| #402 | #128 Customer notifications (email + SMS) | `eb7ab40` | passed | Review **PASS** on this head (`.builder/review-128.md` on the dev machine). | Confirm the review file's first or last line is exactly `VERDICT: PASS`, then merge. Follow-ups are in #403. |
+| #402 | #128 Customer notifications (email + SMS) | `eb7ab40` | passed | Review **PASS** on this head (`.builder/review-128.md` on the dev machine). | The review predates the commit binding, so `merge-ticket.sh 128` will ask for `.builder/review-128.sha`. Either rerun `scripts/review-ticket.sh 128`, or, if the review file is the PASS described here, write `eb7ab4042d0df5a54df04a48d63525ff27762776` into that file by hand. Follow-ups are in #403. |
 | #384 | #167 Closed-store checkout queueing + `CHECKOUT_LIVE_MODE` | `5702432` | **failed: test** (2026-11-08 15:30 UTC) | Review passed. A later CI run was in progress when everything stopped and posted nothing. | Run local CI again. If the test step fails again, fix it before merging. Follow-ups are in #383. |
 | #404 | #142 Store copilot v1 (text reports, one-tap confirm) | `8cfd3f8` | stale pending | Stopped mid fix round after about 5 hours. The rounds kept churning on one case: the owner's report matches several listings and the model asks which one. | Diagnose that case properly before any more rounds (max 3 rounds per ticket). Follow-ups are in #406. |
 | #405 | #133 Store delivery checkout (settings, address, frozen-item guard) | `174d0a6` | stale pending | Stopped mid build/fix after about 4 hours. | Review the current head, fix what's real, and finish. The address lookup is Photon + US Census per ADR-0017 (comment on #133). |
@@ -56,11 +56,11 @@ Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/
 - Merge a PR only when the review's first or last line is exactly `VERDICT: PASS` **and** local CI passed on the same head. Match that exact line, never a loose pattern. PR #390 merged with a BLOCKING review because of a loose match and was fixed in #394.
 - **No GitHub Actions runs until 2026-12-01.** Don't add the `run-ci` label. The `local-ci` commit status from `scripts/ci-local.sh` is the CI gate. Run CI one PR at a time. Don't rerun CI when only the merge is left and the code at that head is unchanged.
 - Production deploys only through a squash commit whose subject ends in `[deploy]`, and only with the owner's say.
-- **Max 3 rounds per ticket.** After round 2, stop and diagnose the whole behaviour before round 3.
+- **Max 3 rounds per ticket.** After round 2, stop and diagnose the whole behaviour before round 3. `build-ticket.sh` now refuses every mode at 3 review logs.
 - **Watch session length:**
   - Cap a builder session at about 90 minutes, and stop it if it churns.
   - Measure a lane's age from its start (the plan log timestamp), not from the current fix round.
-  - The pipeline has no hard timeout yet. Add one.
+  - The pipeline now stops every session at its cap (see "Pipeline fixes").
 - Only necessary tests: no tests for UI-only changes, and no one-test-per-edge-case.
 - No regex or word lists for product matching. Use Postgres search and structured model input.
 - Lanes use a private local Postgres on `:5434`, never Neon. Don't delete Neon branches; the owner does that.
@@ -73,31 +73,39 @@ Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/
 - `scripts/build-ticket.sh <n>`: plan, brief review, build, independent review and fix rounds, in worktree `C:\E-commerce-worktrees\ticket-<n>`. Reviews go to `.builder/review-<n>.md` and logs to `.builder/logs/` on the dev machine (gitignored).
 - `scripts/agent-engine.env` picks the agent CLI and models. It's currently set to the Cursor CLI for build and review. Change it to whatever provider the next team uses.
 - `scripts/ci-local.sh` runs local CI and posts the `local-ci` status.
-- `scripts/merge-ticket.sh <n> "VERDICT: PASS"` merges. It also starts a full main CI run after each merge, which made the queue slow. Consider removing that.
+- `scripts/merge-ticket.sh <n>` merges. It reads the review file itself and takes no verdict from the caller (see "Pipeline fixes" below). It starts a full main CI run every 3 merges.
 - `scripts/ticket-env.txt` lists which env key names each ticket needs. Every PR appends a line, so it causes merge conflicts.
 
 ## Known problems
 
-- Builders on fix rounds churned for hours (#70 ran 8 hours, #142 about 5 hours) because nothing enforced a time cap.
-- The machine-wide ci-local lock let CI runs overlap at least once.
+- The pipeline fixes below have passed their script tests on Linux only. They have not run on the Windows dev machine or against a real ticket yet. Run `for t in scripts/*.test.sh; do bash "$t"; done` there first.
 - Old ticket worktrees contain regenerated screenshots and scratch scripts that were never committed. Their branches are already merged, so nothing is lost. `ticket-146` has an untracked `src/lib/assistant/eval/ticket-spend.json`, a generated spend counter.
+- Killing a local-ci run from outside leaves its `pending` status on the commit (see #404 and #405).
+
+## Pipeline fixes (2026-11-09)
+
+These close the merge-gate holes and the causes of stalled lanes found in the audit below. Details and settings are in `docs/agents/orchestration.md` ("Merge gate", "Time limits", "The local-ci queue").
+
+- **Merge gate.** `merge-ticket.sh` reads `.builder/review-<n>.md` and refuses unless line 1 is exactly `VERDICT: PASS`, no line is `VERDICT: BLOCKING`, and `.builder/review-<n>.sha` (written by `review-ticket.sh`) equals the PR head. This is stricter than "first or last line": a PASS on the last line of a BLOCKING review does not merge.
+- **Owner decisions to merge as is** (#367, #247, #146) go through `OWNER_ACCEPTS_BLOCKING="<reason>" scripts/merge-ticket.sh <n>`. The reason is posted on the PR. The review must still be of the PR head, and CI must still be green.
+- **`ship-ticket.sh` no longer merges.** It rebases and repairs, then the new head needs a review and `merge-ticket.sh` again.
+- **Second-reviewer verdict** is matched exactly, not by prefix.
+- **Every agent session has a cap** and is stopped at it: plan 45 min, brief review 30, build and each fix round 90, ship 45. A ticket has 300 builder minutes in total, so `--continue` cannot restart the clock.
+- **The 3-round cap applies to every mode**, not only `--resume`.
+- **No round is spent** when the review passed and CI failed in setup, or when a fix round made no commit.
+- **The local-ci lock** can no longer be held by two runs. A lock is taken over only from a run that has exited; a run hung for 6 hours is stopped first.
+- **Full runs on main no longer pile up.** One that reaches the front of the queue after a newer one was queued skips itself.
+- **`scripts/ticket-env.txt`** now merges by union (`.gitattributes`), so two PRs that each append a line no longer conflict in a local rebase. GitHub's own merge does not read this setting.
+
+Not done: the second review on a RISK ticket still runs the same model as the first (`CURSOR_REVIEW_MODEL`), which is a setting in `scripts/agent-engine.env` for the owner to choose.
 
 ## State machine audit (2026-11-09, main at `dc69434`)
 
-A read of the code on main. Work on unmerged branches (#384, #402, #404, #359) was not audited. Nothing here has been fixed yet.
+A read of the code on main. Work on unmerged branches (#384, #402, #404, #359) was not audited. The pipeline findings have been fixed; the order lifecycle findings have not.
 
 ### Build pipeline
 
-- **`merge-ticket.sh` does not check the review.** The verdict is a free-text argument that is only posted as a PR comment (`scripts/merge-ticket.sh:8,49`). The exact `VERDICT: PASS` match exists only inside `build-ticket.sh`. Fix: read `.builder/review-<n>.md` in the merge script and require line 1 to equal `VERDICT: PASS`.
-- **The review is not tied to a commit.** CI is pinned to the head SHA, but the review file records no SHA, so a PASS for one head can merge a later one. Fix: have `review-ticket.sh` write the reviewed SHA and have the merge script compare it.
-- **The second-reviewer check is a prefix match** (`scripts/review-ticket.sh:72`), so `VERDICT: PASS with ...` counts as a pass. Fix: exact match.
-- **`ship-ticket.sh` lets an agent rebase, repair and merge** with no verdict check, SHA pin or timeout. Fix: the agent only rebases and pushes; the merge goes back through the gate.
-- **No timeout on plan, build, fix, continue or ship.** Only reviews (120 min) and CI steps (40 min each) are capped. Nothing measures lane age.
-- **Round cap is partly enforced.** `--resume` is refused after 3 reviews, but mode `build` and `--continue` never check the count.
-- **The ci-local lock can be held by two runs** (`scripts/ci-local.sh:73-121`): two waiters can both take over a stale lock, a lock older than 3 hours is taken even when its owner is alive, and cleanup removes the lock without checking who owns it. Overlapping runs share one checkout and drop the same `lane_ci` database. Fix: `flock`, or an owner token checked on takeover and release.
-- A review PASS with a CI setup failure still spends a fix round and a review round.
-- The full main run starts every 3 merges (`CI_MAIN_EVERY`), not after each merge as the Pipeline section above says. Queued main runs are never cancelled by newer ones.
-- Under the current `agent-engine.env` both reviews on a RISK ticket run the same model, so the second is not independent.
+Fixed on 2026-11-09; see "Pipeline fixes" above. One item is left: under the current `agent-engine.env` both reviews on a RISK ticket run the same model, so the second is not independent.
 
 ### Order lifecycle (`src/lib/order/service.ts`)
 
@@ -117,10 +125,8 @@ Transitions are atomic (store row lock, then re-check in the same transaction). 
 - Invite accept is read-then-write; a double submit errors instead of succeeding.
 - Stock events, refund requests, listing import and the capture retry ladder were read and look sound.
 
-### Suggested order
+### Suggested order for what is left
 
-1. Merge gate: review check, SHA binding, exact match (`merge-ticket.sh`, `review-ticket.sh`, `ship-ticket.sh`).
-2. Timeouts and a lane deadline; replace the CI lock.
-3. Health check for the Inngest key and an admin list of stuck orders.
-4. Store and customer cancel plus `payment_intent.canceled`, before the Short button ships.
-5. One order transition table, CHECK constraints, and a spec update.
+1. Health check for the Inngest key and an admin list of stuck orders.
+2. Store and customer cancel plus `payment_intent.canceled`, before the Short button ships.
+3. One order transition table, CHECK constraints, and a spec update.
