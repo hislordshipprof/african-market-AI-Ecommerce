@@ -3,9 +3,13 @@
 import { useState, useTransition } from "react";
 import { CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "@/lib/copilot/actions";
-import type { StoredMessage } from "@/lib/copilot/messages";
-import type { StockProposalCard } from "@/lib/copilot/types";
+import {
+  chooseProposalListing,
+  confirmStockProposal,
+  rejectStockProposal,
+  sendCopilotMessage,
+} from "@/lib/copilot/actions";
+import type { ChoiceCard, PanelMessage, StockProposalCard } from "@/lib/copilot/types";
 
 const KIND: Record<StockProposalCard["kind"], string> = {
   restock: "Restock",
@@ -21,6 +25,13 @@ function shelfLine(card: StockProposalCard): string {
     return `${from} → ${to}`;
   }
   return `${card.beforeQty ?? 0} → ${card.afterQty ?? 0}`;
+}
+
+function choiceChange(choice: ChoiceCard): string {
+  if (choice.kind === "set_status") return `Mark ${(choice.statusValue ?? "updated").replaceAll("_", " ")}`;
+  if (choice.kind === "restock") return `Add ${choice.quantity ?? 0}`;
+  if (choice.kind === "counter_sale") return `Counter sale of ${choice.quantity ?? 0}`;
+  return `Recount to ${choice.quantity ?? 0}`;
 }
 
 function plain(text: string): string {
@@ -40,7 +51,7 @@ export function CopilotPanel({
   proposals: initialProposals,
 }: {
   conversationId: string | null;
-  messages: StoredMessage[];
+  messages: PanelMessage[];
   proposals: StockProposalCard[];
 }) {
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -48,7 +59,9 @@ export function CopilotPanel({
   const [proposals, setProposals] = useState(initialProposals);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | { kind: "send" } | { kind: "confirm" | "dismiss"; id: string }>(null);
+  const [busy, setBusy] = useState<
+    null | { kind: "send" } | { kind: "confirm" | "dismiss"; id: string } | { kind: "choose"; key: string }
+  >(null);
   const [pending, startTransition] = useTransition();
   const trimmed = text.trim();
   const waiting = proposals.filter((card) => card.state === "pending");
@@ -75,9 +88,46 @@ export function CopilotPanel({
       setMessages((current) => [
         ...current,
         { role: "owner", text: draft.trim() },
-        { role: "assistant", text: result.reply },
+        { role: "assistant", text: result.reply, messageId, choices: result.choices },
       ]);
       setProposals((current) => [...result.proposals, ...current]);
+      setBusy(null);
+    });
+  }
+
+  function updateChoice(messageId: string, listingId: string, change: Partial<ChoiceCard>) {
+    setMessages((current) => current.map((message) => (
+      message.messageId !== messageId || !message.choices
+        ? message
+        : {
+          ...message,
+          choices: message.choices.map((choice) => (
+            choice.candidates.some((candidate) => candidate.listingId === listingId) ? { ...choice, ...change } : choice
+          )),
+        }
+    )));
+  }
+
+  function choose(messageId: string, listingId: string) {
+    if (!conversationId) return;
+    setBusy({ kind: "choose", key: `${messageId}:${listingId}` });
+    startTransition(async () => {
+      const result = await chooseProposalListing({ conversationId, messageId, listingId });
+      if (!result.ok) {
+        setNotice(result.code === "expired"
+          ? "That choice expired. Send the report again."
+          : result.code === "stale"
+            ? "That item changed since you asked. Send the report again."
+            : "That choice is no longer open.");
+        updateChoice(messageId, listingId, { open: false });
+        setBusy(null);
+        return;
+      }
+      setNotice(null);
+      updateChoice(messageId, listingId, { open: false, chosenListingId: listingId });
+      setProposals((current) => (
+        current.some((card) => card.id === result.proposal.id) ? current : [result.proposal, ...current]
+      ));
       setBusy(null);
     });
   }
@@ -175,15 +225,55 @@ export function CopilotPanel({
         {messages.length > 0 ? (
           <section aria-label="Conversation" className="flex flex-col gap-3">
             {messages.map((message, index) => (
-              <p
-                key={`${message.role}-${index}`}
-                className={message.role === "owner"
-                  ? "max-w-[65ch] whitespace-pre-wrap rounded-xl bg-muted px-4 py-3 text-base leading-6 text-foreground"
-                  : "max-w-[65ch] whitespace-pre-wrap text-base leading-6 text-foreground"}
-              >
-                <span className="mb-1 block text-[0.8125rem] font-semibold">{message.role === "owner" ? "You" : "Copilot"}</span>
-                {plain(message.text)}
-              </p>
+              <div key={`${message.role}-${index}`} className="flex flex-col gap-3">
+                <p
+                  className={message.role === "owner"
+                    ? "max-w-[65ch] whitespace-pre-wrap rounded-xl bg-muted px-4 py-3 text-base leading-6 text-foreground"
+                    : "max-w-[65ch] whitespace-pre-wrap text-base leading-6 text-foreground"}
+                >
+                  <span className="mb-1 block text-[0.8125rem] font-semibold">{message.role === "owner" ? "You" : "Copilot"}</span>
+                  {plain(message.text)}
+                </p>
+                {message.messageId && message.choices?.map((choice) => {
+                  const messageId = message.messageId!;
+                  const chosen = choice.candidates.find((candidate) => candidate.listingId === choice.chosenListingId);
+                  return (
+                    <section
+                      key={choice.candidates.map((candidate) => candidate.listingId).join(":")}
+                      aria-label={choice.nearOnly ? "Did you mean" : "Which one"}
+                      className="max-w-[65ch] rounded-xl border border-border bg-card px-4 py-4"
+                    >
+                      <h3 className="font-display text-xl leading-tight font-bold text-foreground">
+                        {choice.nearOnly ? "Did you mean?" : "Which one?"}
+                      </h3>
+                      <p className="mt-1 text-sm text-muted-foreground tabular-nums">{choiceChange(choice)}</p>
+                      {chosen ? (
+                        <p className="mt-3 text-sm text-foreground">You picked {chosen.name}. Confirm it below.</p>
+                      ) : choice.open ? (
+                        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                          {choice.candidates.map((candidate) => {
+                            const key = `${messageId}:${candidate.listingId}`;
+                            return (
+                              <Button
+                                key={candidate.listingId}
+                                type="button"
+                                variant="outline"
+                                disabled={pending}
+                                className="min-h-11 justify-start rounded-full px-5 text-left whitespace-normal"
+                                onClick={() => choose(messageId, candidate.listingId)}
+                              >
+                                {busy?.kind === "choose" && busy.key === key ? "Drafting…" : candidate.name}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-muted-foreground">This choice is closed. Send the report again.</p>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
             ))}
           </section>
         ) : null}
