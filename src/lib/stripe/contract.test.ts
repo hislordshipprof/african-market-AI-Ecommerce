@@ -23,10 +23,6 @@ type World = {
   provider: StripeProvider;
   authorize(amountCents: number, paymentMethod?: string): Promise<string>;
   armPending(paymentIntentId: string): void;
-  settleFailed(refundId: string, paymentIntentId: string): Promise<{
-    status: string;
-    amountRefunded: number;
-  }>;
 };
 
 const cleanup: string[] = [];
@@ -45,12 +41,6 @@ function fakeWorld(): World {
     },
     armPending(paymentIntentId) {
       setNextRefundStatus(paymentIntentId, "pending");
-    },
-    async settleFailed(refundId, paymentIntentId) {
-      setRefundStatus(refundId, "failed");
-      const refund = await fakeStripeProvider.retrieveRefund(refundId);
-      const pi = await fakeStripeProvider.retrievePaymentIntent(paymentIntentId);
-      return { status: refund.status, amountRefunded: pi.amountRefunded ?? 0 };
     },
   };
 }
@@ -76,20 +66,6 @@ function liveWorld(): World {
       return pi.id;
     },
     armPending() {},
-    async settleFailed(refundId, paymentIntentId) {
-      const start = Date.now();
-      let last = "missing";
-      while (Date.now() - start < 170_000) {
-        const refund = await stripeProvider.retrieveRefund(refundId);
-        last = refund.status;
-        if (refund.status === "failed") {
-          const pi = await stripeProvider.retrievePaymentIntent(paymentIntentId);
-          return { status: refund.status, amountRefunded: pi.amountRefunded ?? 0 };
-        }
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-      }
-      throw new Error(`refund stayed ${last}`);
-    },
   };
 }
 
@@ -213,15 +189,22 @@ describe("Stripe contract: fake and sandbox", () => {
     });
   }, 90_000);
 
-  it("an asynchronously failing refund behaves the same on the fake and the sandbox", async () => {
-    const observed = await compare(async (world) => {
-      const pi = await world.authorize(400, "pm_card_refundFail");
-      await world.provider.capturePaymentIntent(pi, 400, `cap-fail-${pi}`);
-      const refund = await world.provider.refundPayment(pi, 400, `refund-fail-${pi}`);
-      return world.settleFailed(refund.refundId, pi);
-    });
+  // Fake only. The sandbox side of the same claim (the provider reads status
+  // "failed" and amountRefunded 0) is pinned in pi-sandbox.test.ts, "a failed
+  // destination-charge refund leaves its funds on the platform, reads failed
+  // through the provider...", so a run waits on one pm_card_refundFail refund.
+  it("an asynchronously failing refund ends failed with nothing refunded on the fake (sandbox side pinned in pi-sandbox.test.ts)", async () => {
+    reset();
+    const world = fakeWorld();
+    const pi = await world.authorize(400, "pm_card_refundFail");
+    await world.provider.capturePaymentIntent(pi, 400, `cap-fail-${pi}`);
+    const refund = await world.provider.refundPayment(pi, 400, `refund-fail-${pi}`);
+    setRefundStatus(refund.refundId, "failed");
+    const settled = await world.provider.retrieveRefund(refund.refundId);
+    const after = await world.provider.retrievePaymentIntent(pi);
+    const observed = { status: settled.status, amountRefunded: after.amountRefunded ?? 0 };
     expect(observed).toEqual({ status: "failed", amountRefunded: 0 });
-  }, 200_000);
+  });
 
   it("a pending refund behaves the same on the fake and the sandbox", async () => {
     const observed = await compare(async (world) => {
