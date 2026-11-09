@@ -4,6 +4,26 @@ Updated 2026-11-09, evening. Main is at `dc69434`. Every branch below is pushed.
 
 Read first: `CLAUDE.md`, then this file, then `docs/agents/` (builder, orchestration). The spec, `GLOSSARY.md` and `docs/adr/` are the source of truth for product decisions.
 
+## Mac state (2026-11-09, read this before "Start here")
+
+Steps 1 to 3 below are done on the Mac; don't repeat them. Continue at step 4, item 1 (#408).
+
+- **GitHub:** use only the `hislordshipprof` account (`gh auth status` must show it active). Never use `agentlynt` or `blyntonai`.
+- **Shell:** run `source ~/.local/share/african-markets-tools/mac-env.sh` before any script. It sets Node 22 and pnpm 10 (CI's versions; the Mac's default pnpm 9 rewrites the lockfile), `LC_ALL` (Postgres won't start without it), `PGBIN`, `LANE_PG_DATA`, `AGENT_ENGINE=claude`, `REVIEW_ENGINE=claude`, GNU `date`/`stat`/`sed`, and a `claude` wrapper. The wrapper points `/supermatt:code-review` at the repo's vendored skill, because this plugin isn't installed in the Claude profile.
+- **Postgres:** after a reboot, source that file and run step 2's `pg_ctl` start command.
+- **Review worktree:** `.env.local` points at Neon, so a worktree must never copy it directly. Before `scripts/review-ticket.sh <n>`, from `~/E-commerce-worktrees/ticket-<n>`:
+
+  ```bash
+  pnpm install --frozen-lockfile
+  bash -c '. ~/E-com/scripts/lane-env.sh; prepare_lane_env <n> ~/E-com/.env.local "$PWD/.env.local" ~/E-com/scripts/ticket-env.txt'
+  bash ~/E-com/scripts/lane-db.sh t<n> "$PWD/.env.local"
+  ```
+
+  Then confirm `grep -c neon.tech .env.local` prints 0. Run `review-ticket.sh` from `~/E-com`.
+- **#408:** the seven `scripts/*.test.sh` files pass on macOS with the GNU tools; four tests fail without them. A review of `9f21111` started at 16:36 local time. Its result is `.builder/review-408.md`, with `.builder/review-408.sha` beside it. `local-ci` has not run yet.
+- **This section is a local commit, one ahead of #408.** Don't push it to #408 before the merge: it would move the PR head and void the review. Push it with the Mac-fix PR.
+- **Mac-fix PR, after #408 merges (owner's choice):** replace the GNU-only calls, then drop GNU tools from the shell setup. `date -d` in `build-ticket.sh:57`; `stat -c` in `ci-lock.sh:25`, `build-ticket.sh:67`, `review-watch.sh:65`; `sed -i` in `review-ticket.sh:67,75,77` and `ci-scope.test.sh`.
+
 ## Start here (a new agent session on the owner's Mac)
 
 You are continuing work in `~/E-com` on the owner's MacBook. The owner's `.env.local` is in that folder; never print its values. Work through the steps in order and report to the owner after each PR, before merging anything.
