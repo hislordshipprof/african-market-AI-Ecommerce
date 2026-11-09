@@ -36,7 +36,7 @@ import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/m
 import { setSpendClock } from "../assistant/spend";
 import { auth } from "../auth";
 import { authPrisma, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
-import { confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
+import { chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
 import { FIXED_ERROR } from "./types";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -406,31 +406,82 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: palmId } })).qty).toBe(7);
   }, 60_000);
 
-  it("an ambiguous report stays a question and does not draft a card", async () => {
-    const ofada = await storeScoped(storeAId).listing.create({
+  it("a report that fits two listings offers both and one tap drafts the chosen one", async () => {
+    const ofadaId = (await storeScoped(storeAId).listing.create({
       data: { storeId: storeAId, customName: "Ofada Rice", price: 500, stockMode: "counted", qty: 9 },
-    });
-    const question = "Which one do you mean, Rice or Ofada Rice?";
-    const qtyBefore = (await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: riceId } })).qty;
-    const proposalsBefore = await storeScoped(storeAId).stockProposal.count({
-      where: { listingId: { in: [riceId, ofada.id] } },
-    });
+    })).id;
     try {
-      script([{ kind: "text", text: question }]);
-      const sent = await sendCopilotMessage({
-        messageId: crypto.randomUUID(),
-        text: "got 10 bags of rice",
+      const riceQty = (await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: riceId } })).qty;
+      const proposalsBefore = await storeScoped(storeAId).stockProposal.count({
+        where: { listingId: { in: [riceId, ofadaId] } },
       });
+      script([
+        { kind: "tool", toolName: "find_listings", toolInput: { query: "rice" } },
+        { kind: "tool", toolName: "propose_stock_change", toolInput: { listingId: riceId, kind: "restock", quantity: 10 } },
+        { kind: "text", text: "Pick the rice below." },
+      ]);
+      const messageId = crypto.randomUUID();
+      const sent = await sendCopilotMessage({ messageId, text: "got 10 bags of rice" });
       expect(sent.ok).toBe(true);
       if (!sent.ok) return;
       expect(sent.proposals).toEqual([]);
-      expect(sent.reply).toBe(question);
+      expect(sent.choices).toHaveLength(1);
+      expect(sent.choices[0]).toMatchObject({ kind: "restock", quantity: 10, nearOnly: false, open: true });
+      expect(sent.choices[0]!.candidates.map((candidate) => candidate.name).sort()).toEqual(["Ofada Rice", "Rice"]);
       expect(await storeScoped(storeAId).stockProposal.count({
-        where: { listingId: { in: [riceId, ofada.id] } },
+        where: { listingId: { in: [riceId, ofadaId] } },
       })).toBe(proposalsBefore);
-      expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: riceId } })).qty).toBe(qtyBefore);
+
+      const tap = { conversationId: sent.conversationId, messageId, listingId: ofadaId };
+      expect(await chooseProposalListing({ ...tap, listingId: gariId })).toEqual({ ok: false, code: "not_found" });
+      asStore(storeBSlug, cookiesB);
+      expect(await chooseProposalListing(tap)).toEqual({ ok: false, code: "not_found" });
+      asStore(storeASlug, cookiesA);
+
+      const chosen = await chooseProposalListing(tap);
+      expect(chosen).toMatchObject({
+        ok: true,
+        proposal: { listingId: ofadaId, kind: "restock", quantity: 10, beforeQty: 9, afterQty: 19, state: "pending" },
+      });
+      if (!chosen.ok) return;
+      const again = await chooseProposalListing(tap);
+      expect(again).toMatchObject({ ok: true, proposal: { id: chosen.proposal.id } });
+      expect(await chooseProposalListing({ ...tap, listingId: riceId })).toEqual({ ok: false, code: "not_found" });
+      expect(await storeScoped(storeAId).stockProposal.count({
+        where: { listingId: { in: [riceId, ofadaId] } },
+      })).toBe(proposalsBefore + 1);
+      expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: ofadaId } })).qty).toBe(9);
+      expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: riceId } })).qty).toBe(riceQty);
+      expect(await storeScoped(storeAId).stockEvent.count({ where: { listingId: ofadaId } })).toBe(0);
+
+      expect(await confirmStockProposal({ proposalId: chosen.proposal.id })).toMatchObject({ ok: true, listing: { qty: 19 } });
     } finally {
-      await storeScoped(storeAId).listing.delete({ where: { id: ofada.id } }).catch(() => undefined);
+      await storeScoped(storeAId).listing.update({ where: { id: ofadaId }, data: { active: false } });
     }
-  });
+  }, 60_000);
+
+  it("a specific name with look-alike neighbours drafts one card", async () => {
+    const add = async (name: string) => (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: name, price: 500, stockMode: "counted", qty: 3 },
+    })).id;
+    const yellowId = await add("Yellow Garri 4lb");
+    const others = [await add("Garri"), await add("White Garri")];
+    try {
+      script([
+        { kind: "tool", toolName: "find_listings", toolInput: { query: "yellow garri" } },
+        { kind: "tool", toolName: "propose_stock_change", toolInput: { listingId: yellowId, kind: "restock", quantity: 6 } },
+        { kind: "text", text: "Yellow garri up by 6." },
+      ]);
+      const sent = await sendCopilotMessage({ messageId: crypto.randomUUID(), text: "got 6 yellow garri" });
+      expect(sent.ok).toBe(true);
+      if (!sent.ok) return;
+      expect(sent.choices).toEqual([]);
+      expect(sent.proposals).toEqual([
+        expect.objectContaining({ listingId: yellowId, kind: "restock", quantity: 6, beforeQty: 3, afterQty: 9, state: "pending" }),
+      ]);
+      expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: yellowId } })).qty).toBe(3);
+    } finally {
+      await storeScoped(storeAId).listing.updateMany({ where: { id: { in: [yellowId, ...others] } }, data: { active: false } });
+    }
+  }, 60_000);
 });

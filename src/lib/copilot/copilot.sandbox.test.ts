@@ -23,6 +23,9 @@ describe.skipIf(!live)("copilot live sandbox", () => {
   let gariId = "";
   let palmId = "";
   let riceId = "";
+  const counted = async (name: string, qty: number) => (await storeScoped(storeId).listing.create({
+    data: { storeId, customName: name, price: 500, stockMode: "counted", qty },
+  })).id;
 
   beforeAll(async () => {
     setSpendClock(() => new Date(`${DAY}T12:00:00.000Z`));
@@ -40,9 +43,6 @@ describe.skipIf(!live)("copilot live sandbox", () => {
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, ${"Live " + slug}, ${slug}, 'active', now())`;
     });
-    const counted = async (name: string, qty: number) => (await storeScoped(storeId).listing.create({
-      data: { storeId, customName: name, price: 500, stockMode: "counted", qty },
-    })).id;
     gariId = await counted("Gari", 12);
     palmId = await counted("Palm oil", 7);
     riceId = await counted("Rice", 40);
@@ -89,7 +89,26 @@ describe.skipIf(!live)("copilot live sandbox", () => {
     expect((await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: gariId } })).qty).toBe(12);
     expect((await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: palmId } })).qty).toBe(7);
     expect((await storeScoped(storeId).listing.findUniqueOrThrow({ where: { id: riceId } })).qty).toBe(40);
+
+    const ofadaId = await counted("Ofada Rice", 9);
+    const ambiguous = await sendCopilotTurn({
+      storeId,
+      userId,
+      email: "live@example.com",
+      messageId: crypto.randomUUID(),
+      text: "got 10 bags of rice",
+    });
+    expect(ambiguous.ok, JSON.stringify(ambiguous)).toBe(true);
+    if (ambiguous.ok) {
+      expect(ambiguous.proposals, ambiguous.reply).toHaveLength(0);
+      expect(ambiguous.choices, ambiguous.reply).toHaveLength(1);
+      expect(ambiguous.choices[0]!.candidates.map((candidate) => candidate.listingId).sort())
+        .toEqual([ofadaId, riceId].sort());
+      expect(ambiguous.choices[0]).toMatchObject({ kind: "restock", quantity: 10 });
+    }
+    expect(await storeScoped(storeId).stockProposal.count({ where: { listingId: ofadaId } })).toBe(0);
+
     const after = await dayCost();
     expect(after - before).toBeLessThan(BigInt(50_000));
-  }, 90_000);
+  }, 120_000);
 });
