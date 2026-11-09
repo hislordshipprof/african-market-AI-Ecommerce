@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
+import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
 
 /** One TTL for preview cleanup and the import-token claim. */
 export const IMPORT_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -33,7 +34,7 @@ if (!globalForPrisma.prisma) {
   const adapter = new PrismaPg(connectionUrl!);
   // Vitest-only. Production, next start and Vercel keep Prisma's default maxWait.
   const vitest = process.env.VITEST === "true";
-  globalForPrisma.prisma = new PrismaClient(vitest ? { adapter, transactionOptions: { maxWait: 15_000 } } : { adapter });
+  globalForPrisma.prisma = new PrismaClient(vitest ? { adapter, transactionOptions: { maxWait: VITEST_TRANSACTION_MAX_WAIT_MS } } : { adapter });
 }
 
 const prisma = globalForPrisma.prisma;
