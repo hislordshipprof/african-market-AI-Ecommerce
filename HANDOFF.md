@@ -1,29 +1,141 @@
 # Handoff: African Markets Platform
 
-Written 2026-11-08, updated 2026-11-09 from GitHub (PR heads and `local-ci` statuses). Main is at `dc69434` (the handoff commit, #407; code is unchanged since `f8e5f02`). All branches are pushed. Every build lane, CI run and queue has been stopped. Nothing is running on the dev machine except the local dev server on port 3005.
+Updated 2026-11-09, evening. Main is at `dc69434`. Every branch below is pushed. Nothing is running anywhere: the cloud session that wrote this has stopped, and so has every pipeline lane on the old Windows dev machine.
 
-Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/`, `docs/agents/` (builder, orchestration, issue tracker, labels).
+Read first: `CLAUDE.md`, then this file, then `docs/agents/` (builder, orchestration). The spec, `GLOSSARY.md` and `docs/adr/` are the source of truth for product decisions.
 
-## What changed in the 2026-11-09 update
+## Start here (a new agent session on the owner's Mac)
 
-- **#402 is ready to merge.** `local-ci` passed on `eb7ab40` at 23:58 UTC on 2026-11-08, the same head the review passed on. The first version of this file said CI had not run.
-- **#404 and #405 show a `pending` local-ci status that is stale.** They were posted at 00:56 and 00:58 UTC on 2026-11-09, just before everything was stopped ("running" on #405, "queued for the machine-wide local-ci lock" on #404). No run is behind them. Nothing clears a pending status when a run is killed, so they will sit there until the next run on that head.
-- **The PR numbers on four rows were attached to the wrong tickets.** Corrected below: #371 is #367, #359 is #247, #341 is #146, #313 is #207.
-- No PR has merged and no head has moved since the handoff was written. #401 and #389 are still open.
+You are continuing work in `~/E-com` on the owner's MacBook. The owner's `.env.local` is in that folder; never print its values. Work through the steps in order and report to the owner after each PR, before merging anything.
+
+### 1. Set up the checkout (once)
+
+If `~/E-com` has no `.git` yet (it held only `.env.local`):
+
+```bash
+cd ~/E-com && git init && git remote add origin https://github.com/hislordshipprof/african-market-AI-Ecommerce.git && git fetch origin && git checkout -t origin/claude/focused-johnson-8op40i
+```
+
+That branch is PR #408, which carries this file and the pipeline fixes. Then:
+
+```bash
+pnpm install && git config core.hooksPath .githooks
+```
+
+- `gh auth status` must show the owner signed in; the scripts call `gh`.
+- Other worktrees go in `~/E-commerce-worktrees/` (the scripts expect that sibling folder).
+
+### 2. Local Postgres on :5434 (the scripts assume Windows)
+
+`scripts/local-pg.sh`, `lane-db.sh` and `ci-local.sh` default to `C:\Program Files\PostgreSQL\18\bin`, and start the server through PowerShell. On the Mac:
+
+1. Install Postgres 18 (CI runs 18): `brew install postgresql@18`.
+2. Before any script, set in the shell:
+   - `export PGBIN="$(brew --prefix postgresql@18)/bin"`
+   - `export LANE_PG_DATA="$HOME/.local/share/african-markets-pg/data"`
+   - `LANE_PG_PORT` stays 5434.
+3. Run `bash scripts/local-pg.sh` once. It creates the cluster, then fails at the PowerShell start. That is expected.
+4. Start the server yourself:
+   `"$PGBIN/pg_ctl" -D "$LANE_PG_DATA" -l "$LANE_PG_DATA/server.log" -w start`
+5. Run `bash scripts/local-pg.sh` again. It creates the `app_owner` / `app_runtime` roles and, now that the server is up, skips the start.
+
+After a reboot, repeat step 4. Never point a lane or CI at Neon. If you change these scripts to work on macOS, do it in a small separate PR.
+
+### 3. Agent engines on the Mac
+
+- `scripts/agent-cli.sh` finds the Cursor CLI under Windows paths (`AppData/Local`, `node.exe`), so `ENGINE=cursor` will not start on the Mac.
+- Use `AGENT_ENGINE=claude REVIEW_ENGINE=claude` for any script that runs an agent (`review-ticket.sh`, `build-ticket.sh`), unless the owner sets the Cursor path.
+- The reviewer must not be the session that wrote the code.
+
+### 4. Work order
+
+Run CI one PR at a time. Each PR's CI runs in its own worktree:
+
+```bash
+git worktree add ~/E-commerce-worktrees/ticket-<n> origin/<branch>
+```
+
+Then, from that worktree, using the main checkout's script:
+
+```bash
+E2E_PORT=3100 CI_DB=ci CI_RUNNER="$HOME/E-commerce-worktrees/ci-runner" bash ~/E-com/scripts/ci-local.sh
+```
+
+That posts the `local-ci` status the merge gate reads.
+
+The merge gate (`scripts/merge-ticket.sh <n>`, from #408) needs `.builder/review-<n>.md` with line 1 exactly `VERDICT: PASS`, and `.builder/review-<n>.sha` equal to the PR head. The reviews listed below ran in a cloud session and left no such files. So, for each PR, get a fresh one:
+
+```bash
+AGENT_ENGINE=claude REVIEW_ENGINE=claude scripts/review-ticket.sh <n>
+```
+
+Or ask the owner. Never write a review file by hand.
+
+1. **#408, pipeline fixes and this file.** Branch `claude/focused-johnson-8op40i`.
+   - Run `for t in scripts/*.test.sh; do bash "$t"; done`. They passed on Linux only, never on macOS.
+   - It has not had an independent review. Get one before merging.
+   - Merge it first: the merge gate it adds applies to every merge after it.
+   - After the first merge, check that the squash commit on main carries no AI co-author line.
+2. **#411, test clients wait 15 s for a transaction (closes #401).** Branch `fix-401-main-ci-failures`. Review PASS. Needs `local-ci`.
+3. **#412, Stripe async-refund test (closes #389).** Branch `fix-389-stripe-refund-contract`. Review PASS. Needs `local-ci`, plus the sandbox half with the owner's Stripe keys:
+
+   ```bash
+   pnpm exec vitest run src/lib/stripe/contract.test.ts src/lib/stripe/pi-sandbox.test.ts
+   ```
+
+   Expect 34 passing, and note how long the combined pi-sandbox test takes.
+4. **#405, store delivery checkout (#133).** Branch `ticket-133-store-delivery-checkout-settings-address`, head `0b63d43`.
+   - Two reviews PASS; the browser spec `e2e/customer-journey.spec.ts` passed 4/4.
+   - Needs `local-ci`.
+   - Owner decision: keep store delivery off for real stores until #15 ships, because a paid delivery order stops at READY.
+5. **#404, store copilot v1 (#142).** Branch `ticket-142-store-copilot-v1-text-owner-reports-with`, head `a6cc5b7`.
+   - Round 3 of 3 is done, and its review passed. Do not start another round; follow-ups are in #406.
+   - Needs `local-ci` and the live model test with the owner's key:
+
+     ```bash
+     ASSISTANT_LIVE_TESTS=1 pnpm exec vitest run src/lib/copilot/copilot.sandbox.test.ts
+     ```
+
+     It passes when "live Haiku turns owner reports into the right proposals" shows ✓ and is not skipped. Put the output in the PR.
+6. **#410, WhatsApp transport (#143).** Branch `ticket-143-whatsapp-transport-layer`, head `8691093`.
+   - Three reviews PASS. Needs `local-ci`.
+   - Leave it unmerged until the real-key steps in the PR are done (it is titled `[needs keys]`). Follow-ups are in #409.
+7. **Older PRs** in the table below: #402, #384, then the owner decisions.
+
+### 5. What the cloud session saw (for comparison)
+
+- On Postgres 16 in the cloud, the full suite on these heads failed only in tests that fail the same way on main there:
+  - `src/lib/listing-isolation.test.ts` (expects SQLSTATE 23001, got 23503: a 16-vs-18 difference);
+  - `src/lib/listing/listing-imports-index-migration.test.ts` (drift check against that database);
+  - `e2e/spawned-server.unit.ts` (process kill).
+- `src/lib/cart/cart-user-orphan-migration.test.ts` failed once under full-suite load and passed 3/3 alone.
+- On Postgres 18, the first two should pass. Treat a failure there as real.
+
+### 6. Owner decisions waiting
+
+- #142 / #406 R7: should an exact own name ("Gari" next to "Garri") also ask when look-alikes exist?
+- #143 / #409 F2: how the per-number WhatsApp code limit should work across stores.
+- #133: delivery off for real stores until #15 (above).
+- #389: if the Stripe refund test still flakes, switch to asserting on an earlier failed refund (`events.list({ type: "refund.failed" })`).
+- The older ones under "Owner decisions still open" below.
 
 ## Open PRs and where each one stands
 
-`local-ci` is the status on the PR's current head, read on 2026-11-09.
+`local-ci` is the status on the PR's current head, read on 2026-11-09. None of the PRs opened or changed on 2026-11-09 has a `local-ci` status.
 
 | PR | Ticket | Head | local-ci | State | What's left |
 |---|---|---|---|---|---|
-| #402 | #128 Customer notifications (email + SMS) | `eb7ab40` | passed | Review **PASS** on this head (`.builder/review-128.md` on the dev machine). | The review predates the commit binding, so `merge-ticket.sh 128` will ask for `.builder/review-128.sha`. Either rerun `scripts/review-ticket.sh 128`, or, if the review file is the PASS described here, write `eb7ab4042d0df5a54df04a48d63525ff27762776` into that file by hand. Follow-ups are in #403. |
-| #384 | #167 Closed-store checkout queueing + `CHECKOUT_LIVE_MODE` | `5702432` | **failed: test** (2026-11-08 15:30 UTC) | Review passed. A later CI run was in progress when everything stopped and posted nothing. | Run local CI again. If the test step fails again, fix it before merging. Follow-ups are in #383. |
-| #404 | #142 Store copilot v1 (text reports, one-tap confirm) | `8cfd3f8` | stale pending | Stopped mid fix round after about 5 hours. The rounds kept churning on one case: the owner's report matches several listings and the model asks which one. | Diagnose that case properly before any more rounds (max 3 rounds per ticket). Follow-ups are in #406. |
-| #405 | #133 Store delivery checkout (settings, address, frozen-item guard) | `174d0a6` | stale pending | Stopped mid build/fix after about 4 hours. | Review the current head, fix what's real, and finish. The address lookup is Photon + US Census per ADR-0017 (comment on #133). |
+| #408 | Pipeline fixes, this file | `claude/focused-johnson-8op40i` | none | Script tests pass on Linux. No independent review yet. | Script tests on macOS, a review, local-ci, merge first. |
+| #411 | #401 test Prisma clients wait 15 s | `0e7bdfb` | none | Review PASS. A stall test fails on main and passes here. | local-ci, merge. |
+| #412 | #389 Stripe async-refund test | `2479670` | none | Review PASS. The sandbox half has not run. | Sandbox run with keys, local-ci, merge. |
+| #405 | #133 Store delivery checkout | `0b63d43` | stale pending | Two reviews PASS. Fix round done. e2e passed. | local-ci, delivery-off decision, merge. |
+| #404 | #142 Store copilot v1 | `a6cc5b7` | stale pending | Round 3 of 3 done. Review PASS. | Live model test with key, local-ci, merge. Follow-ups #406. |
+| #410 | #143 WhatsApp transport | `8691093` | none | Three reviews PASS. `[needs keys]`. | local-ci; real-key steps in the PR before merge. Follow-ups #409. |
+| #402 | #128 Customer notifications (email + SMS) | `eb7ab40` | passed | Review **PASS** on this head (`.builder/review-128.md` on the old Windows machine). | The review file is not on the Mac and predates the commit binding; rerun `scripts/review-ticket.sh 128`. Follow-ups are in #403. |
+| #384 | #167 Closed-store checkout queueing + `CHECKOUT_LIVE_MODE` | `5702432` | **failed: test** (2026-11-08 15:30 UTC) | Review passed. | Run local CI again. If the test step fails again, fix it before merging. Follow-ups are in #383. |
 | #371 | #367 Low-stock explicit add | `5be0bda` | passed | Waiting on an owner decision: one extra round, or merge as is. | Owner decision. |
 | #359 | #247 Shopper assistant A3 agentic checkout | `1285960` | passed | Waiting on an owner decision. | Owner decision. |
-| #341 | #146 Golden evaluation set | `bd0b775` | none on this head | Waiting on an owner decision about the recipe test rule. The head is the main-merge commit pushed on 2026-11-08. | Owner decision, then local CI on the new head. |
+| #341 | #146 Golden evaluation set | `bd0b775` | none on this head | Waiting on an owner decision about the recipe test rule. | Owner decision, then local CI on the new head. |
 | #313 | #207 Migrate-diff fail-closed | `03f91e2` | passed (2026-11-05) | Open. The branch is well behind main. | Review, then merge. |
 | #46 | #5 Custom domains | `7930905` | not checked | Labeled `needs keys`. | Needs Vercel custom-domain setup from the owner. |
 
@@ -38,10 +150,8 @@ Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/
   - #22 and #21 are blocked by #20.
   - #26 is blocked by #19 and #24.
   - #25 is blocked by #24.
-- **Unblocked and ready:** #143, #134, #124, #65, plus the follow-up issues labeled `ready-for-agent`.
-- **Main health:** #401 and #389 are still open. Check these first. Both failed at the test step after one retry:
-  - #401 (`5410838`): `src/lib/admin/catalog-actions.test.ts` could not start a Prisma transaction in time, in `beforeAll` and `afterAll`. This looks like connection-pool pressure under the full run, not a product bug.
-  - #389 (`46c9927`): `src/lib/stripe/contract.test.ts`, the asynchronously failing refund stayed `succeeded` on the Stripe sandbox. This depends on sandbox timing.
+- **Unblocked and ready:** #134 (after #405 merges), #124, #65, plus the follow-up issues labeled `ready-for-agent`. #144 is unblocked once #410 merges.
+- **Main health:** #401 and #389 have fixes in #411 and #412. Why new Postgres connections stalled on the Windows machine (#401) is still unknown.
 
 ## Owner decisions still open
 
@@ -79,7 +189,8 @@ Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/
 
 ## Known problems
 
-- The pipeline fixes below have passed their script tests on Linux only. They have not run on the Windows dev machine or against a real ticket yet. Run `for t in scripts/*.test.sh; do bash "$t"; done` there first.
+- The pipeline fixes below have passed their script tests on Linux only. They have not run on macOS or Windows, or against a real ticket yet.
+- The pipeline scripts assume the Windows dev machine (Postgres and Cursor paths, PowerShell). See "Start here" for the Mac workarounds.
 - Old ticket worktrees contain regenerated screenshots and scratch scripts that were never committed. Their branches are already merged, so nothing is lost. `ticket-146` has an untracked `src/lib/assistant/eval/ticket-spend.json`, a generated spend counter.
 - Killing a local-ci run from outside leaves its `pending` status on the commit (see #404 and #405).
 
