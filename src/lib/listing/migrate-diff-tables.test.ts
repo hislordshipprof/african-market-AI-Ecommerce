@@ -135,8 +135,86 @@ ALTER TABLE "stores" ADD COLUMN "y" TEXT;
   },
   {
     name: "a referenced table",
-    script: `ALTER TABLE "accounts" ADD CONSTRAINT "c" FOREIGN KEY ("user_id") REFERENCES "users"("id");\n`,
+    script: `ALTER TABLE "accounts" ADD CONSTRAINT "c" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;\n`,
     names: ["accounts"],
+  },
+  {
+    name: "an altered column",
+    script: `ALTER TABLE "categories" ALTER COLUMN "updated_at" DROP DEFAULT;\n`,
+    names: ["categories"],
+  },
+  {
+    name: "drop table lists every target",
+    script: `${ELEVEN}DROP TABLE IF EXISTS "stores", "orders";\n`,
+    names: TWELVE,
+  },
+  {
+    name: "truncate lists every target",
+    script: `${ELEVEN}TRUNCATE TABLE ONLY "stores" *, "orders";\n`,
+    names: TWELVE,
+  },
+  {
+    name: "an unknown second index",
+    script: `${ELEVEN}DROP INDEX "idx", "unknown_idx";\n`,
+    indexToTable: new Map([["idx", "stores"]]),
+    error: /index has no table: unknown_idx/,
+  },
+  {
+    name: "a mapped second index",
+    script: `${ELEVEN}DROP INDEX CONCURRENTLY "idx", "orders_idx";\n`,
+    indexToTable: new Map([
+      ["idx", "stores"],
+      ["orders_idx", "orders"],
+    ]),
+    names: TWELVE,
+  },
+  {
+    name: "a comma after one alter target",
+    script: `ALTER TABLE "stores", "orders" ADD COLUMN "unexpected" TEXT;\n`,
+    error: /unexamined target tail/,
+  },
+  {
+    name: "a bare name continued with a dollar sign",
+    script: `${ELEVEN}ALTER TABLE stores$extra ADD COLUMN unexpected TEXT;\n`,
+    error: /identifier was cut short: stores\$extra/,
+  },
+  {
+    name: "a schema-qualified bare name continued with a dollar sign",
+    script: `ALTER TABLE public.stores$extra ADD COLUMN unexpected TEXT;\n`,
+    error: /identifier was cut short: stores\$extra/,
+  },
+  {
+    name: "a bare name continued with a non-ascii letter",
+    script: `${ELEVEN}ALTER TABLE storesé ADD COLUMN unexpected TEXT;\n`,
+    error: /identifier was cut short: storesé/,
+  },
+  {
+    name: "a quoted name that contains a dollar sign",
+    script: `${ELEVEN}ALTER TABLE "stores$extra" ADD COLUMN unexpected TEXT;\n`,
+    names: [
+      "accounts",
+      "audit_logs",
+      "categories",
+      "listings",
+      "master_products",
+      "product_synonyms",
+      "sessions",
+      "store_banners",
+      "store_collections",
+      "stores",
+      "stores$extra",
+      "two_factors",
+    ],
+  },
+  {
+    name: "create type after a comment fragment",
+    script: `${ELEVEN}/* ALTER TABLE "stores" */ CREATE TYPE "mood" AS ENUM ('sad');\n`,
+    error: /unhandled statement: CREATE TYPE/,
+  },
+  {
+    name: "update after a comment fragment",
+    script: `${ELEVEN}/* ALTER TABLE "stores" */ UPDATE "orders" SET status='CANCELLED';\n`,
+    error: /unhandled statement: UPDATE/,
   },
   {
     name: "the same table twice",
