@@ -81,3 +81,46 @@ Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/
 - Builders on fix rounds churned for hours (#70 ran 8 hours, #142 about 5 hours) because nothing enforced a time cap.
 - The machine-wide ci-local lock let CI runs overlap at least once.
 - Old ticket worktrees contain regenerated screenshots and scratch scripts that were never committed. Their branches are already merged, so nothing is lost. `ticket-146` has an untracked `src/lib/assistant/eval/ticket-spend.json`, a generated spend counter.
+
+## State machine audit (2026-11-09, main at `dc69434`)
+
+A read of the code on main. Work on unmerged branches (#384, #402, #404, #359) was not audited. Nothing here has been fixed yet.
+
+### Build pipeline
+
+- **`merge-ticket.sh` does not check the review.** The verdict is a free-text argument that is only posted as a PR comment (`scripts/merge-ticket.sh:8,49`). The exact `VERDICT: PASS` match exists only inside `build-ticket.sh`. Fix: read `.builder/review-<n>.md` in the merge script and require line 1 to equal `VERDICT: PASS`.
+- **The review is not tied to a commit.** CI is pinned to the head SHA, but the review file records no SHA, so a PASS for one head can merge a later one. Fix: have `review-ticket.sh` write the reviewed SHA and have the merge script compare it.
+- **The second-reviewer check is a prefix match** (`scripts/review-ticket.sh:72`), so `VERDICT: PASS with ...` counts as a pass. Fix: exact match.
+- **`ship-ticket.sh` lets an agent rebase, repair and merge** with no verdict check, SHA pin or timeout. Fix: the agent only rebases and pushes; the merge goes back through the gate.
+- **No timeout on plan, build, fix, continue or ship.** Only reviews (120 min) and CI steps (40 min each) are capped. Nothing measures lane age.
+- **Round cap is partly enforced.** `--resume` is refused after 3 reviews, but mode `build` and `--continue` never check the count.
+- **The ci-local lock can be held by two runs** (`scripts/ci-local.sh:73-121`): two waiters can both take over a stale lock, a lock older than 3 hours is taken even when its owner is alive, and cleanup removes the lock without checking who owns it. Overlapping runs share one checkout and drop the same `lane_ci` database. Fix: `flock`, or an owner token checked on takeover and release.
+- A review PASS with a CI setup failure still spends a fix round and a review round.
+- The full main run starts every 3 merges (`CI_MAIN_EVERY`), not after each merge as the Pipeline section above says. Queued main runs are never cancelled by newer ones.
+- Under the current `agent-engine.env` both reviews on a RISK ticket run the same model, so the second is not independent.
+
+### Order lifecycle (`src/lib/order/service.ts`)
+
+Transitions are atomic (store row lock, then re-check in the same transaction). The problems are missing paths, not races.
+
+- **Recovery depends on Inngest.** With no `INNGEST_EVENT_KEY` in production the order event is not sent, so there is no auto-cancel timer (#269 is the ticket for the keys). Alert audit rows (`reconcile_failed`, `capture_released`, `acceptance_alert`) are written but nothing reads them; admin only sees `REFUND_FAILED`.
+- **Orders placed while the store is closed are auto-cancelled at 30 minutes** (`src/lib/inngest/functions.ts:126`). #384 fixes this. Auto-accept only fires from an open staff browser.
+- **No cancel and no timeout out of `ACCEPTED` or `PICKING`.** An abandoned order keeps its stock reservation and card hold. The Stripe webhook does not handle `payment_intent.canceled`.
+- **The `short` line status is a dead end.** Nothing moves a line out of it, so the order can never be marked ready. No UI reaches it yet; it will when #13 adds the button.
+- **A card hold can exist with no order** if the shopper closes the tab between confirming the card and `placeOrder`. No webhook or sweep cleans it up.
+- `evaluateOrderRefundState` calls Stripe while holding the store lock (`src/lib/order/refund-requests.ts:409-422`).
+- **Three state lists disagree:** spec section 9, `OrderStatus` in the order service, and a second `OrderStatus` in `src/lib/customer-flow/contracts.ts`. `READY` is unreachable. The status column is a free string with no CHECK constraint, and status writes sit in about 12 places with no transition table.
+
+### Smaller
+
+- Assistant turn lease is released without an owner check (`src/lib/assistant/chat-handler.ts:657`), so a turn longer than 90 seconds can clear the next turn's lease.
+- Invite accept is read-then-write; a double submit errors instead of succeeding.
+- Stock events, refund requests, listing import and the capture retry ladder were read and look sound.
+
+### Suggested order
+
+1. Merge gate: review check, SHA binding, exact match (`merge-ticket.sh`, `review-ticket.sh`, `ship-ticket.sh`).
+2. Timeouts and a lane deadline; replace the CI lock.
+3. Health check for the Inngest key and an admin list of stuck orders.
+4. Store and customer cancel plus `payment_intent.canceled`, before the Short button ships.
+5. One order transition table, CHECK constraints, and a spec update.
