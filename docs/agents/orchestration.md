@@ -104,6 +104,10 @@ The coordinator is one interactive session that never writes product code. Every
 5. **Deploys:** production builds only when the squash subject ends with `[deploy]`. Use it only at milestones: `gh pr merge <pr> --squash --subject "<title> (#<pr>) [deploy]"`. Never put the marker anywhere else in a title.
 6. **Records:** update the build board row, close or edit follow-up issues, and record every decision on the issue, not only in chat.
 
+## Commit attribution
+
+Commits carry no AI co-author (owner rule, 2026-11-09). `scripts/strip-ai-coauthors.sh` removes `Co-Authored-By:` trailers that credit Claude or Cursor. `.githooks/commit-msg` runs it on every commit once `core.hooksPath` is `.githooks` (`build-ticket.sh` sets this), and `merge-ticket.sh` runs it on the squash message it gives GitHub. Tests: `bash scripts/strip-ai-coauthors.test.sh`.
+
 ## Time limits
 
 Every agent session is stopped, with its process tree, when it passes its cap (`run_capped` in `scripts/review-watch.sh`). A stopped session exits 124 and nothing follows it automatically: no review, no fix round.

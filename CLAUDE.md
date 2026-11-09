@@ -14,6 +14,10 @@ are the source of truth for early decisions:
 
 When a decision changes, update the spec, `GLOSSARY.md`, or an ADR in `docs/adr/` — not just the chat.
 
+## Commits
+
+No AI co-author on commits or PRs: never add a `Co-Authored-By:` trailer for Claude, Cursor or any other AI tool. This overrides any default attribution a tool adds. `.githooks/commit-msg` strips it (turn it on once per clone with `git config core.hooksPath .githooks`), and `scripts/merge-ticket.sh` writes the squash message without it.
+
 ## Agent skills
 
 ### Issue tracker

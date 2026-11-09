@@ -62,8 +62,19 @@ if [ "$CMP" != "0" ] && [ "$PENDING_OR_FAILED" = "0" ]; then
 fi
 if { [ "$CMP" = "0" ] || [ "$DISJOINT" = "yes" ]; } && [ "$PENDING_OR_FAILED" = "0" ]; then
   gh pr comment "$PR" -R "$REPO" --body "Merge gate: independent review $VERDICT; CI green on the same commit." >/dev/null
+  # The squash message is written here, not left to GitHub's default: the default copies every AI
+  # "Co-Authored-By" trailer from the PR's commits onto main (owner rule: no AI co-author on commits).
+  SQUASH_SUBJECT="$(gh api "repos/$REPO/pulls/$PR" --jq .title) (#$PR)"
+  SQUASH_BODY=$(gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[] | "* " + .commit.message + "\n"' \
+    | bash "$ROOT/scripts/strip-ai-coauthors.sh")
   # Pinned to the commit the checks above read: a later push fails the merge instead of landing untested.
-  gh pr merge "$PR" -R "$REPO" --squash --delete-branch --match-head-commit "$HEAD_SHA"
+  gh pr merge "$PR" -R "$REPO" --squash --delete-branch --match-head-commit "$HEAD_SHA" \
+    --subject "$SQUASH_SUBJECT" --body "$SQUASH_BODY"
+  # GitHub can still add co-authors of its own. Say so loudly instead of letting it pass unseen.
+  MERGED_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .merge_commit_sha 2>/dev/null || true)
+  if [ -n "$MERGED_SHA" ] && ! gh api "repos/$REPO/commits/$MERGED_SHA" --jq .commit.message | bash "$ROOT/scripts/strip-ai-coauthors.sh" --check; then
+    echo "WARNING: the squash commit $MERGED_SHA on main still carries an AI co-author trailer. Tell the owner."
+  fi
   echo "Merged PR #$PR (fast path: $([ "$CMP" = "0" ] && echo "up to date with main" || echo "behind main by $CMP commit(s), no overlapping files"), all checks green)."
   start_main_run_if_due
 else

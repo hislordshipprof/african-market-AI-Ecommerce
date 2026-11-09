@@ -65,6 +65,7 @@ Read first: `CLAUDE.md`, `docs/spec/platform-spec.md`, `GLOSSARY.md`, `docs/adr/
 - No regex or word lists for product matching. Use Postgres search and structured model input.
 - Lanes use a private local Postgres on `:5434`, never Neon. Don't delete Neon branches; the owner does that.
 - Never split tickets. No agent reviews its own work.
+- No AI co-author on commits: no `Co-Authored-By:` trailer for Claude, Cursor or any other tool. It is stripped by `.githooks/commit-msg` (run `git config core.hooksPath .githooks` once on the dev machine; `build-ticket.sh` also sets it) and left out of the squash message by `merge-ticket.sh`. Until 2026-11-09 nothing stopped it, and most commits on main carry one; history was not rewritten. The open ticket PRs still have it in their commits, which is fine: the squash message drops it. Check the first merge, because it is not yet confirmed that GitHub adds none of its own when the message is given.
 - Never commit `.claude/settings.json`. Never print `.env` values. The owner adds all keys.
 - The gtm-queue repo's failing workflow is not part of this project. Ignore it.
 
