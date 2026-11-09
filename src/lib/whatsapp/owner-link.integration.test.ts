@@ -89,8 +89,12 @@ async function asPlatformAdmin(fn: (tx: typeof authPrisma) => Promise<unknown>):
 let messageSeq = 0;
 
 /** Meta delivering a text from `from`: opens the 24-hour window, then posts a signed webhook. */
-async function deliverText(from: string, body: string, id = `wamid.in-${suffix}-${++messageSeq}`): Promise<Response> {
-  noteInbound(from);
+/** Meta delivering messages: opens the 24-hour window for each phone sender, then posts one signed webhook. */
+async function deliverMessages(
+  contacts: Array<Record<string, unknown>>,
+  messages: Array<Record<string, unknown>>,
+): Promise<Response> {
+  for (const message of messages) if (typeof message.from === "string") noteInbound(message.from);
   const raw = JSON.stringify({
     object: "whatsapp_business_account",
     entry: [{
@@ -100,8 +104,8 @@ async function deliverText(from: string, body: string, id = `wamid.in-${suffix}-
         value: {
           messaging_product: "whatsapp",
           metadata: { display_phone_number: "15550001234", phone_number_id: PHONE_NUMBER_ID },
-          contacts: [{ profile: { name: "Sender" }, wa_id: from }],
-          messages: [{ from, id, timestamp: String(Math.floor(Date.now() / 1000)), type: "text", text: { body } }],
+          contacts,
+          messages,
         },
       }],
     }],
@@ -111,6 +115,14 @@ async function deliverText(from: string, body: string, id = `wamid.in-${suffix}-
     body: raw,
     headers: { "content-type": "application/json", "x-hub-signature-256": signWhatsAppBody(raw, SECRET) },
   }));
+}
+
+/** Meta delivering a text from `from`. */
+async function deliverText(from: string, body: string, id = `wamid.in-${suffix}-${++messageSeq}`): Promise<Response> {
+  return deliverMessages(
+    [{ profile: { name: "Sender" }, wa_id: from }],
+    [{ from, id, timestamp: String(Math.floor(Date.now() / 1000)), type: "text", text: { body } }],
+  );
 }
 
 function sentTo(digits: string): OutboundMessage[] {
@@ -391,5 +403,29 @@ describe.skipIf(!hasDb)("owner WhatsApp link (lane database)", () => {
     expect(await getOwnerLink(storeB, ownerB)).toMatchObject({ phoneNumber: phone.e164, verified: true, codeLive: true });
     expect(await resolveOwnerByPhone(phone.e164)).toMatchObject({ storeId: storeB, userId: ownerB });
     expect(await resolveOwnerByPhone(next.e164)).toBeNull();
+  });
+
+  it("a message without a phone number (username user) does not stop the other messages in the payload", async () => {
+    const stranger = randomUsNumber();
+    const bsuid = `US.${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const usernameId = `wamid.bsuid-${suffix}`;
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const res = await deliverMessages(
+      [
+        { profile: { name: "Username user" }, user_id: bsuid },
+        { profile: { name: "Sender" }, wa_id: stranger.digits, user_id: `US.${stranger.digits}` },
+      ],
+      [
+        { from_user_id: bsuid, id: usernameId, timestamp, type: "text", text: { body: "hello" } },
+        { from: stranger.digits, from_user_id: `US.${stranger.digits}`, id: `wamid.in-${suffix}-${++messageSeq}`, timestamp, type: "text", text: { body: "hi" } },
+      ],
+    );
+    expect(res.status).toBe(200);
+    expect(textsTo(stranger.digits)).toEqual([NOT_LINKED_REPLY]);
+    expect(getFakeOutbox()).toHaveLength(1);
+    // The username message is still claimed, so a redelivery is not handled again.
+    const claimed = await authPrisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM whatsapp_inbound_messages WHERE id = ${usernameId}`;
+    expect(claimed).toHaveLength(1);
   });
 });

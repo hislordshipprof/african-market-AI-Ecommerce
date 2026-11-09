@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { parseInput } from "@/lib/security/parse-input";
 import { readWhatsAppConfig } from "@/lib/whatsapp/config";
+import { messageRef } from "@/lib/whatsapp/code";
 import { handleInboundMessage } from "@/lib/whatsapp/inbound";
 import { verifyWhatsAppSignature } from "@/lib/whatsapp/signature";
 import { extractWebhook, whatsappWebhookSchema } from "@/lib/whatsapp/webhook-payload";
@@ -79,7 +80,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true }, { status: 200 });
   }
 
-  const { messages, failedStatusCodes } = extractWebhook(parsed.data, phoneNumberId);
+  const { messages, failedStatusCodes, unreadableMessages } = extractWebhook(parsed.data, phoneNumberId);
+  if (unreadableMessages > 0) {
+    console.warn(JSON.stringify({ event: "whatsapp_message_unparsed", count: unreadableMessages }));
+  }
   for (const code of failedStatusCodes) {
     console.warn(JSON.stringify({ event: "whatsapp_delivery_failed", code }));
   }
@@ -90,7 +94,7 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error(JSON.stringify({
         event: "whatsapp_inbound_failed",
-        messageId: message.id,
+        message: messageRef(message.id),
         error: error instanceof Error ? error.name : "unknown",
       }));
       return NextResponse.json({ error: "Could not handle message" }, { status: 500 });

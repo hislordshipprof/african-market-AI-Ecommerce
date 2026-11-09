@@ -1,7 +1,7 @@
 import { claimInboundWhatsAppMessage, findVerifiedOwnerLink, platformAdminTransaction, verifyOwnerLinkByCode } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { scheduleAfterResponse } from "../schedule-after-response";
-import { LINK_CODE_PATTERN, phoneKey } from "./code";
+import { LINK_CODE_PATTERN, messageRef, phoneKey } from "./code";
 import { sendWhatsAppMessage } from "./index";
 import { ownerMessageReply } from "./owner-handler";
 import { lastFour } from "./phone";
@@ -21,8 +21,10 @@ type Outcome =
   | { kind: "owner"; storeName: string }
   | { kind: "unlinked" };
 
-function log(messageId: string, from: string, outcome: string): void {
-  console.info(JSON.stringify({ event: "whatsapp_inbound", messageId, from: lastFour(from), outcome }));
+/** Message digest, sender's last four (digits, or BSUID characters) and outcome only. */
+function log(message: InboundMessage, outcome: string): void {
+  const from = message.from ? lastFour(message.from) : (message.fromUserId ?? "").slice(-4);
+  console.info(JSON.stringify({ event: "whatsapp_inbound", message: messageRef(message.id), from, outcome }));
 }
 
 /**
@@ -32,10 +34,13 @@ function log(messageId: string, from: string, outcome: string): void {
  * after the response; a failed reply is logged and not retried.
  */
 export async function handleInboundMessage(message: InboundMessage): Promise<void> {
-  // A sender id that is not a phone-number wa_id (business-scoped user id)
-  // cannot be matched to a link or addressed by number.
-  if (!WA_ID_SHAPE.test(message.from)) {
-    log(message.id, message.from, "unaddressable_sender");
+  // A sender with no phone-number wa_id (a username user, known only by a
+  // business-scoped user id) cannot be matched to a link or addressed by
+  // number: claim the id so a redelivery is skipped, and send no reply.
+  const from = message.from;
+  if (!from || !WA_ID_SHAPE.test(from)) {
+    const first = await platformAdminTransaction((tx) => claimInboundWhatsAppMessage(tx, message.id));
+    log(message, first ? "unaddressable_sender" : "duplicate");
     return;
   }
 
@@ -43,10 +48,10 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     if (!(await claimInboundWhatsAppMessage(tx, message.id))) return { kind: "duplicate" };
     // A verified owner's six-digit text is a code only if it matches a code
     // sent to them; otherwise it is an ordinary message and counts no attempt.
-    const owner = await findVerifiedOwnerLink(tx, message.from);
+    const owner = await findVerifiedOwnerLink(tx, from);
     const text = message.text?.trim() ?? "";
     if (LINK_CODE_PATTERN.test(text)) {
-      const verified = await verifyOwnerLinkByCode(tx, message.from, text, { countMisses: !owner });
+      const verified = await verifyOwnerLinkByCode(tx, from, text, { countMisses: !owner });
       if (verified.kind === "verified") return { kind: "verified", storeName: verified.storeName };
       if (verified.kind === "wrong_or_expired" && !owner) return { kind: "wrong_code" };
     }
@@ -54,7 +59,7 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
     return { kind: "unlinked" };
   });
 
-  log(message.id, message.from, outcome.kind);
+  log(message, outcome.kind);
 
   let body: string;
   switch (outcome.kind) {
@@ -70,13 +75,13 @@ export async function handleInboundMessage(message: InboundMessage): Promise<voi
       body = ownerMessageReply({ storeName: outcome.storeName });
       break;
     case "unlinked": {
-      const limit = await takeRateLimit(`wa-unlinked:${phoneKey(message.from)}`, NOT_LINKED_REPLIES_PER_HOUR, HOUR_MS);
+      const limit = await takeRateLimit(`wa-unlinked:${phoneKey(from)}`, NOT_LINKED_REPLIES_PER_HOUR, HOUR_MS);
       if (!limit.ok) return;
       body = NOT_LINKED_REPLY;
       break;
     }
   }
 
-  const to = message.from;
+  const to = from;
   scheduleAfterResponse(() => sendWhatsAppMessage({ type: "text", to, body }), "whatsapp_reply_failed");
 }

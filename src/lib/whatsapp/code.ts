@@ -24,6 +24,15 @@ export function linkCodeMatches(
   return timingSafeEqual(stored, expected);
 }
 
+/**
+ * Log reference for a WhatsApp message id. A wamid can embed the sender's
+ * number (base64), so logs carry this short one-way digest instead; the same
+ * id always gives the same digest, so duplicate lines still correlate.
+ */
+export function messageRef(messageId: string): string {
+  return createHash("sha256").update(messageId).digest("hex").slice(0, 12);
+}
+
 /** Rate-limit and log key for a number: never the number itself. */
 export function phoneKey(value: string): string {
   return createHash("sha256").update(value.replace(/\D/g, "")).digest("hex").slice(0, 32);

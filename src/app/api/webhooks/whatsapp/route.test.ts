@@ -84,6 +84,7 @@ describe("WhatsApp webhook route", () => {
     expect(handleInboundMessage).toHaveBeenCalledWith({
       id: "wamid.route-1",
       from: "14045550123",
+      fromUserId: null,
       type: "text",
       text: "À bọnọ\n",
     });

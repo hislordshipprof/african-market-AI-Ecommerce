@@ -20,9 +20,9 @@ describe("WhatsApp provider", () => {
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         error: {
-          message: "(#131030) Recipient phone number 14045550123 not in allowed list",
+          message: "(#131026) Message undeliverable to 14045550123",
           type: "OAuthException",
-          code: 131030,
+          code: 131026,
           error_data: { details: "Recipient +14045550123 is not in the allow list" },
         },
       }), { status: 400 }));
@@ -54,7 +54,7 @@ describe("WhatsApp provider", () => {
 
     const failure = await sendWhatsAppMessage({ type: "text", to: "14045550123", body: "hi" }).catch((e: unknown) => e);
     expect(failure).toBeInstanceOf(WhatsAppApiError);
-    expect(failure).toMatchObject({ code: 131030, status: 400 });
+    expect(failure).toMatchObject({ code: 131026, status: 400 });
     const text = `${(failure as Error).message} ${JSON.stringify(failure)}`;
     expect(text).not.toMatch(/4045550123|0123/);
     // One call per send: no automatic retry.
