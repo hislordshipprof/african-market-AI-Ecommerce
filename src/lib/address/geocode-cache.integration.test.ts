@@ -8,6 +8,7 @@ import { setAddressProvider } from "./provider";
 const hasDb = !!process.env.DATABASE_URL;
 const STORE = { lat: 29.693857800118, lng: -95.266257879374, radiusMi: 8 };
 const PARTS = { line1: "3700 Main St", city: "Houston", state: "TX", zip: "77002" };
+const SAME_PARTS_RETYPED = { line1: "  3700   main st. ", city: "houston", state: "tx", zip: "77002" };
 
 describe.skipIf(!hasDb)("geocode cache", () => {
   let calls = 0;
@@ -31,13 +32,13 @@ describe.skipIf(!hasDb)("geocode cache", () => {
     const first = await confirmDeliveryAddress(PARTS, STORE, { limit: true, ip: "203.0.113.50" });
     expect(first.ok).toBe(true);
     expect(calls).toBe(1);
-    const second = await confirmDeliveryAddress(PARTS, STORE, { limit: true, ip: "203.0.113.50" });
+    const second = await confirmDeliveryAddress(SAME_PARTS_RETYPED, STORE, { limit: true, ip: "203.0.113.50" });
     expect(second.ok).toBe(true);
     expect(calls).toBe(1);
     for (let i = 0; i < 25; i += 1) {
-      const looked = await lookupConfirmed(PARTS, STORE);
+      const looked = await lookupConfirmed(SAME_PARTS_RETYPED, STORE);
       expect(looked?.ok).toBe(true);
-      const again = await confirmDeliveryAddress(PARTS, STORE, { limit: true, ip: "203.0.113.50" });
+      const again = await confirmDeliveryAddress(i % 2 ? PARTS : SAME_PARTS_RETYPED, STORE, { limit: true, ip: "203.0.113.50" });
       expect(again.ok).toBe(true);
     }
     expect(calls).toBe(1);
