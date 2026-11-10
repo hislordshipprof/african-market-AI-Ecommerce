@@ -61,7 +61,8 @@
 /* Dark themes: a quiet inner edge seats the light well inside the dark card. */
 .sf-product-image::before { content:""; position:absolute; inset:0; z-index:2; border-radius:inherit; box-shadow:var(--sf-photo-edge, none); pointer-events:none; }
 /* Dark only: thumbnail frames take the well; light frames keep their original grounds. */
-@media (prefers-color-scheme:dark) { :root { --sf-photo-edge: inset 0 0 0 1px rgb(0 0 0 / 28%), inset 0 1px 8px rgb(0 0 0 / 14%); --sf-thumb-well: var(--color-photo-well); } }
+/* On body, where the store theme defines --color-photo-well (on :root it resolved empty). */
+@media (prefers-color-scheme:dark) { :root { --sf-photo-edge: inset 0 0 0 1px rgb(0 0 0 / 28%), inset 0 1px 8px rgb(0 0 0 / 14%); } body { --sf-thumb-well: var(--color-photo-well); } }
 .sf-product-image[data-image-kind="cutout"]:has(img)::after { content:""; position:absolute; z-index:-1; bottom:10%; left:24%; width:52%; height:9%; border-radius:50%; background:radial-gradient(ellipse,#12372624,transparent 70%); }
 .sf-product-image img { object-fit:cover; padding:0; filter:none; transition:transform .4s var(--sf-motion-ease); }
 .sf-product-card { position:relative; padding:8px 8px 16px; border:1px solid transparent; border-radius:12px; background:var(--color-surface); transition:transform .3s var(--sf-motion-ease); }
