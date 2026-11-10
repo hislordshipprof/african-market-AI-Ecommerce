@@ -61,7 +61,7 @@
   font-size: 14px;
   font-weight: 650;
   white-space: nowrap;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .sf-button {
   display: inline-flex;
@@ -117,9 +117,9 @@
   border-radius: 999px;
   background: var(--color-soft);
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 650;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .sf-skip-link {
   position: fixed;
@@ -210,7 +210,7 @@
 .sf-window-chip small {
   display: block;
   font-weight: 400;
-  font-size: 11px;
+  font-size: 13px;
 }
 .sf-fulfillment {
   position: relative;
@@ -250,7 +250,7 @@
 }
 .sf-header .sf-header-cart {
   background: var(--color-on-primary);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   min-width: 72px;
 }
 .sf-category-nav {
@@ -272,7 +272,7 @@
   font-weight: 600;
 }
 .sf-category-nav a:first-child {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .sf-header-signin {
   flex-shrink: 0;
@@ -318,7 +318,7 @@
   border: 1px solid var(--color-line-strong);
   border-radius: 4px;
   padding: 0 5px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .sf-search-dropdown {
   position: absolute;
@@ -356,7 +356,7 @@
 .sf-search-dropdown small {
   display: block;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 13px;
 }
 .sf-search-dropdown p {
   padding: 12px;
@@ -365,7 +365,7 @@
 .sf-search-dropdown mark,
 .sf-search-results mark {
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-weight: 700;
 }
 .sf-hero-wrap {
@@ -579,7 +579,7 @@
 .sf-category-tile small {
   display: block;
   margin-bottom: 5px;
-  font-size: 11px;
+  font-size: 13px;
   letter-spacing: 1px;
 }
 .sf-category-tile:first-child strong {
@@ -658,23 +658,34 @@
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  color: var(--color-primary);
-  background: repeating-linear-gradient(
-    135deg,
-    transparent,
-    transparent 12px,
-    color-mix(in srgb, var(--color-primary) 4%, transparent) 12px,
-    color-mix(in srgb, var(--color-primary) 4%, transparent) 13px
-  );
+  padding: 12px;
+  text-align: center;
+  color: var(--muted-foreground);
 }
+/* No photo yet: a quiet food-group icon and the product's own name, not a broken-image letter. */
 .sf-product-fallback > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  max-width: 100%;
   font-family: var(--font-display);
-  font-size: 64px;
+  font-size: 16px;
   font-weight: 650;
-  line-height: 1.1;
+  line-height: 1.25;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.sf-product-image {
+  container-type: inline-size;
+}
+@container (max-width: 120px) {
+  .sf-product-fallback > span {
+    display: none;
+  }
 }
 .sf-product-fallback > small {
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 8px;
 }
 .sf-quick-add {
@@ -691,7 +702,7 @@
   color: var(--color-ink);
   border-radius: 999px;
   padding: 4px 9px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
 }
 .sf-product-copy {
@@ -705,19 +716,20 @@
   font-variant-numeric: tabular-nums;
 }
 .sf-price sup {
-  font-size: 0.6em;
+  font-size: max(13px, 0.6em);
   top: -0.45em;
   position: relative;
   margin-left: 2px;
 }
 .sf-price small {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--muted-foreground);
   margin-top: 4px;
 }
 .sf-product-name {
+  position: relative;
   display: block;
   font-size: 15px;
   font-weight: 600;
@@ -725,10 +737,20 @@
   margin-top: 10px;
 }
 .sf-local-name {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-foreground);
   line-height: 1.5;
   margin-top: 3px;
+}
+/* Tap targets reach 44px without changing how the text looks. */
+.sf-product-name::after,
+.sf-footer nav a::after {
+  content: "";
+  position: absolute;
+  inset: -12px -6px;
+}
+.sf-footer nav a {
+  position: relative;
 }
 .sf-product-meta {
   display: flex;
@@ -736,11 +758,11 @@
   flex-wrap: wrap;
   align-items: center;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 13px;
   margin-top: 8px;
 }
 .sf-product-meta [data-testid="stock-badge"] {
-  font-size: 10px;
+  font-size: 13px;
   padding: 2px 6px;
   min-height: auto;
 }
@@ -845,7 +867,7 @@
   background: #000b;
   color: #fff;
   padding: 8px 12px;
-  font-size: 10px;
+  font-size: 13px;
 }
 .sf-story h2 {
   font-family: var(--font-display);
@@ -865,7 +887,7 @@
 }
 .sf-story summary {
   font-weight: 650;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   cursor: pointer;
   min-height: 44px;
 }
@@ -882,7 +904,7 @@
   font-weight: 700;
 }
 .sf-story-facts span {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-foreground);
 }
 .sf-hours {
@@ -901,7 +923,7 @@
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
+  font-size: 13px;
   padding-block: 5px;
 }
 .sf-hours dt {
@@ -911,7 +933,7 @@
   color: var(--muted-foreground);
 }
 .sf-hours p {
-  font-size: 12px;
+  font-size: 13px;
   border-top: 1px solid var(--color-line);
   padding-top: 12px;
 }
@@ -950,7 +972,7 @@
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted-foreground);
 }
 .sf-breadcrumb {
@@ -993,7 +1015,7 @@
   height: 72px;
   border-radius: 50%;
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   display: grid;
   place-items: center;
 }
@@ -1030,7 +1052,7 @@
 }
 .sf-sidebar a[aria-current="page"] {
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-weight: 700;
 }
 .sf-filters {
@@ -1093,7 +1115,7 @@
   aspect-ratio: 1.07;
 }
 .sf-photo-note {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted-foreground);
   margin-top: 10px;
 }
@@ -1158,6 +1180,7 @@
 }
 .sf-variants button small {
   display: block;
+  font-size: 13px;
   margin-top: 4px;
   color: var(--muted-foreground);
 }
@@ -1170,7 +1193,7 @@
   gap: 12px;
 }
 .sf-stats dt {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-foreground);
 }
 .sf-stats dd {
@@ -1205,6 +1228,15 @@
 }
 .sf-add-bar .sf-price {
   font-size: 20px;
+}
+@media (min-width: 768px) {
+  /* The add bar carries the price and unit price beside the add control. */
+  .sf-detail-copy > .sf-price {
+    display: none;
+  }
+  .sf-detail-copy > .sf-add-bar {
+    margin-top: 16px;
+  }
 }
 .sf-collection-hero {
   position: relative;
@@ -1299,7 +1331,7 @@
     font-size: 13px;
   }
   .sf-text-link {
-    font-size: 12px;
+    font-size: 13px;
     gap: 4px;
   }
   .sf-header-main {
@@ -1377,7 +1409,7 @@
     margin-block: 12px 16px;
   }
   .sf-hero-copy .sf-button {
-    font-size: 12px;
+    font-size: 13px;
     min-height: 44px;
     padding: 10px 16px;
   }
@@ -1397,7 +1429,7 @@
   .sf-reassurance {
     gap: 16px;
     justify-content: space-between;
-    font-size: 10px;
+    font-size: 13px;
     white-space: nowrap;
     padding-top: 16px;
   }
@@ -1431,7 +1463,7 @@
     font-size: 17px;
   }
   .sf-category-tile small {
-    font-size: 9px;
+    font-size: 13px;
     letter-spacing: 0.6px;
   }
   .sf-category-tile svg {
@@ -1480,10 +1512,10 @@
     margin-top: 8px;
   }
   .sf-local-name {
-    font-size: 12px;
+    font-size: 13px;
   }
   .sf-product-meta {
-    font-size: 11px;
+    font-size: 13px;
   }
   .sf-collections {
     gap: 12px;
@@ -1508,11 +1540,11 @@
     font-size: 28px;
   }
   .sf-promo p {
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.6;
   }
   .sf-promo .sf-button {
-    font-size: 12px;
+    font-size: 13px;
     padding-inline: 16px;
     min-height: 44px;
     margin-top: 16px;
@@ -1549,11 +1581,15 @@
     gap: 16px;
   }
   .sf-footer-bottom {
-    font-size: 10px;
+    font-size: 13px;
+  }
+  /* Clears the floating help launcher (48px over the 88px bottom nav). */
+  .sf-footer {
+    padding-bottom: 60px;
   }
   .sf-breadcrumb {
     padding-block: 20px;
-    font-size: 12px;
+    font-size: 13px;
   }
   .sf-browse {
     display: block;
@@ -1576,7 +1612,7 @@
     border-bottom: 1px solid var(--color-line);
   }
   .sf-mobile-chips a {
-    font-size: 12px;
+    font-size: 13px;
     padding-inline: 14px;
     flex-shrink: 0;
   }
@@ -1590,12 +1626,12 @@
     gap: 6px;
   }
   .sf-filters .sf-chip {
-    font-size: 12px;
+    font-size: 13px;
     padding-inline: 12px;
   }
   .sf-filters select {
     max-width: 135px;
-    font-size: 12px;
+    font-size: 13px;
     padding-inline: 10px;
     margin-left: 0;
   }
@@ -1730,13 +1766,13 @@
     grid-row: 2;
   }
   .sf-window-chip {
-    font-size: 10px;
+    font-size: 13px;
     padding: 4px 6px;
     gap: 4px;
     width: 124px;
   }
   .sf-window-chip small {
-    font-size: 10px;
+    font-size: 13px;
   }
   .sf-window-chip svg {
     width: 12px;
