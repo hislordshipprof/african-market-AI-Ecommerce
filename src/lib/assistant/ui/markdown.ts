@@ -34,7 +34,8 @@ export function linkTarget(href: string): { href: string; external: boolean } | 
     return null;
   }
   if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) {
-    return url.origin === BASE && href.startsWith("/") ? { href: url.pathname + url.search + url.hash, external: false } : null;
+    // A path that normalizes to "//host" (e.g. "/..//host") would leave the site; return what was checked, unchanged.
+    return url.origin === BASE && href.startsWith("/") && !url.pathname.startsWith("//") ? { href, external: false } : null;
   }
   return url.protocol === "https:" && url.origin !== BASE ? { href: url.href, external: true } : null;
 }

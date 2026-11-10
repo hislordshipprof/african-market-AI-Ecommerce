@@ -46,10 +46,15 @@ describe("assistant markdown subset", () => {
   });
 
   it("never makes javascript:, data:, plain http or protocol-relative links active", () => {
-    for (const href of ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,x", "//evil.example", "http://evil.test", "/\\evil.example/x", "/\\/evil.example", "/ok\u0000x"]) {
+    for (const href of ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,x", "//evil.example", "http://evil.test", "/\\evil.example/x", "/\\/evil.example", "/ok\u0000x", "/..//evil.example/x", "/.//evil.example", "/%2e%2e//evil.example", "/a/..//evil.example"]) {
       const [block] = parseMarkdown(`[click](${href})`);
       expect(block).toEqual({ type: "paragraph", children: [{ type: "text", text: "click" }] });
     }
+  });
+
+  it("keeps a same-site link's href exactly as written", () => {
+    const [block] = parseMarkdown("[Yam](/listings/abc?pack=2#sizes)");
+    expect(block).toMatchObject({ children: [{ type: "link", href: "/listings/abc?pack=2#sizes", external: false }] });
   });
 
   it("keeps raw HTML as literal text, never as an element", () => {
