@@ -1,9 +1,10 @@
-import { describe, it, expect, afterAll, beforeAll } from "vitest";
+import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
 import Stripe from "stripe";
 import { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
-import { checkoutTestHooks, createPaymentIntent, placeOrder, computeQuote } from "./service";
+import { checkoutTestHooks, createPaymentIntent, placeOrder, computeQuote, releaseOrphanHolds } from "./service";
+import { holdAuthorizedAt } from "../stripe/checkout-payments";
 
 type ConnectedAccountCaps = {
   id: string;
@@ -630,6 +631,39 @@ describe.skipIf(!hasKey || !hasDb)(
         ).rejects.toThrow(/Your basket changed/);
         expect(await storeScoped(storeAId).customer.count({ where: { email: contact.email } })).toBe(0);
         expect(await storeScoped(storeAId).order.count({ where: { paymentIntentId: pi.id } })).toBe(0);
+      },
+    );
+
+    it(
+      "an unused hold is timed from its charge and released as abandoned after the grace",
+      { timeout: 30_000 },
+      async () => {
+        const cart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
+        cartsCreated.push(cart.id);
+        const { paymentIntentId } = await createPaymentIntent(storeAId, cart.id, 3300);
+        piToCleanup.push(paymentIntentId);
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+        await stripe.paymentIntents.confirm(paymentIntentId, {
+          payment_method: "pm_card_visa",
+          return_url: "https://example.com/return",
+        });
+        const held = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge"] });
+        const charge = held.latest_charge as Stripe.Charge;
+        expect(holdAuthorizedAt(held)).toBe(charge.created * 1000);
+
+        await releaseOrphanHolds([{ storeId: storeAId, cartId: cart.id, paymentIntentId }]);
+        expect((await stripe.paymentIntents.retrieve(paymentIntentId)).status).toBe("requires_capture");
+
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime(charge.created * 1000 + 61 * 60_000);
+          await releaseOrphanHolds([{ storeId: storeAId, cartId: cart.id, paymentIntentId }]);
+        } finally {
+          vi.useRealTimers();
+        }
+        const released = await stripe.paymentIntents.retrieve(paymentIntentId);
+        expect(released.status).toBe("canceled");
+        expect(released.cancellation_reason).toBe("abandoned");
       },
     );
 
