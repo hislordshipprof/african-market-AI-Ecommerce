@@ -2,7 +2,15 @@ import { randomBytes } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { NOTIFICATION_CHANNEL_KINDS } from "./channel-kinds";
 
-export const ORDER_NOTIFY_EVENTS = ["placed", "accepted", "ready", "completed", "cancelled"] as const;
+export const ORDER_NOTIFY_EVENTS = [
+  "placed",
+  "accepted",
+  "ready",
+  "out_for_delivery",
+  "delivered",
+  "completed",
+  "cancelled",
+] as const;
 export type OrderNotifyEvent = (typeof ORDER_NOTIFY_EVENTS)[number];
 
 export function isOrderNotifyEvent(value: string): value is OrderNotifyEvent {

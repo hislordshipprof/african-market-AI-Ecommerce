@@ -9,8 +9,11 @@ const RANK: Record<OrderNotifyEvent, number> = {
   placed: 0,
   accepted: 1,
   ready: 2,
-  completed: 3,
-  cancelled: 4,
+  out_for_delivery: 3,
+  // A store-delivery order ends at delivered, a pickup order at completed: same step, so neither supersedes the other.
+  delivered: 4,
+  completed: 4,
+  cancelled: 5,
 };
 const CANCEL_STATUSES = new Set(["CANCELLING", "CANCELLED", "REFUND_FAILED"]);
 const loggedUrl = new Set<string>();

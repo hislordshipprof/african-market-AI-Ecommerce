@@ -10,6 +10,8 @@ import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
+import { deliveryProofKey, uploadToR2 } from "../r2";
+import { checkProofPhoto } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -20,6 +22,8 @@ export type OrderStatus =
   | "CAPTURING"
   | "READY"
   | "AWAITING_PICKUP"
+  | "OUT_FOR_DELIVERY"
+  | "DELIVERED"
   | "COMPLETED"
   | "CANCELLED"
   | "REFUND_FAILED";
@@ -32,6 +36,8 @@ const MAX_CAPTURE_ATTEMPTS = 5;
 type TransitionalStatus = "CAPTURING" | "CANCELLING";
 
 const CAPTURE_STATUS_CHANGED = "Order status changed during capture";
+
+export const STORE_DELIVERY_ONLY = "Only a store-delivery order can be sent out or marked delivered";
 
 /** Stock writes wait on listing locks, so these transactions cannot use Prisma's 5-second default. */
 const LEDGER_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };
@@ -246,6 +252,7 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   "CANCELLING",
   "READY",
   "AWAITING_PICKUP",
+  "OUT_FOR_DELIVERY",
   "REFUND_FAILED",
 ];
 
@@ -1114,6 +1121,91 @@ export async function completePickup(
     return { ok: true as const, notify };
   });
   if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "completed");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+/** Store delivery only: the store's own driver has left with a packed order. */
+export async function markOutForDelivery(
+  storeId: string,
+  orderId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    if (!order) return { ok: false as const, error: "Order not found", notify: false };
+    if (order.fulfillment !== "store-delivery") {
+      return { ok: false as const, error: STORE_DELIVERY_ONLY, notify: false };
+    }
+    if (order.status !== "READY") {
+      return { ok: false as const, error: `Cannot send out for delivery in status ${order.status}`, notify: false };
+    }
+    const now = new Date();
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "OUT_FOR_DELIVERY", outForDeliveryAt: now },
+    });
+    await tx.deliveryEvent.create({
+      data: { storeId, orderId, type: "out_for_delivery", payload: {} },
+    });
+    const notify = await recordOrderNotification(tx, storeId, orderId, "out_for_delivery");
+    return { ok: true as const, notify };
+  });
+  if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "out_for_delivery");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+function deliveredRejection(order: { status: string; fulfillment: string } | null): string | null {
+  if (!order) return "Order not found";
+  if (order.fulfillment !== "store-delivery") return STORE_DELIVERY_ONLY;
+  if (order.status !== "OUT_FOR_DELIVERY") return `Cannot mark delivered in status ${order.status}`;
+  return null;
+}
+
+/**
+ * Store delivery only, and only with a photo. The photo is uploaded first; if the
+ * transition is then rejected, the order is unchanged and the object is unreferenced.
+ */
+export async function markDelivered(
+  storeId: string,
+  orderId: string,
+  photo: Uint8Array | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const checked = checkProofPhoto(photo);
+  if (!checked.ok) return checked;
+  const current = await storeScoped(storeId).order.findUnique({
+    where: { id: orderId },
+    select: { status: true, fulfillment: true },
+  });
+  const early = deliveredRejection(current);
+  if (early) return { ok: false, error: early };
+
+  const uploadedAt = new Date();
+  const key = deliveryProofKey(orderId, uploadedAt.getTime(), checked.type.ext);
+  await uploadToR2(key, photo!, checked.type.contentType);
+
+  const result = await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    const rejected = deliveredRejection(order);
+    if (rejected) return { ok: false as const, error: rejected, notify: false };
+    const now = new Date();
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: "DELIVERED",
+        deliveredAt: now,
+        completedAt: now,
+        deliveryProofKey: key,
+        deliveryProofUploadedAt: uploadedAt,
+      },
+    });
+    await tx.deliveryEvent.create({
+      data: { storeId, orderId, type: "delivered", payload: { proofKey: key } },
+    });
+    const notify = await recordOrderNotification(tx, storeId, orderId, "delivered");
+    return { ok: true as const, notify };
+  });
+  if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "delivered");
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 

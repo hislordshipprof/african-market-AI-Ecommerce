@@ -119,6 +119,10 @@ export function statusForEvent(event: OrderNotifyEvent, fulfillment: string): st
       return "ACCEPTED";
     case "ready":
       return fulfillment === "pickup" ? "AWAITING_PICKUP" : "READY";
+    case "out_for_delivery":
+      return "OUT_FOR_DELIVERY";
+    case "delivered":
+      return "DELIVERED";
     case "completed":
       return "COMPLETED";
     case "cancelled":
@@ -185,8 +189,11 @@ function cancelCopy(order: NotifyOrder): string {
   return "Your payment has been refunded.";
 }
 
+/** Events after capture: the order is picked and the final amount is charged. */
+const CHARGED_EVENTS: ReadonlySet<OrderNotifyEvent> = new Set(["ready", "out_for_delivery", "delivered", "completed"]);
+
 function lineRows(order: NotifyOrder, event: OrderNotifyEvent): string {
-  const picked = event === "ready" || event === "completed";
+  const picked = CHARGED_EVENTS.has(event);
   return order.lines.map((line) => {
     const name = escapeHtml(lineLabel(line, picked));
     if (picked && (line.status === "refunded" || line.qtyPicked === 0)) {
@@ -230,7 +237,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     const estimate = order.subtotalCents + order.tipCents + order.deliveryFeeCents;
     parts.push(`<p>Estimated total ${escapeHtml(money(estimate))}.</p>`);
     parts.push(`<p>Card hold ${escapeHtml(money(order.totalAuthorizedCents))}. You'll be charged the final amount after picking.</p>`);
-  } else if (event === "ready" || event === "completed") {
+  } else if (CHARGED_EVENTS.has(event)) {
     if (order.capturedAmountCents == null) {
       if (!loggedMissingCapture.has(order.id)) {
         loggedMissingCapture.add(order.id);
@@ -243,7 +250,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     } else {
       parts.push(`<p>Charged ${escapeHtml(money(order.capturedAmountCents))}.</p>`);
     }
-  } else {
+  } else if (event === "cancelled") {
     parts.push(`<p>${escapeHtml(cancelCopy(order))}</p>`);
   }
   parts.push(`<p><a href="${escapeHtml(url)}">Track your order</a></p>`);
