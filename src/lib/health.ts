@@ -43,10 +43,13 @@ function reportedEnvVars(env: Record<string, string | undefined>): readonly stri
   return env.VERCEL_ENV === "preview" ? INNGEST_ENV_VARS : [];
 }
 
-/** Vercel ignores INNGEST_DEV (client.ts), so it is a config mistake to log, not an outage. */
+let loggedInngestDev = false;
+
+/** Vercel ignores INNGEST_DEV (client.ts), so it is a config mistake to log once, not an outage. */
 function warnEnvFlags(env: Record<string, string | undefined>): void {
   const dev = env.INNGEST_DEV?.trim().toLowerCase();
-  if (env.VERCEL_ENV === "production" && (dev === "1" || dev === "true")) {
+  if (env.VERCEL_ENV === "production" && (dev === "1" || dev === "true") && !loggedInngestDev) {
+    loggedInngestDev = true;
     console.warn("Health check: INNGEST_DEV is set in production");
   }
 }

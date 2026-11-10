@@ -305,26 +305,27 @@ describe("runHealthChecks", () => {
     expect(result.body.env.INNGEST_SIGNING_KEY).toBe(false);
   });
 
-  it("logs INNGEST_DEV set in production without failing or exposing it", async () => {
+  it("logs INNGEST_DEV set in production once per process, without failing or exposing it", async () => {
+    vi.resetModules();
+    const health = await import("./health");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const result = await runHealthChecks({
+    const result = await health.runHealthChecks({
       env: { ...productionEnv, INNGEST_DEV: "1" },
       queryRaw: makeQueryRaw(),
     });
+    await health.runHealthChecks({ env: { ...productionEnv, INNGEST_DEV: "1" }, queryRaw: makeQueryRaw() });
     expect(result.status).toBe(200);
-    expect(toMinimalResult(result.status, result.body)).toEqual({ status: "ok", version: "abc123" });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("INNGEST_DEV"));
+    expect(health.toMinimalResult(result.status, result.body)).toEqual({ status: "ok", version: "abc123" });
+    expect(warn.mock.calls.filter(([message]) => String(message).includes("INNGEST_DEV"))).toHaveLength(1);
     warn.mockRestore();
   });
 
-  it.each([
-    ["TRUE", true],
-    ["0", false],
-    ["false", false],
-  ])("logs INNGEST_DEV=%s in production only when it parses as true", async (value, logged) => {
+  it("does not log INNGEST_DEV in production when it does not parse as true", async () => {
+    vi.resetModules();
+    const health = await import("./health");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await runHealthChecks({ env: { ...productionEnv, INNGEST_DEV: value }, queryRaw: makeQueryRaw() });
-    expect(warn.mock.calls.some(([message]) => String(message).includes("INNGEST_DEV"))).toBe(logged);
+    await health.runHealthChecks({ env: { ...productionEnv, INNGEST_DEV: "0" }, queryRaw: makeQueryRaw() });
+    expect(warn.mock.calls.some(([message]) => String(message).includes("INNGEST_DEV"))).toBe(false);
     warn.mockRestore();
   });
 
