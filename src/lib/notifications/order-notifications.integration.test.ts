@@ -19,6 +19,8 @@ import type { Contact } from "../customer-flow/contracts";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada", phone: "(301) 448-2210", email: "ada@example.com" };
+const STORE_POINT = { lat: 29.693857800118, lng: -95.266257879374 };
+const DROP_POINT = { lat: 29.73846459154, lng: -95.379640065998 };
 const PRICE = 2000;
 const RICE = 500;
 
@@ -49,6 +51,11 @@ describe.skipIf(!hasDb)("customer notifications", () => {
         brandColor: "#1F5A43",
         logoUrl: "https://cdn.example.com/logo.png",
         timezone: "America/Chicago",
+        storeDeliveryEnabled: true,
+        storeDeliveryFeeCents: 500,
+        deliveryRadiusMi: 8,
+        lat: STORE_POINT.lat,
+        lng: STORE_POINT.lng,
       },
     });
     const other = await raw.store.create({
@@ -110,7 +117,16 @@ describe.skipIf(!hasDb)("customer notifications", () => {
       data: { listingId: rice.id, label: "bag", price: RICE, weightG: 100 },
     });
     const paymentIntentId = `pi_n128_${crypto.randomUUID()}`;
-    const cart = await storeScoped(storeId).cart.create({ data: { storeId, paymentIntentId } });
+    const delivering = fulfillment === "store-delivery";
+    const cart = await storeScoped(storeId).cart.create({
+      data: {
+        storeId,
+        paymentIntentId,
+        ...(delivering
+          ? { deliveryLine1: "3700 MAIN ST", deliveryCity: "HOUSTON", deliveryState: "TX", deliveryZip: "77002", deliveryLat: DROP_POINT.lat, deliveryLng: DROP_POINT.lng }
+          : {}),
+      },
+    });
     await storeScoped(storeId).cartLine.create({
       data: { storeId, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
@@ -120,7 +136,9 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     const quote = computeQuote(0, [
       { price: PRICE, qty: 1, maxPerOrder: null },
       { price: RICE, qty: 1, maxPerOrder: null },
-    ], CONTACT, fulfillment);
+    ], CONTACT, fulfillment, delivering
+      ? { enabled: true, feeCents: 500, radiusMi: 8, hasCoordinates: true, confirmed: { withinRadius: true }, leaveAtDoor: false }
+      : null);
     setAuthorizedAmount(paymentIntentId, quote.holdCents);
     const recorded = await recordAuthorizedOrder(storeId, {
       cartId: cart.id,

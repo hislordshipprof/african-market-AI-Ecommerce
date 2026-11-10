@@ -695,7 +695,7 @@ describe.skipIf(!hasDb)("notification logs: storeScoped(A) reads only A's rows a
   let raw: PrismaClient;
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     const storeA = await raw.store.create({
       data: { slug: slugA, name: "Notify RLS A", themePreset: "palm-and-shea" },
     });
