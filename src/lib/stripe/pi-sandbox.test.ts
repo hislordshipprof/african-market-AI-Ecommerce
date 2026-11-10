@@ -52,6 +52,38 @@ async function waitForRefundFailedEvent(refundId: string): Promise<Stripe.Event>
   throw new Error(`refund.failed event for ${refundId} did not appear`);
 }
 
+const FAILED_REFUND_MARKER = { sandboxTest: "failed-destination-refund" };
+const EVENT_RETENTION_DAYS = 29;
+
+// Newest refund.failed event for a destination-charge refund this test created in an
+// earlier run (marker in metadata, reverse_transfer left a transfer_reversal).
+async function findEarlierFailedRefund(
+  excludeRefundId: string,
+): Promise<{ refundId: string; event: Stripe.Event } | undefined> {
+  const since = Math.floor(Date.now() / 1000) - EVENT_RETENTION_DAYS * 86_400;
+  let startingAfter: string | undefined;
+  for (let page = 0; page < 5; page += 1) {
+    const events = await stripe.events.list({
+      type: "refund.failed",
+      limit: 100,
+      created: { gte: since },
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    for (const event of events.data) {
+      const object = event.data.object as Stripe.Refund;
+      if (object.id === excludeRefundId || object.status !== "failed") continue;
+      if (object.metadata?.sandboxTest !== FAILED_REFUND_MARKER.sandboxTest) continue;
+      const full = await stripe.refunds.retrieve(object.id);
+      if (full.status === "failed" && full.transfer_reversal) {
+        return { refundId: full.id, event };
+      }
+    }
+    if (!events.has_more || events.data.length === 0) break;
+    startingAfter = events.data[events.data.length - 1]?.id;
+  }
+  return undefined;
+}
+
 afterAll(async () => {
   if (!hasKey || piToCleanup.length === 0) return;
   for (const id of piToCleanup) {
@@ -292,12 +324,17 @@ describe.skipIf(!hasKey)(
     });
 
     // One pm_card_refundFail refund serves the funds checks, the provider reads
-    // that contract.test.ts pins on the fake, and the refund.failed payload, so a
-    // run waits for Stripe once. The parsed payload reads only the refund's id,
+    // that contract.test.ts pins on the fake, and the refund.failed payload. Stripe
+    // documents no fixed delay for the flip: "The charge succeeds. If you initiate a
+    // refund, its status begins as `succeeded`. After a few minutes, its status
+    // transitions to `failed` and sends a `refund.failed` event."
+    // (https://docs.stripe.com/testing, "Simulate an asynchronous refund"). So each
+    // run creates a marked refund without waiting on it and asserts on one an
+    // earlier run left failed (#389). The parsed payload reads only the refund's id,
     // status, payment_intent and metadata, none of which reverse_transfer or the
     // application fee change.
     it("a failed destination-charge refund leaves its funds on the platform, reads failed through the provider and its refund.failed payload parses", async () => {
-      const created = await stripe.paymentIntents.create({
+      const fresh = await stripe.paymentIntents.create({
         amount: 900,
         currency: "usd",
         capture_method: "automatic",
@@ -307,25 +344,33 @@ describe.skipIf(!hasKey)(
         on_behalf_of: stripeAccountId,
         transfer_data: { destination: stripeAccountId },
         return_url: "https://example.com/return",
+        metadata: FAILED_REFUND_MARKER,
       });
-      piToCleanup.push(created.id);
-      let refund = await stripe.refunds.create(
-        { payment_intent: created.id, reverse_transfer: true },
-      );
-      // Stripe documents no fixed delay for this card: "The charge succeeds. If
-      // you initiate a refund, its status begins as `succeeded`. After a few
-      // minutes, its status transitions to `failed` and sends a `refund.failed`
-      // event." (https://docs.stripe.com/testing, "Simulate an asynchronous
-      // refund"). This is the only wait on that flip in the suite.
-      for (let i = 0; i < 90 && refund.status !== "failed"; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        refund = await stripe.refunds.retrieve(refund.id);
+      piToCleanup.push(fresh.id);
+      const freshRefund = await stripe.refunds.create({
+        payment_intent: fresh.id,
+        reverse_transfer: true,
+        metadata: FAILED_REFUND_MARKER,
+      });
+
+      let refund: Stripe.Refund;
+      const earlier = await findEarlierFailedRefund(freshRefund.id);
+      if (earlier) {
+        refund = await stripe.refunds.retrieve(earlier.refundId);
+      } else {
+        // Bootstrap (fresh sandbox, no earlier failed refund): wait once on this run's.
+        refund = freshRefund;
+        for (let i = 0; i < 90 && refund.status !== "failed"; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          refund = await stripe.refunds.retrieve(refund.id);
+        }
       }
       expect(refund.status).toBe("failed");
+      const failedPiId = String(refund.payment_intent);
 
       const reported = await stripeProvider.retrieveRefund(refund.id);
       expect(reported.status).toBe("failed");
-      const viaProvider = await stripeProvider.retrievePaymentIntent(created.id);
+      const viaProvider = await stripeProvider.retrievePaymentIntent(failedPiId);
       expect(viaProvider.amountRefunded).toBe(0);
 
       const settled = await stripe.refunds.retrieve(refund.id, {
@@ -337,7 +382,7 @@ describe.skipIf(!hasKey)(
       expect(failureBalance && typeof failureBalance === "object").toBe(true);
       if (reversal && typeof reversal === "object") expect(reversal.amount).toBeGreaterThan(0);
       if (failureBalance && typeof failureBalance === "object") expect(failureBalance.amount).not.toBe(0);
-      const pi = await stripe.paymentIntents.retrieve(created.id, { expand: ["latest_charge"] });
+      const pi = await stripe.paymentIntents.retrieve(failedPiId, { expand: ["latest_charge"] });
       const charge = pi.latest_charge;
       if (!charge || typeof charge === "string") throw new Error("expected expanded latest_charge");
       expect(pi.amount_received).toBe(900);
@@ -346,7 +391,7 @@ describe.skipIf(!hasKey)(
 
       const secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim();
       expect(secret).toBeTruthy();
-      const match = await waitForRefundFailedEvent(refund.id);
+      const match = earlier?.event ?? (await waitForRefundFailedEvent(refund.id));
       expect(match.id).toBeTruthy();
       const payload = JSON.stringify(match);
       const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: secret! });
@@ -355,7 +400,7 @@ describe.skipIf(!hasKey)(
       expect(parsed.refund).toEqual({
         id: refund.id,
         status: "failed",
-        paymentIntentId: created.id,
+        paymentIntentId: failedPiId,
       });
     }, 200_000);
   },
