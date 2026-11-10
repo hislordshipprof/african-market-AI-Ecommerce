@@ -135,9 +135,18 @@
   color: var(--store-on-primary, var(--color-on-primary));
   font-weight: 600;
 }
+.countLoading {
+  display: inline-block;
+  width: 14px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.45;
+}
 .primaryButton:disabled {
-  opacity: 0.5;
-  cursor: default;
+  background: var(--color-raised);
+  color: var(--muted-foreground);
+  cursor: not-allowed;
 }
 .lines {
   list-style: none;
@@ -164,7 +173,7 @@
   place-items: center;
   font-size: 30px;
   font-weight: 700;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .lineDetails {
   flex: 1;
@@ -179,12 +188,19 @@
   margin: 4px 0 10px;
 }
 .swap {
+  position: relative;
   display: inline-flex;
-  font-size: 12px;
+  font-size: 13px;
   border-radius: 999px;
   padding: 5px 10px;
   background: var(--color-bg);
   color: var(--muted-foreground);
+}
+/* 44px hit area without changing the pill. */
+.swap::after {
+  content: "";
+  position: absolute;
+  inset: -8px 0;
 }
 .lineActions {
   display: flex;
@@ -263,7 +279,7 @@
     border-radius: 999px;
     color: var(--muted-foreground);
     padding: 6px 7px;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
   }
   .activeNav {
@@ -274,7 +290,7 @@
     padding: 0 8px;
     background: transparent;
     color: var(--color-ink);
-    font-size: 12px;
+    font-size: 13px;
     gap: 3px;
   }
   @keyframes enter {

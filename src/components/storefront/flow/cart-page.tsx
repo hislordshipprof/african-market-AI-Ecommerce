@@ -1,5 +1,6 @@
 "use client";
 
+import { minimumOrderGate } from "@/lib/storefront/minimum-order";
 import Link from "next/link";
 import {
   useEffect,
@@ -336,9 +337,8 @@ export function CartPage({
                     aria-label="Minimum order progress"
                   />
                   <p className={styles.muted}>
-                    {remaining
-                      ? `${money(remaining)} more to reach the ${money(settings.minimumOrderCents)} minimum.`
-                      : "You've reached the minimum order."}
+                    {minimumOrderGate(subtotal, settings.minimumOrderCents).message ??
+                      "You've reached the minimum order."}
                   </p>
                 </>
               )}

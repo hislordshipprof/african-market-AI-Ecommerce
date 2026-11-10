@@ -32,7 +32,10 @@ import {
   setLineQty as serverSetLineQty,
   removeCartLine,
   migrateLocalCart,
+  setSwapRule,
 } from "@/lib/cart/actions";
+import { minimumOrderGate } from "@/lib/storefront/minimum-order";
+import { removedLine, restoreSteps, type RemovedLine } from "@/lib/storefront/cart-undo";
 import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { Sheet } from "./sheet";
@@ -766,8 +769,35 @@ export function CartProvider({
       else dropAfterAdd.current.add(key);
       publish(linesRef.current.filter((line) => cartItemKey(line) !== key));
       void enqueue(drain, true);
+      const removed = current && removedLine(current);
+      if (removed) {
+        toast(`Removed ${removed.item.name}.`, {
+          duration: 6000,
+          action: { label: "Undo", onClick: () => restoreRemoved(removed) },
+        });
+      }
     },
   };
+  /** Undo puts the line back with its quantity, then re-applies its swap choice once it has a server id. */
+  function restoreRemoved(removed: RemovedLine) {
+    if (rejectStale()) return;
+    const key = cartItemKey(removed.item);
+    const { quantity, swap } = restoreSteps(
+      removed,
+      linesRef.current.find((line) => cartItemKey(line) === key),
+    );
+    store.setQuantity(removed.item, quantity);
+    if (!swap) return;
+    void enqueue(async () => {
+      const lineId =
+        linesRef.current.find((line) => cartItemKey(line) === key)?.serverLineId ??
+        confirmed.current.get(key)?.lineId;
+      if (!lineId) return;
+      const result = await setSwapRule(lineId, swap.swapRule, swap.substituteVariantId);
+      if (!result.ok && mounted.current) toast.error(result.error);
+      await pullServer("server-wins");
+    }, true);
+  }
   const refreshCart = () =>
     enqueue(async () => {
       const pulled = await pullServer("server-wins");
@@ -797,6 +827,7 @@ export function CartProvider({
   const count = lines.reduce((sum, line) => sum + line.quantity, 0);
   const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.price, 0);
   const minimum = Math.max(0, minimumOrderCents);
+  const gate = minimumOrderGate(subtotal, minimum);
 
   return (
     <Context.Provider
@@ -889,28 +920,21 @@ export function CartProvider({
                     value={Math.min(minimum, subtotal)}
                     aria-label="Minimum order progress"
                   />
-                  <p className={styles.muted}>
-                    {subtotal >= minimum
-                      ? "Minimum order reached"
-                      : `${money(minimum - subtotal)} to reach the ${money(minimum)} minimum order`}
-                  </p>
+                  {gate.met && <p className={styles.muted}>Minimum order reached</p>}
                 </>
               )}
-              <Link
-                className={styles.primaryButton}
-                href="/cart"
-                onClick={() => setOpen(false)}
-              >
-                Review basket & checkout
-              </Link>
-              {subtotal >= minimum && (
+              {gate.met ? (
                 <Link
-                  className="sf-text-link"
-                  href="/checkout"
+                  className={styles.primaryButton}
+                  href="/cart"
                   onClick={() => setOpen(false)}
                 >
-                  Continue to checkout
+                  Review basket & checkout
                 </Link>
+              ) : (
+                <button type="button" className={styles.primaryButton} disabled>
+                  {gate.message}
+                </button>
               )}
             </div>
           </>
@@ -926,7 +950,7 @@ export function CartTrigger({
   className?: string;
   children?: ReactNode;
 }) {
-  const { count, openCart, syncing, attention } = useCart();
+  const { count, openCart, syncing, attention, loading } = useCart();
   const reduced = useReducedMotion();
   return (
     <button
@@ -939,22 +963,27 @@ export function CartTrigger({
     >
       <ShoppingBag size={21} />
       {children}
-      <m.span
-        key={count}
-        data-testid="cart-count"
-        aria-hidden="true"
-        initial={reduced ? false : { scale: 1.2 }}
-        animate={{ scale: 1 }}
-        transition={
-          reduced
-            ? { duration: 0 }
-            : { type: "spring", stiffness: 400, damping: 20 }
-        }
-      >
-        {count}
-      </m.span>
+      {loading ? (
+        // No number until the server cart is read, so the badge never flashes a false 0.
+        <span data-testid="cart-count" data-loading="true" aria-hidden="true" className={styles.countLoading} />
+      ) : (
+        <m.span
+          key={count}
+          data-testid="cart-count"
+          aria-hidden="true"
+          initial={reduced ? false : { scale: 1.2 }}
+          animate={{ scale: 1 }}
+          transition={
+            reduced
+              ? { duration: 0 }
+              : { type: "spring", stiffness: 400, damping: 20 }
+          }
+        >
+          {count}
+        </m.span>
+      )}
       <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {count} {count === 1 ? "item" : "items"} in cart
+        {loading ? "" : `${count} ${count === 1 ? "item" : "items"} in cart`}
       </span>
     </button>
   );
