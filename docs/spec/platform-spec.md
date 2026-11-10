@@ -245,6 +245,21 @@ AWAITING_PICKUP ──(customer collects)──► COMPLETED
 ```
 Transitional statuses `CAPTURING` and `CANCELLING` are set inside a DB transaction before calling Stripe, so concurrent mutations are blocked while the external call is in flight. A reconcile sweep (Inngest cron, every 15 min) recovers orders stuck in either state by checking the real PaymentIntent status. Together with the 15-minute orphan-event sweep this is 5,760 idle runs in a 30-day month. Checkout does not wait on Inngest: `placeOrder` schedules `order/authorized` after the response. The event id is `order-authorized-<orderId>`, so a retried send and the orphan sweep cannot start a second timer. Both sweeps are singletons (`mode: skip`); a new run is dropped while one is still active. Local timers use `INNGEST_DEV=1` and the Dev Server, with no event key. In production, a missing `INNGEST_EVENT_KEY` is logged once per process as `inngest_event_key_missing`. The order still commits, and the orphan sweep retries the send.
 
+Order recovery visibility, built in #420. `/api/health` requires `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` in production (`VERCEL_ENV=production`): a missing key returns 503 `degraded`. Previews list both keys in the `env` body without failing, until the owner sets them (#269). `INNGEST_DEV` set in production is flagged as `flags: ["INNGEST_DEV"]` without failing, because Vercel ignores it. Health checks env presence only; it never calls Inngest. The platform-admin page **Orders to check** (`/admin/orders/check`, `requirePlatformAdmin`) is computed on load from the database, not by a job, because a broken Inngest is one of the things it shows. It lists each stuck order once, with state, how long, and the reason:
+
+| Reason | Stuck when |
+|---|---|
+| Card hold expiring | any uncaptured state (AUTHORIZED, ACCEPTED, PICKING, CAPTURING, CANCELLING), created more than 5 days ago |
+| Timer not started | AUTHORIZED, no `inngest_event_sent_at`, created more than 15 min ago |
+| Timer overdue | AUTHORIZED, 30 min past the cancel timer's 30-open-minute deadline (`timerDeadline`) |
+| Retry stalled | CAPTURING/CANCELLING, first `capture_retry`/`cancel_retry` audit row older than 30 min (else `updated_at`) |
+| Picking overdue | ACCEPTED/PICKING, prep estimate + 60 min after the later of `accepted_at` and the pickup slot |
+| Ready too long | READY 4 h after `ready_at` |
+| Out for delivery too long | OUT_FOR_DELIVERY 4 h after `out_for_delivery_at` |
+| Waiting for pickup too long | AWAITING_PICKUP 48 h after `ready_at` |
+
+It also lists the newest `acceptance_alert`, `reconcile_failed`, `capture_released` and `refund_request_unknown` row per order and action from the last 7 days, newest first, with store and order number. A row older than 7 days stays while its order is not DELIVERED, COMPLETED or CANCELLED. Each candidate set is capped at 200 rows in SQL. `audit_logs (action, created_at)` is indexed for this read. The page only shows; acting on a row and sending alerts are not built.
+
 Pickup orders skip the `READY` status entirely: once all lines are resolved and the Stripe capture succeeds, pickup orders move directly to `AWAITING_PICKUP`. Delivery orders move to `READY`, which triggers the courier dispatch flow. This avoids an ambiguous `READY` state for pickup where the customer would need to be separately notified that the order is ready for collection — `AWAITING_PICKUP` already carries that meaning.
 
 Staff see those statuses plus `REFUND_FAILED`. There is no `CAPTURE_FAILED` status. On `REFUND_FAILED`, the inbox tells staff the platform is resolving the refund and that they must not refund the customer themselves. Staff actions return an allow-listed message, or "Something went wrong. Try again, or contact support if it keeps happening." Raw provider text is written only to the server log, with email and phone redacted.
