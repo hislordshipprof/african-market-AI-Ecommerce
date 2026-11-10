@@ -36,7 +36,9 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { auth } from "../auth";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { newTrackingToken } from "./record";
-import { createPaymentIntentAction } from "../checkout/actions";
+import { createPaymentIntentAction, placeOrderAction } from "../checkout/actions";
+import * as checkoutService from "../checkout/service";
+import * as lookup from "./lookup";
 import OrderPage from "@/app/order/[token]/page";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -137,5 +139,33 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
       "pickup",
     );
     expect(result).toEqual({ ok: true, orderedToken: order.trackingToken });
+  });
+
+  it("a failed token read after the order is placed still reports the order as placed", async () => {
+    const cart = await storeScoped(storeA).cart.create({ data: { storeId: storeA, userId: null, source: "manual" } });
+    const order = await createOrder(storeA, cart.id);
+    headerState.set("x-store-slug", slugA);
+    cookieJar.set("cart_id", cart.id);
+    vi.spyOn(lookup, "trackingTokenFor").mockRejectedValue(new Error("db blip"));
+    vi.spyOn(checkoutService, "placeOrder").mockResolvedValue({
+      token: order.id,
+      trackingToken: order.trackingToken,
+      quote: {} as never,
+    });
+
+    const placed = await placeOrderAction(
+      "pi_1",
+      { name: "Ada Buyer", email: "ada@example.com", phone: "2025550100" },
+      "pickup",
+      "",
+      "asap",
+    );
+    expect(placed).toEqual({ ok: true, token: order.trackingToken });
+
+    const resumed = await createPaymentIntentAction(
+      { name: "Ada Buyer", email: "ada@example.com", phone: "2025550100" },
+      "pickup",
+    );
+    expect(resumed).toEqual({ ok: true, orderedToken: order.id });
   });
 });
