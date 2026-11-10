@@ -32,7 +32,19 @@ import {
   setLineQty as serverSetLineQty,
   removeCartLine,
   migrateLocalCart,
+  setSwapRule,
 } from "@/lib/cart/actions";
+import { minimumOrderGate } from "@/lib/storefront/minimum-order";
+import {
+  addPendingUndo,
+  livePendingUndo,
+  removedLine,
+  restoreSteps,
+  undoMessage,
+  UNDO_MS,
+  type PendingUndo,
+  type RemovedLine,
+} from "@/lib/storefront/cart-undo";
 import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { Sheet } from "./sheet";
@@ -43,6 +55,8 @@ import { bindCartRefresh } from "@/lib/assistant/ui/cart-bridge";
 import { AssistantSlot } from "./assistant/assistant-slot";
 import styles from "./cart.module.css";
 
+/** Wall clock for the Undo window; only read from event handlers and timers. */
+const undoClock = () => Date.now();
 const OFFLINE = "Couldn't update your cart. Check your connection and try again.";
 const STALE_PAGE = "This page is out of date. Reload the market and try again.";
 
@@ -132,6 +146,30 @@ export function CartProvider({
   const [syncing, setSyncing] = useState(false);
   const [attention, setAttention] = useState(false);
   const [cartId, setCartId] = useState<string | null>(null);
+  // Removals Undo can still restore. Inside the open (modal) drawer they show in it; elsewhere as a toast.
+  const [pendingUndo, setPendingUndo] = useState<PendingUndo[]>([]);
+  const pendingUndoRef = useRef<PendingUndo[]>([]);
+  const undoTimer = useRef<number | undefined>(undefined);
+  function setPending(next: PendingUndo[]) {
+    pendingUndoRef.current = next;
+    setPendingUndo(next);
+    window.clearTimeout(undoTimer.current);
+    const { remainingMs } = livePendingUndo(next, undoClock());
+    if (remainingMs > 0) undoTimer.current = window.setTimeout(() => setPending(livePendingUndo(pendingUndoRef.current, undoClock()).entries), remainingMs);
+  }
+  function undoToast(entries: PendingUndo[], duration: number) {
+    toast(undoMessage(entries), {
+      duration,
+      action: { label: "Undo", onClick: () => entries.forEach((entry) => restoreRemoved(entry.removed)) },
+    });
+  }
+  function closeCart() {
+    setOpen(false);
+    // Whatever was still undoable in the drawer moves to a toast for the time it has left.
+    const { entries, remainingMs } = livePendingUndo(pendingUndoRef.current, undoClock());
+    if (entries.length) undoToast(entries, remainingMs);
+    setPending([]);
+  }
   const mounted = useRef(true);
   const linesRef = useRef<CartLine[]>([]);
   const revs = useRef(new Map<string, number>());
@@ -766,8 +804,37 @@ export function CartProvider({
       else dropAfterAdd.current.add(key);
       publish(linesRef.current.filter((line) => cartItemKey(line) !== key));
       void enqueue(drain, true);
+      const removed = current && removedLine(current);
+      if (!removed) return;
+      const now = undoClock();
+      if (open) {
+        // The open drawer is modal, so a page toast could not be tapped; Undo shows inside it.
+        setPending(addPendingUndo(pendingUndoRef.current, removed, now));
+      } else {
+        undoToast(addPendingUndo([], removed, now), UNDO_MS);
+      }
     },
   };
+  /** Undo puts the line back with its quantity, then re-applies its swap choice once it has a server id. */
+  function restoreRemoved(removed: RemovedLine) {
+    if (rejectStale()) return;
+    const key = cartItemKey(removed.item);
+    const { quantity, swap } = restoreSteps(
+      removed,
+      linesRef.current.find((line) => cartItemKey(line) === key),
+    );
+    store.setQuantity(removed.item, quantity);
+    if (!swap) return;
+    void enqueue(async () => {
+      const lineId =
+        linesRef.current.find((line) => cartItemKey(line) === key)?.serverLineId ??
+        confirmed.current.get(key)?.lineId;
+      if (!lineId) return;
+      const result = await setSwapRule(lineId, swap.swapRule, swap.substituteVariantId);
+      if (!result.ok && mounted.current) toast.error(result.error);
+      await pullServer("server-wins");
+    }, true);
+  }
   const refreshCart = () =>
     enqueue(async () => {
       const pulled = await pullServer("server-wins");
@@ -797,6 +864,7 @@ export function CartProvider({
   const count = lines.reduce((sum, line) => sum + line.quantity, 0);
   const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.price, 0);
   const minimum = Math.max(0, minimumOrderCents);
+  const gate = minimumOrderGate(subtotal, minimum);
 
   return (
     <Context.Provider
@@ -815,9 +883,24 @@ export function CartProvider({
       }}
     >
       {children}
-      <Sheet open={open} onClose={() => setOpen(false)} title="Your cart">
+      <Sheet open={open} onClose={closeCart} title="Your cart">
         <p className={styles.muted}>{storeName}</p>
-        {open && <AssistantSlot label="Shop with help" />}
+        {open && <AssistantSlot label="Shop with AI" />}
+        {pendingUndo.length > 0 && (
+          <div className={styles.undoBar} role="status">
+            <span>{undoMessage(pendingUndo)}</span>
+            <button
+              type="button"
+              onClick={() => {
+                const entries = pendingUndoRef.current;
+                setPending([]);
+                entries.forEach((entry) => restoreRemoved(entry.removed));
+              }}
+            >
+              Undo
+            </button>
+          </div>
+        )}
         {!lines.length ? (
           <div className={styles.empty}>
             <ShoppingBag size={44} />
@@ -825,7 +908,7 @@ export function CartProvider({
             <p>Add something from the shelves to start your cart.</p>
             <button
               className={styles.primaryButton}
-              onClick={() => setOpen(false)}
+              onClick={closeCart}
             >
               Start shopping
             </button>
@@ -851,7 +934,7 @@ export function CartProvider({
                     <Link
                       className={styles.swap}
                       href="/cart"
-                      onClick={() => setOpen(false)}
+                      onClick={closeCart}
                     >
                       {(() => {
                         const rule = line.swapRule ?? "exact_only";
@@ -889,28 +972,21 @@ export function CartProvider({
                     value={Math.min(minimum, subtotal)}
                     aria-label="Minimum order progress"
                   />
-                  <p className={styles.muted}>
-                    {subtotal >= minimum
-                      ? "Minimum order reached"
-                      : `${money(minimum - subtotal)} to reach the ${money(minimum)} minimum order`}
-                  </p>
+                  {gate.met && <p className={styles.muted}>Minimum order reached</p>}
                 </>
               )}
-              <Link
-                className={styles.primaryButton}
-                href="/cart"
-                onClick={() => setOpen(false)}
-              >
-                Review basket & checkout
-              </Link>
-              {subtotal >= minimum && (
+              {gate.met ? (
                 <Link
-                  className="sf-text-link"
-                  href="/checkout"
-                  onClick={() => setOpen(false)}
+                  className={styles.primaryButton}
+                  href="/cart"
+                  onClick={closeCart}
                 >
-                  Continue to checkout
+                  Review basket & checkout
                 </Link>
+              ) : (
+                <button type="button" className={styles.primaryButton} disabled>
+                  {gate.message}
+                </button>
               )}
             </div>
           </>
@@ -926,7 +1002,7 @@ export function CartTrigger({
   className?: string;
   children?: ReactNode;
 }) {
-  const { count, openCart, syncing, attention } = useCart();
+  const { count, openCart, syncing, attention, loading } = useCart();
   const reduced = useReducedMotion();
   return (
     <button
@@ -939,22 +1015,27 @@ export function CartTrigger({
     >
       <ShoppingBag size={21} />
       {children}
-      <m.span
-        key={count}
-        data-testid="cart-count"
-        aria-hidden="true"
-        initial={reduced ? false : { scale: 1.2 }}
-        animate={{ scale: 1 }}
-        transition={
-          reduced
-            ? { duration: 0 }
-            : { type: "spring", stiffness: 400, damping: 20 }
-        }
-      >
-        {count}
-      </m.span>
+      {loading ? (
+        // No number until the server cart is read, so the badge never flashes a false 0.
+        <span data-testid="cart-count" data-loading="true" aria-hidden="true" className={styles.countLoading} />
+      ) : (
+        <m.span
+          key={count}
+          data-testid="cart-count"
+          aria-hidden="true"
+          initial={reduced ? false : { scale: 1.2 }}
+          animate={{ scale: 1 }}
+          transition={
+            reduced
+              ? { duration: 0 }
+              : { type: "spring", stiffness: 400, damping: 20 }
+          }
+        >
+          {count}
+        </m.span>
+      )}
       <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {count} {count === 1 ? "item" : "items"} in cart
+        {loading ? "" : `${count} ${count === 1 ? "item" : "items"} in cart`}
       </span>
     </button>
   );

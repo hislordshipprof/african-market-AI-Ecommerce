@@ -95,6 +95,33 @@
   font: 400 16px/1.5 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
+.reply {
+  white-space: normal;
+}
+
+.reply > * + * {
+  margin-top: 8px;
+}
+
+.reply ul,
+.reply ol {
+  padding-left: 1.25em;
+}
+
+.reply ul {
+  list-style: disc;
+}
+
+.reply ol {
+  list-style: decimal;
+}
+
+.reply a {
+  color: var(--color-primary-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .user {
   align-self: flex-end;
   max-width: min(38rem, 100%);
@@ -121,7 +148,7 @@
 }
 
 .seeAll {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font: 600 14px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
@@ -202,7 +229,7 @@
 .card,
 .choiceRow {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   min-width: 0;
@@ -218,12 +245,16 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+.cardAdd {
+  align-self: center;
+}
+
 .photo,
 .placeholder {
   width: 64px;
   height: 64px;
   border-radius: 8px;
-  background: var(--color-raised);
+  background: var(--sf-thumb-well, var(--color-raised));
   overflow: hidden;
 }
 
@@ -231,8 +262,8 @@
   display: grid;
   place-items: center;
   overflow-wrap: anywhere;
-  color: var(--color-muted);
-  font: 600 11px/1.2 Figtree, "Segoe UI", system-ui, sans-serif;
+  color: var(--color-on-photo-well);
+  font: 600 13px/1.2 Figtree, "Segoe UI", system-ui, sans-serif;
   text-align: center;
   padding: 4px;
 }
@@ -570,6 +601,11 @@
   font: 400 16px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
+.composer textarea::placeholder {
+  color: var(--color-muted);
+  opacity: 1;
+}
+
 .composer textarea::selection {
   background: var(--color-soft);
   color: var(--color-ink);
@@ -594,7 +630,7 @@
 }
 
 .notice a {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-weight: 600;
 }
 

@@ -8,6 +8,7 @@ export function RailScroller({
   title,
   description,
   href,
+  hrefLabel = "Shop the aisle",
   className = "",
 }: {
   children: ReactNode;
@@ -15,6 +16,7 @@ export function RailScroller({
   title: string;
   description?: string;
   href?: string;
+  hrefLabel?: string;
   className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -34,7 +36,7 @@ export function RailScroller({
           {description && <p>{description}</p>}
           {href && (
             <a href={href} className="sf-text-link">
-              Shop the aisle <ArrowRight size={16} />
+              {hrefLabel} <ArrowRight size={16} />
             </a>
           )}
         </div>

@@ -40,6 +40,7 @@ import {
 import { PayButton } from "./feedback";
 import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
 import { placeOrderLabel } from "@/lib/checkout/summary";
+import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
@@ -860,12 +861,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
         backLabel="Back to basket"
       />
       {!isRealPayment && <DemoNotice />}
-      <nav className={styles.stages} aria-label="Checkout sections">
-        <a href="#fulfillment">1. Fulfillment</a>
-        <a href="#contact">2. Contact</a>
-        <a href="#payment">3. Payment</a>
-        <a href="#review">4. Review</a>
-      </nav>
+      <CheckoutStages />
       <form className={styles.layout} onSubmit={onSubmit} noValidate>
         <fieldset className={styles.formFields} disabled={payState !== "idle"}>
           <legend className="sr-only">Checkout details</legend>
@@ -1031,7 +1027,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 value={notes}
                 maxLength={1000}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Apartment, gate code, or a note for your shopper"
+                placeholder={fulfillment === "pickup" ? "A note for your shopper" : "Apartment, gate code, or a note for your shopper"}
               />
             </label>
           </FlowCard>
@@ -1471,5 +1467,50 @@ function DemoCheckoutPage({
       isRealPayment={false}
       outcomeSelector={demoOutcomeSelector}
     />
+  );
+}
+
+const STAGES = [
+  { id: "fulfillment", label: "1. Fulfillment" },
+  { id: "contact", label: "2. Contact" },
+  { id: "payment", label: "3. Payment" },
+  { id: "review", label: "4. Review" },
+] as const;
+
+/** Section links that mark where the shopper is with aria-current="step". */
+function CheckoutStages() {
+  const [current, setCurrent] = useState<string>(STAGES[0].id);
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const sections = STAGES.flatMap(({ id }) => {
+        const node = document.getElementById(id);
+        return node ? [{ id, top: node.getBoundingClientRect().top }] : [];
+      });
+      // Below the sticky header, about 40% down the viewport.
+      const next = activeSection(sections, Math.max(180, window.innerHeight * 0.4));
+      if (next) setCurrent(next);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, []);
+  return (
+    <nav className={styles.stages} aria-label="Checkout sections">
+      {STAGES.map(({ id, label }) => (
+        <a key={id} href={`#${id}`} aria-current={current === id ? "step" : undefined}>
+          {label}
+        </a>
+      ))}
+    </nav>
   );
 }

@@ -17,7 +17,6 @@ import { TrustStoryStrip } from "@/components/storefront/trust-story-strip";
 import { EmptyState } from "@/components/storefront/primitives";
 import { SectionReveal } from "@/components/storefront/scroll-motion";
 import { MarketMarquee } from "@/components/storefront/marquee";
-import { DealsCarousel } from "@/components/storefront/deals-carousel";
 import { ReviewsCarousel } from "@/components/storefront/reviews-carousel";
 import { demoFlowsEnabled } from "@/lib/customer-flow/demo-gate";
 
@@ -72,9 +71,9 @@ export default async function StorefrontPage() {
           description="Familiar favorites for a well-stocked kitchen."
           listings={favorites}
           seeAllHref="/categories"
+          seeAllLabel="See all aisles"
         />
       </div>
-      <DealsCarousel listings={favorites} demo={demo} />
       <div className="sf-container sf-stack">
         <SectionReveal><CollectionBanners collections={collections} /></SectionReveal>
         <ProductRail
@@ -91,7 +90,7 @@ export default async function StorefrontPage() {
             seeAllHref="/categories/grains-and-flours"
           />
         )}
-        <ProductRail title={demo ? "Back in stock" : "Available today"} description={demo ? "Sample restocked picks from the demo shelves." : "Available on the shelves today."} listings={all.filter(l => l.badge === "in-stock").slice(-8)} seeAllHref="/categories" />
+        <ProductRail title={demo ? "Back in stock" : "Available today"} description={demo ? "Sample restocked picks from the demo shelves." : "Available on the shelves today."} listings={all.filter(l => l.badge === "in-stock").slice(-8)} seeAllHref="/categories" seeAllLabel="See all aisles" />
       </div>
       <PromoBand
         store={store}

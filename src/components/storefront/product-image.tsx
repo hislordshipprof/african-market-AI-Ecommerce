@@ -54,7 +54,7 @@ function ProductPhoto({ src, name, category, sizes, priority }: {
     /> : src ? <div className="sf-product-fallback" role="img" aria-label={"Photo temporarily unavailable for " + name}>
       <ImageOff size={28} aria-hidden /><small>Photo unavailable</small>
     </div> : <div className="sf-product-fallback" data-testid="designed-image-fallback" role="img" aria-label={name + " - product illustration"}>
-      <Glyph size={28} aria-hidden /><span aria-hidden>{name.charAt(0).toUpperCase()}</span>
+      <Glyph size={28} strokeWidth={1.75} aria-hidden /><span aria-hidden>{name}</span>
     </div>}
   </div>;
 }

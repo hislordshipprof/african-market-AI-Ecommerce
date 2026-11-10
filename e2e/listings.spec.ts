@@ -194,7 +194,7 @@ test.describe("Listing management (authenticated)", () => {
     const detail = `/listings/${before.id}?store=mama-ngozi`;
     const product = page.getByTestId("product-detail");
     await page.goto(detail);
-    await expect(product.getByLabel("$8.00").first()).toBeVisible({ timeout: 10000 });
+    await expect(product.getByLabel("$8.00").filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
 
     await page.goto(LISTINGS_URL);
     await page.locator(`[aria-label="Edit ${uniqueName}"]`).click();
@@ -210,7 +210,7 @@ test.describe("Listing management (authenticated)", () => {
     expect(after.price).toBe(800);
 
     await page.goto(detail);
-    await expect(product.getByLabel("$9.50").first()).toBeVisible({ timeout: 10000 });
+    await expect(product.getByLabel("$9.50").filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
     await expect(product.getByLabel("$8.00")).toHaveCount(0);
 
     await page.goto(LISTINGS_URL);

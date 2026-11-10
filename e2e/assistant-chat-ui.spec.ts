@@ -4,8 +4,11 @@ import { money } from "../src/lib/format";
 import { storeUrl } from "./urls";
 
 const origin = storeUrl("mama-ngozi");
-/** Fake-model reply for "html please". The live region must announce this string, not an image. */
-const HTML_REPLY = 'See <img onerror="alert(1)"> and [a](http://evil.test).';
+/**
+ * The fake model answers "html please" with 'See <img onerror="alert(1)"> and [a](http://evil.test).'
+ * It renders, and is announced, as text: the HTML stays literal and the plain-http link keeps only its words.
+ */
+const HTML_REPLY_SHOWN = 'See <img onerror="alert(1)"> and a.';
 const ROUTE_ERROR = "Sorry, something went wrong. Please try again.";
 
 function bubbles(root: Locator) {
@@ -42,7 +45,7 @@ test("the launcher stays out of the first load and the chat chunk arrives on ope
   expect(chat).toEqual([]);
   expect(await scriptsHave(page, "assistant-chat-chunk-v1")).toBe(false);
   await page.getByTestId("assistant-launcher").click();
-  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
   await expect.poll(() => scriptsHave(page, "assistant-chat-chunk-v1")).toBe(true);
   expect(await scriptsHave(page, "InvalidPDFException")).toBe(false);
@@ -55,19 +58,19 @@ test("a shopper can add egusi, undo it, and keep the transcript across pages", a
   await page.getByRole("button", { name: "Cook a dish" }).click();
   await expect(page.getByTestId("assistant-composer")).toHaveValue("I want to cook ");
   await send(page, "add two egusi");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
   const count = page.getByRole("banner").getByTestId("cart-count");
   await expect(count).toHaveText("2");
   await dialog.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "Undone", exact: true })).toBeVisible();
   await expect(count).toHaveText("0", { timeout: 10_000 });
-  await page.getByRole("button", { name: "Close Shop with help" }).click();
+  await page.getByRole("button", { name: "Close Shop with AI" }).click();
   await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.getByRole("link", { name: /Mama Ngozi/ }).first().click();
   await page.getByRole("link", { name: /Tubers/ }).first().click();
   await page.getByTestId("assistant-launcher").click();
-  const again = page.getByRole("dialog", { name: "Shop with help" });
+  const again = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(bubbles(again).filter({ hasText: "add two egusi" })).toBeVisible();
   await expect(again.getByRole("button", { name: "Undone", exact: true })).toBeVisible();
 });
@@ -82,10 +85,11 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "html please");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
-  await expect(bubbles(dialog).filter({ hasText: HTML_REPLY })).toBeVisible({ timeout: 20_000 });
-  await expect(liveRegion(dialog)).toHaveText(HTML_REPLY, { timeout: 20_000 });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+  await expect(bubbles(dialog).filter({ hasText: HTML_REPLY_SHOWN })).toBeVisible({ timeout: 20_000 });
+  await expect(liveRegion(dialog)).toHaveText(HTML_REPLY_SHOWN, { timeout: 20_000 });
   await expect(dialog.locator("img")).toHaveCount(0);
+  await expect(dialog.locator('a[href*="evil.test"]')).toHaveCount(0);
   await send(page, "stray price");
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I couldn't confirm that price." })).toBeVisible({ timeout: 20_000 });
   await send(page, "4242424242424242");
@@ -107,7 +111,7 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   const chip = page.getByLabel("Choice chips").getByRole("button").first();
   await expect(chip).toBeVisible({ timeout: 20_000 });
   // Start from a fixed point: the reply has finished and focus is back in the composer.
-  const sheet = page.getByRole("dialog", { name: "Shop with help" });
+  const sheet = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(sheet.locator('[class*="bubble"]').filter({ hasText: "Pick one." })).toBeVisible({ timeout: 20_000 });
   await expect(sheet.locator('[class*="typing"]')).toHaveCount(0);
   await composer.focus();
@@ -127,10 +131,10 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await expect.poll(() => choicePosts.length).toBe(1);
   expect(choicePosts[0]).toContain(label);
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeHidden();
   await expect(page.getByTestId("assistant-launcher")).toBeVisible();
   await page.getByTestId("assistant-launcher").click();
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.locator('[class*="addedRow"]')).toBeVisible({ timeout: 20_000 });
   await expect(dialog.locator('[class*="typing"]')).toHaveCount(0);
   await page.getByTestId("assistant-composer").fill("show my basket");
@@ -138,11 +142,11 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await expect(dialog.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
   await expect(dialog.locator('[class*="summary"]').getByText(/to reach the .+ minimum order/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
-  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
   await page.getByRole("link", { name: "Looks good" }).click();
   await expect(page).toHaveURL(/\/cart$/);
-  await expect(page.getByRole("dialog", { name: "Shop with help" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeHidden();
 });
 
 test("Looks good closes the sheet when the summary starts on the cart", async ({ page }) => {
@@ -150,7 +154,7 @@ test("Looks good closes the sheet when the summary starts on the cart", async ({
   await page.goto(`${origin}/cart?from=sheet`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "show my basket");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   const link = dialog.getByRole("link", { name: "Looks good" });
   await expect(link).toBeVisible({ timeout: 20_000 });
   await link.focus();
@@ -173,7 +177,7 @@ test("a failed turn can be retried after the customer leaves the sheet", async (
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await send(page, "mid-stream");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
   expect(posts).toHaveLength(1);
   const failedId = JSON.parse(posts[0] ?? "{}").message.id as string;
@@ -181,7 +185,7 @@ test("a failed turn can be retried after the customer leaves the sheet", async (
   await expect(dialog).toBeHidden();
   await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.getByTestId("assistant-launcher").click();
-  const again = page.getByRole("dialog", { name: "Shop with help" });
+  const again = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(again.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible();
   await again.getByRole("button", { name: "Retry" }).click();
   await expect(again.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
@@ -221,7 +225,7 @@ test("a stream cut after the tool starts shows an error and retry does not add a
     });
   });
   await send(page, "add two egusi");
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.getByRole("status").getByText(ROUTE_ERROR)).toBeVisible({ timeout: 20_000 });
   const count = page.getByRole("banner").getByTestId("cart-count");
   await expect(count).toHaveText("2", { timeout: 10_000 });
@@ -230,7 +234,7 @@ test("a stream cut after the tool starts shows an error and retry does not add a
   await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.unroute("**/api/assistant/chat");
   await page.getByTestId("assistant-launcher").click();
-  const again = page.getByRole("dialog", { name: "Shop with help" });
+  const again = page.getByRole("dialog", { name: "Shop with AI" });
   await again.getByRole("button", { name: "Retry" }).click();
   await expect(again.getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(count).toHaveText("2");
@@ -251,7 +255,7 @@ test("one submit is one request, and a rejected undo says what happened", async 
     form?.requestSubmit();
     form?.requestSubmit();
   });
-  await expect(page.getByRole("dialog", { name: "Shop with help" }).getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("dialog", { name: "Shop with AI" }).getByRole("button", { name: "Undo", exact: true })).toBeVisible({ timeout: 20_000 });
   expect(posts).toHaveLength(1);
   await page.context().addCookies([{ name: "e2e_undo", value: "reject", url: origin }]);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
@@ -268,7 +272,7 @@ test("product cards show the catalog price", async ({ page }) => {
     const response = await fetch("/api/storefront/search?q=egusi");
     return response.json() as Promise<{ results: { name: string; price: number }[] }>;
   });
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   expect(catalog.results.length).toBeGreaterThan(0);
   let compared = 0;
   for (const row of catalog.results) {
@@ -353,7 +357,7 @@ test("a photo does not change the basket until the customer taps", async ({ page
   await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
   await page.getByTestId("assistant-composer").fill("rice from the photo");
   await page.getByTestId("assistant-send").click();
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I found some of the list" })).toBeVisible({ timeout: 20_000 });
   const sentPhoto = dialog.locator('[class*="user"] img');
   await expect(sentPhoto).toBeVisible();
@@ -449,7 +453,7 @@ test("a rejected file send keeps the draft and a late file does not return", asy
   await page.route("**/api/assistant/chat", (route) => route.fulfill({ status: 413, body: "too big", contentType: "text/plain" }));
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
   await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
   await page.getByTestId("assistant-composer").fill("keep this list");
@@ -471,7 +475,7 @@ test("a file that finishes after the sheet closes does not come back", async ({ 
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
-  await page.getByRole("button", { name: "Close Shop with help" }).click();
+  await page.getByRole("button", { name: "Close Shop with AI" }).click();
   await page.evaluate(() => { (window as unknown as { __releaseBitmap?: () => void }).__releaseBitmap?.(); });
   await page.getByTestId("assistant-launcher").click();
   await expect(page.getByRole("button", { name: /Remove / })).toHaveCount(0);
@@ -485,7 +489,7 @@ test("retrying a failed send keeps one customer bubble", async ({ page }) => {
   await page.route("**/api/assistant/chat", (route) => route.fulfill({ status: 500, body: "no", contentType: "text/plain" }));
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   const bubbles = dialog.locator('[class*="bubble"][class*="user"]');
   await page.getByTestId("assistant-composer").fill("beans");
   await page.getByTestId("assistant-send").click();
@@ -539,13 +543,13 @@ test("closing during a held file send drops the preview", async ({ page }) => {
   });
   await page.goto(`${origin}/`);
   await page.getByTestId("assistant-launcher").click();
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
   await expect(page.getByRole("button", { name: /Remove / })).toBeVisible();
   await page.getByTestId("assistant-composer").fill("old draft");
   const before = await page.evaluate(() => (window as unknown as { __objectUrls: { created: number; revoked: number } }).__objectUrls.created);
   await page.getByTestId("assistant-send").click();
-  await page.getByRole("button", { name: "Close Shop with help" }).click();
+  await page.getByRole("button", { name: "Close Shop with AI" }).click();
   await expect(dialog).toBeHidden();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __objectUrls: { revoked: number } }).__objectUrls.revoked)).toBeGreaterThan(0);
   release();
@@ -639,7 +643,7 @@ test("a text turn failing after navigation retains its original Retry", async ({
   release();
   hold = false;
   await page.getByTestId("assistant-launcher").click();
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   const retry = dialog.getByRole("button", { name: "Retry" });
   await expect(retry).toBeVisible({ timeout: 20_000 });
   await expect(retry).toBeDisabled();
@@ -659,7 +663,7 @@ test("a text turn failing after navigation retains its original Retry", async ({
   release();
   hold = false;
   await page.getByTestId("assistant-launcher").click();
-  const returned = page.getByRole("dialog", { name: "Shop with help" });
+  const returned = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(returned.locator('[class*="bubble"]').filter({ hasText: "Recovered after the interruption." })).toBeVisible({ timeout: 20_000 });
   await expect(bubbles(returned).filter({ hasText: "mid-stream" })).toHaveCount(1);
   await expect(returned.getByRole("button", { name: "Retry" })).toHaveCount(0);
@@ -704,7 +708,7 @@ test("closing a failed file turn removes Retry without turning it into a text tu
   await page.keyboard.press("Escape");
   await letGo();
   await page.getByTestId("assistant-launcher").click();
-  const dialog = page.getByRole("dialog", { name: "Shop with help" });
+  const dialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(dialog.getByRole("status")).toBeVisible({ timeout: 20_000 });
   await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: /Remove / })).toHaveCount(0);
@@ -727,7 +731,7 @@ test("closing a failed file turn removes Retry without turning it into a text tu
   await page.keyboard.press("Escape");
   await letGo();
   await page.getByTestId("assistant-launcher").click();
-  const pdfDialog = page.getByRole("dialog", { name: "Shop with help" });
+  const pdfDialog = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(pdfDialog.getByRole("status")).toBeVisible({ timeout: 20_000 });
   await expect(pdfDialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
   await expect(pdfDialog.getByRole("button", { name: /Remove / })).toHaveCount(0);
@@ -743,7 +747,7 @@ test("closing a failed file turn removes Retry without turning it into a text tu
   await page.keyboard.press("Escape");
   await letGo();
   await page.getByTestId("assistant-launcher").click();
-  const filesOnly = page.getByRole("dialog", { name: "Shop with help" });
+  const filesOnly = page.getByRole("dialog", { name: "Shop with AI" });
   await expect(filesOnly.getByRole("status")).toBeVisible({ timeout: 20_000 });
   await expect(filesOnly.getByRole("button", { name: "Retry" })).toHaveCount(0);
   await page.locator('input[accept="image/jpeg,image/png,image/webp"]').setInputFiles("src/lib/assistant/fixtures/list-exif.jpg");
@@ -778,10 +782,10 @@ test("file presence cannot enable Retry for terminal or message-rate-limited err
     }));
     await page.getByTestId("assistant-composer").fill("rice from the photo");
     await page.getByTestId("assistant-send").click();
-    const dialog = page.getByRole("dialog", { name: "Shop with help" });
+    const dialog = page.getByRole("dialog", { name: "Shop with AI" });
     await expect(dialog.getByRole("status").getByText(title)).toBeVisible({ timeout: 20_000 });
     await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
     await page.unroute("**/api/assistant/chat");
   }
 });
-
+

@@ -50,6 +50,21 @@ export function ProductDetail({
           weightG={variant?.weightG}
           unit={variant?.label ?? "item"}
         />
+        {/* Sits under the title so desktop has Add to cart above the fold; phones pin it to the bottom. */}
+        <div className="sf-add-bar">
+          <div>
+            <span>{variant?.label ?? "Each"}</span>
+            <PriceDisplay cents={price} weightG={variant?.weightG} unit={variant?.label ?? "item"} />
+          </div>
+          {listing.badge === "ask-store" ? (
+            <span>Ask the store about availability</span>
+          ) : (
+            <>
+              <span>Add to your basket</span>
+              <QuickAddStepper item={item} />
+            </>
+          )}
+        </div>
         {listing.variants.length > 0 && (
           <section className="sf-variants" aria-labelledby="variants-heading">
             <h3 id="variants-heading">Available sizes</h3>
@@ -99,21 +114,7 @@ export function ProductDetail({
               "A staple from your local market. Check the product packaging for ingredients, allergens and preparation instructions."}
           </p>
         </section>
-        <AssistantSlot label="Ask about this item" />
-        <div className="sf-add-bar">
-          <div>
-            <span>{variant?.label ?? "Each"}</span>
-            <PriceDisplay cents={price} weightG={variant?.weightG} />
-          </div>
-          {listing.badge === "ask-store" ? (
-            <span>Ask the store about availability</span>
-          ) : (
-            <>
-              <span>Add to your basket</span>
-              <QuickAddStepper item={item} />
-            </>
-          )}
-        </div>
+        <AssistantSlot label="Ask AI about this item" />
       </div>
     </div>
   );

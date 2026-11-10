@@ -61,7 +61,7 @@
   margin-left: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .sf-account-cards h3 {
   margin: 28px 0 8px;
@@ -76,7 +76,7 @@
   color: inherit;
 }
 .sf-account-order:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .sf-account-orders-intro {
   overflow-wrap: anywhere;
@@ -223,7 +223,7 @@
   margin: 16px 0;
 }
 .sf-account-story span {
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }

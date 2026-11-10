@@ -35,7 +35,6 @@ export function FlowHeading({
           {backLabel}
         </Link>
       )}
-      <div className="flow-eyebrow">Your neighborhood, delivered</div>
       <h1>{title}</h1>
       {description && <p>{description}</p>}
     </header>

@@ -11,10 +11,12 @@ import styles from "./assistant.module.css";
 
 export function AssistantLauncher({
   storeId,
+  storeName,
   storeStatus,
   accountId,
 }: {
   storeId: string;
+  storeName: string;
   storeStatus: string;
   accountId: string | null;
 }) {
@@ -86,7 +88,7 @@ export function AssistantLauncher({
           onFocus={preload}
           onClick={openSheet}
         >
-          Shop with help
+          Shop with AI
         </button>
       ) : null}
       {failed ? <ChunkFailure onRetry={openSheet} /> : null}
@@ -95,6 +97,7 @@ export function AssistantLauncher({
           open={open}
           onClose={() => setOpen(false)}
           storeId={storeId}
+          storeName={storeName}
           accountId={accountId}
           cartId={cartId}
           loading={loading}
