@@ -72,7 +72,7 @@ test("production assistant gates fail closed without relying on local env files"
     await page.getByTestId("assistant-launcher").click();
     await page.getByTestId("assistant-composer").fill("hello");
     await page.getByTestId("assistant-send").click();
-    const dialog = page.getByRole("dialog", { name: "Shop with help" });
+    const dialog = page.getByRole("dialog", { name: "Shop with AI" });
     await expect(dialog.getByText("The helper isn't available right now.")).toBeVisible({ timeout: 20_000 });
     await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
     const result = await page.evaluate(async (url) => {
@@ -111,7 +111,7 @@ test("production assistant gates fail closed without relying on local env files"
     await page.getByTestId("assistant-launcher").click();
     await page.getByTestId("assistant-composer").fill("mid-stream");
     await page.getByTestId("assistant-send").click();
-    const dialog = page.getByRole("dialog", { name: "Shop with help" });
+    const dialog = page.getByRole("dialog", { name: "Shop with AI" });
     await expect(dialog.getByRole("button", { name: "Retry" })).toBeVisible({ timeout: 20_000 });
     await dialog.getByRole("button", { name: "Retry" }).click();
     await expect(dialog.getByText("Recovered after the interruption.")).toBeVisible({ timeout: 20_000 });

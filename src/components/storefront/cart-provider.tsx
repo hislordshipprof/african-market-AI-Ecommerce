@@ -817,7 +817,7 @@ export function CartProvider({
       {children}
       <Sheet open={open} onClose={() => setOpen(false)} title="Your cart">
         <p className={styles.muted}>{storeName}</p>
-        {open && <AssistantSlot label="Shop with help" />}
+        {open && <AssistantSlot label="Shop with AI" />}
         {!lines.length ? (
           <div className={styles.empty}>
             <ShoppingBag size={44} />

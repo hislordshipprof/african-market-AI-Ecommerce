@@ -199,7 +199,7 @@ export function CartPage({
         backHref="/"
         backLabel="Keep shopping"
       />
-      <AssistantSlot label="Shop with help" />
+      <AssistantSlot label="Shop with AI" />
       <DemoNotice />
       {!lines.length ? (
         <EmptyState

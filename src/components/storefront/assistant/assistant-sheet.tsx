@@ -73,6 +73,7 @@ export function AssistantSheet({
   open,
   onClose,
   storeId,
+  storeName,
   accountId,
   cartId,
   loading,
@@ -84,6 +85,7 @@ export function AssistantSheet({
   open: boolean;
   onClose: () => void;
   storeId: string;
+  storeName: string;
   accountId: string | null;
   cartId: string | null;
   loading: boolean;
@@ -98,11 +100,12 @@ export function AssistantSheet({
   );
   void attention;
   return (
-    <Sheet open={open} onClose={onClose} title="Shop with help">
+    <Sheet open={open} onClose={onClose} title="Shop with AI">
       <Thread
         key={chat.id}
         chat={chat}
         storeId={storeId}
+        storeName={storeName}
         loading={loading}
         lines={lines}
         onCartFailure={onCartFailure}
@@ -117,6 +120,7 @@ export function AssistantSheet({
 function Thread({
   chat,
   storeId,
+  storeName,
   loading,
   lines,
   onCartFailure,
@@ -126,6 +130,7 @@ function Thread({
 }: {
   chat: ReturnType<typeof retainSession>;
   storeId: string;
+  storeName: string;
   loading: boolean;
   lines: readonly CartLine[];
   onCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
@@ -686,7 +691,7 @@ function Thread({
         </button>
       ) : null}
       {messages.length === 0 && tiles.length === 0 ? (
-        <p className={styles.bubble}>What are you cooking or restocking?</p>
+        <p className={styles.bubble}>{`Hi, I'm ${storeName}'s AI shopping assistant. Ask about a dish or an item.`}</p>
       ) : null}
       {messages.length === 0 && tiles.length === 0 ? (
         <div className={styles.starters}>

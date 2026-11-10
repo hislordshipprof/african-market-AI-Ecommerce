@@ -99,7 +99,7 @@ export function ProductDetail({
               "A staple from your local market. Check the product packaging for ingredients, allergens and preparation instructions."}
           </p>
         </section>
-        <AssistantSlot label="Ask about this item" />
+        <AssistantSlot label="Ask AI about this item" />
         <div className="sf-add-bar">
           <div>
             <span>{variant?.label ?? "Each"}</span>
