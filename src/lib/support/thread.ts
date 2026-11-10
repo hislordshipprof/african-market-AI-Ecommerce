@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { storeScoped, storeScopedTransaction } from "../db";
+import { Prisma, storeScoped, storeScopedRawQuery, storeScopedTransaction } from "../db";
 import { recordOrderNotification } from "../notifications/record";
 
 export const MESSAGE_MAX_CHARS = 1000;
@@ -77,7 +77,7 @@ export async function readCustomerMessages(storeId: string, token: string): Prom
 
 /** Unread is the customer messages since the store's last reply. Newest customer message first. */
 export async function listStoreThreads(storeId: string): Promise<StoreThreadSummary[]> {
-  return storeScopedTransaction(storeId, (tx) => tx.$queryRaw<StoreThreadSummary[]>`
+  return storeScopedRawQuery<StoreThreadSummary>(storeId, Prisma.sql`
     SELECT t.id, o.number AS "orderNumber", t.state,
            t.last_customer_at AS "lastCustomerAt", t.last_reply_at AS "lastReplyAt",
            (SELECT count(*)::int FROM support_messages m
@@ -90,7 +90,7 @@ export async function listStoreThreads(storeId: string): Promise<StoreThreadSumm
 }
 
 export async function storeUnreadCount(storeId: string): Promise<number> {
-  const rows = await storeScopedTransaction(storeId, (tx) => tx.$queryRaw<Array<{ unread: number }>>`
+  const rows = await storeScopedRawQuery<{ unread: number }>(storeId, Prisma.sql`
     SELECT count(*)::int AS unread
       FROM support_messages m
       JOIN support_threads t ON t.id = m.thread_id
