@@ -78,6 +78,7 @@ agent_run() {
       case "$role" in
         light)  flags+=(--model claude-sonnet-5-5 --effort medium) ;;
         build|review|review2) flags+=(--effort high) ;;
+        ship) flags+=(--disallowedTools "Bash(gh pr merge:*)") ;;
       esac
       # Reviews may run on a separate Claude profile. It has no supermatt plugin, so the slash skill is rewritten
       # to the vendored copy, as for Cursor. Headless Claude exits when it ends a turn while a background subagent

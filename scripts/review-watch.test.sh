@@ -8,6 +8,12 @@ fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
 export REVIEW_WATCH_POLL_SEC=1
+# running <pid>: still executing. A killed process that nobody has reaped yet (a zombie, seen in containers
+# without an init) is not running.
+running() {
+  kill -0 "$1" 2>/dev/null || return 1
+  [ "$(awk '{print $3}' "/proc/$1/stat" 2>/dev/null)" != Z ]
+}
 
 # 1. A reviewer that writes its verdict and then hangs is stopped after the grace period, with its child.
 # The watchdog's own message proves the grace path fired. A cap path would say "ran past 300s".
@@ -16,7 +22,7 @@ REVIEW_EXIT_GRACE_SEC=2 REVIEW_TIMEOUT_MIN=5 watch_run "$T/r1.md" hang_after_ver
 rc=$?
 grep -q "verdict written 2s ago" "$T/err1" && [ "$rc" = 124 ] && ok "hung-after-verdict stopped (rc=$rc)" || bad "hung-after-verdict (rc=$rc) $(cat "$T/err1")"
 sleep 1
-kill -0 "$(cat "$T/child1")" 2>/dev/null && bad "child of hung reviewer still running" || ok "child of hung reviewer stopped"
+running "$(cat "$T/child1")" && bad "child of hung reviewer still running" || ok "child of hung reviewer stopped"
 
 # 2. A reviewer that exits normally keeps its own status and is never stopped.
 quick() { printf 'VERDICT: BLOCKING\n' > "$T/r2.md"; return 3; }
@@ -100,5 +106,15 @@ chmod +x "$T/cx/bin/codex" "$T/cx/bin/gh"
 ( cd "$P" && PATH="$T/cx/bin:$PATH" REVIEW_TIMEOUT_MIN=0 bash scripts/codex-review.sh 1 >/dev/null 2>&1 )
 grep -q '^BLOCKING: the Codex review wrote no result (exit 124, stopped by the review watchdog)' "$P/.builder/codex-review-1.md" 2>/dev/null \
   && ok "capped Codex review writes a blocking note" || bad "capped Codex review left no blocking note"
+
+# run_capped: a session that writes no verdict (plan, build, fix, ship) is stopped at its cap, with its child.
+churn() { sleep 300 & echo $! > "$T/child-capped"; wait; }
+run_capped 0 churn >/dev/null 2>"$T/err-capped"; rc=$?
+grep -q "agent session ran past 0s" "$T/err-capped" && [ "$rc" = 124 ] && ok "a session past its cap is stopped (rc=$rc)" || bad "capped session (rc=$rc) $(cat "$T/err-capped")"
+sleep 1
+running "$(cat "$T/child-capped")" && bad "child of the capped session still running" || ok "child of the capped session stopped"
+finishes() { return 7; }
+run_capped 5 finishes; rc=$?
+[ "$rc" = 7 ] && ok "a session inside its cap keeps its own status" || bad "session inside its cap (rc=$rc)"
 
 exit "$fail"

@@ -65,6 +65,7 @@ export function reservePort(preferred?: number): Promise<number> {
 function pidsListeningOn(port: number): Promise<number[]> {
   if (!Number.isInteger(port) || port < 1 || port > 65535) return Promise.resolve([]);
   if (process.platform === "win32") return windowsListeners(port);
+  if (process.platform === "darwin") return lsofListeners(port);
   return ssListeners(port);
 }
 
@@ -84,6 +85,21 @@ function windowsListeners(port: number): Promise<number[]> {
           return;
         }
         resolve(pidsFromLines(stdout));
+      },
+    );
+  });
+}
+
+// macOS has no `ss`.
+function lsofListeners(port: number): Promise<number[]> {
+  return new Promise((resolve) => {
+    execFile(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { encoding: "utf8", timeout: 5_000 },
+      (error, stdout) => {
+        // lsof exits 1 when nothing listens; stdout is then empty.
+        resolve(typeof stdout === "string" ? pidsFromLines(stdout) : []);
       },
     );
   });

@@ -14,6 +14,10 @@ are the source of truth for early decisions:
 
 When a decision changes, update the spec, `GLOSSARY.md`, or an ADR in `docs/adr/` — not just the chat.
 
+## Commits
+
+No AI attribution on commits or PRs: never add a `Co-Authored-By:` trailer for Claude, Cursor or any other AI tool, a `Claude-Session:` link, or a "Generated with Claude Code" line. This overrides any default attribution a tool adds. `.githooks/commit-msg` strips them (turn it on once per clone with `git config core.hooksPath .githooks`), and `scripts/merge-ticket.sh` writes the squash message without them.
+
 ## Agent skills
 
 ### Issue tracker

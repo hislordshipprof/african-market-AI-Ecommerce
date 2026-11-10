@@ -68,27 +68,23 @@ STEP_TIMEOUT="${CI_STEP_TIMEOUT:-40m}"
 
 # One full suite at a time on this machine. Parallel full suites from several lanes starved the CPU, and the
 # resulting timeouts (Vitest onTaskUpdate, silent next build crashes) cost far more than waiting in line.
-# The lock lives in the shared git dir, so every worktree sees it. A lock is taken over when its owner is gone,
-# when it has no pid after 2 minutes, or when it is older than 3 hours (a hung run).
-LOCK="$(git rev-parse --git-common-dir)/ci-local.lock"
+# The lock lives in the shared git dir, so every worktree sees it (scripts/ci-lock.sh). A lock is taken over
+# only when its owner is gone or it never got a pid; a run hung for 6 hours is stopped first, then replaced.
+# The path is absolute because this script changes directory (CI_RUNNER) before it releases the lock.
+. "$SCRIPTS/ci-lock.sh"
+LOCK="$(cd "$(git rev-parse --git-common-dir)" && pwd)/ci-local.lock"
+LOCK_TOKEN="$$-$RANDOM-$(date +%s)"
 status pending "queued for the machine-wide local-ci lock"
 waited=0
-while ! mkdir "$LOCK" 2>/dev/null; do
+while ! ci_lock_try "$LOCK" "$$" "$LOCK_TOKEN"; do
   waited=$((waited + 1))
   if [ $((waited % 6)) = 0 ] && superseded; then
     echo "local-ci SUPERSEDED while queued: $BRANCH has a newer commit than $SHA"
     status error "superseded by a newer push"; exit "$CI_SUPERSEDED"
   fi
-  owner=$(cat "$LOCK/pid" 2>/dev/null || true)
-  age=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || date +%s) ))
-  if { [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; } || { [ -z "$owner" ] && [ "$age" -gt 120 ]; } || [ "$age" -gt 10800 ]; then
-    # Rename first: only one waiter wins the rename, so two waiters cannot both take over.
-    mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null && rm -rf "$LOCK.stale.$$"
-    continue
-  fi
-  sleep 10
+  ci_lock_takeover "$LOCK" || true
+  sleep "${CI_LOCK_POLL_SEC:-10}"
 done
-echo $$ > "$LOCK/pid"
 # build-ticket.sh greps for this line: a run that has not printed it is still queued and is safe to cancel.
 echo "== local-ci: lock acquired"
 FAILED_AT=""
@@ -98,9 +94,18 @@ cleanup() {
   if [ "$rc" -ne 0 ] && [ -z "$FAILED_AT" ]; then status failure "failed: setup (see log)"; echo "local-ci SETUP failed on $SHA"; fi
   [ -z "$TEST_OUT" ] || rm -f "$TEST_OUT"
   [ -z "${SUPERSEDE_WATCH:-}" ] || kill "$SUPERSEDE_WATCH" 2>/dev/null || true
-  rm -rf "$LOCK"
+  ci_lock_release "$LOCK" "$LOCK_TOKEN"
 }
 trap cleanup EXIT
+
+# A full run on main that waited in the queue while main moved on: a newer one is queued behind it
+# (scripts/ci-main.sh writes its commit to this file when it starts), so this one would only delay every lane.
+if [ -n "${CI_MAIN_LAST_FILE:-}" ] && [ "$(cat "$CI_MAIN_LAST_FILE" 2>/dev/null || echo "$SHA")" != "$SHA" ]; then
+  FAILED_AT=superseded
+  echo "local-ci SUPERSEDED: a newer full run on main is queued; skipping $SHA"
+  status error "skipped: a newer run on main is queued"
+  exit "$CI_SUPERSEDED"
+fi
 
 # Checks once a minute while the run holds the lock. The running step is stopped, then this script, so a stale
 # run gives up the lock in about a minute instead of finishing a suite nobody will read.
@@ -111,8 +116,9 @@ if [ -n "$BRANCH" ]; then
         echo "local-ci SUPERSEDED: $BRANCH has a newer commit than $SHA"
         status error "superseded by a newer push"
         stop_all_children_but "$BASHPID"
-        rm -rf "$LOCK"
+        # The script dies before the lock goes, so it cannot start another step on a lock it no longer holds.
         kill -KILL "$$"
+        ci_lock_release "$LOCK" "$LOCK_TOKEN"
         exit 0
       fi
     done
