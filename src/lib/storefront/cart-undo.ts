@@ -42,3 +42,28 @@ export function restoreSteps(
     swap: same ? null : { swapRule: removed.swapRule, substituteVariantId: removed.substituteVariantId },
   };
 }
+
+export const UNDO_MS = 6000;
+
+export interface PendingUndo {
+  removed: RemovedLine;
+  until: number;
+}
+
+const sameLine = (a: RemovedLine, b: RemovedLine) =>
+  a.item.listingId === b.item.listingId && (a.item.variantId ?? null) === (b.item.variantId ?? null);
+
+/** Adds a removal to what Undo can still restore; a newer removal of the same line replaces the old one. */
+export function addPendingUndo(pending: readonly PendingUndo[], removed: RemovedLine, now: number): PendingUndo[] {
+  return [...pending.filter((entry) => entry.until > now && !sameLine(entry.removed, removed)), { removed, until: now + UNDO_MS }];
+}
+
+/** The removals still inside their 6 seconds, and how long the last of them has left. */
+export function livePendingUndo(pending: readonly PendingUndo[], now: number): { entries: PendingUndo[]; remainingMs: number } {
+  const entries = pending.filter((entry) => entry.until > now);
+  return { entries, remainingMs: entries.reduce((most, entry) => Math.max(most, entry.until - now), 0) };
+}
+
+export function undoMessage(entries: readonly PendingUndo[]): string {
+  return entries.length === 1 ? `Removed ${entries[0].removed.item.name}.` : `Removed ${entries.length} items.`;
+}

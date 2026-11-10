@@ -35,7 +35,16 @@ import {
   setSwapRule,
 } from "@/lib/cart/actions";
 import { minimumOrderGate } from "@/lib/storefront/minimum-order";
-import { removedLine, restoreSteps, type RemovedLine } from "@/lib/storefront/cart-undo";
+import {
+  addPendingUndo,
+  livePendingUndo,
+  removedLine,
+  restoreSteps,
+  undoMessage,
+  UNDO_MS,
+  type PendingUndo,
+  type RemovedLine,
+} from "@/lib/storefront/cart-undo";
 import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { Sheet } from "./sheet";
@@ -46,6 +55,8 @@ import { bindCartRefresh } from "@/lib/assistant/ui/cart-bridge";
 import { AssistantSlot } from "./assistant/assistant-slot";
 import styles from "./cart.module.css";
 
+/** Wall clock for the Undo window; only read from event handlers and timers. */
+const undoClock = () => Date.now();
 const OFFLINE = "Couldn't update your cart. Check your connection and try again.";
 const STALE_PAGE = "This page is out of date. Reload the market and try again.";
 
@@ -135,8 +146,30 @@ export function CartProvider({
   const [syncing, setSyncing] = useState(false);
   const [attention, setAttention] = useState(false);
   const [cartId, setCartId] = useState<string | null>(null);
-  const [undoable, setUndoable] = useState<RemovedLine | null>(null);
+  // Removals Undo can still restore. Inside the open (modal) drawer they show in it; elsewhere as a toast.
+  const [pendingUndo, setPendingUndo] = useState<PendingUndo[]>([]);
+  const pendingUndoRef = useRef<PendingUndo[]>([]);
   const undoTimer = useRef<number | undefined>(undefined);
+  function setPending(next: PendingUndo[]) {
+    pendingUndoRef.current = next;
+    setPendingUndo(next);
+    window.clearTimeout(undoTimer.current);
+    const { remainingMs } = livePendingUndo(next, undoClock());
+    if (remainingMs > 0) undoTimer.current = window.setTimeout(() => setPending(livePendingUndo(pendingUndoRef.current, undoClock()).entries), remainingMs);
+  }
+  function undoToast(entries: PendingUndo[], duration: number) {
+    toast(undoMessage(entries), {
+      duration,
+      action: { label: "Undo", onClick: () => entries.forEach((entry) => restoreRemoved(entry.removed)) },
+    });
+  }
+  function closeCart() {
+    setOpen(false);
+    // Whatever was still undoable in the drawer moves to a toast for the time it has left.
+    const { entries, remainingMs } = livePendingUndo(pendingUndoRef.current, undoClock());
+    if (entries.length) undoToast(entries, remainingMs);
+    setPending([]);
+  }
   const mounted = useRef(true);
   const linesRef = useRef<CartLine[]>([]);
   const revs = useRef(new Map<string, number>());
@@ -773,16 +806,12 @@ export function CartProvider({
       void enqueue(drain, true);
       const removed = current && removedLine(current);
       if (!removed) return;
+      const now = undoClock();
       if (open) {
         // The open drawer is modal, so a page toast could not be tapped; Undo shows inside it.
-        window.clearTimeout(undoTimer.current);
-        setUndoable(removed);
-        undoTimer.current = window.setTimeout(() => setUndoable(null), 6000);
+        setPending(addPendingUndo(pendingUndoRef.current, removed, now));
       } else {
-        toast(`Removed ${removed.item.name}.`, {
-          duration: 6000,
-          action: { label: "Undo", onClick: () => restoreRemoved(removed) },
-        });
+        undoToast(addPendingUndo([], removed, now), UNDO_MS);
       }
     },
   };
@@ -854,18 +883,18 @@ export function CartProvider({
       }}
     >
       {children}
-      <Sheet open={open} onClose={() => { setOpen(false); setUndoable(null); }} title="Your cart">
+      <Sheet open={open} onClose={closeCart} title="Your cart">
         <p className={styles.muted}>{storeName}</p>
         {open && <AssistantSlot label="Shop with AI" />}
-        {undoable && (
+        {pendingUndo.length > 0 && (
           <div className={styles.undoBar} role="status">
-            <span>Removed {undoable.item.name}.</span>
+            <span>{undoMessage(pendingUndo)}</span>
             <button
               type="button"
               onClick={() => {
-                window.clearTimeout(undoTimer.current);
-                setUndoable(null);
-                restoreRemoved(undoable);
+                const entries = pendingUndoRef.current;
+                setPending([]);
+                entries.forEach((entry) => restoreRemoved(entry.removed));
               }}
             >
               Undo
@@ -879,7 +908,7 @@ export function CartProvider({
             <p>Add something from the shelves to start your cart.</p>
             <button
               className={styles.primaryButton}
-              onClick={() => setOpen(false)}
+              onClick={closeCart}
             >
               Start shopping
             </button>
@@ -905,7 +934,7 @@ export function CartProvider({
                     <Link
                       className={styles.swap}
                       href="/cart"
-                      onClick={() => setOpen(false)}
+                      onClick={closeCart}
                     >
                       {(() => {
                         const rule = line.swapRule ?? "exact_only";
@@ -950,7 +979,7 @@ export function CartProvider({
                 <Link
                   className={styles.primaryButton}
                   href="/cart"
-                  onClick={() => setOpen(false)}
+                  onClick={closeCart}
                 >
                   Review basket & checkout
                 </Link>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { removedLine, restoreSteps } from "./cart-undo";
+import { addPendingUndo, livePendingUndo, removedLine, restoreSteps, undoMessage } from "./cart-undo";
 import type { CartLine } from "./cart-store";
 
 const garri: CartLine = {
@@ -49,5 +49,36 @@ describe("cart undo", () => {
 
   it("has nothing to undo for an empty line", () => {
     expect(removedLine({ ...garri, quantity: 0 })).toBeNull();
+  });
+});
+
+describe("pending undo", () => {
+  const okra = removedLine({ ...garri, listingId: "l2", variantId: "v2", name: "Okra" })!;
+  const garriRemoved = removedLine(garri)!;
+
+  it("keeps the first removal undoable when a second line is removed", () => {
+    const pending = addPendingUndo(addPendingUndo([], garriRemoved, 0), okra, 2000);
+    const live = livePendingUndo(pending, 3000);
+    expect(live.entries.map((entry) => entry.removed.item.name)).toEqual(["Yellow Garri", "Okra"]);
+    expect(undoMessage(live.entries)).toBe("Removed 2 items.");
+  });
+
+  it("hands the time left to the toast when the drawer closes", () => {
+    const pending = addPendingUndo(addPendingUndo([], garriRemoved, 0), okra, 2000);
+    expect(livePendingUndo(pending, 3000).remainingMs).toBe(5000);
+    expect(undoMessage(livePendingUndo(pending, 3000).entries.slice(0, 1))).toBe("Removed Yellow Garri.");
+  });
+
+  it("drops a removal once its 6 seconds are up", () => {
+    const pending = addPendingUndo(addPendingUndo([], garriRemoved, 0), okra, 2000);
+    const live = livePendingUndo(pending, 6500);
+    expect(live.entries.map((entry) => entry.removed.item.name)).toEqual(["Okra"]);
+    expect(livePendingUndo(pending, 8000).entries).toEqual([]);
+  });
+
+  it("keeps only the latest removal of the same line", () => {
+    const again = { ...garriRemoved, quantity: 1 };
+    const pending = addPendingUndo(addPendingUndo([], garriRemoved, 0), again, 1000);
+    expect(livePendingUndo(pending, 1500).entries.map((entry) => entry.removed.quantity)).toEqual([1]);
   });
 });
