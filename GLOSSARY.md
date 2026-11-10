@@ -139,7 +139,14 @@ When an order's 15-minute alert and 30-minute auto-cancel start counting: the or
 Staff cancel an order before capture (Authorized, Accepted or Picking) with a reason: out of stock, store closed, too busy or other, plus an optional note. The card hold is voided and the stock it held is returned. After capture it is a refund, not a cancel.
 
 **Cancel cause**:
-Why an order was cancelled before capture: a store cancel, the 30-minute auto-cancel, or Stripe ending the card hold. It is written when the order starts cancelling and never changes.
+Why an order was cancelled before capture: a store cancel, the 30-minute auto-cancel, a pick timeout, or Stripe ending the card hold. It is written when the order starts cancelling and never changes.
+
+**Pick timeout**:
+An Accepted or Picking order nobody finished is cancelled 24 hours after the later of acceptance and its pickup slot start, and never later than 6 days 12 hours after it was placed, inside the card hold. Picked goods go back on the shelf by hand; the stock returns at once.
+_Avoid_: Abandoned order (ABANDONED is a refund request state)
+
+**Orphan hold**:
+A card hold on a cart that never became an order, for example when the shopper closed the tab after confirming the card. It is released 60 minutes after authorization, timed from the charge, not from when the PaymentIntent was created.
 
 **Swap rule**:
 A customer's choice, per order line, of what happens if the item is unavailable: exact item only, let the store suggest, or a named substitute.
