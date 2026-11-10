@@ -317,6 +317,17 @@ describe("runHealthChecks", () => {
     warn.mockRestore();
   });
 
+  it.each([
+    ["TRUE", true],
+    ["0", false],
+    ["false", false],
+  ])("logs INNGEST_DEV=%s in production only when it parses as true", async (value, logged) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await runHealthChecks({ env: { ...productionEnv, INNGEST_DEV: value }, queryRaw: makeQueryRaw() });
+    expect(warn.mock.calls.some(([message]) => String(message).includes("INNGEST_DEV"))).toBe(logged);
+    warn.mockRestore();
+  });
+
   it("returns 503 in production when a deploy env var is missing", async () => {
     const env = { ...productionEnv };
     delete (env as Record<string, string | undefined>).RESEND_API_KEY;
