@@ -91,6 +91,25 @@ ticket_lane_age_min() {
   echo $(( ( $(date +%s) - first ) / 60 ))
 }
 
+# run_session <agent_run arguments...>: one builder session, stopped at its cap. Returns 124 when it was
+# stopped, 125 when the ticket had no builder time left to start it. Reads ROOT and N; needs run_capped and agent_run.
+run_session() {
+  local used cap
+  used=$(ticket_builder_minutes "$ROOT/.builder/logs" "$N")
+  cap=$(ticket_session_cap "${BUILD_TIMEOUT_MIN:-90}" "${LANE_BUDGET_MIN:-300}" "$used")
+  if [ "$cap" = 0 ]; then
+    echo "Ticket #$N has used $used of its ${LANE_BUDGET_MIN:-300} builder minutes. No further session. Diagnose the whole behaviour first; the owner can raise LANE_BUDGET_MIN for one run."
+    return 125
+  fi
+  echo "Builder session for #$N: capped at $cap min ($used of ${LANE_BUDGET_MIN:-300} builder minutes used; lane age $(ticket_lane_age_min "$ROOT/.builder/logs" "$N") min)."
+  local rc=0
+  WATCH_WHAT="builder session" run_capped "$cap" agent_run "$@" || rc=$?
+  # The engine writes its log only on exit; stamp the real end so a killed session is charged.
+  touch "$2"
+  [ "$rc" != 124 ] || echo "Builder session for #$N was stopped at its $cap-minute cap. No review or fix round follows. Read its log before any --continue."
+  return "$rc"
+}
+
 # Sourced by scripts/ticket-rounds.test.sh. Executing the file runs the orchestrator below.
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
   return 0
@@ -123,22 +142,6 @@ if [ "$(ticket_resume_allowed "$prior")" != yes ]; then
   exit 1
 fi
 
-# run_session <agent_run arguments...>: one builder session, stopped at its cap. Returns 124 when it was
-# stopped, 125 when the ticket had no builder time left to start it.
-run_session() {
-  local used cap
-  used=$(ticket_builder_minutes "$ROOT/.builder/logs" "$N")
-  cap=$(ticket_session_cap "${BUILD_TIMEOUT_MIN:-90}" "${LANE_BUDGET_MIN:-300}" "$used")
-  if [ "$cap" = 0 ]; then
-    echo "Ticket #$N has used $used of its ${LANE_BUDGET_MIN:-300} builder minutes. No further session. Diagnose the whole behaviour first; the owner can raise LANE_BUDGET_MIN for one run."
-    return 125
-  fi
-  echo "Builder session for #$N: capped at $cap min ($used of ${LANE_BUDGET_MIN:-300} builder minutes used; lane age $(ticket_lane_age_min "$ROOT/.builder/logs" "$N") min)."
-  local rc=0
-  WATCH_WHAT="builder session" run_capped "$cap" agent_run "$@" || rc=$?
-  [ "$rc" != 124 ] || echo "Builder session for #$N was stopped at its $cap-minute cap. No review or fix round follows. Read its log before any --continue."
-  return "$rc"
-}
 # Claude keeps the original file name; other engines get their own (their session ids differ).
 SESSION_FILE="$ROOT/.builder/session-$N.txt"
 [ "$AGENT_ENGINE" = "claude" ] || SESSION_FILE="$ROOT/.builder/session-$N.$AGENT_ENGINE.txt"

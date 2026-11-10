@@ -71,4 +71,16 @@ want=$(( (now - plan) / 60 ))
 [ $(( age - want )) -ge -1 ] && [ $(( age - want )) -le 1 ] && ok "lane age is measured from the plan log" || bad "lane age (want $want, got $age)"
 eq "a ticket with no logs has age 0" 0 "$(ticket_lane_age_min "$T/time" 7)"
 
+# A session stopped at its cap is charged its wall time. The engine opens its log at the start and writes
+# only on exit, so a killed session leaves an empty log whose last write is its start.
+. "$ROOT/scripts/review-watch.sh"
+agent_run() { : > "$2"; touch -d "-5 min" "$2"; return 124; }
+(
+  ROOT="$T/capped"; N=9; mkdir -p "$ROOT/.builder/logs"
+  log="$ROOT/.builder/logs/ticket-9-$(date -d "-5 min" +%Y%m%d-%H%M%S).json"
+  run_session builder "$log" "prompt" >/dev/null
+  echo "rc=$? min=$(ticket_builder_minutes "$ROOT/.builder/logs" 9)"
+) > "$T/capped.out"
+eq "a session stopped at its cap is charged its wall minutes" "rc=124 min=5" "$(cat "$T/capped.out")"
+
 exit "$fail"
