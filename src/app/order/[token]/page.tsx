@@ -69,6 +69,17 @@ export default async function OrderPage({
             <p><strong>Subtotal:</strong> {money(realOrder.subtotalCents)}</p>
             <p><strong>Authorization hold:</strong> {money(realOrder.totalAuthorizedCents)}</p>
           </FlowCard>
+          {realOrder.status === "DELIVERED" && realOrder.deliveryProofKey && (
+            <FlowCard title="Delivery photo">
+              {/* Private route, not the image optimizer: the photo must never be cached publicly. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/delivery-proof/${encodeURIComponent(token)}`}
+                alt={`Photo of order #${realOrder.number} where it was delivered`}
+                style={{ width: "100%", height: "auto", borderRadius: 8 }}
+              />
+            </FlowCard>
+          )}
           <div style={{ marginTop: "1rem", textAlign: "center" }}>
             <Link className="sf-button" href="/">Continue shopping</Link>
           </div>
