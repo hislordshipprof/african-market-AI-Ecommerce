@@ -180,15 +180,16 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(getTestSentEmails()).toHaveLength(1);
     expect(getTestSentSms()).toHaveLength(1);
 
+    // The clock stays fixed through the send: a notification older than 2 hours is expired, not sent.
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-08T18:50:00-06:00") });
     try {
       expect((await acceptOrder(storeId, orderId, 20)).ok).toBe(true);
+      clearTestSentEmails();
+      clearTestSentSms();
+      await run(orderId, "accepted");
     } finally {
       vi.useRealTimers();
     }
-    clearTestSentEmails();
-    clearTestSentSms();
-    await run(orderId, "accepted");
     expect(getTestSentEmails().at(-1)!.html).toContain("7:10 PM");
     expect(getTestSentSms()).toHaveLength(1);
     expect(getTestSentSms().at(-1)!.text).not.toContain("STOP");
