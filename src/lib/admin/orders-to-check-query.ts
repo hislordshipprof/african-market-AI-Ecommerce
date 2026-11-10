@@ -1,4 +1,4 @@
-import { findOrderAlertRows, findOrderRecoveryCandidates, type OrderRecoveryCandidate } from "../db";
+import { findOrderAlertRows, findOrderRecoveryCandidates, type OrderRecoveryCandidate, type OrderRecoveryGroup } from "../db";
 import { CANCEL_TIMER, timerDeadline } from "../inngest/functions";
 
 const MIN = 60_000;
@@ -18,7 +18,7 @@ const READY_MS = 4 * HOUR;
 const OUT_FOR_DELIVERY_MS = 4 * HOUR;
 const AWAITING_PICKUP_MS = 48 * HOUR;
 const ALERT_WINDOW_MS = 7 * DAY;
-const ROW_LIMIT = 200;
+export const ROW_LIMIT = 200;
 
 const UNCAPTURED = ["AUTHORIZED", "ACCEPTED", "PICKING", "CAPTURING", "CANCELLING"];
 const FINAL = ["DELIVERED", "COMPLETED", "CANCELLED"];
@@ -109,11 +109,11 @@ function stuckReason(order: OrderRecoveryCandidate, now: number): { reason: Stuc
 export async function findOrdersToCheck(opts?: {
   now?: Date;
   storeIds?: readonly string[];
-}): Promise<{ checkedAt: Date; stuck: StuckOrderRow[]; alerts: OrderAlertRow[] }> {
+}): Promise<{ checkedAt: Date; stuck: StuckOrderRow[]; cappedGroups: OrderRecoveryGroup[]; alerts: OrderAlertRow[] }> {
   const checkedAt = opts?.now ?? new Date();
   const now = checkedAt.getTime();
   const at = (ms: number) => new Date(now - ms);
-  const [candidates, alertRows] = await Promise.all([
+  const [{ candidates, capped }, alertRows] = await Promise.all([
     findOrderRecoveryCandidates({
       authorizedBefore: at(TIMER_NOT_STARTED_MS),
       holdBefore: at(HOLD_EXPIRING_MS),
@@ -146,6 +146,7 @@ export async function findOrdersToCheck(opts?: {
   return {
     checkedAt,
     stuck,
+    cappedGroups: (Object.keys(capped) as OrderRecoveryGroup[]).filter((group) => capped[group]),
     alerts: alertRows.map((row) => ({ ...row, action: row.action as OrderAlertRow["action"] })),
   };
 }

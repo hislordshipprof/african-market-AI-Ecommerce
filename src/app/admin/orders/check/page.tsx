@@ -1,11 +1,18 @@
 import Link from "next/link";
 import { listOrdersToCheck } from "@/lib/admin/orders-to-check";
+import { ROW_LIMIT } from "@/lib/admin/orders-to-check-query";
 
 const ALERT_LABELS: Record<string, string> = {
   acceptance_alert: "Not accepted in 15 open minutes",
   reconcile_failed: "Reconcile failed",
   capture_released: "Card hold released before capture",
   refund_request_unknown: "Refund request outcome unknown",
+};
+
+const GROUP_LABELS: Record<string, string> = {
+  authorized: "orders waiting for the store to accept",
+  uncaptured: "accepted orders not yet charged",
+  captured: "charged orders",
 };
 
 function formatAge(since: Date, now: number): string {
@@ -17,7 +24,7 @@ function formatAge(since: Date, now: number): string {
 }
 
 export default async function OrdersToCheckPage() {
-  const { checkedAt, stuck, alerts } = await listOrdersToCheck();
+  const { checkedAt, stuck, cappedGroups, alerts } = await listOrdersToCheck();
   const now = checkedAt.getTime();
 
   return (
@@ -35,6 +42,11 @@ export default async function OrdersToCheckPage() {
       </div>
 
       <h2 className="mb-3 text-lg font-semibold text-foreground">Stuck orders</h2>
+      {cappedGroups.map((group) => (
+        <p key={group} className="mb-3 text-sm text-muted-foreground" data-testid={`stuck-capped-${group}`}>
+          Showing the first {ROW_LIMIT} {GROUP_LABELS[group]}, oldest first.
+        </p>
+      ))}
       {stuck.length === 0 ? (
         <p className="mb-8 rounded-lg border border-input bg-card p-8 text-center text-muted-foreground" data-testid="stuck-empty">
           No orders are stuck.

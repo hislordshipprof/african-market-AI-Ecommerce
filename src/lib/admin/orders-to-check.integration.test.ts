@@ -97,7 +97,7 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
   });
 
   it("lists each stuck order once with its reason, and the alerts nothing else reads", async () => {
-    const { stuck, alerts } = await findOrdersToCheck({ now, storeIds: [storeId] });
+    const { stuck, cappedGroups, alerts } = await findOrdersToCheck({ now, storeIds: [storeId] });
     const reasonOf = (key: string) => stuck.filter((row) => row.orderId === ids[key]).map((row) => row.reason);
 
     expect(reasonOf("notStarted")).toEqual(["timer not started"]);
@@ -111,10 +111,67 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
     expect(reasonOf("fresh")).toEqual([]);
     expect(reasonOf("scheduled")).toEqual([]);
     expect(stuck.find((row) => row.orderId === ids.cancelling)?.since).toEqual(ago(40 * MIN));
+    expect(cappedGroups).toEqual([]);
 
     const released = alerts.find((row) => row.orderId === ids.released);
     expect(released).toMatchObject({ action: "capture_released", storeName, orderNumber: expect.any(Number) });
     expect(alerts.some((row) => row.orderId === ids.unknownRefund && row.action === "refund_request_unknown")).toBe(true);
     expect(alerts.some((row) => row.orderId === ids.oldClosed)).toBe(false);
+  });
+});
+
+describe.skipIf(!hasDb)("orders to check: a full captured group does not hide uncaptured orders (lane DB)", () => {
+  let prisma: PrismaClient;
+  const storeId = crypto.randomUUID();
+  const now = new Date();
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+  let capturingId = "";
+
+  async function asPlatformAdmin<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      return fn(tx);
+    });
+  }
+
+  beforeAll(async () => {
+    prisma = testPrismaClient();
+    await asPlatformAdmin(async (tx) => {
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, ${`Backlog Market ${RUN}`}, ${`${RUN}-backlog`}, 'active', now())`;
+      const customer = await tx.customer.create({ data: { storeId, name: "Backlog Customer" } });
+      const base = { storeId, customerId: customer.id, subtotalCents: 1000, bufferCents: 0, totalAuthorizedCents: 1000, inngestEventSentAt: ago(20 * DAY) };
+      await tx.order.createMany({
+        data: Array.from({ length: 200 }, (_, i) => ({
+          ...base,
+          number: 43000 + i,
+          status: "AWAITING_PICKUP" as const,
+          createdAt: ago(20 * DAY - i * MIN),
+          readyAt: ago(19 * DAY),
+          capturedAmountCents: 1000,
+        })),
+      });
+      const capturing = await tx.order.create({ data: { ...base, number: 43500, status: "CAPTURING", createdAt: ago(4 * HOUR) } });
+      capturingId = capturing.id;
+      await tx.auditLog.create({
+        data: { storeId, actorId: SYSTEM_ACTOR_ID, actorEmail: SYSTEM_ACTOR_EMAIL, action: "capture_retry", entityType: "order", entityId: capturingId, createdAt: ago(3 * HOUR) },
+      });
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await asPlatformAdmin(async (tx) => {
+      await tx.auditLog.deleteMany({ where: { storeId } });
+      await tx.order.deleteMany({ where: { storeId } });
+      await tx.customer.deleteMany({ where: { storeId } });
+      await tx.store.deleteMany({ where: { id: storeId } });
+    });
+    await prisma.$disconnect();
+  });
+
+  it("lists a stalled capture behind 200 old uncollected pickups", async () => {
+    const { stuck, cappedGroups } = await findOrdersToCheck({ now, storeIds: [storeId] });
+    expect(stuck.some((row) => row.orderId === capturingId && row.reason === "retry stalled")).toBe(true);
+    expect(cappedGroups).toEqual(["captured"]);
   });
 });

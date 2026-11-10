@@ -883,9 +883,13 @@ export interface OrderRecoveryCandidate {
   timezone: string;
 }
 
+/** AUTHORIZED; accepted but not charged (ACCEPTED to CANCELLING); charged (READY onwards). */
+export type OrderRecoveryGroup = "authorized" | "uncaptured" | "captured";
+
 /**
  * Candidates for the admin "Orders to check" list, bounded in SQL; the caller applies the
- * per-state limits. AUTHORIZED orders get their own cap: each needs an open-minutes calculation.
+ * per-state limits. Each group has its own cap, so old captured orders cannot crowd out
+ * uncaptured ones; `capped` says which groups hit it.
  */
 export async function findOrderRecoveryCandidates(opts: {
   authorizedBefore: Date;
@@ -898,8 +902,10 @@ export async function findOrderRecoveryCandidates(opts: {
   outForDeliveryBefore: Date;
   limit: number;
   storeIds?: readonly string[];
-}): Promise<OrderRecoveryCandidate[]> {
-  if (opts.storeIds && opts.storeIds.length === 0) return [];
+}): Promise<{ candidates: OrderRecoveryCandidate[]; capped: Record<OrderRecoveryGroup, boolean> }> {
+  if (opts.storeIds && opts.storeIds.length === 0) {
+    return { candidates: [], capped: { authorized: false, uncaptured: false, captured: false } };
+  }
   const inStores = opts.storeIds ? Prisma.sql`AND o.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   const columns = Prisma.sql`
     o.id, s.name AS store_name, o.number, o.status, o.created_at, o.updated_at,
@@ -936,20 +942,17 @@ export async function findOrderRecoveryCandidates(opts: {
       ORDER BY o.created_at ASC
       LIMIT ${opts.limit}
     `;
-    const others = await tx.$queryRaw<Row[]>`
+    const uncaptured = await tx.$queryRaw<Row[]>`
       SELECT * FROM (
         SELECT ${columns}
         FROM orders o JOIN stores s ON s.id = o.store_id
-        WHERE o.status IN ('ACCEPTED', 'PICKING', 'CAPTURING', 'CANCELLING', 'READY', 'AWAITING_PICKUP', 'OUT_FOR_DELIVERY')
+        WHERE o.status IN ('ACCEPTED', 'PICKING', 'CAPTURING', 'CANCELLING')
           ${inStores}
           AND (
             o.created_at < ${opts.holdBefore}
             OR (o.status IN ('ACCEPTED', 'PICKING')
               AND o.accepted_at + make_interval(mins => COALESCE(o.prep_estimate_minutes, 0) + ${opts.pickingGraceMinutes}) < ${opts.pickingDueBy})
             OR o.status IN ('CAPTURING', 'CANCELLING')
-            OR (o.status = 'READY' AND o.ready_at < ${opts.readyBefore})
-            OR (o.status = 'AWAITING_PICKUP' AND o.ready_at < ${opts.awaitingPickupBefore})
-            OR (o.status = 'OUT_FOR_DELIVERY' AND o.out_for_delivery_at < ${opts.outForDeliveryBefore})
           )
       ) candidates
       WHERE status NOT IN ('CAPTURING', 'CANCELLING')
@@ -958,9 +961,22 @@ export async function findOrderRecoveryCandidates(opts: {
       ORDER BY created_at ASC
       LIMIT ${opts.limit}
     `;
-    return [...authorized, ...others];
+    const captured = await tx.$queryRaw<Row[]>`
+      SELECT ${columns}
+      FROM orders o JOIN stores s ON s.id = o.store_id
+      WHERE o.status IN ('READY', 'AWAITING_PICKUP', 'OUT_FOR_DELIVERY')
+        ${inStores}
+        AND (
+          (o.status = 'READY' AND o.ready_at < ${opts.readyBefore})
+          OR (o.status = 'AWAITING_PICKUP' AND o.ready_at < ${opts.awaitingPickupBefore})
+          OR (o.status = 'OUT_FOR_DELIVERY' AND o.out_for_delivery_at < ${opts.outForDeliveryBefore})
+        )
+      ORDER BY o.created_at ASC
+      LIMIT ${opts.limit}
+    `;
+    return { authorized, uncaptured, captured };
   });
-  return rows.map((r) => ({
+  const toCandidate = (r: Row): OrderRecoveryCandidate => ({
     id: r.id,
     storeName: r.store_name,
     number: r.number,
@@ -977,7 +993,15 @@ export async function findOrderRecoveryCandidates(opts: {
     firstRetryAt: r.first_retry_at,
     hours: r.hours,
     timezone: r.timezone,
-  }));
+  });
+  return {
+    candidates: [...rows.authorized, ...rows.uncaptured, ...rows.captured].map(toCandidate),
+    capped: {
+      authorized: rows.authorized.length === opts.limit,
+      uncaptured: rows.uncaptured.length === opts.limit,
+      captured: rows.captured.length === opts.limit,
+    },
+  };
 }
 
 /**
