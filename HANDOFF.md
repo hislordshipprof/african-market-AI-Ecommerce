@@ -226,7 +226,7 @@ These close the merge-gate holes and the causes of stalled lanes found in the au
 - **Second-reviewer verdict** is matched exactly, not by prefix.
 - **Every agent session has a cap** and is stopped at it: plan 45 min, brief review 30, build and each fix round 90, ship 45. A ticket has 300 builder minutes in total, so `--continue` cannot restart the clock.
 - **The 3-round cap applies to every mode**, not only `--resume`.
-- **No round is spent** when the review passed and CI failed in setup, or when a fix round made no commit.
+- **No fix round runs** when the review passed and CI failed in setup, or when a fix round made no commit. That review still counts toward the 3.
 - **The local-ci lock** can no longer be held by two runs. A lock is taken over only from a run that has exited; a run hung for 6 hours is stopped first.
 - **Full runs on main no longer pile up.** One that reaches the front of the queue after a newer one was queued skips itself.
 - **`scripts/ticket-env.txt`** now merges by union (`.gitattributes`), so two PRs that each append a line no longer conflict in a local rebase. GitHub's own merge does not read this setting.
