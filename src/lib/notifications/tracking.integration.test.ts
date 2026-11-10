@@ -38,7 +38,6 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { newTrackingToken } from "./record";
 import { createPaymentIntentAction, placeOrderAction } from "../checkout/actions";
 import * as checkoutService from "../checkout/service";
-import * as lookup from "./lookup";
 import OrderPage from "@/app/order/[token]/page";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -61,7 +60,11 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
   let storeB: string;
   let orderNumber = 500;
 
-  async function createOrder(storeId: string, sourceCartId: string | null = null) {
+  async function createOrder(
+    storeId: string,
+    sourceCartId: string | null = null,
+    trackingToken: string | null = newTrackingToken(),
+  ) {
     const customerId = (await storeScoped(storeId).customer.create({
       data: { storeId, name: "Track Customer", email: `track-${suffix}-${orderNumber}@example.com`, phone: "+15559990002" },
     })).id;
@@ -72,7 +75,7 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
           number: ++orderNumber,
           customerId,
           sourceCartId,
-          trackingToken: newTrackingToken(),
+          trackingToken,
           subtotalCents: 1000,
           bufferCents: 100,
           totalAuthorizedCents: 1100,
@@ -119,6 +122,17 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
     expect(headingDescriptions(page)).toContain(`Order #${order.number} · Track A`);
   });
 
+  it("the order id of an order that has a tracking token is a 404, with no session", async () => {
+    const order = await createOrder(storeA);
+    await expect(render(slugA, order.id)).rejects.toThrow("NOT_FOUND");
+  });
+
+  it("an order made before tokens still opens by its id", async () => {
+    const order = await createOrder(storeA, null, null);
+    const page = await render(slugA, order.id);
+    expect(headingDescriptions(page)).toContain(`Order #${order.number} · Track A`);
+  });
+
   it("an unknown token is a 404", async () => {
     await expect(render(slugA, newTrackingToken())).rejects.toThrow("NOT_FOUND");
   });
@@ -141,12 +155,11 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
     expect(result).toEqual({ ok: true, orderedToken: order.trackingToken });
   });
 
-  it("a failed token read after the order is placed still reports the order as placed", async () => {
+  it("a resumed order reports the tracking token, never the order id", async () => {
     const cart = await storeScoped(storeA).cart.create({ data: { storeId: storeA, userId: null, source: "manual" } });
     const order = await createOrder(storeA, cart.id);
     headerState.set("x-store-slug", slugA);
     cookieJar.set("cart_id", cart.id);
-    vi.spyOn(lookup, "trackingTokenFor").mockRejectedValue(new Error("db blip"));
     vi.spyOn(checkoutService, "placeOrder").mockResolvedValue({
       token: order.id,
       trackingToken: order.trackingToken,
@@ -166,6 +179,6 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
       { name: "Ada Buyer", email: "ada@example.com", phone: "2025550100" },
       "pickup",
     );
-    expect(resumed).toEqual({ ok: true, orderedToken: order.id });
+    expect(resumed).toEqual({ ok: true, orderedToken: order.trackingToken });
   });
 });

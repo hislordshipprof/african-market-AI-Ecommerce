@@ -869,7 +869,7 @@ export async function resumeOrderedCart(
   storeId: string,
   cartId: string,
   actorUserId: string | null,
-): Promise<{ kind: "order"; token: string } | { kind: "unproved" } | null> {
+): Promise<{ kind: "order"; token: string; trackingToken: string | null } | { kind: "unproved" } | null> {
   const scoped = storeScoped(storeId);
   const cart = await scoped.cart.findUnique({
     where: { id: cartId },
@@ -879,11 +879,11 @@ export async function resumeOrderedCart(
   const order = await scoped.order.findFirst({
     where: { sourceCartId: cartId },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true },
+    select: { id: true, trackingToken: true },
   });
   if (!order) return null;
   if (cart.userId !== actorUserId) return { kind: "unproved" };
-  return { kind: "order", token: order.id };
+  return { kind: "order", token: order.id, trackingToken: order.trackingToken };
 }
 
 /** `token` is the order id; `trackingToken` is the id for the shopper's link, null for an order made before tokens. */

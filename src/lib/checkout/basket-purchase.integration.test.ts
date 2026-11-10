@@ -260,6 +260,7 @@ describe.skipIf(!hasDb)("one basket purchase", () => {
     expect(await resumeOrderedCart(storeId, cart.id, userId)).toEqual({
       kind: "order",
       token: order.token,
+      trackingToken: order.trackingToken,
     });
     expect(await resumeOrderedCart(storeId, cart.id, null)).toEqual({ kind: "unproved" });
   });

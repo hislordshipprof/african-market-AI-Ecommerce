@@ -23,16 +23,6 @@ import { takeRateLimit } from "../rate-limit/app-limiter";
 import { clientIp } from "../assistant/client-ip";
 import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform } from "../db";
-import { trackingTokenFor } from "../notifications/lookup";
-
-/** The order link token for a resumed order. A failed read falls back to the order id: the order exists either way. */
-async function linkTokenFor(storeId: string, orderId: string): Promise<string> {
-  try {
-    return await trackingTokenFor(storeId, orderId);
-  } catch {
-    return orderId;
-  }
-}
 
 const contactSchema = z.strictObject({
   name: z.string().max(200),
@@ -129,7 +119,7 @@ export async function quoteCheckoutAction(
       request,
     );
     if (resume?.kind === "order") {
-      return { ok: true, quote, orderedToken: await linkTokenFor(store.id, resume.token) };
+      return { ok: true, quote, orderedToken: resume.trackingToken ?? resume.token };
     }
     return { ok: true, quote };
   } catch (e) {
@@ -166,7 +156,7 @@ export async function createPaymentIntentAction(
     const actorUserId = await signedInUserId();
     const resume = await resumeOrderedCart(store.id, cartId, actorUserId);
     if (resume?.kind === "order") {
-      return { ok: true, orderedToken: await linkTokenFor(store.id, resume.token) };
+      return { ok: true, orderedToken: resume.trackingToken ?? resume.token };
     }
     if (resume?.kind === "unproved") {
       return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
