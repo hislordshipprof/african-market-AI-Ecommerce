@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   useEffect,
+  useMemo,
   useState,
   useTransition,
   useSyncExternalStore,
@@ -26,6 +27,8 @@ import type {
 } from "@/lib/customer-flow/contracts";
 import { setSwapRule as serverSetSwapRule } from "@/lib/cart/actions";
 import { quoteCheckoutAction } from "@/lib/checkout/actions";
+import { basketQuoteView, type BasketQuoteResponse } from "@/lib/checkout/summary";
+import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import type { SwapRuleValue } from "@/lib/cart/service";
 import { toast } from "sonner";
 import {
@@ -81,43 +84,75 @@ function clientRuleToServer(rule: SwapRule): {
 }
 
 const NO_CONTACT = { name: "", phone: "", email: "" };
+const QUOTE_TIMEOUT_MS = 10_000;
 
-/** The checkout's pickup quote for this basket, so both pages show the same money. */
-function usePickupQuote(lines: readonly CartLine[], subtotal: number, syncing: boolean) {
-  const [quote, setQuote] = useState<CheckoutQuote | null>(null);
-  const [failed, setFailed] = useState(false);
+/** The quote checkout will show for a pickup order of this basket, so both pages show the same money. */
+function useBasketQuote(
+  lines: readonly CartLine[],
+  subtotal: number,
+  syncing: boolean,
+  realCheckout: boolean,
+  demo: ReturnType<typeof createDemoServices>,
+) {
+  const [response, setResponse] = useState<BasketQuoteResponse | null>(null);
   const basketKey = lines
     .map((line) => `${cartItemKey(line)}:${line.quantity}`)
     .join("|");
   useEffect(() => {
     if (syncing || !basketKey) return;
     let active = true;
+    const settle = (next: BasketQuoteResponse) => {
+      if (!active) return;
+      active = false;
+      setResponse(next);
+    };
     const timer = setTimeout(() => {
-      quoteCheckoutAction(NO_CONTACT, "pickup").then((result) => {
-        if (!active) return;
-        setQuote(result.ok ? result.quote : null);
-        setFailed(!result.ok);
-      });
+      // Same quote source as checkout: the server quote when checkout takes payment, else the demo one.
+      const request: Promise<CheckoutQuote | null> = realCheckout
+        ? quoteCheckoutAction(NO_CONTACT, "pickup").then((result) => (result.ok ? result.quote : null))
+        : demo.checkout.quote({
+            lines,
+            fulfillment: "pickup",
+            contact: NO_CONTACT,
+            notes: "",
+            leaveAtDoor: false,
+            slot: "asap",
+            promoCode: "",
+            tipCents: 0,
+          });
+      request
+        .then((quote) =>
+          settle(quote ? { key: basketKey, outcome: "ok", quote } : { key: basketKey, outcome: "error" }),
+        )
+        .catch(() => settle({ key: basketKey, outcome: "error" }));
     }, 300);
+    const timeout = setTimeout(() => settle({ key: basketKey, outcome: "timeout" }), QUOTE_TIMEOUT_MS);
     return () => {
       active = false;
       clearTimeout(timer);
+      clearTimeout(timeout);
     };
-  }, [basketKey, syncing]);
-  return {
-    quote: quote && quote.subtotalCents === subtotal ? quote : null,
-    failed,
-  };
+    // basketKey covers the lines this quote is for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basketKey, syncing, realCheckout, demo]);
+  return basketQuoteView(response, basketKey, subtotal);
 }
 
-export function CartPage({ settings, catalog }: ShoppingFlowProps) {
+export function CartPage({
+  settings,
+  catalog,
+  enabled,
+  realCheckout,
+}: ShoppingFlowProps & { realCheckout: boolean }) {
   const { lines, subtotal, count, store, refreshCart, syncing } = useCart();
   const ready = useCartReady();
-  const { quote, failed: quoteFailed } = usePickupQuote(
-    lines,
-    subtotal,
-    syncing,
+  const demo = useMemo(
+    () => createDemoServices(settings, catalog, enabled),
+    [settings, catalog, enabled],
   );
+  const summary = useBasketQuote(lines, subtotal, syncing, realCheckout, demo);
+  const quote = summary.kind === "quote" ? summary.quote : null;
+  const quoteFailed = summary.kind === "fallback";
   const [selected, select] = useState<CartLine | null>(null);
   const [, startTransition] = useTransition();
   const remaining = Math.max(0, settings.minimumOrderCents - subtotal);

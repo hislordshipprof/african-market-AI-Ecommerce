@@ -1094,8 +1094,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           {fulfillment !== "pickup" && (
             <FlowCard title="A thank-you for your driver">
               <p className={styles.muted}>
-                100% of your tip goes to the courier. Default is 15%; you can
-                change it.
+                100% of your tip goes to the courier. No tip is added unless
+                you choose one.
               </p>
               <div className={styles.options}>
                 {[0, 10, 15, 20].map((value) => (
@@ -1270,7 +1270,7 @@ function DemoCheckoutPage({
   const [promo, setPromo] = useState("");
   const [appliedPromo, setAppliedPromo] = useState("");
   const [promoMessage, setPromoMessage] = useState("");
-  const [tipPercent, setTipPercent] = useState<number | null>(15);
+  const [tipPercent, setTipPercent] = useState<number | null>(0);
   const [customTip, setCustomTip] = useState("");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   const [quoteKey, setQuoteKey] = useState("");

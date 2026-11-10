@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CheckoutQuote } from "../customer-flow/contracts";
-import { orderSummary, placeOrderLabel } from "./summary";
+import { basketQuoteView, orderSummary } from "./summary";
 
 function quote(overrides: Partial<CheckoutQuote> = {}): CheckoutQuote {
   return {
@@ -66,12 +66,27 @@ describe("orderSummary", () => {
   });
 });
 
-describe("placeOrderLabel", () => {
-  it("reads as a hold on the card, not a payment", () => {
-    expect(placeOrderLabel(quote())).toBe("Place order · $46.13 hold");
+describe("basketQuoteView", () => {
+  const key = "a:1";
+
+  it("shows the quote when it answers the current basket and matches its subtotal", () => {
+    expect(basketQuoteView({ key, outcome: "ok", quote: quote() }, key, 4194)).toEqual({
+      kind: "quote",
+      quote: quote(),
+    });
   });
 
-  it("has no amount until the quote arrives", () => {
-    expect(placeOrderLabel(null)).toBe("Place order");
+  it("waits while no answer has arrived for the current basket", () => {
+    expect(basketQuoteView(null, key, 4194)).toEqual({ kind: "pending" });
+    expect(basketQuoteView({ key: "a:2", outcome: "ok", quote: quote() }, key, 4194)).toEqual({ kind: "pending" });
+  });
+
+  it("settles to the checkout fallback when the server prices the basket differently", () => {
+    expect(basketQuoteView({ key, outcome: "ok", quote: quote() }, key, 3999)).toEqual({ kind: "fallback" });
+  });
+
+  it("settles to the checkout fallback on an error or a timeout", () => {
+    expect(basketQuoteView({ key, outcome: "error" }, key, 4194)).toEqual({ kind: "fallback" });
+    expect(basketQuoteView({ key, outcome: "timeout" }, key, 4194)).toEqual({ kind: "fallback" });
   });
 });
