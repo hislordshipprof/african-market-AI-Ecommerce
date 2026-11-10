@@ -4,22 +4,8 @@ import { OrderFlow } from "@/components/storefront/flow/order-flow";
 import { ClosedFlow, FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
-import { storeScoped } from "@/lib/db";
 import { customerStatusLabel } from "@/lib/customer-account/order-history-view";
-
-async function getRealOrder(storeId: string, orderId: string) {
-  return storeScoped(storeId).order.findUnique({
-    where: { id: orderId },
-    include: {
-      customer: true,
-      lines: {
-        include: {
-          listingVariant: { include: { listing: true } },
-        },
-      },
-    },
-  });
-}
+import { findOrderForTracking } from "@/lib/notifications/lookup";
 
 const money = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
@@ -39,7 +25,7 @@ export default async function OrderPage({
     getFlowContext(),
   ]);
 
-  const realOrder = await getRealOrder(context.store.id, token).catch(
+  const realOrder = await findOrderForTracking(context.store.id, token).catch(
     () => null,
   );
 

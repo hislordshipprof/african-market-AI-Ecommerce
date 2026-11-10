@@ -144,6 +144,9 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     await fakeStripeProvider.refundPayment(pi, 3000, `covered-${placed.orderId}`);
     await evaluateOrderRefundState(placed.orderId);
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("CANCELLED");
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: placed.orderId, event: "cancelled" } })).toBe(2);
+    await evaluateOrderRefundState(placed.orderId);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: placed.orderId, event: "cancelled" } })).toBe(2);
     const released = { qty: 10, events: [["reservation", -3], ["reservation_release", 3]] };
     expect(await stockOf(storeId, listingId)).toEqual(released);
 

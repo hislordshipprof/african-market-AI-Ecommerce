@@ -122,6 +122,9 @@ The Store copilot's end-of-day summary for a store owner.
 **Order**:
 One customer's purchase from exactly one store.
 
+**Tracking link**:
+The unguessable link in every customer message that opens the order's tracking page without signing in.
+
 **Swap rule**:
 A customer's choice, per order line, of what happens if the item is unavailable: exact item only, let the store suggest, or a named substitute.
 _Avoid_: Substitution preference

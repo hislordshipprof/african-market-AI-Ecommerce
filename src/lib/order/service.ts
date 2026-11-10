@@ -8,6 +8,8 @@ import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
 import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
+import { recordOrderNotification } from "../notifications/record";
+import { scheduleOrderNotification } from "../inngest/notify";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -88,13 +90,13 @@ async function finalizeCancelledOrder(
   },
 ): Promise<{ wrote: boolean }> {
   const from = options?.from ?? ["CAPTURING", "CANCELLING"];
-  return storeScopedTransaction(storeId, async (tx) => {
+  const outcome = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status === "CANCELLED" || !from.includes(current.status as TransitionalStatus)) {
-      return { wrote: false };
+      return { wrote: false, notify: false };
     }
-    if (await openRefundRequest(tx, orderId)) return { wrote: false };
+    if (await openRefundRequest(tx, orderId)) return { wrote: false, notify: false };
     const existing = await tx.auditLog.findFirst({ where: orderAuditWhere(orderId, action) });
     await tx.order.update({
       where: { id: orderId },
@@ -111,8 +113,11 @@ async function finalizeCancelledOrder(
       });
     }
     await releaseOrderStock(tx, storeId, orderId);
-    return { wrote: true };
+    const notify = await recordOrderNotification(tx, storeId, orderId, "cancelled");
+    return { wrote: true, notify };
   }, LEDGER_TRANSACTION);
+  if (outcome.notify) scheduleOrderNotification(storeId, orderId, "cancelled");
+  return { wrote: outcome.wrote };
 }
 
 /** Refund whatever of a captured charge is still unrefunded. The request ledger owns the attempt. */
@@ -302,12 +307,12 @@ export async function acceptOrder(
   prepEstimateMinutes: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const clamped = Math.max(1, Math.min(120, Math.round(prepEstimateMinutes)));
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
-    if (!order) return { ok: false, error: "Order not found" };
+    if (!order) return { ok: false as const, error: "Order not found", notify: false };
     if (order.status !== "AUTHORIZED") {
-      return { ok: false, error: `Cannot accept order in status ${order.status}` };
+      return { ok: false as const, error: `Cannot accept order in status ${order.status}`, notify: false };
     }
 
     await tx.order.update({
@@ -319,8 +324,11 @@ export async function acceptOrder(
       },
     });
 
-    return { ok: true };
+    const notify = await recordOrderNotification(tx, storeId, orderId, "accepted");
+    return { ok: true as const, notify };
   });
+  if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "accepted");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
 export async function markLinePicked(
@@ -1042,7 +1050,9 @@ export async function markReady(
 
   // Phase 3: finalize in transaction (verify still CAPTURING)
   // Persist Stripe's amount_received, not the requested amount (M2)
+  let notifyReady = false;
   const finalize = await storeScopedTransaction(storeId, async (tx) => {
+    notifyReady = false;
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order || order.status !== "CAPTURING") {
@@ -1067,10 +1077,12 @@ export async function markReady(
       },
     });
     await settleCapturedStock(tx, storeId, orderId);
+    notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
     return { ok: true as const, capturedAmountCents: captureResult.amountCaptured };
   }, LEDGER_TRANSACTION);
 
   if (!finalize.ok) return finalize;
+  if (notifyReady) scheduleOrderNotification(storeId, orderId, "ready");
 
   return { ok: true, capturedAmountCents: finalize.capturedAmountCents };
 }
@@ -1079,15 +1091,15 @@ export async function completePickup(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
-    if (!order) return { ok: false, error: "Order not found" };
+    if (!order) return { ok: false as const, error: "Order not found", notify: false };
     if (order.status !== "AWAITING_PICKUP") {
       if (order.fulfillment === "delivery" || order.fulfillment === "store-delivery" || order.fulfillment === "courier") {
-        return { ok: false, error: "Cannot complete pickup for delivery order — use courier dispatch" };
+        return { ok: false as const, error: "Cannot complete pickup for delivery order — use courier dispatch", notify: false };
       }
-      return { ok: false, error: "Order is not awaiting pickup" };
+      return { ok: false as const, error: "Order is not awaiting pickup", notify: false };
     }
 
     await tx.order.update({
@@ -1098,8 +1110,11 @@ export async function completePickup(
       },
     });
 
-    return { ok: true };
+    const notify = await recordOrderNotification(tx, storeId, orderId, "completed");
+    return { ok: true as const, notify };
   });
+  if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "completed");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
 export async function autoCancelOrder(
@@ -1358,7 +1373,9 @@ async function finalizeCaptureFromSweep(
 ): Promise<{ ok: true; action: string }> {
   const newStatus: OrderStatus = fulfilledStatus(fulfillment);
 
+  let notifyReady = false;
   await storeScopedTransaction(storeId, async (tx) => {
+    notifyReady = false;
     await lockStoreRow(tx, storeId);
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status !== "CAPTURING") return;
@@ -1375,7 +1392,9 @@ async function finalizeCaptureFromSweep(
       data: systemAuditData(storeId, orderId, "reconcile_capture"),
     });
     await settleCapturedStock(tx, storeId, orderId);
+    notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
   }, LEDGER_TRANSACTION);
+  if (notifyReady) scheduleOrderNotification(storeId, orderId, "ready");
 
   return { ok: true, action: "finalized_capture" };
 }

@@ -327,14 +327,17 @@ Store marks "deliver myself" → simple driver link (SMS) with map + photo proof
 | Event | Customer | Store |
 |---|---|---|
 | Order placed | Email + SMS | Push + sound (+ SMS to owner if app closed) |
-| Accepted / prep ETA | SMS | — |
-| Item short | SMS + push (action link) | Live update on pick screen |
-| Ready / courier assigned | SMS with tracking link | Push with courier ETA |
-| Picked up / delivered | SMS + photo | Push |
-| Issue reported | Email | Push + inbox |
-| Daily summary | — | AI copilot digest (WhatsApp or email) |
+| Accepted | Email + SMS | — |
+| Ready | Email + SMS | Push |
+| Completed | Email + SMS | Push |
+| Cancelled | Email + SMS | — |
+| Item short | — | Live update on pick screen |
+| Issue reported | — | Push + inbox |
+| Daily summary | — | AI copilot digest |
 
-Channels: Resend (email), Twilio (SMS, WhatsApp Business API), Web Push. Customers choose preferred channel; WhatsApp opt-in.
+Customer email and SMS go out for placed, accepted, ready, completed and cancelled. Each message carries the store's name and an unguessable tracking link. Item short, issue reporting, the daily digest and channel preferences are separate tickets.
+
+Channels: Resend (email), Telnyx (SMS), Web Push (ADR-0017).
 
 ---
 

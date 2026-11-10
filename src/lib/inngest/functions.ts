@@ -1,9 +1,12 @@
 import { inngest } from "./client";
-import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders } from "../db";
+import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders, findPendingOrderNotifications, expireStaleOrderNotifications } from "../db";
 import { platform } from "../db";
 import { autoCancelOrder, reconcileStuckOrder } from "../order/service";
 import { isStoreOpen } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
+import { sendOrderNotification } from "./notify";
+import { deliverOrderNotification, onNotificationFailure } from "../notifications/deliver";
+import { isOrderNotifyEvent } from "../notifications/record";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { runAssistantRetention } from "../assistant/retention";
 import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing/confidence-job";
@@ -157,15 +160,41 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
     triggers: [{ cron: "*/15 * * * *" }],
   },
   async ({ step }) => {
-    const orphaned = await step.run("find-orphaned", async () => {
-      return findOrphanedAuthorizedOrders();
+    const found = await step.run("find-orphaned", async () => {
+      await expireStaleOrderNotifications();
+      const orders = await findOrphanedAuthorizedOrders();
+      const notifications = await findPendingOrderNotifications();
+      return { orders, notifications };
     });
 
-    for (const row of orphaned) {
+    for (const row of found.orders) {
       await step.run(`resend-${row.id}`, async () => {
         await sendOrderAuthorized(row.storeId, row.id);
       });
     }
+
+    if (found.notifications.length > 0) {
+      await step.run("resend-notifications", async () => {
+        for (const row of found.notifications) {
+          if (!isOrderNotifyEvent(row.event)) continue;
+          await sendOrderNotification(row.storeId, row.orderId, row.event);
+        }
+      });
+    }
+  },
+);
+
+export const sendCustomerNotification = inngest.createFunction(
+  {
+    id: "order/send-notification",
+    triggers: [{ event: "order/notification.requested" }],
+    onFailure: async ({ event }) => {
+      await onNotificationFailure(event);
+    },
+  },
+  async ({ event, step }) => {
+    const data = event.data as { storeId?: string; orderId?: string; event?: string };
+    await deliverOrderNotification(data, step);
   },
 );
 
@@ -229,4 +258,5 @@ export const inngestFunctions = [
   reconcileStuckTransitional,
   assistantRetention,
   dailyConfidence,
+  sendCustomerNotification,
 ];

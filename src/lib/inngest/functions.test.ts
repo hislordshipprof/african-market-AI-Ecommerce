@@ -8,10 +8,13 @@ import { setStripeProvider } from "../stripe";
 import { cancelledPayments, captureCalls, fakeStripeProvider, refundRequests, reset as resetFakeStripe, scriptRetrieveStatuses, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { inngest } from "./client";
+import { makeFakeStep } from "./fake-step";
 
 const hasDb = !!process.env.DATABASE_URL;
 const realFindStuck = dbModule.findStuckTransitionalOrders;
 const realFindOrphaned = dbModule.findOrphanedAuthorizedOrders;
+const realFindPending = dbModule.findPendingOrderNotifications;
+const realExpireNotifications = dbModule.expireStaleOrderNotifications;
 
 /** Tue 2026-11-03 14:00 America/New_York (UTC-5). */
 const OPEN_AT = "2026-11-03T19:00:00.000Z";
@@ -25,25 +28,6 @@ const WEEKDAY_HOURS = {
   sat: { open: "09:00", close: "20:00" },
   sun: { open: "09:00", close: "20:00" },
 };
-
-function makeFakeStep() {
-  const sleeps: Array<{ name: string; duration: string }> = [];
-  const sleepNames: string[] = [];
-  const runs: string[] = [];
-  return {
-    sleeps,
-    sleepNames,
-    runs,
-    async sleep(name: string, duration: string) {
-      sleeps.push({ name, duration });
-      sleepNames.push(name);
-    },
-    async run<T>(name: string, fn: () => Promise<T>): Promise<T> {
-      runs.push(name);
-      return fn();
-    },
-  };
-}
 
 function holdSleepUntilReleased(step: ReturnType<typeof makeFakeStep>) {
   let releaseSleep!: () => void;
@@ -82,6 +66,25 @@ describe("sweep configuration", () => {
     const { sweepOrphanedAuthorized, reconcileStuckTransitional } = await import("./functions");
     expect(sweepOrphanedAuthorized.opts.singleton).toEqual({ mode: "skip" });
     expect(reconcileStuckTransitional.opts.singleton).toEqual({ mode: "skip" });
+  });
+
+  it("the notification function is not deduplicated per order, and an idle sweep runs one step", async () => {
+    const { sendCustomerNotification, sweepOrphanedAuthorized } = await import("./functions");
+    const idempotency = (sendCustomerNotification as { opts?: { idempotency?: unknown } }).opts?.idempotency;
+    if (idempotency != null) expect(String(idempotency)).toContain("data.event");
+    vi.spyOn(dbModule, "findOrphanedAuthorizedOrders").mockImplementation(async () => realFindOrphaned({ storeIds: [] }));
+    vi.spyOn(dbModule, "findPendingOrderNotifications").mockImplementation(async () => realFindPending({ storeIds: [] }));
+    vi.spyOn(dbModule, "expireStaleOrderNotifications").mockImplementation(async () => realExpireNotifications({ storeIds: [] }));
+    try {
+      const step = makeFakeStep();
+      const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+      await handler({ step });
+      expect(step.runs).toEqual(["find-orphaned"]);
+    } finally {
+      vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
+      vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
+      vi.mocked(dbModule.expireStaleOrderNotifications).mockRestore();
+    }
   });
 });
 type Handler = (ctx: HandlerCtx) => Promise<void>;
@@ -241,11 +244,21 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       if (opts?.storeIds) return realFindOrphaned(opts);
       return realFindOrphaned({ storeIds: ownStores() });
     });
+    vi.spyOn(dbModule, "findPendingOrderNotifications").mockImplementation(async (opts) => {
+      if (opts?.storeIds) return realFindPending(opts);
+      return realFindPending({ storeIds: ownStores() });
+    });
+    vi.spyOn(dbModule, "expireStaleOrderNotifications").mockImplementation(async (opts) => {
+      if (opts?.storeIds) return realExpireNotifications(opts);
+      return realExpireNotifications({ storeIds: ownStores() });
+    });
   });
 
   afterEach(() => {
     vi.mocked(dbModule.findStuckTransitionalOrders).mockRestore();
     vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
+    vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
+    vi.mocked(dbModule.expireStaleOrderNotifications).mockRestore();
   });
 
   describe("dailyConfidence", () => {
@@ -1018,6 +1031,36 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         async () => {
           const order = await createTestOrder();
           return { order, run: () => sendOrderAuthorized(storeBId, order.id) };
+        },
+        async () => {
+          const order = await createTestOrder();
+          await storeScoped(storeId).notificationLog.createMany({
+            data: [
+              { storeId, orderId: order.id, event: "placed", channel: "email", status: "pending" },
+              { storeId, orderId: order.id, event: "placed", channel: "sms", status: "pending" },
+            ],
+          });
+          const { sendCustomerNotification } = await import("./functions");
+          const { clearTestSentEmails, getTestSentEmails } = await import("../email/send");
+          const { clearTestSentSms, getTestSentSms } = await import("../notifications/sms");
+          clearTestSentEmails();
+          clearTestSentSms();
+          const handler = (sendCustomerNotification as unknown as {
+            fn: (ctx: { event: { data: { orderId: string; storeId: string; event: string } }; step: ReturnType<typeof makeFakeStep> }) => Promise<void>;
+          }).fn;
+          return {
+            order,
+            run: async () => {
+              await handler({
+                event: { data: { orderId: order.id, storeId: storeBId, event: "placed" } },
+                step: makeFakeStep(),
+              });
+              const rows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: order.id } });
+              expect(rows.map((row) => row.status)).toEqual(["pending", "pending"]);
+              expect(getTestSentEmails()).toHaveLength(0);
+              expect(getTestSentSms()).toHaveLength(0);
+            },
+          };
         },
       ];
       for (const build of cases) {

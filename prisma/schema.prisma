@@ -63,6 +63,7 @@ model Store {
   copilotConversations CopilotConversation[]
   copilotClientMessages CopilotClientMessage[]
   stockProposals StockProposal[]
+  notificationLogs NotificationLog[]
 
   @@map("stores")
 }
@@ -796,6 +797,7 @@ model Order {
   completedAt          DateTime? @map("completed_at")
   cancelledAt          DateTime? @map("cancelled_at")
   inngestEventSentAt   DateTime? @map("inngest_event_sent_at")
+  trackingToken        String?   @unique @map("tracking_token")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -803,6 +805,7 @@ model Order {
   customer Customer   @relation(fields: [customerId, storeId], references: [id, storeId])
   lines    OrderLine[]
   refundRequests RefundRequest[]
+  notificationLogs NotificationLog[]
 
   @@unique([id, storeId])
   @@unique([storeId, number])
@@ -835,6 +838,31 @@ model RefundRequest {
   @@index([orderId])
   @@index([storeId, state])
   @@map("refund_requests")
+}
+
+/// One send attempt for one order event and channel. Contact is read from the order at send time.
+model NotificationLog {
+  id                String    @id @default(cuid())
+  storeId           String    @map("store_id")
+  orderId           String    @map("order_id")
+  event             String
+  channel           String
+  status            String    @default("pending")
+  reason            String?
+  providerMessageId String?   @map("provider_message_id")
+  attempts          Int       @default(0)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  sentAt            DateTime? @map("sent_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@unique([orderId, event, channel])
+  @@index([storeId])
+  @@index([storeId, orderId])
+  @@index([status, createdAt])
+  @@map("notification_logs")
 }
 
 model OrderLine {
