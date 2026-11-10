@@ -162,7 +162,7 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 
 **The Quiet Night Header Rule.** In dark themes the header sits on `surface` with ink text; primary is kept for the cart button and key accents. Header sublabels are at least 13px. Selected chips use the `soft` tint, a 2px primary ring and a check mark, so selection never relies on colour alone.
 
-**The Text Primary Rule.** Primary used as text (links, chip labels, step chips) uses `primary-text`, computed from `primary`: it clears 4.5:1 on `bg`, `surface`, `raised` and `soft`, and 5.5:1 on `raised` in dark so tinted tiles stay AA. Fills keep `primary`. Light presets already pass, so their `primary-text` equals `primary`.
+**The Text Primary Rule.** Primary used as text (links, chip labels, step chips) uses `primary-text`, computed from `primary`: it clears 4.5:1 on `bg`, `surface`, `raised` and `soft`, and in dark 5.5:1 on all four, so tinted tiles stay AA. Fills keep `primary`. Light presets already pass, so their `primary-text` equals `primary`.
 
 **The Photo Well Rule.** Product images (cards, quick view, product page, cart and basket thumbnails, assistant cards, aisle tiles) sit on `photo-well`, a neutral ground per preset. Light keeps the soft tint (#EBF3EC Palm & Shea); dark uses a warm off-white (#ECEBE5 Palm & Shea, #EEEAE3 Cocoa, #EBEBE6 Lagoon) with a quiet inset edge, so brown cut-outs keep their edges. Text on the well uses `on-photo-well`.
 
@@ -192,7 +192,7 @@ Mobile-first, with breakpoints at 768, 1024 and 1280px. Spacing on a 4/8 grid. P
 
 ## Elevation & Depth
 
-Flat by default. Depth comes from tonal layers (`bg` → `surface` → `raised`), not shadows. Product images have no shadow. Shadows appear only on floating layers (the sticky cart bar, bottom sheets, toasts) and only as a soft ambient lift.
+Flat by default. Depth comes from tonal layers (`bg` → `surface` → `raised`), not shadows. Product images have no drop shadow; in dark the photo well carries a quiet inset edge (The Photo Well Rule). Shadows appear only on floating layers (the sticky cart bar, bottom sheets, toasts) and only as a soft ambient lift.
 
 ## Shapes
 

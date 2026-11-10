@@ -254,7 +254,7 @@ export function getThemeTokens(
 }
 
 /**
- * Primary as text (links, eyebrows, chip labels): the fill stays the brand colour, the text
+ * Primary as text (links, chip labels, step chips): the fill stays the brand colour, the text
  * moves away from the grounds until it clears `target` on every one of them.
  */
 function primaryText(tokens: ThemeTokens, target: number): string {
