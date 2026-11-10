@@ -30,3 +30,15 @@ export async function findOrderForTracking(storeId: string, token: string) {
     include: orderInclude,
   });
 }
+
+/**
+ * The token for the delivery photo, or null. The photo shows only when the page was opened
+ * with the tracking token itself: an order id opens the page but never the photo.
+ */
+export function deliveryProofTokenFor(
+  order: { status: string; deliveryProofKey: string | null; trackingToken: string | null },
+  urlToken: string,
+): string | null {
+  if (order.status !== "DELIVERED" || !order.deliveryProofKey || !order.trackingToken) return null;
+  return order.trackingToken === urlToken ? order.trackingToken : null;
+}

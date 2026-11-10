@@ -5,7 +5,7 @@ import { ClosedFlow, FlowCard, FlowHeading } from "@/components/storefront/flow/
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { customerStatusLabel } from "@/lib/customer-account/order-history-view";
-import { findOrderForTracking } from "@/lib/notifications/lookup";
+import { deliveryProofTokenFor, findOrderForTracking } from "@/lib/notifications/lookup";
 
 const money = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
@@ -30,6 +30,7 @@ export default async function OrderPage({
   );
 
   if (realOrder) {
+    const proofToken = deliveryProofTokenFor(realOrder, token);
     return (
       <StorefrontShell store={context.store}>
         <div style={{ maxWidth: 600, margin: "0 auto", padding: "2rem 1rem" }}>
@@ -69,12 +70,12 @@ export default async function OrderPage({
             <p><strong>Subtotal:</strong> {money(realOrder.subtotalCents)}</p>
             <p><strong>Authorization hold:</strong> {money(realOrder.totalAuthorizedCents)}</p>
           </FlowCard>
-          {realOrder.status === "DELIVERED" && realOrder.deliveryProofKey && realOrder.trackingToken && (
+          {proofToken && (
             <FlowCard title="Delivery photo">
               {/* Private route, not the image optimizer: the photo must never be cached publicly. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`/api/delivery-proof/${encodeURIComponent(realOrder.trackingToken)}`}
+                src={`/api/delivery-proof/${encodeURIComponent(proofToken)}`}
                 alt={`Photo of order #${realOrder.number} where it was delivered`}
                 style={{ width: "100%", height: "auto", borderRadius: 8 }}
               />
