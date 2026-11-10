@@ -17,8 +17,8 @@ function formatAge(since: Date, now: number): string {
 }
 
 export default async function OrdersToCheckPage() {
-  const { stuck, alerts } = await listOrdersToCheck();
-  const now = Date.now();
+  const { checkedAt, stuck, alerts } = await listOrdersToCheck();
+  const now = checkedAt.getTime();
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">

@@ -863,6 +863,169 @@ export async function findStuckTransitionalOrders(opts?: {
   });
 }
 
+export interface OrderRecoveryCandidate {
+  id: string;
+  storeName: string;
+  number: number;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  acceptanceClockStartsAt: Date | null;
+  inngestEventSentAt: Date | null;
+  acceptedAt: Date | null;
+  prepEstimateMinutes: number | null;
+  pickupSlot: string | null;
+  readyAt: Date | null;
+  outForDeliveryAt: Date | null;
+  /** First capture_retry/cancel_retry audit row, for CAPTURING/CANCELLING only. */
+  firstRetryAt: Date | null;
+  hours: unknown;
+  timezone: string;
+}
+
+/**
+ * Candidates for the admin "Orders to check" list, bounded in SQL; the caller applies the
+ * per-state limits. AUTHORIZED orders get their own cap: each needs an open-minutes calculation.
+ */
+export async function findOrderRecoveryCandidates(opts: {
+  authorizedBefore: Date;
+  holdBefore: Date;
+  retryBefore: Date;
+  pickingDueBy: Date;
+  pickingGraceMinutes: number;
+  readyBefore: Date;
+  awaitingPickupBefore: Date;
+  outForDeliveryBefore: Date;
+  limit: number;
+  storeIds?: readonly string[];
+}): Promise<OrderRecoveryCandidate[]> {
+  if (opts.storeIds && opts.storeIds.length === 0) return [];
+  const inStores = opts.storeIds ? Prisma.sql`AND o.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  const columns = Prisma.sql`
+    o.id, s.name AS store_name, o.number, o.status, o.created_at, o.updated_at,
+    o.acceptance_clock_starts_at, o.inngest_event_sent_at, o.accepted_at, o.prep_estimate_minutes,
+    o.pickup_slot, o.ready_at, o.out_for_delivery_at, s.hours, s.timezone,
+    CASE WHEN o.status IN ('CAPTURING', 'CANCELLING') THEN (
+      SELECT MIN(a.created_at) FROM audit_logs a
+      WHERE a.entity_type = 'order' AND a.entity_id = o.id
+        AND a.action = CASE o.status WHEN 'CAPTURING' THEN 'capture_retry' ELSE 'cancel_retry' END
+    ) END AS first_retry_at`;
+  type Row = {
+    id: string;
+    store_name: string;
+    number: number;
+    status: string;
+    created_at: Date;
+    updated_at: Date;
+    acceptance_clock_starts_at: Date | null;
+    inngest_event_sent_at: Date | null;
+    accepted_at: Date | null;
+    prep_estimate_minutes: number | null;
+    pickup_slot: string | null;
+    ready_at: Date | null;
+    out_for_delivery_at: Date | null;
+    first_retry_at: Date | null;
+    hours: unknown;
+    timezone: string;
+  };
+  const rows = await platformAdminTransaction(async (tx) => {
+    const authorized = await tx.$queryRaw<Row[]>`
+      SELECT ${columns}
+      FROM orders o JOIN stores s ON s.id = o.store_id
+      WHERE o.status = 'AUTHORIZED' AND o.created_at < ${opts.authorizedBefore} ${inStores}
+      ORDER BY o.created_at ASC
+      LIMIT ${opts.limit}
+    `;
+    const others = await tx.$queryRaw<Row[]>`
+      SELECT * FROM (
+        SELECT ${columns}
+        FROM orders o JOIN stores s ON s.id = o.store_id
+        WHERE o.status IN ('ACCEPTED', 'PICKING', 'CAPTURING', 'CANCELLING', 'READY', 'AWAITING_PICKUP', 'OUT_FOR_DELIVERY')
+          ${inStores}
+          AND (
+            o.created_at < ${opts.holdBefore}
+            OR (o.status IN ('ACCEPTED', 'PICKING')
+              AND o.accepted_at + make_interval(mins => COALESCE(o.prep_estimate_minutes, 0) + ${opts.pickingGraceMinutes}) < ${opts.pickingDueBy})
+            OR o.status IN ('CAPTURING', 'CANCELLING')
+            OR (o.status = 'READY' AND o.ready_at < ${opts.readyBefore})
+            OR (o.status = 'AWAITING_PICKUP' AND o.ready_at < ${opts.awaitingPickupBefore})
+            OR (o.status = 'OUT_FOR_DELIVERY' AND o.out_for_delivery_at < ${opts.outForDeliveryBefore})
+          )
+      ) candidates
+      WHERE status NOT IN ('CAPTURING', 'CANCELLING')
+        OR COALESCE(first_retry_at, updated_at) < ${opts.retryBefore}
+        OR created_at < ${opts.holdBefore}
+      ORDER BY created_at ASC
+      LIMIT ${opts.limit}
+    `;
+    return [...authorized, ...others];
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    storeName: r.store_name,
+    number: r.number,
+    status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    acceptanceClockStartsAt: r.acceptance_clock_starts_at,
+    inngestEventSentAt: r.inngest_event_sent_at,
+    acceptedAt: r.accepted_at,
+    prepEstimateMinutes: r.prep_estimate_minutes,
+    pickupSlot: r.pickup_slot,
+    readyAt: r.ready_at,
+    outForDeliveryAt: r.out_for_delivery_at,
+    firstRetryAt: r.first_retry_at,
+    hours: r.hours,
+    timezone: r.timezone,
+  }));
+}
+
+/**
+ * The newest audit row per order and action, newest first. Rows older than `since` stay while
+ * their order is not in `finalStatuses`.
+ */
+export async function findOrderAlertRows(opts: {
+  actions: readonly string[];
+  since: Date;
+  finalStatuses: readonly string[];
+  limit: number;
+  storeIds?: readonly string[];
+}): Promise<Array<{ orderId: string; action: string; createdAt: Date; orderNumber: number; orderStatus: string; storeName: string }>> {
+  if (opts.storeIds && opts.storeIds.length === 0) return [];
+  const inStores = opts.storeIds ? Prisma.sql`AND a.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  const rows = await platformAdminTransaction((tx) => tx.$queryRaw<Array<{
+    entity_id: string;
+    action: string;
+    created_at: Date;
+    number: number;
+    status: string;
+    store_name: string;
+  }>>`
+    SELECT * FROM (
+      SELECT DISTINCT ON (a.entity_id, a.action)
+        a.entity_id, a.action, a.created_at, o.number, o.status, s.name AS store_name
+      FROM audit_logs a
+      JOIN orders o ON o.id = a.entity_id AND o.store_id = a.store_id
+      JOIN stores s ON s.id = o.store_id
+      WHERE a.entity_type = 'order'
+        AND a.action IN (${Prisma.join(opts.actions)})
+        AND (a.created_at >= ${opts.since} OR o.status NOT IN (${Prisma.join(opts.finalStatuses)}))
+        ${inStores}
+      ORDER BY a.entity_id, a.action, a.created_at DESC
+    ) latest
+    ORDER BY created_at DESC
+    LIMIT ${opts.limit}
+  `);
+  return rows.map((r) => ({
+    orderId: r.entity_id,
+    action: r.action,
+    createdAt: r.created_at,
+    orderNumber: r.number,
+    orderStatus: r.status,
+    storeName: r.store_name,
+  }));
+}
+
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
 export async function lockMasterProductRow(tx: Pick<PrismaClient, "$queryRaw">, productId: string) {
   await tx.$queryRaw`SELECT 1 FROM master_products WHERE id = ${productId} FOR UPDATE`;
