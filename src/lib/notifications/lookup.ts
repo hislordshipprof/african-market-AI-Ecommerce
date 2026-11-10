@@ -7,6 +7,7 @@ const orderInclude = {
       listingVariant: { include: { listing: true } },
     },
   },
+  issueReports: { select: { state: true, amountCents: true } },
 } as const;
 
 /** The tracking token only: no order-id fallback. For the private delivery photo. */
@@ -14,6 +15,14 @@ export async function findOrderByTrackingToken(storeId: string, token: string) {
   return storeScoped(storeId).order.findUnique({
     where: { trackingToken: token },
     select: { id: true, deliveryProofKey: true },
+  });
+}
+
+/** The tracking token only: an issue report is never opened by order id. */
+export async function findOrderForIssueReport(storeId: string, token: string) {
+  return storeScoped(storeId).order.findUnique({
+    where: { trackingToken: token },
+    include: orderInclude,
   });
 }
 

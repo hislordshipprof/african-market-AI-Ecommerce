@@ -27,6 +27,24 @@ export type IssueReportInput = {
   photo: Uint8Array | null;
 };
 
+const money = (cents: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+
+/** What the customer sees about their report on the tracking and report pages. */
+export function issueStateMessage(issue: { state: string; amountCents: number }): string {
+  switch (issue.state) {
+    case "auto_refunded":
+    case "approved":
+      return `A refund of ${money(issue.amountCents)} is on its way to your card.`;
+    case "declined":
+      return "The store reviewed your report and did not issue a refund. Please contact the store with any questions.";
+    case "refund_failed":
+      return "Your refund did not go through. The store and our team have been alerted and will sort it out.";
+    default:
+      return "The store is reviewing your report.";
+  }
+}
+
 type ReportableOrder = {
   status: string;
   completedAt: Date | null;
