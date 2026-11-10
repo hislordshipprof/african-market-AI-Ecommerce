@@ -12,6 +12,7 @@ import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { runAssistantRetention } from "../assistant/retention";
 import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing/confidence-job";
 import { sendNewOrderPush } from "../push/new-order";
+import { slotStart } from "../admin/orders-to-check-query";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -262,8 +263,8 @@ const PICK_TIMEOUT_SCAN = 4 * PICK_TIMEOUT_BATCH;
  * its pickup slot start, and never later than created_at + HOLD_SAFETY_CAP_MS.
  */
 export function pickTimeoutDeadline(order: { createdAt: Date; acceptedAt: Date; pickupSlot: string | null }): number {
-  const slot = order.pickupSlot ? Date.parse(order.pickupSlot) : NaN;
-  const start = Math.max(order.acceptedAt.getTime(), Number.isNaN(slot) ? 0 : slot);
+  const acceptedAt = order.acceptedAt.getTime();
+  const start = Math.max(acceptedAt, slotStart(order.pickupSlot, acceptedAt) ?? 0);
   return Math.min(start + PICK_TIMEOUT_MS, order.createdAt.getTime() + HOLD_SAFETY_CAP_MS);
 }
 
@@ -291,9 +292,7 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
       await expireStaleOrderNotifications();
       const orders = await findOrphanedAuthorizedOrders();
       const notifications = await findPendingOrderNotifications();
-      const pickTimeouts = await findPickTimeoutOrders();
-      const orphanHolds = await findOrphanHoldCarts();
-      return { orders, notifications, pickTimeouts, orphanHolds };
+      return { orders, notifications };
     });
 
     for (const row of found.orders) {
@@ -311,7 +310,9 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
       });
     }
 
-    for (const row of found.pickTimeouts) {
+    // Each new finder has its own step, so its failure cannot stop the resends above.
+    const pickTimeouts = await step.run("find-pick-timeouts", () => findPickTimeoutOrders());
+    for (const row of pickTimeouts) {
       // A failed order logs and waits for the next run, so it cannot block the rest of the batch.
       await step.run(`pick-timeout-${row.id}`, async () => {
         let error: string | undefined;
@@ -325,9 +326,7 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
       });
     }
 
-    if (found.orphanHolds.length > 0) {
-      await step.run("release-orphan-holds", () => releaseOrphanHolds(found.orphanHolds));
-    }
+    await step.run("release-orphan-holds", async () => releaseOrphanHolds(await findOrphanHoldCarts()));
   },
 );
 

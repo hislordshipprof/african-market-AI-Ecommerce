@@ -127,7 +127,7 @@ describe("sweep configuration", () => {
     expect(reconcileStuckTransitional.opts.singleton).toEqual({ mode: "skip" });
   });
 
-  it("the notification function is not deduplicated per order, and an idle sweep runs one step", async () => {
+  it("the notification function is not deduplicated per order, and an idle sweep runs its three finder steps", async () => {
     const { sendCustomerNotification, sweepOrphanedAuthorized } = await import("./functions");
     const idempotency = (sendCustomerNotification as { opts?: { idempotency?: unknown } }).opts?.idempotency;
     if (idempotency != null) expect(String(idempotency)).toContain("data.event");
@@ -140,7 +140,7 @@ describe("sweep configuration", () => {
       const step = makeFakeStep();
       const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
       await handler({ step });
-      expect(step.runs).toEqual(["find-orphaned"]);
+      expect(step.runs).toEqual(["find-orphaned", "find-pick-timeouts", "release-orphan-holds"]);
     } finally {
       vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
       vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
