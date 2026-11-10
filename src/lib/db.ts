@@ -511,6 +511,16 @@ export function txExecute(tx: Pick<PrismaClient, "$executeRaw">, query: Prisma.S
   return tx.$executeRaw(query);
 }
 
+/** The store's hours and zone, read inside the caller's transaction (after lockStoreRow, so they cannot change under it). */
+export async function readStoreHours(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+): Promise<{ hours: unknown; timezone: string } | null> {
+  const rows = await tx.$queryRaw<Array<{ hours: unknown; timezone: string }>>`
+    SELECT hours, timezone FROM stores WHERE id = ${storeId}`;
+  return rows[0] ?? null;
+}
+
 /** Sees an order in any store. The caller is inside a store-scoped transaction and must not insert while this is on. */
 export async function orderExistsForPaymentIntent(
   tx: Pick<PrismaClient, "order" | "$executeRaw">,

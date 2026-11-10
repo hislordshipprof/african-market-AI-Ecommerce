@@ -288,6 +288,35 @@
   color: var(--color-ink);
   margin: 14px 0;
 }
+.queueNotice {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  margin: 14px 0;
+  border-radius: 12px;
+  background: var(--color-bg);
+  color: var(--color-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.queueNotice svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-primary);
+}
+.queueNotice strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--color-ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+/* Breaks between the opening and the ready time, so the dot never starts a line. */
+.queueNotice strong span {
+  display: inline-block;
+}
 .error {
   min-width: 0;
   max-width: 100%;

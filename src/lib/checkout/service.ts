@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
@@ -16,6 +16,8 @@ import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card
 import { platformFeeCentsForCapture } from "../order/platform-fee";
 import { reserveOrderStock } from "../order/stock-ledger";
 import { validPhone } from "../customer-account/phone";
+import { assertLiveModeAllowed } from "./live-mode";
+import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
 import type {
   CheckoutQuote,
   Contact,
@@ -299,6 +301,8 @@ export async function quoteCheckout(
 
 export { checkoutTestHooks } from "./test-hooks";
 export { SavedCardUnavailableError } from "./saved-card-payment";
+export { LiveModeBlockedError } from "./live-mode";
+export { StoreNotTakingOrdersError } from "../order/store-queue";
 
 export interface CreatePaymentIntentOptions {
   actorUserId?: string | null;
@@ -313,7 +317,12 @@ export async function createPaymentIntent(
   holdCents: number,
   options?: CreatePaymentIntentOptions,
 ): Promise<{ clientSecret: string; paymentIntentId: string; attemptToken?: string }> {
+  assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
+  // Refuse before any Stripe call. placeOrder re-checks under the store lock.
+  if (storeAvailability(store.hours, store.timezone, new Date()).kind === "unavailable") {
+    throw new StoreNotTakingOrdersError();
+  }
   if (options?.actorUserId) {
     return prepareSignedInPaymentIntent(storeId, cartId, holdCents, {
       actorUserId: options.actorUserId,
@@ -535,6 +544,15 @@ export async function recordAuthorizedOrder(
         return { orderId: existing.id, created: false as const, notify: false };
       }
 
+      // Under the store lock, after the replay branch: hours saved mid-checkout
+      // either refuse here with no write, or wait for this order to commit.
+      const now = new Date();
+      const hours = await readStoreHours(tx, storeId);
+      const availability = hours
+        ? storeAvailability(hours.hours, hours.timezone, now)
+        : ({ kind: "unavailable" } as const);
+      if (availability.kind === "unavailable") throw new StoreNotTakingOrdersError();
+
       if (input.lines.length === 0) {
         throw new Error("Order lines are required");
       }
@@ -671,6 +689,7 @@ export async function recordAuthorizedOrder(
           deliveryDistanceMi: distanceMi,
           leaveAtDoor: delivering ? cart.leaveAtDoor : false,
           trackingToken: newTrackingToken(),
+          acceptanceClockStartsAt: availability.clockStartsAt,
         },
       });
       const orderLines = await tx.orderLine.createManyAndReturn({
@@ -879,6 +898,7 @@ export async function placeOrder(
   actorUserId: string | null = null,
   leaveAtDoor = false,
 ): Promise<{ token: string; quote: CheckoutQuote }> {
+  assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
 
   if (fulfillment === "courier") {
@@ -1066,7 +1086,7 @@ export async function placeOrder(
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw new Error("Cart is empty");
     }
-    if (error instanceof BasketChangedError) {
+    if (error instanceof BasketChangedError || error instanceof StoreNotTakingOrdersError) {
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw error;
     }

@@ -798,6 +798,8 @@ model Order {
   cancelledAt          DateTime? @map("cancelled_at")
   inngestEventSentAt   DateTime? @map("inngest_event_sent_at")
   trackingToken        String?   @unique @map("tracking_token")
+  /// When the acceptance alert and auto-cancel start counting. NULL means created_at (orders before #167).
+  acceptanceClockStartsAt DateTime? @map("acceptance_clock_starts_at") @db.Timestamptz(6)
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
 

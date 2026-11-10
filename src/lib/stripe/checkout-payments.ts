@@ -84,8 +84,10 @@ interface FakeLedger {
   customers: Map<string, FakeCustomer>;
   cards: Map<string, NormalizedCard>;
   intents: Map<string, NormalizedPaymentIntent>;
+  intentModes: Map<string, "test" | "live">;
   idempotency: Map<string, IdempotencyRecord>;
   detachCalls: string[];
+  calls: number;
   cardSeq: number;
   failNext: "timeout" | "500" | null;
 }
@@ -96,12 +98,14 @@ const ledger: FakeLedger = ((globalThis as { __fakeCheckoutLedger?: FakeLedger }
   customers: new Map(),
   cards: new Map(),
   intents: new Map(),
+  intentModes: new Map(),
   idempotency: new Map(),
   detachCalls: [],
+  calls: 0,
   cardSeq: 0,
   failNext: null,
 });
-const { customers, cards, intents, idempotency, detachCalls } = ledger;
+const { customers, cards, intents, intentModes, idempotency, detachCalls } = ledger;
 
 const FIXTURES: Record<string, Pick<NormalizedCard, "brand" | "last4" | "expMonth" | "expYear" | "behavior">> = {
   pm_card_visa: { brand: "visa", last4: "4242", expMonth: 12, expYear: 2034, behavior: "ok" },
@@ -122,7 +126,20 @@ function emptyToNull(value: unknown): string | null {
   return String(value);
 }
 
+/** Stripe keeps test and live objects apart: a PaymentIntent made with one key is "No such payment_intent" to the other. */
+function keyMode(): "test" | "live" {
+  const key = process.env.STRIPE_SECRET_KEY ?? "";
+  return key === "" || key.startsWith("sk_test_") || key.startsWith("rk_test_") ? "test" : "live";
+}
+
+/** Every call the fake has served since the last reset. */
+export function fakeCheckoutCallCount(): number {
+  return ledger.calls;
+}
+
 export function resetFakeCheckoutPayments(): void {
+  ledger.calls = 0;
+  intentModes.clear();
   customers.clear();
   cards.clear();
   intents.clear();
@@ -169,7 +186,7 @@ function rememberCard(id: string, customer: string | null): NormalizedCard {
   return card;
 }
 
-export const fakeCheckoutPayments: CheckoutPayments = {
+const fakeMethods: CheckoutPayments = {
   async createCustomer(params, idempotencyKey) {
     if (ledger.failNext === "timeout") {
       ledger.failNext = null;
@@ -292,6 +309,7 @@ export const fakeCheckoutPayments: CheckoutPayments = {
       capture_method: emptyToNull(params.capture_method),
     };
     intents.set(id, intent);
+    intentModes.set(id, keyMode());
     if (key) idempotency.set(key, { hash: hashParams(params), customerId: id, expired: false });
     return intent;
   },
@@ -319,8 +337,7 @@ export const fakeCheckoutPayments: CheckoutPayments = {
   },
 
   async cancelPaymentIntent(id) {
-    const intent = intents.get(id);
-    if (!intent) throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
+    const intent = requireIntent(id);
     if (intent.status === "canceled") return { id, status: "canceled" };
     if (intent.status === "succeeded" || intent.status === "processing") {
       throw invalid(`You cannot cancel a PaymentIntent in status ${intent.status}.`);
@@ -370,9 +387,22 @@ export const fakeCheckoutPayments: CheckoutPayments = {
   },
 };
 
+/** Counts every call, so a test can prove a path made none. */
+export const fakeCheckoutPayments: CheckoutPayments = Object.fromEntries(
+  Object.entries(fakeMethods).map(([name, method]) => [
+    name,
+    (...args: unknown[]) => {
+      ledger.calls += 1;
+      return (method as (...a: unknown[]) => unknown)(...args);
+    },
+  ]),
+) as unknown as CheckoutPayments;
+
 function requireIntent(id: string): NormalizedPaymentIntent {
   const intent = intents.get(id);
-  if (!intent) throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
+  if (!intent || intentModes.get(id) !== keyMode()) {
+    throw invalid(`No such payment_intent: '${id}'`, "resource_missing", 404);
+  }
   return intent;
 }
 

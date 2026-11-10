@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, ShoppingBag, Truck } from "lucide-react";
+import { Clock, MapPin, ShoppingBag, Truck } from "lucide-react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import {
   Elements,
@@ -982,11 +982,16 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           </div>
           <FlowCard title="When works for you?">
             {settings.closed && (
-              <p className={styles.notice}>
-                The market is closed. Opens {settings.opensAt}. Order now to
-                join the queue; estimated ready about {settings.prepTimeMinutes}{" "}
-                minutes after opening.
-              </p>
+              <div className={styles.queueNotice}>
+                <Clock size={18} aria-hidden />
+                <p>
+                  <strong>
+                    <span>Opens {settings.opensAt} ·</span>{" "}
+                    <span>ready about {settings.readyAt}</span>
+                  </strong>
+                  The store is closed. Order now to join the queue.
+                </p>
+              </div>
             )}
             <div className={styles.options}>
               <Chip
@@ -1220,6 +1225,13 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               <FlowError title="Let's review that" message={error}>
                 {errorHref ? <Link className="sf-text-link" href={errorHref}>View your orders</Link> : null}
               </FlowError>
+            )}
+            {isRealPayment && settings.closed && (
+              <p className={styles.muted}>
+                The store opens {settings.opensAt}. Your card is held now and
+                charged after picking. If the store doesn&rsquo;t accept your
+                order, the hold is released.
+              </p>
             )}
             <PayButton
               type="submit"
