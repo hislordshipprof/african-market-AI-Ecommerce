@@ -66,6 +66,8 @@ model Store {
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
   pushSubscriptions PushSubscription[]
+  supportThreads SupportThread[]
+  supportMessages SupportMessage[]
 
   @@map("stores")
 }
@@ -110,6 +112,7 @@ model User {
   customerAddresses        CustomerAddress[]
   cardSaveConsents         CardSaveConsent[]
   pushSubscriptions        PushSubscription[]
+  supportMessages          SupportMessage[]
   copilotConversations     CopilotConversation[]
   stockProposalDecisions   StockProposal[] @relation("StockProposalDecision")
 
@@ -817,6 +820,7 @@ model Order {
   refundRequests RefundRequest[]
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
+  supportThreads SupportThread[]
 
   @@unique([id, storeId])
   @@unique([storeId, number])
@@ -891,6 +895,45 @@ model DeliveryEvent {
   @@index([storeId])
   @@index([storeId, orderId])
   @@map("delivery_events")
+}
+
+/// Support thread: one per order, customer and store messages about that order.
+model SupportThread {
+  id             String    @id @default(cuid())
+  storeId        String    @map("store_id")
+  orderId        String    @unique @map("order_id")
+  topic          String    @default("order")
+  state          String    @default("open")
+  lastCustomerAt DateTime? @map("last_customer_at")
+  lastReplyAt    DateTime? @map("last_reply_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  store    Store            @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order    Order            @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  messages SupportMessage[]
+
+  @@unique([id, storeId])
+  @@index([storeId, lastCustomerAt])
+  @@map("support_threads")
+}
+
+model SupportMessage {
+  id           String   @id @default(cuid())
+  storeId      String   @map("store_id")
+  threadId     String   @map("thread_id")
+  sender       String
+  senderUserId String?  @map("sender_user_id")
+  body         String
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  store      Store         @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  thread     SupportThread @relation(fields: [threadId, storeId], references: [id, storeId], onDelete: Cascade)
+  senderUser User?         @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([storeId])
+  @@index([threadId, createdAt])
+  @@map("support_messages")
 }
 
 model OrderLine {

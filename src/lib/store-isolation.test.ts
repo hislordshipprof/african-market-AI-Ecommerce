@@ -811,3 +811,79 @@ describe.skipIf(!hasDb)("delivery events: storeScoped(B) cannot read or write st
     expect(await storeScoped(storeAId).deliveryEvent.count({ where: { orderId: orderAId } })).toBe(1);
   });
 });
+
+describe.skipIf(!hasDb)("support threads and messages: storeScoped(B) cannot read or write store A's rows", () => {
+  let storeAId = "";
+  let storeBId = "";
+  let orderAId = "";
+  let threadAId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const stamp = Date.now().toString(36);
+    storeAId = (await raw.store.create({
+      data: { slug: `support-rls-a-${stamp}`, name: "Support RLS A", themePreset: "palm-and-shea" },
+    })).id;
+    storeBId = (await raw.store.create({
+      data: { slug: `support-rls-b-${stamp}`, name: "Support RLS B", themePreset: "palm-and-shea" },
+    })).id;
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "RLS Buyer", email: "support-rls-a@example.com" },
+    });
+    orderAId = (await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        customerId: customer.id,
+        status: "ACCEPTED",
+        fulfillment: "pickup",
+        subtotalCents: 100,
+        bufferCents: 0,
+        totalCents: 100,
+        totalAuthorizedCents: 100,
+        number: 1,
+      },
+    })).id;
+    threadAId = (await storeScoped(storeAId).supportThread.create({
+      data: { storeId: storeAId, orderId: orderAId, lastCustomerAt: new Date() },
+    })).id;
+    await storeScoped(storeAId).supportMessage.create({
+      data: { storeId: storeAId, threadId: threadAId, sender: "customer", body: "Where is my order?" },
+    });
+  });
+
+  afterAll(async () => {
+    for (const id of [storeAId, storeBId]) {
+      if (!id) continue;
+      const scoped = storeScoped(id);
+      await scoped.supportMessage.deleteMany({});
+      await scoped.supportThread.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.customer.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter(Boolean) } } });
+    await raw.$disconnect();
+  });
+
+  it("support threads: storeScoped(B) reads none of A's threads, cannot insert one for A, and updates nothing", async () => {
+    expect(await storeScoped(storeBId).supportThread.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).supportThread.create({ data: { storeId: storeAId, orderId: orderAId } }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).supportThread.updateMany({
+      where: { id: threadAId },
+      data: { state: "resolved" },
+    })).count).toBe(0);
+    expect((await storeScoped(storeAId).supportThread.findUnique({ where: { id: threadAId } }))?.state).toBe("open");
+  });
+
+  it("support messages: storeScoped(B) reads none of A's messages and cannot reply on A's thread", async () => {
+    expect(await storeScoped(storeBId).supportMessage.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).supportMessage.create({
+        data: { storeId: storeAId, threadId: threadAId, sender: "store", body: "hello" },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect(await storeScoped(storeAId).supportMessage.count({ where: { threadId: threadAId } })).toBe(1);
+  });
+});
