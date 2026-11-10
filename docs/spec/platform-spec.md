@@ -105,7 +105,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - **Shortage prompt:** push/SMS "Egusi 1 lb is out — swap for Egusi 2 lb (+$4) or refund?" Customer has 10 min; no answer → apply the line's swap rule; if rule is *Exact only* → refund that line.
 - Live courier map once assigned; drop-off photo/PIN shown on completion.
 - **One-tap issue report** within 48 h: missing / damaged / wrong / poor freshness + photo → auto-refund up to a per-tenant limit, otherwise store review queue.
-- In-app chat with the store.
+- In-app chat with the store (#429): one support thread per order. The customer writes from the tracking page, opened with the tracking token only (never an order id), and the page polls for replies every 10 s. Sends are limited to 30 an hour per token and 60 an hour per IP. A new customer message pushes "New message" to store members. Any member answers from the store-admin Messages page; unread is the customer messages since the store's last reply, and the dashboard shows the store's total. The first store reply sends one "The store replied" email and SMS with the tracking link; later replies show on the page only. Escalation to the platform after 30 open minutes without a reply is #432.
 - Reorder, favorites, saved lists ("Sunday soup").
 
 ---
@@ -509,5 +509,5 @@ Second metro, native apps, batch picking, scheduled van slots, nationwide shippi
 4. **Uber Direct account:** confirm multi-location/organization setup and US pricing for platform accounts; confirm weight limits with both providers.
 5. **Brand:** (storefronts are store-branded per ADR-0003; only the platform name remains open) platform name and whether customers see the platform brand at all on tenant stores ("powered by").
 6. ~~Customer accounts~~ **Resolved:** ADR-0002. Was: one platform login (current spec) vs per-store accounts; affects phase-2 marketplace.
-7. ~~Customer support~~ **Resolved:** the store is first line (in-app chat, refunds). The platform team handles payment, courier and app issues, or steps in when a store doesn't respond within the SLA.
+7. ~~Customer support~~ **Resolved:** the store is first line (in-app chat, refunds). A platform admin handles payment, courier and app issues, or steps in when a store doesn't respond within the SLA (30 open minutes, set per store; owner decision 2026-11-10).
 8. ~~Delivery fee policy~~ **Resolved:** ADR-0006. Was: flat by distance band vs pass-through quote; who pays above free-delivery threshold.

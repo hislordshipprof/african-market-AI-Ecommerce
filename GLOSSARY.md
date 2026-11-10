@@ -125,6 +125,13 @@ One customer's purchase from exactly one store.
 **Tracking link**:
 The unguessable link in every customer message that opens the order's tracking page without signing in.
 
+**Support thread**:
+The one conversation about an order between its customer and the store, opened from the tracking link. A platform admin can join it.
+_Avoid_: Chat (the shopper assistant and store copilot are chats too), ticket
+
+**Escalated thread**:
+A support thread handed to the platform admins: the store did not reply within its SLA, or the problem is payment, courier or the app.
+
 **Acceptance clock**:
 When an order's 15-minute alert and 30-minute auto-cancel start counting: the order time if the store was open, otherwise its next opening. They count open minutes from it. Stored on the order and never changed by later hours edits.
 
