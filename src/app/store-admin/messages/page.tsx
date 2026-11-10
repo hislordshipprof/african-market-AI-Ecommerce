@@ -5,8 +5,8 @@ import { getStoreThread, listStoreThreads } from "@/lib/support/thread";
 import { Badge } from "@/components/ui/badge";
 import { ThreadReply } from "./thread-reply";
 
-const when = (date: Date | string) =>
-  new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(date));
+const when = (date: Date | string, timeZone: string) =>
+  new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone }).format(new Date(date));
 
 export default async function MessagesPage({
   searchParams,
@@ -54,7 +54,7 @@ export default async function MessagesPage({
                     <span>
                       <span className="block text-sm font-medium text-foreground">Order #{t.orderNumber}</span>
                       {t.lastCustomerAt && (
-                        <span className="block text-xs text-muted-foreground">{when(t.lastCustomerAt)}</span>
+                        <span className="block text-xs text-muted-foreground">{when(t.lastCustomerAt, session.store.timezone)}</span>
                       )}
                     </span>
                     {t.unread > 0 && <Badge aria-label={`${t.unread} unread`}>{t.unread}</Badge>}
@@ -78,7 +78,7 @@ export default async function MessagesPage({
                     className={`max-w-[85%] rounded-lg border border-border px-3 py-2 ${m.sender === "customer" ? "justify-self-start" : "justify-self-end bg-muted"}`}
                   >
                     <span className="block text-xs text-muted-foreground">
-                      {m.sender === "customer" ? "Customer" : m.senderName ?? "Store"} · {when(m.createdAt)}
+                      {m.sender === "customer" ? "Customer" : m.senderName ?? "Store"} · {when(m.createdAt, session.store.timezone)}
                     </span>
                     <span className="whitespace-pre-wrap break-words text-sm text-foreground">{m.body}</span>
                   </li>

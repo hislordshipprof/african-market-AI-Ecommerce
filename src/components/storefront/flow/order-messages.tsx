@@ -8,17 +8,20 @@ import { FlowCard } from "./common";
 
 const POLL_MS = 10_000;
 
-const time = (iso: string) =>
-  new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" }).format(new Date(iso));
+// The store's zone on server and client alike, so hydration renders the same text.
+const time = (iso: string, timeZone: string) =>
+  new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", month: "short", day: "numeric", timeZone }).format(new Date(iso));
 
 /** The order's support thread on the tracking page. Polls the cached route every 10 s (ADR-0016). */
 export function OrderMessages({
   token,
   storeName,
+  timeZone,
   initialMessages,
 }: {
   token: string;
   storeName: string;
+  timeZone: string;
   initialMessages: ThreadMessage[];
 }) {
   const [messages, setMessages] = useState(initialMessages);
@@ -83,7 +86,7 @@ export function OrderMessages({
               }}
             >
               <small style={{ display: "block", opacity: 0.75 }}>
-                {message.sender === "customer" ? "You" : storeName} · {time(message.createdAt)}
+                {message.sender === "customer" ? "You" : storeName} · {time(message.createdAt, timeZone)}
               </small>
               <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{message.body}</span>
             </li>

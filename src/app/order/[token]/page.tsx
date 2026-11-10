@@ -89,7 +89,7 @@ export default async function OrderPage({
             </FlowCard>
           )}
           {messages && (
-            <OrderMessages token={token} storeName={context.store.name} initialMessages={messages} />
+            <OrderMessages token={token} storeName={context.store.name} timeZone={context.store.timezone} initialMessages={messages} />
           )}
           <div style={{ marginTop: "1rem", textAlign: "center" }}>
             <Link className="sf-button" href="/">Continue shopping</Link>
