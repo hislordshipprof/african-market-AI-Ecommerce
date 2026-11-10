@@ -25,9 +25,10 @@ import sharp from "sharp";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount } from "../stripe/fake";
+import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
 import { countedListing } from "./stock-ledger-test-helpers";
 import { ISSUE_ALREADY_REPORTED, submitIssueReport } from "./issue-report";
+import { evaluateOrderRefundState } from "./refund-requests";
 
 const hasDb = !!process.env.DATABASE_URL;
 const HOUR = 60 * 60 * 1000;
@@ -187,6 +188,23 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     });
     expect(result).toEqual({ ok: true, state: "auto_refunded" });
     expect((await written(order.id)).order.status).toBe("REFUNDED");
+  });
+
+  it("a full issue refund that fails after it succeeded puts the order back to Completed", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 1000 }], 1);
+    await submitIssueReport(store, token, {
+      type: "damaged",
+      lines: [{ lineId: order.lines[0].id, qty: 1 }],
+      note: null,
+      photo: JPEG,
+    });
+    expect((await written(order.id)).order.status).toBe("REFUNDED");
+    const [refund] = await fakeStripeProvider.listRefunds(order.paymentIntentId!);
+    setRefundStatus(refund.refundId, "failed");
+    await evaluateOrderRefundState(order.id);
+    const after = await written(order.id);
+    expect(after.issues[0].state).toBe("refund_failed");
+    expect(after.order.status).toBe("COMPLETED");
   });
 
   it("an amount $1 over the limit goes to review with no refund and the order unchanged", async () => {

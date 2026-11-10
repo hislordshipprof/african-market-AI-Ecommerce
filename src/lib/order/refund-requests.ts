@@ -598,10 +598,15 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
     }
     if (AFTER_DELIVERY.has(order.status)) {
       issueFailure = await recordIssueRefundFailure(tx, order.storeId, orderId, listed);
-      const next = settled === 0 ? null : settled >= captured ? "REFUNDED" : "PARTIALLY_REFUNDED";
+      // A refund can fail after it succeeded: with nothing refunded the order is back to fulfilled.
+      const refundedState = order.status === "REFUNDED" || order.status === "PARTIALLY_REFUNDED";
+      const fulfilled = order.deliveredAt ? "DELIVERED" : "COMPLETED";
+      const next = settled === 0 ? (refundedState ? fulfilled : null) : settled >= captured ? "REFUNDED" : "PARTIALLY_REFUNDED";
       if (next && next !== order.status) {
         await tx.order.update({ where: { id: orderId }, data: { status: next } });
-        notifyRefunded = await recordOrderNotification(tx, order.storeId, orderId, "refunded");
+        if (next === "REFUNDED" || next === "PARTIALLY_REFUNDED") {
+          notifyRefunded = await recordOrderNotification(tx, order.storeId, orderId, "refunded");
+        }
       }
     }
     return fresh;
