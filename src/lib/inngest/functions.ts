@@ -1,7 +1,8 @@
 import { inngest } from "./client";
-import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders, findPendingOrderNotifications, expireStaleOrderNotifications, findPickTimeoutCandidates } from "../db";
+import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders, findPendingOrderNotifications, expireStaleOrderNotifications, findPickTimeoutCandidates, findOrphanHoldCarts } from "../db";
 import { platform } from "../db";
 import { autoCancelOrder, cancelOrder, reconcileStuckOrder } from "../order/service";
+import { releaseOrphanHolds } from "../checkout/service";
 import { isValidTimezone, openMinutesDeadline } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
 import { sendOrderNotification } from "./notify";
@@ -291,7 +292,8 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
       const orders = await findOrphanedAuthorizedOrders();
       const notifications = await findPendingOrderNotifications();
       const pickTimeouts = await findPickTimeoutOrders();
-      return { orders, notifications, pickTimeouts };
+      const orphanHolds = await findOrphanHoldCarts();
+      return { orders, notifications, pickTimeouts, orphanHolds };
     });
 
     for (const row of found.orders) {
@@ -321,6 +323,10 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
         }
         if (error) console.error(JSON.stringify({ event: "pick_timeout_failed", orderId: row.id, error }));
       });
+    }
+
+    if (found.orphanHolds.length > 0) {
+      await step.run("release-orphan-holds", () => releaseOrphanHolds(found.orphanHolds));
     }
   },
 );

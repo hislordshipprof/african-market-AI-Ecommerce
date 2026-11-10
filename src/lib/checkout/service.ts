@@ -4,7 +4,7 @@ import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
-import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
+import { checkoutPaymentsUseFake, getCheckoutPayments, holdAuthorizedAt, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
 import { scheduleOrderNotification } from "../inngest/notify";
 import { newTrackingToken, recordOrderNotification } from "../notifications/record";
@@ -88,7 +88,7 @@ function fakeIntent(id: string | null | undefined): boolean {
 
 async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentIntent> {
   if (fakeIntent(id)) return getCheckoutPayments().retrievePaymentIntent(id);
-  const pi = await getStripeClient().paymentIntents.retrieve(id);
+  const pi = await getStripeClient().paymentIntents.retrieve(id, { expand: ["latest_charge"] });
   const destination = pi.transfer_data?.destination;
   return {
     id: pi.id,
@@ -105,6 +105,7 @@ async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentInte
       : null,
     metadata: pi.metadata ?? {},
     capture_method: pi.capture_method,
+    authorized_at: holdAuthorizedAt(pi),
   };
 }
 
@@ -776,6 +777,7 @@ export async function releaseLosingHold(
   storeId: string,
   cartId: string,
   paymentIntentId: string,
+  cancellationReason?: "abandoned",
 ): Promise<void> {
   const reserved = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
@@ -810,7 +812,7 @@ export async function releaseLosingHold(
     }
     await getStripeClient().paymentIntents.cancel(
       paymentIntentId,
-      undefined,
+      cancellationReason ? { cancellation_reason: cancellationReason } : undefined,
       { idempotencyKey: key },
     );
   } catch (error) {
@@ -820,6 +822,34 @@ export async function releaseLosingHold(
       paymentIntentId,
       message: "Platform alerted. The authorization expires on its own.",
     }));
+  }
+}
+
+/** An unused card hold is released this long after authorization (owner decision, #422). */
+const ORPHAN_HOLD_GRACE_MS = 60 * 60_000;
+
+/**
+ * Releases card holds that never became an order: the intent is still
+ * `requires_capture` and was authorized more than the grace ago. releaseLosingHold
+ * re-checks for an order under the store and cart locks and writes the tombstone,
+ * so a placeOrder that wins the race keeps its hold and a later one is refused.
+ */
+export async function releaseOrphanHolds(
+  carts: ReadonlyArray<{ storeId: string; cartId: string; paymentIntentId: string }>,
+): Promise<void> {
+  for (const cart of carts) {
+    try {
+      const pi = await retrieveCheckoutIntent(cart.paymentIntentId);
+      if (pi.status !== "requires_capture" || pi.authorized_at == null) continue;
+      if (Date.now() - pi.authorized_at < ORPHAN_HOLD_GRACE_MS) continue;
+      await releaseLosingHold(cart.storeId, cart.cartId, cart.paymentIntentId, "abandoned");
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "orphan_hold_release_failed",
+        paymentIntentId: cart.paymentIntentId,
+        message: error instanceof Error ? error.message : String(error),
+      }));
+    }
   }
 }
 

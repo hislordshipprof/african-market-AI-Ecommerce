@@ -15,6 +15,7 @@ const realFindOrphaned = dbModule.findOrphanedAuthorizedOrders;
 const realFindPending = dbModule.findPendingOrderNotifications;
 const realExpireNotifications = dbModule.expireStaleOrderNotifications;
 const realFindPickTimeout = dbModule.findPickTimeoutCandidates;
+const realFindOrphanHolds = dbModule.findOrphanHoldCarts;
 
 /** Tue 2026-11-03 14:00 America/New_York (UTC-5). */
 const OPEN_AT = "2026-11-03T19:00:00.000Z";
@@ -134,6 +135,7 @@ describe("sweep configuration", () => {
     vi.spyOn(dbModule, "findPendingOrderNotifications").mockImplementation(async () => realFindPending({ storeIds: [] }));
     vi.spyOn(dbModule, "expireStaleOrderNotifications").mockImplementation(async () => realExpireNotifications({ storeIds: [] }));
     vi.spyOn(dbModule, "findPickTimeoutCandidates").mockImplementation(async (opts) => realFindPickTimeout({ ...opts, storeIds: [] }));
+    vi.spyOn(dbModule, "findOrphanHoldCarts").mockImplementation(async (opts) => realFindOrphanHolds({ ...opts, storeIds: [] }));
     try {
       const step = makeFakeStep();
       const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
@@ -144,6 +146,7 @@ describe("sweep configuration", () => {
       vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
       vi.mocked(dbModule.expireStaleOrderNotifications).mockRestore();
       vi.mocked(dbModule.findPickTimeoutCandidates).mockRestore();
+      vi.mocked(dbModule.findOrphanHoldCarts).mockRestore();
     }
   });
 });
@@ -298,6 +301,9 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
     vi.spyOn(dbModule, "findPickTimeoutCandidates").mockImplementation(async (opts) => {
       return realFindPickTimeout({ ...opts, storeIds: opts.storeIds ?? ownStores() });
     });
+    vi.spyOn(dbModule, "findOrphanHoldCarts").mockImplementation(async (opts) => {
+      return realFindOrphanHolds({ ...opts, storeIds: opts?.storeIds ?? ownStores() });
+    });
   });
 
   afterEach(() => {
@@ -306,6 +312,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
     vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
     vi.mocked(dbModule.expireStaleOrderNotifications).mockRestore();
     vi.mocked(dbModule.findPickTimeoutCandidates).mockRestore();
+    vi.mocked(dbModule.findOrphanHoldCarts).mockRestore();
   });
 
   describe("dailyConfidence", () => {

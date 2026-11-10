@@ -43,6 +43,8 @@ export interface NormalizedPaymentIntent {
   transfer_data: { destination: string | null } | null;
   metadata: Record<string, string>;
   capture_method: string | null;
+  /** When the card hold was authorized, in ms; null when the intent holds nothing or `latest_charge` was not expanded. */
+  authorized_at: number | null;
 }
 
 export interface CheckoutPayments {
@@ -307,6 +309,7 @@ const fakeMethods: CheckoutPayments = {
       transfer_data: transfer ? { destination: transfer.destination ?? null } : null,
       metadata: { ...metadata },
       capture_method: emptyToNull(params.capture_method),
+      authorized_at: null,
     };
     intents.set(id, intent);
     intentModes.set(id, keyMode());
@@ -383,6 +386,7 @@ const fakeMethods: CheckoutPayments = {
       intent.payment_method = paymentMethodId;
     }
     intent.status = card.behavior === "action" ? "requires_action" : "requires_capture";
+    if (intent.status === "requires_capture") intent.authorized_at = Date.now();
     return intent;
   },
 };
@@ -433,6 +437,22 @@ function checkoutFakeAllowed(): boolean {
   return process.env.NODE_ENV !== "production";
 }
 
+/** Online card holds last 7 days (Stripe: place a hold on a payment method). */
+const CARD_HOLD_MS = 7 * 24 * 60 * 60_000;
+
+/**
+ * The authorization time of the intent's hold, from an expanded `latest_charge`:
+ * the charge's `created`, else `capture_before` minus the hold length. One intent
+ * is reused per cart, so the intent's own `created` can be far older than its hold.
+ */
+export function holdAuthorizedAt(intent: Pick<Stripe.PaymentIntent, "latest_charge">): number | null {
+  const charge = intent.latest_charge;
+  if (!charge || typeof charge === "string") return null;
+  if (charge.created) return charge.created * 1000;
+  const captureBefore = charge.payment_method_details?.card?.capture_before;
+  return captureBefore ? captureBefore * 1000 - CARD_HOLD_MS : null;
+}
+
 function normalizeStripeIntent(intent: Stripe.PaymentIntent): NormalizedPaymentIntent {
   const destination = intent.transfer_data?.destination;
   const paymentMethod = intent.payment_method;
@@ -451,6 +471,7 @@ function normalizeStripeIntent(intent: Stripe.PaymentIntent): NormalizedPaymentI
       : null,
     metadata: intent.metadata ?? {},
     capture_method: intent.capture_method,
+    authorized_at: holdAuthorizedAt(intent),
   };
 }
 
