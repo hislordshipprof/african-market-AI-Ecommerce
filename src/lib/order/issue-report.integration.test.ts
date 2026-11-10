@@ -25,7 +25,7 @@ import sharp from "sharp";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { countedListing } from "./stock-ledger-test-helpers";
 import { ISSUE_ALREADY_REPORTED, submitIssueReport } from "./issue-report";
 import { evaluateOrderRefundState } from "./refund-requests";
@@ -205,6 +205,19 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     const after = await written(order.id);
     expect(after.issues[0].state).toBe("refund_failed");
     expect(after.order.status).toBe("COMPLETED");
+  });
+
+  it("a refund Stripe answers as failed is reported to the customer as failed, not refunded", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 900 }], 1);
+    setNextRefundStatus(order.paymentIntentId!, "failed");
+    const result = await submitIssueReport(store, token, {
+      type: "missing",
+      lines: [{ lineId: order.lines[0].id, qty: 1 }],
+      note: null,
+      photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "refund_failed" });
+    expect((await written(order.id)).order.status).toBe("COMPLETED");
   });
 
   it("an amount $1 over the limit goes to review with no refund and the order unchanged", async () => {

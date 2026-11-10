@@ -167,5 +167,7 @@ export async function submitIssueReport(
     return { ok: true, state: "in_review" };
   }
   await evaluateOrderRefundState(order.id);
-  return { ok: true, state: "auto_refunded" };
+  // Stripe can answer the create as failed; the evaluation has then marked the issue.
+  const settled = await storeScoped(store.id).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true } });
+  return { ok: true, state: settled.state as IssueState };
 }
