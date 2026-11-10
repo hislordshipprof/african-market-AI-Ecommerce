@@ -239,10 +239,9 @@ Expose store catalogs and checkout via an MCP server and the Agentic Commerce Pr
 PLACED ──(payment authorized)──► AUTHORIZED ──(store accepts)──► ACCEPTED ──► PICKING
 PICKING ──(line short)──► SUBSTITUTION_PENDING ──(customer answers / 10-min timeout)──► PICKING
 PICKING ──(all lines resolved)──► CAPTURING ──(Stripe captured)──► { pickup: AWAITING_PICKUP, delivery: READY }
-READY ──(delivery)──► COURIER_REQUESTED ──► COURIER_ASSIGNED ──► PICKED_UP ──► DELIVERED
-READY ──(store delivery: driver leaves)──► OUT_FOR_DELIVERY ──(delivery proof photo)──► DELIVERED
+READY ──(courier delivery)──► COURIER_REQUESTED ──► COURIER_ASSIGNED ──► PICKED_UP ──► DELIVERED ──(48 h, no issue)──► COMPLETED
+READY ──(store delivery: driver leaves)──► OUT_FOR_DELIVERY ──(delivery proof photo)──► DELIVERED (final; completed_at set at delivery)
 AWAITING_PICKUP ──(customer collects)──► COMPLETED
-DELIVERED ──(48 h, no issue)──► COMPLETED
 ```
 Transitional statuses `CAPTURING` and `CANCELLING` are set inside a DB transaction before calling Stripe, so concurrent mutations are blocked while the external call is in flight. A reconcile sweep (Inngest cron, every 15 min) recovers orders stuck in either state by checking the real PaymentIntent status. Together with the 15-minute orphan-event sweep this is 5,760 idle runs in a 30-day month. Checkout does not wait on Inngest: `placeOrder` schedules `order/authorized` after the response. The event id is `order-authorized-<orderId>`, so a retried send and the orphan sweep cannot start a second timer. Both sweeps are singletons (`mode: skip`); a new run is dropped while one is still active. Local timers use `INNGEST_DEV=1` and the Dev Server, with no event key. In production, a missing `INNGEST_EVENT_KEY` is logged once per process as `inngest_event_key_missing`. The order still commits, and the orphan sweep retries the send.
 
@@ -323,7 +322,7 @@ Adapters: `UberDirectProvider` (primary), `DoorDashDriveProvider` (fallback). Ea
 ### 11.5 Own-driver / van (phase 2)
 Store marks "deliver myself" → simple driver link (SMS) with map + photo proof; or Onfleet integration for stores with multiple drivers.
 
-Built in #134: staff in the order inbox mark a store-delivery order Out for delivery, then Delivered with a required photo. The **delivery proof** photo is resized in the browser, then re-encoded on the server with sharp: upright, at most 2000px on the long edge, JPEG, with all metadata stripped (no EXIF GPS of a customer's home). The photo is private. It is stored in R2 under `delivery-proof/<orderId>/<timestamp>.jpg` and read only through `GET /api/delivery-proof/<tracking token>`, which resolves the store from the host like the tracking page, answers `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`, and returns 404 for an unknown token, another store's token or an order with no photo. There are no signed URLs, and the public catalog-image route accepts only `catalog/` keys. Not built: driver link, map, live GPS, PIN, multiple drivers.
+Built in #134: staff in the order inbox mark a store-delivery order Out for delivery, then Delivered with a required photo. The **delivery proof** photo is resized in the browser, then re-encoded on the server with sharp: upright, at most 2000px on the long edge, JPEG, with all metadata stripped (no EXIF GPS of a customer's home). The photo is private. It is stored in its own private R2 bucket `R2_PROOF_BUCKET` (never the catalog bucket) under `delivery-proof/<orderId>/<timestamp>.jpg`; if that bucket is not set, staff cannot mark the order Delivered. It is read only through `GET /api/delivery-proof/<tracking token>`, which resolves the store from the host like the tracking page, accepts the tracking token only (the order id is 404), answers `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`, and returns 404 for an unknown token, another store's token or an order with no photo. There are no signed URLs, and the public catalog-image route accepts only `catalog/` keys. Not built: driver link, map, live GPS, PIN, multiple drivers.
 
 ---
 
@@ -411,7 +410,7 @@ Designed for ~1,000 stores, ~1M customers, ~20k orders/day (ADR-0012). Each choi
 - **Auth:** Better Auth: phone one-time codes for customers, organizations and roles for stores, 2FA for owners and staff, built-in rate limiting (ADR-0015).
 - **Jobs:** Inngest Cloud free tier for timers and retries (substitution timeout, courier failover, confidence decay, digests) (ADR-0016).
 - **Live updates:** Web Push + SMS alerts, ~10 s polling on open boards, courier tracking pages; self-hosted Centrifugo later if needed (ADR-0016).
-- **Storage:** Cloudflare R2 + Cloudflare image CDN; private bucket with signed URLs for proof photos (ADR-0013).
+- **Storage:** Cloudflare R2 + Cloudflare image CDN; proof photos in a separate private bucket `R2_PROOF_BUCKET`, read through the token-checked app route `/api/delivery-proof/<tracking token>`, no signed URLs (ADR-0013, amended 2026-11-09).
 - **Search:** Postgres full-text + pg_trgm + synonym table, per-store indexes; pgvector for AI matching; Typesense only if p95 > 300 ms (ADR-0014).
 - **Caching:** Next.js cache tagged per store; no Redis until needed (ADR-0017).
 - **AI:** Anthropic API (Claude) with tool use; prompt caching for catalog/recipe context; embeddings for product matching.
