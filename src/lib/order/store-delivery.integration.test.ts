@@ -24,14 +24,17 @@ vi.mock("@aws-sdk/client-s3", () => {
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { markDelivered, markOutForDelivery } from "./service";
-import { STORE_DELIVERY_ONLY } from "./delivery-proof";
+import { PROOF_PHOTO_NOT_IMAGE, PROOF_PHOTO_TOO_LARGE, STORE_DELIVERY_ONLY } from "./delivery-proof";
+import { CSV_ACTION_BODY_LIMIT_BYTES } from "../listing/csv-file-cap";
+import sharp from "sharp";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests } from "../email/send";
 import { clearTestSentSms, getTestSentSms, setSmsSenderForTests } from "../notifications/sms";
 import { sendCustomerNotification } from "../inngest/functions";
 import { makeFakeStep } from "../inngest/fake-step";
 
 const hasDb = !!process.env.DATABASE_URL;
-const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+const JPEG_HEADER = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+let JPEG = new Uint8Array();
 
 const handler = (sendCustomerNotification as unknown as {
   fn: (ctx: {
@@ -47,6 +50,7 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
   let number = 0;
 
   beforeAll(async () => {
+    JPEG = new Uint8Array(await sharp({ create: { width: 64, height: 48, channels: 3, background: "#c0392b" } }).jpeg().toBuffer());
     raw = testPrismaClient();
     const stamp = Date.now().toString(36);
     const store = await raw.store.create({
@@ -162,12 +166,13 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     expect(getTestSentEmails().at(-1)!.html).toContain(`Delivered. Order #${order.number}.`);
   });
 
-  it("delivered with no photo, a non-image, or a file over 8 MB is rejected and leaves the order out for delivery", async () => {
+  it("delivered with no photo, a non-image, or a file over the server-action body limit is rejected and leaves the order out for delivery", async () => {
     const order = await readyOrder();
     await markOutForDelivery(storeId, order.id);
     const pdf = new TextEncoder().encode("%PDF-1.7 not a photo");
-    const oversize = new Uint8Array(8 * 1024 * 1024 + 1);
-    oversize.set(JPEG);
+    const oversize = new Uint8Array(CSV_ACTION_BODY_LIMIT_BYTES + 1);
+    oversize.set(JPEG_HEADER);
+    expect(await markDelivered(storeId, order.id, oversize)).toEqual({ ok: false, error: PROOF_PHOTO_TOO_LARGE });
     for (const photo of [null, new Uint8Array(0), pdf, oversize]) {
       const result = await markDelivered(storeId, order.id, photo);
       expect(result.ok).toBe(false);
@@ -212,6 +217,47 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     const after = await state(order.id);
     expect(after.order.status).toBe("OUT_FOR_DELIVERY");
     expect(after.events.map((event) => event.type)).toEqual(["out_for_delivery"]);
+    expect(bucket.size).toBe(0);
+  });
+
+  it("a phone photo with GPS and a sideways orientation is stored upright, as a JPEG at most 2000px, with no metadata", async () => {
+    const sideways = await sharp({ create: { width: 3000, height: 1000, channels: 3, background: "#2e86c1" } })
+      .withExif({
+        IFD0: { Make: "PhoneCo", Model: "Driver Phone" },
+        IFD3: { GPSLatitudeRef: "N", GPSLatitude: "29/1 41/1 3863/100", GPSLongitudeRef: "W", GPSLongitude: "95/1 15/1 5851/100" },
+      })
+      .withMetadata({ orientation: 6 })
+      .png()
+      .toBuffer();
+    const before = await sharp(sideways).metadata();
+    expect(before.exif?.includes(Buffer.from("PhoneCo"))).toBe(true);
+    expect(before.orientation).toBe(6);
+
+    const order = await readyOrder();
+    await markOutForDelivery(storeId, order.id);
+    expect(await markDelivered(storeId, order.id, new Uint8Array(sideways))).toEqual({ ok: true });
+
+    const key = (await state(order.id)).order.deliveryProofKey!;
+    expect(key).toMatch(/\.jpg$/);
+    const stored = bucket.get(key)!;
+    expect(stored.contentType).toBe("image/jpeg");
+    const meta = await sharp(Buffer.from(stored.body)).metadata();
+    expect(meta.format).toBe("jpeg");
+    expect(meta.exif).toBeUndefined();
+    expect(meta.xmp).toBeUndefined();
+    expect(meta.orientation).toBeUndefined();
+    expect({ width: meta.width, height: meta.height }).toEqual({ width: 667, height: 2000 });
+  });
+
+  it("a file with a JPEG header and a garbage body is not a photo: nothing uploaded, order still out for delivery", async () => {
+    const order = await readyOrder();
+    await markOutForDelivery(storeId, order.id);
+    const garbage = new Uint8Array(4096).map((_, i) => (i * 37) % 251);
+    garbage.set(JPEG_HEADER);
+    expect(await markDelivered(storeId, order.id, garbage)).toEqual({ ok: false, error: PROOF_PHOTO_NOT_IMAGE });
+    const after = await state(order.id);
+    expect(after.order.status).toBe("OUT_FOR_DELIVERY");
+    expect(after.order.deliveryProofKey).toBeNull();
     expect(bucket.size).toBe(0);
   });
 });

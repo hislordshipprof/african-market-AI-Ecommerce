@@ -138,13 +138,14 @@ describe("delivery proof keys", () => {
       ContentType: "image/jpeg",
     });
     const { deliveryProofKey, streamDeliveryProof, streamFromR2 } = await import("./r2");
-    const key = deliveryProofKey("cmorder123", 1762700000000, "jpg");
+    const key = deliveryProofKey("cmorder123", 1762700000000);
     expect(key).toBe("delivery-proof/cmorder123/1762700000000.jpg");
 
     expect(await streamFromR2(key)).toBeNull();
     expect(await streamDeliveryProof("catalog/foo.jpg")).toBeNull();
     expect(await streamDeliveryProof("delivery-proof/cmorder123/../x.jpg")).toBeNull();
     expect(await streamDeliveryProof("delivery-proof/cmorder123/1762700000000.svg")).toBeNull();
+    expect(await streamDeliveryProof("delivery-proof/cmorder123/1762700000000.png")).toBeNull();
     expect(__mockSend).not.toHaveBeenCalled();
 
     expect(await streamDeliveryProof(key)).not.toBeNull();

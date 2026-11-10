@@ -68,11 +68,11 @@ export function isServableCatalogKey(key: string): boolean {
   return ALLOWED_KEY_RE.test(key);
 }
 
-const DELIVERY_PROOF_KEY_RE = /^delivery-proof\/[a-z0-9]+\/\d+\.(jpg|png|webp)$/;
+const DELIVERY_PROOF_KEY_RE = /^delivery-proof\/[a-z0-9]+\/\d+\.jpg$/;
 
-/** Private proof photos. Never servable by the catalog route: different prefix, different reader. */
-export function deliveryProofKey(orderId: string, timestamp: number, ext: "jpg" | "png" | "webp"): string {
-  return `delivery-proof/${orderId}/${timestamp}.${ext}`;
+/** Private proof photos, always re-encoded to JPEG. Never servable by the catalog route. */
+export function deliveryProofKey(orderId: string, timestamp: number): string {
+  return `delivery-proof/${orderId}/${timestamp}.jpg`;
 }
 
 export function isDeliveryProofKey(key: string): boolean {

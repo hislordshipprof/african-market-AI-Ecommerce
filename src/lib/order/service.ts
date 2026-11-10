@@ -11,7 +11,7 @@ import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
 import { deliveryProofKey, uploadToR2 } from "../r2";
-import { checkProofPhoto, STORE_DELIVERY_ONLY } from "./delivery-proof";
+import { prepareProofPhoto, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -1168,8 +1168,8 @@ export async function markDelivered(
   orderId: string,
   photo: Uint8Array | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const checked = checkProofPhoto(photo);
-  if (!checked.ok) return checked;
+  const prepared = await prepareProofPhoto(photo);
+  if (!prepared.ok) return prepared;
   const current = await storeScoped(storeId).order.findUnique({
     where: { id: orderId },
     select: { status: true, fulfillment: true },
@@ -1178,8 +1178,8 @@ export async function markDelivered(
   if (early) return { ok: false, error: early };
 
   const uploadedAt = new Date();
-  const key = deliveryProofKey(orderId, uploadedAt.getTime(), checked.type.ext);
-  await uploadToR2(key, photo!, checked.type.contentType);
+  const key = deliveryProofKey(orderId, uploadedAt.getTime());
+  await uploadToR2(key, prepared.jpeg, "image/jpeg");
 
   const result = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);

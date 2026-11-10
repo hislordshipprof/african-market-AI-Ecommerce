@@ -22,7 +22,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
   if (!photo) return notFound();
   return new Response(photo.body, {
     headers: {
-      "Content-Type": photo.contentType,
+      "Content-Type": "image/jpeg",
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
     },
