@@ -708,6 +708,39 @@ export async function findOrphanedAuthorizedOrders(opts?: {
   });
 }
 
+/**
+ * ACCEPTED/PICKING orders that may be past the pick timeout: accepted before
+ * `acceptedBefore` or created before `createdBefore`. The caller applies the
+ * pickup slot, which is free text.
+ */
+export async function findPickTimeoutCandidates(opts: {
+  acceptedBefore: Date;
+  createdBefore: Date;
+  limit: number;
+  storeIds?: readonly string[];
+}): Promise<Array<{ id: string; storeId: string; createdAt: Date; acceptedAt: Date; pickupSlot: string | null }>> {
+  if (opts.storeIds && opts.storeIds.length === 0) return [];
+  const inStores = opts.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; created_at: Date; accepted_at: Date; pickup_slot: string | null }>>`
+      SELECT id, store_id, created_at, accepted_at, pickup_slot FROM orders
+      WHERE status IN ('ACCEPTED', 'PICKING')
+        AND accepted_at IS NOT NULL
+        AND (accepted_at < ${opts.acceptedBefore} OR created_at < ${opts.createdBefore})
+        ${inStores}
+      ORDER BY (pickup_slot IS NULL OR created_at < ${opts.createdBefore}) DESC, created_at ASC
+      LIMIT ${opts.limit}
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      storeId: r.store_id,
+      createdAt: r.created_at,
+      acceptedAt: r.accepted_at,
+      pickupSlot: r.pickup_slot,
+    }));
+  });
+}
+
 const NOTIFICATION_RESEND_MS = 5 * 60_000;
 const NOTIFICATION_EXPIRE_MS = 2 * 60 * 60_000;
 

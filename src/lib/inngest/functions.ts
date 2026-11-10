@@ -1,7 +1,7 @@
 import { inngest } from "./client";
-import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders, findPendingOrderNotifications, expireStaleOrderNotifications } from "../db";
+import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders, findPendingOrderNotifications, expireStaleOrderNotifications, findPickTimeoutCandidates } from "../db";
 import { platform } from "../db";
-import { autoCancelOrder, reconcileStuckOrder } from "../order/service";
+import { autoCancelOrder, cancelOrder, reconcileStuckOrder } from "../order/service";
 import { isValidTimezone, openMinutesDeadline } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
 import { sendOrderNotification } from "./notify";
@@ -251,6 +251,34 @@ export const newOrderPush = inngest.createFunction(
   },
 );
 
+const PICK_TIMEOUT_MS = 24 * 60 * 60_000;
+const PICK_TIMEOUT_BATCH = 50;
+/** Scheduled orders not yet due sort after the rest; read past them so they cannot fill the batch. */
+const PICK_TIMEOUT_SCAN = 4 * PICK_TIMEOUT_BATCH;
+
+/**
+ * An ACCEPTED/PICKING order is abandoned 24 h after the later of acceptance and
+ * its pickup slot start, and never later than created_at + HOLD_SAFETY_CAP_MS.
+ */
+export function pickTimeoutDeadline(order: { createdAt: Date; acceptedAt: Date; pickupSlot: string | null }): number {
+  const slot = order.pickupSlot ? Date.parse(order.pickupSlot) : NaN;
+  const start = Math.max(order.acceptedAt.getTime(), Number.isNaN(slot) ? 0 : slot);
+  return Math.min(start + PICK_TIMEOUT_MS, order.createdAt.getTime() + HOLD_SAFETY_CAP_MS);
+}
+
+async function findPickTimeoutOrders(): Promise<Array<{ id: string; storeId: string }>> {
+  const now = Date.now();
+  const candidates = await findPickTimeoutCandidates({
+    acceptedBefore: new Date(now - PICK_TIMEOUT_MS),
+    createdBefore: new Date(now - HOLD_SAFETY_CAP_MS),
+    limit: PICK_TIMEOUT_SCAN,
+  });
+  return candidates
+    .filter((order) => pickTimeoutDeadline(order) <= now)
+    .slice(0, PICK_TIMEOUT_BATCH)
+    .map(({ id, storeId }) => ({ id, storeId }));
+}
+
 export const sweepOrphanedAuthorized = inngest.createFunction(
   {
     id: "order/sweep-orphaned-authorized",
@@ -262,7 +290,8 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
       await expireStaleOrderNotifications();
       const orders = await findOrphanedAuthorizedOrders();
       const notifications = await findPendingOrderNotifications();
-      return { orders, notifications };
+      const pickTimeouts = await findPickTimeoutOrders();
+      return { orders, notifications, pickTimeouts };
     });
 
     for (const row of found.orders) {
@@ -277,6 +306,20 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
           if (!isOrderNotifyEvent(row.event)) continue;
           await sendOrderNotification(row.storeId, row.orderId, row.event);
         }
+      });
+    }
+
+    for (const row of found.pickTimeouts) {
+      // A failed order logs and waits for the next run, so it cannot block the rest of the batch.
+      await step.run(`pick-timeout-${row.id}`, async () => {
+        let error: string | undefined;
+        try {
+          const result = await cancelOrder(row.storeId, row.id, { action: "pick_timeout" });
+          if (!result.ok) error = result.error;
+        } catch (err) {
+          error = err instanceof Error ? err.message : String(err);
+        }
+        if (error) console.error(JSON.stringify({ event: "pick_timeout_failed", orderId: row.id, error }));
       });
     }
   },
