@@ -51,7 +51,7 @@ import { RESOLVED_LINE_STATUSES } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
-import { REFUND_FAILED_STAFF_COPY, showCapturedLine } from "@/lib/order/staff-copy";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
 
 const STATUS_CONFIG: Record<
   string,
@@ -170,6 +170,12 @@ export function OrderInbox({
   }, [pollOrders]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
+
+  /** Every selection change drops the picked photo, so it can never ride along to another visit. */
+  function selectOrder(orderId: string | null) {
+    setProofPhoto(null);
+    setSelectedOrderId(orderId);
+  }
   const allLinesResolved =
     selectedOrder?.status === "PICKING"
       ? selectedOrder.lines.every((l) =>
@@ -235,7 +241,7 @@ export function OrderInbox({
       const result = await completePickupAction(orderId);
       if (result.ok) {
         toast.success("Pickup completed");
-        setSelectedOrderId(null);
+        selectOrder(null);
         pollOrders();
       } else {
         toast.error(result.error);
@@ -245,7 +251,13 @@ export function OrderInbox({
 
   function handleOutForDelivery(orderId: string) {
     startTransition(async () => {
-      const result = await markOutForDeliveryAction(orderId);
+      let result: Awaited<ReturnType<typeof markOutForDeliveryAction>>;
+      try {
+        result = await markOutForDeliveryAction(orderId);
+      } catch {
+        toast.error(STAFF_GENERIC_ERROR);
+        return;
+      }
       if (result.ok) {
         toast.success("Out for delivery");
         pollOrders();
@@ -272,11 +284,16 @@ export function OrderInbox({
       const form = new FormData();
       form.set("orderId", orderId);
       form.set("photo", new File([jpeg], "delivery.jpg", { type: "image/jpeg" }));
-      const result = await markDeliveredAction(form);
+      let result: Awaited<ReturnType<typeof markDeliveredAction>>;
+      try {
+        result = await markDeliveredAction(form);
+      } catch {
+        toast.error(STAFF_GENERIC_ERROR);
+        return;
+      }
       if (result.ok) {
         toast.success("Order delivered");
-        setProofPhoto(null);
-        setSelectedOrderId(null);
+        selectOrder(null);
         pollOrders();
       } else {
         toast.error(result.error);
@@ -344,7 +361,7 @@ export function OrderInbox({
         {selectedOrder ? (
           <div>
             <button
-              onClick={() => setSelectedOrderId(null)}
+              onClick={() => selectOrder(null)}
               className="mb-4 flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="size-4" /> Back to orders
@@ -583,7 +600,7 @@ export function OrderInbox({
                   return (
                     <button
                       key={order.id}
-                      onClick={() => setSelectedOrderId(order.id)}
+                      onClick={() => selectOrder(order.id)}
                       className="w-full text-left"
                     >
                       <Card className="transition-all duration-200 hover:shadow-md active:scale-[0.99]">
