@@ -933,6 +933,7 @@ model SupportMessage {
 
   @@index([storeId])
   @@index([threadId, createdAt])
+  @@index([senderUserId])
   @@map("support_messages")
 }
 

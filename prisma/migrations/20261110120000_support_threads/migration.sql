@@ -43,6 +43,7 @@ CREATE TABLE "support_messages" (
 
 CREATE INDEX "support_messages_store_id_idx" ON "support_messages"("store_id");
 CREATE INDEX "support_messages_thread_id_created_at_idx" ON "support_messages"("thread_id", "created_at");
+CREATE INDEX "support_messages_sender_user_id_idx" ON "support_messages"("sender_user_id");
 
 ALTER TABLE "support_messages"
     ADD CONSTRAINT "support_messages_store_id_fkey"
