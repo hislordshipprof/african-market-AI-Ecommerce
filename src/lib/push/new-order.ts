@@ -1,4 +1,5 @@
 import { platform, storeScoped } from "../db";
+import { isPushServiceEndpoint } from "./endpoint";
 import { pushSender, PushSendError } from "./sender";
 
 const GONE = new Set([404, 410]);
@@ -48,17 +49,32 @@ export async function sendNewOrderPush(
     url: `/store-admin/orders?store=${encodeURIComponent(store.slug)}`,
   };
 
-  for (const subscription of subscriptions) {
-    if (!memberIds.has(subscription.userId)) continue;
+  async function dropSubscription(id: string) {
     try {
-      await sender.send(subscription, message);
-    } catch (err) {
-      const status = err instanceof PushSendError ? err.status : 0;
-      if (GONE.has(status)) {
-        await scoped.pushSubscription.deleteMany({ where: { id: subscription.id } });
-        continue;
-      }
-      console.error(JSON.stringify({ event: "push_send_failed", storeId, orderId, subscriptionId: subscription.id, status }));
+      await scoped.pushSubscription.deleteMany({ where: { id } });
+    } catch {
+      console.error(JSON.stringify({ event: "push_delete_failed", storeId, orderId, subscriptionId: id }));
     }
   }
+
+  await Promise.allSettled(
+    subscriptions
+      .filter((subscription) => memberIds.has(subscription.userId))
+      .map(async (subscription) => {
+        if (!isPushServiceEndpoint(subscription.endpoint)) {
+          await dropSubscription(subscription.id);
+          return;
+        }
+        try {
+          await sender.send(subscription, message);
+        } catch (err) {
+          const status = err instanceof PushSendError ? err.status : 0;
+          if (GONE.has(status)) {
+            await dropSubscription(subscription.id);
+            return;
+          }
+          console.error(JSON.stringify({ event: "push_send_failed", storeId, orderId, subscriptionId: subscription.id, status }));
+        }
+      }),
+  );
 }

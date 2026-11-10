@@ -28,7 +28,7 @@ const keys = {
   p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
   auth: "tBHItJI5svbpez7KI4CCXg",
 };
-const endpoint = (name: string) => `https://push.example.test/send/${name}-${suffix}`;
+const endpoint = (name: string) => `https://fcm.googleapis.com/fcm/send/${name}-${suffix}`;
 
 type FakeSession = Awaited<ReturnType<typeof auth.api.getSession>>;
 
@@ -109,6 +109,18 @@ describe.skipIf(!hasDb)("subscribe and unsubscribe actions", () => {
     expect(rows.map((r) => [r.endpoint, r.userId])).toEqual([[endpoint("twice"), memberA]]);
   });
 
+  it("a member keeps at most 10 devices: the 11th replaces the oldest", async () => {
+    signInAs(memberA);
+    onStore(slugA);
+    for (let i = 0; i < 11; i++) {
+      expect(await subscribePushAction({ endpoint: endpoint(`cap${i}`), keys })).toEqual({ ok: true });
+    }
+    const rows = await storeScoped(storeA).pushSubscription.findMany();
+    expect(rows.map((r) => r.endpoint).sort()).toEqual(
+      Array.from({ length: 10 }, (_, i) => endpoint(`cap${i + 1}`)).sort(),
+    );
+  });
+
   it("a store B member cannot unsubscribe store A's endpoint", async () => {
     signInAs(memberA);
     onStore(slugA);
@@ -132,7 +144,9 @@ describe.skipIf(!hasDb)("subscribe and unsubscribe actions", () => {
   });
 
   it.each([
-    ["an http endpoint", { endpoint: "http://push.example.test/send/x", keys }],
+    ["an http endpoint", { endpoint: "http://fcm.googleapis.com/fcm/send/x", keys }],
+    ["a loopback address with a port", { endpoint: "https://127.0.0.1:9/x", keys }],
+    ["a host that is not a push service", { endpoint: "https://evil.example.com/push", keys }],
     ["a missing p256dh key", { endpoint: endpoint("bad"), keys: { auth: keys.auth } }],
     ["an empty auth key", { endpoint: endpoint("bad"), keys: { ...keys, auth: "" } }],
     ["an oversized p256dh key", { endpoint: endpoint("bad"), keys: { ...keys, p256dh: "A".repeat(500) } }],

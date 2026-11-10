@@ -12,7 +12,7 @@ const keys = {
 };
 
 export function endpointFor(name: string): string {
-  return `https://push.example.test/send/${name}-${suffix}`;
+  return `https://fcm.googleapis.com/fcm/send/${name}-${suffix}`;
 }
 
 describe.skipIf(!hasDb)("push_subscriptions RLS", () => {
