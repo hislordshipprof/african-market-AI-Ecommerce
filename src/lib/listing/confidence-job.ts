@@ -1,5 +1,4 @@
 import { findStoreIdsAfter, readStockEventRollups, storeScopedTransaction, writeConfidenceScores } from "../db";
-import { CONFIRMING_EVENT_TYPES } from "../order/stock-ledger";
 import { computeConfidence, CONFIDENCE_WINDOW_DAYS, type ConfidenceEvent } from "./confidence";
 
 const STORES_PER_BATCH = 100;
@@ -7,7 +6,7 @@ const STORES_PER_BATCH = 100;
 const BATCH_BUDGET_MS = 120_000;
 const WRITE_PAGE_SIZE = 500;
 const TRANSACTION = { timeout: 30_000, maxWait: 8_000 };
-const SIGNAL_EVENT_TYPES = [...CONFIRMING_EVENT_TYPES, "sale", "short"];
+const SIGNAL_EVENT_TYPES = ["recount", "restock", "adjust", "counter_sale", "sale", "short"];
 
 async function recomputeStore(storeId: string): Promise<number> {
   // Inside the step: replay must not reuse an older clock.

@@ -89,6 +89,9 @@ _Avoid_: Offline sale, POS sale
 **Owner report**:
 A stock change the store owner tells the Store copilot about (a restock, counter sales, a recount), confirmed with a tap.
 
+**Stock proposal**:
+A pending owner report the Store copilot drafted and has not applied. Stock changes only when the owner confirms it. Dismissing it writes nothing to the shelf.
+
 ## Assistants
 
 **Shopper assistant**:

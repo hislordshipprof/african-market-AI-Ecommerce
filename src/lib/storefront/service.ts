@@ -1,4 +1,5 @@
 import { cachedStorefrontRead } from "./cache";
+import { listingRelevanceJoin, listingRelevanceWhere } from "./search-relevance";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { orderPacks } from "./pack-order";
 import { stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
@@ -313,21 +314,8 @@ async function readSearchListings(
       SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
       WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id COLLATE "C" LIMIT 1
     ) pack ON true
-    CROSS JOIN LATERAL (
-      SELECT MIN(CASE
-        WHEN LOWER(term) = LOWER(${trimmed}) THEN 0
-        WHEN STARTS_WITH(LOWER(term), LOWER(${trimmed})) THEN 1
-        WHEN to_tsvector('english', term) @@ plainto_tsquery('english', ${trimmed}) THEN 2
-        ELSE 3 END) AS rank,
-        MAX(similarity(LOWER(${trimmed}), LOWER(term))) AS fuzzy
-      FROM (
-        SELECT l.custom_name AS term UNION ALL SELECT mp.name
-        UNION ALL SELECT ps.term FROM product_synonyms ps WHERE ps.product_id = mp.id
-        UNION ALL SELECT word FROM regexp_split_to_table(COALESCE(mp.name, '') || ' ' || COALESCE(l.custom_name, ''), '[^[:alnum:]]+') word
-        WHERE length(word) >= GREATEST(3, length(${trimmed}) - 1)
-      ) terms WHERE term IS NOT NULL
-    ) relevance
-    WHERE l.active = true AND ${notE2eListingSql} AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND relevance.fuzzy > 0.3))
+    ${listingRelevanceJoin(trimmed)}
+    WHERE l.active = true AND ${notE2eListingSql} AND ${listingRelevanceWhere(trimmed)}
     ORDER BY relevance.rank, relevance.fuzzy DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
     LIMIT 50
     `,

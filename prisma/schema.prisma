@@ -51,6 +51,9 @@ model Store {
   assistantUndoReceipts AssistantUndoReceipt[]
   guestBrowserCarts GuestBrowserCart[]
   paymentIntentReleases PaymentIntentRelease[]
+  copilotConversations CopilotConversation[]
+  copilotClientMessages CopilotClientMessage[]
+  stockProposals StockProposal[]
 
   @@map("stores")
 }
@@ -94,6 +97,8 @@ model User {
   platformCustomerProfile  PlatformCustomerProfile?
   customerAddresses        CustomerAddress[]
   cardSaveConsents         CardSaveConsent[]
+  copilotConversations     CopilotConversation[]
+  stockProposalDecisions   StockProposal[] @relation("StockProposalDecision")
 
   @@map("users")
 }
@@ -384,6 +389,80 @@ model StockEvent {
   @@index([actorId])
   @@index([storeId, listingId, createdAt])
   @@map("stock_events")
+}
+
+/// Owner copilot thread. Shopper transcripts stay on ai_conversations.
+model CopilotConversation {
+  id            String    @id @default(cuid())
+  storeId       String    @map("store_id")
+  userId        String    @map("user_id")
+  model         String
+  messages      Json      @default("[]")
+  inFlightUntil DateTime? @map("in_flight_until")
+  tokensIn      Int       @default(0) @map("tokens_in")
+  tokensOut     Int       @default(0) @map("tokens_out")
+  costMicros    BigInt    @default(0) @map("cost_micros")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  lastMessageAt DateTime  @default(now()) @map("last_message_at")
+
+  store    Store                 @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  user     User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  proposals StockProposal[]
+  receipts CopilotClientMessage[]
+
+  @@index([storeId])
+  @@index([storeId, userId, lastMessageAt])
+  @@map("copilot_conversations")
+}
+
+/// One row per owner send, so a repeated client message id replays without a second model call.
+model CopilotClientMessage {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  userId          String    @map("user_id")
+  conversationId  String?   @map("conversation_id")
+  clientMessageId String    @map("client_message_id")
+  reply           String?
+  claimedUntil    DateTime  @map("claimed_until")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  store        Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  conversation CopilotConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, userId, clientMessageId])
+  @@index([storeId])
+  @@index([conversationId])
+  @@map("copilot_client_messages")
+}
+
+/// A stock change the owner has not applied until they tap confirm. No stock-event foreign key.
+model StockProposal {
+  id              String    @id @default(cuid())
+  storeId         String    @map("store_id")
+  conversationId  String    @map("conversation_id")
+  listingId       String    @map("listing_id")
+  clientMessageId String    @map("client_message_id")
+  kind            String
+  quantity        Int?
+  statusValue     String?   @map("status_value")
+  before          Json
+  state           String
+  expiresAt       DateTime  @map("expires_at")
+  decidedById     String?   @map("decided_by_id")
+  decidedAt       DateTime? @map("decided_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  store        Store               @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  conversation CopilotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  decidedBy    User?               @relation("StockProposalDecision", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([storeId, listingId, state])
+  @@index([storeId, clientMessageId])
+  @@index([conversationId])
+  @@index([listingId])
+  @@index([decidedById])
+  @@map("stock_proposals")
 }
 
 model StoreBanner {
