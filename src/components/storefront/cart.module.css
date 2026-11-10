@@ -189,7 +189,7 @@
   border-radius: 12px;
   object-fit: cover;
   flex-shrink: 0;
-  background: var(--color-photo-well);
+  background: var(--sf-thumb-well, var(--color-bg));
 }
 .fallback {
   display: grid;

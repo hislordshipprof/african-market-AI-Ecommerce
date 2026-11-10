@@ -60,7 +60,8 @@
 .sf-product-image { background:var(--color-photo-well); isolation:isolate; }
 /* Dark themes: a quiet inner edge seats the light well inside the dark card. */
 .sf-product-image::before { content:""; position:absolute; inset:0; z-index:2; border-radius:inherit; box-shadow:var(--sf-photo-edge, none); pointer-events:none; }
-@media (prefers-color-scheme:dark) { :root { --sf-photo-edge: inset 0 0 0 1px rgb(0 0 0 / 28%), inset 0 1px 8px rgb(0 0 0 / 14%); } }
+/* Dark only: thumbnail frames take the well; light frames keep their original grounds. */
+@media (prefers-color-scheme:dark) { :root { --sf-photo-edge: inset 0 0 0 1px rgb(0 0 0 / 28%), inset 0 1px 8px rgb(0 0 0 / 14%); --sf-thumb-well: var(--color-photo-well); } }
 .sf-product-image[data-image-kind="cutout"]:has(img)::after { content:""; position:absolute; z-index:-1; bottom:10%; left:24%; width:52%; height:9%; border-radius:50%; background:radial-gradient(ellipse,#12372624,transparent 70%); }
 .sf-product-image img { object-fit:cover; padding:0; filter:none; transition:transform .4s var(--sf-motion-ease); }
 .sf-product-card { position:relative; padding:8px 8px 16px; border:1px solid transparent; border-radius:12px; background:var(--color-surface); transition:transform .3s var(--sf-motion-ease); }
@@ -155,9 +156,10 @@
   .sf-glass-one { top:auto; bottom:80px; right:auto; left:0; font-size:13px; padding:10px 12px; }
   .sf-glass-two,.sf-round-badge,.sf-hero-offer { display:none; }
   .sf-hero-controls { width:calc(100% - 32px); bottom:12px; }
-  .sf-hero-dots { gap:0; }
-  .sf-hero-dot { width:44px; }
-  .sf-hero-dot span,.sf-hero-dot[aria-current="true"] span { width:32px; }
+  .sf-hero-dot,.sf-hero-dot span,.sf-hero-dot[aria-current="true"] span { width:32px; }
+  /* 44px hit area without moving the dots. */
+  .sf-hero-dot { position:relative; }
+  .sf-hero-dot::after { content:""; position:absolute; inset:0 -6px; }
   .sf-hero-arrows { gap:6px; }
   .sf-reassurance { min-height:60px; justify-content:flex-start; overflow:auto; flex-wrap:nowrap; gap:24px; padding:14px 0; font-size:13px; scrollbar-width:none; }
   .sf-reassurance span { flex-shrink:0; display:flex; }

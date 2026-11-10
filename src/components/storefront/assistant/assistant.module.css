@@ -254,7 +254,7 @@
   width: 64px;
   height: 64px;
   border-radius: 8px;
-  background: var(--color-photo-well);
+  background: var(--sf-thumb-well, var(--color-raised));
   overflow: hidden;
 }
 

@@ -69,7 +69,7 @@
   flex: 0 0 88px;
   overflow: hidden;
   border-radius: 12px;
-  background: var(--color-photo-well);
+  background: var(--sf-thumb-well, var(--color-bg));
 }
 .photo > div,
 .smallPhoto > div,
