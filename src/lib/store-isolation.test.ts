@@ -748,3 +748,66 @@ describe.skipIf(!hasDb)("notification logs: storeScoped(A) reads only A's rows a
     expect(await storeScoped(storeBId).notificationLog.count({ where: { orderId: orderBId } })).toBe(1);
   });
 });
+
+describe.skipIf(!hasDb)("delivery events: storeScoped(B) cannot read or write store A's rows", () => {
+  let storeAId = "";
+  let storeBId = "";
+  let orderAId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const stamp = Date.now().toString(36);
+    const storeA = await raw.store.create({
+      data: { slug: `delivery-rls-a-${stamp}`, name: "Delivery RLS A", themePreset: "palm-and-shea" },
+    });
+    const storeB = await raw.store.create({
+      data: { slug: `delivery-rls-b-${stamp}`, name: "Delivery RLS B", themePreset: "palm-and-shea" },
+    });
+    storeAId = storeA.id;
+    storeBId = storeB.id;
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "RLS Buyer", email: "delivery-rls-a@example.com" },
+    });
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        customerId: customer.id,
+        status: "OUT_FOR_DELIVERY",
+        fulfillment: "store-delivery",
+        subtotalCents: 100,
+        bufferCents: 0,
+        totalCents: 100,
+        totalAuthorizedCents: 100,
+        number: 1,
+      },
+    });
+    orderAId = order.id;
+    await storeScoped(storeAId).deliveryEvent.create({
+      data: { storeId: storeAId, orderId: order.id, type: "out_for_delivery", payload: {} },
+    });
+  });
+
+  afterAll(async () => {
+    for (const id of [storeAId, storeBId]) {
+      if (!id) continue;
+      const scoped = storeScoped(id);
+      await scoped.deliveryEvent.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.customer.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter(Boolean) } } });
+    await raw.$disconnect();
+  });
+
+  it("delivery events: storeScoped(B) reads none of A's rows, cannot insert one for A, and deletes nothing", async () => {
+    expect(await storeScoped(storeBId).deliveryEvent.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).deliveryEvent.create({
+        data: { storeId: storeAId, orderId: orderAId, type: "delivered", payload: {} },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).deliveryEvent.deleteMany({ where: { orderId: orderAId } })).count).toBe(0);
+    expect(await storeScoped(storeAId).deliveryEvent.count({ where: { orderId: orderAId } })).toBe(1);
+  });
+});
