@@ -121,7 +121,7 @@
 }
 
 .seeAll {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font: 600 14px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
@@ -232,7 +232,7 @@
   place-items: center;
   overflow-wrap: anywhere;
   color: var(--color-muted);
-  font: 600 11px/1.2 Figtree, "Segoe UI", system-ui, sans-serif;
+  font: 600 13px/1.2 Figtree, "Segoe UI", system-ui, sans-serif;
   text-align: center;
   padding: 4px;
 }
@@ -594,7 +594,7 @@
 }
 
 .notice a {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-weight: 600;
 }
 

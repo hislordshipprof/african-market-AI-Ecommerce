@@ -245,11 +245,31 @@ export function getThemeTokens(
   return presets[preset][mode];
 }
 
+/**
+ * Primary as text (links, eyebrows, chip labels): the fill stays the brand colour, the text
+ * moves away from the grounds until it clears `target` on every one of them.
+ */
+function primaryText(tokens: ThemeTokens, target: number): string {
+  const grounds = [tokens.bg, tokens.surface, tokens.raised, tokens.soft];
+  const passes = (c: string) => grounds.every((g) => contrastRatio(c, g) >= target);
+  if (passes(tokens.primary)) return tokens.primary;
+  const dark = luminance(tokens.bg) < 0.5;
+  const [h, s, l] = hexToHsl(tokens.primary);
+  for (let step = 1; step <= 100; step++) {
+    const c = hslToHex(h, s, dark ? Math.min(1, l + step * 0.01) : Math.max(0, l - step * 0.01));
+    if (passes(c)) return c;
+  }
+  return tokens.ink;
+}
+
 function buildCssVars(tokens: ThemeTokens): Record<string, string> {
   const cssVars: Record<string, string> = {};
   for (const [key, value] of Object.entries(tokens)) {
     cssVars[`--store-${key}`] = value;
   }
+  const dark = luminance(tokens.bg) < 0.5;
+  // Dark tiles and hover tints sit a step lighter than raised, so dark text keeps headroom.
+  cssVars["--store-primary-text"] = primaryText(tokens, dark ? 5.5 : 4.5);
   cssVars["--store-on-primary"] = readableFillColor(tokens.primary);
   cssVars["--store-on-primary-deep"] = readableFillColor(tokens["primary-deep"]);
   cssVars["--store-on-accent"] = readableFillColor(tokens.accent);
