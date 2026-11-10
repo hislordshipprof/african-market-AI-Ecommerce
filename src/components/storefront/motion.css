@@ -168,6 +168,8 @@
   .sf-rail-item { width:185px; }
   .sf-product-card { padding:5px 5px 12px; }
   .sf-quick-view-trigger { font-size:13px; padding:8px 12px; top:5px; right:5px; }
+  /* Narrow cards: Quick view drops below the Frozen badge so both stay visible. */
+  .sf-product-photo:has(.sf-photo-tag) .sf-quick-view-trigger { top:40px; }
   .sf-product-name { font-size:16px; }
   .sf-local-name,.sf-product-meta,.sf-product-meta [data-testid="stock-badge"],.sf-price small,.sf-window-chip small { font-size:13px; }
   .sf-promo-photo { height:230px; }
@@ -233,7 +235,9 @@
   .sf-collection-rail .sf-collection-card { height:290px; }
   .sf-collection-rail .sf-collection-card > div:last-child { padding:12px; }
   .sf-collection-rail .sf-collection-card h3 { font-size:22px; }
-  .sf-collection-rail .sf-collection-card p { padding:0 52px 0 0; font-size:14px; }
+  .sf-collection-rail .sf-collection-card p { padding:0; font-size:14px; }
+  /* Phones: the arrow sits under the text instead of over it. */
+  .sf-collection-rail .sf-collection-card .sf-round-button { position:static; margin-top:10px; }
   .sf-market-track,.sf-market-item { gap:16px; }
 }
 @media (prefers-reduced-motion:reduce) {
