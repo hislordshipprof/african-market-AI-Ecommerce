@@ -402,6 +402,67 @@ describe.skipIf(!hasDb)("signed Stripe webhooks (lane DB)", () => {
     expect(stored?.capturedAmountCents).toBe(1000);
   });
 
+  it("refund.failed for an issue refund on a completed order, delivered twice, fails the issue once and leaves the order", async () => {
+    const customer = await storeScoped(storeA).customer.create({
+      data: { storeId: storeA, name: "Issue webhook" },
+    });
+    const pi = `pi_issue_failed_${run}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap-issue-failed");
+    const order = await storeScoped(storeA).order.create({
+      data: {
+        storeId: storeA,
+        number: 18630,
+        customerId: customer.id,
+        status: "COMPLETED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        completedAt: new Date(),
+      },
+    });
+    const key = `refund:${order.id}:1`;
+    const request = await storeScoped(storeA).refundRequest.create({
+      data: {
+        storeId: storeA,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key,
+        amountCents: 400,
+        refundApplicationFee: true,
+        state: "RESERVED",
+      },
+    });
+    const issue = await storeScoped(storeA).issueReport.create({
+      data: {
+        storeId: storeA,
+        orderId: order.id,
+        type: "damaged",
+        lines: [],
+        amountCents: 400,
+        state: "auto_refunded",
+        refundRequestId: request.id,
+      },
+    });
+    const refund = await fakeStripeProvider.refundPayment(pi, 400, key, { reservationKey: key, orderId: order.id });
+    setRefundStatus(refund.refundId, "failed");
+
+    expect((await postRefund("refund.failed", refund.refundId, pi, "failed", key)).status).toBe(200);
+    expect((await postRefund("refund.failed", refund.refundId, pi, "failed", key)).status).toBe(200);
+
+    const stored = await storeScoped(storeA).issueReport.findUniqueOrThrow({ where: { id: issue.id } });
+    expect(stored.state).toBe("refund_failed");
+    expect(await storeScoped(storeA).auditLog.count({
+      where: { entityId: order.id, action: "issue_refund_failed" },
+    })).toBe(1);
+    const after = await storeScoped(storeA).order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(after.status).toBe("COMPLETED");
+  });
+
   it("DB failure returns 500 and the retry records the refund", async () => {
     const customer = await storeScoped(storeA).customer.create({
       data: { storeId: storeA, name: "Retry webhook" },

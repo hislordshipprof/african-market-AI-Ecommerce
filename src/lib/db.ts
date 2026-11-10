@@ -108,6 +108,7 @@ export function storeScoped(storeId: string) {
     order: wrapDelegate(storeId, prisma.order),
     orderLine: wrapDelegate(storeId, prisma.orderLine),
     refundRequest: wrapDelegate(storeId, prisma.refundRequest),
+    issueReport: wrapDelegate(storeId, prisma.issueReport),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
