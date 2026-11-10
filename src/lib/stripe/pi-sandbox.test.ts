@@ -29,19 +29,19 @@ async function createAuthorizedPI(amountCents: number): Promise<string> {
   return pi.id;
 }
 
-async function waitForRefundFailedEvent(refundId: string): Promise<Stripe.Event> {
+async function waitForEvent(type: string, objectId: string): Promise<Stripe.Event> {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     let startingAfter: string | undefined;
     for (let page = 0; page < 5; page += 1) {
       const events = await stripe.events.list({
-        type: "refund.failed",
+        type,
         limit: 100,
         ...(startingAfter ? { starting_after: startingAfter } : {}),
       });
       const match = events.data.find((event) => {
         const object = event.data.object as { id?: string };
-        return object.id === refundId;
+        return object.id === objectId;
       });
       if (match) return match;
       if (!events.has_more || events.data.length === 0) break;
@@ -49,7 +49,7 @@ async function waitForRefundFailedEvent(refundId: string): Promise<Stripe.Event>
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  throw new Error(`refund.failed event for ${refundId} did not appear`);
+  throw new Error(`${type} event for ${objectId} did not appear`);
 }
 
 const FAILED_REFUND_MARKER = { sandboxTest: "failed-destination-refund" };
@@ -138,6 +138,21 @@ describe.skipIf(!hasKey)(
       const result = await stripeProvider.cancelPaymentIntent(piId, `test-cancel-${piId}`);
       expect(result.status).toBe("canceled");
     });
+
+    it("our void's payment_intent.canceled event parses through the provider", async () => {
+      const piId = await createAuthorizedPI(1200);
+      await stripeProvider.cancelPaymentIntent(piId, `echo-${piId}`);
+      const secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim();
+      expect(secret).toBeTruthy();
+      const match = await waitForEvent("payment_intent.canceled", piId);
+      const payload = JSON.stringify(match);
+      const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: secret! });
+      const parsed = stripeProvider.verifyWebhookSignature({ payload, signature });
+      expect(parsed.type).toBe("payment_intent.canceled");
+      expect(parsed.eventId).toBe(match.id);
+      // Our own void sends no reason, so the webhook never mistakes it for an expired hold.
+      expect(parsed.paymentIntent).toEqual({ id: piId, status: "canceled", cancellationReason: null });
+    }, 90_000);
 
     it("cancel on already-cancelled PI falls back to retrieve", async () => {
       const piId = await createAuthorizedPI(500);
@@ -391,7 +406,7 @@ describe.skipIf(!hasKey)(
 
       const secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim();
       expect(secret).toBeTruthy();
-      const match = earlier?.event ?? (await waitForRefundFailedEvent(refund.id));
+      const match = earlier?.event ?? (await waitForEvent("refund.failed", refund.id));
       expect(match.id).toBeTruthy();
       const payload = JSON.stringify(match);
       const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: secret! });
