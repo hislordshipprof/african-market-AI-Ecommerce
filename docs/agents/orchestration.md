@@ -95,14 +95,14 @@ Every pipeline script (`plan-ticket.sh`, `build-ticket.sh`, `review-ticket.sh`, 
 
 ## Coordinator runbook (any engine)
 
-The coordinator is one interactive session that never writes product code. Everything it needs is in the repo:
+The coordinator is one interactive session that never writes product code. Everything it needs is in the repo and the Phase 1 Build Board artifact:
 
 1. **Queue:** open issues labelled `ready-for-agent`, in the order of the Phase 1 Build Board artifact (see `CLAUDE.md`). Keep up to 3 lanes (ports 3000, 3100, 3200) while about 1 GB of RAM stays free. Never start a ticket that edits the same files as a running lane.
 2. **Start a lane:** run `scripts/plan-ticket.sh <n>` if the issue has no "Agent brief" comment, then `E2E_PORT=<port> [TIER=light] [RISK=1] scripts/build-ticket.sh <n>`. Each lane gets its own local Postgres database (`lane_t<n>`); lanes never touch Neon.
 3. **Review loop:** `build-ticket.sh` runs a fresh independent review (`review-ticket.sh`, plus Codex for RISK tickets) after every build and fix round. One automatic fix follows the first blocking review. After the second review the coordinator writes a decision (findings to fix, scope cuts, deferrals to named follow-up issues) and runs `scripts/build-ticket.sh <n> --resume "<decision>"` once. That review ends the ticket: no automatic fix, and every mode is refused when 3 review logs already exist.
 4. **Merge gate:** a review verdict of PASS on the PR head, and a `local-ci` success status on that same head (`build-ticket.sh` runs it beside each review; when it did not, e.g. SKIP_REVIEW=1 or a failed build run, the coordinator runs `E2E_PORT=<port> CI_DB=ci CI_RUNNER=../E-commerce-worktrees/ci-runner scripts/ci-local.sh` in the worktree). Then `scripts/merge-ticket.sh <n>`. The script enforces both halves and takes no verdict from the caller (`scripts/merge-gate.sh`, tests in `scripts/merge-gate.test.sh`): line 1 of the review file must be exactly `VERDICT: PASS`, no line may be `VERDICT: BLOCKING` (the second RISK review is appended to the same file), and `.builder/review-<n>.sha` must equal the PR head. A push after the review, or a repair by `ship-ticket.sh`, needs a new review. The script's own clean rebase carries the review over. When the owner decides to merge a reviewed commit with known findings, run it with `OWNER_ACCEPTS_BLOCKING="<the owner's reason>"`; the reason is posted on the PR, and the review must still be of the PR head. Do not add the `run-ci` label before 2026-12-01 (GitHub Actions budget).
 5. **Deploys:** production builds only when the squash subject ends with `[deploy]`. Use it only at milestones: `gh pr merge <pr> --squash --subject "<title> (#<pr>) [deploy]"`. Never put the marker anywhere else in a title.
-6. **Records:** update the build board row, close or edit follow-up issues, and record every decision on the issue, not only in chat.
+6. **Records:** update the Phase 1 Build Board `tickets` row, close or edit follow-up issues, and record every decision on the issue, not only in chat.
 
 ## Commit attribution
 

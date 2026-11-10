@@ -24,7 +24,7 @@ No AI attribution on commits or PRs: never add a `Co-Authored-By:` trailer for C
 
 Issues live in GitHub Issues for hislordshipprof/african-market-AI-Ecommerce (`gh` CLI). See `docs/agents/issue-tracker.md`.
 
-Ticket status lives on the **Phase 1 Build Board** artifact: https://claude.ai/artifact/V3sW62KYPUHVPSJY6X2Njv (build waves, the Phase 0–3 plan, and a `tickets` database with one status row per issue). It is the source of truth for where work stands; `HANDOFF.md` is not. Update the issue's row after every merge, PR status change or blocked round. Phases 2 and 3 are only outlined, in `docs/spec/platform-spec.md` §17.
+Ticket status lives on the **Phase 1 Build Board** artifact: https://claude.ai/artifact/V3sW62KYPUHVPSJY6X2Njv (build waves, the Phase 0–3 plan, and a `tickets` database with one status row per issue). It is the source of truth for where work stands; `HANDOFF.md` is not. The coordinator session updates the issue's row after every merge, PR status change or blocked round; pipeline lanes and reviewers cannot reach the artifact and record status on the GitHub issue instead. Phases 2 and 3 are only outlined, in `docs/spec/platform-spec.md` §17.
 
 ### Triage labels
 
