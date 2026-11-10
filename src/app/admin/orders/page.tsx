@@ -13,9 +13,14 @@ export default async function RefundFailedOrdersPage() {
     <div className="mx-auto max-w-5xl px-6 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Refunds to resolve</h1>
-        <Link href="/admin/stores" className="text-sm text-primary underline">
-          Stores
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/admin/orders/check" className="text-sm text-primary underline">
+            Orders to check
+          </Link>
+          <Link href="/admin/stores" className="text-sm text-primary underline">
+            Stores
+          </Link>
+        </div>
       </div>
       {rows.length === 0 ? (
         <p className="rounded-lg border border-input bg-card p-8 text-center text-muted-foreground" data-testid="refunds-empty">

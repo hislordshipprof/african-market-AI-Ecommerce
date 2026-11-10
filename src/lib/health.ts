@@ -23,22 +23,42 @@ const DEPLOY_ENV_VARS = [
   "APP_RUNTIME_PASSWORD",
   "RESEND_API_KEY",
 ] as const;
+const INNGEST_ENV_VARS = ["INNGEST_EVENT_KEY", "INNGEST_SIGNING_KEY"] as const;
 
 export function requiredEnvVars(
   env: Record<string, string | undefined>,
 ): readonly string[] {
   const vercelEnv = env.VERCEL_ENV;
-  if (vercelEnv === "production" || vercelEnv === "preview") {
+  if (vercelEnv === "production") {
+    return [...CORE_ENV_VARS, ...DEPLOY_ENV_VARS, ...INNGEST_ENV_VARS];
+  }
+  if (vercelEnv === "preview") {
     return [...CORE_ENV_VARS, ...DEPLOY_ENV_VARS];
   }
   return [...CORE_ENV_VARS];
+}
+
+/** Previews report the Inngest keys without failing: the owner sets them in #269. */
+function reportedEnvVars(env: Record<string, string | undefined>): readonly string[] {
+  return env.VERCEL_ENV === "preview" ? INNGEST_ENV_VARS : [];
+}
+
+let loggedInngestDev = false;
+
+/** Vercel ignores INNGEST_DEV (client.ts), so it is a config mistake to log once, not an outage. */
+function warnEnvFlags(env: Record<string, string | undefined>): void {
+  const dev = env.INNGEST_DEV?.trim().toLowerCase();
+  if (env.VERCEL_ENV === "production" && (dev === "1" || dev === "true") && !loggedInngestDev) {
+    loggedInngestDev = true;
+    console.warn("Health check: INNGEST_DEV is set in production");
+  }
 }
 
 export function checkEnv(
   env: Record<string, string | undefined>,
 ): Record<string, boolean> {
   const result: Record<string, boolean> = {};
-  for (const name of requiredEnvVars(env)) {
+  for (const name of [...requiredEnvVars(env), ...reportedEnvVars(env)]) {
     if (name === "DATABASE_URL_UNPOOLED") {
       result[name] = !!(env.DATABASE_URL_UNPOOLED || env.DIRECT_URL);
     } else {
@@ -125,12 +145,13 @@ export async function runHealthChecks(deps: {
   ]);
 
   const envResult = checkEnv(deps.env);
+  warnEnvFlags(deps.env);
   const version = deps.env.VERCEL_GIT_COMMIT_SHA || "unknown";
 
   const healthy =
     database.reachable &&
     migrations.upToDate &&
-    Object.values(envResult).every(Boolean);
+    requiredEnvVars(deps.env).every((name) => envResult[name]);
 
   return {
     status: healthy ? 200 : 503,
