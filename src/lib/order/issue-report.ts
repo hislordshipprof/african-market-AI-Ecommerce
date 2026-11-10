@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { deliveryProofBucket, issuePhotoKey, uploadIssuePhoto } from "../r2";
+import { money } from "../format";
 import { prepareProofPhoto } from "./delivery-proof";
 import { evaluateOrderRefundState, submitRefund } from "./refund-requests";
 
@@ -26,9 +27,6 @@ export type IssueReportInput = {
   note: string | null;
   photo: Uint8Array | null;
 };
-
-const money = (cents: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 
 /** What the customer sees about their report on the tracking and report pages. */
 export function issueStateMessage(issue: { state: string; amountCents: number }): string {

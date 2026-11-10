@@ -3,17 +3,31 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { reportIssueAction, type ReportIssueResult } from "@/lib/order/issue-actions";
+import { jpegBlob } from "@/lib/image/client-jpeg";
+import { money } from "@/lib/format";
 import { FlowCard, FlowError } from "./common";
 import { Button } from "../primitives";
 import "./order-flow.css";
 
 export type ReportLine = { id: string; name: string; qtyPicked: number; unitPriceCents: number };
 
-const money = (cents: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+const PHOTO_UNREADABLE = "This browser can't read that photo. Take it again or choose another one.";
+
+/** A phone photo is larger than the action body limit, so it is shrunk here before it is sent. */
+async function submitReport(previous: ReportIssueResult, form: FormData): Promise<ReportIssueResult> {
+  const photo = form.get("photo");
+  if (photo instanceof File && photo.size > 0) {
+    try {
+      form.set("photo", new File([await jpegBlob(photo)], "issue.jpg", { type: "image/jpeg" }));
+    } catch {
+      return { ok: false, error: PHOTO_UNREADABLE };
+    }
+  }
+  return reportIssueAction(previous, form);
+}
 
 export function IssueReportForm({ token, lines }: { token: string; lines: ReportLine[] }) {
-  const [result, action, pending] = useActionState<ReportIssueResult, FormData>(reportIssueAction, null);
+  const [result, action, pending] = useActionState<ReportIssueResult, FormData>(submitReport, null);
   if (result?.ok) {
     return (
       <FlowCard title={result.state === "auto_refunded" ? "Refund on its way" : "Sent to the store"}>
