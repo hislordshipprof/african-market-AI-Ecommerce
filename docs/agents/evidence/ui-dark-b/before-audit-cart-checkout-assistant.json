@@ -1,0 +1,836 @@
+{
+ "375-dark": {
+  "drawer": {
+   "checked": 12,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Exact item only",
+     "sel": "a.cart-module__clQJ3q__swap",
+     "size": 12
+    },
+    {
+     "text": "Continue to checkout",
+     "sel": "a.sf-text-link",
+     "size": 12
+    }
+   ],
+   "overflow": 0
+  },
+  "cartPage": {
+   "checked": 74,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Keep shopping",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "Your neighborhood, delivered",
+     "sel": "div.flow-eyebrow",
+     "size": 11
+    },
+    {
+     "text": "Replace with ",
+     "sel": "button.cart-checkout-module__uL5gDa__swap",
+     "size": 12
+    },
+    {
+     "text": "Exact item only",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Subtotal",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "10",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "90",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "00",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  },
+  "checkout": {
+   "checked": 73,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Back to basket",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "Your neighborhood, delivered",
+     "sel": "div.flow-eyebrow",
+     "size": 11
+    },
+    {
+     "text": "Demo map",
+     "sel": "small",
+     "size": 10
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "10",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Edit basket",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "90",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "00",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  },
+  "assistant": {
+   "checked": 9,
+   "overImage": 0,
+   "fails": [],
+   "small": [],
+   "overflow": 0
+  }
+ },
+ "1280-dark": {
+  "drawer": {
+   "checked": 12,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Exact item only",
+     "sel": "a.cart-module__clQJ3q__swap",
+     "size": 12
+    }
+   ],
+   "overflow": 0
+  },
+  "cartPage": {
+   "checked": 81,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Your neighborhood, delivered",
+     "sel": "div.flow-eyebrow",
+     "size": 11
+    },
+    {
+     "text": "Replace with ",
+     "sel": "button.cart-checkout-module__uL5gDa__swap",
+     "size": 12
+    },
+    {
+     "text": "Exact item only",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "90",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "00",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "160 ml tin",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.41 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "400 ml tin",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.97 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "10-pack",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  },
+  "checkout": {
+   "checked": 78,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Your neighborhood, delivered",
+     "sel": "div.flow-eyebrow",
+     "size": 11
+    },
+    {
+     "text": "Demo map",
+     "sel": "small",
+     "size": 10
+    },
+    {
+     "text": "90",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "00",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  },
+  "assistant": {
+   "checked": 9,
+   "overImage": 0,
+   "fails": [],
+   "small": [],
+   "overflow": 0
+  }
+ },
+ "375-light": {
+  "drawer": {
+   "checked": 12,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Exact item only",
+     "sel": "a.cart-module__clQJ3q__swap",
+     "size": 12
+    },
+    {
+     "text": "Continue to checkout",
+     "sel": "a.sf-text-link",
+     "size": 12
+    }
+   ],
+   "overflow": 0
+  },
+  "cartPage": {
+   "checked": 74,
+   "overImage": 0,
+   "fails": [
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 13,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": false
+    }
+   ],
+   "small": [
+    {
+     "text": "Pickup · 30 min",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Keep shopping",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "Your neighborhood, delivered",
+     "sel": "div.flow-eyebrow",
+     "size": 11
+    },
+    {
+     "text": "Replace with ",
+     "sel": "button.cart-checkout-module__uL5gDa__swap",
+     "size": 12
+    },
+    {
+     "text": "Exact item only",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Subtotal",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "10",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12
+    },
+    {
+     "text": "90",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "00",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  },
+  "checkout": {
+   "checked": 73,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Pickup · 30 min",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Back to basket",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "Your neighborhood, delivered",
+     "sel": "div.flow-eyebrow",
+     "size": 11
+    },
+    {
+     "text": "Demo map",
+     "sel": "small",
+     "size": 10
+    },
+    {
+     "text": "Home",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Categories",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Search",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "10",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Account",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "Edit basket",
+     "sel": "a.sf-text-link",
+     "size": 12
+    },
+    {
+     "text": "90",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "00",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 10
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 10
+    }
+   ],
+   "overflow": 0
+  },
+  "assistant": {
+   "checked": 9,
+   "overImage": 0,
+   "fails": [],
+   "small": [],
+   "overflow": 0
+  }
+ },
+ "1280-light": {
+  "drawer": {
+   "checked": 12,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Exact item only",
+     "sel": "a.cart-module__clQJ3q__swap",
+     "size": 12
+    }
+   ],
+   "overflow": 0
+  },
+  "cartPage": {
+   "checked": 81,
+   "overImage": 0,
+   "fails": [
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10,
+     "weight": 600,
+     "ratio": 4.16,
+     "fg": "#2e7d4f",
+     "bg": "#e0ece5",
+     "image": false,
+     "fail": true,
+     "small": true
+    }
+   ],
+   "small": [
+    {
+     "text": "Set ZIP code",
+     "sel": "small",
+     "size": 11
+    },
+    {
+     "text": "/",
+     "sel": "kbd.sf-search-key",
+     "size": 12
+    },
+    {
+     "text": "Your neighborhood, delivered",
+     "sel": "div.flow-eyebrow",
+     "size": 11
+    },
+    {
+     "text": "Replace with ",
+     "sel": "button.cart-checkout-module__uL5gDa__swap",
+     "size": 12
+    },
+    {
+     "text": "Exact item only",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "90",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "00",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "49",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.99 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "160 ml tin",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$1.41 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "400 ml tin",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 12.6
+    },
+    {
+     "text": "$4.97 / 100 g",
+     "sel": "small",
+     "size": 12
+    },
+    {
+     "text": "10-pack",
+     "sel": "span",
+     "size": 12
+    },
+    {
+     "text": "In stock",
+     "sel": "span.inline-flex.items-center",
+     "size": 10
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  },
+  "checkout": {
+   "checked": 78,
+   "overImage": 0,
+   "fails": [],
+   "small": [
+    {
+     "text": "Set ZIP code",
+     "sel": "small",
+     "size": 11
+    },
+    {
+     "text": "/",
+     "sel": "kbd.sf-search-key",
+     "size": 12
+    },
+    {
+     "text": "Your neighborhood, delivered",
+     "sel": "div.flow-eyebrow",
+     "size": 11
+    },
+    {
+     "text": "Demo map",
+     "sel": "small",
+     "size": 10
+    },
+    {
+     "text": "90",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "00",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "99",
+     "sel": "sup",
+     "size": 10.8
+    },
+    {
+     "text": "© 2026  Mama Ngozi African Market",
+     "sel": "span",
+     "size": 11
+    },
+    {
+     "text": "Powered by the Platform",
+     "sel": "span",
+     "size": 11
+    }
+   ],
+   "overflow": 0
+  },
+  "assistant": {
+   "checked": 9,
+   "overImage": 0,
+   "fails": [],
+   "small": [],
+   "overflow": 0
+  }
+ }
+}
