@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getStore } from "@/lib/get-store";
-import { findOrderForTracking } from "@/lib/notifications/lookup";
+import { findOrderByTrackingToken } from "@/lib/notifications/lookup";
 import { streamDeliveryProof } from "@/lib/r2";
 import { parseInput } from "@/lib/security/parse-input";
 
@@ -10,13 +10,13 @@ function notFound() {
   return new Response(null, { status: 404, headers: { "Cache-Control": "private, no-store" } });
 }
 
-/** The proof photo is private: anyone with the order's tracking link may see it, no one else. */
+/** The proof photo is private: only the tracking token opens it, never the order id. */
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
   const parsed = parseInput(tokenSchema, token);
   if (!parsed.ok) return notFound();
   const store = await getStore();
-  const order = await findOrderForTracking(store.id, parsed.data).catch(() => null);
+  const order = await findOrderByTrackingToken(store.id, parsed.data).catch(() => null);
   if (!order?.deliveryProofKey) return notFound();
   const photo = await streamDeliveryProof(order.deliveryProofKey);
   if (!photo) return notFound();

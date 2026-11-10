@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 
 let currentSlug = "";
@@ -9,14 +9,14 @@ vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound"
 const bucket = vi.hoisted(() => new Map<string, { body: Uint8Array; contentType: string }>());
 vi.mock("@aws-sdk/client-s3", () => {
   class GetObjectCommand {
-    constructor(readonly input: { Key: string }) {}
+    constructor(readonly input: { Bucket: string; Key: string }) {}
   }
   class PutObjectCommand {
     constructor(readonly input: { Key: string }) {}
   }
   class S3Client {
     async send(command: GetObjectCommand) {
-      const object = bucket.get(command.input.Key);
+      const object = bucket.get(`${command.input.Bucket}/${command.input.Key}`);
       if (!object) throw new Error("NoSuchKey");
       return {
         ContentType: object.contentType,
@@ -42,6 +42,7 @@ describe.skipIf(!hasDb)("GET /api/delivery-proof/[token]", () => {
   let storeAId = "";
   let storeBId = "";
   let deliveredToken = "";
+  let deliveredId = "";
   let noProofToken = "";
 
   const call = (slug: string, token: string) => {
@@ -82,9 +83,10 @@ describe.skipIf(!hasDb)("GET /api/delivery-proof/[token]", () => {
     deliveredToken = `tok-delivered-${stamp}`;
     noProofToken = `tok-noproof-${stamp}`;
     const delivered = await order(storeAId, 1, deliveredToken);
+    deliveredId = delivered.id;
     const key = `delivery-proof/${delivered.id}/1762700000000.jpg`;
     await storeScoped(storeAId).order.update({ where: { id: delivered.id }, data: { status: "DELIVERED", deliveryProofKey: key } });
-    bucket.set(key, { body: PHOTO, contentType: "image/jpeg" });
+    bucket.set(`proof-bucket/${key}`, { body: PHOTO, contentType: "image/jpeg" });
     await order(storeAId, 2, noProofToken);
   });
 
@@ -92,7 +94,12 @@ describe.skipIf(!hasDb)("GET /api/delivery-proof/[token]", () => {
     process.env.R2_ACCOUNT_ID = "test-account";
     process.env.R2_ACCESS_KEY_ID = "test-key";
     process.env.R2_SECRET_ACCESS_KEY = "test-secret";
-    process.env.R2_BUCKET = "test-bucket";
+    process.env.R2_BUCKET = "catalog-bucket";
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   afterAll(async () => {
@@ -117,5 +124,15 @@ describe.skipIf(!hasDb)("GET /api/delivery-proof/[token]", () => {
     expect((await call(slugA, "tok-unknown")).status).toBe(404);
     expect((await call(slugB, deliveredToken)).status).toBe(404);
     expect((await call(slugA, noProofToken)).status).toBe(404);
+  });
+
+  it("the delivered order's id is not its tracking token: 404", async () => {
+    expect((await call(slugA, deliveredId)).status).toBe(404);
+    expect((await call(slugA, deliveredToken)).status).toBe(200);
+  });
+
+  it("with no private proof bucket configured the photo is 404", async () => {
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    expect((await call(slugA, deliveredToken)).status).toBe(404);
   });
 });

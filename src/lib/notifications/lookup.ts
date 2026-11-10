@@ -9,6 +9,14 @@ const orderInclude = {
   },
 } as const;
 
+/** The tracking token only: no order-id fallback. For the private delivery photo. */
+export async function findOrderByTrackingToken(storeId: string, token: string) {
+  return storeScoped(storeId).order.findUnique({
+    where: { trackingToken: token },
+    select: { id: true, deliveryProofKey: true },
+  });
+}
+
 /** Tracking token first, then the order id, so checkout and account links keep working. */
 export async function findOrderForTracking(storeId: string, token: string) {
   const scoped = storeScoped(storeId);
