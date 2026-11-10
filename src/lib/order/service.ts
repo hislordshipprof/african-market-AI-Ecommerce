@@ -5,7 +5,7 @@ import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/error
 import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
-import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
+import { RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification } from "../notifications/record";
@@ -63,9 +63,6 @@ function orderAuditWhere(entityId: string, action: string) {
 function cancellationAuditAction(acceptedAt: Date | null): "void_zero_amount" | "auto_cancel" {
   return acceptedAt == null ? "auto_cancel" : "void_zero_amount";
 }
-
-export const STORE_CANCEL_REASONS = ["out_of_stock", "store_closed", "too_busy", "other"] as const;
-export type StoreCancelReason = (typeof STORE_CANCEL_REASONS)[number];
 
 export type CancelCause =
   | { action: "auto_cancel" }

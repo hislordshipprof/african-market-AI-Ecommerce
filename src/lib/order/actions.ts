@@ -12,8 +12,8 @@ import {
   markOutForDelivery,
   markDelivered,
   cancelOrder,
-  STORE_CANCEL_REASONS,
 } from "./service";
+import { STORE_CANCEL_REASONS } from "./constants";
 import {
   DELIVERY_PROOF_MAX_BYTES,
   PROOF_PHOTO_MISSING,
