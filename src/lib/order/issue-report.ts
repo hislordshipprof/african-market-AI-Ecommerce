@@ -59,7 +59,11 @@ function issueAmountCents(order: OrderWithLines, chosen: IssueReportInput["lines
   return total > 0 ? total : null;
 }
 
-function refusal(order: (OrderWithLines & { issueReports: unknown[] }) | null, input: IssueReportInput, now: Date) {
+function refusal(
+  order: (OrderWithLines & { issueReports: unknown[] }) | null,
+  input: IssueReportInput,
+  now: Date,
+): { error: string } | { amount: number } {
   if (!order) return { error: ISSUE_ORDER_NOT_FOUND };
   if (order.issueReports.length > 0) return { error: ISSUE_ALREADY_REPORTED };
   if (!issueWindowOpen(order, now)) return { error: ISSUE_WINDOW_CLOSED };
