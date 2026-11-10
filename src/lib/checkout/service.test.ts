@@ -150,12 +150,36 @@ describe("computeQuote", () => {
   });
 
   it("flags non-pickup fulfillment", () => {
-    const q = computeQuote(0, baseLines(), validContact, "store-delivery");
+    const q = computeQuote(0, baseLines(), validContact, "courier");
     expect(q.problems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "ineligible" }),
       ]),
     );
+    expect(q.deliveryFeeCents).toBe(0);
+  });
+
+  it("store delivery adds the store's fee to total and hold", () => {
+    const q = computeQuote(
+      0,
+      [{ price: 4000, qty: 1, maxPerOrder: null }],
+      validContact,
+      "store-delivery",
+      {
+        enabled: true,
+        feeCents: 500,
+        radiusMi: 8,
+        hasCoordinates: true,
+        confirmed: { withinRadius: true },
+        leaveAtDoor: false,
+      },
+    );
+    expect(q.problems).toEqual([]);
+    expect(q.subtotalCents).toBe(4000);
+    expect(q.deliveryFeeCents).toBe(500);
+    expect(q.totalCents).toBe(4500);
+    expect(q.bufferCents).toBe(400);
+    expect(q.holdCents).toBe(4900);
   });
 
   it("returns a valid expiration ~15 minutes out", () => {

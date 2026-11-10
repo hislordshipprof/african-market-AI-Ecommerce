@@ -362,8 +362,142 @@ export async function lockConversationRow(tx: Pick<PrismaClient, "$queryRaw">, c
   await tx.$queryRaw`SELECT id FROM ai_conversations WHERE id = ${conversationId} FOR UPDATE`;
 }
 
-export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
-  await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
+export interface LockedStoreRow {
+  storeDeliveryEnabled: boolean;
+  storeDeliveryFeeCents: number;
+  deliveryRadiusMi: number;
+  lat: number | null;
+  lng: number | null;
+}
+
+export interface GeocodeCacheRow {
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+  formattedAddress: string;
+  lat: number;
+  lng: number;
+}
+
+export async function readAddressGeocode(key: string, cutoff: Date): Promise<GeocodeCacheRow | null> {
+  const rows = await prisma.$queryRaw<Array<{
+    line1: string;
+    city: string;
+    state: string;
+    zip: string;
+    formatted_address: string;
+    lat: number;
+    lng: number;
+  }>>`
+    SELECT line1, city, state, zip, formatted_address, lat, lng
+    FROM address_geocodes
+    WHERE key = ${key} AND cached_at > ${cutoff}
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    line1: row.line1,
+    city: row.city,
+    state: row.state,
+    zip: row.zip,
+    formattedAddress: row.formatted_address,
+    lat: row.lat,
+    lng: row.lng,
+  };
+}
+
+export async function upsertAddressGeocode(
+  key: string,
+  match: GeocodeCacheRow,
+  now: Date,
+): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO address_geocodes (key, line1, city, state, zip, formatted_address, lat, lng, cached_at)
+    VALUES (
+      ${key},
+      ${match.line1},
+      ${match.city},
+      ${match.state},
+      ${match.zip},
+      ${match.formattedAddress},
+      ${match.lat},
+      ${match.lng},
+      ${now}
+    )
+    ON CONFLICT (key) DO UPDATE SET
+      line1 = EXCLUDED.line1,
+      city = EXCLUDED.city,
+      state = EXCLUDED.state,
+      zip = EXCLUDED.zip,
+      formatted_address = EXCLUDED.formatted_address,
+      lat = EXCLUDED.lat,
+      lng = EXCLUDED.lng,
+      cached_at = EXCLUDED.cached_at
+  `;
+}
+
+export interface LockedStoreAddress {
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}
+
+export async function lockStoreAddress(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+): Promise<LockedStoreAddress | null> {
+  const rows = await tx.$queryRaw<Array<{
+    address_line1: string | null;
+    address_line2: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+  }>>`
+    SELECT address_line1, address_line2, city, state, zip
+    FROM stores
+    WHERE id = ${storeId}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    addressLine1: row.address_line1,
+    addressLine2: row.address_line2,
+    city: row.city,
+    state: row.state,
+    zip: row.zip,
+  };
+}
+
+/** Locks the store and returns the delivery settings read under that lock. */
+export async function lockStoreRow(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+): Promise<LockedStoreRow> {
+  const rows = await tx.$queryRaw<Array<{
+    store_delivery_enabled: boolean;
+    store_delivery_fee_cents: number;
+    delivery_radius_mi: unknown;
+    lat: number | null;
+    lng: number | null;
+  }>>`
+    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng
+    FROM stores
+    WHERE id = ${storeId}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row) throw new Error("Store not found");
+  return {
+    storeDeliveryEnabled: row.store_delivery_enabled,
+    storeDeliveryFeeCents: row.store_delivery_fee_cents,
+    deliveryRadiusMi: Number(row.delivery_radius_mi),
+    lat: row.lat,
+    lng: row.lng,
+  };
 }
 
 /** Tagged SQL on an open transaction. Callers outside this file cannot call $queryRaw. */

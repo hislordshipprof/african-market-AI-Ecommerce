@@ -180,7 +180,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   let orderSeq = 90000;
   async function createTestOrder(
     status: string = "AUTHORIZED",
-    opts?: { tipCents?: number; deliveryFeeCents?: number; fulfillment?: "pickup" | "delivery" },
+    opts?: { tipCents?: number; deliveryFeeCents?: number; fulfillment?: "pickup" | "delivery" | "courier" | "store-delivery" },
   ) {
     const num = ++orderSeq;
     const tipCents = opts?.tipCents ?? 0;
@@ -409,7 +409,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   it("markReady succeeds and captures correct amount (lines + tip + delivery)", async () => {
-    const order = await createTestOrder("AUTHORIZED", { tipCents: 200, deliveryFeeCents: 300 });
+    const order = await createTestOrder("AUTHORIZED", { tipCents: 200, deliveryFeeCents: 300, fulfillment: "courier" });
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({
@@ -428,12 +428,12 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     }
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("AWAITING_PICKUP");
+    expect(updated!.status).toBe("READY");
     expect(updated!.readyAt).toBeTruthy();
     expect(updated!.capturedAmountCents).toBe(6000);
 
     expect(capturedPayments.get(order.paymentIntentId!)).toBe(6000);
-    // 2.9% + 30¢ of 6000 = 204, plus the $3 delivery fee.
+    // 2.9% + 30¢ of 6000 = 204, plus the $3 courier delivery fee.
     expect(capturedFees.get(order.paymentIntentId!)).toBe(504);
     expect(updated!.platformFeeCents).toBe(204);
   });
@@ -2338,18 +2338,58 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   it("markReady for a delivery order captures and lands on READY", async () => {
-    const order = await createTestOrder("AUTHORIZED", { fulfillment: "delivery" });
-    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    const order = await createTestOrder("AUTHORIZED", {
+      fulfillment: "store-delivery",
+      deliveryFeeCents: 500,
+    });
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    setNextCaptureFailure(pi, 1);
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
     for (const line of lines) await markLinePicked(storeId, line.id);
+
+    const failed = await markReady(storeId, order.id);
+    expect(failed.ok).toBe(false);
+    const capturing = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(capturing!.status).toBe("CAPTURING");
+    await backdateCaptureAttempt(order.id, 30_000);
 
     const result = await markReady(storeId, order.id);
     expect(result.ok).toBe(true);
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("READY");
     expect(updated!.readyAt).toBeTruthy();
-    expect(capturedPayments.get(order.paymentIntentId!)).toBe(5500);
+    expect(capturedPayments.get(pi)).toBe(6000);
+    expect(capturedFees.get(pi)).toBe(204);
+    expect(updated!.platformFeeCents).toBe(204);
+  });
+
+  it("markReady voids a store delivery order with nothing picked", async () => {
+    const order = await createTestOrder("AUTHORIZED", {
+      fulfillment: "store-delivery",
+      deliveryFeeCents: 500,
+      tipCents: 200,
+    });
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    await storeScopedTransaction(storeId, async (tx) => {
+      for (const line of lines) {
+        await tx.orderLine.update({
+          where: { id: line.id },
+          data: { status: "refunded", qtyPicked: 0 },
+        });
+      }
+      await tx.order.update({ where: { id: order.id }, data: { status: "PICKING" } });
+    });
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.capturedAmountCents).toBe(0);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(capturedPayments.has(order.paymentIntentId!)).toBe(false);
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
   });
 
   it("markReady rejects a short line and does not call Stripe", async () => {
@@ -3321,6 +3361,27 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       ).toBe(0);
     } finally {
       spy.mockRestore();
+    }
+  });
+
+  it("reconcile after a restart registers a checkout harness hold before the first retrieve", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const harness = `pi_fake_${order.id}`;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { paymentIntentId: harness, capturedAmountCents: 5500 },
+      });
+    });
+    resetFakeStripe();
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("CI", "true");
+    try {
+      const result = await reconcileStuckOrder(storeId, order.id);
+      expect(result).toEqual({ ok: true, action: "finalized_capture" });
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 

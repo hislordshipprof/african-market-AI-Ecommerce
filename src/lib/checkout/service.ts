@@ -1,5 +1,7 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform } from "../db";
+import { assessRadius } from "../address/geo";
+import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
 import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
@@ -107,11 +109,22 @@ function validEmail(email: string): boolean {
   return EMAIL_RE.test(email.trim());
 }
 
+export interface StoreDeliveryQuote {
+  enabled: boolean;
+  feeCents: number;
+  radiusMi: number;
+  hasCoordinates: boolean;
+  /** Null until Census has confirmed the address. Distance is not stored here. */
+  confirmed: { withinRadius: boolean } | null;
+  leaveAtDoor: boolean;
+}
+
 export function computeQuote(
   minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null }>,
+  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean }>,
   contact: Contact,
   fulfillment: Fulfillment,
+  delivery?: StoreDeliveryQuote | null,
 ): CheckoutQuote {
   const problems: FlowProblem[] = [];
   let subtotalCents = 0;
@@ -151,22 +164,49 @@ export function computeQuote(
     });
   }
 
-  if (fulfillment !== "pickup") {
+  let deliveryFeeCents = 0;
+  if (fulfillment === "courier") {
     problems.push({
       code: "ineligible",
       message: "Only pickup is available for this store.",
     });
+  } else if (fulfillment === "store-delivery") {
+    // The fee stays in the hold when delivery is switched off or the radius
+    // shrinks, so those refusals are visible as problems rather than a new total.
+    deliveryFeeCents = Math.max(0, delivery?.feeCents ?? 0);
+    if (!delivery || !delivery.enabled || !delivery.hasCoordinates || delivery.radiusMi <= 0) {
+      problems.push({
+        code: "ineligible",
+        message: "Only pickup is available for this store.",
+      });
+    } else if (!delivery.confirmed) {
+      problems.push({
+        code: "ineligible",
+        message: "We couldn't find that address",
+      });
+    } else if (!delivery.confirmed.withinRadius) {
+      problems.push({
+        code: "outside-radius",
+        message: "That address is outside the delivery area",
+      });
+    }
+    if (delivery?.leaveAtDoor && cartLines.some((line) => line.frozen)) {
+      problems.push({
+        code: "ineligible",
+        message: "Frozen items require handoff.",
+      });
+    }
   }
 
   const tipCents = 0;
-  const totalCents = subtotalCents + tipCents;
+  const totalCents = subtotalCents + tipCents + deliveryFeeCents;
   const bufferCents = Math.min(Math.round(subtotalCents * 0.1), 2000);
   const holdCents = totalCents + bufferCents;
 
   return {
     id: crypto.randomUUID(),
     subtotalCents,
-    deliveryFeeCents: 0,
+    deliveryFeeCents,
     courierFeeCents: 0,
     taxCents: 0,
     tipCents,
@@ -179,23 +219,80 @@ export function computeQuote(
   };
 }
 
+export interface DeliveryRequest {
+  line1: string;
+  line2?: string | null;
+  city: string;
+  state: string;
+  zip: string;
+  leaveAtDoor: boolean;
+}
+
+interface DeliveryStoreRow {
+  storeDeliveryEnabled: boolean;
+  storeDeliveryFeeCents: number;
+  deliveryRadiusMi: unknown;
+  lat: number | null;
+  lng: number | null;
+}
+
+function deliveryQuoteInput(
+  store: DeliveryStoreRow,
+  point: { lat: number; lng: number } | null,
+  leaveAtDoor: boolean,
+): StoreDeliveryQuote {
+  const radiusMi = Number(store.deliveryRadiusMi);
+  const hasCoordinates = store.lat != null && store.lng != null;
+  const confirmed = point && hasCoordinates
+    ? { withinRadius: assessRadius(point, { lat: store.lat as number, lng: store.lng as number, radiusMi }).withinRadius }
+    : null;
+  return {
+    enabled: store.storeDeliveryEnabled,
+    feeCents: store.storeDeliveryFeeCents,
+    radiusMi,
+    hasCoordinates,
+    confirmed,
+    leaveAtDoor,
+  };
+}
+
 export async function quoteCheckout(
   storeId: string,
   minimumOrderCents: number,
   cartId: string,
   contact: Contact,
   fulfillment: Fulfillment,
+  request?: DeliveryRequest | null,
 ): Promise<CheckoutQuote> {
-  const cart = await getCartWithLines(storeId, cartId);
-  if (!cart || !cart.lines.length) {
-    return computeQuote(minimumOrderCents, [], contact, fulfillment);
-  }
-  const serverLines = cart.lines.map((l) => ({
-    price: l.variant.price,
-    qty: l.qty,
-    maxPerOrder: l.variant.listing.maxPerOrder,
+  const [cart, store] = await Promise.all([
+    getCartWithLines(storeId, cartId),
+    platform.store.findUnique({ where: { id: storeId } }),
+  ]);
+  if (!store) throw new Error("Store not found");
+  const serverLines = (cart?.lines ?? []).map((line) => ({
+    price: line.variant.price,
+    qty: line.qty,
+    maxPerOrder: line.variant.listing.maxPerOrder,
+    frozen: line.variant.listing.frozen,
   }));
-  return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+  if (fulfillment !== "store-delivery") {
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+  }
+  let point: { lat: number; lng: number } | null = null;
+  if (request && store.lat != null && store.lng != null) {
+    const cached = await lookupConfirmed(
+      { line1: request.line1, city: request.city, state: request.state, zip: request.zip },
+      { lat: store.lat, lng: store.lng, radiusMi: Number(store.deliveryRadiusMi) },
+    );
+    if (cached?.ok) point = { lat: cached.match.lat, lng: cached.match.lng };
+  }
+  return computeQuote(
+    minimumOrderCents,
+    serverLines,
+    contact,
+    fulfillment,
+    deliveryQuoteInput(store, point, request?.leaveAtDoor === true),
+  );
 }
 
 export { checkoutTestHooks } from "./test-hooks";
@@ -316,6 +413,53 @@ export async function createPaymentIntent(
   return { clientSecret: pi.client_secret, paymentIntentId: pi.id };
 }
 
+export interface DeliverySnapshot {
+  line1: string;
+  line2: string | null;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number;
+  lng: number;
+  leaveAtDoor: boolean;
+}
+
+/** Writes the confirmed address onto the cart, or clears it for pickup. */
+export async function saveDeliverySnapshot(
+  storeId: string,
+  cartId: string,
+  snapshot: DeliverySnapshot | null,
+): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    await tx.cart.update({
+      where: { id: cartId },
+      data: snapshot
+        ? {
+            deliveryLine1: snapshot.line1,
+            deliveryLine2: snapshot.line2,
+            deliveryCity: snapshot.city,
+            deliveryState: snapshot.state,
+            deliveryZip: snapshot.zip,
+            deliveryLat: snapshot.lat,
+            deliveryLng: snapshot.lng,
+            leaveAtDoor: snapshot.leaveAtDoor,
+          }
+        : {
+            deliveryLine1: null,
+            deliveryLine2: null,
+            deliveryCity: null,
+            deliveryState: null,
+            deliveryZip: null,
+            deliveryLat: null,
+            deliveryLng: null,
+            leaveAtDoor: false,
+          },
+    });
+  });
+}
+
 function runTestHook(hook: (() => Promise<void>) | null): Promise<void> {
   if (process.env.NODE_ENV === "test" && hook) return hook();
   return Promise.resolve();
@@ -346,6 +490,8 @@ export interface RecordAuthorizedOrderInput {
   /** True when metadata includes purchase_epoch, including a value that is not a number. */
   epochPresent?: boolean;
   minimumOrderCents?: number;
+  /** Direct place calls can set this even when the cart snapshot does not. */
+  leaveAtDoor?: boolean;
 }
 
 function paymentIntentTaken(err: unknown): boolean {
@@ -369,7 +515,7 @@ export async function recordAuthorizedOrder(
 ): Promise<{ orderId: string; created: boolean }> {
   try {
     return await storeScopedTransaction(storeId, async (tx) => {
-      await lockStoreRow(tx, storeId);
+      const lockedStore = await lockStoreRow(tx, storeId);
 
       const existing = await tx.order.findUnique({
         where: { paymentIntentId: input.paymentIntentId },
@@ -422,17 +568,36 @@ export async function recordAuthorizedOrder(
         swapRule: line.swapRule,
         substituteVariantId: line.substituteVariantId,
         maxPerOrder: line.variant.listing.maxPerOrder,
+        frozen: line.variant.listing.frozen,
       }));
       if (!sameBasket(current, input.lines)) throw new BasketChangedError();
+      const point = cart.deliveryLat != null && cart.deliveryLng != null
+        ? { lat: cart.deliveryLat, lng: cart.deliveryLng }
+        : null;
+      const delivery = input.fulfillment === "store-delivery"
+        ? deliveryQuoteInput(lockedStore, point, cart.leaveAtDoor || input.leaveAtDoor === true)
+        : null;
       const currentQuote = computeQuote(
         input.minimumOrderCents ?? 0,
         current,
         input.contact,
         input.fulfillment,
+        delivery,
       );
-      if (currentQuote.holdCents !== (input.paymentAmount ?? input.quote.holdCents)) {
+      if (
+        currentQuote.problems.length > 0
+        || currentQuote.holdCents !== (input.paymentAmount ?? input.quote.holdCents)
+      ) {
         throw new BasketChangedError();
       }
+      const delivering = input.fulfillment === "store-delivery" && point != null;
+      const distanceMi = delivering && lockedStore.lat != null && lockedStore.lng != null
+        ? assessRadius(point, {
+            lat: lockedStore.lat,
+            lng: lockedStore.lng,
+            radiusMi: lockedStore.deliveryRadiusMi,
+          }).roundedMi
+        : null;
 
       const variantIds = [
         ...new Set(
@@ -484,14 +649,25 @@ export async function recordAuthorizedOrder(
           status: "AUTHORIZED",
           fulfillment: input.fulfillment,
           pickupSlot: input.pickupSlot !== "asap" ? input.pickupSlot : null,
-          subtotalCents: input.quote.subtotalCents,
-          tipCents: input.quote.tipCents,
-          bufferCents: input.quote.bufferCents,
-          totalAuthorizedCents: input.quote.holdCents,
+          subtotalCents: currentQuote.subtotalCents,
+          tipCents: currentQuote.tipCents,
+          bufferCents: currentQuote.bufferCents,
+          totalAuthorizedCents: currentQuote.holdCents,
+          deliveryFeeCents: currentQuote.deliveryFeeCents,
+          totalCents: currentQuote.totalCents,
           paymentIntentId: input.paymentIntentId,
           sourceCartId: input.cartId,
-          platformFeeCents: platformFeeCentsForCapture(input.quote.totalCents),
+          platformFeeCents: platformFeeCentsForCapture(currentQuote.totalCents),
           notes: input.notes || null,
+          deliveryLine1: delivering ? cart.deliveryLine1 : null,
+          deliveryLine2: delivering ? cart.deliveryLine2 : null,
+          deliveryCity: delivering ? cart.deliveryCity : null,
+          deliveryState: delivering ? cart.deliveryState : null,
+          deliveryZip: delivering ? cart.deliveryZip : null,
+          deliveryLat: delivering ? cart.deliveryLat : null,
+          deliveryLng: delivering ? cart.deliveryLng : null,
+          deliveryDistanceMi: distanceMi,
+          leaveAtDoor: delivering ? cart.leaveAtDoor : false,
         },
       });
       const orderLines = await tx.orderLine.createManyAndReturn({
@@ -545,6 +721,7 @@ function cartLinesToOrderLines(
   swapRule: string;
   substituteVariantId: string | null;
   maxPerOrder: number | null;
+  frozen: boolean;
 }> {
   return cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -554,6 +731,7 @@ function cartLinesToOrderLines(
     swapRule: l.swapRule,
     substituteVariantId: l.substituteVariantId,
     maxPerOrder: l.variant.listing.maxPerOrder,
+    frozen: l.variant.listing.frozen,
   }));
 }
 
@@ -693,10 +871,11 @@ export async function placeOrder(
   pickupSlot: string | null,
   paymentIntentId: string,
   actorUserId: string | null = null,
+  leaveAtDoor = false,
 ): Promise<{ token: string; quote: CheckoutQuote }> {
   const store = await getStripeStore(storeId);
 
-  if (fulfillment !== "pickup") {
+  if (fulfillment === "courier") {
     throw new Error("Only pickup fulfillment is supported");
   }
 
@@ -796,16 +975,26 @@ export async function placeOrder(
     price: l.price,
     qty: l.qty,
     maxPerOrder: l.maxPerOrder,
+    frozen: l.frozen,
   }));
-  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+  const storeRow = await platform.store.findUnique({ where: { id: storeId } });
+  if (!storeRow) throw new Error("Store not found");
+  const point = cart.delivery.lat != null && cart.delivery.lng != null
+    ? { lat: cart.delivery.lat, lng: cart.delivery.lng }
+    : null;
+  const delivery = fulfillment === "store-delivery"
+    ? deliveryQuoteInput(storeRow, point, cart.delivery.leaveAtDoor || leaveAtDoor)
+    : null;
+  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, delivery);
 
-  if (pi.amount !== quote.holdCents) {
+  const contactOnly = quote.problems.length > 0
+    && quote.problems.every((problem) => problem.code === "invalid-contact");
+  if (contactOnly) {
+    throw new Error(quote.problems.map((problem) => problem.message).join(" "));
+  }
+  if (quote.problems.length > 0 || pi.amount !== quote.holdCents) {
     await releaseLosingHold(storeId, cartId, paymentIntentId);
     throw new BasketChangedError();
-  }
-
-  if (quote.problems.length) {
-    throw new Error(quote.problems.map((p) => p.message).join(" "));
   }
 
   for (const line of orderLineData) {
@@ -842,6 +1031,7 @@ export async function placeOrder(
       purchaseEpoch: epochStamp(pi.metadata).epoch,
       epochPresent: epochStamp(pi.metadata).present,
       minimumOrderCents,
+      leaveAtDoor,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
         qty: line.qty,

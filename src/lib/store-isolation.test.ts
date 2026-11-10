@@ -485,12 +485,15 @@ describe.skipIf(!hasDb)("Stripe Connect column RLS isolation", () => {
     const result = await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.store_id', ${storeBId}, true)`,
-      rawPrisma.$executeRaw`UPDATE stores SET stripe_onboarding_status = 'hacked' WHERE id = ${storeAId}`,
+      rawPrisma.$executeRaw`UPDATE stores SET stripe_onboarding_status = 'hacked', store_delivery_enabled = true, store_delivery_fee_cents = 999, address_line1 = 'hacked', lat = 1, lng = 2 WHERE id = ${storeAId}`,
     ]);
     expect(result[2]).toBe(0);
 
     const store = await rawPrisma.store.findUnique({ where: { id: storeAId } });
     expect(store!.stripeOnboardingStatus).toBe("complete");
+    expect(store!.storeDeliveryEnabled).toBe(false);
+    expect(store!.storeDeliveryFeeCents).toBe(0);
+    expect(store!.addressLine1).toBeNull();
   });
 
   it("platformAdmin can update stripe fields on any store", async () => {

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidateStore } from "../get-store";
-import { platformAdmin, platformAdminTransaction } from "../db";
+import { platformAdmin, platformAdminTransaction, lockStoreAddress } from "../db";
 import { requirePlatformAdmin } from "./session";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
 import { isSlugRoutable } from "../slug";
@@ -11,6 +11,7 @@ import { z } from "zod";
 import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
+import { getAddressProvider } from "../address/provider";
 
 import { VALID_US_TIMEZONES } from "./timezone";
 
@@ -50,7 +51,7 @@ function formText(data: unknown, key: string): string | null {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled", "timezone"]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "storeDeliveryFee", "storeDeliveryEnabled"]) {
     const v = formText(data, key);
     if (v != null) raw[key] = v;
   }
@@ -73,6 +74,13 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     pickupEnabled: boolean;
     autoRefundLimitCents: number;
     timezone: string;
+    addressLine1: string | null;
+    addressLine2: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    storeDeliveryEnabled: boolean;
+    storeDeliveryFeeCents: number;
   };
 } {
   const errors: Record<string, string> = {};
@@ -94,6 +102,13 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     parseFloatOrDefault(formText(data, "autoRefundLimit"), 25) * 100,
   );
   const timezone = formText(data, "timezone")?.trim() || defaultTimezone;
+  const addressLine1 = formText(data, "addressLine1")?.trim() || null;
+  const addressLine2 = formText(data, "addressLine2")?.trim() || null;
+  const city = formText(data, "city")?.trim() || null;
+  const state = formText(data, "state")?.trim().toUpperCase() || null;
+  const zip = formText(data, "zip")?.trim() || null;
+  const storeDeliveryEnabled = formText(data, "storeDeliveryEnabled") === "on";
+  const storeDeliveryFeeCents = Math.round(parseFloatOrDefault(formText(data, "storeDeliveryFee"), 0) * 100);
 
   if (!slug) errors.slug = "Slug is required";
   else if (!isSlugRoutable(slug)) errors.slug = "This slug is not allowed (reserved, all-digit, or invalid format)";
@@ -163,6 +178,18 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     errors.timezone = `Invalid timezone: must be one of ${VALID_US_TIMEZONES.join(", ")}`;
   }
 
+  if (state && !/^[A-Z]{2}$/.test(state)) errors.state = "State must be a 2-letter code";
+  if (zip && !/^\d{5}$/.test(zip)) errors.zip = "ZIP must be 5 digits";
+  if (!Number.isFinite(storeDeliveryFeeCents) || storeDeliveryFeeCents < 0 || storeDeliveryFeeCents > 10_000) {
+    errors.storeDeliveryFee = "Delivery fee must be $0–$100";
+  }
+  if (storeDeliveryEnabled) {
+    if (!addressLine1 || !city || !state || !zip) {
+      errors.addressLine1 = "Store delivery needs a street, city, state, and ZIP";
+    }
+    if (deliveryRadiusMi <= 0) errors.deliveryRadiusMi = "Delivery radius must be greater than 0";
+  }
+
   let hours: unknown = null;
   if (hoursRaw) {
     try {
@@ -188,6 +215,13 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
       pickupEnabled,
       autoRefundLimitCents,
       timezone,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      zip,
+      storeDeliveryEnabled,
+      storeDeliveryFeeCents,
     },
   };
 }
@@ -196,6 +230,8 @@ const STORE_FORM_FIELDS = [
   "slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours",
   "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit",
   "pickupEnabled", "timezone", "storeId",
+  "addressLine1", "addressLine2", "city", "state", "zip",
+  "storeDeliveryFee", "storeDeliveryEnabled",
 ] as const;
 const storeFormSchema = z.strictObject({
   slug: z.string().max(80).nullable(),
@@ -212,10 +248,100 @@ const storeFormSchema = z.strictObject({
   pickupEnabled: z.string().max(10).nullable(),
   timezone: z.string().max(80).nullable(),
   storeId: z.string().max(200).nullable(),
+  addressLine1: z.string().max(120).nullable(),
+  addressLine2: z.string().max(120).nullable(),
+  city: z.string().max(80).nullable(),
+  state: z.string().max(8).nullable(),
+  zip: z.string().max(12).nullable(),
+  storeDeliveryFee: z.string().max(20).nullable(),
+  storeDeliveryEnabled: z.string().max(10).nullable(),
 });
 
 function boundStoreForm(data: FormData): boolean {
   return parseInput(storeFormSchema, readFormFields(data, STORE_FORM_FIELDS)).ok;
+}
+
+function addressStamp(row: {
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}): string {
+  return [row.addressLine1, row.addressLine2, row.city, row.state, row.zip]
+    .map((part) => (part ?? "").trim().toLowerCase())
+    .join("|");
+}
+
+class StoreAddressChanged extends Error {
+  constructor() {
+    super("STORE_ADDRESS_CHANGED");
+  }
+}
+
+async function coordinatesForStore(
+  values: {
+    addressLine1: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    addressLine2: string | null;
+    storeDeliveryEnabled: boolean;
+  },
+  previous: {
+    addressLine1: string | null;
+    addressLine2: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    lat: number | null;
+    lng: number | null;
+  } | null,
+): Promise<{ lat: number | null; lng: number | null } | { error: string }> {
+  if (
+    previous &&
+    previous.lat != null &&
+    previous.lng != null &&
+    addressStamp(values) === addressStamp(previous)
+  ) {
+    return { lat: previous.lat, lng: previous.lng };
+  }
+  if (!values.addressLine1) return { lat: null, lng: null };
+  const located = await getAddressProvider().locate({
+    line1: values.addressLine1,
+    city: values.city ?? "",
+    state: values.state ?? "",
+    zip: values.zip ?? "",
+  });
+  if (!located.ok) {
+    if (values.storeDeliveryEnabled) return { error: "We couldn't confirm that address" };
+    return { lat: null, lng: null };
+  }
+  return { lat: located.match.lat, lng: located.match.lng };
+}
+
+function deliveryAudit(row: {
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lat: number | null;
+  lng: number | null;
+  storeDeliveryEnabled: boolean;
+  storeDeliveryFeeCents: number;
+}) {
+  return {
+    addressLine1: row.addressLine1,
+    addressLine2: row.addressLine2,
+    city: row.city,
+    state: row.state,
+    zip: row.zip,
+    lat: row.lat,
+    lng: row.lng,
+    storeDeliveryEnabled: row.storeDeliveryEnabled,
+    storeDeliveryFeeCents: row.storeDeliveryFeeCents,
+  };
 }
 
 export async function createStore(
@@ -238,6 +364,14 @@ export async function createStore(
   });
   if (existing) {
     return { fieldErrors: { slug: "A store with this slug already exists" }, submittedValues: raw };
+  }
+
+  const coords = await coordinatesForStore(values, null);
+  if ("error" in coords) {
+    return { fieldErrors: { addressLine1: coords.error }, submittedValues: raw };
+  }
+  if (values.storeDeliveryEnabled && (coords.lat == null || coords.lng == null)) {
+    return { fieldErrors: { addressLine1: "Store delivery needs a confirmed address" }, submittedValues: raw };
   }
 
   let brandColorNudged = false;
@@ -269,6 +403,15 @@ export async function createStore(
         pickupEnabled: values.pickupEnabled,
         autoRefundLimitCents: values.autoRefundLimitCents,
         timezone: values.timezone,
+        addressLine1: values.addressLine1,
+        addressLine2: values.addressLine2,
+        city: values.city,
+        state: values.state,
+        zip: values.zip,
+        lat: coords.lat,
+        lng: coords.lng,
+        storeDeliveryEnabled: values.storeDeliveryEnabled,
+        storeDeliveryFeeCents: values.storeDeliveryFeeCents,
       },
     });
 
@@ -294,6 +437,7 @@ export async function createStore(
           pickupEnabled: s.pickupEnabled,
           autoRefundLimitCents: s.autoRefundLimitCents,
           timezone: s.timezone,
+          ...deliveryAudit(s),
         },
       },
     });
@@ -341,6 +485,14 @@ export async function updateStore(
     }
   }
 
+  const coords = await coordinatesForStore(values, before);
+  if ("error" in coords) {
+    return { fieldErrors: { addressLine1: coords.error }, submittedValues: raw };
+  }
+  if (values.storeDeliveryEnabled && (coords.lat == null || coords.lng == null)) {
+    return { fieldErrors: { addressLine1: "Store delivery needs a confirmed address" }, submittedValues: raw };
+  }
+
   let brandColorNudged = false;
   let nudgedColor: string | undefined;
   let finalBrandColor = values.brandColor;
@@ -354,7 +506,14 @@ export async function updateStore(
     }
   }
 
-  const store = await platformAdminTransaction(async (tx) => {
+  let store;
+  try {
+    store = await platformAdminTransaction(async (tx) => {
+    const lockedAddress = await lockStoreAddress(tx, storeId);
+    if (!lockedAddress) throw new Error("Store not found");
+    if (addressStamp(lockedAddress) !== addressStamp(before)) {
+      throw new StoreAddressChanged();
+    }
     const s = await tx.store.update({
       where: { id: storeId },
       data: {
@@ -371,6 +530,15 @@ export async function updateStore(
         pickupEnabled: values.pickupEnabled,
         autoRefundLimitCents: values.autoRefundLimitCents,
         timezone: values.timezone,
+        addressLine1: values.addressLine1,
+        addressLine2: values.addressLine2,
+        city: values.city,
+        state: values.state,
+        zip: values.zip,
+        lat: coords.lat,
+        lng: coords.lng,
+        storeDeliveryEnabled: values.storeDeliveryEnabled,
+        storeDeliveryFeeCents: values.storeDeliveryFeeCents,
       },
     });
 
@@ -396,6 +564,7 @@ export async function updateStore(
           pickupEnabled: before.pickupEnabled,
           autoRefundLimitCents: before.autoRefundLimitCents,
           timezone: before.timezone,
+          ...deliveryAudit(before),
         },
         after: {
           slug: s.slug,
@@ -411,12 +580,19 @@ export async function updateStore(
           pickupEnabled: s.pickupEnabled,
           autoRefundLimitCents: s.autoRefundLimitCents,
           timezone: s.timezone,
+          ...deliveryAudit(s),
         },
       },
     });
 
     return s;
   });
+  } catch (error) {
+    if (error instanceof StoreAddressChanged) {
+      return { fieldErrors: { addressLine1: "This address was just changed. Review it and save again." }, submittedValues: raw };
+    }
+    throw error;
+  }
 
   revalidateStore(store);
   if (before.slug !== store.slug) {

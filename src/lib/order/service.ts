@@ -519,7 +519,9 @@ async function settleUnconfirmedCapture(
 }
 
 async function registerE2EPayment(paymentIntentId: string, authorizedCents: number): Promise<void> {
-  if (stripeProviderKind() !== "fake" || !paymentIntentId.startsWith("pi_seed_")) return;
+  if (stripeProviderKind() !== "fake") return;
+  // pi_seed_ is an order fixture. pi_fake_ is the checkout harness intent.
+  if (!paymentIntentId.startsWith("pi_seed_") && !paymentIntentId.startsWith("pi_fake_")) return;
   const { ensureAuthorizedAmount } = await import("../stripe/fake");
   ensureAuthorizedAmount(paymentIntentId, authorizedCents);
 }
@@ -848,7 +850,10 @@ export async function markReady(
       const stored = storedCaptureAmount(order.capturedAmountCents);
       if (!stored.ok) return stored;
       const amount = stored.capturedAmountCents;
-      const fee = applicationFeeForCapture(amount, order.deliveryFeeCents);
+      const fee = applicationFeeForCapture(amount, {
+        fulfillment: order.fulfillment,
+        deliveryFeeCents: order.deliveryFeeCents,
+      });
       return {
         ok: true as const,
         capturedAmountCents: amount,
@@ -876,7 +881,10 @@ export async function markReady(
       return sum + l.qtyPicked * l.unitPriceCents;
     }, 0);
 
-    const capturedAmountCents = lineTotalCents + order.tipCents + order.deliveryFeeCents;
+    // Nothing picked: release the whole hold, including the delivery fee and tip.
+    const capturedAmountCents = lineTotalCents === 0
+      ? 0
+      : lineTotalCents + order.tipCents + order.deliveryFeeCents;
 
     if (!order.paymentIntentId) {
       return { ok: false as const, error: "Order has no payment intent" };
@@ -910,7 +918,10 @@ export async function markReady(
 
     const newStatus: OrderStatus = fulfilledStatus(order.fulfillment);
 
-    const fee = applicationFeeForCapture(capturedAmountCents, order.deliveryFeeCents);
+    const fee = applicationFeeForCapture(capturedAmountCents, {
+      fulfillment: order.fulfillment,
+      deliveryFeeCents: order.deliveryFeeCents,
+    });
 
     await tx.order.update({
       where: { id: orderId },
@@ -1073,7 +1084,7 @@ export async function completePickup(
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false, error: "Order not found" };
     if (order.status !== "AWAITING_PICKUP") {
-      if (order.fulfillment === "delivery") {
+      if (order.fulfillment === "delivery" || order.fulfillment === "store-delivery" || order.fulfillment === "courier") {
         return { ok: false, error: "Cannot complete pickup for delivery order — use courier dispatch" };
       }
       return { ok: false, error: "Order is not awaiting pickup" };
@@ -1248,7 +1259,10 @@ export async function reconcileStuckOrder(
         return { ok: false, error: "capture_backoff", waiting: true };
       }
       const attempt = reservedCapture.attempt;
-      const sweepFee = applicationFeeForCapture(amount, order.deliveryFeeCents);
+      const sweepFee = applicationFeeForCapture(amount, {
+        fulfillment: order.fulfillment,
+        deliveryFeeCents: order.deliveryFeeCents,
+      });
       try {
         await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
         const retryCap = await stripe.capturePaymentIntent(

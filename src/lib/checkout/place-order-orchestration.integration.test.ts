@@ -44,7 +44,9 @@ vi.mock("../inngest/send", () => ({
 }));
 
 import { sendOrderAuthorized } from "../inngest/send";
+import { setAddressProvider } from "../address/provider";
 import {
+  BasketChangedError,
   checkoutTestHooks,
   computeQuote,
   placeOrder,
@@ -906,13 +908,183 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       await expect(rejected, field.label).rejects.not.toThrow(winner.token);
     }
     await expect(
-      placeOrder(owner.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId),
+      placeOrder(owner.id, 0, seeded.cart.id, CONTACT, "courier", null, null, seeded.paymentIntentId),
     ).rejects.toThrow(/Only pickup fulfillment is supported/);
     expect(await persistedOrder(owner.id, winner.token)).toEqual(beforeRows);
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
     expect(await counts(owner.id)).toEqual({ orders: 1, customers: 1 });
     expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
   }, 20_000);
+
+  const HOUSTON = { lat: 29.693857800118, lng: -95.266257879374 };
+  const MAIN_ST = { lat: 29.73846459154, lng: -95.379640065998 };
+
+  async function seedDeliveryCart(label: string, price = 4000) {
+    const store = await makeStore(label);
+    await raw.store.update({
+      where: { id: store.id },
+      data: {
+        storeDeliveryEnabled: true,
+        storeDeliveryFeeCents: 500,
+        deliveryRadiusMi: 8,
+        addressLine1: "8400 Park Place Blvd",
+        city: "Houston",
+        state: "TX",
+        zip: "77017",
+        lat: HOUSTON.lat,
+        lng: HOUSTON.lng,
+      },
+    });
+    const variant = await makeVariant(store.id, price);
+    const paymentIntentId = `pi_${crypto.randomUUID()}`;
+    const cart = await storeScoped(store.id).cart.create({
+      data: {
+        storeId: store.id,
+        paymentIntentId,
+        deliveryLine1: "3700 MAIN ST",
+        deliveryCity: "HOUSTON",
+        deliveryState: "TX",
+        deliveryZip: "77002",
+        deliveryLat: MAIN_ST.lat,
+        deliveryLng: MAIN_ST.lng,
+        leaveAtDoor: true,
+      },
+    });
+    await storeScoped(store.id).cartLine.create({
+      data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
+    });
+    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], CONTACT, "store-delivery", {
+      enabled: true,
+      feeCents: 500,
+      radiusMi: 8,
+      hasCoordinates: true,
+      confirmed: { withinRadius: true },
+      leaveAtDoor: true,
+    });
+    paymentIntents.set(paymentIntentId, paymentIntent({
+      amount: quote.holdCents,
+      destination: store.stripeAccountId!,
+      onBehalfOf: store.stripeAccountId!,
+      storeId: store.id,
+    }));
+    return { store, variant, cart, paymentIntentId, quote };
+  }
+
+  it("a store delivery order records the fee, address and leave-at-door", async () => {
+    const seeded = await seedDeliveryCart("deliver");
+    const placed = await placeOrder(
+      seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId,
+    );
+    const order = await storeScoped(seeded.store.id).order.findUnique({ where: { id: placed.token } });
+    expect(order?.fulfillment).toBe("store-delivery");
+    expect(order?.deliveryFeeCents).toBe(500);
+    expect(order?.deliveryLine1).toBe("3700 MAIN ST");
+    expect(order?.deliveryCity).toBe("HOUSTON");
+    expect(order?.deliveryState).toBe("TX");
+    expect(order?.deliveryZip).toBe("77002");
+    expect(order?.leaveAtDoor).toBe(true);
+    expect(order?.deliveryLat).toBeCloseTo(MAIN_ST.lat, 4);
+    expect(order?.deliveryLng).toBeCloseTo(MAIN_ST.lng, 4);
+    expect(order?.deliveryDistanceMi).toBeGreaterThan(0);
+    expect(order?.totalCents).toBe(4500);
+    expect(order?.totalAuthorizedCents).toBe(4900);
+  });
+
+  it("placement refuses leave at door when the cart has a frozen item", async () => {
+    const seeded = await seedDeliveryCart("frozen");
+    await storeScoped(seeded.store.id).listing.update({
+      where: { id: seeded.variant.listingId },
+      data: { frozen: true },
+    });
+    await expect(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId),
+    ).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+    expect(paymentIntents.get(seeded.paymentIntentId)?.status).toBe("canceled");
+  });
+
+  it("a store delivery fee raised after the hold refuses placement", async () => {
+    const seeded = await seedDeliveryCart("fee");
+    await raw.store.update({
+      where: { id: seeded.store.id },
+      data: { storeDeliveryFeeCents: 800 },
+    });
+    await expect(recordAuthorizedOrder(seeded.store.id, {
+      cartId: seeded.cart.id,
+      contact: CONTACT,
+      fulfillment: "store-delivery",
+      pickupSlot: null,
+      notes: null,
+      paymentIntentId: seeded.paymentIntentId,
+      quote: seeded.quote,
+      paymentAmount: seeded.quote.holdCents,
+      minimumOrderCents: 0,
+      lines: [{
+        variantId: seeded.variant.id,
+        qty: 1,
+        price: 4000,
+        swapRule: "exact_only",
+        substituteVariantId: null,
+      }],
+    })).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+  });
+
+  it("turning store delivery off after the hold refuses the locked recompute", async () => {
+    const seeded = await seedDeliveryCart("off");
+    await raw.store.update({
+      where: { id: seeded.store.id },
+      data: { storeDeliveryEnabled: false },
+    });
+    await expect(recordAuthorizedOrder(seeded.store.id, {
+      cartId: seeded.cart.id,
+      contact: CONTACT,
+      fulfillment: "store-delivery",
+      pickupSlot: null,
+      notes: null,
+      paymentIntentId: seeded.paymentIntentId,
+      quote: seeded.quote,
+      paymentAmount: seeded.quote.holdCents,
+      minimumOrderCents: 0,
+      lines: [{
+        variantId: seeded.variant.id,
+        qty: 1,
+        price: 4000,
+        swapRule: "exact_only",
+        substituteVariantId: null,
+      }],
+    })).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+  });
+
+  it("a store delivery placement refused for the radius releases the hold", async () => {
+    const seeded = await seedDeliveryCart("radius");
+    await raw.store.update({
+      where: { id: seeded.store.id },
+      data: { deliveryRadiusMi: 1 },
+    });
+    await expect(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId),
+    ).rejects.toBeInstanceOf(BasketChangedError);
+    expect(paymentIntents.get(seeded.paymentIntentId)?.status).toBe("canceled");
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+  });
+
+  it("placement after payment makes no address-service call", async () => {
+    setAddressProvider({
+      suggest: async () => { throw new Error("photon"); },
+      locate: async () => { throw new Error("census"); },
+    });
+    const seeded = await seedDeliveryCart("cached");
+    const first = await placeOrder(
+      seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId,
+    );
+    const second = await placeOrder(
+      seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId,
+    );
+    expect(second.token).toBe(first.token);
+    setAddressProvider(null);
+  });
 
   it("store B never receives store A's order for a PaymentIntent A recorded", async () => {
     const seeded = await seedPricedCart("owner-pi");

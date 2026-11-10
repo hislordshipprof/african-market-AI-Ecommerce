@@ -254,7 +254,110 @@ export function StoreForm({
                 defaultValue={sv?.deliveryRadiusMi ?? (store ? Number(store.deliveryRadiusMi) : 8)}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
+              {state.fieldErrors?.deliveryRadiusMi && (
+                <p className="mt-1 text-xs text-destructive">{state.fieldErrors.deliveryRadiusMi}</p>
+              )}
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label htmlFor="addressLine1" className="mb-1 block text-sm font-medium text-foreground">
+                Street address
+              </label>
+              <input
+                id="addressLine1"
+                name="addressLine1"
+                maxLength={120}
+                defaultValue={sv?.addressLine1 ?? store?.addressLine1 ?? ""}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              {state.fieldErrors?.addressLine1 && (
+                <p className="mt-1 text-xs text-destructive">{state.fieldErrors.addressLine1}</p>
+              )}
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="addressLine2" className="mb-1 block text-sm font-medium text-foreground">
+                Apartment, suite (optional)
+              </label>
+              <input
+                id="addressLine2"
+                name="addressLine2"
+                maxLength={120}
+                defaultValue={sv?.addressLine2 ?? store?.addressLine2 ?? ""}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+            <div>
+              <label htmlFor="city" className="mb-1 block text-sm font-medium text-foreground">City</label>
+              <input
+                id="city"
+                name="city"
+                maxLength={80}
+                defaultValue={sv?.city ?? store?.city ?? ""}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="state" className="mb-1 block text-sm font-medium text-foreground">State</label>
+                <input
+                  id="state"
+                  name="state"
+                  maxLength={2}
+                  defaultValue={sv?.state ?? store?.state ?? ""}
+                  className="w-full rounded-md border border-input px-3 py-2 text-sm uppercase focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                {state.fieldErrors?.state && (
+                  <p className="mt-1 text-xs text-destructive">{state.fieldErrors.state}</p>
+                )}
+              </div>
+              <div>
+                <label htmlFor="zip" className="mb-1 block text-sm font-medium text-foreground">ZIP</label>
+                <input
+                  id="zip"
+                  name="zip"
+                  inputMode="numeric"
+                  maxLength={5}
+                  defaultValue={sv?.zip ?? store?.zip ?? ""}
+                  className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                {state.fieldErrors?.zip && (
+                  <p className="mt-1 text-xs text-destructive">{state.fieldErrors.zip}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              name="storeDeliveryEnabled"
+              type="checkbox"
+              id="storeDeliveryEnabled"
+              defaultChecked={sv ? sv.storeDeliveryEnabled === "on" : (store?.storeDeliveryEnabled ?? false)}
+              className="h-4 w-4 rounded border-input text-primary focus-visible:ring-ring"
+            />
+            <label htmlFor="storeDeliveryEnabled" className="text-sm text-foreground">
+              Store delivery
+            </label>
+          </div>
+          <div>
+            <label htmlFor="storeDeliveryFee" className="mb-1 block text-sm font-medium text-foreground">
+              Store delivery fee ($)
+            </label>
+            <input
+              id="storeDeliveryFee"
+              name="storeDeliveryFee"
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              defaultValue={sv?.storeDeliveryFee ?? (store ? store.storeDeliveryFeeCents / 100 : 0)}
+              className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            {state.fieldErrors?.storeDeliveryFee && (
+              <p className="mt-1 text-xs text-destructive">{state.fieldErrors.storeDeliveryFee}</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">

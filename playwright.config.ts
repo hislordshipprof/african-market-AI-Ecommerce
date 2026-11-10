@@ -69,6 +69,7 @@ export default defineConfig({
           NEXT_PUBLIC_DEMO_FLOWS: "1",
           E2E_STORE_OVERRIDE: "1",
           E2E_FAKE_STRIPE: "1",
+          E2E_FAKE_ADDRESS: "1",
           // `next start` is production. CI=true selects the fake Stripe provider and
           // the in-memory email sender. VERCEL must stay unset. An empty key stops
           // .env.local from hiding a missing-secret failure.

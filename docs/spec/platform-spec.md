@@ -408,7 +408,7 @@ Designed for ~1,000 stores, ~1M customers, ~20k orders/day (ADR-0012). Each choi
 - **Payments:** Stripe Connect, Stripe Tax, Stripe Billing.
 - **Delivery:** Uber Direct API, DoorDash Drive API.
 - **Comms:** Resend (email), Telnyx (SMS), Meta WhatsApp Cloud API (ADR-0017).
-- **Maps:** Google Maps Platform with billing caps, session tokens and cached geocodes (ADR-0017).
+- **Maps:** Photon for address suggestions and the US Census Geocoder for confirmation. No API key. Confirmed coordinates are cached for 90 days (ADR-0017).
 - **DNS:** Cloudflare.
 - **Observability:** Sentry free tier, Vercel logs, Inngest run history, uptime checks on webhooks; budget alerts on every metered service (ADR-0017).
 

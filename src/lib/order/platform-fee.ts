@@ -25,9 +25,13 @@ export function platformFeeCentsForCapture(capturedCents: number): number {
   );
 }
 
-/** Value sent as Stripe `application_fee_amount`. */
-export function applicationFeeForCapture(capturedCents: number, deliveryFeeCents: number): number {
+/** Value sent as Stripe `application_fee_amount`. Store delivery keeps its fee. */
+export function applicationFeeForCapture(
+  capturedCents: number,
+  options: { fulfillment: string; deliveryFeeCents: number },
+): number {
   if (capturedCents <= 0) return 0;
-  const raw = platformFeeCentsForCapture(capturedCents) + Math.max(0, deliveryFeeCents);
+  const courierRecovery = options.fulfillment === "courier" ? Math.max(0, options.deliveryFeeCents) : 0;
+  const raw = platformFeeCentsForCapture(capturedCents) + courierRecovery;
   return Math.min(raw, capturedCents);
 }

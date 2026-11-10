@@ -18,6 +18,15 @@ model Store {
   timezone             String   @default("America/New_York")
   prepTimeMinutes      Int      @default(30) @map("prep_time_minutes")
   deliveryRadiusMi     Decimal  @default(8) @map("delivery_radius_mi")
+  storeDeliveryEnabled Boolean  @default(false) @map("store_delivery_enabled")
+  storeDeliveryFeeCents Int     @default(0) @map("store_delivery_fee_cents")
+  addressLine1         String?  @map("address_line1")
+  addressLine2         String?  @map("address_line2")
+  city                 String?
+  state                String?
+  zip                  String?
+  lat                  Float?
+  lng                  Float?
   minimumOrderCents    Int      @default(3500) @map("minimum_order_cents")
   pickupEnabled        Boolean  @default(false) @map("pickup_enabled")
   autoAcceptOrders     Boolean  @default(false) @map("auto_accept_orders")
@@ -199,6 +208,22 @@ model AppRateLimit {
   count       Int
 
   @@map("app_rate_limits")
+}
+
+/// Shared Census match. Not store-owned: the key is a normalized address, and
+/// the row never stores a distance or an inside/outside result.
+model AddressGeocode {
+  key              String   @id
+  line1            String
+  city             String
+  state            String
+  zip              String
+  formattedAddress String   @map("formatted_address")
+  lat              Float
+  lng              Float
+  cachedAt         DateTime @map("cached_at")
+
+  @@map("address_geocodes")
 }
 
 model AuditLog {
@@ -530,6 +555,14 @@ model Cart {
   paymentIntentId     String? @unique @map("payment_intent_id")
   paymentAttemptToken String? @map("payment_attempt_token")
   purchaseEpoch       Int     @default(0) @map("purchase_epoch")
+  deliveryLine1       String? @map("delivery_line1")
+  deliveryLine2       String? @map("delivery_line2")
+  deliveryCity        String? @map("delivery_city")
+  deliveryState       String? @map("delivery_state")
+  deliveryZip         String? @map("delivery_zip")
+  deliveryLat         Float?  @map("delivery_lat")
+  deliveryLng         Float?  @map("delivery_lng")
+  leaveAtDoor         Boolean @default(false) @map("leave_at_door")
   source              String  @default("manual")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -746,6 +779,15 @@ model Order {
   refundId             String?   @map("refund_id")
   platformFeeCents     Int?      @map("platform_fee_cents")
   deliveryFeeCents     Int       @default(0) @map("delivery_fee_cents")
+  deliveryLine1        String?   @map("delivery_line1")
+  deliveryLine2        String?   @map("delivery_line2")
+  deliveryCity         String?   @map("delivery_city")
+  deliveryState        String?   @map("delivery_state")
+  deliveryZip          String?   @map("delivery_zip")
+  deliveryLat          Float?    @map("delivery_lat")
+  deliveryLng          Float?    @map("delivery_lng")
+  deliveryDistanceMi   Float?    @map("delivery_distance_mi")
+  leaveAtDoor          Boolean   @default(false) @map("leave_at_door")
   totalCents           Int       @default(0) @map("total_cents")
   notes                String?
   prepEstimateMinutes  Int?      @map("prep_estimate_minutes")

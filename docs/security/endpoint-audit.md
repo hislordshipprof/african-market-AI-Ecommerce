@@ -7,6 +7,7 @@ A gap is either `fixed in #309` or `listed, not fixed` with a reason. No product
 | Endpoint | Caller | Auth check | Store scope | Input | Rate limit | Money or auth | Gap | Resolution |
 |---|---|---|---|---|---|---|---|---|
 | `src/app/account/actions.ts` syncCustomerAction | customer | session inside the action | signed-in user; customers | no caller input | none | no | none | fixed in #309 |
+| `src/app/api/address/suggest/route.ts` GET | guest | public | getStore() from the host | query length; under 3 characters returns an empty list | 30/min per IP and 600/min platform; over either returns an empty list | no | none | listed, not fixed |
 | `src/app/api/assistant/chat/route.ts` POST | guest | same origin | host store; carts, ai_conversations, ai_actions, assistant_undo_receipts | message envelope; extra keys stripped | 60/hour per IP and 30/hour per cart | no | none | fixed in #309 |
 | `src/app/api/auth/[...all]/route.ts` GET | guest | Better Auth | getStore() from the host | enabled groups: email-and-password, magic-link, two-factor; relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
 | `src/app/api/auth/[...all]/route.ts` POST | guest | Better Auth | getStore() from the host | enabled groups: email-and-password, magic-link, two-factor; relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
@@ -48,6 +49,7 @@ A gap is either `fixed in #309` or `listed, not fixed` with a reason. No product
 | `src/lib/cart/actions.ts` clearCart | guest | public allow-list; store comes from the host | host store; carts, cart_lines, guest_browser_carts | no caller input | none | no | none | fixed in #309 |
 | `src/lib/cart/actions.ts` getMinimumOrder | guest | public allow-list; store comes from the host | host store; carts, cart_lines, guest_browser_carts | no caller input | none | no | none | fixed in #309 |
 | `src/lib/cart/actions.ts` migrateLocalCart | guest | public allow-list; store comes from the host | host store; carts, cart_lines, guest_browser_carts | parseInput before ensureCartId | none | no | none | fixed in #309 |
+| `src/lib/checkout/actions.ts` confirmAddressAction | guest | public allow-list; store comes from the host | host store; address_geocodes | parseInput strict address; extra keys rejected | 20 per 10 min per IP, cache miss only | yes | catch returns the raw error message | listed, not fixed |
 | `src/lib/checkout/actions.ts` quoteCheckoutAction | guest | public allow-list; store comes from the host | host store; orders | parseInput before any read or write | none | yes | catch returns the raw error message | listed, not fixed |
 | `src/lib/checkout/actions.ts` createPaymentIntentAction | guest | public allow-list; store comes from the host | host store; orders | parseInput before any read or write | 30/hour per cart | yes | catch returns the raw error message | listed, not fixed |
 | `src/lib/checkout/actions.ts` placeOrderAction | guest | public allow-list; store comes from the host | host store; orders | parseInput before any read or write | none | yes | catch returns the raw error message | listed, not fixed |
