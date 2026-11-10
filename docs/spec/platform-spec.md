@@ -253,7 +253,7 @@ Order recovery visibility, built in #420. `/api/health` requires `INNGEST_EVENT_
 | Timer not started | AUTHORIZED, no `inngest_event_sent_at`, created more than 15 min ago |
 | Timer overdue | AUTHORIZED, 30 min past the cancel timer's 30-open-minute deadline (`timerDeadline`) |
 | Retry stalled | CAPTURING/CANCELLING, first `capture_retry`/`cancel_retry` audit row older than 30 min (else `updated_at`) |
-| Picking overdue | ACCEPTED/PICKING, prep estimate + 60 min after the later of `accepted_at` and the pickup slot |
+| Picking overdue | ACCEPTED/PICKING, prep estimate + 60 min after the later of `accepted_at` and the pickup slot; a slot starting more than 7 days after `accepted_at` is ignored |
 | Ready too long | READY 4 h after `ready_at` |
 | Out for delivery too long | OUT_FOR_DELIVERY 4 h after `out_for_delivery_at` |
 | Waiting for pickup too long | AWAITING_PICKUP 48 h after `ready_at` |

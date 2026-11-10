@@ -12,6 +12,8 @@ const TIMER_OVERDUE_MS = 30 * MIN;
 /** Reconcile picks after 5 min and runs every 15 min. */
 const RETRY_STALLED_MS = 30 * MIN;
 const PICKING_GRACE_MINUTES = 60;
+/** The slot is free text from checkout; a start further out than this is ignored. */
+const SLOT_HORIZON_MS = 7 * DAY;
 /** The card hold lasts 7 days (store-queue.ts). */
 const HOLD_EXPIRING_MS = 5 * DAY;
 const READY_MS = 4 * HOUR;
@@ -53,10 +55,10 @@ export type OrderAlertRow = {
   createdAt: Date;
 };
 
-function slotStart(slot: string | null): number | null {
+function slotStart(slot: string | null, acceptedAt: number): number | null {
   if (!slot) return null;
   const at = Date.parse(slot);
-  return Number.isNaN(at) ? null : at;
+  return Number.isNaN(at) || at > acceptedAt + SLOT_HORIZON_MS ? null : at;
 }
 
 function stuckReason(order: OrderRecoveryCandidate, now: number): { reason: StuckReason; since: Date } | null {
@@ -83,7 +85,8 @@ function stuckReason(order: OrderRecoveryCandidate, now: number): { reason: Stuc
     case "ACCEPTED":
     case "PICKING": {
       if (!order.acceptedAt) return null;
-      const start = Math.max(order.acceptedAt.getTime(), slotStart(order.pickupSlot) ?? 0);
+      const acceptedAt = order.acceptedAt.getTime();
+      const start = Math.max(acceptedAt, slotStart(order.pickupSlot, acceptedAt) ?? 0);
       const due = start + ((order.prepEstimateMinutes ?? 0) + PICKING_GRACE_MINUTES) * MIN;
       return due < now ? { reason: "picking overdue", since: new Date(start) } : null;
     }

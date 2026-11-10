@@ -66,6 +66,13 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
         prepEstimateMinutes: 20,
         pickupSlot: new Date(now.getTime() + 6 * HOUR).toISOString(),
       });
+      await order("farSlot", {
+        status: "ACCEPTED",
+        createdAt: ago(2 * HOUR + 5 * MIN),
+        acceptedAt: ago(2 * HOUR),
+        prepEstimateMinutes: 20,
+        pickupSlot: new Date(now.getTime() + 30 * DAY).toISOString(),
+      });
       await order("hold", {
         status: "ACCEPTED",
         createdAt: ago(5 * DAY + HOUR),
@@ -104,6 +111,7 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
     expect(reasonOf("timerOverdue")).toEqual(["timer overdue"]);
     expect(reasonOf("cancelling")).toEqual(["retry stalled"]);
     expect(reasonOf("picking")).toEqual(["picking overdue"]);
+    expect(reasonOf("farSlot")).toEqual(["picking overdue"]);
     expect(reasonOf("hold")).toEqual(["card hold expiring"]);
     expect(reasonOf("ready")).toEqual(["ready too long"]);
     expect(reasonOf("awaitingPickup")).toEqual(["waiting for pickup too long"]);
