@@ -169,6 +169,24 @@ describe.skipIf(!hasKey)(
       expect(result.status).toBe("succeeded");
     });
 
+    it("a partial issue refund without the application fee carries its reservation and leaves the fee", { timeout: 30_000 }, async () => {
+      const piId = await createAuthorizedPI(1000);
+      await stripeProvider.capturePaymentIntent(piId, 1000, `cap-${piId}`, 100);
+      const key = `refund:issue-${piId}:1`;
+      const result = await stripeProvider.refundPayment(piId, 400, key, {
+        refundApplicationFee: false,
+        reservationKey: key,
+        orderId: `order-${piId}`,
+      });
+      expect(result).toMatchObject({ amountRefunded: 400, status: "succeeded", reservationKey: key });
+      const listed = await stripeProvider.listRefunds(piId);
+      expect(listed.map((refund) => [refund.reservationKey, refund.amountRefunded])).toEqual([[key, 400]]);
+      const pi = await stripe.paymentIntents.retrieve(piId, { expand: ["latest_charge.application_fee"] });
+      const fee = (pi.latest_charge as Stripe.Charge).application_fee as Stripe.ApplicationFee;
+      expect(fee.amount).toBe(100);
+      expect(fee.amount_refunded).toBe(0);
+    });
+
     it("retrieve after capture returns succeeded with amount_received", async () => {
       const piId = await createAuthorizedPI(900);
       await stripeProvider.capturePaymentIntent(piId, 600, `cap-${piId}`);

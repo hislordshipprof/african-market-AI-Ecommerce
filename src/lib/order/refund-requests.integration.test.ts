@@ -588,6 +588,8 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 600 });
     await evaluateOrderRefundState(order.id);
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("REFUNDED");
+    const issued = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: order.id, event: "refunded" } });
+    expect(issued.map((row) => row.channel).sort()).toEqual(["email", "sms"]);
   });
 
   it("an issue refund on a courier order keeps the application fee", async () => {
