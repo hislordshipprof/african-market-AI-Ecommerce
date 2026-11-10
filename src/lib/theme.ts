@@ -16,6 +16,8 @@ interface ThemeTokens {
   soft: string;
   deal: string;
   success: string;
+  /** Neutral ground behind product photos and cut-outs; never the store green. */
+  "photo-well": string;
 }
 
 /** Dark themes add a strong edge for inputs, chips and outlined buttons (>= 3:1 on bg, surface and raised). */
@@ -38,6 +40,7 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: DarkThemeTokens }
       soft: "#E1EEE3",
       deal: "#B42335",
       success: "#2E7D4F",
+      "photo-well": "#EBF3EC",
     },
     dark: {
       bg: "#0D1410",
@@ -53,6 +56,7 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: DarkThemeTokens }
       soft: "#21412E",
       deal: "#F28793",
       success: "#6CC08F",
+      "photo-well": "#ECEBE5",
     },
   },
   "cocoa-and-bottle-green": {
@@ -69,6 +73,7 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: DarkThemeTokens }
       soft: "#E9E3DA",
       deal: "#A1302A",
       success: "#2F6B45",
+      "photo-well": "#EFEAE3",
     },
     dark: {
       bg: "#120F0D",
@@ -84,6 +89,7 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: DarkThemeTokens }
       soft: "#493526",
       deal: "#F0867D",
       success: "#66B791",
+      "photo-well": "#EEEAE3",
     },
   },
   "lagoon-and-coral": {
@@ -100,6 +106,7 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: DarkThemeTokens }
       soft: "#E0ECEC",
       deal: "#C23B52",
       success: "#0F6B3A",
+      "photo-well": "#EAF2F2",
     },
     dark: {
       bg: "#0C1314",
@@ -115,6 +122,7 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: DarkThemeTokens }
       soft: "#253E48",
       deal: "#F18799",
       success: "#6FC79A",
+      "photo-well": "#EBEBE6",
     },
   },
 };
@@ -273,6 +281,9 @@ function buildCssVars(tokens: ThemeTokens): Record<string, string> {
   cssVars["--store-on-primary"] = readableFillColor(tokens.primary);
   cssVars["--store-on-primary-deep"] = readableFillColor(tokens["primary-deep"]);
   cssVars["--store-on-accent"] = readableFillColor(tokens.accent);
+  // Ink when it holds 7:1 on the well (light themes), else near-black (the light well in dark themes).
+  cssVars["--store-on-photo-well"] =
+    contrastRatio(tokens.ink, tokens["photo-well"]) >= 7 ? tokens.ink : readableFillColor(tokens["photo-well"]);
   return cssVars;
 }
 

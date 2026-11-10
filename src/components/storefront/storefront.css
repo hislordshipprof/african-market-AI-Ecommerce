@@ -646,7 +646,7 @@
   max-width: 100%;
   border-radius: 12px;
   overflow: hidden;
-  background: var(--color-soft);
+  background: var(--color-photo-well);
 }
 .sf-product-image img {
   object-fit: cover;
@@ -660,7 +660,7 @@
   flex-direction: column;
   padding: 12px;
   text-align: center;
-  color: var(--muted-foreground);
+  color: var(--color-on-photo-well);
 }
 /* No photo yet: a quiet food-group icon and the product's own name, not a broken-image letter. */
 .sf-product-fallback > span {
@@ -673,7 +673,7 @@
   font-size: 16px;
   font-weight: 650;
   line-height: 1.25;
-  color: var(--color-ink);
+  color: var(--color-on-photo-well);
   overflow-wrap: anywhere;
 }
 .sf-product-image {

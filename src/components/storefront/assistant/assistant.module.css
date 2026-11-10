@@ -223,7 +223,7 @@
   width: 64px;
   height: 64px;
   border-radius: 8px;
-  background: var(--color-raised);
+  background: var(--color-photo-well);
   overflow: hidden;
 }
 
@@ -231,7 +231,7 @@
   display: grid;
   place-items: center;
   overflow-wrap: anywhere;
-  color: var(--color-muted);
+  color: var(--color-on-photo-well);
   font: 600 13px/1.2 Figtree, "Segoe UI", system-ui, sans-serif;
   text-align: center;
   padding: 4px;

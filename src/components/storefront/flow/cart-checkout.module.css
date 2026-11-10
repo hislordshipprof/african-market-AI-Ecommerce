@@ -69,7 +69,7 @@
   flex: 0 0 88px;
   overflow: hidden;
   border-radius: 12px;
-  background: var(--color-bg);
+  background: var(--color-photo-well);
 }
 .photo > div,
 .smallPhoto > div,

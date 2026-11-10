@@ -56,6 +56,8 @@
     --color-primary: var(--store-primary, #1F5A43);
     --color-primary-deep: var(--store-primary-deep, #123726);
     --color-primary-text: var(--store-primary-text, var(--store-primary, #1F5A43));
+    --color-photo-well: var(--store-photo-well, #EBF3EC);
+    --color-on-photo-well: var(--store-on-photo-well, #15201A);
     --color-on-primary: var(--store-on-primary, #FFFFFF);
     --color-accent: var(--store-accent, #A8DDB5);
     --color-on-accent: var(--store-on-accent, #0F2A1B);

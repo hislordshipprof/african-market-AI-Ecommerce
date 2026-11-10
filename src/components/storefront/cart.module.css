@@ -166,7 +166,7 @@
   border-radius: 12px;
   object-fit: cover;
   flex-shrink: 0;
-  background: var(--color-bg);
+  background: var(--color-photo-well);
 }
 .fallback {
   display: grid;

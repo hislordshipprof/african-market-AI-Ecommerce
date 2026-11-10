@@ -33,3 +33,25 @@ describe("primary text token", () => {
     expect(light["--store-primary-text"]).toBe(light["--store-primary"]);
   });
 });
+
+describe("photo well token", () => {
+  const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+  it.each(VALID_PRESETS)("is a soft neutral off-white in %s dark, never pure white or store green", (preset) => {
+    const dark = resolveStoreTheme(preset, "#1F5A43").dark;
+    const well = dark["--store-photo-well"];
+    const [r, g, b] = channels(well);
+    expect(well.toUpperCase()).not.toBe("#FFFFFF");
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(12);
+    // Light enough that brown cut-outs keep their edges against it.
+    expect(contrastRatio(well, "#6B4A2B")).toBeGreaterThanOrEqual(5);
+    expect(contrastRatio(well, "#FFFFFF")).toBeGreaterThan(1.1);
+  });
+
+  it.each(VALID_PRESETS)("carries readable text for the no-photo tile in %s", (preset) => {
+    for (const mode of ["light", "dark"] as const) {
+      const vars = resolveStoreTheme(preset, null)[mode];
+      expect(contrastRatio(vars["--store-on-photo-well"], vars["--store-photo-well"])).toBeGreaterThanOrEqual(7);
+    }
+  });
+});
