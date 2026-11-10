@@ -10,6 +10,7 @@ import { stripeProvider } from "./provider";
 import { cancelledPayments, fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "./fake";
 import { acceptOrder, cancelOrder } from "../order/service";
 import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
+import { findOrdersToCheck } from "../admin/orders-to-check-query";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -461,6 +462,8 @@ describe.skipIf(!hasDb)("signed Stripe webhooks (lane DB)", () => {
     })).toBe(1);
     const after = await storeScoped(storeA).order.findUniqueOrThrow({ where: { id: order.id } });
     expect(after.status).toBe("COMPLETED");
+    const { alerts } = await findOrdersToCheck({ storeIds: [storeA] });
+    expect(alerts).toContainEqual(expect.objectContaining({ orderId: order.id, action: "issue_refund_failed" }));
   });
 
   it("DB failure returns 500 and the retry records the refund", async () => {

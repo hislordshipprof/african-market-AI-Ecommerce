@@ -7,6 +7,7 @@ const ALERT_LABELS: Record<string, string> = {
   reconcile_failed: "Reconcile failed",
   capture_released: "Card hold released before capture",
   refund_request_unknown: "Refund request outcome unknown",
+  issue_refund_failed: "Problem report refund failed",
 };
 
 const GROUP_LABELS: Record<string, string> = {
