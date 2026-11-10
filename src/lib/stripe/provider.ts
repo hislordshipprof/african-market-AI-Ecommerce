@@ -126,6 +126,7 @@ export const stripeProvider: StripeProvider = {
           object?: string;
           status?: string | null;
           payment_intent?: string | { id?: string };
+          cancellation_reason?: string | null;
           metadata?: { reservation?: string };
         } | undefined;
         const paymentIntentId =
@@ -140,10 +141,16 @@ export const stripeProvider: StripeProvider = {
                 ...(reservationKey ? { reservationKey } : {}),
               }
             : undefined;
+        const paymentIntent =
+          obj?.object === "payment_intent" && obj.id && obj.status
+            ? { id: obj.id, status: obj.status, cancellationReason: obj.cancellation_reason ?? null }
+            : undefined;
         return {
           type: event.type,
           accountId: obj?.id ?? event.account ?? "",
+          eventId: event.id,
           ...(refund ? { refund } : {}),
+          ...(paymentIntent ? { paymentIntent } : {}),
         } satisfies WebhookEvent;
       } catch (err) {
         lastError = err;

@@ -7,11 +7,13 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { setStripeProvider } from "../stripe";
 import { stripeProvider } from "./provider";
-import { fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "./fake";
+import { cancelledPayments, fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "./fake";
+import { acceptOrder, cancelOrder } from "../order/service";
+import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
 
 const hasDb = !!process.env.DATABASE_URL;
 
-describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
+describe.skipIf(!hasDb)("signed Stripe webhooks (lane DB)", () => {
   const run = `wh186-${Date.now()}`;
   let raw: PrismaClient;
   let storeA = "";
@@ -59,8 +61,15 @@ describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.auditLog.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
+      await tx.stockEvent.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
+      await tx.cartLine.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
+      await tx.cart.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
+      await tx.notificationLog.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
+      await tx.orderLine.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
       await tx.order.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
       await tx.customer.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
+      await tx.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeA, storeB] } } } });
+      await tx.listing.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
       await tx.store.deleteMany({ where: { id: { in: [storeA, storeB] } } });
     });
     await raw.$disconnect();
@@ -448,4 +457,110 @@ describe.skipIf(!hasDb)("signed refund.failed webhook (lane DB)", () => {
     expect(stored?.status).toBe("CANCELLING");
     expect(stored?.capturedAmountCents).toBe(1000);
   });
+
+  async function postIntentCanceled(eventId: string, paymentIntentId: string, cancellationReason: string | null) {
+    const payload = JSON.stringify({
+      id: eventId,
+      object: "event",
+      api_version: "2026-10-28.endive",
+      created: Math.floor(Date.now() / 1000),
+      type: "payment_intent.canceled",
+      livemode: false,
+      pending_webhooks: 1,
+      request: { id: null, idempotency_key: null },
+      data: {
+        object: {
+          id: paymentIntentId,
+          object: "payment_intent",
+          status: "canceled",
+          cancellation_reason: cancellationReason,
+        },
+      },
+    });
+    const signature = Stripe.webhooks.generateTestHeaderString({ payload, secret });
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    return POST(new NextRequest("http://localhost:3000/api/webhooks/stripe", {
+      method: "POST",
+      body: payload,
+      headers: { "stripe-signature": signature, "content-type": "application/json" },
+    }));
+  }
+
+  async function cancelTrail(orderId: string, listingId: string) {
+    const scoped = storeScoped(storeA);
+    const order = await scoped.order.findUniqueOrThrow({ where: { id: orderId } });
+    const audits = await scoped.auditLog.findMany({
+      where: { entityId: orderId, entityType: "order" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    const notifications = await scoped.notificationLog.count({ where: { orderId, event: "cancelled" } });
+    return {
+      status: order.status,
+      audits: audits.map((row) => row.action).filter((action) => action !== "cancel_retry"),
+      stock: await stockOf(storeA, listingId),
+      notifications,
+    };
+  }
+
+  it("payment_intent.canceled for an accepted order, delivered twice, cancels it once", async () => {
+    const { listingId, variantId } = await countedListing(storeA, 10, "Held");
+    const placed = await placeOrder(storeA, [{ variantId, qty: 2 }]);
+    await acceptOrder(storeA, placed.orderId, 15);
+    // Stripe ended the hold on its side before telling us.
+    cancelledPayments.add(placed.paymentIntentId);
+
+    const eventId = `evt_pi_canceled_${placed.orderId}`;
+    expect((await postIntentCanceled(eventId, placed.paymentIntentId, "expired")).status).toBe(200);
+    const once = await cancelTrail(placed.orderId, listingId);
+    expect(once).toMatchObject({
+      status: "CANCELLED",
+      audits: ["provider_canceled"],
+      stock: { qty: 10, events: [["reservation", -2], ["reservation_release", 2]] },
+    });
+    expect(once.notifications).toBeGreaterThan(0);
+    const cause = await storeScoped(storeA).auditLog.findFirstOrThrow({
+      where: { entityId: placed.orderId, action: "provider_canceled" },
+    });
+    expect(cause.after).toMatchObject({ stripeEventId: eventId, cancellationReason: "expired", holdEnded: true });
+
+    expect((await postIntentCanceled(eventId, placed.paymentIntentId, "expired")).status).toBe(200);
+    expect(await cancelTrail(placed.orderId, listingId)).toEqual(once);
+  }, 30_000);
+
+  it("payment_intent.canceled for a cancelled or unknown intent returns 200 and writes nothing", async () => {
+    const { listingId, variantId } = await countedListing(storeA, 10, "Already cancelled");
+    const placed = await placeOrder(storeA, [{ variantId, qty: 1 }]);
+    expect(await cancelOrder(storeA, placed.orderId, { action: "auto_cancel" })).toEqual({ ok: true });
+    const before = await cancelTrail(placed.orderId, listingId);
+    expect(before.status).toBe("CANCELLED");
+
+    const late = await postIntentCanceled(`evt_late_${placed.orderId}`, placed.paymentIntentId, null);
+    expect(late.status).toBe(200);
+    expect(await cancelTrail(placed.orderId, listingId)).toEqual(before);
+
+    const unknown = await postIntentCanceled(`evt_unknown_${run}`, `pi_unknown_${run}`, "expired");
+    expect(unknown.status).toBe(200);
+  }, 30_000);
+
+  it("the echo of our own store cancel writes no second audit row, stock release or notification", async () => {
+    const { listingId, variantId } = await countedListing(storeA, 10, "Echoed");
+    const placed = await placeOrder(storeA, [{ variantId, qty: 3 }]);
+    await acceptOrder(storeA, placed.orderId, 15);
+    expect(await cancelOrder(storeA, placed.orderId, {
+      action: "store_cancel",
+      actor: { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL },
+      reason: "store_closed",
+      note: null,
+    })).toEqual({ ok: true });
+    const ours = await cancelTrail(placed.orderId, listingId);
+    expect(ours).toMatchObject({
+      status: "CANCELLED",
+      audits: ["store_cancel"],
+      stock: { qty: 10, events: [["reservation", -3], ["reservation_release", 3]] },
+    });
+
+    const echo = await postIntentCanceled(`evt_echo_${placed.orderId}`, placed.paymentIntentId, null);
+    expect(echo.status).toBe(200);
+    expect(await cancelTrail(placed.orderId, listingId)).toEqual(ours);
+  }, 30_000);
 });

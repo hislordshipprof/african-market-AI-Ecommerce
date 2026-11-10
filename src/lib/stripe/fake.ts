@@ -278,6 +278,7 @@ const fakeStripeProvider: StripeProvider = {
       );
     }
     const parsed = JSON.parse(payload) as {
+      id?: string;
       type?: string;
       accountId?: string;
       data?: {
@@ -286,6 +287,7 @@ const fakeStripeProvider: StripeProvider = {
           object?: string;
           status?: string;
           payment_intent?: string | { id?: string };
+          cancellation_reason?: string | null;
           metadata?: { reservation?: string };
         };
       };
@@ -303,10 +305,16 @@ const fakeStripeProvider: StripeProvider = {
             ...(reservationKey ? { reservationKey } : {}),
           }
         : undefined;
+    const paymentIntent =
+      obj?.object === "payment_intent" && obj.id && obj.status
+        ? { id: obj.id, status: obj.status, cancellationReason: obj.cancellation_reason ?? null }
+        : undefined;
     return {
       type: parsed.type as string,
       accountId: (parsed.accountId ?? obj?.id ?? "") as string,
+      ...(parsed.id ? { eventId: parsed.id } : {}),
       ...(refund ? { refund } : {}),
+      ...(paymentIntent ? { paymentIntent } : {}),
     } satisfies WebhookEvent;
   },
 

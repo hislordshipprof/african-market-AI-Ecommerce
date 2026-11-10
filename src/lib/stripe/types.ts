@@ -23,10 +23,19 @@ export interface WebhookRefund {
   reservationKey?: string;
 }
 
+export interface WebhookPaymentIntent {
+  id: string;
+  status: string;
+  cancellationReason: string | null;
+}
+
 export interface WebhookEvent {
   type: string;
   accountId: string;
+  /** Stripe's event id; a replay carries the same one. */
+  eventId?: string;
   refund?: WebhookRefund;
+  paymentIntent?: WebhookPaymentIntent;
 }
 
 export interface CaptureResult {
