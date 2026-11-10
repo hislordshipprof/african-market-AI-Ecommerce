@@ -31,6 +31,7 @@ import { applyProviderRefund, clearReplayCallsForTests, evaluateOrderRefundState
 import { autoCancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "../order/service";
 import { failedAtLabel } from "./failed-at";
 import { listRefundFailedOrders, resolveRefundFailed, resolveRefundFailedAction } from "./refund-resolution";
+import { listOrdersToCheck } from "./orders-to-check";
 import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
 import { parseRepaidDollars } from "./repaid-dollars";
 
@@ -259,6 +260,16 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     });
     const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(after?.status).toBe("REFUND_FAILED");
+  });
+
+  it("store staff and signed-out callers cannot open the orders to check", async () => {
+    const toSignIn = (error: unknown) => isRedirectError(error) && getURLFromRedirectError(error) === "/admin/sign-in";
+    asAdmin(cookiesOwner);
+    await expect(listOrdersToCheck()).rejects.toSatisfy(toSignIn);
+    headerState.delete("cookie");
+    await expect(listOrdersToCheck()).rejects.toSatisfy(toSignIn);
+    asAdmin(cookiesAdmin);
+    await expect(listOrdersToCheck()).resolves.toHaveProperty("stuck");
   });
 
   it("an empty, whitespace or 501-character note is refused", async () => {
