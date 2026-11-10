@@ -651,13 +651,13 @@ describe.skipIf(!hasKey || !hasDb)(
         const charge = held.latest_charge as Stripe.Charge;
         expect(holdAuthorizedAt(held)).toBe(charge.created * 1000);
 
-        await releaseOrphanHolds([{ storeId: storeAId, cartId: cart.id, paymentIntentId }]);
+        await releaseOrphanHolds([{ storeId: storeAId, cartId: cart.id, paymentIntentId, updatedAt: cart.updatedAt }]);
         expect((await stripe.paymentIntents.retrieve(paymentIntentId)).status).toBe("requires_capture");
 
         vi.useFakeTimers({ toFake: ["Date"] });
         try {
           vi.setSystemTime(charge.created * 1000 + 61 * 60_000);
-          await releaseOrphanHolds([{ storeId: storeAId, cartId: cart.id, paymentIntentId }]);
+          await releaseOrphanHolds([{ storeId: storeAId, cartId: cart.id, paymentIntentId, updatedAt: cart.updatedAt }]);
         } finally {
           vi.useRealTimers();
         }

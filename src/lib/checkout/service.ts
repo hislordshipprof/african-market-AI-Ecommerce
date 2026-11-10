@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
@@ -350,6 +350,7 @@ export async function createPaymentIntent(
       }
       if (provenanceOk && OPENABLE_PAYMENT.has(existing.status)) {
         if (!existing.client_secret) throw new Error("Stripe did not return a client secret");
+        await tx.cart.update({ where: { id: cartId }, data: { orphanCheckedAt: null } });
         return {
           kind: "reuse" as const,
           clientSecret: existing.client_secret,
@@ -827,22 +828,37 @@ export async function releaseLosingHold(
 
 /** An unused card hold is released this long after authorization (owner decision, #422). */
 const ORPHAN_HOLD_GRACE_MS = 60 * 60_000;
+/** A cart whose intent never got a card is cancelled once untouched this long. */
+const DEAD_CART_MS = 24 * 60 * 60_000;
+const UNPAID_PAYMENT = new Set(["requires_payment_method", "requires_confirmation"]);
 
 /**
  * Releases card holds that never became an order: the intent is still
- * `requires_capture` and was authorized more than the grace ago. releaseLosingHold
- * re-checks for an order under the store and cart locks and writes the tombstone,
- * so a placeOrder that wins the race keeps its hold and a later one is refused.
+ * `requires_capture` and was authorized more than the grace ago. Also cancels
+ * intents that never got a card within a day, so they leave the sweep; a returning
+ * shopper gets a fresh intent. releaseLosingHold re-checks for an order under the
+ * store and cart locks and writes the tombstone, so a placeOrder that wins the
+ * race keeps its hold and a later one is refused.
  */
 export async function releaseOrphanHolds(
-  carts: ReadonlyArray<{ storeId: string; cartId: string; paymentIntentId: string }>,
+  carts: ReadonlyArray<{ storeId: string; cartId: string; paymentIntentId: string; updatedAt: Date }>,
 ): Promise<void> {
   for (const cart of carts) {
     try {
       const pi = await retrieveCheckoutIntent(cart.paymentIntentId);
-      if (pi.status !== "requires_capture" || pi.authorized_at == null) continue;
-      if (Date.now() - pi.authorized_at < ORPHAN_HOLD_GRACE_MS) continue;
-      await releaseLosingHold(cart.storeId, cart.cartId, cart.paymentIntentId, "abandoned");
+      if (pi.status === "requires_capture" && pi.authorized_at != null) {
+        if (Date.now() - pi.authorized_at < ORPHAN_HOLD_GRACE_MS) continue;
+        await releaseLosingHold(cart.storeId, cart.cartId, cart.paymentIntentId, "abandoned");
+        continue;
+      }
+      if (UNPAID_PAYMENT.has(pi.status) && Date.now() - cart.updatedAt.getTime() > DEAD_CART_MS) {
+        await releaseLosingHold(cart.storeId, cart.cartId, cart.paymentIntentId, "abandoned");
+        continue;
+      }
+      if (pi.status === "requires_capture") {
+        console.error(JSON.stringify({ event: "orphan_hold_without_authorization_time", paymentIntentId: pi.id }));
+      }
+      await markOrphanHoldChecked(cart.storeId, cart.cartId, cart.paymentIntentId);
     } catch (error) {
       console.error(JSON.stringify({
         event: "orphan_hold_release_failed",

@@ -463,6 +463,23 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
     }
   }
 
+  async function deadCart(writtenAgoMs: number) {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId } });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() - writtenAgoMs);
+      const prepared = await prepareSignedInPaymentIntent(storeId, cart.id, 4200, {
+        actorUserId: userId,
+        saveCard: false,
+        savedCardId: null,
+        attemptToken: null,
+      }, storeAccountId);
+      return { cartId: cart.id, paymentIntentId: prepared.paymentIntentId };
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
   function releaseRow(paymentIntentId: string) {
     return storeScopedTransaction(storeId, (tx) => tx.paymentIntentRelease.findUnique({ where: { paymentIntentId } }));
   }
@@ -498,6 +515,27 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
       expect(await releaseRow(held.paymentIntentId)).toBeNull();
       const cart = await storeScoped(storeId).cart.findUnique({ where: { id: held.cartId } });
       expect(cart?.paymentIntentId).toBe(held.paymentIntentId);
+    }
+  });
+
+  it("reaches an orphan hold behind carts that never paid, and cancels carts dead for 24 h", async () => {
+    const deadCarts = async (count: number, writtenAgoMs: number) => {
+      const carts = [];
+      for (let i = 0; i < count; i += 1) carts.push(await deadCart(writtenAgoMs));
+      return carts;
+    };
+    const dayOld = await deadCarts(25, 25 * 60 * 60_000);
+    const unpaid = [...await deadCarts(50, 4 * 60 * 60_000), ...await deadCarts(50, 2 * 60 * 60_000)];
+    const held = await heldCart(3 * 60 * 60_000, 61 * 60_000);
+    for (let run = 0; run < 3; run += 1) await sweep();
+    expect((await getCheckoutPayments().retrievePaymentIntent(held.paymentIntentId)).status).toBe("canceled");
+    expect(await releaseRow(held.paymentIntentId)).not.toBeNull();
+    for (const dead of dayOld) {
+      expect((await getCheckoutPayments().retrievePaymentIntent(dead.paymentIntentId)).status).toBe("canceled");
+      expect(await releaseRow(dead.paymentIntentId)).not.toBeNull();
+    }
+    for (const dead of unpaid) {
+      expect((await getCheckoutPayments().retrievePaymentIntent(dead.paymentIntentId)).status).toBe("requires_payment_method");
     }
   });
 });

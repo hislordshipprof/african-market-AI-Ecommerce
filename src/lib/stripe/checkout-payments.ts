@@ -437,20 +437,15 @@ function checkoutFakeAllowed(): boolean {
   return process.env.NODE_ENV !== "production";
 }
 
-/** Online card holds last 7 days (Stripe: place a hold on a payment method). */
-const CARD_HOLD_MS = 7 * 24 * 60 * 60_000;
-
 /**
- * The authorization time of the intent's hold, from an expanded `latest_charge`:
- * the charge's `created`, else `capture_before` minus the hold length. One intent
- * is reused per cart, so the intent's own `created` can be far older than its hold.
+ * The authorization time of the intent's hold: the expanded `latest_charge`'s
+ * `created`. One intent is reused per cart, so the intent's own `created` can be
+ * far older than its hold.
  */
 export function holdAuthorizedAt(intent: Pick<Stripe.PaymentIntent, "latest_charge">): number | null {
   const charge = intent.latest_charge;
   if (!charge || typeof charge === "string") return null;
-  if (charge.created) return charge.created * 1000;
-  const captureBefore = charge.payment_method_details?.card?.capture_before;
-  return captureBefore ? captureBefore * 1000 - CARD_HOLD_MS : null;
+  return charge.created * 1000;
 }
 
 function normalizeStripeIntent(intent: Stripe.PaymentIntent): NormalizedPaymentIntent {

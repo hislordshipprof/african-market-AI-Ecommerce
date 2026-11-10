@@ -744,29 +744,43 @@ export async function findPickTimeoutCandidates(opts: {
 /**
  * Carts holding a PaymentIntent with no order and no release tombstone, not
  * written in the last `untouchedFor` ms (a hold cannot be older than that and
- * still unused for longer). Most recently written first, so a fresh hold is seen.
+ * still unused for longer). Never-checked carts first, then least recently
+ * checked, oldest first, so carts that never paid cannot starve a real hold.
  */
 export async function findOrphanHoldCarts(opts?: {
   untouchedFor?: number;
   limit?: number;
   storeIds?: readonly string[];
-}): Promise<Array<{ storeId: string; cartId: string; paymentIntentId: string }>> {
+}): Promise<Array<{ storeId: string; cartId: string; paymentIntentId: string; updatedAt: Date }>> {
   if (opts?.storeIds && opts.storeIds.length === 0) return [];
   const before = new Date(Date.now() - (opts?.untouchedFor ?? 60 * 60_000));
   const inStores = opts?.storeIds ? Prisma.sql`AND c.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   return platformAdminTransaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; payment_intent_id: string }>>`
-      SELECT c.id, c.store_id, c.payment_intent_id FROM carts c
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; payment_intent_id: string; updated_at: Date }>>`
+      SELECT c.id, c.store_id, c.payment_intent_id, c.updated_at FROM carts c
       WHERE c.payment_intent_id IS NOT NULL
         AND c.updated_at < ${before}
         AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.payment_intent_id = c.payment_intent_id)
         AND NOT EXISTS (SELECT 1 FROM payment_intent_releases r WHERE r.payment_intent_id = c.payment_intent_id)
         ${inStores}
-      ORDER BY c.updated_at DESC
+      ORDER BY c.orphan_checked_at ASC NULLS FIRST, c.updated_at ASC
       LIMIT ${opts?.limit ?? 50}
     `;
-    return rows.map((r) => ({ storeId: r.store_id, cartId: r.id, paymentIntentId: r.payment_intent_id }));
+    return rows.map((r) => ({
+      storeId: r.store_id,
+      cartId: r.id,
+      paymentIntentId: r.payment_intent_id,
+      updatedAt: r.updated_at,
+    }));
   });
+}
+
+/** Moves a checked cart to the back of the orphan-hold sweep. Raw SQL so `updated_at` is kept. */
+export async function markOrphanHoldChecked(storeId: string, cartId: string, paymentIntentId: string): Promise<void> {
+  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+    UPDATE carts SET orphan_checked_at = now()
+    WHERE id = ${cartId} AND store_id = ${storeId} AND payment_intent_id = ${paymentIntentId}
+  `);
 }
 
 const NOTIFICATION_RESEND_MS = 5 * 60_000;
