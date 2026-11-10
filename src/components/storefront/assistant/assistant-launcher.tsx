@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
-import { launcherFloats, launcherVisible } from "@/lib/assistant/ui/launcher-gate";
+import { launcherVisible } from "@/lib/assistant/ui/launcher-gate";
 import { assistantHiddenForStore, hideAssistantForStore } from "@/lib/assistant/ui/session-hide";
 import { useCart } from "../cart-provider";
 import { useAssistantSlot } from "./assistant-slot";
@@ -28,6 +28,8 @@ export function AssistantLauncher({
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
   const [Sheet, setSheet] = useState<typeof import("./assistant-sheet").AssistantSheet | null>(null);
+  // Pages with their own controls under the launcher (product, basket, cart drawer) mount a slot;
+  // everywhere else, including a closed basket, the launcher floats.
   const slot = useAssistantSlot();
 
   const visible = launcherVisible({
@@ -74,7 +76,7 @@ export function AssistantLauncher({
             slot.element,
           )
         : null}
-      {visible && !slot && launcherFloats(pathname) ? (
+      {visible && !slot ? (
         <button
           type="button"
           className={styles.launcher}
