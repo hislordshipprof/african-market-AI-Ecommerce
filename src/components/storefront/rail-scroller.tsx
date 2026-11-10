@@ -86,7 +86,11 @@ export function RailScroller({
         onKeyDown={(e) => {
           if (e.key === "Home" || e.key === "End") {
             e.preventDefault();
-            e.currentTarget.scrollTo({ left: e.key === "Home" ? 0 : e.currentTarget.scrollWidth, behavior: "instant" });
+            const rail = e.currentTarget;
+            // A jump during a smooth arrow scroll gets pulled back by mandatory snapping mid-animation, so snap waits two frames.
+            rail.style.scrollSnapType = "none";
+            rail.scrollTo({ left: e.key === "Home" ? 0 : rail.scrollWidth, behavior: "instant" });
+            requestAnimationFrame(() => requestAnimationFrame(() => { rail.style.scrollSnapType = ""; }));
           }
           if (e.key === "ArrowRight") {
             e.preventDefault();

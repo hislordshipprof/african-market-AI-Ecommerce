@@ -10,6 +10,7 @@ import { isOrderNotifyEvent } from "../notifications/record";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 import { runAssistantRetention } from "../assistant/retention";
 import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing/confidence-job";
+import { sendNewOrderPush } from "../push/new-order";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -236,6 +237,20 @@ export const autoCancel = inngest.createFunction(
   },
 );
 
+/** Web push to store staff. A push failure never touches checkout: this runs on the after-commit event. */
+export const newOrderPush = inngest.createFunction(
+  {
+    id: "order/new-order-push",
+    idempotency: "event.data.orderId",
+    triggers: [{ event: "order/authorized" }],
+  },
+  async ({ event, step }) => {
+    const { orderId, storeId } = event.data as { orderId?: string; storeId?: string };
+    if (!orderId || !storeId) return;
+    await step.run("send-push", () => sendNewOrderPush(storeId, orderId));
+  },
+);
+
 export const sweepOrphanedAuthorized = inngest.createFunction(
   {
     id: "order/sweep-orphaned-authorized",
@@ -337,6 +352,7 @@ export const dailyConfidence = inngest.createFunction(
 export const inngestFunctions = [
   acceptanceAlert,
   autoCancel,
+  newOrderPush,
   sweepOrphanedAuthorized,
   reconcileStuckTransitional,
   assistantRetention,

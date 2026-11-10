@@ -29,6 +29,7 @@ export async function listAccountOrders(
       deliveryFeeCents: true,
       capturedAmountCents: true,
       refundId: true,
+      trackingToken: true,
       _count: { select: { lines: true } },
     },
   });

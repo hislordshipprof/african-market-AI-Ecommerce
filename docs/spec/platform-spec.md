@@ -345,6 +345,8 @@ Customer email and SMS go out for placed, accepted, ready, out for delivery, del
 
 Channels: Resend (email), Telnyx (SMS), Web Push (ADR-0017).
 
+Store web push, built in #129: a store member turns on **Order alerts on this device** on the store-admin orders page. The browser subscribes with the public VAPID key (handed to the page as a server-rendered prop) and the subscription is saved in `push_subscriptions` (store, member, endpoint, `p256dh`, `auth`; RLS like every store table; one row per store and endpoint). On `order/authorized` an Inngest function sends one push per subscribed device of a current member of that store: "New order", the order number and fulfillment, and a link to the orders page. It runs off the checkout path, so a push failure never fails or delays checkout. A push service answer of 404 or 410 deletes that subscription. Without `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` sending is skipped with one warning and the control is hidden. The service worker (`/push-sw.js`) only shows the notification and opens the orders page on click: no caching, no PWA manifest. Push for other events, sound, and SMS to the owner are not built.
+
 ---
 
 ## 13. Data model (core entities)

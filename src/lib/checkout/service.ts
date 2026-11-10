@@ -523,7 +523,7 @@ function paymentIntentTaken(err: unknown): boolean {
 export async function recordAuthorizedOrder(
   storeId: string,
   input: RecordAuthorizedOrderInput,
-): Promise<{ orderId: string; created: boolean }> {
+): Promise<{ orderId: string; created: boolean; trackingToken: string | null }> {
   try {
     const recorded = await storeScopedTransaction(storeId, async (tx) => {
       const lockedStore = await lockStoreRow(tx, storeId);
@@ -541,7 +541,7 @@ export async function recordAuthorizedOrder(
             throw new Error("Cart not found");
           }
         }
-        return { orderId: existing.id, created: false as const, notify: false };
+        return { orderId: existing.id, created: false as const, notify: false, trackingToken: existing.trackingToken };
       }
 
       // Under the store lock, after the replay branch: hours saved mid-checkout
@@ -724,10 +724,10 @@ export async function recordAuthorizedOrder(
         },
       });
       const notify = await recordOrderNotification(tx, storeId, order.id, "placed");
-      return { orderId: order.id, created: true as const, notify };
+      return { orderId: order.id, created: true as const, notify, trackingToken: order.trackingToken };
     }, { timeout: 40_000, maxWait: 8_000 });
     if (recorded.notify) scheduleOrderNotification(storeId, recorded.orderId, "placed");
-    return { orderId: recorded.orderId, created: recorded.created };
+    return { orderId: recorded.orderId, created: recorded.created, trackingToken: recorded.trackingToken };
   } catch (err) {
     if (paymentIntentTaken(err)) {
       throw new Error("PaymentIntent is already recorded");
@@ -832,7 +832,7 @@ async function settleConsumedBasket(input: {
   contact: Contact;
   fulfillment: Fulfillment;
 }): Promise<
-  | { kind: "order"; result: { token: string; quote: CheckoutQuote } }
+  | { kind: "order"; result: PlacedOrder }
   | { kind: "unproved" }
   | { kind: "none"; lines: number }
 > {
@@ -861,7 +861,7 @@ async function settleConsumedBasket(input: {
     input.contact,
     input.fulfillment,
   );
-  return { kind: "order", result: { token: order.id, quote } };
+  return { kind: "order", result: { token: order.id, trackingToken: order.trackingToken, quote } };
 }
 
 /** An emptied cart that already has an order for this actor. Pay uses this before quoting a new charge. */
@@ -869,7 +869,7 @@ export async function resumeOrderedCart(
   storeId: string,
   cartId: string,
   actorUserId: string | null,
-): Promise<{ kind: "order"; token: string } | { kind: "unproved" } | null> {
+): Promise<{ kind: "order"; token: string; trackingToken: string | null } | { kind: "unproved" } | null> {
   const scoped = storeScoped(storeId);
   const cart = await scoped.cart.findUnique({
     where: { id: cartId },
@@ -879,12 +879,15 @@ export async function resumeOrderedCart(
   const order = await scoped.order.findFirst({
     where: { sourceCartId: cartId },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true },
+    select: { id: true, trackingToken: true },
   });
   if (!order) return null;
   if (cart.userId !== actorUserId) return { kind: "unproved" };
-  return { kind: "order", token: order.id };
+  return { kind: "order", token: order.id, trackingToken: order.trackingToken };
 }
+
+/** `token` is the order id; `trackingToken` is the id for the shopper's link, null for an order made before tokens. */
+export type PlacedOrder = { token: string; trackingToken: string | null; quote: CheckoutQuote };
 
 export async function placeOrder(
   storeId: string,
@@ -897,7 +900,7 @@ export async function placeOrder(
   paymentIntentId: string,
   actorUserId: string | null = null,
   leaveAtDoor = false,
-): Promise<{ token: string; quote: CheckoutQuote }> {
+): Promise<PlacedOrder> {
   assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
 
@@ -953,7 +956,7 @@ export async function placeOrder(
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
     // Idempotent replay — don't re-send the Inngest event or touch the cart.
     await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
-    return { token: existingOrder.id, quote };
+    return { token: existingOrder.id, trackingToken: existingOrder.trackingToken, quote };
   }
 
   await runTestHook(checkoutTestHooks.afterMissedOrderLookup);
@@ -974,7 +977,7 @@ export async function placeOrder(
     }
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
     await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
-    return { token: replay.id, quote };
+    return { token: replay.id, trackingToken: replay.trackingToken, quote };
   }
 
   await runTestHook(checkoutTestHooks.afterPostReadLookupMiss);
@@ -1042,7 +1045,7 @@ export async function placeOrder(
     }
   }
 
-  let recorded: { orderId: string; created: boolean };
+  let recorded: { orderId: string; created: boolean; trackingToken: string | null };
   try {
     recorded = await recordAuthorizedOrder(storeId, {
       cartId,
@@ -1101,7 +1104,7 @@ export async function placeOrder(
   }
   await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
 
-  return { token: recorded.orderId, quote };
+  return { token: recorded.orderId, trackingToken: recorded.trackingToken, quote };
 }
 
 async function recoverSavedCardConsent(

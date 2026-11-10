@@ -3965,7 +3965,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
         expect(await stockOf(storeId, listingId)).toEqual({ qty: 7, events: [["reservation", -3]] });
 
         const replay = await recordAuthorizedOrder(storeId, placed.input);
-        expect(replay).toEqual({ orderId: placed.orderId, created: false });
+        expect(replay).toMatchObject({ orderId: placed.orderId, created: false });
         expect(await stockOf(storeId, listingId)).toEqual({ qty: 7, events: [["reservation", -3]] });
 
         await pickAll(placed.orderId);

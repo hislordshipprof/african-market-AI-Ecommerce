@@ -17,7 +17,7 @@ export async function findOrderByTrackingToken(storeId: string, token: string) {
   });
 }
 
-/** Tracking token first, then the order id, so checkout and account links keep working. */
+/** Tracking token first. The order id opens only an order made before tokens, so an id never exposes a tokened order. */
 export async function findOrderForTracking(storeId: string, token: string) {
   const scoped = storeScoped(storeId);
   const byToken = await scoped.order.findUnique({
@@ -25,8 +25,8 @@ export async function findOrderForTracking(storeId: string, token: string) {
     include: orderInclude,
   });
   if (byToken) return byToken;
-  return scoped.order.findUnique({
-    where: { id: token },
+  return scoped.order.findFirst({
+    where: { id: token, trackingToken: null },
     include: orderInclude,
   });
 }
