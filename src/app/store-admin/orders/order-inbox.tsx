@@ -52,6 +52,7 @@ import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
+import { OrderAlertsToggle } from "./order-alerts-toggle";
 
 const STATUS_CONFIG: Record<
   string,
@@ -91,6 +92,7 @@ interface Props {
   initialOrders: StoreOrderRow[];
   storeName: string;
   storeSlug: string;
+  vapidPublicKey: string | null;
   autoAcceptOrders: boolean;
   defaultPrepMinutes: number;
 }
@@ -99,6 +101,7 @@ export function OrderInbox({
   initialOrders,
   storeName,
   storeSlug,
+  vapidPublicKey,
   autoAcceptOrders,
   defaultPrepMinutes,
 }: Props) {
@@ -338,6 +341,7 @@ export function OrderInbox({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <OrderAlertsToggle publicKey={vapidPublicKey} />
             <Button
               variant="ghost"
               size="sm"

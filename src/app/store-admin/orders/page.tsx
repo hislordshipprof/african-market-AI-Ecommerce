@@ -1,6 +1,7 @@
 import { requireStoreMember } from "@/lib/store-admin/session";
 import { getStoreOrders } from "@/lib/order/service";
 import { platform } from "@/lib/db";
+import { vapidPublicKey } from "@/lib/push/sender";
 import { OrderInbox } from "./order-inbox";
 
 export default async function OrdersPage() {
@@ -20,6 +21,7 @@ export default async function OrdersPage() {
       initialOrders={orders}
       storeName={session.store.name}
       storeSlug={session.store.slug}
+      vapidPublicKey={vapidPublicKey()}
       autoAcceptOrders={store?.autoAcceptOrders ?? false}
       defaultPrepMinutes={store?.prepTimeMinutes ?? 30}
     />

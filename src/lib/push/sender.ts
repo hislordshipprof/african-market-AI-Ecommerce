@@ -78,14 +78,19 @@ export function setPushSenderForTests(next: PushSender | null): void {
   testSender = next;
 }
 
+/** The key a browser subscribes with. Null unless both keys are set, so no device subscribes to alerts that never send. */
+export function vapidPublicKey(env: Record<string, string | undefined> = process.env): string | null {
+  const publicKey = env.VAPID_PUBLIC_KEY?.trim();
+  return publicKey && env.VAPID_PRIVATE_KEY?.trim() ? publicKey : null;
+}
+
 /** Null when the VAPID keys are missing: sending is skipped. */
 export function pushSender(env: Record<string, string | undefined> = process.env): PushSender | null {
-  const publicKey = env.VAPID_PUBLIC_KEY?.trim();
-  const privateKey = env.VAPID_PRIVATE_KEY?.trim();
-  if (!publicKey || !privateKey) return null;
+  const publicKey = vapidPublicKey(env);
+  if (!publicKey) return null;
   if (testSender) return testSender;
   if (env.NEXT_PHASE === "phase-production-build" || env.NODE_ENV === "test" || env.CI === "true") {
     return new PushTestSender();
   }
-  return new WebPushSender({ publicKey, privateKey, subject: vapidSubject(env) });
+  return new WebPushSender({ publicKey, privateKey: env.VAPID_PRIVATE_KEY!.trim(), subject: vapidSubject(env) });
 }
