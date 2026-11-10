@@ -4,9 +4,10 @@ import { money } from "../src/lib/format";
 import { storeUrl } from "./urls";
 
 const origin = storeUrl("mama-ngozi");
-/** Fake-model reply for "html please". The live region must announce this string, not an image. */
-const HTML_REPLY = 'See <img onerror="alert(1)"> and [a](http://evil.test).';
-/** How it renders: the HTML stays literal text, and the plain-http link keeps only its words. */
+/**
+ * The fake model answers "html please" with 'See <img onerror="alert(1)"> and [a](http://evil.test).'
+ * It renders, and is announced, as text: the HTML stays literal and the plain-http link keeps only its words.
+ */
 const HTML_REPLY_SHOWN = 'See <img onerror="alert(1)"> and a.';
 const ROUTE_ERROR = "Sorry, something went wrong. Please try again.";
 
