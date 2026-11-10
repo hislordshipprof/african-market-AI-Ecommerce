@@ -16,6 +16,7 @@ import { ProductImage } from "../product-image";
 import { ListingCard } from "../listing-card";
 import { RailScroller } from "../rail-scroller";
 import { Sheet } from "../sheet";
+import { AssistantSlot } from "../assistant/assistant-slot";
 import { cartItemKey, type CartLine } from "@/lib/storefront/cart-store";
 import type {
   CheckoutQuote,
@@ -156,13 +157,14 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
     )
     .slice(0, 4);
   return (
-    <div className={`${styles.page} ${styles.withAssistant}`}>
+    <div className={styles.page}>
       <FlowHeading
         title="Your basket"
         description={`${count} ${count === 1 ? "item" : "items"} from ${settings.name}`}
         backHref="/"
         backLabel="Keep shopping"
       />
+      <AssistantSlot label="Shop with help" />
       <DemoNotice />
       {!lines.length ? (
         <EmptyState

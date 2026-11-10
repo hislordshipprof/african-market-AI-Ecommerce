@@ -40,6 +40,7 @@ import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { toast } from "sonner";
 import { money } from "@/lib/format";
 import { bindCartRefresh } from "@/lib/assistant/ui/cart-bridge";
+import { AssistantSlot } from "./assistant/assistant-slot";
 import styles from "./cart.module.css";
 
 const OFFLINE = "Couldn't update your cart. Check your connection and try again.";
@@ -816,6 +817,7 @@ export function CartProvider({
       {children}
       <Sheet open={open} onClose={() => setOpen(false)} title="Your cart">
         <p className={styles.muted}>{storeName}</p>
+        {open && <AssistantSlot label="Shop with help" />}
         {!lines.length ? (
           <div className={styles.empty}>
             <ShoppingBag size={44} />

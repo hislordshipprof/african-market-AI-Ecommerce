@@ -6,6 +6,7 @@ import { ProductImage } from "./product-image";
 import { PriceDisplay } from "./price-display";
 import { StockBadgeChip } from "./stock-badge";
 import { QuickAddStepper } from "./quick-add-stepper";
+import { AssistantSlot } from "./assistant/assistant-slot";
 export function ProductDetail({
   listing,
   servingSuggestion,
@@ -98,6 +99,7 @@ export function ProductDetail({
               "A staple from your local market. Check the product packaging for ingredients, allergens and preparation instructions."}
           </p>
         </section>
+        <AssistantSlot label="Ask about this item" />
         <div className="sf-add-bar">
           <div>
             <span>{variant?.label ?? "Each"}</span>
