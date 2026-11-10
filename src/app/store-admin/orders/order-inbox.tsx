@@ -325,7 +325,7 @@ export function OrderInbox({
   return (
     <div className="min-h-dvh bg-background">
       <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3">
           <div className="flex items-center gap-3">
             <Link
               href={`/store-admin?store=${storeParam}`}
@@ -340,7 +340,7 @@ export function OrderInbox({
               <p className="text-xs text-muted-foreground">{storeName}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <OrderAlertsToggle publicKey={vapidPublicKey} />
             <Button
               variant="ghost"

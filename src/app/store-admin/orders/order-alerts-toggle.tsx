@@ -102,6 +102,7 @@ export function OrderAlertsToggle({ publicKey }: { publicKey: string | null }) {
     <Button
       variant={enabled ? "secondary" : "outline"}
       size="sm"
+      className="min-h-11"
       onClick={toggle}
       disabled={busy}
       aria-pressed={enabled}
