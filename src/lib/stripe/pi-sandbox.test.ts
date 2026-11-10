@@ -291,40 +291,12 @@ describe.skipIf(!hasKey)(
       expect(reported.amountRefunded).toBe(600);
     });
 
-    it("a real refund.failed event payload parses into the refund id, status and PaymentIntent", async () => {
-      const created = await stripe.paymentIntents.create({
-        amount: 700,
-        currency: "usd",
-        capture_method: "automatic",
-        confirm: true,
-        payment_method: "pm_card_refundFail",
-        on_behalf_of: stripeAccountId,
-        transfer_data: { destination: stripeAccountId },
-        return_url: "https://example.com/return",
-      });
-      piToCleanup.push(created.id);
-      let refund = await stripe.refunds.create({ payment_intent: created.id });
-      for (let i = 0; i < 90 && refund.status !== "failed"; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        refund = await stripe.refunds.retrieve(refund.id);
-      }
-      expect(refund.status).toBe("failed");
-      const secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim();
-      expect(secret).toBeTruthy();
-      const match = await waitForRefundFailedEvent(refund.id);
-      expect(match.id).toBeTruthy();
-      const payload = JSON.stringify(match);
-      const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: secret! });
-      const parsed = stripeProvider.verifyWebhookSignature({ payload, signature });
-      expect(parsed.type).toBe("refund.failed");
-      expect(parsed.refund).toEqual({
-        id: refund.id,
-        status: "failed",
-        paymentIntentId: created.id,
-      });
-    }, 200_000);
-
-    it("a failed destination-charge refund leaves its funds on the platform", async () => {
+    // One pm_card_refundFail refund serves the funds checks, the provider reads
+    // that contract.test.ts pins on the fake, and the refund.failed payload, so a
+    // run waits for Stripe once. The parsed payload reads only the refund's id,
+    // status, payment_intent and metadata, none of which reverse_transfer or the
+    // application fee change.
+    it("a failed destination-charge refund leaves its funds on the platform, reads failed through the provider and its refund.failed payload parses", async () => {
       const created = await stripe.paymentIntents.create({
         amount: 900,
         currency: "usd",
@@ -340,11 +312,22 @@ describe.skipIf(!hasKey)(
       let refund = await stripe.refunds.create(
         { payment_intent: created.id, reverse_transfer: true },
       );
+      // Stripe documents no fixed delay for this card: "The charge succeeds. If
+      // you initiate a refund, its status begins as `succeeded`. After a few
+      // minutes, its status transitions to `failed` and sends a `refund.failed`
+      // event." (https://docs.stripe.com/testing, "Simulate an asynchronous
+      // refund"). This is the only wait on that flip in the suite.
       for (let i = 0; i < 90 && refund.status !== "failed"; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
         refund = await stripe.refunds.retrieve(refund.id);
       }
       expect(refund.status).toBe("failed");
+
+      const reported = await stripeProvider.retrieveRefund(refund.id);
+      expect(reported.status).toBe("failed");
+      const viaProvider = await stripeProvider.retrievePaymentIntent(created.id);
+      expect(viaProvider.amountRefunded).toBe(0);
+
       const settled = await stripe.refunds.retrieve(refund.id, {
         expand: ["transfer_reversal", "failure_balance_transaction", "balance_transaction"],
       });
@@ -360,6 +343,20 @@ describe.skipIf(!hasKey)(
       expect(pi.amount_received).toBe(900);
       expect(charge.amount_refunded).toBe(0);
       expect(charge.refunded).toBe(false);
+
+      const secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim();
+      expect(secret).toBeTruthy();
+      const match = await waitForRefundFailedEvent(refund.id);
+      expect(match.id).toBeTruthy();
+      const payload = JSON.stringify(match);
+      const signature = stripe.webhooks.generateTestHeaderString({ payload, secret: secret! });
+      const parsed = stripeProvider.verifyWebhookSignature({ payload, signature });
+      expect(parsed.type).toBe("refund.failed");
+      expect(parsed.refund).toEqual({
+        id: refund.id,
+        status: "failed",
+        paymentIntentId: created.id,
+      });
     }, 200_000);
   },
   { timeout: 60_000 },
