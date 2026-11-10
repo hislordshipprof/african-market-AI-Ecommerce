@@ -3,7 +3,7 @@ import { z } from "zod";
 import { findOrderByPaymentIntent } from "@/lib/db";
 import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
-import { markTerminalRefundFailure } from "@/lib/order/service";
+import { cancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "@/lib/order/service";
 import { applyProviderRefund, evaluateOrderRefundState } from "@/lib/order/refund-requests";
 import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
 import type { RefundResult } from "@/lib/stripe/types";
@@ -18,7 +18,43 @@ const webhookEventSchema = z.looseObject({
     paymentIntentId: z.string().min(1).max(200),
     reservationKey: z.string().max(200).optional(),
   }).optional(),
+  eventId: z.string().max(200).optional(),
+  paymentIntent: z.looseObject({
+    id: z.string().min(1).max(200),
+    status: z.string().min(1).max(40),
+    cancellationReason: z.string().max(100).nullable(),
+  }).optional(),
 });
+
+/** Before capture the hold can end on Stripe's side; these orders follow it. */
+const PROVIDER_CANCELLABLE = ["AUTHORIZED", "ACCEPTED", "PICKING", "CANCELLING"];
+
+/** Our own cancel echoes back here, so an order already CANCELLING or CANCELLED must stay a no-op. */
+async function handlePaymentIntentCanceled(
+  paymentIntent: { id: string; cancellationReason: string | null },
+  eventId: string | null,
+): Promise<void> {
+  const order = await findOrderByPaymentIntent(paymentIntent.id);
+  console.log(JSON.stringify({
+    event: "payment_intent_canceled",
+    stripeEventId: eventId,
+    paymentIntentId: paymentIntent.id,
+    cancellationReason: paymentIntent.cancellationReason,
+    orderId: order?.id ?? null,
+    orderStatus: order?.status ?? null,
+  }));
+  if (!order) return;
+  if (order.status === "CAPTURING") {
+    await reconcileStuckOrder(order.storeId, order.id);
+    return;
+  }
+  if (!PROVIDER_CANCELLABLE.includes(order.status)) return;
+  await cancelOrder(order.storeId, order.id, {
+    action: "provider_canceled",
+    stripeEventId: eventId,
+    cancellationReason: paymentIntent.cancellationReason,
+  });
+}
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +115,15 @@ export async function POST(req: NextRequest) {
   ];
   if (accountEventTypes.includes(verified.type) && verified.accountId) {
     await updateStoreOnboardingStatus(verified.accountId);
+  }
+
+  if (verified.type === "payment_intent.canceled" && verified.paymentIntent) {
+    try {
+      await handlePaymentIntentCanceled(verified.paymentIntent, verified.eventId ?? null);
+    } catch (err) {
+      console.error(err);
+      return NextResponse.json({ error: "Cancellation could not be recorded" }, { status: 500 });
+    }
   }
 
   if (verified.refund) {

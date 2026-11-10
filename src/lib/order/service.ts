@@ -5,7 +5,7 @@ import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/error
 import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
-import { RESOLVED_LINE_STATUSES, type OrderLineStatus } from "./constants";
+import { RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification } from "../notifications/record";
@@ -57,13 +57,56 @@ function orderAuditWhere(entityId: string, action: string) {
 }
 
 /**
- * Label for a cancellation the timer finishes.
- * Only two writers set CANCELLING: markReady's below-minimum void (the order
- * was already accepted, so acceptedAt is set) and autoCancelOrder's own claim
- * from AUTHORIZED (acceptedAt stays null). A later store cancel would need its own label.
+ * Label for a CANCELLING order with no cause row: markReady's below-minimum void
+ * (acceptedAt is set) or a claim made before cause rows existed (acceptedAt is null).
  */
 function cancellationAuditAction(acceptedAt: Date | null): "void_zero_amount" | "auto_cancel" {
   return acceptedAt == null ? "auto_cancel" : "void_zero_amount";
+}
+
+export type CancelCause =
+  | { action: "auto_cancel" }
+  | { action: "provider_canceled"; stripeEventId: string | null; cancellationReason: string | null }
+  | {
+      action: "store_cancel";
+      actor: { id: string; email: string };
+      reason: StoreCancelReason;
+      note: string | null;
+    };
+
+const CANCEL_CAUSE_ACTIONS: CancelCause["action"][] = ["store_cancel", "provider_canceled", "auto_cancel"];
+
+const CANCELLABLE_FROM: Record<CancelCause["action"], OrderStatus[]> = {
+  auto_cancel: ["AUTHORIZED"],
+  store_cancel: ["AUTHORIZED", "ACCEPTED", "PICKING"],
+  provider_canceled: ["AUTHORIZED", "ACCEPTED", "PICKING"],
+};
+
+/** Stripe ended the hold itself: `expired` on API 2025-03-31.basil and later, `automatic` before. */
+export function stripeEndedHold(cancellationReason: string | null): boolean {
+  return cancellationReason === "expired" || cancellationReason === "automatic";
+}
+
+function causeAuditData(storeId: string, orderId: string, cause: CancelCause) {
+  if (cause.action === "store_cancel") {
+    return {
+      storeId,
+      actorId: cause.actor.id,
+      actorEmail: cause.actor.email,
+      action: cause.action,
+      entityType: "order" as const,
+      entityId: orderId,
+      after: { reason: cause.reason, note: cause.note },
+    };
+  }
+  if (cause.action === "provider_canceled") {
+    return systemAuditData(storeId, orderId, cause.action, {
+      stripeEventId: cause.stripeEventId,
+      cancellationReason: cause.cancellationReason,
+      holdEnded: stripeEndedHold(cause.cancellationReason),
+    });
+  }
+  return systemAuditData(storeId, orderId, cause.action);
 }
 
 function systemAuditData(
@@ -1212,30 +1255,47 @@ export async function autoCancelOrder(
   storeId: string,
   orderId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  // Phase 1: claim with CANCELLING inside transaction (blocks acceptOrder)
+  return cancelOrder(storeId, orderId, { action: "auto_cancel" });
+}
+
+/**
+ * Every cancel before capture. A resumed CANCELLING order keeps the cause it was
+ * claimed with, so a second caller never relabels it.
+ */
+export async function cancelOrder(
+  storeId: string,
+  orderId: string,
+  cause: CancelCause,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Phase 1: claim with CANCELLING and write the cause row, under the store lock.
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) return { ok: false as const, error: "Order not found" };
     if (order.status === "CANCELLING") {
+      const causeRow = await tx.auditLog.findFirst({
+        where: { entityId: orderId, entityType: "order", action: { in: CANCEL_CAUSE_ACTIONS } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
       return {
         ok: true as const,
         paymentIntentId: order.paymentIntentId,
         totalAuthorizedCents: order.totalAuthorizedCents,
         refundId: order.refundId,
-        action: cancellationAuditAction(order.acceptedAt),
+        action: causeRow?.action ?? cancellationAuditAction(order.acceptedAt),
       };
     }
-    if (order.status !== "AUTHORIZED") {
-      return { ok: false as const, error: `Order is in status ${order.status}, not AUTHORIZED` };
+    if (!CANCELLABLE_FROM[cause.action].includes(order.status as OrderStatus)) {
+      return { ok: false as const, error: `Cannot cancel order in status ${order.status}` };
     }
     await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLING" } });
+    await tx.auditLog.create({ data: causeAuditData(storeId, orderId, cause) });
     return {
       ok: true as const,
       paymentIntentId: order.paymentIntentId,
       totalAuthorizedCents: order.totalAuthorizedCents,
       refundId: null,
-      action: cancellationAuditAction(null),
+      action: cause.action,
     };
   });
 

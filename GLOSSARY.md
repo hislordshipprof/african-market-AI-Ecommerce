@@ -128,6 +128,12 @@ The unguessable link in every customer message that opens the order's tracking p
 **Acceptance clock**:
 When an order's 15-minute alert and 30-minute auto-cancel start counting: the order time if the store was open, otherwise its next opening. They count open minutes from it. Stored on the order and never changed by later hours edits.
 
+**Store cancel**:
+Staff cancel an order before capture (Authorized, Accepted or Picking) with a reason: out of stock, store closed, too busy or other, plus an optional note. The card hold is voided and the stock it held is returned. After capture it is a refund, not a cancel.
+
+**Cancel cause**:
+Why an order was cancelled before capture: a store cancel, the 30-minute auto-cancel, or Stripe ending the card hold. It is written when the order starts cancelling and never changes.
+
 **Swap rule**:
 A customer's choice, per order line, of what happens if the item is unavailable: exact item only, let the store suggest, or a named substitute.
 _Avoid_: Substitution preference

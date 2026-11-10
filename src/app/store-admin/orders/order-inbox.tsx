@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
   Bell,
@@ -35,6 +36,7 @@ import {
   Truck,
   ShoppingBag,
   UserCheck,
+  XCircle,
 } from "lucide-react";
 import {
   fetchOrdersAction,
@@ -45,9 +47,10 @@ import {
   completePickupAction,
   markOutForDeliveryAction,
   markDeliveredAction,
+  cancelOrderAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
-import { RESOLVED_LINE_STATUSES } from "@/lib/order/constants";
+import { RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
@@ -70,6 +73,15 @@ const STATUS_CONFIG: Record<
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
   CANCELLED: { label: "Cancelled", variant: "outline", icon: CheckCircle2 },
 };
+
+const STORE_CANCEL_REASON_LABELS: Record<StoreCancelReason, string> = {
+  out_of_stock: "Out of stock",
+  store_closed: "Store closed",
+  too_busy: "Too busy",
+  other: "Other",
+};
+
+const STORE_CANCELLABLE = ["AUTHORIZED", "ACCEPTED", "PICKING"];
 
 function orderCustomerLabel(name: string, phone: string | null): string {
   const trimmed = phone?.trim() ?? "";
@@ -115,6 +127,9 @@ export function OrderInbox({
   const [acceptingOrderId, setAcceptingOrderId] = useState<string | null>(null);
   const [prepMinutes, setPrepMinutes] = useState(String(defaultPrepMinutes));
   const [proofPhoto, setProofPhoto] = useState<{ orderId: string; file: File } | null>(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState<StoreCancelReason | null>(null);
+  const [cancelNote, setCancelNote] = useState("");
   const prevOrderIdsRef = useRef(new Set(initialOrders.map((o) => o.id)));
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -204,6 +219,26 @@ export function OrderInbox({
       if (result.ok) {
         toast.success("Order accepted");
         setAcceptDialogOpen(false);
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleCancelClick(orderId: string) {
+    setCancellingOrderId(orderId);
+    setCancelReason(null);
+    setCancelNote("");
+  }
+
+  function handleCancelConfirm() {
+    if (!cancellingOrderId || !cancelReason) return;
+    startTransition(async () => {
+      const result = await cancelOrderAction(cancellingOrderId, { reason: cancelReason, note: cancelNote });
+      if (result.ok) {
+        toast.success("Order cancelled — the card hold is released");
+        setCancellingOrderId(null);
         pollOrders();
       } else {
         toast.error(result.error);
@@ -495,6 +530,17 @@ export function OrderInbox({
                   </Button>
                 )}
 
+                {STORE_CANCELLABLE.includes(selectedOrder.status) && (
+                  <Button
+                    className="mb-4 w-full rounded-full"
+                    variant="destructive"
+                    onClick={() => handleCancelClick(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <XCircle className="mr-2 size-4" /> Cancel order
+                  </Button>
+                )}
+
                 {selectedOrder.status === "CAPTURING" && (
                   <Button
                     className="mb-4 w-full rounded-full"
@@ -689,6 +735,63 @@ export function OrderInbox({
               className="rounded-full"
             >
               Accept
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={cancellingOrderId !== null}
+        onOpenChange={(open) => {
+          if (!open) setCancellingOrderId(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel order</DialogTitle>
+            <DialogDescription>
+              The customer is told and the card hold is released. Put any picked items back on the shelf.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <Label>Reason</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {(Object.keys(STORE_CANCEL_REASON_LABELS) as StoreCancelReason[]).map((reason) => (
+                <Button
+                  key={reason}
+                  type="button"
+                  variant={cancelReason === reason ? "default" : "outline"}
+                  aria-pressed={cancelReason === reason}
+                  className="rounded-full"
+                  onClick={() => setCancelReason(reason)}
+                >
+                  {STORE_CANCEL_REASON_LABELS[reason]}
+                </Button>
+              ))}
+            </div>
+            <Label htmlFor="cancel-note">Note (optional)</Label>
+            <Textarea
+              id="cancel-note"
+              maxLength={500}
+              value={cancelNote}
+              onChange={(e) => setCancelNote(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCancellingOrderId(null)}
+              className="rounded-full"
+            >
+              Keep order
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCancelConfirm}
+              disabled={isPending || !cancelReason}
+              className="rounded-full"
+            >
+              Cancel order
             </Button>
           </DialogFooter>
         </DialogContent>
