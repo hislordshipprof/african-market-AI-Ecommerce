@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { customerRlsErrorText, isCustomerRlsRejection } from "../customer-rls-error";
 
@@ -18,8 +18,7 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
   let orderBId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({

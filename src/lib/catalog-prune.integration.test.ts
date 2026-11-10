@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { catalogPruneMode } from "./catalog-prune";
@@ -99,7 +99,7 @@ describe.skipIf(!hasDb)("catalog prune on the lane database", () => {
   };
 
   beforeAll(async () => {
-    prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    prisma = testPrismaClient(resolveDirectUrl());
     await prisma.$connect();
     const stores = await prisma.$queryRaw<Array<{ id: string; slug: string }>>`
       SELECT id, slug FROM stores WHERE slug IN ('mama-ngozi', 'tante-marie')

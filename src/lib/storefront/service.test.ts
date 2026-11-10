@@ -1,7 +1,7 @@
 vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import { catalogImageUrl } from "../r2";
 import { storeScoped } from "../db";
@@ -63,8 +63,7 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({

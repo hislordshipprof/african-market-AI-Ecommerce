@@ -5,7 +5,7 @@
 // nothing cannot pass vacuously. Two throwaway stores per run keep the shared mama-ngozi data untouched.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { deleteE2eListings } from "../../../e2e/cleanup-listings";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 
@@ -47,7 +47,7 @@ describe.skipIf(!hasDb)("deleteE2eListings (DB integration, FORCE RLS as app_own
   const uid = (p: string) => `${p}-${RUN}-${++seq}`;
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     storeA = (await raw.store.create({ data: { slug: slugA, name: "E2ec152 A", themePreset: "palm-and-shea" } })).id;
     storeB = (await raw.store.create({ data: { slug: slugB, name: "E2ec152 B", themePreset: "palm-and-shea" } })).id;

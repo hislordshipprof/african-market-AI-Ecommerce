@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { OverRefundError } from "../stripe/errors";
@@ -59,7 +59,7 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
   let number = 27000;
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     const store = await raw.store.create({
       data: { slug: `rr-${run}`, name: "Refund requests", themePreset: "palm-and-shea", prepTimeMinutes: 20 },

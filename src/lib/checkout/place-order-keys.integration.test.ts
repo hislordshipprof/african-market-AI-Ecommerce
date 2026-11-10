@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 
 const execFileAsync = promisify(execFile);
@@ -58,7 +58,7 @@ describe.skipIf(!hasDb)("placeOrder keys and cold runtime", () => {
   const storeIds: string[] = [];
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
   }, 30_000);
 

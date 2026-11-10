@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({
@@ -60,7 +59,7 @@ describe.skipIf(!child)("production child prune", () => {
     const searchIp = "198.51.100.80";
     process.env.ASSISTANT_CHAT_ENABLED = "1";
     process.env.PRUNE_STORE_SLUG = slug;
-    const owner = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    const owner = testPrismaClient();
     const store = await owner.store.create({
       data: {
         slug,

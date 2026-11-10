@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -15,8 +15,7 @@ describe.skipIf(!hasDb)("Cart and CartLine RLS isolation", () => {
   let cartBId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 
 const send = vi.hoisted(() => vi.fn());
 
@@ -18,7 +18,7 @@ describe.skipIf(!hasDb)("sendOrderAuthorized bookkeeping (lane DB)", () => {
   const storeIds: string[] = [];
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
   }, 30_000);
 

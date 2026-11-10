@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { commitImport, generatePreview } from "./csv-import";
 import type { Actor } from "./service";
@@ -32,7 +32,7 @@ describe.skipIf(!hasDb)("csv weight commit (lane DB, app_runtime)", () => {
   let ambigId = "";
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
 
     const storeA = await raw.store.create({
