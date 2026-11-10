@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  useSyncExternalStore,
+} from "react";
 import { Trash2, ArrowRight } from "lucide-react";
 import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
 import { QuickAddStepper } from "../quick-add-stepper";
@@ -11,13 +17,18 @@ import { ProductImage } from "../product-image";
 import { ListingCard } from "../listing-card";
 import { RailScroller } from "../rail-scroller";
 import { Sheet } from "../sheet";
+import { AssistantSlot } from "../assistant/assistant-slot";
 import { cartItemKey, type CartLine } from "@/lib/storefront/cart-store";
 import type {
+  CheckoutQuote,
   FlowCatalogItem,
   FlowStore,
   SwapRule,
 } from "@/lib/customer-flow/contracts";
 import { setSwapRule as serverSetSwapRule } from "@/lib/cart/actions";
+import { quoteCheckoutAction } from "@/lib/checkout/actions";
+import { basketQuoteView, type BasketQuoteResponse } from "@/lib/checkout/summary";
+import { createDemoServices } from "@/lib/customer-flow/demo-adapters";
 import type { SwapRuleValue } from "@/lib/cart/service";
 import { toast } from "sonner";
 import {
@@ -26,6 +37,7 @@ import {
   FlowCard,
   FlowHeading,
   FlowLoading,
+  QuoteLines,
 } from "./common";
 import styles from "./cart-checkout.module.css";
 
@@ -71,9 +83,76 @@ function clientRuleToServer(rule: SwapRule): {
   return { swapRule: "exact_only", substituteVariantId: null };
 }
 
-export function CartPage({ settings, catalog }: ShoppingFlowProps) {
-  const { lines, subtotal, count, store, refreshCart } = useCart();
+const NO_CONTACT = { name: "", phone: "", email: "" };
+const QUOTE_TIMEOUT_MS = 10_000;
+
+/** The quote checkout will show for a pickup order of this basket, so both pages show the same money. */
+function useBasketQuote(
+  lines: readonly CartLine[],
+  subtotal: number,
+  syncing: boolean,
+  realCheckout: boolean,
+  demo: ReturnType<typeof createDemoServices>,
+) {
+  const [response, setResponse] = useState<BasketQuoteResponse | null>(null);
+  const basketKey = lines
+    .map((line) => `${cartItemKey(line)}:${line.quantity}`)
+    .join("|");
+  useEffect(() => {
+    if (syncing || !basketKey) return;
+    let active = true;
+    const settle = (next: BasketQuoteResponse) => {
+      if (!active) return;
+      active = false;
+      setResponse(next);
+    };
+    const timer = setTimeout(() => {
+      // Same quote source as checkout: the server quote when checkout takes payment, else the demo one.
+      const request: Promise<CheckoutQuote | null> = realCheckout
+        ? quoteCheckoutAction(NO_CONTACT, "pickup").then((result) => (result.ok ? result.quote : null))
+        : demo.checkout.quote({
+            lines,
+            fulfillment: "pickup",
+            contact: NO_CONTACT,
+            notes: "",
+            leaveAtDoor: false,
+            slot: "asap",
+            promoCode: "",
+            tipCents: 0,
+          });
+      request
+        .then((quote) =>
+          settle(quote ? { key: basketKey, outcome: "ok", quote } : { key: basketKey, outcome: "error" }),
+        )
+        .catch(() => settle({ key: basketKey, outcome: "error" }));
+    }, 300);
+    const timeout = setTimeout(() => settle({ key: basketKey, outcome: "timeout" }), QUOTE_TIMEOUT_MS);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      clearTimeout(timeout);
+    };
+    // basketKey covers the lines this quote is for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basketKey, syncing, realCheckout, demo]);
+  return basketQuoteView(response, basketKey, subtotal);
+}
+
+export function CartPage({
+  settings,
+  catalog,
+  enabled,
+  realCheckout,
+}: ShoppingFlowProps & { realCheckout: boolean }) {
+  const { lines, subtotal, count, store, refreshCart, syncing } = useCart();
   const ready = useCartReady();
+  const demo = useMemo(
+    () => createDemoServices(settings, catalog, enabled),
+    [settings, catalog, enabled],
+  );
+  const summary = useBasketQuote(lines, subtotal, syncing, realCheckout, demo);
+  const quote = summary.kind === "quote" ? summary.quote : null;
+  const quoteFailed = summary.kind === "fallback";
   const [selected, select] = useState<CartLine | null>(null);
   const [, startTransition] = useTransition();
   const remaining = Math.max(0, settings.minimumOrderCents - subtotal);
@@ -113,13 +192,14 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
     )
     .slice(0, 4);
   return (
-    <div className={`${styles.page} ${styles.withAssistant}`}>
+    <div className={styles.page}>
       <FlowHeading
         title="Your basket"
         description={`${count} ${count === 1 ? "item" : "items"} from ${settings.name}`}
         backHref="/"
         backLabel="Keep shopping"
       />
+      <AssistantSlot label="Shop with help" />
       <DemoNotice />
       {!lines.length ? (
         <EmptyState
@@ -229,31 +309,24 @@ export function CartPage({ settings, catalog }: ShoppingFlowProps) {
           </div>
           <aside className={styles.sticky}>
             <FlowCard title="Basket summary">
-              <FeeLine label="Subtotal" cents={subtotal} />
-              <FeeLine
-                label="Estimated pickup tax"
-                cents={Math.round(subtotal * 0.06)}
-              />
-              <FeeLine label="Pickup fee" cents={0} />
-              <FeeLine
-                label="Default tip · 15%, editable"
-                cents={Math.round(subtotal * 0.15)}
-              />
+              {quote ? (
+                <QuoteLines quote={quote} fulfillment="pickup" />
+              ) : (
+                <>
+                  <FeeLine label="Subtotal" cents={subtotal} />
+                  <p className={styles.muted} role="status">
+                    {quoteFailed
+                      ? "Fees and the card hold are shown at checkout."
+                      : "Estimating your order…"}
+                  </p>
+                </>
+              )}
               <p className={styles.muted}>
-                Delivery starts at {money(settings.storeDeliveryFeeCents)} with
-                the store, or a simulated {money(699)} courier quote. Tip
-                defaults to 15% at checkout and is editable. Final fees depend
-                on your choices.
+                Estimated for pickup. Delivery starts at{" "}
+                {money(settings.storeDeliveryFeeCents)} with the store, or a
+                simulated {money(699)} courier quote. Final fees depend on your
+                choices.
               </p>
-              <FeeLine
-                label="Estimated pickup total"
-                cents={
-                  subtotal +
-                  Math.round(subtotal * 0.06) +
-                  Math.round(subtotal * 0.15)
-                }
-                strong
-              />
               {settings.minimumOrderCents > 0 && (
                 <>
                   <progress

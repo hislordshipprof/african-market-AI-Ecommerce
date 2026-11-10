@@ -52,6 +52,7 @@
     --color-ink: var(--store-ink, #15201A);
     --color-muted: var(--store-muted, #55625A);
     --color-line: var(--store-line, #DCDFD6);
+    --color-line-strong: var(--store-line-strong, var(--store-line, #DCDFD6));
     --color-primary: var(--store-primary, #1F5A43);
     --color-primary-deep: var(--store-primary-deep, #123726);
     --color-on-primary: var(--store-on-primary, #FFFFFF);
@@ -212,7 +213,7 @@ body {
   --card: var(--store-surface, #FFFFFF);
   --card-foreground: var(--store-ink, #15201A);
   --border: var(--store-line, #DCDFD6);
-  --input: var(--store-line, #DCDFD6);
+  --input: var(--store-line-strong, var(--store-line, #DCDFD6));
   --ring: var(--store-primary, #1F5A43);
   --destructive: var(--store-deal, #B42335);
 }

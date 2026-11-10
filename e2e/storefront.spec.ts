@@ -73,7 +73,7 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
     const bgColor = await page.locator("body").evaluate((el) =>
       getComputedStyle(el).getPropertyValue("--store-bg").trim(),
     );
-    expect(bgColor).toBe("#0F1712");
+    expect(bgColor).toBe("#0D1410");
   });
 
   test("light mode uses light theme tokens", async ({ page }) => {

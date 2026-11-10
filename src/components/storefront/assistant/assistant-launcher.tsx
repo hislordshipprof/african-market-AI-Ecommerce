@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { launcherVisible } from "@/lib/assistant/ui/launcher-gate";
 import { assistantHiddenForStore, hideAssistantForStore } from "@/lib/assistant/ui/session-hide";
 import { useCart } from "../cart-provider";
+import { useAssistantSlot } from "./assistant-slot";
 import styles from "./assistant.module.css";
 
 export function AssistantLauncher({
@@ -26,6 +28,9 @@ export function AssistantLauncher({
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
   const [Sheet, setSheet] = useState<typeof import("./assistant-sheet").AssistantSheet | null>(null);
+  // Pages with their own controls under the launcher (product, basket, cart drawer) mount a slot;
+  // everywhere else, including a closed basket, the launcher floats.
+  const slot = useAssistantSlot();
 
   const visible = launcherVisible({
     flag: true,
@@ -55,10 +60,26 @@ export function AssistantLauncher({
 
   return (
     <>
-      {visible ? (
+      {visible && slot
+        ? createPortal(
+            <button
+              type="button"
+              className={styles.entry}
+              data-testid="assistant-launcher"
+              data-store-id={storeId}
+              onMouseEnter={preload}
+              onFocus={preload}
+              onClick={openSheet}
+            >
+              {slot.label}
+            </button>,
+            slot.element,
+          )
+        : null}
+      {visible && !slot ? (
         <button
           type="button"
-          className={`${styles.launcher} ${pathname === "/cart" ? styles.onCart : ""}`}
+          className={styles.launcher}
           data-testid="assistant-launcher"
           data-store-id={storeId}
           onMouseEnter={preload}

@@ -112,7 +112,7 @@
   margin-top: 8px;
 }
 .stepper {
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-line-strong);
   border-radius: 999px;
   display: flex;
   align-items: center;
@@ -174,7 +174,7 @@
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-line-strong);
   border-radius: 12px;
   text-align: left;
   width: 100%;
@@ -221,7 +221,7 @@
 }
 .field :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
   background: var(--color-bg);
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-line-strong);
   color: var(--color-ink);
   border-radius: 12px;
   min-height: 46px;
@@ -317,6 +317,19 @@
 .queueNotice strong span {
   display: inline-block;
 }
+.payTotal {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 14px 0 8px;
+  font-size: 14px;
+  color: var(--color-muted);
+}
+.payTotal strong {
+  color: var(--color-ink);
+  font-size: 16px;
+}
 .error {
   min-width: 0;
   max-width: 100%;
@@ -381,7 +394,7 @@
   display: flex;
   align-items: center;
   padding: 8px 16px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-line-strong);
   border-radius: 999px;
   font-size: 13px;
   font-weight: 600;
@@ -463,9 +476,6 @@
   .page {
     width: min(100% - 32px, 1160px);
     padding-top: 24px;
-  }
-  .withAssistant {
-    padding-top: 72px;
   }
   .line {
     gap: 10px;

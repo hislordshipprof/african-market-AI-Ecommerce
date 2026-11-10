@@ -31,14 +31,15 @@ import type {
 import {
   AddressCard,
   DemoNotice,
-  FeeLine,
   FlowCard,
   FlowError,
   FlowHeading,
   FlowLoading,
+  QuoteLines,
 } from "./common";
 import { PayButton } from "./feedback";
 import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
+import { placeOrderLabel } from "@/lib/checkout/summary";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
@@ -704,7 +705,7 @@ function RealCheckoutForm({
           ) : null}
         </>
       }
-      payLabel={quote ? `Pay · ${money(quote.holdCents)}` : "Pay"}
+      payLabel={placeOrderLabel(quote)}
       isRealPayment
     />
   );
@@ -1093,8 +1094,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           {fulfillment !== "pickup" && (
             <FlowCard title="A thank-you for your driver">
               <p className={styles.muted}>
-                100% of your tip goes to the courier. Default is 15%; you can
-                change it.
+                100% of your tip goes to the courier. No tip is added unless
+                you choose one.
               </p>
               <div className={styles.options}>
                 {[0, 10, 15, 20].map((value) => (
@@ -1187,32 +1188,12 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               </>
             )}
             {quote ? (
-              <>
-                <FeeLine label="Subtotal" cents={quote.subtotalCents} />
-                <FeeLine label="Store delivery" cents={quote.deliveryFeeCents} />
-                <FeeLine
-                  label={quote.courierProvider ? `${quote.courierProvider}` : "Courier"}
-                  cents={quote.courierFeeCents}
-                />
-                <FeeLine label="Estimated tax" cents={quote.taxCents} />
-                <FeeLine label="Tip" cents={quote.tipCents} />
-                {!!quote.discountCents && (
-                  <FeeLine label="Promo savings" cents={-quote.discountCents} />
-                )}
-                <FeeLine label="Estimated total" cents={quote.totalCents} strong />
-                <FeeLine label="Temporary swap buffer" cents={quote.bufferCents} />
-                <FeeLine label="Authorization hold" cents={quote.holdCents} strong />
-              </>
+              <QuoteLines quote={quote} fulfillment={fulfillment} />
             ) : (
               <p role="status">Estimating your order…</p>
             )}
             <p className={styles.notice}>
-              {quote && (
-                <>
-                  Your card will be authorized for {money(quote.holdCents)}.
-                  You&rsquo;ll be charged the final amount after picking.{" "}
-                </>
-              )}
+              {quote && <>Your card will be authorized for {money(quote.holdCents)}. </>}
               We authorize the estimated total plus a 10% buffer, capped at $20.
               You&rsquo;ll be charged the final amount after picking; unused
               funds are released. Any higher-priced swap requires your approval
@@ -1231,6 +1212,12 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 The store opens {settings.opensAt}. Your card is held now and
                 charged after picking. If the store doesn&rsquo;t accept your
                 order, the hold is released.
+              </p>
+            )}
+            {quote && (
+              <p className={styles.payTotal}>
+                <span>Estimated total</span>
+                <strong>{money(quote.totalCents)}</strong>
               </p>
             )}
             <PayButton
@@ -1283,7 +1270,7 @@ function DemoCheckoutPage({
   const [promo, setPromo] = useState("");
   const [appliedPromo, setAppliedPromo] = useState("");
   const [promoMessage, setPromoMessage] = useState("");
-  const [tipPercent, setTipPercent] = useState<number | null>(15);
+  const [tipPercent, setTipPercent] = useState<number | null>(0);
   const [customTip, setCustomTip] = useState("");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   const [quoteKey, setQuoteKey] = useState("");
@@ -1304,8 +1291,9 @@ function DemoCheckoutPage({
     weightG <= 22679.6 &&
     metadata.every(({ item }) => !!item && item.weightG <= 22679.6) &&
     (!frozen || settings.insulatedPackaging);
-  const tipCents =
-    tipPercent === null
+  const tipCents = fulfillment === "pickup"
+    ? 0
+    : tipPercent === null
       ? Math.max(0, Math.round((Number(customTip) || 0) * 100))
       : Math.round((subtotal * tipPercent) / 100);
   const input = useMemo<CheckoutInput>(

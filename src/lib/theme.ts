@@ -18,7 +18,12 @@ interface ThemeTokens {
   success: string;
 }
 
-const presets: Record<ThemePreset, { light: ThemeTokens; dark: ThemeTokens }> = {
+/** Dark themes add a strong edge for inputs, chips and outlined buttons (>= 3:1 on bg, surface and raised). */
+interface DarkThemeTokens extends ThemeTokens {
+  "line-strong": string;
+}
+
+const presets: Record<ThemePreset, { light: ThemeTokens; dark: DarkThemeTokens }> = {
   "palm-and-shea": {
     light: {
       bg: "#F3F4EF",
@@ -35,17 +40,18 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: ThemeTokens }> = 
       success: "#2E7D4F",
     },
     dark: {
-      bg: "#0F1712",
-      surface: "#16211A",
-      raised: "#1F2C24",
+      bg: "#0D1410",
+      surface: "#1E2C23",
+      raised: "#2B3F33",
       ink: "#EEF2EC",
       muted: "#A3B1A7",
-      line: "#2A3A30",
+      line: "#35463B",
+      "line-strong": "#71907D",
       primary: "#6CC08F",
       "primary-deep": "#1D3A2B",
       accent: "#A8DDB5",
-      soft: "#1B2E23",
-      deal: "#F0707E",
+      soft: "#21412E",
+      deal: "#F28793",
       success: "#6CC08F",
     },
   },
@@ -65,18 +71,19 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: ThemeTokens }> = 
       success: "#2F6B45",
     },
     dark: {
-      bg: "#151210",
-      surface: "#1F1A17",
-      raised: "#2A241F",
+      bg: "#120F0D",
+      surface: "#2D2621",
+      raised: "#403730",
       ink: "#F1ECE5",
       muted: "#B3A69A",
-      line: "#38302A",
-      primary: "#5FB08A",
+      line: "#48403A",
+      "line-strong": "#91847A",
+      primary: "#66B791",
       "primary-deep": "#1E3A2D",
       accent: "#E6C8BF",
-      soft: "#2C2520",
-      deal: "#EF7B72",
-      success: "#5FB08A",
+      soft: "#493526",
+      deal: "#F0867D",
+      success: "#66B791",
     },
   },
   "lagoon-and-coral": {
@@ -95,17 +102,18 @@ const presets: Record<ThemePreset, { light: ThemeTokens; dark: ThemeTokens }> = 
       success: "#0F6B3A",
     },
     dark: {
-      bg: "#0C1619",
-      surface: "#122024",
-      raised: "#1B2C31",
+      bg: "#0C1314",
+      surface: "#1C2C2F",
+      raised: "#283E42",
       ink: "#E7F0F1",
       muted: "#9BB0B4",
-      line: "#24383D",
+      line: "#32464A",
+      "line-strong": "#6D8F95",
       primary: "#6FC2CF",
       "primary-deep": "#103540",
       accent: "#F07F92",
-      soft: "#16303A",
-      deal: "#F07F92",
+      soft: "#253E48",
+      deal: "#F18799",
       success: "#6FC79A",
     },
   },
@@ -120,7 +128,7 @@ function luminance(hex: string): number {
   return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
 }
 
-function contrastRatio(hex1: string, hex2: string): number {
+export function contrastRatio(hex1: string, hex2: string): number {
   const l1 = luminance(hex1);
   const l2 = luminance(hex2);
   const lighter = Math.max(l1, l2);
@@ -265,7 +273,8 @@ export function resolveStoreTheme(
     lightTokens.primary = nudgedLight;
     lightTokens["primary-deep"] = deriveDeep(lightTokens.primary);
 
-    const { color: nudgedDark } = nudgeForContrast(brandColor, darkTokens.bg);
+    // Dark primary is also link text on raised cards, the lightest dark layer.
+    const { color: nudgedDark } = nudgeForContrast(brandColor, darkTokens.raised);
     darkTokens.primary = nudgedDark;
     darkTokens["primary-deep"] = deriveDeep(darkTokens.primary);
   }

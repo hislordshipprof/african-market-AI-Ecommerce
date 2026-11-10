@@ -3,7 +3,7 @@ import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { CheckoutPage } from "@/components/storefront/flow/checkout-page";
 import { CheckoutUnavailable, ClosedFlow } from "@/components/storefront/flow/common";
 import { getFlowContext } from "@/lib/customer-flow/server";
-import { checkCheckoutReady } from "@/lib/stripe/checkout-gate";
+import { checkoutTakesPayment } from "@/lib/stripe/checkout-gate";
 import { auth } from "@/lib/auth";
 import { loadCheckoutPrefill } from "@/lib/customer-account/checkout-profile";
 import { checkoutPaymentsUseFake } from "@/lib/stripe/checkout-payments";
@@ -24,12 +24,11 @@ export default async function CheckoutRoute() {
     : !settings.takingOrders
       ? STORE_NOT_TAKING_ORDERS
       : null;
-  const gate = checkCheckoutReady(store.stripeOnboardingStatus);
   const harness = cookieStore.get("e2e_stripe_harness")?.value === "1" && checkoutPaymentsUseFake();
   const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
   const prefill = !unavailable && session?.user?.id ? await loadCheckoutPrefill(session.user.id) : null;
   const stripeConfig =
-    !unavailable && gate.enabled && (publishableKey || harness)
+    !unavailable && checkoutTakesPayment(store.stripeOnboardingStatus, publishableKey, harness)
       ? {
           publishableKey: publishableKey || "pk_test_e2e_harness",
           onBehalfOf: store.stripeAccountId ?? undefined,
