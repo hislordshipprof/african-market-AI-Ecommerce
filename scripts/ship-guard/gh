@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# First on PATH inside a ship session only (scripts/ship-ticket.sh), which repairs a branch and must never merge it.
+refuse() { echo "gh: merging is refused in a ship session. Stop once the branch is pushed and local-ci is green." >&2; exit 1; }
+case "${1:-}" in
+  pr) for a in "$@"; do [ "$a" != merge ] || refuse; done ;;
+  api) case "$*" in */pulls/*/merge* | *mergePullRequest* | *enablePullRequestAutoMerge*) refuse ;; esac ;;
+esac
+exec "${REAL_GH:?ship-ticket.sh sets REAL_GH}" "$@"

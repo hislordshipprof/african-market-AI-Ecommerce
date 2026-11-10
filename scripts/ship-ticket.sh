@@ -18,8 +18,14 @@ DO NOT MERGE and do not close the issue, whatever the skill says: stop once the 
 
 . "$ROOT/scripts/agent-cli.sh"
 . "$ROOT/scripts/review-watch.sh"
-WATCH_WHAT="ship session" run_capped "${SHIP_TIMEOUT_MIN:-45}" agent_run ship "$LOG" "$PROMPT" || status=$?
+export REAL_GH; REAL_GH="$(command -v gh)"
+PATH="$ROOT/scripts/ship-guard:$PATH" WATCH_WHAT="ship session" run_capped "${SHIP_TIMEOUT_MIN:-45}" agent_run ship "$LOG" "$PROMPT" || status=$?
 [ "${status:-0}" != 124 ] || echo "Ship session for #$N was stopped at its ${SHIP_TIMEOUT_MIN:-45}-minute cap."
-PR=$(gh pr list -R "$REPO" --state all --search "head:ticket-$N-" --json number,state --jq '.[0] | "#\(.number) \(.state)"')
-echo "Ship finished (exit ${status:-0}). PR: $PR. Log: $LOG"
+PR="${SHIP_PR:-$(gh pr list -R "$REPO" --state all --search "head:ticket-$N-" --json number --jq '.[0].number // empty')}"
+# The guard stops the usual ways to merge. This catches any other way a session could land the PR.
+if [ -n "$PR" ] && [ "$(gh api "repos/$REPO/pulls/$PR" --jq .merged)" = true ]; then
+  echo "ERROR: the ship session for #$N merged PR #$PR without a review. Tell the owner."
+  exit 6
+fi
+echo "Ship finished (exit ${status:-0}). PR: ${PR:-none}. Log: $LOG"
 exit "${status:-0}"

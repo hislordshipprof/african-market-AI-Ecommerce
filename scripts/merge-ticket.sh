@@ -7,13 +7,21 @@
 # scoped local-ci when it rebases cleanly; otherwise scripts/ship-ticket.sh repairs the branch, which then needs
 # a new review before this script will merge it.
 # Usage: scripts/merge-ticket.sh <issue>
+#   Or scripts/merge-ticket.sh --pr <pr-number>, for a PR whose branch is not named ticket-<n>-. Its review files and
+#   worktree are then keyed by the PR number, as with scripts/review-ticket.sh <pr-number>.
 #   A second argument (the verdict line older callers passed) is accepted and ignored: the verdict is read from
 #   the review file, never from the caller.
 #   OWNER_ACCEPTS_BLOCKING="<the owner's reason>" merges a reviewed commit whose review is not a clean pass.
 #   Only for a decision the owner made for this ticket; the reason is posted on the PR.
 set -euo pipefail
 REPO="hislordshipprof/african-market-AI-Ecommerce"
+BY_PR=""
+if [ "${1:-}" = --pr ]; then
+  case "${2:-}" in ""|*[!0-9]*) echo "usage: scripts/merge-ticket.sh --pr <pr-number>"; exit 1 ;; esac
+  BY_PR="$2"; shift 2; set -- "$BY_PR" "$@"
+fi
 N="${1:?usage: scripts/merge-ticket.sh <issue>}"
+SELF_ARGS="${BY_PR:+--pr }$N"
 ROOT="$(git rev-parse --show-toplevel)"
 . "$ROOT/scripts/merge-gate.sh"
 REVIEW_FILE="$ROOT/.builder/review-$N.md"
@@ -33,8 +41,13 @@ start_main_run_if_due() {
   fi
 }
 
-PR=$(gh pr list -R "$REPO" --state open --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"ticket-$N-\")) | .number" | head -1)
-[ -n "$PR" ] || { echo "No open PR for ticket #$N"; exit 1; }
+if [ -n "$BY_PR" ]; then
+  PR="$BY_PR"
+  [ "$(gh api "repos/$REPO/pulls/$PR" --jq .state)" = open ] || { echo "PR #$PR is not open."; exit 1; }
+else
+  PR=$(gh pr list -R "$REPO" --state open --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"ticket-$N-\")) | .number" | head -1)
+  [ -n "$PR" ] || { echo "No open PR for ticket #$N"; exit 1; }
+fi
 HEAD_REF=$(gh api "repos/$REPO/pulls/$PR" --jq .head.ref)
 CMP=$(gh api "repos/$REPO/compare/main...$HEAD_REF" --jq .behind_by)
 HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
@@ -97,7 +110,7 @@ else
       CI_LOG="$ROOT/.builder/logs/ci-local-$N-$(date +%Y%m%d-%H%M%S).log"
       if (cd "$WT" && CI_REBASE_OF="$HEAD_SHA" E2E_PORT="${E2E_PORT:-3950}" CI_DB=ci \
         CI_RUNNER="$(dirname "$ROOT")/E-commerce-worktrees/ci-runner" bash "$ROOT/scripts/ci-local.sh" > "$CI_LOG" 2>&1); then
-        MERGE_REBASED=1 exec bash "$0" "$N"
+        MERGE_REBASED=1 exec bash "$0" $SELF_ARGS
       fi
       echo "local-ci failed after the rebase. Log: $CI_LOG"
       exit 1
@@ -106,13 +119,17 @@ else
     echo "The rebase has conflicts."
   fi
   echo "PR #$PR is $CMP commit(s) behind main or has $PENDING_OR_FAILED non-green check(s); using ship-ticket.sh to repair the branch."
-  "$(dirname "$0")/ship-ticket.sh" "$N" || true
+  SHIP_PR="$PR" bash "$(dirname "$0")/ship-ticket.sh" "$N" || true
+  if [ "$(gh api "repos/$REPO/pulls/$PR" --jq .merged)" = true ]; then
+    echo "ERROR: the ship session merged PR #$PR without a review. Tell the owner."
+    exit 6
+  fi
   NEW_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
   if [ "$NEW_SHA" = "$HEAD_SHA" ]; then
     echo "ship-ticket.sh did not change PR #$PR. Not merged; see its log."
   else
     echo "PR #$PR was repaired and its head is now $NEW_SHA. That commit has not been reviewed. Not merged."
-    echo "Next: scripts/review-ticket.sh $N, then scripts/merge-ticket.sh $N."
+    echo "Next: scripts/review-ticket.sh $N, then scripts/merge-ticket.sh $SELF_ARGS."
   fi
   exit 5
 fi
