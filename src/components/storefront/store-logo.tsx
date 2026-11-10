@@ -44,6 +44,8 @@ export function storeInitials(name: string): string {
     .join("");
 }
 
+// The logo is decoded only as an image (never inlined or fetched as markup), so an
+// embedded SVG script cannot run here either (#60).
 function readLogoPixels(src: string): Promise<Uint8ClampedArray | null> {
   return new Promise((resolve) => {
     const img = new window.Image();
@@ -89,12 +91,12 @@ export function StoreLogo({ src, name }: { src: string | null; name: string }) {
   }
   const alt = `${name} logo`;
   return (
-    <span className="sf-logo">
+    <span className="sf-logo-plate">
       {isSvgLogo(src) ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={alt} width={160} height={64} />
+        <img src={src} alt={alt} width={160} height={64} className="sf-logo" />
       ) : (
-        <Image src={src} alt={alt} width={160} height={64} />
+        <Image src={src} alt={alt} width={160} height={64} className="sf-logo" />
       )}
     </span>
   );
