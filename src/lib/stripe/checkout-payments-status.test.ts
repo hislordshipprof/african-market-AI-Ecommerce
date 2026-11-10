@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cancelReplaceablePaymentIntent } from "../checkout/saved-card-payment";
 import { fakeCheckoutPayments, resetFakeCheckoutPayments } from "./checkout-payments";
 
@@ -7,6 +7,20 @@ afterEach(() => {
 });
 
 describe("fake payment status machine", () => {
+  it("confirms a hold from another copy of the module, as a route handler does after a server action", async () => {
+    const created = await fakeCheckoutPayments.createPaymentIntent(
+      { amount: 4900, currency: "usd" },
+      "bundle-key",
+    );
+    vi.resetModules();
+    const other = await import("./checkout-payments");
+    expect(other.fakeCheckoutPayments).not.toBe(fakeCheckoutPayments);
+    const confirmed = await other.fakeCheckoutPayments.confirmPaymentIntent(created.id, {
+      payment_method: "pm_card_visa",
+    });
+    expect(confirmed.status).toBe("requires_capture");
+  });
+
   it("rejects confirmation of a canceled PaymentIntent and cancels an uncaptured authorization", async () => {
     const created = await fakeCheckoutPayments.createPaymentIntent(
       { amount: 1200, currency: "usd", payment_method: "pm_card_visa" },

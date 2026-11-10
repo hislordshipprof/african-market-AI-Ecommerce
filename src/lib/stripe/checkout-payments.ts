@@ -84,8 +84,10 @@ interface FakeLedger {
   customers: Map<string, FakeCustomer>;
   cards: Map<string, NormalizedCard>;
   intents: Map<string, NormalizedPaymentIntent>;
+  intentModes: Map<string, "test" | "live">;
   idempotency: Map<string, IdempotencyRecord>;
   detachCalls: string[];
+  calls: number;
   cardSeq: number;
   failNext: "timeout" | "500" | null;
 }
@@ -96,12 +98,14 @@ const ledger: FakeLedger = ((globalThis as { __fakeCheckoutLedger?: FakeLedger }
   customers: new Map(),
   cards: new Map(),
   intents: new Map(),
+  intentModes: new Map(),
   idempotency: new Map(),
   detachCalls: [],
+  calls: 0,
   cardSeq: 0,
   failNext: null,
 });
-const { customers, cards, intents, idempotency, detachCalls } = ledger;
+const { customers, cards, intents, intentModes, idempotency, detachCalls } = ledger;
 
 const FIXTURES: Record<string, Pick<NormalizedCard, "brand" | "last4" | "expMonth" | "expYear" | "behavior">> = {
   pm_card_visa: { brand: "visa", last4: "4242", expMonth: 12, expYear: 2034, behavior: "ok" },
@@ -122,9 +126,6 @@ function emptyToNull(value: unknown): string | null {
   return String(value);
 }
 
-let fakeCalls = 0;
-const intentModes = new Map<string, "test" | "live">();
-
 /** Stripe keeps test and live objects apart: a PaymentIntent made with one key is "No such payment_intent" to the other. */
 function keyMode(): "test" | "live" {
   const key = process.env.STRIPE_SECRET_KEY ?? "";
@@ -133,11 +134,11 @@ function keyMode(): "test" | "live" {
 
 /** Every call the fake has served since the last reset. */
 export function fakeCheckoutCallCount(): number {
-  return fakeCalls;
+  return ledger.calls;
 }
 
 export function resetFakeCheckoutPayments(): void {
-  fakeCalls = 0;
+  ledger.calls = 0;
   intentModes.clear();
   customers.clear();
   cards.clear();
@@ -391,7 +392,7 @@ export const fakeCheckoutPayments: CheckoutPayments = Object.fromEntries(
   Object.entries(fakeMethods).map(([name, method]) => [
     name,
     (...args: unknown[]) => {
-      fakeCalls += 1;
+      ledger.calls += 1;
       return (method as (...a: unknown[]) => unknown)(...args);
     },
   ]),
