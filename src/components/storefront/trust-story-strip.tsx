@@ -1,6 +1,6 @@
 import Image from "next/image";
 import type { StoreProfile } from "@/lib/storefront/service";
-import { editorial } from "@/lib/storefront/editorial";
+import { Store } from "lucide-react";
 import { CountUp, SectionReveal } from "./scroll-motion";
 const DAYS = [
   "monday",
@@ -39,20 +39,20 @@ export function TrustStoryStrip({
       id="our-story"
     >
       <figure className="sf-story-photo">
-        <Image
-          src={actualPhoto || editorial.market}
-          alt={
-            actualPhoto
-              ? profile.ownerName || "Store owner"
-              : "Bodija Market in Ibadan, Nigeria"
-          }
-          fill
-          sizes="(max-width:767px) 100vw, 360px"
-        />
-        {!actualPhoto && (
-          <figcaption>
-            Market inspiration · Bodija, Ibadan · Tunde Buremo
-          </figcaption>
+        {actualPhoto ? (
+          <Image
+            src={actualPhoto}
+            alt={profile.ownerName || "Store owner"}
+            fill
+            sizes="(max-width:767px) 100vw, 360px"
+          />
+        ) : (
+          // No real store photo exists yet (PRODUCT.md), so the frame says so instead of using stock people.
+          <div className="sf-story-placeholder" role="img" aria-label="Placeholder: the store's own photo will go here">
+            <Store size={36} strokeWidth={1.5} aria-hidden />
+            <strong>Store photo coming soon</strong>
+            <span>Placeholder · the store adds its own photo</span>
+          </div>
         )}
       </figure>
       <div className="sf-story-steps">
