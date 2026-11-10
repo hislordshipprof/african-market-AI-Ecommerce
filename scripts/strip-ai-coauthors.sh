@@ -8,8 +8,8 @@
 # Used by .githooks/commit-msg (every local commit) and scripts/merge-ticket.sh (the squash message).
 # Tests: bash scripts/strip-ai-coauthors.test.sh
 set -euo pipefail
-# The address is what identifies the tool; the name before it changes with every model.
-AI='^[[:space:]]*(co-authored-by:.*(noreply@anthropic\.com|cursoragent@cursor\.com|\bclaude\b|\bcursor\b)|claude-session:|.*generated with \[?claude code)'
+# Only the address identifies the tool: the name changes with every model, and a person can be named Claude.
+AI='^[[:space:]]*(co-authored-by:.*(noreply@anthropic\.com|cursoragent@cursor\.com)|claude-session:|.*generated with \[?claude code)'
 if [ "${1:-}" = "--check" ]; then
   ! grep -qiE "$AI"
 else

@@ -19,6 +19,9 @@ eq "every AI trailer in a squash message goes, in any letter case" "$(printf 'Su
 got=$(printf 'Subject\n\nCo-authored-by: Ada Obi <ada@example.test>\n' | bash "$F")
 eq "a human co-author is kept" "$(printf 'Subject\n\nCo-authored-by: Ada Obi <ada@example.test>')" "$got"
 
+got=$(printf 'Subject\n\nCo-authored-by: Jean-Claude Mensah <jc@example.test>\nCo-authored-by: Claude Okafor <claude@example.test>\n' | bash "$F")
+eq "a human co-author named Claude is kept" "$(printf 'Subject\n\nCo-authored-by: Jean-Claude Mensah <jc@example.test>\nCo-authored-by: Claude Okafor <claude@example.test>')" "$got"
+
 got=$(printf 'Let Claude and Cursor review the brief\n\nThe claude profile is no longer used.\n' | bash "$F")
 eq "a message that only mentions the tools is untouched" "$(printf 'Let Claude and Cursor review the brief\n\nThe claude profile is no longer used.')" "$got"
 
