@@ -37,16 +37,16 @@ describe("assistant markdown subset", () => {
     expect(block).toMatchObject({
       children: [
         { type: "text", text: "See " },
-        { type: "link", href: "/listings/abc" },
+        { type: "link", href: "/listings/abc", external: false },
         { type: "text", text: " or " },
-        { type: "link", href: "https://example.com/egusi" },
+        { type: "link", href: "https://example.com/egusi", external: true },
         { type: "text", text: "." },
       ],
     });
   });
 
   it("never makes javascript:, data:, plain http or protocol-relative links active", () => {
-    for (const href of ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,x", "//evil.example", "http://evil.test"]) {
+    for (const href of ["javascript:alert(1)", "JavaScript:alert(1)", "data:text/html,x", "//evil.example", "http://evil.test", "/\\evil.example/x", "/\\/evil.example", "/ok\u0000x"]) {
       const [block] = parseMarkdown(`[click](${href})`);
       expect(block).toEqual({ type: "paragraph", children: [{ type: "text", text: "click" }] });
     }

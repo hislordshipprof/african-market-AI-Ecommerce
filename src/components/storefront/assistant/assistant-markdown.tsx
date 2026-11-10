@@ -6,9 +6,9 @@ function renderInline(nodes: readonly Inline[]): ReactNode[] {
     if (node.type === "text") return node.text;
     if (node.type === "strong") return <strong key={index}>{renderInline(node.children)}</strong>;
     if (node.type === "em") return <em key={index}>{renderInline(node.children)}</em>;
-    const external = !node.href.startsWith("/");
+    // node.external comes from linkTarget(): verified same-site, or an allowed https link.
     return (
-      <a key={index} href={node.href} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
+      <a key={index} href={node.href} {...(node.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
         {renderInline(node.children)}
       </a>
     );

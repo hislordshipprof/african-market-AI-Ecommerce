@@ -8,7 +8,7 @@ export type Inline =
   | { type: "text"; text: string }
   | { type: "strong"; children: Inline[] }
   | { type: "em"; children: Inline[] }
-  | { type: "link"; href: string; children: Inline[] };
+  | { type: "link"; href: string; external: boolean; children: Inline[] };
 
 export type Block =
   | { type: "paragraph"; children: Inline[] }
@@ -18,14 +18,25 @@ const BULLET = /^\s*[-*•]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
 const LINK = /^\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/;
 
-function safeHref(href: string): string | null {
-  if (href.startsWith("/") && !href.startsWith("//")) return href;
+const BASE = "https://x.invalid";
+
+/**
+ * The one link check. A relative href is same-site only if it resolves on a fixed base
+ * without leaving it (browsers read a backslash as a slash, so "/" + "\\host" is off-site).
+ * Backslashes, control characters and "//" are refused outright; otherwise only https is allowed.
+ */
+export function linkTarget(href: string): { href: string; external: boolean } | null {
+  if (/[\\\u0000-\u001f\u007f]/.test(href) || href.startsWith("//")) return null;
+  let url: URL;
   try {
-    const url = new URL(href);
-    return url.protocol === "https:" ? url.href : null;
+    url = new URL(href, BASE);
   } catch {
     return null;
   }
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+    return url.origin === BASE && href.startsWith("/") ? { href: url.pathname + url.search + url.hash, external: false } : null;
+  }
+  return url.protocol === "https:" && url.origin !== BASE ? { href: url.href, external: true } : null;
 }
 
 function inline(source: string): Inline[] {
@@ -61,8 +72,8 @@ function inline(source: string): Inline[] {
       const match = LINK.exec(source.slice(i));
       if (match) {
         flush();
-        const href = safeHref(match[2]);
-        if (href) out.push({ type: "link", href, children: inline(match[1]) });
+        const target = linkTarget(match[2]);
+        if (target) out.push({ type: "link", ...target, children: inline(match[1]) });
         else text = match[1];
         i += match[0].length;
         continue;
