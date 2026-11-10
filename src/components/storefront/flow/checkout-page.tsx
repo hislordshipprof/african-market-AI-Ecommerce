@@ -1488,8 +1488,8 @@ function CheckoutStages() {
         const node = document.getElementById(id);
         return node ? [{ id, top: node.getBoundingClientRect().top }] : [];
       });
-      const atEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
-      const next = activeSection(sections, 180, atEnd && window.scrollY > 0);
+      // Below the sticky header, about 40% down the viewport.
+      const next = activeSection(sections, Math.max(180, window.innerHeight * 0.4));
       if (next) setCurrent(next);
     };
     const onScroll = () => {

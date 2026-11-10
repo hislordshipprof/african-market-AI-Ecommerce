@@ -14,8 +14,9 @@ describe("activeSection", () => {
     expect(activeSection(sections([-1500, -900, -200, 170]), 180)).toBe("review");
   });
 
-  it("marks the last section once the page cannot scroll further", () => {
-    expect(activeSection(sections([-1500, -900, 200, 500]), 180, true)).toBe("review");
+  it("ignores a section beside the form, like the sticky order summary on desktop", () => {
+    // Desktop: review is the right column, its top above payment's.
+    expect(activeSection(sections([-900, 150, 600, 168]), 320)).toBe("contact");
   });
 
   it("returns null with no sections on the page", () => {
