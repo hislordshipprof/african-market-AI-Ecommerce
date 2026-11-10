@@ -317,6 +317,19 @@
 .queueNotice strong span {
   display: inline-block;
 }
+.payTotal {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 14px 0 8px;
+  font-size: 14px;
+  color: var(--color-muted);
+}
+.payTotal strong {
+  color: var(--color-ink);
+  font-size: 16px;
+}
 .error {
   min-width: 0;
   max-width: 100%;

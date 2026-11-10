@@ -203,7 +203,7 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     await expect(page.getByRole("status").filter({ hasText: /7\.5 mi/ })).toBeVisible();
     await page.reload();
     await page.getByRole("button", { name: /Store delivery/ }).click();
-    const estimating = page.getByRole("button", { name: /Pay · \$49\.00/ });
+    const estimating = page.getByRole("button", { name: /Place order · \$49\.00 hold/ });
     await expect(estimating).toBeEnabled({ timeout: 10_000 });
     await estimating.click();
     await expect(page.getByText("Confirm your delivery address.")).toBeVisible();
@@ -216,7 +216,7 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     await page.getByLabel("Full name").fill("Ada Buyer");
     await page.getByLabel("Phone number (required)").fill("2025550100");
     await page.getByLabel("Email (required)").fill("ada-delivery@example.com");
-    const pay = page.getByRole("button", { name: /Pay · \$49\.00/ });
+    const pay = page.getByRole("button", { name: /Place order · \$49\.00 hold/ });
     await expect(pay).toBeVisible();
     await pay.click();
     await expect(page).toHaveURL(/\/order\/.+placed=1/, { timeout: 20_000 });

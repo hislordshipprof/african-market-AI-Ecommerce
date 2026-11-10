@@ -8,7 +8,12 @@ import {
   Info,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { FlowAddress } from "@/lib/customer-flow/contracts";
+import type {
+  CheckoutQuote,
+  FlowAddress,
+  Fulfillment,
+} from "@/lib/customer-flow/contracts";
+import { orderSummary } from "@/lib/checkout/summary";
 import { PriceDisplay } from "../price-display";
 
 export function FlowHeading({
@@ -106,6 +111,28 @@ export function CheckoutUnavailable({ message }: { message: string }) {
     </div>
   );
 }
+
+/** Basket and checkout render the same server quote through this one component. */
+export function QuoteLines({
+  quote,
+  fulfillment,
+}: {
+  quote: CheckoutQuote;
+  fulfillment: Fulfillment;
+}) {
+  const view = orderSummary(quote, fulfillment);
+  return (
+    <>
+      {view.lines.map((line) => (
+        <FeeLine key={line.key} label={line.label} cents={line.cents} />
+      ))}
+      <FeeLine label="Estimated total" cents={view.totalCents} strong />
+      <FeeLine label="Temporary swap buffer" cents={view.bufferCents} />
+      <FeeLine label="Authorization hold" cents={view.holdCents} strong />
+    </>
+  );
+}
+
 export function FeeLine({
   label,
   cents,
