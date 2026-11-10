@@ -103,49 +103,52 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 ### Palm & Shea (default)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #F3F4EF | #0F1712 |
-| surface | #FFFFFF | #16211A |
-| raised | #E7E9E2 | #1F2C24 |
+| bg | #F3F4EF | #0D1410 |
+| surface | #FFFFFF | #1E2C23 |
+| raised | #E7E9E2 | #2B3F33 |
 | ink | #15201A | #EEF2EC |
 | muted | #55625A | #A3B1A7 |
-| line | #DCDFD6 | #2A3A30 |
+| line | #DCDFD6 | #35463B |
+| line-strong | (uses line) | #71907D |
 | primary | #1F5A43 | #6CC08F |
 | primary-deep | #123726 | #1D3A2B |
 | accent | #A8DDB5 | #A8DDB5 |
-| soft | #E1EEE3 | #1B2E23 |
-| deal | #B42335 | #F0707E |
+| soft | #E1EEE3 | #21412E |
+| deal | #B42335 | #F28793 |
 | success | #2E7D4F | #6CC08F |
 
 ### Cocoa & Bottle Green (heritage)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #EFEDE8 | #151210 |
-| surface | #FBFAF7 | #1F1A17 |
-| raised | #E4E1DA | #2A241F |
+| bg | #EFEDE8 | #120F0D |
+| surface | #FBFAF7 | #2D2621 |
+| raised | #E4E1DA | #403730 |
 | ink | #2A1D17 | #F1ECE5 |
 | muted | #6A5C53 | #B3A69A |
-| line | #DAD5CC | #38302A |
-| primary | #0E3B2A | #5FB08A |
+| line | #DAD5CC | #48403A |
+| line-strong | (uses line) | #91847A |
+| primary | #0E3B2A | #66B791 |
 | primary-deep | #072419 | #1E3A2D |
 | accent | #E6C8BF | #E6C8BF |
-| soft | #E9E3DA | #2C2520 |
-| deal | #A1302A | #EF7B72 |
-| success | #2F6B45 | #5FB08A |
+| soft | #E9E3DA | #493526 |
+| deal | #A1302A | #F0867D |
+| success | #2F6B45 | #66B791 |
 
 ### Lagoon & Coral (any cuisine)
 | Token | Light | Dark |
 |---|---|---|
-| bg | #F1F3F2 | #0C1619 |
-| surface | #FFFFFF | #122024 |
-| raised | #E4E8E7 | #1B2C31 |
+| bg | #F1F3F2 | #0C1314 |
+| surface | #FFFFFF | #1C2C2F |
+| raised | #E4E8E7 | #283E42 |
 | ink | #13252A | #E7F0F1 |
 | muted | #51666C | #9BB0B4 |
-| line | #D6DCDB | #24383D |
+| line | #D6DCDB | #32464A |
+| line-strong | (uses line) | #6D8F95 |
 | primary | #0F4A57 | #6FC2CF |
 | primary-deep | #082F38 | #103540 |
 | accent | #C23B52 | #F07F92 |
-| soft | #E0ECEC | #16303A |
-| deal | #C23B52 | #F07F92 |
+| soft | #E0ECEC | #253E48 |
+| deal | #C23B52 | #F18799 |
 | success | #0F6B3A | #6FC79A |
 
 ### Named Rules
@@ -154,6 +157,10 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 **The Store Color Nudge Rule.** If a store's brand color is under 4.5:1 against `bg` or against its own text, shade it darker (light theme) or mix it toward white (dark theme) in small steps until it passes. Tell the owner in the admin when this happens.
 
 **The Quiet Accent Rule.** The accent is a fill for promo bands and highlights only, never text, and under 5% of any screen.
+
+**The Dark Depth Rule.** In dark themes, `bg`, `surface` and `raised` sit at least 1.25:1 apart, ink stays at least 7:1 and muted at least 4.5:1 on each. `line` is the quiet divider; `line-strong` (dark only, at least 3:1 on every surface) edges inputs, selects, textareas, unselected chips and outlined or round buttons. Light themes have no `line-strong` and use `line`. A store's dark primary is nudged against `raised`, the lightest dark layer, so links stay AA on cards.
+
+**The Quiet Night Header Rule.** In dark themes the header sits on `surface` with ink text; primary is kept for the cart button and key accents. Header sublabels are at least 13px. Selected chips use the `soft` tint, a 2px primary ring and a check mark, so selection never relies on colour alone.
 
 **The Separate Semantics Rule.** Deal, success and error colors belong to the system, not the brand. Errors always carry an icon and text, never color alone.
 
