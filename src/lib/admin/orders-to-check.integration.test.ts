@@ -175,3 +175,58 @@ describe.skipIf(!hasDb)("orders to check: a full captured group does not hide un
     expect(cappedGroups).toEqual(["captured"]);
   });
 });
+
+describe.skipIf(!hasDb)("orders to check: orders not yet due do not fill a group's cap (lane DB)", () => {
+  const storeId = newStore();
+  const now = new Date();
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+  let capturingId = "";
+  let notStartedId = "";
+
+  beforeAll(async () => {
+    await asPlatformAdmin(async (tx) => {
+      await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, ${`Scheduled Market ${RUN}`}, ${`${RUN}-scheduled`}, 'active', now())`;
+      const customer = await tx.customer.create({ data: { storeId, name: "Scheduled Customer" } });
+      const base = { storeId, customerId: customer.id, subtotalCents: 1000, bufferCents: 0, totalAuthorizedCents: 1000, inngestEventSentAt: ago(2 * DAY) };
+      await tx.order.createMany({
+        data: Array.from({ length: 200 }, (_, i) => ({
+          ...base,
+          number: 44000 + i,
+          status: "ACCEPTED" as const,
+          createdAt: ago(2 * DAY - i * MIN),
+          acceptedAt: ago(2 * DAY - i * MIN - 10 * MIN),
+          prepEstimateMinutes: 20,
+          pickupSlot: new Date(now.getTime() + 2 * DAY).toISOString(),
+        })),
+      });
+      await tx.order.createMany({
+        data: Array.from({ length: 200 }, (_, i) => ({
+          ...base,
+          number: 44300 + i,
+          status: "AUTHORIZED" as const,
+          createdAt: ago(DAY - i * MIN),
+          acceptanceClockStartsAt: new Date(now.getTime() + DAY),
+        })),
+      });
+      const capturing = await tx.order.create({ data: { ...base, number: 44600, status: "CAPTURING", createdAt: ago(4 * HOUR) } });
+      capturingId = capturing.id;
+      await tx.auditLog.create({
+        data: { storeId, actorId: SYSTEM_ACTOR_ID, actorEmail: SYSTEM_ACTOR_EMAIL, action: "capture_retry", entityType: "order", entityId: capturingId, createdAt: ago(3 * HOUR) },
+      });
+      const notStarted = await tx.order.create({ data: { ...base, number: 44601, status: "AUTHORIZED", createdAt: ago(20 * MIN), inngestEventSentAt: null } });
+      notStartedId = notStarted.id;
+    });
+  }, 30_000);
+
+  it("lists a stalled capture behind 200 scheduled orders and a timer not started behind 200 waiting orders", async () => {
+    const { stuck, cappedGroups } = await findOrdersToCheck({ now, storeIds: [storeId] });
+    expect(stuck.map((row) => [row.orderId, row.reason])).toEqual(
+      expect.arrayContaining([
+        [capturingId, "retry stalled"],
+        [notStartedId, "timer not started"],
+      ]),
+    );
+    expect(stuck).toHaveLength(2);
+    expect(cappedGroups).toEqual(["authorized", "uncaptured"]);
+  });
+});

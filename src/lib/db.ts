@@ -889,7 +889,8 @@ export type OrderRecoveryGroup = "authorized" | "uncaptured" | "captured";
 /**
  * Candidates for the admin "Orders to check" list, bounded in SQL; the caller applies the
  * per-state limits. Each group has its own cap, so old captured orders cannot crowd out
- * uncaptured ones; `capped` says which groups hit it.
+ * uncaptured ones; `capped` says which groups hit it. Within a group, rows SQL already knows are
+ * stuck sort first, so orders not yet due (a later pickup slot, a store still closed) cannot fill it.
  */
 export async function findOrderRecoveryCandidates(opts: {
   authorizedBefore: Date;
@@ -939,7 +940,7 @@ export async function findOrderRecoveryCandidates(opts: {
       SELECT ${columns}
       FROM orders o JOIN stores s ON s.id = o.store_id
       WHERE o.status = 'AUTHORIZED' AND o.created_at < ${opts.authorizedBefore} ${inStores}
-      ORDER BY o.created_at ASC
+      ORDER BY (o.inngest_event_sent_at IS NULL) DESC, o.created_at ASC
       LIMIT ${opts.limit}
     `;
     const uncaptured = await tx.$queryRaw<Row[]>`
@@ -958,7 +959,7 @@ export async function findOrderRecoveryCandidates(opts: {
       WHERE status NOT IN ('CAPTURING', 'CANCELLING')
         OR COALESCE(first_retry_at, updated_at) < ${opts.retryBefore}
         OR created_at < ${opts.holdBefore}
-      ORDER BY created_at ASC
+      ORDER BY (status IN ('CAPTURING', 'CANCELLING') OR created_at < ${opts.holdBefore} OR pickup_slot IS NULL) DESC, created_at ASC
       LIMIT ${opts.limit}
     `;
     const captured = await tx.$queryRaw<Row[]>`
