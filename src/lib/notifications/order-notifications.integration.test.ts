@@ -167,7 +167,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(placedMail.html).toContain("https://cdn.example.com/logo.png");
     expect(placedMail.html).toContain("#1F5A43");
     expect(placedMail.html).toContain("Powered by the Platform");
-    expect(placedMail.html).toContain(String(order.number));
+    expect(placedMail.html).toContain(`Order #${order.number}.`);
     expect(placedMail.html).toContain("$20.00");
     expect(placedMail.html).toContain("$5.00");
     expect(placedMail.html).toContain("Estimated total $25.00");
@@ -176,6 +176,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(placedMail.html).toContain(order.trackingToken!);
     expect(placedSms.to).toBe("+13014482210");
     expect(placedSms.text).toContain("Ada's Market");
+    expect(placedSms.text).toContain(`order #${order.number} `);
     expect(placedSms.text).toContain("Reply STOP to opt out.");
     expect(getTestSentEmails()).toHaveLength(1);
     expect(getTestSentSms()).toHaveLength(1);
@@ -201,6 +202,9 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     clearTestSentSms();
     await run(orderId, "ready");
     expect(getTestSentEmails().at(-1)!.html).toContain("Ready for pickup");
+    expect(getTestSentEmails().at(-1)!.html).toContain(`Order #${order.number}.`);
+    expect(getTestSentSms()).toHaveLength(1);
+    expect(getTestSentSms().at(-1)!.text).toContain(`Ada's Market: order #${order.number} `);
     expect(getTestSentEmails().at(-1)!.html).toContain("Charged $25.00");
 
     expect((await completePickup(storeId, orderId)).ok).toBe(true);
@@ -219,7 +223,11 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     clearTestSentEmails();
     clearTestSentSms();
     await run(deliveryId, "ready");
+    const delivery = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: deliveryId } });
     expect(getTestSentEmails().at(-1)!.html).toContain("Packed and ready");
+    expect(getTestSentEmails().at(-1)!.html).toContain(`Order #${delivery.number}.`);
+    expect(getTestSentSms()).toHaveLength(1);
+    expect(getTestSentSms().at(-1)!.text).toContain(`Ada's Market: order #${delivery.number} `);
 
     const cancelledId = await place("pickup");
     expect((await autoCancelOrder(storeId, cancelledId)).ok).toBe(true);
