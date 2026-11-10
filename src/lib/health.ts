@@ -43,9 +43,11 @@ function reportedEnvVars(env: Record<string, string | undefined>): readonly stri
   return env.VERCEL_ENV === "preview" ? INNGEST_ENV_VARS : [];
 }
 
-/** Vercel ignores INNGEST_DEV (client.ts), so it is a config mistake to flag, not an outage. */
-export function envFlags(env: Record<string, string | undefined>): string[] {
-  return env.VERCEL_ENV === "production" && env.INNGEST_DEV ? ["INNGEST_DEV"] : [];
+/** Vercel ignores INNGEST_DEV (client.ts), so it is a config mistake to log, not an outage. */
+function warnEnvFlags(env: Record<string, string | undefined>): void {
+  if (env.VERCEL_ENV === "production" && env.INNGEST_DEV) {
+    console.warn("Health check: INNGEST_DEV is set in production");
+  }
 }
 
 export function checkEnv(
@@ -112,13 +114,11 @@ export interface HealthResult {
   database: { reachable: boolean; user: string | null };
   migrations: { upToDate: boolean };
   env: Record<string, boolean>;
-  flags: string[];
 }
 
 export interface MinimalHealthResult {
   status: "ok" | "degraded";
   version: string;
-  flags?: string[];
 }
 
 export function toMinimalResult(
@@ -128,7 +128,6 @@ export function toMinimalResult(
   return {
     status: httpStatus === 200 ? "ok" : "degraded",
     version: body.version,
-    ...(body.flags.length > 0 ? { flags: body.flags } : {}),
   };
 }
 
@@ -142,6 +141,7 @@ export async function runHealthChecks(deps: {
   ]);
 
   const envResult = checkEnv(deps.env);
+  warnEnvFlags(deps.env);
   const version = deps.env.VERCEL_GIT_COMMIT_SHA || "unknown";
 
   const healthy =
@@ -151,6 +151,6 @@ export async function runHealthChecks(deps: {
 
   return {
     status: healthy ? 200 : 503,
-    body: { version, database, migrations, env: envResult, flags: envFlags(deps.env) },
+    body: { version, database, migrations, env: envResult },
   };
 }

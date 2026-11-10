@@ -305,17 +305,16 @@ describe("runHealthChecks", () => {
     expect(result.body.env.INNGEST_SIGNING_KEY).toBe(false);
   });
 
-  it("flags INNGEST_DEV set in production without failing", async () => {
+  it("logs INNGEST_DEV set in production without failing or exposing it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = await runHealthChecks({
       env: { ...productionEnv, INNGEST_DEV: "1" },
       queryRaw: makeQueryRaw(),
     });
     expect(result.status).toBe(200);
-    expect(toMinimalResult(result.status, result.body)).toEqual({
-      status: "ok",
-      version: "abc123",
-      flags: ["INNGEST_DEV"],
-    });
+    expect(toMinimalResult(result.status, result.body)).toEqual({ status: "ok", version: "abc123" });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("INNGEST_DEV"));
+    warn.mockRestore();
   });
 
   it("returns 503 in production when a deploy env var is missing", async () => {
@@ -364,7 +363,6 @@ describe("toMinimalResult", () => {
     database: { reachable: true, user: "app_runtime" },
     migrations: { upToDate: true },
     env: { DATABASE_URL: true },
-    flags: [],
   };
 
   it("returns ok for healthy status", () => {
