@@ -86,7 +86,7 @@ interface TimerSpec {
 }
 
 const ALERT_TIMER: TimerSpec = { name: "alert", openMinutes: ALERT_OPEN_MINUTES, statuses: ["AUTHORIZED"] };
-const CANCEL_TIMER: TimerSpec = { name: "cancel", openMinutes: CANCEL_OPEN_MINUTES, statuses: ["AUTHORIZED", "CANCELLING"] };
+export const CANCEL_TIMER: TimerSpec = { name: "cancel", openMinutes: CANCEL_OPEN_MINUTES, statuses: ["AUTHORIZED", "CANCELLING"] };
 
 /**
  * The timer's deadline from the order row and the store's current hours:
@@ -94,7 +94,7 @@ const CANCEL_TIMER: TimerSpec = { name: "cancel", openMinutes: CANCEL_OPEN_MINUT
  * placed before #167), never later than created_at + HOLD_SAFETY_CAP_MS.
  * An invalid zone falls back to wall-clock minutes from the clock.
  */
-function timerDeadline(
+export function timerDeadline(
   order: { createdAt: Date; acceptanceClockStartsAt: Date | null },
   store: { hours: unknown; timezone: string } | null,
   spec: TimerSpec,
