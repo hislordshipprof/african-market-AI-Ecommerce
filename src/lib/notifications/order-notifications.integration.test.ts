@@ -174,7 +174,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(order.trackingToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect((await findOrderForTracking(storeId, order.trackingToken!))?.id).toBe(orderId);
     expect(await findOrderForTracking(otherStoreId, order.trackingToken!)).toBeNull();
-    expect((await findOrderForTracking(storeId, orderId))?.id).toBe(orderId);
+    expect(await findOrderForTracking(storeId, orderId)).toBeNull();
 
     await run(orderId, "placed");
     const placedMail = getTestSentEmails().at(-1)!;
