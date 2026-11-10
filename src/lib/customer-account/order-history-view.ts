@@ -40,6 +40,8 @@ const CUSTOMER_STATUS_LABELS: Record<OrderStatus, string> = {
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   REFUND_FAILED: "Refund in progress",
+  PARTIALLY_REFUNDED: "Partly refunded",
+  REFUNDED: "Refunded",
 };
 
 /** `orders.status` is a free string with no database check, so an unknown value still gets a label. */
@@ -58,6 +60,7 @@ const money = (cents: number) =>
  */
 function amountLabel(order: AccountOrderRecord): string {
   if (order.refundId && order.status === "CANCELLED") return "Refunded";
+  if (order.status === "REFUNDED") return "Refunded";
   if (order.refundId && order.status === "CANCELLING") return "Refund pending";
   // CAPTURING writes the amount before Stripe confirms it, so it is not a charge yet.
   if (order.capturedAmountCents != null && order.status === "CAPTURING") {

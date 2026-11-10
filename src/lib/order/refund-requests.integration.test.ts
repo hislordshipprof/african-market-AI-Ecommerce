@@ -4,7 +4,7 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { OverRefundError } from "../stripe/errors";
-import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { autoCancelOrder, reconcileStuckOrder } from "./service";
 import { evaluateOrderRefundState, reconcileRefundRequest, REPLAY_LEASE_MS, submitRefund } from "./refund-requests";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
@@ -564,5 +564,54 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     expect(await storeScoped(storeId).auditLog.count({
       where: { entityId: order.id, action: "refund_request_unknown" },
     })).toBe(1);
+  });
+
+  async function finishedOrder(cents: number, fulfillment: string, status = "COMPLETED") {
+    const { order, pi } = await cancellingOrder(cents);
+    await storeScoped(storeId).order.update({
+      where: { id: order.id },
+      data: { status, fulfillment, completedAt: new Date() },
+    });
+    return { order, pi };
+  }
+
+  it("an issue refund sends the asked amount with the fee on pickup, and a second one to the full capture makes the order Refunded", async () => {
+    const { order, pi } = await finishedOrder(1000, "pickup");
+    const first = await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 400 });
+    expect("refundId" in first && first.amountRefunded).toBe(400);
+    expect(refundRequests.at(-1)).toMatchObject({ amountCents: 400, refundApplicationFee: true, idempotencyKey: `refund:${order.id}:1` });
+    const listed = await fakeStripeProvider.listRefunds(pi);
+    expect(listed[0]?.reservationKey).toBe(`refund:${order.id}:1`);
+    await evaluateOrderRefundState(order.id);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("PARTIALLY_REFUNDED");
+
+    await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 600 });
+    await evaluateOrderRefundState(order.id);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("REFUNDED");
+  });
+
+  it("an issue refund on a courier order keeps the application fee", async () => {
+    const { order, pi } = await finishedOrder(1000, "courier", "DELIVERED");
+    await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 300 });
+    expect(refundRequests.at(-1)).toMatchObject({ amountCents: 300, refundApplicationFee: false });
+    const row = await storeScoped(storeId).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(row.refundApplicationFee).toBe(false);
+  });
+
+  it("an issue refund is capped at captured minus succeeded minus pending refunds", async () => {
+    const { order, pi } = await finishedOrder(1000, "pickup");
+    await fakeStripeProvider.refundPayment(pi, 200, `dash-ok-${order.id}`);
+    setNextRefundStatus(pi, "pending");
+    await fakeStripeProvider.refundPayment(pi, 300, `dash-pending-${order.id}`);
+    setNextRefundStatus(pi, "succeeded");
+    await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 800 });
+    expect(refundRequests.at(-1)).toMatchObject({ amountCents: 500 });
+  });
+
+  it("an issue refund is refused on an order that is not delivered or completed", async () => {
+    const { order, pi } = await cancellingOrder(1000);
+    const calls = refundRequests.length;
+    expect(await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 100 })).toEqual({ blocked: true });
+    expect(refundRequests.length).toBe(calls);
   });
 });

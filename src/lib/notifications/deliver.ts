@@ -14,6 +14,7 @@ const RANK: Record<OrderNotifyEvent, number> = {
   delivered: 4,
   completed: 4,
   cancelled: 5,
+  refunded: 6,
   // Not a status step: it never supersedes one, and skipReason never skips it.
   store_replied: -1,
 };

@@ -11,6 +11,8 @@ const CAPTURED_LINE_STATUSES = new Set([
   "DELIVERED",
   "COMPLETED",
   "REFUND_FAILED",
+  "PARTIALLY_REFUNDED",
+  "REFUNDED",
 ]);
 
 export function showCapturedLine(status: string, capturedAmountCents: number | null): boolean {

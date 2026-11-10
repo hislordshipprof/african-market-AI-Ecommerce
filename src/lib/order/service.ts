@@ -26,7 +26,9 @@ export type OrderStatus =
   | "DELIVERED"
   | "COMPLETED"
   | "CANCELLED"
-  | "REFUND_FAILED";
+  | "REFUND_FAILED"
+  | "PARTIALLY_REFUNDED"
+  | "REFUNDED";
 
 // Stripe USD minimum capture: $0.50 (50 cents).
 // https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts
