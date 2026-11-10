@@ -23,22 +23,36 @@ const DEPLOY_ENV_VARS = [
   "APP_RUNTIME_PASSWORD",
   "RESEND_API_KEY",
 ] as const;
+const INNGEST_ENV_VARS = ["INNGEST_EVENT_KEY", "INNGEST_SIGNING_KEY"] as const;
 
 export function requiredEnvVars(
   env: Record<string, string | undefined>,
 ): readonly string[] {
   const vercelEnv = env.VERCEL_ENV;
-  if (vercelEnv === "production" || vercelEnv === "preview") {
+  if (vercelEnv === "production") {
+    return [...CORE_ENV_VARS, ...DEPLOY_ENV_VARS, ...INNGEST_ENV_VARS];
+  }
+  if (vercelEnv === "preview") {
     return [...CORE_ENV_VARS, ...DEPLOY_ENV_VARS];
   }
   return [...CORE_ENV_VARS];
+}
+
+/** Previews report the Inngest keys without failing: the owner sets them in #269. */
+function reportedEnvVars(env: Record<string, string | undefined>): readonly string[] {
+  return env.VERCEL_ENV === "preview" ? INNGEST_ENV_VARS : [];
+}
+
+/** Vercel ignores INNGEST_DEV (client.ts), so it is a config mistake to flag, not an outage. */
+export function envFlags(env: Record<string, string | undefined>): string[] {
+  return env.VERCEL_ENV === "production" && env.INNGEST_DEV ? ["INNGEST_DEV"] : [];
 }
 
 export function checkEnv(
   env: Record<string, string | undefined>,
 ): Record<string, boolean> {
   const result: Record<string, boolean> = {};
-  for (const name of requiredEnvVars(env)) {
+  for (const name of [...requiredEnvVars(env), ...reportedEnvVars(env)]) {
     if (name === "DATABASE_URL_UNPOOLED") {
       result[name] = !!(env.DATABASE_URL_UNPOOLED || env.DIRECT_URL);
     } else {
@@ -98,11 +112,13 @@ export interface HealthResult {
   database: { reachable: boolean; user: string | null };
   migrations: { upToDate: boolean };
   env: Record<string, boolean>;
+  flags: string[];
 }
 
 export interface MinimalHealthResult {
   status: "ok" | "degraded";
   version: string;
+  flags?: string[];
 }
 
 export function toMinimalResult(
@@ -112,6 +128,7 @@ export function toMinimalResult(
   return {
     status: httpStatus === 200 ? "ok" : "degraded",
     version: body.version,
+    ...(body.flags.length > 0 ? { flags: body.flags } : {}),
   };
 }
 
@@ -130,10 +147,10 @@ export async function runHealthChecks(deps: {
   const healthy =
     database.reachable &&
     migrations.upToDate &&
-    Object.values(envResult).every(Boolean);
+    requiredEnvVars(deps.env).every((name) => envResult[name]);
 
   return {
     status: healthy ? 200 : 503,
-    body: { version, database, migrations, env: envResult },
+    body: { version, database, migrations, env: envResult, flags: envFlags(deps.env) },
   };
 }

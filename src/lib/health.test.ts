@@ -25,7 +25,9 @@ describe("requiredEnvVars", () => {
     expect(vars).toContain("BETTER_AUTH_SECRET");
     expect(vars).toContain("APP_RUNTIME_PASSWORD");
     expect(vars).toContain("RESEND_API_KEY");
-    expect(vars).toHaveLength(5);
+    expect(vars).toContain("INNGEST_EVENT_KEY");
+    expect(vars).toContain("INNGEST_SIGNING_KEY");
+    expect(vars).toHaveLength(7);
   });
 
   it("returns all vars when VERCEL_ENV is preview", () => {
@@ -54,6 +56,8 @@ describe("checkEnv", () => {
       BETTER_AUTH_SECRET: "s",
       APP_RUNTIME_PASSWORD: "p",
       RESEND_API_KEY: "r",
+      INNGEST_EVENT_KEY: "e",
+      INNGEST_SIGNING_KEY: "k",
       DATABASE_URL: "postgres://x",
       DATABASE_URL_UNPOOLED: "postgres://y",
     };
@@ -61,6 +65,8 @@ describe("checkEnv", () => {
       BETTER_AUTH_SECRET: true,
       APP_RUNTIME_PASSWORD: true,
       RESEND_API_KEY: true,
+      INNGEST_EVENT_KEY: true,
+      INNGEST_SIGNING_KEY: true,
       DATABASE_URL: true,
       DATABASE_URL_UNPOOLED: true,
     });
@@ -241,6 +247,8 @@ describe("runHealthChecks", () => {
     BETTER_AUTH_SECRET: "s",
     APP_RUNTIME_PASSWORD: "p",
     RESEND_API_KEY: "r",
+    INNGEST_EVENT_KEY: "e",
+    INNGEST_SIGNING_KEY: "k",
   };
 
   function makeQueryRaw(user = "app_runtime", pendingCount = BigInt(0)) {
@@ -274,7 +282,40 @@ describe("runHealthChecks", () => {
       queryRaw: makeQueryRaw(),
     });
     expect(result.status).toBe(200);
-    expect(Object.keys(result.body.env)).toHaveLength(5);
+    expect(Object.keys(result.body.env)).toHaveLength(7);
+    expect(toMinimalResult(result.status, result.body)).toEqual({ status: "ok", version: "abc123" });
+  });
+
+  it("returns 503 degraded in production without the Inngest event key", async () => {
+    const env: Record<string, string | undefined> = { ...productionEnv };
+    delete env.INNGEST_EVENT_KEY;
+    const result = await runHealthChecks({ env, queryRaw: makeQueryRaw() });
+    expect(result.status).toBe(503);
+    expect(result.body.env.INNGEST_EVENT_KEY).toBe(false);
+    expect(toMinimalResult(result.status, result.body).status).toBe("degraded");
+  });
+
+  it("reports missing Inngest keys in preview without failing", async () => {
+    const env: Record<string, string | undefined> = { ...productionEnv, VERCEL_ENV: "preview" };
+    delete env.INNGEST_EVENT_KEY;
+    delete env.INNGEST_SIGNING_KEY;
+    const result = await runHealthChecks({ env, queryRaw: makeQueryRaw() });
+    expect(result.status).toBe(200);
+    expect(result.body.env.INNGEST_EVENT_KEY).toBe(false);
+    expect(result.body.env.INNGEST_SIGNING_KEY).toBe(false);
+  });
+
+  it("flags INNGEST_DEV set in production without failing", async () => {
+    const result = await runHealthChecks({
+      env: { ...productionEnv, INNGEST_DEV: "1" },
+      queryRaw: makeQueryRaw(),
+    });
+    expect(result.status).toBe(200);
+    expect(toMinimalResult(result.status, result.body)).toEqual({
+      status: "ok",
+      version: "abc123",
+      flags: ["INNGEST_DEV"],
+    });
   });
 
   it("returns 503 in production when a deploy env var is missing", async () => {
@@ -323,6 +364,7 @@ describe("toMinimalResult", () => {
     database: { reachable: true, user: "app_runtime" },
     migrations: { upToDate: true },
     env: { DATABASE_URL: true },
+    flags: [],
   };
 
   it("returns ok for healthy status", () => {
