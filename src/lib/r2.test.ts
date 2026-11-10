@@ -131,6 +131,26 @@ describe("streamFromR2 key allowlist", () => {
   });
 });
 
+describe("delivery proof keys", () => {
+  it("a delivery-proof key is refused by the catalog reader, and the proof reader refuses catalog keys", async () => {
+    __mockSend.mockResolvedValue({
+      Body: { transformToWebStream: () => new ReadableStream() },
+      ContentType: "image/jpeg",
+    });
+    const { deliveryProofKey, streamDeliveryProof, streamFromR2 } = await import("./r2");
+    const key = deliveryProofKey("cmorder123", 1762700000000, "jpg");
+    expect(key).toBe("delivery-proof/cmorder123/1762700000000.jpg");
+
+    expect(await streamFromR2(key)).toBeNull();
+    expect(await streamDeliveryProof("catalog/foo.jpg")).toBeNull();
+    expect(await streamDeliveryProof("delivery-proof/cmorder123/../x.jpg")).toBeNull();
+    expect(await streamDeliveryProof("delivery-proof/cmorder123/1762700000000.svg")).toBeNull();
+    expect(__mockSend).not.toHaveBeenCalled();
+
+    expect(await streamDeliveryProof(key)).not.toBeNull();
+  });
+});
+
 describe("shared catalog key rule", () => {
   it("accepts a route key and rejects dotted names", async () => {
     const { isServableCatalogKey } = await import("./r2");
