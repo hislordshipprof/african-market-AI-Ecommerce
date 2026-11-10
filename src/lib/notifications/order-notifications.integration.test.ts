@@ -16,6 +16,7 @@ import { sendCustomerNotification } from "../inngest/functions";
 import { makeFakeStep } from "../inngest/fake-step";
 import { inngest } from "../inngest/client";
 import type { Contact } from "../customer-flow/contracts";
+import { postCustomerMessage, replyAsStore } from "../support/thread";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada", phone: "(301) 448-2210", email: "ada@example.com" };
@@ -24,7 +25,7 @@ const DROP_POINT = { lat: 29.73846459154, lng: -95.379640065998 };
 const PRICE = 2000;
 const RICE = 500;
 
-type NotifyEvent = "placed" | "accepted" | "ready" | "completed" | "cancelled";
+type NotifyEvent = "placed" | "accepted" | "ready" | "completed" | "cancelled" | "store_replied";
 
 const handler = (sendCustomerNotification as unknown as {
   fn: (ctx: {
@@ -37,6 +38,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
   let storeId = "";
   let otherStoreId = "";
   const createdStores: string[] = [];
+  const staffId = `n128-staff-${Date.now().toString(36)}`;
   let raw: PrismaClient;
 
   beforeAll(async () => {
@@ -64,6 +66,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     storeId = store.id;
     otherStoreId = other.id;
     createdStores.push(store.id, other.id);
+    await raw.user.create({ data: { id: staffId, name: "Staff", email: `${staffId}@example.com` } });
   });
 
   beforeEach(() => {
@@ -85,6 +88,8 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     for (const id of createdStores) {
       const scoped = storeScoped(id);
       await scoped.notificationLog.deleteMany({});
+      await scoped.supportMessage.deleteMany({});
+      await scoped.supportThread.deleteMany({});
       await scoped.auditLog.deleteMany({});
       await scoped.orderLine.deleteMany({});
       await scoped.order.deleteMany({});
@@ -100,6 +105,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
       await raw.paymentIntentRelease.deleteMany({ where: { storeId: { in: createdStores } } });
       await raw.store.deleteMany({ where: { id: { in: createdStores } } });
     }
+    await raw.user.deleteMany({ where: { id: staffId } });
     await raw.$disconnect();
   });
 
@@ -232,6 +238,19 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(getTestSentEmails().at(-1)!.html).toContain("Completed");
     expect(getTestSentEmails()).toHaveLength(1);
     expect(getTestSentSms()).toHaveLength(1);
+
+    // A store reply after the order completed is not superseded by the completed message.
+    await postCustomerMessage(storeId, order.trackingToken!, "Was the rice included?");
+    const thread = await storeScoped(storeId).supportThread.findUniqueOrThrow({ where: { orderId } });
+    expect((await replyAsStore(storeId, staffId, thread.id, "Yes, in the second bag"))?.notify).toBe(true);
+    clearTestSentEmails();
+    clearTestSentSms();
+    await run(orderId, "store_replied");
+    expect(getTestSentEmails()).toHaveLength(1);
+    expect(getTestSentEmails().at(-1)!.subject).toContain("The store replied");
+    expect(getTestSentEmails().at(-1)!.html).toContain(order.trackingToken!);
+    expect(getTestSentSms()).toHaveLength(1);
+    expect(getTestSentSms().at(-1)!.text).toContain("The store replied");
 
     const deliveryId = await place("store-delivery");
     await acceptOrder(storeId, deliveryId, 20);

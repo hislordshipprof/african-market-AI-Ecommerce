@@ -14,6 +14,8 @@ const RANK: Record<OrderNotifyEvent, number> = {
   delivered: 4,
   completed: 4,
   cancelled: 5,
+  // Not a status step: it never supersedes one, and skipReason never skips it.
+  store_replied: -1,
 };
 const CANCEL_STATUSES = new Set(["CANCELLING", "CANCELLED", "REFUND_FAILED"]);
 const loggedUrl = new Set<string>();
@@ -151,6 +153,7 @@ async function higherSent(
 }
 
 function skipReason(event: OrderNotifyEvent, status: string, blockedByLater: boolean): string | null {
+  if (event === "store_replied") return null;
   if (event !== "cancelled" && CANCEL_STATUSES.has(status)) return "superseded";
   if (event !== "placed" && blockedByLater) return "superseded";
   return null;
