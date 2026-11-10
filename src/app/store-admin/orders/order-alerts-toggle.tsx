@@ -37,7 +37,10 @@ export function OrderAlertsToggle({ publicKey }: { publicKey: string | null }) {
         const existing = await reg.pushManager.getSubscription();
         if (cancelled) return;
         setRegistration(reg);
-        setEnabled(existing !== null);
+        if (!existing) return;
+        // The browser may hold a subscription from another account on this device: link it to this user, or show "off".
+        const linked = await subscribePushAction(existing.toJSON()).then((result) => result.ok, () => false);
+        if (!cancelled) setEnabled(linked);
       })
       .catch(() => undefined);
     return () => {
@@ -70,8 +73,13 @@ export function OrderAlertsToggle({ publicKey }: { publicKey: string | null }) {
   async function disable(reg: ServiceWorkerRegistration) {
     const subscription = await reg.pushManager.getSubscription();
     if (subscription) {
-      await unsubscribePushAction(subscription.endpoint);
-      await subscription.unsubscribe();
+      const removed = await unsubscribePushAction(subscription.endpoint);
+      if (!removed.ok) {
+        toast.error("Could not turn off order alerts.");
+        return;
+      }
+      // The server row is gone, so no alert will arrive whether or not the browser lets go.
+      await subscription.unsubscribe().catch(() => false);
     }
     setEnabled(false);
     toast.success("Order alerts are off for this device.");
