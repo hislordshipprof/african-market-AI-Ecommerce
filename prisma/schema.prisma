@@ -859,7 +859,6 @@ model RefundRequest {
   @@map("refund_requests")
 }
 
-/// One send attempt for one order event and channel. Contact is read from the order at send time.
 /// One customer report per order (#428). State: auto_refunded, in_review, approved, declined, refund_failed.
 model IssueReport {
   id              String   @id @default(cuid())
@@ -884,6 +883,7 @@ model IssueReport {
   @@map("issue_reports")
 }
 
+/// One send attempt for one order event and channel. Contact is read from the order at send time.
 model NotificationLog {
   id                String    @id @default(cuid())
   storeId           String    @map("store_id")

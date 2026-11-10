@@ -269,7 +269,7 @@ Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_ST
 | Transition | Trigger | Side effects |
 |---|---|---|
 | DELIVERED / COMPLETED → issue report (#428) | Customer, from the tracking link, within 48 h of `completed_at` (store delivery sets it at DELIVERED, pickup at COMPLETED) | One `issue_reports` row per order (store-owned, RLS): type (missing, damaged, wrong, poor freshness), lines with quantities, optional note, one photo, amount, state. The amount is the sum of `qty_picked × unit_price_cents` for the chosen quantities, never fees or tip. The photo goes through the delivery-proof pipeline to the private proof bucket at `issue-photo/<orderId>/<issueId>.jpg`. At or under the store's `auto_refund_limit_cents` the issue is `auto_refunded` and refunded through the refund ledger; above it, `in_review` with no Stripe call. A second report, a report after 48 h, or lines from another order are refused and write nothing. The public action is limited to 5 an hour per token and 20 an hour per IP. |
-| DELIVERED / COMPLETED / PARTIALLY_REFUNDED → PARTIALLY_REFUNDED → REFUNDED | The refund evaluation, from the ledger | Partly refunded while succeeded refunds are below the capture, Refunded when they equal it. The customer gets one "Refund issued" email and SMS per order. A failed issue refund sets the issue to `refund_failed` with one `issue_refund_failed` alert per refund (store and platform); the order is not moved to Refund failed. |
+| DELIVERED / COMPLETED / PARTIALLY_REFUNDED → PARTIALLY_REFUNDED → REFUNDED | The refund evaluation, from the ledger | Partly refunded while succeeded refunds are below the capture, Refunded when they equal it. If a refund fails after it succeeded and succeeded refunds drop to 0, the order goes back to Delivered or Completed. The customer gets one "Refund issued" email and SMS per order. A failed issue refund sets the issue to `refund_failed` with one `issue_refund_failed` alert per refund (store and platform), listed in admin Orders to check; the order is not moved to Refund failed. |
 
 | Transition | Trigger | Side effects |
 |---|---|---|
@@ -364,7 +364,7 @@ Built in #134: staff in the order inbox mark a store-delivery order Out for deli
 | Issue reported | — | Push + inbox |
 | Daily summary | — | AI copilot digest |
 
-Customer email and SMS go out for placed, accepted, ready, out for delivery, delivered, completed, cancelled and refund issued (once per order, when an issue refund first succeeds, #428). Delivered and completed are the same final step (a store-delivery order ends at delivered, a pickup order at completed), so neither supersedes the other. Each message carries the store's name and an unguessable tracking link. Item short, issue reporting, the daily digest and channel preferences are separate tickets.
+Customer email and SMS go out for placed, accepted, ready, out for delivery, delivered, completed, cancelled and refund issued (once per order, when an issue refund first succeeds, #428). Delivered and completed are the same final step (a store-delivery order ends at delivered, a pickup order at completed), so neither supersedes the other. Each message carries the store's name and an unguessable tracking link. Item short, the daily digest and channel preferences are separate tickets.
 
 Channels: Resend (email), Telnyx (SMS), Web Push (ADR-0017).
 
