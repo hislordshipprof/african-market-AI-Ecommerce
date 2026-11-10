@@ -45,15 +45,6 @@ export function setAddressProvider(backend: AddressBackend | null): void {
   override = backend;
 }
 
-/** Selects the fake or the real adapter. Tests pass their own fetch into the real one. */
-export function addressBackendFor(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch): AddressBackend {
-  if (addressProviderKind(env) === "fake") return fakeAddressBackend();
-  if (env.NODE_ENV === "test" && fetchImpl === globalThis.fetch) {
-    throw new Error("Real address adapter refused in tests without an injected fetch");
-  }
-  return realAddressBackend(fetchImpl, env);
-}
-
 export function getAddressProvider(env: NodeJS.ProcessEnv = process.env): AddressBackend {
   if (override) return override;
   const kind = addressProviderKind(env);

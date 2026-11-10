@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assessRadius } from "./geo";
-import { addressBackendFor } from "./provider";
+import { getAddressProvider, setAddressProvider } from "./provider";
 import { locateWithCensus, suggestFromPhoton } from "./remote";
 
 const STORE = { lat: 38.84505589808, lng: -76.92836638093, radiusMi: 7 };
@@ -46,6 +46,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -188,17 +189,18 @@ describe("address service", () => {
     expect(timeout).toHaveBeenCalledWith(1_500);
   });
 
-  it("the fake address service is refused on Vercel and in production without CI", async () => {
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("CI", "true");
-    vi.stubEnv("E2E_FAKE_ADDRESS", "1");
+  it.each([
+    ["on Vercel", { VERCEL: "1", NODE_ENV: "production", CI: "true", E2E_FAKE_ADDRESS: "1" }],
+    ["in production without CI", { VERCEL: "", NODE_ENV: "production", CI: "", E2E_FAKE_ADDRESS: "1" }],
+  ])("the fake address service is refused %s", async (_where, env) => {
+    setAddressProvider(null);
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       void input;
       return jsonResponse(censusBody([WHITE_HOUSE]));
     });
-    const backend = addressBackendFor(process.env, fetchImpl);
-    const located = await backend.locate({
+    vi.stubGlobal("fetch", fetchImpl);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const located = await getAddressProvider(env as NodeJS.ProcessEnv).locate({
       line1: "1600 Pennsylvania Ave NW",
       city: "Washington",
       state: "DC",
