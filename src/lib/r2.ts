@@ -68,11 +68,35 @@ export function isServableCatalogKey(key: string): boolean {
   return ALLOWED_KEY_RE.test(key);
 }
 
+const DELIVERY_PROOF_KEY_RE = /^delivery-proof\/[a-z0-9]+\/\d+\.(jpg|png|webp)$/;
+
+/** Private proof photos. Never servable by the catalog route: different prefix, different reader. */
+export function deliveryProofKey(orderId: string, timestamp: number, ext: "jpg" | "png" | "webp"): string {
+  return `delivery-proof/${orderId}/${timestamp}.${ext}`;
+}
+
+export function isDeliveryProofKey(key: string): boolean {
+  return DELIVERY_PROOF_KEY_RE.test(key);
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
   if (!isServableCatalogKey(key)) return null;
+  return getObject(key);
+}
 
+/** Read through the private delivery-proof route only. */
+export async function streamDeliveryProof(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
+  if (!isDeliveryProofKey(key)) return null;
+  return getObject(key);
+}
+
+async function getObject(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
   const bucket = process.env.R2_BUCKET;
   if (!bucket) return null;
 
