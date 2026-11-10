@@ -135,6 +135,29 @@
   color: var(--store-on-primary, var(--color-on-primary));
   font-weight: 600;
 }
+.undoBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-block: 12px;
+  padding: 4px 4px 4px 16px;
+  border-radius: 12px;
+  background: var(--color-raised);
+  color: var(--color-ink);
+  font-size: 15px;
+}
+.undoBar button {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-weight: 650;
+  color: var(--color-primary-text);
+}
+.undoBar button:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
 .countLoading {
   display: inline-block;
   width: 14px;

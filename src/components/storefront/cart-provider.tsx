@@ -135,6 +135,8 @@ export function CartProvider({
   const [syncing, setSyncing] = useState(false);
   const [attention, setAttention] = useState(false);
   const [cartId, setCartId] = useState<string | null>(null);
+  const [undoable, setUndoable] = useState<RemovedLine | null>(null);
+  const undoTimer = useRef<number | undefined>(undefined);
   const mounted = useRef(true);
   const linesRef = useRef<CartLine[]>([]);
   const revs = useRef(new Map<string, number>());
@@ -770,7 +772,13 @@ export function CartProvider({
       publish(linesRef.current.filter((line) => cartItemKey(line) !== key));
       void enqueue(drain, true);
       const removed = current && removedLine(current);
-      if (removed) {
+      if (!removed) return;
+      if (open) {
+        // The open drawer is modal, so a page toast could not be tapped; Undo shows inside it.
+        window.clearTimeout(undoTimer.current);
+        setUndoable(removed);
+        undoTimer.current = window.setTimeout(() => setUndoable(null), 6000);
+      } else {
         toast(`Removed ${removed.item.name}.`, {
           duration: 6000,
           action: { label: "Undo", onClick: () => restoreRemoved(removed) },
@@ -846,9 +854,24 @@ export function CartProvider({
       }}
     >
       {children}
-      <Sheet open={open} onClose={() => setOpen(false)} title="Your cart">
+      <Sheet open={open} onClose={() => { setOpen(false); setUndoable(null); }} title="Your cart">
         <p className={styles.muted}>{storeName}</p>
         {open && <AssistantSlot label="Shop with AI" />}
+        {undoable && (
+          <div className={styles.undoBar} role="status">
+            <span>Removed {undoable.item.name}.</span>
+            <button
+              type="button"
+              onClick={() => {
+                window.clearTimeout(undoTimer.current);
+                setUndoable(null);
+                restoreRemoved(undoable);
+              }}
+            >
+              Undo
+            </button>
+          </div>
+        )}
         {!lines.length ? (
           <div className={styles.empty}>
             <ShoppingBag size={44} />
