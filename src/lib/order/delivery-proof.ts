@@ -1,5 +1,7 @@
 export const DELIVERY_PROOF_MAX_BYTES = 8 * 1024 * 1024;
 
+export const STORE_DELIVERY_ONLY = "Only a store-delivery order can be sent out or marked delivered";
+
 export const PROOF_PHOTO_MISSING = "Add a photo of the delivered order";
 export const PROOF_PHOTO_NOT_IMAGE = "The delivery photo must be a JPEG, PNG or WebP image";
 export const PROOF_PHOTO_TOO_LARGE = "The delivery photo must be 8 MB or smaller";

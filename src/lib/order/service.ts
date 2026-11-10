@@ -11,7 +11,7 @@ import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
 import { deliveryProofKey, uploadToR2 } from "../r2";
-import { checkProofPhoto } from "./delivery-proof";
+import { checkProofPhoto, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -36,8 +36,6 @@ const MAX_CAPTURE_ATTEMPTS = 5;
 type TransitionalStatus = "CAPTURING" | "CANCELLING";
 
 const CAPTURE_STATUS_CHANGED = "Order status changed during capture";
-
-export const STORE_DELIVERY_ONLY = "Only a store-delivery order can be sent out or marked delivered";
 
 /** Stock writes wait on listing locks, so these transactions cannot use Prisma's 5-second default. */
 const LEDGER_TRANSACTION = { timeout: 20_000, maxWait: 8_000 };

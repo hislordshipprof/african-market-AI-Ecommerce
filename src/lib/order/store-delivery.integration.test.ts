@@ -23,7 +23,8 @@ vi.mock("@aws-sdk/client-s3", () => {
 
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
-import { markDelivered, markOutForDelivery, STORE_DELIVERY_ONLY } from "./service";
+import { markDelivered, markOutForDelivery } from "./service";
+import { STORE_DELIVERY_ONLY } from "./delivery-proof";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests } from "../email/send";
 import { clearTestSentSms, getTestSentSms, setSmsSenderForTests } from "../notifications/sms";
 import { sendCustomerNotification } from "../inngest/functions";
