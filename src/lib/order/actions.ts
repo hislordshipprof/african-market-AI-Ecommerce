@@ -17,6 +17,7 @@ import {
   PROOF_PHOTO_MISSING,
   PROOF_PHOTO_NOT_IMAGE,
   PROOF_PHOTO_TOO_LARGE,
+  PROOF_STORAGE_NOT_SET_UP,
   STORE_DELIVERY_ONLY,
 } from "./delivery-proof";
 import { platform } from "../db";
@@ -39,6 +40,7 @@ const ALLOWED_STAFF_ERRORS = new Set([
   PROOF_PHOTO_MISSING,
   PROOF_PHOTO_NOT_IMAGE,
   PROOF_PHOTO_TOO_LARGE,
+  PROOF_STORAGE_NOT_SET_UP,
 ]);
 
 function isAllowListed(message: string): boolean {

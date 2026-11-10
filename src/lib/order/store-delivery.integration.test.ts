@@ -1,10 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 
-const bucket = vi.hoisted(() => new Map<string, { body: Uint8Array; contentType: string }>());
+const bucket = vi.hoisted(() => new Map<string, { body: Uint8Array; contentType: string; bucket: string }>());
 vi.mock("@aws-sdk/client-s3", () => {
   class PutObjectCommand {
-    constructor(readonly input: { Key: string; Body: Uint8Array; ContentType: string }) {}
+    constructor(readonly input: { Bucket: string; Key: string; Body: Uint8Array; ContentType: string }) {}
   }
   class GetObjectCommand {
     constructor(readonly input: { Key: string }) {}
@@ -12,7 +12,7 @@ vi.mock("@aws-sdk/client-s3", () => {
   class S3Client {
     async send(command: PutObjectCommand | GetObjectCommand) {
       if (command instanceof PutObjectCommand) {
-        bucket.set(command.input.Key, { body: command.input.Body, contentType: command.input.ContentType });
+        bucket.set(command.input.Key, { body: command.input.Body, contentType: command.input.ContentType, bucket: command.input.Bucket });
         return {};
       }
       throw new Error("NoSuchKey");
@@ -24,7 +24,7 @@ vi.mock("@aws-sdk/client-s3", () => {
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { markDelivered, markOutForDelivery } from "./service";
-import { PROOF_PHOTO_NOT_IMAGE, PROOF_PHOTO_TOO_LARGE, STORE_DELIVERY_ONLY } from "./delivery-proof";
+import { PROOF_PHOTO_NOT_IMAGE, PROOF_PHOTO_TOO_LARGE, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 import { CSV_ACTION_BODY_LIMIT_BYTES } from "../listing/csv-file-cap";
 import sharp from "sharp";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests } from "../email/send";
@@ -73,7 +73,8 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     process.env.R2_ACCOUNT_ID = "test-account";
     process.env.R2_ACCESS_KEY_ID = "test-key";
     process.env.R2_SECRET_ACCESS_KEY = "test-secret";
-    process.env.R2_BUCKET = "test-bucket";
+    process.env.R2_BUCKET = "catalog-bucket";
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
   });
 
   afterEach(() => {
@@ -155,6 +156,7 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     expect(after.order.deliveryProofUploadedAt).toBeInstanceOf(Date);
     expect(after.order.deliveryProofKey).toMatch(new RegExp(`^delivery-proof/${order.id}/\\d+\\.jpg$`));
     expect(bucket.get(after.order.deliveryProofKey!)?.contentType).toBe("image/jpeg");
+    expect(bucket.get(after.order.deliveryProofKey!)?.bucket).toBe("proof-bucket");
     expect(after.events.map((event) => event.type).sort()).toEqual(["delivered", "out_for_delivery"]);
     expect(after.notifications.filter((row) => row.event === "delivered").map((row) => row.channel).sort())
       .toEqual(["email", "sms"]);
@@ -258,6 +260,18 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     const after = await state(order.id);
     expect(after.order.status).toBe("OUT_FOR_DELIVERY");
     expect(after.order.deliveryProofKey).toBeNull();
+    expect(bucket.size).toBe(0);
+  });
+
+  it("with no private proof bucket configured, delivered is refused before any upload and the order stays out for delivery", async () => {
+    vi.stubEnv("R2_PROOF_BUCKET", "");
+    const order = await readyOrder();
+    await markOutForDelivery(storeId, order.id);
+    expect(await markDelivered(storeId, order.id, JPEG)).toEqual({ ok: false, error: PROOF_STORAGE_NOT_SET_UP });
+    const after = await state(order.id);
+    expect(after.order.status).toBe("OUT_FOR_DELIVERY");
+    expect(after.order.deliveryProofKey).toBeNull();
+    expect(after.events.map((event) => event.type)).toEqual(["out_for_delivery"]);
     expect(bucket.size).toBe(0);
   });
 });

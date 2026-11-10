@@ -137,6 +137,7 @@ describe("delivery proof keys", () => {
       Body: { transformToWebStream: () => new ReadableStream() },
       ContentType: "image/jpeg",
     });
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
     const { deliveryProofKey, streamDeliveryProof, streamFromR2 } = await import("./r2");
     const key = deliveryProofKey("cmorder123", 1762700000000);
     expect(key).toBe("delivery-proof/cmorder123/1762700000000.jpg");
@@ -149,6 +150,7 @@ describe("delivery proof keys", () => {
     expect(__mockSend).not.toHaveBeenCalled();
 
     expect(await streamDeliveryProof(key)).not.toBeNull();
+    vi.unstubAllEnvs();
   });
 });
 

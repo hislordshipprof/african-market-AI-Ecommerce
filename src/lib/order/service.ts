@@ -10,8 +10,8 @@ import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
-import { deliveryProofKey, uploadToR2 } from "../r2";
-import { prepareProofPhoto, STORE_DELIVERY_ONLY } from "./delivery-proof";
+import { deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
+import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
 export type OrderStatus =
@@ -1168,6 +1168,7 @@ export async function markDelivered(
   orderId: string,
   photo: Uint8Array | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!deliveryProofBucket()) return { ok: false, error: PROOF_STORAGE_NOT_SET_UP };
   const prepared = await prepareProofPhoto(photo);
   if (!prepared.ok) return prepared;
   const current = await storeScoped(storeId).order.findUnique({
@@ -1179,7 +1180,7 @@ export async function markDelivered(
 
   const uploadedAt = new Date();
   const key = deliveryProofKey(orderId, uploadedAt.getTime());
-  await uploadToR2(key, prepared.jpeg, "image/jpeg");
+  await uploadDeliveryProof(key, prepared.jpeg);
 
   const result = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);

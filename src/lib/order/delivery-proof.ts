@@ -7,6 +7,8 @@ const MAX_INPUT_PIXELS = 16_777_216;
 
 export const STORE_DELIVERY_ONLY = "Only a store-delivery order can be sent out or marked delivered";
 
+export const PROOF_STORAGE_NOT_SET_UP = "Delivery photos are not set up for this store yet. Contact support";
+
 export const PROOF_PHOTO_MISSING = "Add a photo of the delivered order";
 export const PROOF_PHOTO_NOT_IMAGE = "The delivery photo must be a JPEG, PNG or WebP image";
 export const PROOF_PHOTO_TOO_LARGE = "The delivery photo is too large. Take it again or choose a smaller one";
