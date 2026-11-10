@@ -112,11 +112,17 @@ function stuckReason(order: OrderRecoveryCandidate, now: number): { reason: Stuc
 export async function findOrdersToCheck(opts?: {
   now?: Date;
   storeIds?: readonly string[];
-}): Promise<{ checkedAt: Date; stuck: StuckOrderRow[]; cappedGroups: OrderRecoveryGroup[]; alerts: OrderAlertRow[] }> {
+}): Promise<{
+  checkedAt: Date;
+  stuck: StuckOrderRow[];
+  cappedGroups: OrderRecoveryGroup[];
+  alerts: OrderAlertRow[];
+  alertsCapped: boolean;
+}> {
   const checkedAt = opts?.now ?? new Date();
   const now = checkedAt.getTime();
   const at = (ms: number) => new Date(now - ms);
-  const [{ candidates, capped }, alertRows] = await Promise.all([
+  const [{ candidates, capped }, { alerts, capped: alertsCapped }] = await Promise.all([
     findOrderRecoveryCandidates({
       authorizedBefore: at(TIMER_NOT_STARTED_MS),
       holdBefore: at(HOLD_EXPIRING_MS),
@@ -150,6 +156,7 @@ export async function findOrdersToCheck(opts?: {
     checkedAt,
     stuck,
     cappedGroups: (Object.keys(capped) as OrderRecoveryGroup[]).filter((group) => capped[group]),
-    alerts: alertRows.map((row) => ({ ...row, action: row.action as OrderAlertRow["action"] })),
+    alerts: alerts.map((row) => ({ ...row, action: row.action as OrderAlertRow["action"] })),
+    alertsCapped,
   };
 }

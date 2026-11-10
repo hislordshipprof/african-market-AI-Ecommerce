@@ -116,7 +116,7 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
   });
 
   it("lists each stuck order once with its reason, and the alerts nothing else reads", async () => {
-    const { stuck, cappedGroups, alerts } = await findOrdersToCheck({ now, storeIds: [storeId] });
+    const { stuck, cappedGroups, alerts, alertsCapped } = await findOrdersToCheck({ now, storeIds: [storeId] });
     const reasonOf = (key: string) => stuck.filter((row) => row.orderId === ids[key]).map((row) => row.reason);
 
     expect(reasonOf("notStarted")).toEqual(["timer not started"]);
@@ -132,6 +132,7 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
     expect(reasonOf("scheduled")).toEqual([]);
     expect(stuck.find((row) => row.orderId === ids.cancelling)?.since).toEqual(ago(40 * MIN));
     expect(cappedGroups).toEqual([]);
+    expect(alertsCapped).toBe(false);
 
     const released = alerts.find((row) => row.orderId === ids.released);
     expect(released).toMatchObject({ action: "capture_released", storeName, orderNumber: expect.any(Number) });
@@ -199,7 +200,8 @@ describe.skipIf(!hasDb)("orders to check: orders not yet due do not fill a group
           pickupSlot: new Date(now.getTime() + 2 * DAY).toISOString(),
         })),
       });
-      await tx.order.createMany({
+      const waiting = await tx.order.createManyAndReturn({
+        select: { id: true },
         data: Array.from({ length: 200 }, (_, i) => ({
           ...base,
           number: 44300 + i,
@@ -207,6 +209,9 @@ describe.skipIf(!hasDb)("orders to check: orders not yet due do not fill a group
           createdAt: ago(DAY - i * MIN),
           acceptanceClockStartsAt: new Date(now.getTime() + DAY),
         })),
+      });
+      await tx.auditLog.createMany({
+        data: waiting.map(({ id }) => ({ storeId, actorId: SYSTEM_ACTOR_ID, actorEmail: SYSTEM_ACTOR_EMAIL, action: "acceptance_alert", entityType: "order", entityId: id, createdAt: ago(HOUR) })),
       });
       const capturing = await tx.order.create({ data: { ...base, number: 44600, status: "CAPTURING", createdAt: ago(4 * HOUR) } });
       capturingId = capturing.id;
@@ -228,5 +233,11 @@ describe.skipIf(!hasDb)("orders to check: orders not yet due do not fill a group
     );
     expect(stuck).toHaveLength(2);
     expect(cappedGroups).toEqual(["authorized", "uncaptured"]);
+  });
+
+  it("says when the alert list hits its cap", async () => {
+    const { alerts, alertsCapped } = await findOrdersToCheck({ now, storeIds: [storeId] });
+    expect(alerts).toHaveLength(200);
+    expect(alertsCapped).toBe(true);
   });
 });

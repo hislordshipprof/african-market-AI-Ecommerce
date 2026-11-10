@@ -1007,7 +1007,7 @@ export async function findOrderRecoveryCandidates(opts: {
 
 /**
  * The newest audit row per order and action, newest first. Rows older than `since` stay while
- * their order is not in `finalStatuses`.
+ * their order is not in `finalStatuses`. `capped` says the list hit `limit`.
  */
 export async function findOrderAlertRows(opts: {
   actions: readonly string[];
@@ -1015,8 +1015,11 @@ export async function findOrderAlertRows(opts: {
   finalStatuses: readonly string[];
   limit: number;
   storeIds?: readonly string[];
-}): Promise<Array<{ orderId: string; action: string; createdAt: Date; orderNumber: number; orderStatus: string; storeName: string }>> {
-  if (opts.storeIds && opts.storeIds.length === 0) return [];
+}): Promise<{
+  alerts: Array<{ orderId: string; action: string; createdAt: Date; orderNumber: number; orderStatus: string; storeName: string }>;
+  capped: boolean;
+}> {
+  if (opts.storeIds && opts.storeIds.length === 0) return { alerts: [], capped: false };
   const inStores = opts.storeIds ? Prisma.sql`AND a.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   const rows = await platformAdminTransaction((tx) => tx.$queryRaw<Array<{
     entity_id: string;
@@ -1041,14 +1044,17 @@ export async function findOrderAlertRows(opts: {
     ORDER BY created_at DESC
     LIMIT ${opts.limit}
   `);
-  return rows.map((r) => ({
-    orderId: r.entity_id,
-    action: r.action,
-    createdAt: r.created_at,
-    orderNumber: r.number,
-    orderStatus: r.status,
-    storeName: r.store_name,
-  }));
+  return {
+    alerts: rows.map((r) => ({
+      orderId: r.entity_id,
+      action: r.action,
+      createdAt: r.created_at,
+      orderNumber: r.number,
+      orderStatus: r.status,
+      storeName: r.store_name,
+    })),
+    capped: rows.length === opts.limit,
+  };
 }
 
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */

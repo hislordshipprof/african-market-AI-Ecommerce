@@ -24,7 +24,7 @@ function formatAge(since: Date, now: number): string {
 }
 
 export default async function OrdersToCheckPage() {
-  const { checkedAt, stuck, cappedGroups, alerts } = await listOrdersToCheck();
+  const { checkedAt, stuck, cappedGroups, alerts, alertsCapped } = await listOrdersToCheck();
   const now = checkedAt.getTime();
 
   return (
@@ -44,12 +44,12 @@ export default async function OrdersToCheckPage() {
       <h2 className="mb-3 text-lg font-semibold text-foreground">Stuck orders</h2>
       {cappedGroups.map((group) => (
         <p key={group} className="mb-3 text-sm text-muted-foreground" data-testid={`stuck-capped-${group}`}>
-          Showing the first {ROW_LIMIT} {GROUP_LABELS[group]}, oldest first.
+          The list may be incomplete: only {ROW_LIMIT} {GROUP_LABELS[group]} were checked, those known to be stuck first, then the oldest.
         </p>
       ))}
       {stuck.length === 0 ? (
         <p className="mb-8 rounded-lg border border-input bg-card p-8 text-center text-muted-foreground" data-testid="stuck-empty">
-          No orders are stuck.
+          {cappedGroups.length > 0 ? "No stuck orders among those checked. The list may be incomplete." : "No orders are stuck."}
         </p>
       ) : (
         <div className="mb-8 overflow-x-auto rounded-lg border border-input bg-card">
@@ -79,6 +79,11 @@ export default async function OrdersToCheckPage() {
       )}
 
       <h2 className="mb-3 text-lg font-semibold text-foreground">Alerts</h2>
+      {alertsCapped && (
+        <p className="mb-3 text-sm text-muted-foreground" data-testid="alerts-capped">
+          The list may be incomplete: showing the newest {ROW_LIMIT} alerts.
+        </p>
+      )}
       {alerts.length === 0 ? (
         <p className="rounded-lg border border-input bg-card p-8 text-center text-muted-foreground" data-testid="alerts-empty">
           No alerts to check.
