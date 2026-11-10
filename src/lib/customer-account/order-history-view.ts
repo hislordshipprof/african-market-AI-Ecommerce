@@ -34,6 +34,8 @@ const CUSTOMER_STATUS_LABELS: Record<OrderStatus, string> = {
   CAPTURING: "Finalizing your total",
   READY: "Packed and ready",
   AWAITING_PICKUP: "Ready for pickup",
+  OUT_FOR_DELIVERY: "Out for delivery",
+  DELIVERED: "Delivered",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   REFUND_FAILED: "Refund in progress",

@@ -68,14 +68,53 @@ export function isServableCatalogKey(key: string): boolean {
   return ALLOWED_KEY_RE.test(key);
 }
 
+const DELIVERY_PROOF_KEY_RE = /^delivery-proof\/[a-z0-9]+\/\d+\.jpg$/;
+
+/** Private proof photos, always re-encoded to JPEG. Never servable by the catalog route. */
+export function deliveryProofKey(orderId: string, timestamp: number): string {
+  return `delivery-proof/${orderId}/${timestamp}.jpg`;
+}
+
+export function isDeliveryProofKey(key: string): boolean {
+  return DELIVERY_PROOF_KEY_RE.test(key);
+}
+
+/** Proofs live only in their own private bucket, never the catalog one (ADR 0013). */
+export function deliveryProofBucket(): string | null {
+  return process.env.R2_PROOF_BUCKET?.trim() || null;
+}
+
+export async function uploadDeliveryProof(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isDeliveryProofKey(key)) throw new Error("not a delivery-proof key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
   if (!isServableCatalogKey(key)) return null;
-
   const bucket = process.env.R2_BUCKET;
   if (!bucket) return null;
+  return getObject(bucket, key);
+}
 
+/** Read through the private delivery-proof route only. */
+export async function streamDeliveryProof(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !isDeliveryProofKey(key)) return null;
+  return getObject(bucket, key);
+}
+
+async function getObject(
+  bucket: string,
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
   try {
     const client = getR2Client();
     const response = await client.send(

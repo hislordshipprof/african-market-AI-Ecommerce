@@ -32,6 +32,7 @@ import {
   HandMetal,
   Package,
   RefreshCw,
+  Truck,
   ShoppingBag,
   UserCheck,
 } from "lucide-react";
@@ -42,12 +43,15 @@ import {
   markLinePickedAction,
   markReadyAction,
   completePickupAction,
+  markOutForDeliveryAction,
+  markDeliveredAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
 import { RESOLVED_LINE_STATUSES } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
-import { REFUND_FAILED_STAFF_COPY, showCapturedLine } from "@/lib/order/staff-copy";
+import { jpegBlob } from "@/lib/image/client-jpeg";
+import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
 
 const STATUS_CONFIG: Record<
   string,
@@ -60,6 +64,8 @@ const STATUS_CONFIG: Record<
   CANCELLING: { label: "Cancelling…", variant: "destructive", icon: RefreshCw },
   READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
   AWAITING_PICKUP: { label: "Awaiting pickup", variant: "outline", icon: ShoppingBag },
+  OUT_FOR_DELIVERY: { label: "Out for delivery", variant: "secondary", icon: Truck },
+  DELIVERED: { label: "Delivered", variant: "outline", icon: CheckCircle2 },
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
   CANCELLED: { label: "Cancelled", variant: "outline", icon: CheckCircle2 },
 };
@@ -105,6 +111,7 @@ export function OrderInbox({
   const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
   const [acceptingOrderId, setAcceptingOrderId] = useState<string | null>(null);
   const [prepMinutes, setPrepMinutes] = useState(String(defaultPrepMinutes));
+  const [proofPhoto, setProofPhoto] = useState<{ orderId: string; file: File } | null>(null);
   const prevOrderIdsRef = useRef(new Set(initialOrders.map((o) => o.id)));
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -163,6 +170,12 @@ export function OrderInbox({
   }, [pollOrders]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
+
+  /** Every selection change drops the picked photo, so it can never ride along to another visit. */
+  function selectOrder(orderId: string | null) {
+    setProofPhoto(null);
+    setSelectedOrderId(orderId);
+  }
   const allLinesResolved =
     selectedOrder?.status === "PICKING"
       ? selectedOrder.lines.every((l) =>
@@ -228,7 +241,59 @@ export function OrderInbox({
       const result = await completePickupAction(orderId);
       if (result.ok) {
         toast.success("Pickup completed");
-        setSelectedOrderId(null);
+        selectOrder(null);
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleOutForDelivery(orderId: string) {
+    startTransition(async () => {
+      let result: Awaited<ReturnType<typeof markOutForDeliveryAction>>;
+      try {
+        result = await markOutForDeliveryAction(orderId);
+      } catch {
+        toast.error(STAFF_GENERIC_ERROR);
+        return;
+      }
+      if (result.ok) {
+        toast.success("Out for delivery");
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
+  function handleMarkDelivered(orderId: string) {
+    const photo = proofPhoto?.orderId === orderId ? proofPhoto.file : null;
+    if (!photo) {
+      toast.error("Add a photo of the delivered order");
+      return;
+    }
+    startTransition(async () => {
+      let jpeg: Blob;
+      try {
+        jpeg = await jpegBlob(photo);
+      } catch {
+        toast.error("This browser can't read that photo. Take it again or choose another one");
+        return;
+      }
+      const form = new FormData();
+      form.set("orderId", orderId);
+      form.set("photo", new File([jpeg], "delivery.jpg", { type: "image/jpeg" }));
+      let result: Awaited<ReturnType<typeof markDeliveredAction>>;
+      try {
+        result = await markDeliveredAction(form);
+      } catch {
+        toast.error(STAFF_GENERIC_ERROR);
+        return;
+      }
+      if (result.ok) {
+        toast.success("Order delivered");
+        selectOrder(null);
         pollOrders();
       } else {
         toast.error(result.error);
@@ -296,7 +361,7 @@ export function OrderInbox({
         {selectedOrder ? (
           <div>
             <button
-              onClick={() => setSelectedOrderId(null)}
+              onClick={() => selectOrder(null)}
               className="mb-4 flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="size-4" /> Back to orders
@@ -447,6 +512,42 @@ export function OrderInbox({
                   </Button>
                 )}
 
+                {selectedOrder.status === "READY" && selectedOrder.fulfillment === "store-delivery" && (
+                  <Button
+                    className="w-full rounded-full"
+                    onClick={() => handleOutForDelivery(selectedOrder.id)}
+                    disabled={isPending}
+                  >
+                    <Truck className="mr-2 size-4" /> Out for delivery
+                  </Button>
+                )}
+
+                {selectedOrder.status === "OUT_FOR_DELIVERY" && (
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="delivery-proof">Delivery photo</Label>
+                      <Input
+                        key={selectedOrder.id}
+                        id="delivery-proof"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        capture="environment"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          setProofPhoto(file ? { orderId: selectedOrder.id, file } : null);
+                        }}
+                      />
+                    </div>
+                    <Button
+                      className="w-full rounded-full"
+                      onClick={() => handleMarkDelivered(selectedOrder.id)}
+                      disabled={isPending || proofPhoto?.orderId !== selectedOrder.id}
+                    >
+                      <CheckCircle2 className="mr-2 size-4" /> Mark delivered
+                    </Button>
+                  </div>
+                )}
+
                 <div className="mt-6 space-y-1.5 border-t pt-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Subtotal</span>
@@ -499,7 +600,7 @@ export function OrderInbox({
                   return (
                     <button
                       key={order.id}
-                      onClick={() => setSelectedOrderId(order.id)}
+                      onClick={() => selectOrder(order.id)}
                       className="w-full text-left"
                     >
                       <Card className="transition-all duration-200 hover:shadow-md active:scale-[0.99]">

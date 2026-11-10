@@ -10,6 +10,8 @@ describe("captured line", () => {
     expect(showCapturedLine("READY", 1200)).toBe(true);
     expect(showCapturedLine("AWAITING_PICKUP", 1200)).toBe(true);
     expect(showCapturedLine("COMPLETED", 1200)).toBe(true);
+    expect(showCapturedLine("OUT_FOR_DELIVERY", 1200)).toBe(true);
+    expect(showCapturedLine("DELIVERED", 1200)).toBe(true);
     expect(showCapturedLine("REFUND_FAILED", 1200)).toBe(true);
     expect(showCapturedLine("REFUND_FAILED", 0)).toBe(false);
   });

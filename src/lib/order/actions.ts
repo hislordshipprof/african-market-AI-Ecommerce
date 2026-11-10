@@ -9,7 +9,17 @@ import {
   markLinePicked,
   markReady,
   completePickup,
+  markOutForDelivery,
+  markDelivered,
 } from "./service";
+import {
+  DELIVERY_PROOF_MAX_BYTES,
+  PROOF_PHOTO_MISSING,
+  PROOF_PHOTO_NOT_IMAGE,
+  PROOF_PHOTO_TOO_LARGE,
+  PROOF_STORAGE_NOT_SET_UP,
+  STORE_DELIVERY_ONLY,
+} from "./delivery-proof";
 import { platform } from "../db";
 import { STAFF_GENERIC_ERROR } from "./staff-copy";
 
@@ -26,6 +36,11 @@ const ALLOWED_STAFF_ERRORS = new Set([
   "Cancellation is still confirming with the bank",
   "Payment authorization expired or was voided — order cancelled; contact the customer",
   "Payment authorization was released — order cancelled; contact the customer",
+  STORE_DELIVERY_ONLY,
+  PROOF_PHOTO_MISSING,
+  PROOF_PHOTO_NOT_IMAGE,
+  PROOF_PHOTO_TOO_LARGE,
+  PROOF_STORAGE_NOT_SET_UP,
 ]);
 
 function isAllowListed(message: string): boolean {
@@ -35,6 +50,8 @@ function isAllowListed(message: string): boolean {
     message.startsWith("Cannot accept order in status ") ||
     message.startsWith("Cannot pick lines for order in status ") ||
     message.startsWith("Cannot complete pickup for order in status ") ||
+    message.startsWith("Cannot send out for delivery in status ") ||
+    message.startsWith("Cannot mark delivered in status ") ||
     message.startsWith("Line already resolved") ||
     message.startsWith("Retrying in ") ||
     message.startsWith("Capture amount ")
@@ -127,4 +144,24 @@ export async function completePickupAction(orderId: string) {
   const id = parseInput(orderIdSchema, orderId);
   if (!id.ok) return { ok: false as const, error: "Order not found" };
   return runStaffAction("completePickup", id.data, () => completePickup(session.store.id, id.data));
+}
+
+export async function markOutForDeliveryAction(orderId: string) {
+  const session = await requireStoreMember();
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  return runStaffAction("markOutForDelivery", id.data, () => markOutForDelivery(session.store.id, id.data));
+}
+
+/** FormData: `orderId` and the `photo` file. The service checks the photo's bytes. */
+export async function markDeliveredAction(form: FormData) {
+  const session = await requireStoreMember();
+  const id = parseInput(orderIdSchema, form.get("orderId"));
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  const photo = form.get("photo");
+  const file = photo instanceof File && photo.size > 0 ? photo : null;
+  if (file && file.size > DELIVERY_PROOF_MAX_BYTES) return { ok: false as const, error: PROOF_PHOTO_TOO_LARGE };
+  return runStaffAction("markDelivered", id.data, async () =>
+    markDelivered(session.store.id, id.data, file ? new Uint8Array(await file.arrayBuffer()) : null),
+  );
 }

@@ -64,6 +64,7 @@ model Store {
   copilotClientMessages CopilotClientMessage[]
   stockProposals StockProposal[]
   notificationLogs NotificationLog[]
+  deliveryEvents DeliveryEvent[]
 
   @@map("stores")
 }
@@ -800,6 +801,10 @@ model Order {
   trackingToken        String?   @unique @map("tracking_token")
   /// When the acceptance alert and auto-cancel start counting. NULL means created_at (orders before #167).
   acceptanceClockStartsAt DateTime? @map("acceptance_clock_starts_at") @db.Timestamptz(6)
+  outForDeliveryAt     DateTime? @map("out_for_delivery_at")
+  deliveredAt          DateTime? @map("delivered_at")
+  deliveryProofKey     String?   @map("delivery_proof_key")
+  deliveryProofUploadedAt DateTime? @map("delivery_proof_uploaded_at")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -808,6 +813,7 @@ model Order {
   lines    OrderLine[]
   refundRequests RefundRequest[]
   notificationLogs NotificationLog[]
+  deliveryEvents DeliveryEvent[]
 
   @@unique([id, storeId])
   @@unique([storeId, number])
@@ -865,6 +871,23 @@ model NotificationLog {
   @@index([storeId, orderId])
   @@index([status, createdAt])
   @@map("notification_logs")
+}
+
+/// One store-delivery step: out_for_delivery or delivered.
+model DeliveryEvent {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  orderId   String   @map("order_id")
+  type      String
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([storeId, orderId])
+  @@map("delivery_events")
 }
 
 model OrderLine {

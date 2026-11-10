@@ -13,6 +13,8 @@ vi.mock("./service", () => ({
   markLinePicked: vi.fn(),
   markReady: vi.fn(),
   completePickup: vi.fn(),
+  markOutForDelivery: vi.fn(),
+  markDelivered: vi.fn(),
 }));
 
 vi.mock("../db", () => ({
@@ -87,5 +89,39 @@ describe("markReadyAction", () => {
     expect(result).toEqual({ ok: false, error: STAFF_GENERIC_ERROR });
     expect(errorSpy.mock.calls.flat().join(" ")).toContain("network timeout");
     errorSpy.mockRestore();
+  });
+});
+
+describe("store delivery actions", () => {
+  it("markDeliveredAction hands the photo's bytes and the session store to the service", async () => {
+    const { markDelivered } = await import("./service");
+    const { markDeliveredAction } = await import("./actions");
+    (markDelivered as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+    const form = new FormData();
+    form.set("orderId", "order-9");
+    form.set("photo", new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], "door.jpg", { type: "image/jpeg" }));
+
+    expect(await markDeliveredAction(form)).toEqual({ ok: true });
+    expect(markDelivered).toHaveBeenCalledWith("store-1", "order-9", new Uint8Array([0xff, 0xd8, 0xff, 0xe0]));
+  });
+
+  it("photo and transition errors reach staff as written, not as the generic message", async () => {
+    const { markDelivered, markOutForDelivery } = await import("./service");
+    const { markDeliveredAction, markOutForDeliveryAction } = await import("./actions");
+    const { PROOF_PHOTO_NOT_IMAGE, STORE_DELIVERY_ONLY } = await import("./delivery-proof");
+    const form = new FormData();
+    form.set("orderId", "order-9");
+    for (const error of [PROOF_PHOTO_NOT_IMAGE, STORE_DELIVERY_ONLY, "Cannot mark delivered in status READY"]) {
+      (markDelivered as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error });
+      expect(await markDeliveredAction(form)).toEqual({ ok: false, error });
+    }
+    (markOutForDelivery as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      error: "Cannot send out for delivery in status OUT_FOR_DELIVERY",
+    });
+    expect(await markOutForDeliveryAction("order-9")).toEqual({
+      ok: false,
+      error: "Cannot send out for delivery in status OUT_FOR_DELIVERY",
+    });
   });
 });
