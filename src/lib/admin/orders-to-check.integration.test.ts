@@ -10,24 +10,46 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
+let prisma: PrismaClient;
+const storeIds: string[] = [];
+
+function newStore(): string {
+  const id = crypto.randomUUID();
+  storeIds.push(id);
+  return id;
+}
+
+async function asPlatformAdmin<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+    return fn(tx);
+  });
+}
+
+beforeAll(() => {
+  if (hasDb) prisma = testPrismaClient();
+});
+
+afterAll(async () => {
+  if (!hasDb) return;
+  await asPlatformAdmin(async (tx) => {
+    await tx.auditLog.deleteMany({ where: { storeId: { in: storeIds } } });
+    await tx.order.deleteMany({ where: { storeId: { in: storeIds } } });
+    await tx.customer.deleteMany({ where: { storeId: { in: storeIds } } });
+    await tx.store.deleteMany({ where: { id: { in: storeIds } } });
+  });
+  await prisma.$disconnect();
+});
+
 describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
-  let prisma: PrismaClient;
-  const storeId = crypto.randomUUID();
+  const storeId = newStore();
   const storeName = `Check Market ${RUN}`;
   const now = new Date();
   const ago = (ms: number) => new Date(now.getTime() - ms);
   const ids: Record<string, string> = {};
 
-  async function asPlatformAdmin<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-    return prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      return fn(tx);
-    });
-  }
-
   beforeAll(async () => {
-    prisma = testPrismaClient();
     await asPlatformAdmin(async (tx) => {
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, ${storeName}, ${RUN}, 'active', now())`;
       const customer = await tx.customer.create({ data: { storeId, name: "Check Customer" } });
@@ -93,16 +115,6 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
     });
   });
 
-  afterAll(async () => {
-    await asPlatformAdmin(async (tx) => {
-      await tx.auditLog.deleteMany({ where: { storeId } });
-      await tx.order.deleteMany({ where: { storeId } });
-      await tx.customer.deleteMany({ where: { storeId } });
-      await tx.store.deleteMany({ where: { id: storeId } });
-    });
-    await prisma.$disconnect();
-  });
-
   it("lists each stuck order once with its reason, and the alerts nothing else reads", async () => {
     const { stuck, cappedGroups, alerts } = await findOrdersToCheck({ now, storeIds: [storeId] });
     const reasonOf = (key: string) => stuck.filter((row) => row.orderId === ids[key]).map((row) => row.reason);
@@ -129,22 +141,12 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
 });
 
 describe.skipIf(!hasDb)("orders to check: a full captured group does not hide uncaptured orders (lane DB)", () => {
-  let prisma: PrismaClient;
-  const storeId = crypto.randomUUID();
+  const storeId = newStore();
   const now = new Date();
   const ago = (ms: number) => new Date(now.getTime() - ms);
   let capturingId = "";
 
-  async function asPlatformAdmin<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
-    return prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      return fn(tx);
-    });
-  }
-
   beforeAll(async () => {
-    prisma = testPrismaClient();
     await asPlatformAdmin(async (tx) => {
       await tx.$executeRaw`INSERT INTO stores (id, name, slug, status, updated_at) VALUES (${storeId}, ${`Backlog Market ${RUN}`}, ${`${RUN}-backlog`}, 'active', now())`;
       const customer = await tx.customer.create({ data: { storeId, name: "Backlog Customer" } });
@@ -166,16 +168,6 @@ describe.skipIf(!hasDb)("orders to check: a full captured group does not hide un
       });
     });
   }, 30_000);
-
-  afterAll(async () => {
-    await asPlatformAdmin(async (tx) => {
-      await tx.auditLog.deleteMany({ where: { storeId } });
-      await tx.order.deleteMany({ where: { storeId } });
-      await tx.customer.deleteMany({ where: { storeId } });
-      await tx.store.deleteMany({ where: { id: storeId } });
-    });
-    await prisma.$disconnect();
-  });
 
   it("lists a stalled capture behind 200 old uncollected pickups", async () => {
     const { stuck, cappedGroups } = await findOrdersToCheck({ now, storeIds: [storeId] });
