@@ -20,8 +20,8 @@ Steps 1 to 3 below are done on the Mac; don't repeat them. Continue at step 4, i
   ```
 
   Then confirm `grep -c neon.tech .env.local` prints 0. Run `review-ticket.sh` from `~/E-com`.
-- **#408:** the seven `scripts/*.test.sh` files pass on macOS with the GNU tools; four tests fail without them. A review of `9f21111` started at 16:36 local time. Its result is `.builder/review-408.md`, with `.builder/review-408.sha` beside it. `local-ci` has not run yet.
-- **This section is a local commit, one ahead of #408.** Don't push it to #408 before the merge: it would move the PR head and void the review. Push it with the Mac-fix PR.
+- **#408:** the seven `scripts/*.test.sh` files pass on macOS with the GNU tools; four tests fail without them. Review round 1 of `9f21111` was BLOCKING: a ship session could merge an unreviewed head. Round 2 denies `gh pr merge` in that session, makes `ship-ticket.sh` and `merge-ticket.sh` exit 6 if the PR got merged anyway, and adds `merge-ticket.sh --pr <pr-number>`. Round 2 needs a fresh review and `local-ci` on its head. Any later commit makes that review stale.
+- **PRs not on a `ticket-<n>-` branch (#408, #411, #412):** run `review-ticket.sh <pr-number>`, then `merge-ticket.sh --pr <pr-number>`. Review files and the worktree use the PR number.
 - **Mac-fix PR, after #408 merges (owner's choice):** replace the GNU-only calls, then drop GNU tools from the shell setup. `date -d` in `build-ticket.sh:57`; `stat -c` in `ci-lock.sh:25`, `build-ticket.sh:67`, `review-watch.sh:65`; `sed -i` in `review-ticket.sh:67,75,77` and `ci-scope.test.sh`.
 
 ## Start here (a new agent session on the owner's Mac)
