@@ -46,7 +46,14 @@ export function OrderMessages({
     const body = draft.trim();
     if (!body) return;
     startTransition(async () => {
-      const result = await sendOrderMessageAction({ token, body });
+      let result;
+      try {
+        result = await sendOrderMessageAction({ token, body });
+      } catch {
+        // Uncaught, the rejection reaches the error boundary and the draft is lost.
+        setError("We couldn't send your message. Check your connection and try again.");
+        return;
+      }
       if (!result.ok) {
         setError(result.error);
         return;

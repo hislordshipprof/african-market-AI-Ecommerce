@@ -173,6 +173,20 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
     expect(await storeScoped(storeA).supportThread.count({ where: { orderId: own.id } })).toBe(0);
   });
 
+  it("a body with a NUL byte is refused by both actions and writes nothing", async () => {
+    const placed = await order(storeA, 5);
+    onStore(slugA);
+    expect(await sendOrderMessageAction({ token: placed.token, body: "hi\u0000there" })).toMatchObject({ ok: false });
+    expect(await storeScoped(storeA).supportThread.count({ where: { orderId: placed.id } })).toBe(0);
+
+    await sendOrderMessageAction({ token: placed.token, body: "Hello" });
+    const thread = await storeScoped(storeA).supportThread.findUniqueOrThrow({ where: { orderId: placed.id } });
+    signInAs(memberA);
+    onStore(slugA);
+    expect(await replyToThreadAction({ threadId: thread.id, body: "hi\u0000there" })).toMatchObject({ ok: false });
+    expect(await storeScoped(storeA).supportMessage.count({ where: { threadId: thread.id } })).toBe(1);
+  });
+
   it("staff of store B cannot read or reply to store A's thread", async () => {
     const placed = await order(storeA, 4);
     onStore(slugA);

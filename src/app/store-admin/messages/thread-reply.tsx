@@ -17,7 +17,14 @@ export function ThreadReply({ threadId }: { threadId: string }) {
     const body = draft.trim();
     if (!body) return;
     startTransition(async () => {
-      const result = await replyToThreadAction({ threadId, body });
+      let result;
+      try {
+        result = await replyToThreadAction({ threadId, body });
+      } catch {
+        // Uncaught, the rejection reaches the error boundary and the draft is lost.
+        setError("We couldn't send your reply. Check your connection and try again.");
+        return;
+      }
       if (!result.ok) {
         setError(result.error);
         return;

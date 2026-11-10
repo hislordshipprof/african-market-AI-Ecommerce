@@ -5,11 +5,11 @@ import { revalidateTag } from "next/cache";
 import { requireStoreMember } from "../store-admin/session";
 import { scheduleOrderNotification } from "../inngest/notify";
 import { parseInput } from "../security/parse-input";
-import { MESSAGE_MAX_CHARS, orderMessagesTag, replyAsStore } from "./thread";
+import { messageBodySchema, orderMessagesTag, replyAsStore } from "./thread";
 
 const replySchema = z.strictObject({
   threadId: z.string().min(1).max(200),
-  body: z.string().trim().min(1).max(MESSAGE_MAX_CHARS),
+  body: messageBodySchema,
 });
 
 /** Any member replies. The store comes from the session; another store's thread is not found. */

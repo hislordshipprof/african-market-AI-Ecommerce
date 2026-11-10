@@ -10,7 +10,7 @@ import { takeRateLimit } from "../rate-limit/app-limiter";
 import { scheduleAfterResponse } from "../schedule-after-response";
 import { parseInput } from "../security/parse-input";
 import { pushToStoreMembers } from "../push/store-members";
-import { MESSAGE_MAX_CHARS, orderMessagesTag, postCustomerMessage } from "./thread";
+import { messageBodySchema, orderMessagesTag, postCustomerMessage } from "./thread";
 
 const HOUR_MS = 60 * 60 * 1000;
 const PER_TOKEN_PER_HOUR = 30;
@@ -18,7 +18,7 @@ const PER_IP_PER_HOUR = 60;
 
 const sendSchema = z.strictObject({
   token: z.string().min(1).max(200),
-  body: z.string().trim().min(1).max(MESSAGE_MAX_CHARS),
+  body: messageBodySchema,
 });
 
 type SendResult = { ok: true } | { ok: false; error: string };
