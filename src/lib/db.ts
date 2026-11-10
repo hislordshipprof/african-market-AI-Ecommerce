@@ -117,6 +117,7 @@ export function storeScoped(storeId: string) {
     stockProposal: wrapDelegate(storeId, prisma.stockProposal),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     deliveryEvent: wrapDelegate(storeId, prisma.deliveryEvent),
+    pushSubscription: wrapDelegate(storeId, prisma.pushSubscription),
   };
 }
 
@@ -287,7 +288,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "notificationLog" | "deliveryEvent" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -319,6 +320,7 @@ export async function storeScopedTransaction<T>(
       stockProposal: tx.stockProposal,
       notificationLog: tx.notificationLog,
       deliveryEvent: tx.deliveryEvent,
+      pushSubscription: tx.pushSubscription,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
