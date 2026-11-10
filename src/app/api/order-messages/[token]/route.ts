@@ -16,7 +16,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
   const messages = await unstable_cache(
     () => readCustomerMessages(store.id, parsed.data),
     ["order-messages", store.id, orderMessagesTag(parsed.data)],
-    { revalidate: 60, tags: [orderMessagesTag(parsed.data)] },
+    { revalidate: 10, tags: [orderMessagesTag(parsed.data)] },
   )();
   if (!messages) return new Response(null, { status: 404, headers: NO_STORE });
   return Response.json({ messages }, { headers: NO_STORE });
