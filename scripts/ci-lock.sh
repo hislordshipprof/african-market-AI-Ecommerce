@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The machine-wide local-ci lock, sourced by ci-local.sh. One suite runs at a time; every other run waits.
-# The lock is a directory holding the owner's pid and a token only the owner knows.
+# The lock is a directory holding the owner's pid, its start time, and a token only the owner knows.
 # The earlier version let two runs hold the lock at once, three ways:
 # - two waiters could both judge a lock stale, and the slower one then renamed away the lock the faster one had
 #   just taken;
@@ -13,8 +13,13 @@
 ci_lock_try() {
   mkdir "$1" 2>/dev/null || return 1
   printf '%s\n' "$3" > "$1/token"
+  _ci_lock_started "$2" > "$1/started"
   printf '%s\n' "$2" > "$1/pid"
 }
+
+# _ci_lock_started <pid>: the process start time. With the pid it names one process, so a pid reused after a
+# reboot is not taken for the owner. Empty where ps has no -o (Git Bash); the pid alone is used there.
+_ci_lock_started() { ps -o lstart= -p "$1" 2>/dev/null || true; }
 
 # ci_lock_release <lock> <token>: remove the lock only when it is still ours.
 ci_lock_release() {
@@ -24,11 +29,12 @@ ci_lock_release() {
 
 _ci_lock_age() { echo $(( $(date +%s) - $(stat -c %Y "$1" 2>/dev/null || date +%s) )); }
 
-# ci_lock_stale <lock>: the owner is gone, or the lock never got a pid (its owner died between the two writes).
+# ci_lock_stale <lock>: the owner is gone (its pid is dead or now another process), or the lock never got a pid
+# (its owner died between the writes).
 ci_lock_stale() {
   local owner; owner=$(cat "$1/pid" 2>/dev/null || true)
   if [ -n "$owner" ]; then
-    ! kill -0 "$owner" 2>/dev/null
+    ! kill -0 "$owner" 2>/dev/null || [ "$(_ci_lock_started "$owner")" != "$(cat "$1/started" 2>/dev/null || true)" ]
   else
     [ "$(_ci_lock_age "$1")" -gt "${CI_LOCK_NOPID_SEC:-120}" ]
   fi

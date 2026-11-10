@@ -49,6 +49,16 @@ wait "$hung" 2>/dev/null
 kill -0 "$hung" 2>/dev/null && bad "the hung run is still running" || ok "a hung run is stopped"
 [ -d "$L" ] && bad "the hung run's lock stayed" || ok "the hung run's lock is freed"
 
+# After a reboot the recorded pid can belong to an unrelated program. It is not the owner: the lock is freed and
+# the program is left running.
+sleep 300 & stranger=$!
+ci_lock_try "$L" "$stranger" old
+echo "Mon Jan  1 00:00:00 2001" > "$L/started"
+CI_LOCK_MAX_AGE_SEC=-1 ci_lock_takeover "$L" 2>/dev/null
+kill -0 "$stranger" 2>/dev/null && ok "a reused pid's program is not stopped" || bad "a reused pid's program was stopped"
+[ -d "$L" ] && bad "a lock with a reused pid stayed" || ok "a lock with a reused pid is freed"
+kill "$stranger" 2>/dev/null; wait "$stranger" 2>/dev/null
+
 # While one takeover is in progress another backs off.
 mkdir "$L.takeover"
 ci_lock_try "$L" "$dead" gone
