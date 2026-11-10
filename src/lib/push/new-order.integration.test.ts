@@ -7,6 +7,7 @@ import { newOrderPush } from "../inngest/functions";
 import * as db from "../db";
 import { PushTestSender, setPushSenderForTests, type PushSender } from "./sender";
 import { sendNewOrderPush } from "./new-order";
+import { pushToStoreMembers } from "./store-members";
 
 const hasDb = !!process.env.DATABASE_URL;
 const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -114,7 +115,15 @@ describe.skipIf(!hasDb)("new-order web push", () => {
       expect(push.message.body).toContain(`#${order.number}`);
       expect(push.message.body).toMatch(/delivery/i);
       expect(push.message.url).toBe(`/store-admin/orders?store=${slugA}`);
+      expect(push.message.tag).toBe("new-order");
     }
+  });
+
+  it("pushToStoreMembers sends the payload's own tag to that store's members only", async () => {
+    const message = { title: "New message", body: "Order #7", url: "/store-admin/messages", tag: "support-t1" };
+    await pushToStoreMembers(storeA, message, VAPID_ENV);
+    expect(sender.sent.map((s) => s.endpoint).sort()).toEqual([endpoint("a1"), endpoint("a2")].sort());
+    expect(sender.sent.map((s) => s.message)).toEqual([message, message]);
   });
 
   it("skips a subscription whose user is no longer a member of the store", async () => {

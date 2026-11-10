@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageSquare } from "lucide-react";
+import { Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageSquare, MessagesSquare } from "lucide-react";
 
 interface Props {
   storeName: string;
@@ -17,6 +17,7 @@ interface Props {
   userName: string;
   role: string;
   stripeOnboardingStatus: string;
+  unreadMessages: number;
 }
 
 const STATUS_LABELS: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -32,6 +33,7 @@ export function StoreAdminDashboard({
   userName,
   role,
   stripeOnboardingStatus,
+  unreadMessages,
 }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -121,6 +123,25 @@ export function StoreAdminDashboard({
                     <CardTitle className="text-base">Orders</CardTitle>
                     <CardDescription>
                       View and manage incoming orders
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+          </Link>
+
+          <Link href={`/store-admin/messages?store=${storeParam}`}>
+            <Card className="transition-shadow hover:shadow-md">
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
+                    <MessagesSquare className="size-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">Messages</CardTitle>
+                    <CardDescription className="flex items-center gap-2">
+                      Customer questions about orders
+                      {unreadMessages > 0 && <Badge>{unreadMessages} unread</Badge>}
                     </CardDescription>
                   </div>
                 </div>

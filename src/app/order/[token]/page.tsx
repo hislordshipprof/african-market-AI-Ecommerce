@@ -7,6 +7,8 @@ import { getFlowContext } from "@/lib/customer-flow/server";
 import { customerStatusLabel } from "@/lib/customer-account/order-history-view";
 import { notFound } from "next/navigation";
 import { deliveryProofTokenFor, findOrderForTracking } from "@/lib/notifications/lookup";
+import { OrderMessages } from "@/components/storefront/flow/order-messages";
+import { readCustomerMessages } from "@/lib/support/thread";
 
 const money = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
@@ -32,6 +34,10 @@ export default async function OrderPage({
 
   if (realOrder) {
     const proofToken = deliveryProofTokenFor(realOrder, token);
+    // Only the tracking token opens the thread: an order id opens the page but never the messages.
+    const messages = realOrder.trackingToken === token
+      ? await readCustomerMessages(context.store.id, token).catch(() => null)
+      : null;
     return (
       <StorefrontShell store={context.store}>
         <div style={{ maxWidth: 600, margin: "0 auto", padding: "2rem 1rem" }}>
@@ -81,6 +87,9 @@ export default async function OrderPage({
                 style={{ width: "100%", height: "auto", borderRadius: 8 }}
               />
             </FlowCard>
+          )}
+          {messages && (
+            <OrderMessages token={token} storeName={context.store.name} timeZone={context.store.timezone} initialMessages={messages} />
           )}
           <div style={{ marginTop: "1rem", textAlign: "center" }}>
             <Link className="sf-button" href="/">Continue shopping</Link>
