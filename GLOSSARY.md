@@ -178,6 +178,12 @@ The straight-line distance, in miles, from the store's confirmed coordinates. An
 **Leave at door**:
 The customer asked the store to leave the order without a handoff. Frozen items cannot use it.
 
+**Out for delivery**:
+A store-delivery order the store's driver has left with. The step between Ready and Delivered.
+
+**Delivery proof**:
+The photo the store's driver takes when a store-delivery order is delivered. Required to mark it Delivered. Private: only someone with the order's tracking link can see it.
+
 **Courier delivery**:
 Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen by the platform.
 

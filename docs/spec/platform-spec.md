@@ -240,6 +240,7 @@ PLACED ──(payment authorized)──► AUTHORIZED ──(store accepts)─�
 PICKING ──(line short)──► SUBSTITUTION_PENDING ──(customer answers / 10-min timeout)──► PICKING
 PICKING ──(all lines resolved)──► CAPTURING ──(Stripe captured)──► { pickup: AWAITING_PICKUP, delivery: READY }
 READY ──(delivery)──► COURIER_REQUESTED ──► COURIER_ASSIGNED ──► PICKED_UP ──► DELIVERED
+READY ──(store delivery: driver leaves)──► OUT_FOR_DELIVERY ──(delivery proof photo)──► DELIVERED
 AWAITING_PICKUP ──(customer collects)──► COMPLETED
 DELIVERED ──(48 h, no issue)──► COMPLETED
 ```
@@ -263,6 +264,8 @@ Side states: `CANCELLED` (before PICKED_UP), `DELIVERY_FAILED` → `RETURN_TO_ST
 | fallback | No assignment in 10 min or provider error | Cancel with provider A, create with provider B |
 | → PICKED_UP | Provider webhook | Live map starts |
 | → DELIVERED | Provider webhook + proof | Proof stored; payout eligibility |
+| READY → OUT_FOR_DELIVERY | Staff tap, store delivery only (#134) | `out_for_delivery_at` set; one `delivery_events` row; customer notified. Pickup and courier orders, and any other status, are refused. |
+| OUT_FOR_DELIVERY → DELIVERED | Staff tap with a photo, store delivery only (#134) | Photo (JPEG, PNG or WebP by its bytes, 8 MB max) uploaded to R2 first, then `delivered_at`, `completed_at` and the proof key set; one `delivery_events` row; customer notified. Terminal for store delivery. READY → DELIVERED is refused. |
 | → CANCELLED | Customer (before ACCEPTED) / store / system | Release auth or refund. Return what the order still holds with one `reservation_release` per line, exactly once. A count newer than the reservation supersedes the return (delta 0), so stock is not counted twice. While the order is Refund failed the reservation stays held. |
 
 Unanswered store: if not ACCEPTED within 15 min while the store is inside its hours, alert owner (store web push with #129; until then, audit record only); at 30 min auto-cancel and void authorization. A day marked `Closed` or `{ closed: true }` is closed. A range whose open and close are the same time contributes no opening interval, on its own day or the following day, and does not suppress a valid overnight interval from the previous day. A range that cannot be parsed counts as open so a malformed schedule does not hide the alert. Null hours mean always open. The 15 and 30 minutes are open minutes counted from the order's acceptance clock, which is the order time when the store was open and otherwise its next opening, so an overnight order is alerted and cancelled after opening. An order placed 10 minutes before closing gets its remaining minutes after reopening. If edited hours leave no way to reach 30 open minutes, the order is cancelled no later than 6 days 12 hours after it was placed, inside the card hold.
@@ -320,6 +323,8 @@ Adapters: `UberDirectProvider` (primary), `DoorDashDriveProvider` (fallback). Ea
 ### 11.5 Own-driver / van (phase 2)
 Store marks "deliver myself" → simple driver link (SMS) with map + photo proof; or Onfleet integration for stores with multiple drivers.
 
+Built in #134: staff in the order inbox mark a store-delivery order Out for delivery, then Delivered with a required photo. The **delivery proof** photo is private. It is stored in R2 under `delivery-proof/<orderId>/<timestamp>.<ext>` and read only through `GET /api/delivery-proof/<tracking token>`, which resolves the store from the host like the tracking page, answers `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`, and returns 404 for an unknown token, another store's token or an order with no photo. There are no signed URLs, and the public catalog-image route accepts only `catalog/` keys. Not built: driver link, map, live GPS, PIN, multiple drivers.
+
 ---
 
 ## 12. Notifications
@@ -329,13 +334,15 @@ Store marks "deliver myself" → simple driver link (SMS) with map + photo proof
 | Order placed | Email + SMS | Push + sound (+ SMS to owner if app closed) |
 | Accepted | Email + SMS | — |
 | Ready | Email + SMS | Push |
+| Out for delivery (store delivery) | Email + SMS | — |
+| Delivered (store delivery) | Email + SMS | — |
 | Completed | Email + SMS | Push |
 | Cancelled | Email + SMS | — |
 | Item short | — | Live update on pick screen |
 | Issue reported | — | Push + inbox |
 | Daily summary | — | AI copilot digest |
 
-Customer email and SMS go out for placed, accepted, ready, completed and cancelled. Each message carries the store's name and an unguessable tracking link. Item short, issue reporting, the daily digest and channel preferences are separate tickets.
+Customer email and SMS go out for placed, accepted, ready, out for delivery, delivered, completed and cancelled. Delivered and completed are the same final step (a store-delivery order ends at delivered, a pickup order at completed), so neither supersedes the other. Each message carries the store's name and an unguessable tracking link. Item short, issue reporting, the daily digest and channel preferences are separate tickets.
 
 Channels: Resend (email), Telnyx (SMS), Web Push (ADR-0017).
 
