@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { OrderFlow } from "@/components/storefront/flow/order-flow";
-import { ClosedFlow, FlowCard, FlowHeading } from "@/components/storefront/flow/common";
+import { FlowCard, FlowHeading } from "@/components/storefront/flow/common";
 import { SuccessMark } from "@/components/storefront/flow/feedback";
 import { getFlowContext } from "@/lib/customer-flow/server";
 import { customerStatusLabel } from "@/lib/customer-account/order-history-view";
+import { notFound } from "next/navigation";
 import { deliveryProofTokenFor, findOrderForTracking } from "@/lib/notifications/lookup";
 
 const money = (cents: number) =>
@@ -89,19 +90,18 @@ export default async function OrderPage({
     );
   }
 
+  // Outside demo flows an unknown token, or another store's, is a plain 404.
+  if (!context.enabled) notFound();
+
   return (
     <StorefrontShell store={context.store}>
-      {context.enabled ? (
-        <OrderFlow
-          token={token}
-          settings={context.settings}
-          catalog={context.catalog}
-          enabled={context.enabled}
-          confirmation={query.placed === "1"}
-        />
-      ) : (
-        <ClosedFlow />
-      )}
+      <OrderFlow
+        token={token}
+        settings={context.settings}
+        catalog={context.catalog}
+        enabled={context.enabled}
+        confirmation={query.placed === "1"}
+      />
     </StorefrontShell>
   );
 }

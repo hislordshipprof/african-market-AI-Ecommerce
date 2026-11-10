@@ -11,6 +11,7 @@ const order = (over: Partial<AccountOrderRecord>): AccountOrderRecord => ({
   deliveryFeeCents: 0,
   capturedAmountCents: null,
   refundId: null,
+  trackingToken: null,
   itemCount: 1,
   ...over,
 });
@@ -27,5 +28,13 @@ describe("account order history amount", () => {
     expect(amount({ status: "CANCELLING", refundId: "re_1", capturedAmountCents: 3000 })).toBe("Refund pending");
     expect(amount({ status: "CANCELLING", refundId: "re_1", capturedAmountCents: null })).toBe("Refund pending");
     expect(amount({ status: "CANCELLED", refundId: "re_1", capturedAmountCents: null })).toBe("Refunded");
+  });
+});
+
+describe("account order history link", () => {
+  it("links to the tracking token, and to the id only for an order made before tokens", () => {
+    const token = "RCEN5kMdbbYYXWjj4MQ_u-307lZa8eyHU2gizis0C4w";
+    expect(accountOrderRow(order({ trackingToken: token }), "America/New_York").href).toBe(`/order/${token}`);
+    expect(accountOrderRow(order({ trackingToken: null }), "America/New_York").href).toBe("/order/order-1");
   });
 });

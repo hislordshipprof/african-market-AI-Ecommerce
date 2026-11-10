@@ -12,6 +12,7 @@ export type AccountOrderRecord = {
   deliveryFeeCents: number;
   capturedAmountCents: number | null;
   refundId: string | null;
+  trackingToken: string | null;
   itemCount: number;
 };
 
@@ -82,7 +83,7 @@ export function accountOrderRow(order: AccountOrderRecord, timeZone: string): Ac
   return {
     id: order.id,
     number: order.number,
-    href: `/order/${encodeURIComponent(order.id)}`,
+    href: `/order/${encodeURIComponent(order.trackingToken ?? order.id)}`,
     dateLabel: dateLabel(order.createdAt, timeZone),
     itemsLabel: `${order.itemCount} ${order.itemCount === 1 ? "item" : "items"}`,
     statusLabel: customerStatusLabel(order.status),

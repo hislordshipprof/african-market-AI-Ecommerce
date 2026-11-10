@@ -23,6 +23,7 @@ import { takeRateLimit } from "../rate-limit/app-limiter";
 import { clientIp } from "../assistant/client-ip";
 import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform } from "../db";
+import { trackingTokenFor } from "../notifications/lookup";
 
 const contactSchema = z.strictObject({
   name: z.string().max(200),
@@ -118,7 +119,9 @@ export async function quoteCheckoutAction(
       input.fulfillment,
       request,
     );
-    if (resume?.kind === "order") return { ok: true, quote, orderedToken: resume.token };
+    if (resume?.kind === "order") {
+      return { ok: true, quote, orderedToken: await trackingTokenFor(store.id, resume.token) };
+    }
     return { ok: true, quote };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Quote failed" };
@@ -153,7 +156,9 @@ export async function createPaymentIntentAction(
     const cartId = resolved.cartId;
     const actorUserId = await signedInUserId();
     const resume = await resumeOrderedCart(store.id, cartId, actorUserId);
-    if (resume?.kind === "order") return { ok: true, orderedToken: resume.token };
+    if (resume?.kind === "order") {
+      return { ok: true, orderedToken: await trackingTokenFor(store.id, resume.token) };
+    }
     if (resume?.kind === "unproved") {
       return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
     }
@@ -271,7 +276,7 @@ export async function placeOrderAction(
       resolved.userId,
       request?.leaveAtDoor ?? false,
     );
-    return { ok: true, token: result.token };
+    return { ok: true, token: await trackingTokenFor(store.id, result.token) };
   } catch (e) {
     if (e instanceof BasketAlreadyOrderedError) {
       return { ok: false, error: e.message, code: e.code };

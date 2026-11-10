@@ -42,3 +42,12 @@ export function deliveryProofTokenFor(
   if (order.status !== "DELIVERED" || !order.deliveryProofKey || !order.trackingToken) return null;
   return order.trackingToken === urlToken ? order.trackingToken : null;
 }
+
+/** The id that goes in a customer's order link: the tracking token, or the id for an order made before tokens. */
+export async function trackingTokenFor(storeId: string, orderId: string): Promise<string> {
+  const order = await storeScoped(storeId).order.findUnique({
+    where: { id: orderId },
+    select: { trackingToken: true },
+  });
+  return order?.trackingToken ?? orderId;
+}
