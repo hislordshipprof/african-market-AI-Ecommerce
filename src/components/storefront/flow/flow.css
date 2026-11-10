@@ -22,14 +22,6 @@
   line-height: 1.6;
   max-width: 60ch;
 }
-.flow-eyebrow {
-  color: var(--color-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 11px;
-  font-weight: 750;
-  margin-top: 16px;
-}
 .flow-layout {
   display: grid;
   gap: 24px;
@@ -164,7 +156,7 @@
 .flow-fee small {
   display: block;
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 13px;
   margin-top: 4px;
   max-width: 26ch;
 }
@@ -239,7 +231,7 @@
 .flow-map small {
   position: absolute;
   bottom: 5px;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--color-ink);
   background: var(--color-surface);
   border-radius: 4px;
@@ -311,7 +303,7 @@
   height: 80px;
   border-radius: 50%;
   background: var(--color-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .flow-toast {
   position: fixed;
