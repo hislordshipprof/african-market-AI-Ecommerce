@@ -184,7 +184,7 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     });
   });
 
-  it("staff of another store cannot mark ready or complete this store's order", async () => {
+  it("staff of another store cannot mark ready, complete or cancel this store's order; nobody cancels after capture", async () => {
     const before = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(before?.status).toBe("AWAITING_PICKUP");
     expect(await storeScoped(storeBId).order.findUnique({ where: { id: orderId } })).toBeNull();
@@ -211,12 +211,23 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     asStore(storeBSlug, cookiesB);
     const ready = await markReadyAction(orderId);
     const pickup = await completePickupAction(orderId);
+    const crossCancel = await cancelOrderAction(orderId, { reason: "other" });
     expect(ready).toEqual({ ok: false, error: "Order not found" });
     expect(pickup).toEqual({ ok: false, error: "Order not found" });
+    expect(crossCancel).toEqual({ ok: false, error: "Order not found" });
+
+    // Store A's own staff cannot cancel after capture either: that is a refund, not a cancel.
+    asStore(storeASlug, cookiesA);
+    expect(await cancelOrderAction(orderId, { reason: "store_closed" })).toEqual({
+      ok: false,
+      error: "Cannot cancel order in status AWAITING_PICKUP",
+    });
 
     const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(after?.status).toBe("AWAITING_PICKUP");
     expect(after?.completedAt).toBeNull();
+    expect(after?.cancelledAt).toBeNull();
+    expect(cancelledPayments.has(`pi_${RUN}`)).toBe(false);
     const audit = await storeScoped(storeAId).auditLog.findUnique({ where: { id: auditId } });
     expect(audit?.action).toBe("seed_marker");
     expect(await storeScoped(storeAId).auditLog.count({ where: { entityId: orderId } })).toBe(1);
