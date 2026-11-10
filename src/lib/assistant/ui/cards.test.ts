@@ -359,3 +359,37 @@ describe("assistant cards", () => {
     });
   });
 });
+
+describe("product cards can be added to the basket", () => {
+  it("carry the listing and variant from search and show results", () => {
+    const [searched] = cardsFromParts([{
+      type: "tool-search_catalog",
+      toolCallId: "s",
+      state: "output-available",
+      input: { query: "yam" },
+      output: { items: [{ listingId: "l1", variantId: "v1", name: "Yam", packLabel: "1 tuber", priceCents: 899, imageUrl: null }] },
+    }]);
+    expect(searched).toMatchObject({ kind: "product", listingId: "l1", variantId: "v1" });
+    const [shown] = cardsFromParts([{
+      type: "tool-show_products",
+      toolCallId: "p",
+      state: "output-available",
+      output: { cards: [{ listingId: "l2", name: "Okra", imageUrl: null, variants: [
+        { variantId: "big", label: "1 lb", priceCents: 500 },
+        { variantId: "small", label: "8 oz", priceCents: 300 },
+      ] }] },
+    }]);
+    expect(shown).toMatchObject({ kind: "product", listingId: "l2", variantId: "small", priceCents: 300 });
+  });
+
+  it("have no add target when the tool output has no ids", () => {
+    const [card] = cardsFromParts([{
+      type: "tool-search_catalog",
+      toolCallId: "s",
+      state: "output-available",
+      input: { query: "yam" },
+      output: { items: [{ name: "Yam", packLabel: "Each", priceCents: 899, imageUrl: null }] },
+    }]);
+    expect(card).toMatchObject({ kind: "product", listingId: null, variantId: null });
+  });
+});

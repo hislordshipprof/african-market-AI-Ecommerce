@@ -8,6 +8,8 @@ import { ArrowUp, FileText, Mic, Square, X } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
+import { QuickAddStepper } from "../quick-add-stepper";
+import { AssistantMarkdown } from "./assistant-markdown";
 import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
 import {
@@ -47,9 +49,7 @@ export const ASSISTANT_CHUNK = "assistant-chat-chunk-v1";
 const STARTERS = [
   { label: "Cook a dish", text: "I want to cook " },
   { label: "Restock my usual", text: "Restock my usual: " },
-  { label: "Show me pictures", text: "Show me pictures of " },
   { label: "Snap your shopping list", text: "Here is my shopping list: " },
-  { label: "Send a recipe PDF", text: "Here is a recipe: " },
 ] as const;
 
 const FILE_NOTE = "Read once to answer you. We don't save your files. Please don't send cards or IDs.";
@@ -648,7 +648,7 @@ function Thread({
 
   return (
     <div className={styles.thread} data-chunk={ASSISTANT_CHUNK} data-retry={memory.retryToken} style={{ paddingBottom: keyboardInset }}>
-      <p className={styles.live} aria-live="polite" ref={liveRef} />
+      <p className={styles.live} aria-live="polite" aria-atomic="true" ref={liveRef} />
       <div
         className={styles.log}
         ref={logRef}
@@ -760,6 +760,7 @@ function Thread({
           ref={composer}
           data-testid="assistant-composer"
           maxLength={2000}
+          placeholder="Ask about a dish or an item"
           value={draft}
           disabled={!!routeError?.terminal}
           onChange={(event) => {
@@ -942,7 +943,7 @@ function MessageView({
     <div className={styles.message}>
       {message.parts.map((part, index) => {
         if (part.type === "text") {
-          return part.text ? <p key={`${message.id}-text-${index}`} className={styles.bubble}>{part.text}</p> : null;
+          return part.text ? <AssistantMarkdown key={`${message.id}-text-${index}`} className={`${styles.bubble} ${styles.reply}`} text={part.text} /> : null;
         }
         const cards = partCards[index] ?? [];
         const added = index === firstAdded ? turnAdded : [];
@@ -1031,6 +1032,20 @@ function CardView({
           <p className={styles.price}>{card.priceLabel}</p>
           {card.mayBeUnavailable ? <p className={styles.flag}>May be unavailable</p> : null}
         </div>
+        {card.listingId && card.variantId ? (
+          <div className={styles.cardAdd}>
+            <QuickAddStepper
+              item={{
+                listingId: card.listingId,
+                variantId: card.variantId,
+                name: card.name,
+                price: card.priceCents,
+                imageUrl: card.imageUrl ?? undefined,
+                packLabel: card.packLabel,
+              }}
+            />
+          </div>
+        ) : null}
       </article>
     );
   }

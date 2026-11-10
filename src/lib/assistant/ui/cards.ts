@@ -12,6 +12,9 @@ export type ProductCard = {
   priceLabel: string;
   imageUrl: string | null;
   mayBeUnavailable: boolean;
+  /** What the card's quick-add puts in the basket; null when the tool did not say. */
+  listingId: string | null;
+  variantId: string | null;
 };
 
 export type AddedCard = {
@@ -178,6 +181,8 @@ function productFromSearch(item: unknown, key: string): ProductCard | null {
     priceLabel: money(item.priceCents),
     imageUrl,
     mayBeUnavailable: item.mayBeUnavailable === true,
+    listingId: typeof item.listingId === "string" ? item.listingId : null,
+    variantId: typeof item.variantId === "string" ? item.variantId : null,
   };
 }
 
@@ -224,6 +229,8 @@ function productFromShow(card: unknown, key: string): ProductCard | null {
     priceLabel: money(cheapest.priceCents),
     imageUrl,
     mayBeUnavailable: card.mayBeUnavailable === true,
+    listingId: typeof card.listingId === "string" ? card.listingId : null,
+    variantId: typeof cheapest.variantId === "string" ? cheapest.variantId : null,
   };
 }
 

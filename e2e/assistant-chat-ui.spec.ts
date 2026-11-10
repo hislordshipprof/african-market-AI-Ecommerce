@@ -6,6 +6,8 @@ import { storeUrl } from "./urls";
 const origin = storeUrl("mama-ngozi");
 /** Fake-model reply for "html please". The live region must announce this string, not an image. */
 const HTML_REPLY = 'See <img onerror="alert(1)"> and [a](http://evil.test).';
+/** How it renders: the HTML stays literal text, and the plain-http link keeps only its words. */
+const HTML_REPLY_SHOWN = 'See <img onerror="alert(1)"> and a.';
 const ROUTE_ERROR = "Sorry, something went wrong. Please try again.";
 
 function bubbles(root: Locator) {
@@ -83,9 +85,10 @@ test("markup and stray prices stay plain text, and a card number never leaves th
   await page.getByTestId("assistant-launcher").click();
   await send(page, "html please");
   const dialog = page.getByRole("dialog", { name: "Shop with AI" });
-  await expect(bubbles(dialog).filter({ hasText: HTML_REPLY })).toBeVisible({ timeout: 20_000 });
-  await expect(liveRegion(dialog)).toHaveText(HTML_REPLY, { timeout: 20_000 });
+  await expect(bubbles(dialog).filter({ hasText: HTML_REPLY_SHOWN })).toBeVisible({ timeout: 20_000 });
+  await expect(liveRegion(dialog)).toHaveText(HTML_REPLY_SHOWN, { timeout: 20_000 });
   await expect(dialog.locator("img")).toHaveCount(0);
+  await expect(dialog.locator('a[href*="evil.test"]')).toHaveCount(0);
   await send(page, "stray price");
   await expect(dialog.locator('[class*="bubble"]').filter({ hasText: "I couldn't confirm that price." })).toBeVisible({ timeout: 20_000 });
   await send(page, "4242424242424242");
@@ -784,4 +787,4 @@ test("file presence cannot enable Retry for terminal or message-rate-limited err
     await page.unroute("**/api/assistant/chat");
   }
 });
-
+

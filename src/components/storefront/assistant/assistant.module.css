@@ -95,6 +95,33 @@
   font: 400 16px/1.5 Figtree, "Segoe UI", system-ui, sans-serif;
 }
 
+.reply {
+  white-space: normal;
+}
+
+.reply > * + * {
+  margin-top: 8px;
+}
+
+.reply ul,
+.reply ol {
+  padding-left: 1.25em;
+}
+
+.reply ul {
+  list-style: disc;
+}
+
+.reply ol {
+  list-style: decimal;
+}
+
+.reply a {
+  color: var(--color-primary-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .user {
   align-self: flex-end;
   max-width: min(38rem, 100%);
@@ -202,7 +229,7 @@
 .card,
 .choiceRow {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   min-width: 0;
@@ -216,6 +243,10 @@
 
 .choiceRow {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.cardAdd {
+  align-self: center;
 }
 
 .photo,
@@ -568,6 +599,11 @@
   color: var(--color-ink);
   caret-color: var(--color-primary);
   font: 400 16px/1.4 Figtree, "Segoe UI", system-ui, sans-serif;
+}
+
+.composer textarea::placeholder {
+  color: var(--color-muted);
+  opacity: 1;
 }
 
 .composer textarea::selection {

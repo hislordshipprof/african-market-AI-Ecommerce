@@ -1,10 +1,11 @@
 import { cardsFromParts, type AssistantCard } from "./cards";
+import { markdownToPlain } from "./markdown";
 
 type Part = Parameters<typeof cardsFromParts>[0][number];
 
 /** One completion announcement: the reply text, then a short card summary. */
 export function completionAnnouncement(message: { parts: readonly Part[] }): string {
-  const text = message.parts.flatMap((part) => part.type === "text" && typeof part.text === "string" && part.text.trim() ? [part.text.trim()] : []).join(" ");
+  const text = message.parts.flatMap((part) => part.type === "text" && typeof part.text === "string" && part.text.trim() ? [markdownToPlain(part.text)] : []).join(" ");
   const cards = cardsFromParts(message.parts);
   const summary = cardSummary(cards);
   const spoken = [text, summary].filter((part) => part.length > 0).join(" ");
