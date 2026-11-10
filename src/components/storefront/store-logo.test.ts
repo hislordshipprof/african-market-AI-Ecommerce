@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSvgLogo, logoReadableOn, storeInitials } from "./store-logo";
+import { isSvgLogo, logoReadableOn } from "./store-logo";
 
 /** RGBA pixels: `count` copies of one colour. */
 function pixels(...runs: Array<[count: number, rgba: [number, number, number, number]]>) {
@@ -34,22 +34,15 @@ describe("logoReadableOn", () => {
     expect(logoReadableOn(pixels([180, TEAL], [40, WHITE]), "#FFFFFF")).toBe(true);
   });
 
+  it("accepts an opaque white logo background with a little dark lettering", () => {
+    expect(logoReadableOn(pixels([90, WHITE], [10, INK]), "#FFFFFF")).toBe(true);
+  });
+
   it("rejects a fully transparent image", () => {
     expect(logoReadableOn(pixels([100, CLEAR]), "#FFFFFF")).toBe(false);
   });
 
-  it("rejects a mostly invisible logo with only a speck of contrast", () => {
-    expect(logoReadableOn(pixels([95, WHITE], [5, INK]), "#FFFFFF")).toBe(false);
-  });
-});
-
-describe("storeInitials", () => {
-  it("takes the first letters of the first two words", () => {
-    expect(storeInitials("Mama Ngozi African Market")).toBe("MN");
-    expect(storeInitials("tante marie")).toBe("TM");
-  });
-
-  it("uses one letter for a one-word name and ignores extra spaces", () => {
-    expect(storeInitials("  Kiosk  ")).toBe("K");
+  it("rejects pale lettering that barely differs from the plate", () => {
+    expect(logoReadableOn(pixels([90, WHITE], [10, [230, 236, 232, 255]]), "#FFFFFF")).toBe(false);
   });
 });

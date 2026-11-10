@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { contrastRatio } from "@/lib/theme";
 
-/** The logo plate is the same light backdrop in both themes, so one check covers both. */
+/** The logo plate's colour, in both themes; the readability check and the plate share it. */
 const LOGO_PLATE = "#FFFFFF";
 
 /**
@@ -21,18 +21,21 @@ function hex(r: number, g: number, b: number): string {
 }
 
 /**
- * A logo is readable on the plate when at least a fifth of its visible pixels
- * reach 3:1 against it (the WCAG floor for graphics).
+ * A logo is readable on the plate when at least a fifth of the pixels that differ
+ * from the plate reach 3:1 against it (the WCAG floor for graphics). Pixels the
+ * same colour as the plate (a logo's own white background) are not counted.
  */
 export function logoReadableOn(rgba: Uint8ClampedArray, backdrop: string): boolean {
-  let visible = 0;
+  let marked = 0;
   let distinct = 0;
   for (let i = 0; i + 3 < rgba.length; i += 4) {
     if (rgba[i + 3] < 128) continue;
-    visible++;
-    if (contrastRatio(hex(rgba[i], rgba[i + 1], rgba[i + 2]), backdrop) >= 3) distinct++;
+    const ratio = contrastRatio(hex(rgba[i], rgba[i + 1], rgba[i + 2]), backdrop);
+    if (ratio < 1.1) continue;
+    marked++;
+    if (ratio >= 3) distinct++;
   }
-  return visible > 0 && distinct / visible >= 0.2;
+  return marked > 0 && distinct / marked >= 0.2;
 }
 
 export function storeInitials(name: string): string {
@@ -52,9 +55,11 @@ function readLogoPixels(src: string): Promise<Uint8ClampedArray | null> {
     img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
+        // No intrinsic size to sample (a viewBox-only SVG in some browsers): keep the logo.
+        if (!img.naturalWidth || !img.naturalHeight) return resolve(null);
         const canvas = document.createElement("canvas");
         canvas.width = 80;
-        canvas.height = Math.max(1, Math.round((80 * img.naturalHeight) / (img.naturalWidth || 80)));
+        canvas.height = Math.max(1, Math.round((80 * img.naturalHeight) / img.naturalWidth));
         const context = canvas.getContext("2d");
         if (!context) return resolve(null);
         context.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -91,7 +96,7 @@ export function StoreLogo({ src, name }: { src: string | null; name: string }) {
   }
   const alt = `${name} logo`;
   return (
-    <span className="sf-logo-plate">
+    <span className="sf-logo-plate" style={{ background: LOGO_PLATE }}>
       {isSvgLogo(src) ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt={alt} width={160} height={64} className="sf-logo" />
