@@ -189,6 +189,12 @@ A RefundRequest that is still unanswered: reserved, unknown, or created at the p
 **ABANDONED**:
 An open refund request that was still unknown 23 hours after it was created, and was not in the middle of a replay. The platform alert is written in the same locked transaction, so a failed insert does not leave the request abandoned. A refund that shows up later is still recorded, and the reconcile cron keeps matching it without sending the request again. A replay stays open until the provider answers, including on another server. Abandonment re-reads the current row under the store lock and does not overwrite a live reservation. This window is a coordinator default, pending owner confirmation.
 
+**Issue report**:
+A customer's one report of a problem with a finished order, made from the tracking link within 48 hours of completion: missing, damaged, wrong or poor freshness, with the items and quantities, an optional note and one photo. Its amount is the picked quantity times the unit price of the chosen items, never fees or tip. At or under the store's auto-refund limit it is refunded to the card at once (auto refunded); above it, it waits for the store (in review). Its states are auto refunded, in review, approved, declined and refund failed. A second problem goes through the store, not a second report.
+
+**Partly refunded** / **Refunded**:
+Order statuses after delivery, set only from money: Partly refunded while the succeeded refunds are below the capture, Refunded when they equal it. A reported problem alone does not change the order's status. A failed issue refund marks the issue refund failed and alerts the store and the platform; the order never becomes Refund failed, which is only for cancellations.
+
 **Fulfillment option**:
 How a customer gets an order: store delivery, courier delivery, or pickup.
 
