@@ -11,6 +11,8 @@ import {
   completePickup,
   markOutForDelivery,
   markDelivered,
+  cancelOrder,
+  STORE_CANCEL_REASONS,
 } from "./service";
 import {
   DELIVERY_PROOF_MAX_BYTES,
@@ -36,6 +38,7 @@ const ALLOWED_STAFF_ERRORS = new Set([
   "Cancellation is still confirming with the bank",
   "Payment authorization expired or was voided — order cancelled; contact the customer",
   "Payment authorization was released — order cancelled; contact the customer",
+  "Order status changed during cancellation",
   STORE_DELIVERY_ONLY,
   PROOF_PHOTO_MISSING,
   PROOF_PHOTO_NOT_IMAGE,
@@ -52,6 +55,7 @@ function isAllowListed(message: string): boolean {
     message.startsWith("Cannot complete pickup for order in status ") ||
     message.startsWith("Cannot send out for delivery in status ") ||
     message.startsWith("Cannot mark delivered in status ") ||
+    message.startsWith("Cannot cancel order in status ") ||
     message.startsWith("Line already resolved") ||
     message.startsWith("Retrying in ") ||
     message.startsWith("Capture amount ")
@@ -163,5 +167,27 @@ export async function markDeliveredAction(form: FormData) {
   if (file && file.size > DELIVERY_PROOF_MAX_BYTES) return { ok: false as const, error: PROOF_PHOTO_TOO_LARGE };
   return runStaffAction("markDelivered", id.data, async () =>
     markDelivered(session.store.id, id.data, file ? new Uint8Array(await file.arrayBuffer()) : null),
+  );
+}
+
+const storeCancelSchema = z.object({
+  reason: z.enum(STORE_CANCEL_REASONS),
+  note: z.string().trim().max(500).nullish(),
+});
+
+/** Before capture only: the core refuses CAPTURING and every later status. */
+export async function cancelOrderAction(orderId: string, input: { reason: string; note?: string | null }) {
+  const session = await requireStoreMember();
+  const id = parseInput(orderIdSchema, orderId);
+  if (!id.ok) return { ok: false as const, error: "Order not found" };
+  const parsed = parseInput(storeCancelSchema, input);
+  if (!parsed.ok) return { ok: false as const, error: "Choose a reason to cancel" };
+  return runStaffAction("cancelOrder", id.data, () =>
+    cancelOrder(session.store.id, id.data, {
+      action: "store_cancel",
+      actor: { id: session.user.id, email: session.user.email },
+      reason: parsed.data.reason,
+      note: parsed.data.note || null,
+    }),
   );
 }

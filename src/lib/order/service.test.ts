@@ -3,7 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { recordReconcileResult } from "../inngest/functions";
-import { acceptOrder, autoCancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markLineShort, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
+import { acceptOrder, autoCancelOrder, cancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markLineShort, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
 import { recordAuthorizedOrder } from "../checkout/service";
 import { updateListing } from "../listing/service";
 import { confirmProposal } from "../copilot/confirm";
@@ -834,7 +834,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const result = await autoCancelOrder(storeId, order.id);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain("not AUTHORIZED");
+      expect(result.error).toBe("Cannot cancel order in status ACCEPTED");
     }
     expect(cancelledPayments.size).toBe(0);
   });
@@ -4115,6 +4115,35 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       });
       await autoCancelOrder(storeId, order.id);
       expect(await stockOf(storeId, legacy.listingId)).toEqual({ qty: 10, events: [] });
+    }, 30_000);
+
+    it("a store cancel racing markReady on a picking order: one wins, stock returns at most once", async () => {
+      const { listingId, variantId } = await countedListing(storeId, 10);
+      const placed = await placeOrder(storeId, [{ variantId, qty: 3 }]);
+      await pickAll(placed.orderId);
+
+      const [ready, cancelled] = await Promise.all([
+        markReady(storeId, placed.orderId),
+        cancelOrder(storeId, placed.orderId, {
+          action: "store_cancel",
+          actor: { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL },
+          reason: "too_busy",
+          note: null,
+        }),
+      ]);
+      expect([cancelled.ok, ready.ok].filter(Boolean)).toHaveLength(1);
+      const stock = await stockOf(storeId, listingId);
+      expect(stock.events.filter(([type]) => type === "reservation_release")).toEqual([["reservation_release", 3]]);
+      if (cancelled.ok) {
+        expect(await statusOf(placed.orderId)).toBe("CANCELLED");
+        expect(stock.qty).toBe(10);
+        expect(capturedPayments.has(placed.paymentIntentId)).toBe(false);
+      } else {
+        expect(cancelled).toMatchObject({ ok: false, error: expect.stringMatching(/^Cannot cancel order in status (CAPTURING|AWAITING_PICKUP)$/) });
+        expect(await statusOf(placed.orderId)).toBe("AWAITING_PICKUP");
+        expect(stock.qty).toBe(7);
+        expect(cancelledPayments.has(placed.paymentIntentId)).toBe(false);
+      }
     }, 30_000);
 
     it("the reconcile sweep settles stock once after Stripe captured", async () => {

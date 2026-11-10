@@ -21,7 +21,11 @@ import { getURLFromRedirectError } from "next/dist/client/components/redirect";
 import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
 import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
-import { completePickupAction, markReadyAction } from "./actions";
+import { setStripeProvider } from "../stripe";
+import { cancelledPayments, fakeStripeProvider } from "../stripe/fake";
+import { cancelOrderAction, completePickupAction, markReadyAction } from "./actions";
+import { acceptOrder, markLinePicked, markLineShort } from "./service";
+import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `t186-${Date.now()}`;
@@ -59,6 +63,23 @@ function asStore(slug: string, cookies: string): void {
   headerState.set("x-store-slug", slug);
 }
 
+async function signInWithTwoFactor(email: string): Promise<string> {
+  const jar = new CookieJar();
+  const signedIn = await authPost("/sign-in/email", { email, password });
+  expect(signedIn.status, await signedIn.clone().text()).toBe(200);
+  jar.apply(signedIn);
+  const enabled = await authPost("/two-factor/enable", { password }, jar.header());
+  expect(enabled.status, await enabled.clone().text()).toBe(200);
+  jar.apply(enabled);
+  const body = (await enabled.json()) as { totpURI?: string };
+  const secret = new URL(body.totpURI ?? "http://localhost").searchParams.get("secret");
+  expect(secret).toBeTruthy();
+  const verified = await authPost("/two-factor/verify-totp", { code: generateTOTP(secret!) }, jar.header());
+  expect(verified.status, await verified.clone().text()).toBe(200);
+  jar.apply(verified);
+  return jar.header();
+}
+
 describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () => {
   const storeAId = crypto.randomUUID();
   const storeBId = crypto.randomUUID();
@@ -68,6 +89,7 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
   const emailB = `owner-b-${RUN}@example.com`;
   let ownerAId = "";
   let ownerBId = "";
+  let cookiesA = "";
   let cookiesB = "";
   let orderId = "";
   let auditId = "";
@@ -94,20 +116,9 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
       await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${storeBId}, ${ownerBId}, 'owner', now())`;
     });
 
-    const jar = new CookieJar();
-    const signedIn = await authPost("/sign-in/email", { email: emailB, password });
-    expect(signedIn.status, await signedIn.clone().text()).toBe(200);
-    jar.apply(signedIn);
-    const enabled = await authPost("/two-factor/enable", { password }, jar.header());
-    expect(enabled.status, await enabled.clone().text()).toBe(200);
-    jar.apply(enabled);
-    const body = (await enabled.json()) as { totpURI?: string };
-    const secret = new URL(body.totpURI ?? "http://localhost").searchParams.get("secret");
-    expect(secret).toBeTruthy();
-    const verified = await authPost("/two-factor/verify-totp", { code: generateTOTP(secret!) }, jar.header());
-    expect(verified.status, await verified.clone().text()).toBe(200);
-    jar.apply(verified);
-    cookiesB = jar.header();
+    setStripeProvider(fakeStripeProvider);
+    cookiesA = await signInWithTwoFactor(emailA);
+    cookiesB = await signInWithTwoFactor(emailB);
 
     const customer = await storeScoped(storeAId).customer.create({
       data: { storeId: storeAId, name: "A Customer" },
@@ -142,13 +153,21 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
   }, 60_000);
 
   afterAll(async () => {
+    setStripeProvider(null);
     const emails = [emailA, emailB];
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
       await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
       await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM stock_events WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM cart_lines WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM carts WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM notification_logs WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM order_lines WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM orders WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM customers WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM listing_variants WHERE listing_id IN (SELECT id FROM listings WHERE store_id IN (${storeAId}, ${storeBId}))`;
+      await tx.$executeRaw`DELETE FROM listings WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM store_memberships WHERE store_id IN (${storeAId}, ${storeBId})`;
       const found = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM users WHERE email IN (${Prisma.join(emails)})
@@ -212,4 +231,46 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(after?.status).toBe("AWAITING_PICKUP");
   });
+
+  it("staff cancel a picking order: hold voided, stock returned once, audit names them, customer told", async () => {
+    const picked = await countedListing(storeAId, 10, "Picked");
+    const shorted = await countedListing(storeAId, 10, "Shorted");
+    const placed = await placeOrder(storeAId, [
+      { variantId: picked.variantId, qty: 3 },
+      { variantId: shorted.variantId, qty: 2 },
+    ]);
+    await acceptOrder(storeAId, placed.orderId, 15);
+    const lines = await storeScoped(storeAId).orderLine.findMany({ where: { orderId: placed.orderId } });
+    const pickedLine = lines.find((line) => line.qtyOrdered === 3)!;
+    const shortLine = lines.find((line) => line.qtyOrdered === 2)!;
+    expect((await markLinePicked(storeAId, pickedLine.id)).ok).toBe(true);
+    expect((await markLineShort(storeAId, shortLine.id, 1)).ok).toBe(true);
+
+    asStore(storeASlug, cookiesA);
+    const cancelled = await cancelOrderAction(placed.orderId, { reason: "out_of_stock", note: "Freezer broke" });
+    expect(cancelled).toEqual({ ok: true });
+
+    const order = await storeScoped(storeAId).order.findUniqueOrThrow({ where: { id: placed.orderId } });
+    expect(order.status).toBe("CANCELLED");
+    expect(cancelledPayments.has(placed.paymentIntentId)).toBe(true);
+    expect(await stockOf(storeAId, picked.listingId)).toEqual({
+      qty: 10,
+      events: [["reservation", -3], ["reservation_release", 3]],
+    });
+    // The short already gave back one unit and wrote one off; the cancel returns the unit still held.
+    expect(await stockOf(storeAId, shorted.listingId)).toEqual({
+      qty: 9,
+      events: [["reservation", -2], ["reservation_release", 1], ["short", -1], ["reservation_release", 1]],
+    });
+    const audits = await storeScoped(storeAId).auditLog.findMany({
+      where: { entityId: placed.orderId, entityType: "order", action: "store_cancel" },
+    });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ actorId: ownerAId, actorEmail: emailA });
+    expect(audits[0]?.after).toMatchObject({ reason: "out_of_stock", note: "Freezer broke" });
+    const told = await storeScoped(storeAId).notificationLog.findMany({
+      where: { orderId: placed.orderId, event: "cancelled" },
+    });
+    expect(told.length).toBeGreaterThan(0);
+  }, 30_000);
 });
