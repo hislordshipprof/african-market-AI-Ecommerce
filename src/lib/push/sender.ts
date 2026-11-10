@@ -11,6 +11,8 @@ export interface PushMessage {
   title: string;
   body: string;
   url: string;
+  /** A newer push with the same tag replaces the waiting notification on the device. */
+  tag: string;
 }
 
 /** `status` is the push service's HTTP status, 0 for a network failure. */

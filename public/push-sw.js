@@ -1,4 +1,4 @@
-// Store-admin order alerts only: no caching, no fetch handler.
+// Store-admin alerts only: no caching, no fetch handler.
 self.addEventListener("push", (event) => {
   let data = {};
   try {
@@ -10,7 +10,7 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(data.title || "New order", {
       body: data.body || "",
       data: { url: data.url || "/store-admin/orders" },
-      tag: "new-order",
+      tag: data.tag || "new-order",
       renotify: true,
     }),
   );
