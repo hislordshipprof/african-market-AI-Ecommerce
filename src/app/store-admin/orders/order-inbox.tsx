@@ -50,6 +50,7 @@ import type { StoreOrderRow } from "@/lib/order/service";
 import { RESOLVED_LINE_STATUSES } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
+import { jpegBlob } from "@/lib/image/client-jpeg";
 import { REFUND_FAILED_STAFF_COPY, showCapturedLine } from "@/lib/order/staff-copy";
 
 const STATUS_CONFIG: Record<
@@ -260,10 +261,17 @@ export function OrderInbox({
       toast.error("Add a photo of the delivered order");
       return;
     }
-    const form = new FormData();
-    form.set("orderId", orderId);
-    form.set("photo", photo);
     startTransition(async () => {
+      let jpeg: Blob;
+      try {
+        jpeg = await jpegBlob(photo);
+      } catch {
+        toast.error("This browser can't read that photo. Take it again or choose another one");
+        return;
+      }
+      const form = new FormData();
+      form.set("orderId", orderId);
+      form.set("photo", new File([jpeg], "delivery.jpg", { type: "image/jpeg" }));
       const result = await markDeliveredAction(form);
       if (result.ok) {
         toast.success("Order delivered");
