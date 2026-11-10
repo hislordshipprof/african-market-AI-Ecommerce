@@ -2,7 +2,7 @@
 
 One row per exported Server Action and route-handler method after #309.
 Better Auth's catch-all is the two methods below. Both name the enabled groups: email-and-password, magic-link, and two-factor. Phone number is registered on the client only and is not enabled on the server.
-A gap is either `fixed in #309` or `listed, not fixed` with a reason. No production setting was changed.
+A gap is either `fixed in #309` or `listed, not fixed` with a reason. An endpoint added later is `checked in #<ticket>`. No production setting was changed.
 
 | Endpoint | Caller | Auth check | Store scope | Input | Rate limit | Money or auth | Gap | Resolution |
 |---|---|---|---|---|---|---|---|---|
@@ -80,7 +80,7 @@ A gap is either `fixed in #309` or `listed, not fixed` with a reason. No product
 | `src/lib/order/actions.ts` completePickupAction | staff | requireStoreMember | session store id; orders, order_lines | parseInput before any read or write | none | capture and void | none | fixed in #309 |
 | `src/lib/order/actions.ts` markOutForDeliveryAction | staff | requireStoreMember | session store id; orders, delivery_events, notification_logs | parseInput before any read or write | none | no | none | fixed in #309 |
 | `src/lib/order/actions.ts` markDeliveredAction | staff | requireStoreMember | session store id; orders, delivery_events, notification_logs; private R2_PROOF_BUCKET object, refused when unset | parseInput on orderId; photo JPEG, PNG or WebP by magic bytes, action body limit cap, re-encoded by sharp with metadata stripped, before upload | none | no | none | fixed in #309 |
-| `src/lib/order/actions.ts` cancelOrderAction | staff | requireStoreMember | session store id; orders, order_lines, stock_events, audit_logs, notification_logs | parseInput on orderId; reason from a fixed list, note trimmed to 500 characters | none | void (refund only if Stripe already captured) | none | added in #421 |
+| `src/lib/order/actions.ts` cancelOrderAction | staff | requireStoreMember | session store id; orders, order_lines, stock_events, audit_logs, notification_logs | parseInput on orderId; reason from a fixed list, note trimmed to 500 characters | none | void (refund only if Stripe already captured) | none | checked in #421 |
 | `src/lib/push/actions.ts` subscribePushAction | staff | requireStoreMember | session store id and user id; push_subscriptions upsert on (store, endpoint) | parseInput before any write: https endpoint up to 2048 characters; p256dh and auth non-empty base64url, capped at 128 and 64 | none | no | none | fixed in #309 |
 | `src/lib/push/actions.ts` unsubscribePushAction | staff | requireStoreMember | session store id; push_subscriptions delete by endpoint in that store only | parseInput on endpoint length | none | no | none | fixed in #309 |
 | `src/lib/store-admin/actions.ts` inviteMemberAction | owner | requireStoreOwner | session store id; store_memberships, store_invites | parseInput before any read or write | none | no | none | fixed in #309 |

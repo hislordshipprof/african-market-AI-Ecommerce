@@ -130,7 +130,7 @@ describe("endpoint inventory", () => {
     const expected = [...actions(), ...routes()].map((item) => `${item.file} ${item.name}`);
     expect(expected.slice().sort()).toEqual([...rows.keys()].sort());
     for (const resolution of rows.values()) {
-      expect(resolution === "fixed in #309" || resolution === "listed, not fixed").toBe(true);
+      expect(resolution).toMatch(/^(fixed in #309|listed, not fixed|checked in #\d+)$/);
     }
   });
 
