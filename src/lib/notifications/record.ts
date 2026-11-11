@@ -11,6 +11,7 @@ export const ORDER_NOTIFY_EVENTS = [
   "completed",
   "cancelled",
   "store_replied",
+  "refunded",
 ] as const;
 export type OrderNotifyEvent = (typeof ORDER_NOTIFY_EVENTS)[number];
 

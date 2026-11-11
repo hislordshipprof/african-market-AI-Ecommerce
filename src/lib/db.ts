@@ -108,6 +108,7 @@ export function storeScoped(storeId: string) {
     order: wrapDelegate(storeId, prisma.order),
     orderLine: wrapDelegate(storeId, prisma.orderLine),
     refundRequest: wrapDelegate(storeId, prisma.refundRequest),
+    issueReport: wrapDelegate(storeId, prisma.issueReport),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
@@ -290,7 +291,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -313,6 +314,7 @@ export async function storeScopedTransaction<T>(
       orderLine: tx.orderLine,
       paymentIntentRelease: tx.paymentIntentRelease,
       refundRequest: tx.refundRequest,
+      issueReport: tx.issueReport,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
       assistantUndoReceipt: tx.assistantUndoReceipt,

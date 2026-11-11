@@ -749,7 +749,7 @@ describe.skipIf(!hasDb)("notification logs: storeScoped(A) reads only A's rows a
   });
 });
 
-describe.skipIf(!hasDb)("delivery events: storeScoped(B) cannot read or write store A's rows", () => {
+describe.skipIf(!hasDb)("delivery events and issue reports: storeScoped(B) cannot read or write store A's rows", () => {
   let storeAId = "";
   let storeBId = "";
   let orderAId = "";
@@ -786,6 +786,9 @@ describe.skipIf(!hasDb)("delivery events: storeScoped(B) cannot read or write st
     await storeScoped(storeAId).deliveryEvent.create({
       data: { storeId: storeAId, orderId: order.id, type: "out_for_delivery", payload: {} },
     });
+    await storeScoped(storeAId).issueReport.create({
+      data: { storeId: storeAId, orderId: order.id, type: "damaged", lines: [], amountCents: 100, state: "in_review" },
+    });
   });
 
   afterAll(async () => {
@@ -809,6 +812,18 @@ describe.skipIf(!hasDb)("delivery events: storeScoped(B) cannot read or write st
     ).rejects.toSatisfy(isRlsRejection);
     expect((await storeScoped(storeBId).deliveryEvent.deleteMany({ where: { orderId: orderAId } })).count).toBe(0);
     expect(await storeScoped(storeAId).deliveryEvent.count({ where: { orderId: orderAId } })).toBe(1);
+  });
+
+  it("issue reports: storeScoped(B) reads none of A's, cannot insert or update one for A", async () => {
+    expect(await storeScoped(storeBId).issueReport.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).issueReport.create({
+        data: { storeId: storeAId, orderId: orderAId, type: "wrong", lines: [], amountCents: 1, state: "in_review" },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).issueReport.updateMany({ where: { orderId: orderAId }, data: { state: "approved" } })).count).toBe(0);
+    const own = await storeScoped(storeAId).issueReport.findMany({ where: { orderId: orderAId } });
+    expect(own.map((row) => row.state)).toEqual(["in_review"]);
   });
 });
 

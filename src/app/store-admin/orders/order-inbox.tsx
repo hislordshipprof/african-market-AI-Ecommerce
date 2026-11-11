@@ -71,6 +71,8 @@ const STATUS_CONFIG: Record<
   OUT_FOR_DELIVERY: { label: "Out for delivery", variant: "secondary", icon: Truck },
   DELIVERED: { label: "Delivered", variant: "outline", icon: CheckCircle2 },
   REFUND_FAILED: { label: "Refund failed", variant: "destructive", icon: Bell },
+  PARTIALLY_REFUNDED: { label: "Partly refunded", variant: "outline", icon: RefreshCw },
+  REFUNDED: { label: "Refunded", variant: "outline", icon: CheckCircle2 },
   CANCELLED: { label: "Cancelled", variant: "outline", icon: CheckCircle2 },
 };
 

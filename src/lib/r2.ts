@@ -93,6 +93,26 @@ export async function uploadDeliveryProof(key: string, body: Buffer | Uint8Array
   );
 }
 
+const ISSUE_PHOTO_KEY_RE = /^issue-photo\/[a-z0-9]+\/[a-z0-9]+\.jpg$/;
+
+/** A customer's issue photo (#428): private, in the proof bucket, never servable by the catalog route. */
+export function issuePhotoKey(orderId: string, issueId: string): string {
+  return `issue-photo/${orderId}/${issueId}.jpg`;
+}
+
+export function isIssuePhotoKey(key: string): boolean {
+  return ISSUE_PHOTO_KEY_RE.test(key);
+}
+
+export async function uploadIssuePhoto(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isIssuePhotoKey(key)) throw new Error("not an issue-photo key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {

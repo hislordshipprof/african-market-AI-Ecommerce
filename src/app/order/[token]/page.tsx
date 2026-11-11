@@ -9,6 +9,7 @@ import { notFound } from "next/navigation";
 import { deliveryProofTokenFor, findOrderForTracking } from "@/lib/notifications/lookup";
 import { OrderMessages } from "@/components/storefront/flow/order-messages";
 import { readCustomerMessages } from "@/lib/support/thread";
+import { issueStateMessage, issueWindowOpen } from "@/lib/order/issue-report";
 
 const money = (cents: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
@@ -91,6 +92,16 @@ export default async function OrderPage({
           {messages && (
             <OrderMessages token={token} storeName={context.store.name} timeZone={context.store.timezone} initialMessages={messages} />
           )}
+          {realOrder.issueReports[0] ? (
+            <FlowCard title="Your problem report">
+              <p>{issueStateMessage(realOrder.issueReports[0])}</p>
+            </FlowCard>
+          ) : realOrder.trackingToken === token && issueWindowOpen(realOrder) ? (
+            <FlowCard title="Something wrong with your order?">
+              <p>Tell us within 48 hours of your order and we&rsquo;ll make it right.</p>
+              <Link className="sf-button" href={`/order/${encodeURIComponent(token)}/report`}>Report a problem</Link>
+            </FlowCard>
+          ) : null}
           <div style={{ marginTop: "1rem", textAlign: "center" }}>
             <Link className="sf-button" href="/">Continue shopping</Link>
           </div>

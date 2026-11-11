@@ -127,6 +127,8 @@ export function statusForEvent(event: Exclude<OrderNotifyEvent, "store_replied">
       return "COMPLETED";
     case "cancelled":
       return "CANCELLED";
+    case "refunded":
+      return "REFUNDED";
   }
 }
 
@@ -215,6 +217,8 @@ export type RenderedMessage = {
 /** The subject and first line: the order status, or that the store answered the customer's message. */
 function headline(order: NotifyOrder, event: OrderNotifyEvent): string {
   if (event === "store_replied") return "The store replied";
+  // A refund can be part of the order, so its message never reads as the order status.
+  if (event === "refunded") return "Refund issued";
   return customerStatusLabel(statusForEvent(event, order.fulfillment));
 }
 
@@ -238,7 +242,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   }
   parts.push(`<p>${escapeHtml(status)}. Order #${order.number}.</p>`);
   if (around) parts.push(`<p>Ready around ${escapeHtml(around)}.</p>`);
-  if (event !== "cancelled" && event !== "store_replied") parts.push(`<ul>${lineRows(order, event)}</ul>`);
+  if (event !== "cancelled" && event !== "store_replied" && event !== "refunded") parts.push(`<ul>${lineRows(order, event)}</ul>`);
   if (event === "placed" || event === "accepted") {
     const estimate = order.subtotalCents + order.tipCents + order.deliveryFeeCents;
     parts.push(`<p>Estimated total ${escapeHtml(money(estimate))}.</p>`);
@@ -258,6 +262,8 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     }
   } else if (event === "cancelled") {
     parts.push(`<p>${escapeHtml(cancelCopy(order))}</p>`);
+  } else if (event === "refunded") {
+    parts.push(`<p>Your refund is on its way to your card. Banks usually take 5 to 10 business days to show it.</p>`);
   }
   const linkText = event === "store_replied" ? "Read the reply" : "Track your order";
   parts.push(`<p><a href="${escapeHtml(url)}">${linkText}</a></p>`);
@@ -276,7 +282,7 @@ export function renderSms(order: NotifyOrder, event: OrderNotifyEvent, url: stri
   if (event === "store_replied") {
     return { to: order.customer.phone ?? "", text: `${name}: The store replied about order #${order.number}. Read it: ${url}` };
   }
-  const status = customerStatusLabel(statusForEvent(event, order.fulfillment));
+  const status = headline(order, event);
   let text = `${name}: order #${order.number} ${status}. Track it: ${url}`;
   if (event === "placed") text += " Reply STOP to opt out.";
   return { to: order.customer.phone ?? "", text };

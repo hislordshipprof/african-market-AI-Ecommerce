@@ -54,6 +54,7 @@ model Store {
   customers    Customer[]
   orders          Order[]
   refundRequests  RefundRequest[]
+  issueReports    IssueReport[]
   listingImports  ListingImport[]
   aiConversations AiConversation[]
   aiActions       AiAction[]
@@ -820,6 +821,7 @@ model Order {
   customer Customer   @relation(fields: [customerId, storeId], references: [id, storeId])
   lines    OrderLine[]
   refundRequests RefundRequest[]
+  issueReports   IssueReport[]
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
   supportThreads SupportThread[]
@@ -855,6 +857,30 @@ model RefundRequest {
   @@index([orderId])
   @@index([storeId, state])
   @@map("refund_requests")
+}
+
+/// One customer report per order (#428). State: auto_refunded, in_review, approved, declined, refund_failed.
+model IssueReport {
+  id              String   @id @default(cuid())
+  storeId         String   @map("store_id")
+  orderId         String   @unique @map("order_id")
+  type            String
+  /// [{ lineId, qty }] chosen by the customer.
+  lines           Json
+  note            String?
+  photoKey        String?  @map("photo_key")
+  amountCents     Int      @map("amount_cents")
+  state           String
+  refundRequestId String?  @unique @map("refund_request_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id])
+  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+
+  @@index([storeId])
+  @@index([storeId, state])
+  @@map("issue_reports")
 }
 
 /// One send attempt for one order event and channel. Contact is read from the order at send time.
