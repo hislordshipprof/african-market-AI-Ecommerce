@@ -978,3 +978,115 @@ describe.skipIf(!hasDb)("owner reports and their items: storeScoped(B) cannot re
     expect((await storeScoped(storeAId).ownerReportItem.findUnique({ where: { id: itemAId } }))?.status).toBe("pending");
   });
 });
+
+describe.skipIf(!hasDb)("orders, order lines and audit logs: storeScoped(B) cannot read or write store A's rows", () => {
+  let storeAId = "";
+  let storeBId = "";
+  let customerAId = "";
+  let orderAId = "";
+  let lineAId = "";
+  let variantAId = "";
+  let auditAId = "";
+  let actorId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const stamp = Date.now().toString(36);
+    storeAId = (await raw.store.create({
+      data: { slug: `order-rls-a-${stamp}`, name: "Order RLS A", themePreset: "palm-and-shea" },
+    })).id;
+    storeBId = (await raw.store.create({
+      data: { slug: `order-rls-b-${stamp}`, name: "Order RLS B", themePreset: "palm-and-shea" },
+    })).id;
+    actorId = `order-rls-${stamp}`;
+    await raw.user.create({ data: { id: actorId, email: `${actorId}@example.com`, name: "Owner" } });
+    const scopedA = storeScoped(storeAId);
+    const listing = await scopedA.listing.create({
+      data: { storeId: storeAId, customName: "Gari", price: 500, stockMode: "unlimited" },
+    });
+    variantAId = (await scopedA.listingVariant.create({
+      data: { listingId: listing.id, label: "1kg", price: 500, weightG: 1000 },
+    })).id;
+    customerAId = (await scopedA.customer.create({ data: { storeId: storeAId, name: "RLS Buyer" } })).id;
+    orderAId = (await scopedA.order.create({
+      data: {
+        storeId: storeAId, customerId: customerAId, status: "AUTHORIZED", fulfillment: "pickup",
+        subtotalCents: 500, bufferCents: 0, totalCents: 500, totalAuthorizedCents: 500, number: 1,
+      },
+    })).id;
+    lineAId = (await scopedA.orderLine.create({
+      data: { storeId: storeAId, orderId: orderAId, listingVariantId: variantAId, qtyOrdered: 1, unitPriceCents: 500 },
+    })).id;
+    auditAId = (await scopedA.auditLog.create({
+      data: {
+        storeId: storeAId, actorId, actorEmail: `${actorId}@example.com`,
+        action: "order_placed", entityType: "order", entityId: orderAId,
+      },
+    })).id;
+  });
+
+  afterAll(async () => {
+    const storeIds = [storeAId, storeBId].filter(Boolean);
+    await raw.$transaction([
+      raw.$executeRaw`SET LOCAL ROLE app_user`,
+      raw.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      raw.auditLog.deleteMany({ where: { storeId: { in: storeIds } } }),
+    ]);
+    for (const id of storeIds) {
+      await storeScoped(id).order.deleteMany({});
+      await storeScoped(id).customer.deleteMany({});
+      await storeScoped(id).listing.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: storeIds } } });
+    await raw.user.deleteMany({ where: { id: actorId } });
+    await raw.$disconnect();
+  });
+
+  it("orders: storeScoped(B) reads null, update throws P2025, updateMany and insert change nothing of A's", async () => {
+    const scopedB = storeScoped(storeBId);
+    expect(await scopedB.order.findUnique({ where: { id: orderAId } })).toBeNull();
+    await expect(scopedB.order.update({ where: { id: orderAId }, data: { status: "CANCELLED" } }))
+      .rejects.toMatchObject({ code: "P2025" });
+    expect((await scopedB.order.updateMany({ where: { id: orderAId }, data: { status: "CANCELLED" } })).count).toBe(0);
+    await expect(scopedB.order.create({
+      data: {
+        storeId: storeAId, customerId: customerAId, status: "AUTHORIZED", fulfillment: "pickup",
+        subtotalCents: 1, bufferCents: 0, totalCents: 1, totalAuthorizedCents: 1, number: 2,
+      },
+    })).rejects.toSatisfy(isRlsRejection);
+    const own = await storeScoped(storeAId).order.findMany();
+    expect(own.map((order) => [order.id, order.status])).toEqual([[orderAId, "AUTHORIZED"]]);
+  });
+
+  it("order lines: storeScoped(B) reads null, update throws P2025, updateMany and insert change nothing of A's", async () => {
+    const scopedB = storeScoped(storeBId);
+    expect(await scopedB.orderLine.findUnique({ where: { id: lineAId } })).toBeNull();
+    await expect(scopedB.orderLine.update({ where: { id: lineAId }, data: { qtyPicked: 1 } }))
+      .rejects.toMatchObject({ code: "P2025" });
+    expect((await scopedB.orderLine.updateMany({ where: { orderId: orderAId }, data: { qtyPicked: 1 } })).count).toBe(0);
+    await expect(scopedB.orderLine.create({
+      data: { storeId: storeAId, orderId: orderAId, listingVariantId: variantAId, qtyOrdered: 9, unitPriceCents: 1 },
+    })).rejects.toSatisfy(isRlsRejection);
+    const own = await storeScoped(storeAId).orderLine.findMany({ where: { orderId: orderAId } });
+    expect(own.map((line) => [line.id, line.qtyOrdered, line.qtyPicked])).toEqual([[lineAId, 1, 0]]);
+  });
+
+  it("audit logs: storeScoped(B) reads null and cannot insert for A; append-only, so even A updates and deletes 0 rows", async () => {
+    const scopedA = storeScoped(storeAId);
+    const scopedB = storeScoped(storeBId);
+    expect(await scopedB.auditLog.findUnique({ where: { id: auditAId } })).toBeNull();
+    await expect(scopedB.auditLog.create({
+      data: {
+        storeId: storeAId, actorId, actorEmail: `${actorId}@example.com`,
+        action: "forged", entityType: "order", entityId: orderAId,
+      },
+    })).rejects.toSatisfy(isRlsRejection);
+    for (const scoped of [scopedA, scopedB]) {
+      expect((await scoped.auditLog.updateMany({ where: { id: auditAId }, data: { action: "rewritten" } })).count).toBe(0);
+      expect((await scoped.auditLog.deleteMany({ where: { id: auditAId } })).count).toBe(0);
+    }
+    const own = await scopedA.auditLog.findMany({ where: { entityId: orderAId } });
+    expect(own.map((row) => [row.id, row.action])).toEqual([[auditAId, "order_placed"]]);
+  });
+});
