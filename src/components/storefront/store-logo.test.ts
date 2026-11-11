@@ -22,27 +22,16 @@ describe("StoreLogo", () => {
 });
 
 describe("logoReadableOn", () => {
-  it("rejects white lettering with no background of its own on a white plate", () => {
-    expect(logoReadableOn(pixels([200, CLEAR], [40, WHITE]), "#FFFFFF")).toBe(false);
-  });
-
-  it("accepts dark lettering on a transparent background", () => {
-    expect(logoReadableOn(pixels([200, CLEAR], [40, INK]), "#FFFFFF")).toBe(true);
-  });
-
-  it("accepts a logo that brings its own dark panel behind white lettering", () => {
-    expect(logoReadableOn(pixels([180, TEAL], [40, WHITE]), "#FFFFFF")).toBe(true);
-  });
-
-  it("accepts an opaque white logo background with a little dark lettering", () => {
-    expect(logoReadableOn(pixels([90, WHITE], [10, INK]), "#FFFFFF")).toBe(true);
-  });
-
-  it("rejects a fully transparent image", () => {
-    expect(logoReadableOn(pixels([100, CLEAR]), "#FFFFFF")).toBe(false);
-  });
-
-  it("rejects pale lettering that barely differs from the plate", () => {
-    expect(logoReadableOn(pixels([90, WHITE], [10, [230, 236, 232, 255]]), "#FFFFFF")).toBe(false);
+  it("keeps a logo whose lettering stands out from its own panel or the plate, else falls back", () => {
+    const readable = (px: Uint8ClampedArray) => logoReadableOn(px, "#FFFFFF");
+    // Transparent logos are measured against the plate.
+    expect(readable(pixels([200, CLEAR], [40, INK]))).toBe(true);
+    expect(readable(pixels([200, CLEAR], [40, WHITE]))).toBe(false);
+    expect(readable(pixels([100, CLEAR]))).toBe(false);
+    // Opaque logos bring their own panel: lettering is measured against it (#419).
+    for (const panel of [WHITE, TEAL, [245, 239, 224, 255], [238, 238, 238, 255], [255, 213, 79, 255], [220, 235, 250, 255]] as const) {
+      expect(readable(pixels([90, [...panel]], [10, panel === TEAL ? WHITE : INK]))).toBe(true);
+    }
+    expect(readable(pixels([90, WHITE], [10, [230, 236, 232, 255]]))).toBe(false);
   });
 });
