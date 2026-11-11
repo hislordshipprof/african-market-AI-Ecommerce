@@ -206,7 +206,10 @@ export async function searchCatalog(ctx: AssistantContext, input: unknown): Prom
       ...(matched.matchedTerm ? { matchedTerm: matched.matchedTerm } : {}),
     };
   });
-  return recordRead(ctx, "search_catalog", parsed, { ok: true, items });
+  const fits = items.filter((item) => item.match !== "near");
+  return recordRead(ctx, "search_catalog", parsed, fits.length > 0
+    ? { ok: true, items: fits }
+    : { ok: true, items: [], reason: "No listing fits this request." });
 }
 
 export async function showProducts(ctx: AssistantContext, input: unknown): Promise<ToolResult> {

@@ -643,8 +643,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       items: [{ listingId: item.listingId, variantId: item.variantId, priceCents: 450, match: "synonym", matchedTerm: localName }],
     });
     const near = await searchCatalog(ctx(), { query: `Ayoola poundo yam ${suffix}` });
-    const nearItem = (near as unknown as { items: Array<{ listingId: string; match: string }> }).items.find((row) => row.listingId === item.listingId);
-    expect(nearItem?.match).toBe("near");
+    const nearItems = (near as unknown as { items: Array<{ listingId: string }> }).items;
+    expect(nearItems.some((row) => row.listingId === item.listingId)).toBe(false);
+    expect(near).toMatchObject({ ok: true, reason: "No listing fits this request." });
     const shown = await showProducts(ctx(), { listing_ids: [item.listingId] });
     expect(shown).toMatchObject({
       ok: true,
