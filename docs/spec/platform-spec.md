@@ -440,6 +440,7 @@ Designed for ~1,000 stores, ~1M customers, ~20k orders/day (ADR-0012). Each choi
 - **Caching:** Next.js cache tagged per store; no Redis until needed (ADR-0017).
 - **AI:** Anthropic API (Claude) with tool use; prompt caching for catalog/recipe context; embeddings for product matching.
 - **Payments:** Stripe Connect, Stripe Tax, Stripe Billing.
+- **Stripe webhooks (sandbox, set up 2026-11-10, #269):** both endpoints post to `https://african-market-ai-ecommerce.vercel.app/api/webhooks/stripe` (the production deployment, which runs on sandbox keys until go-live; previews change URL per deploy and sit behind Vercel's login). "Your account": `refund.updated`, `refund.failed`, `payment_intent.canceled`. "Connected accounts": `account.updated`. `STRIPE_WEBHOOK_SECRET` on Vercel Production holds both signing secrets, comma-separated. Production keys and live endpoints wait for live payments.
 - **Delivery:** Uber Direct API, DoorDash Drive API.
 - **Comms:** Resend (email), Telnyx (SMS), Meta WhatsApp Cloud API (ADR-0017).
 - **Maps:** Photon for address suggestions and the US Census Geocoder for confirmation. No API key. Confirmed coordinates are cached for 90 days (ADR-0017).
