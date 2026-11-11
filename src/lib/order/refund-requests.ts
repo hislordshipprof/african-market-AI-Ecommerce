@@ -463,6 +463,23 @@ function baselineBody(after: Prisma.JsonValue): { refundedCents: number; counted
 }
 
 /**
+ * Runs the evaluation after a caller's commit. An error is logged, not thrown, so it cannot hide
+ * the committed action; the next refund webhook or ledger sweep evaluates against the stored state.
+ */
+export async function evaluateOrderRefundStateAfterCommit(orderId: string): Promise<void> {
+  try {
+    await evaluateOrderRefundState(orderId);
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    console.error(JSON.stringify({
+      event: "refund_evaluation_failed",
+      orderId,
+      code: typeof code === "string" ? code : "unknown",
+    }));
+  }
+}
+
+/**
  * The only place that changes an order's refund status or writes a post-resolution alert.
  * It compares the provider balance with the ledger under the store lock.
  */

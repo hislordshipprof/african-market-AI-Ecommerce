@@ -18,12 +18,18 @@ vi.mock("next/cache", () => ({
   revalidateTag: () => {},
 }));
 
+vi.mock("../inngest/notify", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../inngest/notify")>()),
+  scheduleOrderNotification: vi.fn(),
+}));
+
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { getURLFromRedirectError } from "next/dist/client/components/redirect";
 import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
 import { authPrisma, findStuckTransitionalOrders, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { recordReconcileResult } from "../inngest/functions";
+import { scheduleOrderNotification } from "../inngest/notify";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundCreatedLate, setRefundStatus } from "../stripe/fake";
 import { RefundNotCreatedError } from "../stripe/errors";
@@ -1429,7 +1435,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     return { entered: enteredGate, release };
   }
 
-  it("resolving reads Stripe without holding the store lock", async () => {
+  it("resolving reads Stripe without holding the store lock, and a Stripe error after the commit keeps the resolution", async () => {
     asAdmin(cookiesAdmin);
     const customer = await storeScoped(storeAId).customer.create({
       data: { storeId: storeAId, name: "Lock-free read" },
@@ -1474,12 +1480,18 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
         const status = (await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status;
         // After the commit the shared refund evaluation re-reads under the lock, as the webhook does.
         if (status === "REFUND_FAILED") lockedReads.push(await storeLockHeld());
-        else readsAfterCommit += 1;
+        else {
+          readsAfterCommit += 1;
+          throw Object.assign(new Error("Stripe 500"), { code: "api_error" });
+        }
       }
       return original(id);
     });
+    vi.mocked(scheduleOrderNotification).mockClear();
+    let scheduled: unknown[][] = [];
     try {
       expect(await resolveRefundFailed(order.id, "Paid by Zelle", 1000, 1000)).toEqual({ ok: true });
+      scheduled = [...vi.mocked(scheduleOrderNotification).mock.calls];
     } finally {
       vi.restoreAllMocks();
       setStripeProvider(fakeStripeProvider);
@@ -1487,6 +1499,16 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(lockedReads.length).toBeGreaterThan(0);
     expect(lockedReads).not.toContain(true);
     expect(readsAfterCommit).toBe(1);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+    expect(scheduled).toEqual([[storeAId, order.id, "cancelled"]]);
+    // The baseline is stored, so the next evaluation (webhook or sweep) still alerts on a refund that moved.
+    await fakeStripeProvider.refundPayment(pi, 1000, "lock-free-late");
+    await evaluateOrderRefundState(order.id);
+    const late = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    });
+    expect(late?.after).toMatchObject({ overpaidCents: 1000, alert: "store_and_platform" });
   });
 
   it("a counted refund reversed between the resolution snapshot and commit is refused", async () => {
