@@ -12,7 +12,7 @@ A store owner picks one of three **Theme presets** at setup:
 2. **Cocoa & Bottle Green** ("heritage"): cocoa-brown ink, bottle green, dusty-rose promo field.
 3. **Lagoon & Coral** ("any cuisine"): deep teal with coral, for Caribbean, Asian and mixed grocers (ADR-0004).
 
-Every preset has a light theme and a dark theme. The dark themes follow the Night Market approach (warm charcoal grounds, lifted primary). If the store sets a brand color, it becomes the primary. The system nudges it lighter or darker until it passes AA against the preset's background and its own text color, and tells the owner when it did.
+Every preset has a light theme and a dark theme. The dark themes follow the Night Market approach (warm charcoal grounds, lifted primary). If the store sets a brand color, it becomes the primary. The system nudges it lighter or darker until it passes AA against the preset's background (in dark themes, against `raised`, the lightest dark layer, so links on cards stay AA) and its own text color, and tells the owner when it did.
 
 Zobo & Moss, Adire & Pepper and Night Market are not presets. Red competes with deal and error states, and blue fights appetite on a grocery site. Night Market lives on only as the dark theme.
 

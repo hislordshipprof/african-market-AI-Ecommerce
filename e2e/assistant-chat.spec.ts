@@ -1,6 +1,21 @@
 import { expect, test } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 import { storeUrl } from "./urls";
+
+// The per-IP assistant limit lives in the database, so a reused lane database carries
+// earlier runs' count for ::1 and these checks get 429 instead of the gate under test (#419).
+test.beforeEach(async () => {
+  const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL_UNPOOLED;
+  if (!url) throw new Error("DIRECT_URL is required to reset the assistant rate limit");
+  const prisma = new PrismaClient({ adapter: new PrismaPg(url) });
+  try {
+    await prisma.appRateLimit.deleteMany({ where: { key: { startsWith: "assistant:ip:" } } });
+  } finally {
+    await prisma.$disconnect();
+  }
+});
 
 test("chat returns assistant_unavailable JSON when no Anthropic key is set", async ({ page }) => {
   test.skip(process.env.E2E_FAKE_ASSISTANT === "1", "the scripted assistant replaces the keyless check");

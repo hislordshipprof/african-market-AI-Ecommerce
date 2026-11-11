@@ -99,7 +99,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - Payment: card / Apple Pay / Google Pay via Stripe. **Authorize at checkout (total + small buffer), capture the final amount after picking** (see §10). Auth window 7 days; pickup orders > 6 days out not allowed.
 - The Stripe Payment Element takes the store's theme: its colors are read from the store's tokens, with Stripe's `night` theme in dark mode, so labels stay AA in both schemes (#379). Stripe Link is turned off in the Payment Element, so our "Save this card for next time" is the only save offer.
 - Delivery instructions, apartment/gate code, leave-at-door toggle (disabled when frozen items present).
-- Tip (default 15%, editable), passed 100% to courier.
+- Tip (default 0%, owner 2026-11-09; 10/15/20% or custom), passed 100% to courier. Pickup orders carry no tip.
 
 ### 5.5 After ordering
 - Order page + SMS/email/WhatsApp updates at each state.

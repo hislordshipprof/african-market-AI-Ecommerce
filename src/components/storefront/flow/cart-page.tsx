@@ -100,13 +100,21 @@ function useBasketQuote(
     .map((line) => `${cartItemKey(line)}:${line.quantity}`)
     .join("|");
   useEffect(() => {
-    if (syncing || !basketKey) return;
+    if (!basketKey) return;
     let active = true;
     const settle = (next: BasketQuoteResponse) => {
       if (!active) return;
       active = false;
       setResponse(next);
     };
+    // Armed before the syncing check, so a cart sync that never settles still ends in the fallback.
+    const timeout = setTimeout(() => settle({ key: basketKey, outcome: "timeout" }), QUOTE_TIMEOUT_MS);
+    if (syncing) {
+      return () => {
+        active = false;
+        clearTimeout(timeout);
+      };
+    }
     const timer = setTimeout(() => {
       // Same quote source as checkout: the server quote when checkout takes payment, else the demo one.
       const request: Promise<CheckoutQuote | null> = realCheckout
@@ -127,7 +135,6 @@ function useBasketQuote(
         )
         .catch(() => settle({ key: basketKey, outcome: "error" }));
     }, 300);
-    const timeout = setTimeout(() => settle({ key: basketKey, outcome: "timeout" }), QUOTE_TIMEOUT_MS);
     return () => {
       active = false;
       clearTimeout(timer);

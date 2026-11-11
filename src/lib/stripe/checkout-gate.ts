@@ -1,3 +1,4 @@
+import { checkoutPaymentsUseFake } from "./checkout-payments";
 import type { OnboardingStatus } from "./types";
 
 export interface CheckoutGateResult {
@@ -24,4 +25,9 @@ export function checkoutTakesPayment(
   harness: boolean,
 ): boolean {
   return checkCheckoutReady(stripeOnboardingStatus).enabled && Boolean(publishableKey || harness);
+}
+
+/** The e2e Stripe harness is on: its cookie is set and this deployment allows the fake. Basket and checkout share it. */
+export function checkoutHarnessOn(cookieStore: { get(name: string): { value: string } | undefined }): boolean {
+  return cookieStore.get("e2e_stripe_harness")?.value === "1" && checkoutPaymentsUseFake();
 }

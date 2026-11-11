@@ -6,8 +6,12 @@ const SMOKE_PORT_OFFSET = 299;
 /**
  * Port for a lane's extra production server. Playwright keeps `E2E_PORT`.
  * 3000 → 3299, 3100 → 3399, 3200 → 3499, so lanes do not share one port.
+ * Each Playwright worker adds its parallel index, so workers in one lane do not race for it.
  */
-export function laneSmokePort(e2ePort: string = process.env.E2E_PORT || "3000"): number {
+export function laneSmokePort(
+  e2ePort: string = process.env.E2E_PORT || "3000",
+  worker: string = process.env.TEST_PARALLEL_INDEX || "0",
+): number {
   if (!/^[1-9]\d*$/.test(e2ePort)) {
     throw new Error(`E2E_PORT must be a port number, received ${e2ePort}`);
   }
@@ -15,7 +19,7 @@ export function laneSmokePort(e2ePort: string = process.env.E2E_PORT || "3000"):
   if (base > 65535) {
     throw new Error(`E2E_PORT must be a port number, received ${e2ePort}`);
   }
-  const preferred = base + SMOKE_PORT_OFFSET;
+  const preferred = base + SMOKE_PORT_OFFSET + (/^\d+$/.test(worker) ? Number(worker) : 0);
   if (preferred > 65535) {
     throw new Error(`smoke port ${preferred} is outside the port range`);
   }
@@ -38,22 +42,28 @@ function bindEphemeral(avoid?: number): Promise<number> {
   });
 }
 
-/** Preferred port when it is free; otherwise a free port that is not that one. */
-export function reservePort(preferred?: number): Promise<number> {
-  if (preferred === undefined) return bindEphemeral();
+function freeOn(port: number, host: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const probe = createServer();
     probe.once("error", (error: NodeJS.ErrnoException) => {
-      if (error.code === "EADDRINUSE" || error.code === "EACCES") {
-        resolve(bindEphemeral(preferred));
-        return;
-      }
-      reject(error);
+      if (error.code === "EADDRINUSE" || error.code === "EACCES") resolve(false);
+      else reject(error);
     });
-    probe.listen(preferred, "127.0.0.1", () => {
-      probe.close((error) => (error ? reject(error) : resolve(preferred)));
+    probe.listen(port, host, () => {
+      probe.close((error) => (error ? reject(error) : resolve(true)));
     });
   });
+}
+
+/**
+ * Preferred port when it is free; otherwise a free port that is not that one.
+ * `next start` binds all interfaces (::), and macOS lets a loopback probe succeed
+ * beside a :: listener and the reverse, so both must be free.
+ */
+export async function reservePort(preferred?: number): Promise<number> {
+  if (preferred === undefined) return bindEphemeral();
+  if ((await freeOn(preferred, "127.0.0.1")) && (await freeOn(preferred, "::"))) return preferred;
+  return bindEphemeral(preferred);
 }
 
 /**

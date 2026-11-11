@@ -3,10 +3,9 @@ import { StorefrontShell } from "@/components/storefront/storefront-shell";
 import { CheckoutPage } from "@/components/storefront/flow/checkout-page";
 import { CheckoutUnavailable, ClosedFlow } from "@/components/storefront/flow/common";
 import { getFlowContext } from "@/lib/customer-flow/server";
-import { checkoutTakesPayment } from "@/lib/stripe/checkout-gate";
+import { checkoutHarnessOn, checkoutTakesPayment } from "@/lib/stripe/checkout-gate";
 import { auth } from "@/lib/auth";
 import { loadCheckoutPrefill } from "@/lib/customer-account/checkout-profile";
-import { checkoutPaymentsUseFake } from "@/lib/stripe/checkout-payments";
 import { LIVE_MODE_BLOCKED_MESSAGE, liveModeCheck } from "@/lib/checkout/live-mode";
 import { STORE_NOT_TAKING_ORDERS } from "@/lib/customer-flow/contracts";
 
@@ -24,7 +23,7 @@ export default async function CheckoutRoute() {
     : !settings.takingOrders
       ? STORE_NOT_TAKING_ORDERS
       : null;
-  const harness = cookieStore.get("e2e_stripe_harness")?.value === "1" && checkoutPaymentsUseFake();
+  const harness = checkoutHarnessOn(cookieStore);
   const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
   const prefill = !unavailable && session?.user?.id ? await loadCheckoutPrefill(session.user.id) : null;
   const stripeConfig =
