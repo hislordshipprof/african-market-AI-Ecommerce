@@ -16,7 +16,7 @@ import {
 import { FIXED_ERROR, MESSAGE_MAX } from "./types";
 
 const voiceSchema = z.strictObject({ transcript: z.string().max(MESSAGE_MAX) });
-const photoTypeSchema = z.enum(["invoice_photo", "shelf_photo"]);
+const photoSchema = z.strictObject({ type: z.enum(["invoice_photo", "shelf_photo"]) });
 const confirmSchema = z.strictObject({
   reportId: z.string().min(1).max(200),
   itemIds: z.array(z.string().min(1).max(200)).max(100),
@@ -41,15 +41,15 @@ export async function submitVoiceReport(input: unknown): Promise<CreateReportRes
 /** Any store member: one invoice or shelf photo (`type`, `photo`). */
 export async function submitPhotoReport(form: FormData): Promise<CreateReportResult> {
   const session = await requireStoreMember();
-  const type = photoTypeSchema.safeParse(form.get("type"));
+  const parsed = parseInput(photoSchema, { type: form.get("type") });
   const photo = form.get("photo");
   const file = photo instanceof File && photo.size > 0 ? photo : null;
-  if (!type.success || !file || file.size > DELIVERY_PROOF_MAX_BYTES) {
+  if (!parsed.ok || !file || file.size > DELIVERY_PROOF_MAX_BYTES) {
     return { ok: false, code: "photo_invalid", message: REPORT_PHOTO_INVALID };
   }
   try {
     return await createOwnerReport(session.store.id, { id: session.user.id, email: session.user.email }, {
-      type: type.data,
+      type: parsed.data.type,
       photo: new Uint8Array(await file.arrayBuffer()),
     });
   } catch (error) {
