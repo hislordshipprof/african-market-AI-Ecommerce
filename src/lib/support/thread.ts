@@ -6,7 +6,7 @@ import { pushToStoreMembers } from "../push/store-members";
 import { scheduleAfterResponse } from "../schedule-after-response";
 import { scheduleSlaTimer } from "./escalation";
 
-const MESSAGE_MAX_CHARS = 1000;
+export const MESSAGE_MAX_CHARS = 1000;
 // Postgres text rejects NUL, so refuse it here instead of failing in the insert.
 export const messageBodySchema = z.string().trim().min(1).max(MESSAGE_MAX_CHARS).refine((body) => !body.includes("\u0000"));
 const THREAD_LIST_LIMIT = 100;

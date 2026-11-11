@@ -199,5 +199,44 @@ describe.skipIf(!hasDb)("assistant store questions", () => {
     expect(message.body).toContain("2 × Egusi");
     expect(message.body).toContain("My egusi was stale, I want a refund.");
     expect(await storeScoped(storeB).supportThread.findMany()).toEqual([]);
+
+    // A 25-line order with the longest issue still fits the 1000-character message limit.
+    const scoped = storeScoped(storeA);
+    const aliceA = await scoped.customer.findFirstOrThrow({ where: { userId: alice } });
+    const big = await scoped.order.create({
+      data: {
+        storeId: storeA,
+        number: 1002,
+        customerId: aliceA.id,
+        status: "PICKING",
+        fulfillment: "pickup",
+        subtotalCents: 22500,
+        bufferCents: 2250,
+        totalAuthorizedCents: 24750,
+        totalCents: 22500,
+        createdAt: new Date(Date.now() - 300_000),
+      },
+    });
+    for (let i = 1; i <= 25; i++) {
+      const item = await scoped.listing.create({
+        data: { storeId: storeA, customName: `Ground egusi seeds ${i}`, price: 900, stockMode: "counted", qty: 10, variants: { create: { label: "2 lb bag", price: 900, weightG: 907 } } },
+        include: { variants: true },
+      });
+      await scoped.orderLine.create({
+        data: { storeId: storeA, orderId: big.id, listingVariantId: item.variants[0].id, qtyOrdered: 1, unitPriceCents: 900 },
+      });
+    }
+    const issue = "The egusi was stale and two items were missing. ".repeat(12).trim().slice(0, 600);
+    expect(await runner({ actorUserId: alice })("forward_to_store", { order_number: 1002, issue })).toMatchObject({
+      ok: true,
+      orderNumber: 1002,
+    });
+    const bigThread = (await listStoreThreads(storeA)).find((thread) => thread.orderNumber === 1002)!;
+    const bigMessage = await scoped.supportMessage.findFirstOrThrow({ where: { threadId: bigThread.id } });
+    expect(bigMessage.body.length).toBeLessThanOrEqual(1000);
+    expect(bigMessage.body).toContain("Order #1002");
+    expect(bigMessage.body).toContain("1 × Ground egusi seeds 1 (2 lb bag)");
+    expect(bigMessage.body).toMatch(/…and \d+ more/);
+    expect(bigMessage.body).toContain(`Customer says: ${issue}`);
   });
 });

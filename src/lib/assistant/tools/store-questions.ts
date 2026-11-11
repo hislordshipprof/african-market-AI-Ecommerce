@@ -4,6 +4,7 @@ import { platform, storeScoped } from "../../db";
 import { isStoreOpen, isValidTimezone } from "../../order/store-hours";
 import {
   announceCustomerMessage,
+  MESSAGE_MAX_CHARS,
   messageBodySchema,
   orderMessagesTag,
   postCustomerMessageForOrder,
@@ -229,13 +230,20 @@ export async function getStoreInfo(ctx: AssistantContext, input: unknown): Promi
   });
 }
 
+/** The header and the customer's words stay whole; the item list is cut to fit the message limit. */
 function forwardBody(order: OwnOrder, issue: string): string {
-  const lines = lineSummary(order).map((line) => `${line.qty} × ${line.name} (${line.packLabel})`).join(", ");
-  return [
-    `Order #${order.number} (${order.status}). Sent by the shopper assistant for the customer.`,
-    lines ? `Items: ${lines}` : "",
-    `Customer says: ${issue.slice(0, ISSUE_MAX_CHARS)}`,
-  ].filter(Boolean).join("\n");
+  const header = `Order #${order.number} (${order.status}). Sent by the shopper assistant for the customer.`;
+  const says = `Customer says: ${issue.slice(0, ISSUE_MAX_CHARS)}`;
+  const items = lineSummary(order).map((line) => `${line.qty} × ${line.name} (${line.packLabel})`);
+  const budget = MESSAGE_MAX_CHARS - header.length - says.length - 2;
+  let shown = items.length;
+  const itemLine = () => {
+    const more = items.length - shown;
+    return `Items: ${items.slice(0, shown).join(", ")}${more > 0 ? `${shown > 0 ? ", " : ""}…and ${more} more` : ""}`;
+  };
+  while (shown > 0 && itemLine().length > budget) shown--;
+  const list = items.length > 0 && itemLine().length <= budget ? itemLine() : "";
+  return [header, list, says].filter(Boolean).join("\n");
 }
 
 /**
