@@ -101,17 +101,14 @@ export async function submitIssueReport(
   input: IssueReportInput,
   now = new Date(),
 ): Promise<{ ok: true; state: IssueState; amountCents: number } | { ok: false; error: string }> {
-  const early = refusal(
-    await storeScoped(store.id).order.findUnique({ where: { trackingToken: token }, include: orderForIssue }),
-    input,
-    now,
-  );
+  const found = await storeScoped(store.id).order.findUnique({ where: { trackingToken: token }, include: orderForIssue });
+  const early = refusal(found, input, now);
   if ("error" in early) return { ok: false, error: early.error };
   if (!deliveryProofBucket()) return { ok: false, error: ISSUE_STORAGE_NOT_SET_UP };
   const prepared = await prepareProofPhoto(input.photo);
   if (!prepared.ok) return { ok: false, error: ISSUE_PHOTO_INVALID };
 
-  const order = await storeScoped(store.id).order.findUniqueOrThrow({ where: { trackingToken: token }, select: { id: true } });
+  const order = found!;
   const issueId = randomBytes(12).toString("hex");
   const photoKey = issuePhotoKey(order.id, issueId);
   await uploadIssuePhoto(photoKey, prepared.jpeg);
