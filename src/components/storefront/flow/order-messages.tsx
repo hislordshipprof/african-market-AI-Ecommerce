@@ -2,11 +2,18 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { sendOrderMessageAction } from "@/lib/support/customer-actions";
-import type { ThreadMessage } from "@/lib/support/thread";
+import type { SupportTopic, ThreadMessage } from "@/lib/support/thread";
 import { Button } from "../primitives";
 import { FlowCard } from "./common";
 
 const POLL_MS = 10_000;
+
+const TOPICS: { value: SupportTopic; label: string }[] = [
+  { value: "order", label: "My order (the store answers)" },
+  { value: "payment", label: "A payment or charge" },
+  { value: "delivery", label: "The delivery or courier" },
+  { value: "app", label: "A problem with this site" },
+];
 
 // The store's zone on server and client alike, so hydration renders the same text.
 const time = (iso: string, timeZone: string) =>
@@ -26,6 +33,7 @@ export function OrderMessages({
 }) {
   const [messages, setMessages] = useState(initialMessages);
   const [draft, setDraft] = useState("");
+  const [topic, setTopic] = useState<SupportTopic>("order");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -51,7 +59,7 @@ export function OrderMessages({
     startTransition(async () => {
       let result;
       try {
-        result = await sendOrderMessageAction({ token, body });
+        result = await sendOrderMessageAction({ token, body, ...(messages.length === 0 ? { topic } : {}) });
       } catch {
         // Uncaught, the rejection reaches the error boundary and the draft is lost.
         setError("We couldn't send your message. Check your connection and try again.");
@@ -86,7 +94,7 @@ export function OrderMessages({
               }}
             >
               <small style={{ display: "block", opacity: 0.75 }}>
-                {message.sender === "customer" ? "You" : storeName} · {time(message.createdAt, timeZone)}
+                {message.sender === "customer" ? "You" : message.sender === "platform" ? "Platform team" : storeName} · {time(message.createdAt, timeZone)}
               </small>
               <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{message.body}</span>
             </li>
@@ -94,6 +102,16 @@ export function OrderMessages({
         </ol>
       )}
       <form onSubmit={send} style={{ display: "grid", gap: "0.5rem" }}>
+        {messages.length === 0 && (
+          <>
+            <label htmlFor="order-message-topic">What is it about?</label>
+            <select id="order-message-topic" value={topic} onChange={(event) => setTopic(event.target.value as SupportTopic)}>
+              {TOPICS.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </>
+        )}
         <label htmlFor="order-message">Your message</label>
         <textarea
           id="order-message"

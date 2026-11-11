@@ -258,7 +258,7 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -278,6 +278,8 @@ export async function platformAdminTransaction<T>(
       productSynonym: tx.productSynonym,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
+      supportThread: tx.supportThread,
+      supportMessage: tx.supportMessage,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });

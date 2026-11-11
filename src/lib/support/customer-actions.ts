@@ -10,7 +10,8 @@ import { takeRateLimit } from "../rate-limit/app-limiter";
 import { scheduleAfterResponse } from "../schedule-after-response";
 import { parseInput } from "../security/parse-input";
 import { pushToStoreMembers } from "../push/store-members";
-import { messageBodySchema, orderMessagesTag, postCustomerMessage } from "./thread";
+import { messageBodySchema, orderMessagesTag, postCustomerMessage, SUPPORT_TOPICS } from "./thread";
+import { scheduleSlaTimer } from "./escalation";
 
 const HOUR_MS = 60 * 60 * 1000;
 const PER_TOKEN_PER_HOUR = 30;
@@ -19,15 +20,19 @@ const PER_IP_PER_HOUR = 60;
 const sendSchema = z.strictObject({
   token: z.string().min(1).max(200),
   body: messageBodySchema,
+  topic: z.enum(SUPPORT_TOPICS).optional(),
 });
 
 type SendResult = { ok: true } | { ok: false; error: string };
 
-/** Public: the tracking token is the only credential. The store comes from the host, the order from the token. */
+/**
+ * Public: the tracking token is the only credential. The store comes from the host, the order from the token.
+ * `topic` applies only when the message opens the thread.
+ */
 export async function sendOrderMessageAction(input: unknown): Promise<SendResult> {
   const parsed = parseInput(sendSchema, input);
   if (!parsed.ok) return { ok: false, error: "Write a message of up to 1000 characters." };
-  const { token, body } = parsed.data;
+  const { token, body, topic } = parsed.data;
 
   const [store, reqHeaders] = await Promise.all([getStore(), headers()]);
   const tokenKey = createHash("sha256").update(token).digest("hex").slice(0, 32);
@@ -35,10 +40,11 @@ export async function sendOrderMessageAction(input: unknown): Promise<SendResult
   const byToken = byIp.ok ? await takeRateLimit(`support-message:token:${tokenKey}`, PER_TOKEN_PER_HOUR, HOUR_MS) : byIp;
   if (!byToken.ok) return { ok: false, error: "Too many messages. Please wait and try again." };
 
-  const posted = await postCustomerMessage(store.id, token, body);
+  const posted = await postCustomerMessage(store.id, token, body, topic);
   if (!posted) return { ok: false, error: "We couldn't find this order." };
 
   revalidateTag(orderMessagesTag(token), { expire: 0 });
+  if (posted.topic === "order") scheduleSlaTimer(store.id, posted.messageId);
   scheduleAfterResponse(
     () => pushToStoreMembers(store.id, {
       title: "New message",

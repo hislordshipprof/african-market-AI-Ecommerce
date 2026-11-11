@@ -51,7 +51,7 @@ function formText(data: unknown, key: string): string | null {
 
 function extractRawValues(data: FormData): Record<string, string> {
   const raw: Record<string, string> = {};
-  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "storeDeliveryFee", "storeDeliveryEnabled"]) {
+  for (const key of ["slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours", "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes", "pickupEnabled", "timezone", "addressLine1", "addressLine2", "city", "state", "zip", "storeDeliveryFee", "storeDeliveryEnabled"]) {
     const v = formText(data, key);
     if (v != null) raw[key] = v;
   }
@@ -73,6 +73,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     minimumOrderCents: number;
     pickupEnabled: boolean;
     autoRefundLimitCents: number;
+    supportSlaMinutes: number;
     timezone: string;
     addressLine1: string | null;
     addressLine2: string | null;
@@ -101,6 +102,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
   const autoRefundLimitCents = Math.round(
     parseFloatOrDefault(formText(data, "autoRefundLimit"), 25) * 100,
   );
+  const supportSlaMinutes = parseIntOrDefault(formText(data, "supportSlaMinutes"), 30);
   const timezone = formText(data, "timezone")?.trim() || defaultTimezone;
   const addressLine1 = formText(data, "addressLine1")?.trim() || null;
   const addressLine2 = formText(data, "addressLine2")?.trim() || null;
@@ -174,6 +176,10 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
     errors.autoRefundLimit = "Auto-refund limit is too large";
   }
 
+  if (!Number.isFinite(supportSlaMinutes) || supportSlaMinutes < 1 || supportSlaMinutes > 1440) {
+    errors.supportSlaMinutes = "Message reply time must be 1-1440 open minutes";
+  }
+
   if (!(VALID_US_TIMEZONES as readonly string[]).includes(timezone)) {
     errors.timezone = `Invalid timezone: must be one of ${VALID_US_TIMEZONES.join(", ")}`;
   }
@@ -214,6 +220,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
       minimumOrderCents,
       pickupEnabled,
       autoRefundLimitCents,
+      supportSlaMinutes,
       timezone,
       addressLine1,
       addressLine2,
@@ -228,7 +235,7 @@ function validateStoreFields(data: FormData, defaultTimezone = "America/New_York
 
 const STORE_FORM_FIELDS = [
   "slug", "name", "logoUrl", "brandColor", "themePreset", "status", "hours",
-  "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit",
+  "prepTimeMinutes", "deliveryRadiusMi", "minimumOrder", "autoRefundLimit", "supportSlaMinutes",
   "pickupEnabled", "timezone", "storeId",
   "addressLine1", "addressLine2", "city", "state", "zip",
   "storeDeliveryFee", "storeDeliveryEnabled",
@@ -245,6 +252,7 @@ const storeFormSchema = z.strictObject({
   deliveryRadiusMi: z.string().max(20).nullable(),
   minimumOrder: z.string().max(20).nullable(),
   autoRefundLimit: z.string().max(20).nullable(),
+  supportSlaMinutes: z.string().max(20).nullable(),
   pickupEnabled: z.string().max(10).nullable(),
   timezone: z.string().max(80).nullable(),
   storeId: z.string().max(200).nullable(),
@@ -402,6 +410,7 @@ export async function createStore(
         minimumOrderCents: values.minimumOrderCents,
         pickupEnabled: values.pickupEnabled,
         autoRefundLimitCents: values.autoRefundLimitCents,
+        supportSlaMinutes: values.supportSlaMinutes,
         timezone: values.timezone,
         addressLine1: values.addressLine1,
         addressLine2: values.addressLine2,
@@ -436,6 +445,7 @@ export async function createStore(
           minimumOrderCents: s.minimumOrderCents,
           pickupEnabled: s.pickupEnabled,
           autoRefundLimitCents: s.autoRefundLimitCents,
+          supportSlaMinutes: s.supportSlaMinutes,
           timezone: s.timezone,
           ...deliveryAudit(s),
         },
@@ -529,6 +539,7 @@ export async function updateStore(
         minimumOrderCents: values.minimumOrderCents,
         pickupEnabled: values.pickupEnabled,
         autoRefundLimitCents: values.autoRefundLimitCents,
+        supportSlaMinutes: values.supportSlaMinutes,
         timezone: values.timezone,
         addressLine1: values.addressLine1,
         addressLine2: values.addressLine2,
@@ -563,6 +574,7 @@ export async function updateStore(
           minimumOrderCents: before.minimumOrderCents,
           pickupEnabled: before.pickupEnabled,
           autoRefundLimitCents: before.autoRefundLimitCents,
+          supportSlaMinutes: before.supportSlaMinutes,
           timezone: before.timezone,
           ...deliveryAudit(before),
         },
@@ -579,6 +591,7 @@ export async function updateStore(
           minimumOrderCents: s.minimumOrderCents,
           pickupEnabled: s.pickupEnabled,
           autoRefundLimitCents: s.autoRefundLimitCents,
+          supportSlaMinutes: s.supportSlaMinutes,
           timezone: s.timezone,
           ...deliveryAudit(s),
         },

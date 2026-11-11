@@ -57,7 +57,10 @@ export default async function MessagesPage({
                         <span className="block text-xs text-muted-foreground">{when(t.lastCustomerAt, session.store.timezone)}</span>
                       )}
                     </span>
-                    {t.unread > 0 && <Badge aria-label={`${t.unread} unread`}>{t.unread}</Badge>}
+                    <span className="flex items-center gap-2">
+                      {t.state === "escalated" && <Badge variant="destructive">Escalated</Badge>}
+                      {t.unread > 0 && <Badge aria-label={`${t.unread} unread`}>{t.unread}</Badge>}
+                    </span>
                   </Link>
                 </li>
               ))}
@@ -70,7 +73,11 @@ export default async function MessagesPage({
               <h2 className="text-base font-semibold text-foreground">
                 Order #{thread.orderNumber}
                 {thread.customerName ? ` · ${thread.customerName}` : ""}
+                {thread.state === "escalated" && <Badge variant="destructive" className="ml-2 align-middle">Escalated</Badge>}
               </h2>
+              {thread.state === "escalated" && (
+                <p className="mt-1 text-xs text-muted-foreground">The platform team can see this thread. Reply to take it back.</p>
+              )}
               <ol className="my-4 grid gap-2">
                 {thread.messages.map((m) => (
                   <li
@@ -78,7 +85,7 @@ export default async function MessagesPage({
                     className={`max-w-[85%] rounded-lg border border-border px-3 py-2 ${m.sender === "customer" ? "justify-self-start" : "justify-self-end bg-muted"}`}
                   >
                     <span className="block text-xs text-muted-foreground">
-                      {m.sender === "customer" ? "Customer" : m.senderName ?? "Store"} · {when(m.createdAt, session.store.timezone)}
+                      {m.sender === "customer" ? "Customer" : m.sender === "platform" ? "Platform team" : m.senderName ?? "Store"} · {when(m.createdAt, session.store.timezone)}
                     </span>
                     <span className="whitespace-pre-wrap break-words text-sm text-foreground">{m.body}</span>
                   </li>

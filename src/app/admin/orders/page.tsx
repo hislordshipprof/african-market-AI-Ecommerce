@@ -17,6 +17,9 @@ export default async function RefundFailedOrdersPage() {
           <Link href="/admin/orders/check" className="text-sm text-primary underline">
             Orders to check
           </Link>
+          <Link href="/admin/support" className="text-sm text-primary underline">
+            Messages
+          </Link>
           <Link href="/admin/stores" className="text-sm text-primary underline">
             Stores
           </Link>

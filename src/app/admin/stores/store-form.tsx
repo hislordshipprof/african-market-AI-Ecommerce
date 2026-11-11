@@ -399,6 +399,29 @@ export function StoreForm({
                 </p>
               )}
             </div>
+            <div>
+              <label htmlFor="supportSlaMinutes" className="mb-1 block text-sm font-medium text-foreground">
+                Message reply time (open minutes)
+              </label>
+              <input
+                id="supportSlaMinutes"
+                name="supportSlaMinutes"
+                type="number"
+                min={1}
+                max={1440}
+                defaultValue={sv?.supportSlaMinutes ?? store?.supportSlaMinutes ?? 30}
+                aria-describedby="supportSlaMinutes-hint"
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <p id="supportSlaMinutes-hint" className="mt-1 text-xs text-muted-foreground">
+                An unanswered customer message goes to the platform team after this many open minutes.
+              </p>
+              {state.fieldErrors?.supportSlaMinutes && (
+                <p className="mt-1 text-xs text-destructive">
+                  {state.fieldErrors.supportSlaMinutes}
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
