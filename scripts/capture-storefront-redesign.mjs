@@ -9,7 +9,7 @@ const browser = await chromium.launch({ headless: true });
 const checks = [];
 const screens = [
   ["home-top", "/", "[data-testid=hero-carousel]"],
-  ["home-mid", "/", "[data-testid=deals-carousel]"],
+  ["home-mid", "/", "[data-testid=product-rail]"],
   ["home-bottom", "/", ".sf-footer"],
   ["category", "/categories/grains-and-flours", "[data-testid=listing-card]"],
   ["product", "/listings/mn_egusi", "[data-testid=product-detail]"],
