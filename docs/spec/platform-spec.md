@@ -188,7 +188,7 @@ Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant default
 | `prepare_checkout()` | Saves an immutable checkout snapshot and shows the confirm card; **cannot place the order** — only the shopper's tap on the card does, via a single-use token that bypasses the model ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)) |
 | `get_order_status(order_number?)` | Signed-in customer's own orders at this store only (account Customer plus claimed guest rows, as on the account page): status, lines, last event; newest five without a number. A guest is told to sign in (#26) |
 | `check_delivery_area(line1, city, state, zip)` | Geocodes through the checkout address service (cache, then Census) and compares with `Store.deliveryRadiusMi`, equal counts as inside; reports store delivery, pickup, and courier as not offered. A ZIP alone cannot be geocoded, so the assistant asks for the street (#26) |
-| `get_store_info()` | Hours, today and open now, minimum order, pickup, delivery fee and radius, auto-refund limit, owner story (#26) |
+| `get_store_info()` | Hours, today and open now, minimum order, pickup, delivery fee and radius, owner story (#26). The auto-refund limit is never shown to shoppers (owner decision 2026-11-11). |
 | `forward_to_store(order_number?, issue)` | Complaints and refund requests: posts the customer's words with the order number and lines to that order's support thread, then the store is pushed and the SLA timer starts. Signed-in, own orders only; the assistant never resolves or promises a refund (#26) |
 
 **Rules**
