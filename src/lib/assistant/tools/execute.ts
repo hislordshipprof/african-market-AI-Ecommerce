@@ -137,22 +137,75 @@ function factsOf(listing: StockFacts): StockFacts {
   };
 }
 
+const MATCH_COMMAND_WORDS = new Set(["add", "some", "a", "an", "the", "please", "of", "and"]);
+const MATCH_SIZE_WORD = /^\d+(?:\.\d+)?(?:g|kg|lb|lbs|oz|ml|l)$/;
+
+function matchWords(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 0);
+}
+
+function requestedWords(query: string): string[] {
+  return matchWords(query).filter((word) => !MATCH_COMMAND_WORDS.has(word) && !/^\d+$/.test(word) && !MATCH_SIZE_WORD.test(word));
+}
+
+function sameWordSet(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((word) => rightSet.has(word));
+}
+
+/** How a search hit relates to the query. synonym is a catalog local name; near is not an identity. */
+export function catalogMatch(
+  query: string,
+  name: string,
+  altName: string | undefined,
+  synonymTerms: string[],
+): { match: "name" | "synonym" | "near"; matchedTerm?: string } {
+  const wanted = requestedWords(query);
+  if (wanted.length === 0) return { match: "near" };
+  const titleWords = new Set(matchWords(`${name} ${altName ?? ""}`));
+  if (wanted.every((word) => titleWords.has(word))) return { match: "name" };
+  let matchedTerm: string | undefined;
+  for (const term of synonymTerms) {
+    const termWords = requestedWords(term);
+    if (termWords.length === 0 || !sameWordSet(wanted, termWords)) continue;
+    if (!matchedTerm || term.length > matchedTerm.length) matchedTerm = term;
+  }
+  return matchedTerm ? { match: "synonym", matchedTerm } : { match: "near" };
+}
+
 export async function searchCatalog(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(searchCatalogInput, input);
   const query = parsed.query.trim();
   if (!query) return recordRead(ctx, "search_catalog", parsed, { ok: true, items: [] });
   const found = await searchListings(ctx.storeId, query);
-  const items = found.slice(0, parsed.limit).map((item) => ({
-    listingId: item.id,
-    name: item.name,
-    ...(item.altName ? { altName: item.altName } : {}),
-    variantId: item.variantId ?? null,
-    packLabel: item.packLabel ?? "Each",
-    priceCents: item.price,
-    imageUrl: item.imageUrl ?? null,
-    mayBeUnavailable: item.badge !== "in-stock",
-    badge: item.badge,
-  }));
+  const sliced = found.slice(0, parsed.limit);
+  const details = sliced.length === 0
+    ? []
+    : await storeScoped(ctx.storeId).listing.findMany({
+      where: { id: { in: sliced.map((item) => item.id) } },
+      select: { id: true, masterProduct: { select: { synonyms: { select: { term: true } } } } },
+    });
+  const synonymsByListing = new Map(details.map((listing) => [
+    listing.id,
+    listing.masterProduct?.synonyms.map((synonym) => synonym.term) ?? [],
+  ]));
+  const items = sliced.map((item) => {
+    const matched = catalogMatch(query, item.name, item.altName, synonymsByListing.get(item.id) ?? []);
+    return {
+      listingId: item.id,
+      name: item.name,
+      ...(item.altName ? { altName: item.altName } : {}),
+      variantId: item.variantId ?? null,
+      packLabel: item.packLabel ?? "Each",
+      priceCents: item.price,
+      imageUrl: item.imageUrl ?? null,
+      mayBeUnavailable: item.badge !== "in-stock",
+      badge: item.badge,
+      match: matched.match,
+      ...(matched.matchedTerm ? { matchedTerm: matched.matchedTerm } : {}),
+    };
+  });
   return recordRead(ctx, "search_catalog", parsed, { ok: true, items });
 }
 

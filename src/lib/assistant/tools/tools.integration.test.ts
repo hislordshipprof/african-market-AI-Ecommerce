@@ -621,6 +621,42 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     await expect(searchCatalog(ctx(), { query: "a".repeat(101) })).rejects.toThrow("Invalid tool input");
   });
 
+  it("search marks an established synonym and show_products keeps the dearer pack", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const localName = `iyan${suffix}`;
+    const item = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Pounded yam flour ${suffix}`, imageUrl: null },
+      price: 450,
+      label: "70g tin",
+    });
+    const masterId = (await storeScoped(storeA).listing.findUniqueOrThrow({ where: { id: item.listingId } })).masterProductId;
+    await platformAdmin.productSynonym.create({ data: { productId: masterId!, term: localName } });
+    await platformAdmin.productSynonym.create({ data: { productId: masterId!, term: `poundo yam ${suffix}` } });
+    const dear = await storeScoped(storeA).listingVariant.create({
+      data: { listingId: item.listingId, label: "400g tin", price: 1200, weightG: 400 },
+    });
+    const established = await searchCatalog(ctx(), { query: localName });
+    expect(established).toMatchObject({
+      ok: true,
+      items: [{ listingId: item.listingId, variantId: item.variantId, priceCents: 450, match: "synonym", matchedTerm: localName }],
+    });
+    const near = await searchCatalog(ctx(), { query: `Ayoola poundo yam ${suffix}` });
+    const nearItem = (near as unknown as { items: Array<{ listingId: string; match: string }> }).items.find((row) => row.listingId === item.listingId);
+    expect(nearItem?.match).toBe("near");
+    const shown = await showProducts(ctx(), { listing_ids: [item.listingId] });
+    expect(shown).toMatchObject({
+      ok: true,
+      cards: [{
+        variants: expect.arrayContaining([
+          { variantId: item.variantId, label: "70g tin", priceCents: 450 },
+          { variantId: dear.id, label: "400g tin", priceCents: 1200 },
+        ]),
+      }],
+    });
+  });
+
   it("show_products returns a null image when the listing has no photo", async () => {
     const item = await makeListing(storeA, { name: "Zz No Photo Grain", price: 50 });
     const shown = await showProducts(ctx(), { listing_ids: [item.listingId] });
