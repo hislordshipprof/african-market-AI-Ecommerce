@@ -5,7 +5,7 @@ import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/error
 import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
-import { RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
+import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification } from "../notifications/record";
@@ -82,8 +82,8 @@ const CANCEL_CAUSE_ACTIONS: CancelCause["action"][] = ["store_cancel", "provider
 const CANCELLABLE_FROM: Record<CancelCause["action"], OrderStatus[]> = {
   auto_cancel: ["AUTHORIZED"],
   pick_timeout: ["ACCEPTED", "PICKING"],
-  store_cancel: ["AUTHORIZED", "ACCEPTED", "PICKING"],
-  provider_canceled: ["AUTHORIZED", "ACCEPTED", "PICKING"],
+  store_cancel: [...CANCELLABLE_BEFORE_CAPTURE],
+  provider_canceled: [...CANCELLABLE_BEFORE_CAPTURE],
 };
 
 /** Stripe ended the hold itself: `expired` on API 2025-03-31.basil and later, `automatic` before. */
@@ -1255,7 +1255,7 @@ export async function cancelOrder(
   storeId: string,
   orderId: string,
   cause: CancelCause,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; retry?: true }> {
   // Phase 1: claim with CANCELLING and write the cause row, under the store lock.
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
@@ -1294,7 +1294,7 @@ export async function cancelOrder(
   if (validation.paymentIntentId) {
     const stripe = getStripeProvider();
     const reservedCancel = await reserveAttempt(storeId, orderId, "cancel_retry");
-    if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank" };
+    if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
     try {
       await registerE2EPayment(validation.paymentIntentId, validation.totalAuthorizedCents);
       await stripe.cancelPaymentIntent(
@@ -1305,14 +1305,14 @@ export async function cancelOrder(
     } catch (err) {
       if (isIdempotencyKeyInUse(err)) {
         await noteAttemptInFlight(storeId, orderId, "cancel_retry", reservedCancel.attempt);
-        return { ok: false, error: "Cancellation is still confirming with the bank" };
+        return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
       }
       if (isRetryableProviderError(err)) {
         const fresh = await stripe.retrievePaymentIntent(validation.paymentIntentId);
         if (fresh.status !== "canceled") {
           await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
         }
-        return { ok: false, error: "Cancellation is still confirming with the bank" };
+        return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
       }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
@@ -1321,7 +1321,7 @@ export async function cancelOrder(
           ? await stripe.retrieveRefund(validation.refundId)
           : await refundCapturedBalance(validation.paymentIntentId, orderId, storeId);
         if (refundBlocked(refund)) return { ok: false, error: "Order status changed during cancellation" };
-        if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank" };
+        if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank", retry: true };
         const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true };
@@ -1332,7 +1332,12 @@ export async function cancelOrder(
 
   // Phase 3: one cancellation write, which also returns the order's reserved stock.
   const finalize = await finalizeCancelledOrder(storeId, orderId, validation.action, { from: ["CANCELLING"] });
-  if (!finalize.wrote) return { ok: false, error: "Order status changed during cancellation" };
+  if (!finalize.wrote) {
+    // A racing echo, timer or sweep may have finalized first; that is still a cancel.
+    const current = await storeScoped(storeId).order.findUnique({ where: { id: orderId } });
+    if (current?.status === "CANCELLED") return { ok: true };
+    return { ok: false, error: "Order status changed during cancellation" };
+  }
 
   return { ok: true };
 }

@@ -7,7 +7,7 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { setStripeProvider } from "../stripe";
 import { stripeProvider } from "./provider";
-import { cancelledPayments, fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "./fake";
+import { cancelledPayments, fakeStripeProvider, reset, setAuthorizedAmount, setNextCancelFailure, setRefundStatus } from "./fake";
 import { acceptOrder, cancelOrder } from "../order/service";
 import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
 import { findOrdersToCheck } from "../admin/orders-to-check-query";
@@ -591,6 +591,24 @@ describe.skipIf(!hasDb)("signed Stripe webhooks (lane DB)", () => {
     expect(await cancelTrail(placed.orderId, listingId)).toEqual(once);
   }, 30_000);
 
+  it("payment_intent.canceled answers 500 while the cancel is still confirming, and Stripe's retry finishes it", async () => {
+    const { listingId, variantId } = await countedListing(storeA, 10, "Confirming");
+    const placed = await placeOrder(storeA, [{ variantId, qty: 2 }]);
+    await acceptOrder(storeA, placed.orderId, 15);
+    setNextCancelFailure(placed.paymentIntentId, 1);
+
+    const eventId = `evt_pi_confirming_${placed.orderId}`;
+    expect((await postIntentCanceled(eventId, placed.paymentIntentId, "expired")).status).toBe(500);
+    expect((await cancelTrail(placed.orderId, listingId)).status).toBe("CANCELLING");
+
+    expect((await postIntentCanceled(eventId, placed.paymentIntentId, "expired")).status).toBe(200);
+    expect(await cancelTrail(placed.orderId, listingId)).toMatchObject({
+      status: "CANCELLED",
+      audits: ["provider_canceled"],
+      stock: { qty: 10, events: [["reservation", -2], ["reservation_release", 2]] },
+    });
+  }, 30_000);
+
   it("payment_intent.canceled for a cancelled or unknown intent returns 200 and writes nothing", async () => {
     const { listingId, variantId } = await countedListing(storeA, 10, "Already cancelled");
     const placed = await placeOrder(storeA, [{ variantId, qty: 1 }]);
@@ -626,5 +644,41 @@ describe.skipIf(!hasDb)("signed Stripe webhooks (lane DB)", () => {
     const echo = await postIntentCanceled(`evt_echo_${placed.orderId}`, placed.paymentIntentId, null);
     expect(echo.status).toBe(200);
     expect(await cancelTrail(placed.orderId, listingId)).toEqual(ours);
+  }, 30_000);
+  it("an echo that finalizes before our store cancel leaves the staff result ok and one cancellation", async () => {
+    const { listingId, variantId } = await countedListing(storeA, 10, "Echo race");
+    const placed = await placeOrder(storeA, [{ variantId, qty: 2 }]);
+    await acceptOrder(storeA, placed.orderId, 15);
+    let echoStatus = 0;
+    setStripeProvider({
+      ...fakeStripeProvider,
+      verifyWebhookSignature: (input) => stripeProvider.verifyWebhookSignature(input),
+      cancelPaymentIntent: async (paymentIntentId, idempotencyKey) => {
+        const cancelled = await fakeStripeProvider.cancelPaymentIntent(paymentIntentId, idempotencyKey);
+        if (echoStatus) return cancelled;
+        echoStatus = -1;
+        echoStatus = (await postIntentCanceled(`evt_race_${placed.orderId}`, paymentIntentId, null)).status;
+        return cancelled;
+      },
+    });
+    try {
+      expect(await cancelOrder(storeA, placed.orderId, {
+        action: "store_cancel",
+        actor: { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL },
+        reason: "store_closed",
+        note: null,
+      })).toEqual({ ok: true });
+    } finally {
+      setStripeProvider({
+        ...fakeStripeProvider,
+        verifyWebhookSignature: (input) => stripeProvider.verifyWebhookSignature(input),
+      });
+    }
+    expect(echoStatus).toBe(200);
+    expect(await cancelTrail(placed.orderId, listingId)).toMatchObject({
+      status: "CANCELLED",
+      audits: ["store_cancel"],
+      stock: { qty: 10, events: [["reservation", -2], ["reservation_release", 2]] },
+    });
   }, 30_000);
 });

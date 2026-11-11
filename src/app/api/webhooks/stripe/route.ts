@@ -5,6 +5,7 @@ import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
 import { cancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "@/lib/order/service";
 import { applyProviderRefund, evaluateOrderRefundState } from "@/lib/order/refund-requests";
+import { CANCELLABLE_BEFORE_CAPTURE } from "@/lib/order/constants";
 import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
 import type { RefundResult } from "@/lib/stripe/types";
 import { parseInput } from "@/lib/security/parse-input";
@@ -27,13 +28,13 @@ const webhookEventSchema = z.looseObject({
 });
 
 /** Before capture the hold can end on Stripe's side; these orders follow it. */
-const PROVIDER_CANCELLABLE = ["AUTHORIZED", "ACCEPTED", "PICKING", "CANCELLING"];
+const PROVIDER_CANCELLABLE: readonly string[] = [...CANCELLABLE_BEFORE_CAPTURE, "CANCELLING"];
 
-/** Our own cancel echoes back here, so an order already CANCELLING or CANCELLED must stay a no-op. */
+/** Our own cancel echoes back here: a CANCELLED order stays a no-op, a CANCELLING one resumes. Returns false when Stripe should retry. */
 async function handlePaymentIntentCanceled(
   paymentIntent: { id: string; cancellationReason: string | null },
   eventId: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const order = await findOrderByPaymentIntent(paymentIntent.id);
   console.log(JSON.stringify({
     event: "payment_intent_canceled",
@@ -43,17 +44,18 @@ async function handlePaymentIntentCanceled(
     orderId: order?.id ?? null,
     orderStatus: order?.status ?? null,
   }));
-  if (!order) return;
+  if (!order) return true;
   if (order.status === "CAPTURING") {
     await reconcileStuckOrder(order.storeId, order.id);
-    return;
+    return true;
   }
-  if (!PROVIDER_CANCELLABLE.includes(order.status)) return;
-  await cancelOrder(order.storeId, order.id, {
+  if (!PROVIDER_CANCELLABLE.includes(order.status)) return true;
+  const result = await cancelOrder(order.storeId, order.id, {
     action: "provider_canceled",
     stripeEventId: eventId,
     cancellationReason: paymentIntent.cancellationReason,
   });
+  return result.ok || !result.retry;
 }
 
 export const dynamic = "force-dynamic";
@@ -119,7 +121,9 @@ export async function POST(req: NextRequest) {
 
   if (verified.type === "payment_intent.canceled" && verified.paymentIntent) {
     try {
-      await handlePaymentIntentCanceled(verified.paymentIntent, verified.eventId ?? null);
+      if (!(await handlePaymentIntentCanceled(verified.paymentIntent, verified.eventId ?? null))) {
+        return NextResponse.json({ error: "Cancellation is still confirming with the bank" }, { status: 500 });
+      }
     } catch (err) {
       console.error(err);
       return NextResponse.json({ error: "Cancellation could not be recorded" }, { status: 500 });

@@ -50,7 +50,7 @@ import {
   cancelOrderAction,
 } from "@/lib/order/actions";
 import type { StoreOrderRow } from "@/lib/order/service";
-import { RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
+import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/constants";
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
@@ -84,7 +84,7 @@ const STORE_CANCEL_REASON_LABELS: Record<StoreCancelReason, string> = {
   other: "Other",
 };
 
-const STORE_CANCELLABLE = ["AUTHORIZED", "ACCEPTED", "PICKING"];
+const STORE_CANCELLABLE: readonly string[] = CANCELLABLE_BEFORE_CAPTURE;
 
 function orderCustomerLabel(name: string, phone: string | null): string {
   const trimmed = phone?.trim() ?? "";
@@ -242,7 +242,7 @@ export function OrderInbox({
     startTransition(async () => {
       const result = await cancelOrderAction(cancellingOrderId, { reason: cancelReason, note: cancelNote });
       if (result.ok) {
-        toast.success("Order cancelled — the card hold is released");
+        toast.success("Order cancelled");
         setCancellingOrderId(null);
         pollOrders();
       } else {
@@ -764,8 +764,8 @@ export function OrderInbox({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-4">
-            <Label>Reason</Label>
-            <div className="grid grid-cols-2 gap-2">
+            <Label id="cancel-reason-label">Reason</Label>
+            <div role="group" aria-labelledby="cancel-reason-label" className="grid grid-cols-2 gap-2">
               {(Object.keys(STORE_CANCEL_REASON_LABELS) as StoreCancelReason[]).map((reason) => (
                 <Button
                   key={reason}
