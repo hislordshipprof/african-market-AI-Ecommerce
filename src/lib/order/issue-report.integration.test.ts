@@ -25,7 +25,8 @@ import sharp from "sharp";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { systemAuditData } from "../system-actor";
 import { countedListing } from "./stock-ledger-test-helpers";
 import { ISSUE_ALREADY_REPORTED, submitIssueReport } from "./issue-report";
 import { evaluateOrderRefundState } from "./refund-requests";
@@ -265,6 +266,56 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     const alerts = await storeScoped(store.id).auditLog.findMany({ where: { entityId: order.id, action: "issue_refund_failed" } });
     expect(alerts).toHaveLength(1);
     expect(alerts[0].after).toMatchObject({ issueReportId: after.issues[0].id, alert: "store_and_platform" });
+  });
+
+  it("after a dashboard refund, a report for more than remains is refunded only the remainder and the issue shows that amount", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 900 }], 1);
+    await fakeStripeProvider.refundPayment(order.paymentIntentId!, 500, `dashboard-${order.id}`);
+    const result = await submitIssueReport(store, token, {
+      type: "missing",
+      lines: [{ lineId: order.lines[0].id, qty: 1 }],
+      note: null,
+      photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 400 });
+    const after = await written(order.id);
+    expect(after.issues[0].amountCents).toBe(400);
+    expect(after.requests[0].amountCents).toBe(400);
+    expect(after.order.status).toBe("REFUNDED");
+  });
+
+  it("a capped issue refund whose Stripe call errors still shows the capped amount, not the reported one", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 900 }], 1);
+    await fakeStripeProvider.refundPayment(order.paymentIntentId!, 500, `dashboard-${order.id}`);
+    setNextRefundFailure(order.paymentIntentId!);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await submitIssueReport(store, token, {
+      type: "missing",
+      lines: [{ lineId: order.lines[0].id, qty: 1 }],
+      note: null,
+      photo: JPEG,
+    });
+    expect(result).toMatchObject({ ok: true, amountCents: 400 });
+    const after = await written(order.id);
+    expect(after.issues[0]).toMatchObject({ amountCents: 400, refundRequestId: after.requests[0].id });
+  });
+
+  it("an under-limit report the refund ledger blocks goes to review with no refund request", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 900 }], 1);
+    await storeScoped(store.id).auditLog.create({ data: systemAuditData(store.id, order.id, "refund_resolved_manually") });
+    const calls = refundRequests.length;
+    const result = await submitIssueReport(store, token, {
+      type: "missing",
+      lines: [{ lineId: order.lines[0].id, qty: 1 }],
+      note: null,
+      photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "in_review", amountCents: 900 });
+    const after = await written(order.id);
+    expect(after.issues[0]).toMatchObject({ state: "in_review", refundRequestId: null });
+    expect(after.requests).toHaveLength(0);
+    expect(refundRequests.length).toBe(calls);
+    expect(await storeScoped(store.id).auditLog.count({ where: { entityId: order.id, action: "issue_refund_failed" } })).toBe(0);
   });
 
   it("an amount $1 over the limit goes to review with no refund and the order unchanged", async () => {

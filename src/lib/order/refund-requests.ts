@@ -376,7 +376,8 @@ export async function submitRefund(
       },
     });
     if (cause.cause === "issue" && cause.issueReportId) {
-      await tx.issueReport.update({ where: { id: cause.issueReportId }, data: { refundRequestId: row.id } });
+      // The issue shows what is refunded, capped at the unrefunded capture, even if the create call then fails.
+      await tx.issueReport.update({ where: { id: cause.issueReportId }, data: { refundRequestId: row.id, amountCents: amount } });
     }
     return { open: null, row };
   });

@@ -150,14 +150,11 @@ export async function submitIssueReport(
 
   let threw = false;
   try {
-    const refund = await submitRefund(store.id, order.id, created.paymentIntentId, {
+    await submitRefund(store.id, order.id, created.paymentIntentId, {
       cause: "issue",
       amountCents: created.amount,
       issueReportId: issueId,
     });
-    if ("amountRefunded" in refund && refund.amountRefunded < created.amount) {
-      await storeScoped(store.id).issueReport.update({ where: { id: issueId }, data: { amountCents: refund.amountRefunded } });
-    }
   } catch (err) {
     // An open request is replayed by the ledger sweep; one Stripe refused is marked refund_failed by the evaluation below.
     console.error(`Issue refund for order ${order.id} did not finish: ${redactedErrorMessage(err)}`);
