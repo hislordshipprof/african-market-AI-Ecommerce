@@ -116,6 +116,7 @@ export function storeScoped(storeId: string) {
     copilotConversation: wrapDelegate(storeId, prisma.copilotConversation),
     copilotClientMessage: wrapDelegate(storeId, prisma.copilotClientMessage),
     stockProposal: wrapDelegate(storeId, prisma.stockProposal),
+    copilotAlert: wrapDelegate(storeId, prisma.copilotAlert),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     deliveryEvent: wrapDelegate(storeId, prisma.deliveryEvent),
     pushSubscription: wrapDelegate(storeId, prisma.pushSubscription),
@@ -293,7 +294,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -324,6 +325,7 @@ export async function storeScopedTransaction<T>(
       copilotConversation: tx.copilotConversation,
       copilotClientMessage: tx.copilotClientMessage,
       stockProposal: tx.stockProposal,
+      copilotAlert: tx.copilotAlert,
       notificationLog: tx.notificationLog,
       deliveryEvent: tx.deliveryEvent,
       pushSubscription: tx.pushSubscription,
