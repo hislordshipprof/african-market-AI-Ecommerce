@@ -113,6 +113,26 @@ export async function uploadIssuePhoto(key: string, body: Buffer | Uint8Array): 
   );
 }
 
+const OWNER_REPORT_PHOTO_KEY_RE = /^owner-reports\/[a-z0-9-]+\/[a-z0-9]+\.jpg$/;
+
+/** A store member's invoice or shelf photo (#21): private, in the proof bucket, never servable by the catalog route. */
+export function ownerReportPhotoKey(storeId: string, reportId: string): string {
+  return `owner-reports/${storeId}/${reportId}.jpg`;
+}
+
+export function isOwnerReportPhotoKey(key: string): boolean {
+  return OWNER_REPORT_PHOTO_KEY_RE.test(key);
+}
+
+export async function uploadOwnerReportPhoto(key: string, body: Buffer | Uint8Array): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isOwnerReportPhotoKey(key)) throw new Error("not an owner-report key");
+  await getR2Client().send(
+    new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
+  );
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
