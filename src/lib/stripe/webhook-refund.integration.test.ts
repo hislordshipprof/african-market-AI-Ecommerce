@@ -7,7 +7,7 @@ import { storeScoped, storeScopedTransaction } from "../db";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { setStripeProvider } from "../stripe";
 import { stripeProvider } from "./provider";
-import { cancelledPayments, fakeStripeProvider, reset, setAuthorizedAmount, setRefundStatus } from "./fake";
+import { cancelledPayments, fakeStripeProvider, reset, setAuthorizedAmount, setNextCancelFailure, setRefundStatus } from "./fake";
 import { acceptOrder, cancelOrder } from "../order/service";
 import { countedListing, placeOrder, stockOf } from "../order/stock-ledger-test-helpers";
 import { findOrdersToCheck } from "../admin/orders-to-check-query";
@@ -589,6 +589,24 @@ describe.skipIf(!hasDb)("signed Stripe webhooks (lane DB)", () => {
 
     expect((await postIntentCanceled(eventId, placed.paymentIntentId, "expired")).status).toBe(200);
     expect(await cancelTrail(placed.orderId, listingId)).toEqual(once);
+  }, 30_000);
+
+  it("payment_intent.canceled answers 500 while the cancel is still confirming, and Stripe's retry finishes it", async () => {
+    const { listingId, variantId } = await countedListing(storeA, 10, "Confirming");
+    const placed = await placeOrder(storeA, [{ variantId, qty: 2 }]);
+    await acceptOrder(storeA, placed.orderId, 15);
+    setNextCancelFailure(placed.paymentIntentId, 1);
+
+    const eventId = `evt_pi_confirming_${placed.orderId}`;
+    expect((await postIntentCanceled(eventId, placed.paymentIntentId, "expired")).status).toBe(500);
+    expect((await cancelTrail(placed.orderId, listingId)).status).toBe("CANCELLING");
+
+    expect((await postIntentCanceled(eventId, placed.paymentIntentId, "expired")).status).toBe(200);
+    expect(await cancelTrail(placed.orderId, listingId)).toMatchObject({
+      status: "CANCELLED",
+      audits: ["provider_canceled"],
+      stock: { qty: 10, events: [["reservation", -2], ["reservation_release", 2]] },
+    });
   }, 30_000);
 
   it("payment_intent.canceled for a cancelled or unknown intent returns 200 and writes nothing", async () => {

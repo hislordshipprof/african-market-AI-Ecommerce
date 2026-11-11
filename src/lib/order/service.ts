@@ -1255,7 +1255,7 @@ export async function cancelOrder(
   storeId: string,
   orderId: string,
   cause: CancelCause,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; retry?: true }> {
   // Phase 1: claim with CANCELLING and write the cause row, under the store lock.
   const validation = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
@@ -1294,7 +1294,7 @@ export async function cancelOrder(
   if (validation.paymentIntentId) {
     const stripe = getStripeProvider();
     const reservedCancel = await reserveAttempt(storeId, orderId, "cancel_retry");
-    if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank" };
+    if (!reservedCancel.ok) return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
     try {
       await registerE2EPayment(validation.paymentIntentId, validation.totalAuthorizedCents);
       await stripe.cancelPaymentIntent(
@@ -1305,14 +1305,14 @@ export async function cancelOrder(
     } catch (err) {
       if (isIdempotencyKeyInUse(err)) {
         await noteAttemptInFlight(storeId, orderId, "cancel_retry", reservedCancel.attempt);
-        return { ok: false, error: "Cancellation is still confirming with the bank" };
+        return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
       }
       if (isRetryableProviderError(err)) {
         const fresh = await stripe.retrievePaymentIntent(validation.paymentIntentId);
         if (fresh.status !== "canceled") {
           await noteAttemptReleased(storeId, orderId, "cancel_retry", reservedCancel.attempt);
         }
-        return { ok: false, error: "Cancellation is still confirming with the bank" };
+        return { ok: false, error: "Cancellation is still confirming with the bank", retry: true };
       }
       if (err instanceof ProviderStateError) {
         // PI was captured externally — refund and cancel
@@ -1321,7 +1321,7 @@ export async function cancelOrder(
           ? await stripe.retrieveRefund(validation.refundId)
           : await refundCapturedBalance(validation.paymentIntentId, orderId, storeId);
         if (refundBlocked(refund)) return { ok: false, error: "Order status changed during cancellation" };
-        if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank" };
+        if (refundInFlight(refund)) return { ok: false, error: "Refund is still confirming with the bank", retry: true };
         const settled = await settleCapturedRefund(storeId, orderId, validation.paymentIntentId, refund);
         if (settled.outcome !== "refunded") return { ok: false, error: settled.error };
         return { ok: true };
