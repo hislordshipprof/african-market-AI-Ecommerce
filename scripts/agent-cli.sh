@@ -83,7 +83,7 @@ agent_run() {
       local runner=()
       if [ -n "${AGENT_CLAUDE_CONFIG_DIR:-}" ]; then
         local v; runner=(env)
-        for v in $(compgen -e); do
+        for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
           case "$v" in CLAUDE_CODE_DISABLE_BACKGROUND_TASKS) ;; CLAUDE_CODE_*|CLAUDE_AGENT_SDK_*|ANTHROPIC_*) runner+=(-u "$v") ;; esac
         done
       fi
