@@ -2,9 +2,9 @@ import { Prisma } from "@prisma/client";
 import { storeScoped, storeScopedTransaction, lockStoreRow, findOrderByPaymentIntent } from "../db";
 import { getStripeProvider, stripeProviderKind } from "../stripe";
 import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/errors";
-import { applyProviderRefund, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
+import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
-import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
+import { systemAuditData } from "../system-actor";
 import { RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
@@ -110,24 +110,7 @@ function causeAuditData(storeId: string, orderId: string, cause: CancelCause) {
       holdEnded: stripeEndedHold(cause.cancellationReason),
     });
   }
-  return systemAuditData(storeId, orderId, cause.action);
-}
-
-function systemAuditData(
-  storeId: string,
-  orderId: string,
-  action: string,
-  after: Prisma.InputJsonValue = {},
-) {
-  return {
-    storeId,
-    actorId: SYSTEM_ACTOR_ID,
-    actorEmail: SYSTEM_ACTOR_EMAIL,
-    action,
-    entityType: "order" as const,
-    entityId: orderId,
-    after,
-  };
+  return systemAuditData(storeId, orderId, cause.action, {});
 }
 
 async function finalizeCancelledOrder(
@@ -567,7 +550,7 @@ async function settleUnconfirmedCapture(
   }
 
   if (pi.status === "canceled") {
-    await finalizeCancelFromSweep(storeId, orderId, "reconcile_cancel");
+    await finalizeCancelFromSweep(storeId, orderId, await canceledHoldAction(storeId, orderId));
     return {
       ok: false,
       error: "Payment authorization was released — order cancelled; contact the customer",
@@ -763,10 +746,7 @@ async function syncProviderRefund(paymentIntentId: string, refundId: string, sta
 
 function refundStillCovers(refunds: RefundResult[], capturedCents: number): boolean {
   if (capturedCents <= 0) return false;
-  const covering = refunds
-    .filter((refund) => refund.status === "succeeded" || refund.status === "pending" || refund.status === "requires_action")
-    .reduce((sum, refund) => sum + refund.amountRefunded, 0);
-  return covering >= capturedCents;
+  return coveredRefundCents(refunds) >= capturedCents;
 }
 
 /** One failure record per refund. A repeat of the same refund does not alert again. */
@@ -1359,10 +1339,22 @@ export async function cancelOrder(
   return { ok: true };
 }
 
+/** Every outcome the stuck-order sweep can report. */
+export type ReconcileAction =
+  | "already_resolved"
+  | "anomaly_refund"
+  | "finalized_capture"
+  | "finalized_cancel"
+  | "unknown_stripe_status";
+
+export type ReconcileResult =
+  | { ok: true; action: ReconcileAction }
+  | { ok: false; error: string; waiting?: boolean };
+
 export async function reconcileStuckOrder(
   storeId: string,
   orderId: string,
-): Promise<{ ok: true; action: string } | { ok: false; error: string; waiting?: boolean }> {
+): Promise<ReconcileResult> {
   const order = await storeScopedTransaction(storeId, async (tx) => {
     return tx.order.findUnique({
       where: { id: orderId },
@@ -1371,6 +1363,7 @@ export async function reconcileStuckOrder(
   });
 
   if (order?.paymentIntentId) {
+    await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
     await reconcileOpenRefundRequests(storeId, orderId);
     await reconcileAbandonedRefundRequests(storeId, orderId);
   }
@@ -1384,7 +1377,6 @@ export async function reconcileStuckOrder(
     return { ok: false, error: "Order has no payment intent" };
   }
 
-  await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
   const stripe = getStripeProvider();
   const pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
 
@@ -1415,7 +1407,7 @@ export async function reconcileStuckOrder(
   }
 
   if (pi.status === "canceled") {
-    return finalizeCancelFromSweep(storeId, orderId);
+    return finalizeCancelFromSweep(storeId, orderId, await canceledHoldAction(storeId, orderId));
   }
 
   if (pi.status === "requires_capture") {
@@ -1532,7 +1524,7 @@ async function finalizeCaptureFromSweep(
   orderId: string,
   fulfillment: string,
   capturedAmountCents: number,
-): Promise<{ ok: true; action: string }> {
+): Promise<{ ok: true; action: ReconcileAction }> {
   const newStatus: OrderStatus = fulfilledStatus(fulfillment);
 
   let notifyReady = false;
@@ -1551,7 +1543,7 @@ async function finalizeCaptureFromSweep(
       },
     });
     await tx.auditLog.create({
-      data: systemAuditData(storeId, orderId, "reconcile_capture"),
+      data: systemAuditData(storeId, orderId, "reconcile_capture", {}),
     });
     await settleCapturedStock(tx, storeId, orderId);
     notifyReady = await recordOrderNotification(tx, storeId, orderId, "ready");
@@ -1561,11 +1553,20 @@ async function finalizeCaptureFromSweep(
   return { ok: true, action: "finalized_capture" };
 }
 
+/** A canceled hold we asked to release keeps its release audit and alert, even if the cancel's response was lost. */
+async function canceledHoldAction(storeId: string, orderId: string): Promise<"reconcile_cancel" | "capture_released"> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.auditLog.findMany({ where: orderAuditWhere(orderId, "cancel_retry") }),
+  );
+  const released = rows.some((row) => (row.after as { releaseHold?: unknown } | null)?.releaseHold === true);
+  return released ? "capture_released" : "reconcile_cancel";
+}
+
 async function finalizeCancelFromSweep(
   storeId: string,
   orderId: string,
   action: "reconcile_cancel" | "capture_released" = "reconcile_cancel",
-): Promise<{ ok: true; action: string }> {
+): Promise<{ ok: true; action: ReconcileAction }> {
   await finalizeCancelledOrder(storeId, orderId, action, {
     after: action === "capture_released" ? { alert: "store_and_platform" } : {},
   });

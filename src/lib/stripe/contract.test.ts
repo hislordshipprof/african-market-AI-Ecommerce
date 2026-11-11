@@ -6,6 +6,7 @@ import {
   setAuthorizedAmount,
   setNextRefundStatus,
   setRefundStatus,
+  feeRefunded,
 } from "./fake";
 import { stripeProvider } from "./provider";
 import type { StripeProvider } from "./types";
@@ -23,6 +24,9 @@ type World = {
   provider: StripeProvider;
   authorize(amountCents: number, paymentMethod?: string): Promise<string>;
   armPending(paymentIntentId: string): void;
+  /** Fake: marks the refund failed. Sandbox: no-op, so its replay is read before or after a real change. */
+  failRefund(refundId: string): void;
+  feeRefundedCents(paymentIntentId: string): Promise<number>;
 };
 
 const cleanup: string[] = [];
@@ -41,6 +45,12 @@ function fakeWorld(): World {
     },
     armPending(paymentIntentId) {
       setNextRefundStatus(paymentIntentId, "pending");
+    },
+    failRefund(refundId) {
+      setRefundStatus(refundId, "failed");
+    },
+    async feeRefundedCents(paymentIntentId) {
+      return feeRefunded.get(paymentIntentId) ?? 0;
     },
   };
 }
@@ -66,6 +76,12 @@ function liveWorld(): World {
       return pi.id;
     },
     armPending() {},
+    failRefund() {},
+    async feeRefundedCents(paymentIntentId) {
+      const pi = await stripe!.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge.application_fee"] });
+      const fee = (pi.latest_charge as Stripe.Charge).application_fee as Stripe.ApplicationFee | null;
+      return fee?.amount_refunded ?? 0;
+    },
   };
 }
 
@@ -310,6 +326,63 @@ describe("Stripe contract: fake and sandbox", () => {
       refund: { status: "succeeded", amountRefunded: 100 },
     });
   }, 60_000);
+
+  it("a refund key replays its saved first response after the refund changes", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(500);
+      await world.provider.capturePaymentIntent(pi, 500, `cap-snap-${pi}`);
+      const key = `refund-snap-${pi}`;
+      const first = await world.provider.refundPayment(pi, 200, key);
+      world.failRefund(first.refundId);
+      const replay = await world.provider.refundPayment(pi, 200, key);
+      return {
+        first: { status: first.status, amount: first.amountRefunded },
+        replay: { status: replay.status, amount: replay.amountRefunded, sameId: replay.refundId === first.refundId },
+      };
+    });
+    expect(observed).toEqual({
+      first: { status: "succeeded", amount: 200 },
+      replay: { status: "succeeded", amount: 200, sameId: true },
+    });
+  }, 60_000);
+
+  it("a cancel key reused on another PaymentIntent is an idempotency error", async () => {
+    const observed = await compare(async (world) => {
+      const first = await world.authorize(500);
+      const second = await world.authorize(500);
+      const key = `cancel-mismatch-${first}`;
+      await world.provider.cancelPaymentIntent(first, key);
+      const error = await errorOf(() => world.provider.cancelPaymentIntent(second, key));
+      return { type: error.type, code: error.code, statusCode: error.statusCode };
+    });
+    expect(observed).toEqual({ type: "StripeIdempotencyError", code: null, statusCode: 400 });
+  }, 60_000);
+
+  it("a refund key reused with a different fee flag is an idempotency error", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(1000);
+      await world.provider.capturePaymentIntent(pi, 1000, `cap-feeflag-${pi}`, 100);
+      const key = `refund-feeflag-${pi}`;
+      await world.provider.refundPayment(pi, 200, key, { refundApplicationFee: true });
+      const error = await errorOf(() => world.provider.refundPayment(pi, 200, key));
+      return { type: error.type, statusCode: error.statusCode };
+    });
+    expect(observed).toEqual({ type: "StripeIdempotencyError", statusCode: 400 });
+  }, 60_000);
+
+  it("partial refunds return the application fee proportionally with the same rounding", async () => {
+    const observed = await compare(async (world) => {
+      const pi = await world.authorize(1000);
+      await world.provider.capturePaymentIntent(pi, 1000, `cap-round-${pi}`, 100);
+      const steps: number[] = [];
+      for (const [n, amount] of [5, 15, 333].entries()) {
+        await world.provider.refundPayment(pi, amount, `refund-round-${n}-${pi}`, { refundApplicationFee: true });
+        steps.push(await world.feeRefundedCents(pi));
+      }
+      return steps;
+    });
+    expect(observed).toEqual([1, 3, 36]);
+  }, 90_000);
 
   it("listing refunds for an unknown PaymentIntent is resource_missing on the fake and the sandbox", async () => {
     const observed = await compare(async (world) => {

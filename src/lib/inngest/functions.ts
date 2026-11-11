@@ -8,7 +8,7 @@ import { sendOrderAuthorized } from "./send";
 import { sendOrderNotification } from "./notify";
 import { deliverOrderNotification, onNotificationFailure } from "../notifications/deliver";
 import { isOrderNotifyEvent } from "../notifications/record";
-import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
+import { systemAuditData } from "../system-actor";
 import { runAssistantRetention } from "../assistant/retention";
 import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing/confidence-job";
 import { sendNewOrderPush } from "../push/new-order";
@@ -48,15 +48,7 @@ export async function recordReconcileResult(storeId: string, orderId: string): P
     if (!recent) {
       await storeScopedTransaction(storeId, async (tx) => {
         await tx.auditLog.create({
-          data: {
-            storeId,
-            actorId: SYSTEM_ACTOR_ID,
-            actorEmail: SYSTEM_ACTOR_EMAIL,
-            action: "reconcile_failed",
-            entityType: "order",
-            entityId: orderId,
-            after: { error: failReason },
-          },
+          data: systemAuditData(storeId, orderId, "reconcile_failed", { error: failReason }),
         });
       });
     }
@@ -204,14 +196,7 @@ export const acceptanceAlert = inngest.createFunction(
         if (existing) return;
 
         await tx.auditLog.create({
-          data: {
-            storeId,
-            actorId: SYSTEM_ACTOR_ID,
-            actorEmail: SYSTEM_ACTOR_EMAIL,
-            action: "acceptance_alert",
-            entityType: "order",
-            entityId: orderId,
-          },
+          data: systemAuditData(storeId, orderId, "acceptance_alert"),
         });
       });
     });

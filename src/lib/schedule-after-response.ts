@@ -10,10 +10,12 @@ function deliveryFailureLog(eventName: string, error: unknown): string {
 }
 
 /**
- * Runs work after the response when Next has a request scope (`after`),
- * so a serverless freeze cannot drop the email. Outside a request
- * (auth.handler in vitest) the task still starts without being awaited.
- * Rejections are logged and never include an email address.
+ * Starts the task at once and does not await it, so the caller (checkout,
+ * a magic-link email) returns while the task is still pending. With a
+ * request scope, `after` keeps the invocation alive until it settles, so a
+ * serverless freeze cannot drop it. Outside a request (auth.handler in
+ * vitest) nothing waits for it. Rejections are logged and never include an
+ * email address.
  */
 export function scheduleAfterResponse(
   task: () => Promise<unknown>,

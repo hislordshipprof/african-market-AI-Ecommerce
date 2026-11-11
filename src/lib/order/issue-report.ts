@@ -4,7 +4,7 @@ import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { deliveryProofBucket, issuePhotoKey, uploadIssuePhoto } from "../r2";
 import { money } from "../format";
 import { prepareProofPhoto } from "./delivery-proof";
-import { evaluateOrderRefundState, submitRefund } from "./refund-requests";
+import { evaluateOrderRefundStateAfterCommit, submitRefund } from "./refund-requests";
 import { redactedErrorMessage } from "./staff-copy";
 
 export const ISSUE_TYPES = ["missing", "damaged", "wrong", "poor_freshness"] as const;
@@ -167,7 +167,7 @@ export async function submitIssueReport(
     await storeScoped(store.id).issueReport.update({ where: { id: issueId }, data: { state: "in_review" } });
     return { ok: true, state: "in_review", amountCents: issue.amountCents };
   }
-  await evaluateOrderRefundState(order.id);
+  await evaluateOrderRefundStateAfterCommit(order.id);
   // Stripe can answer the create as failed; the evaluation has then marked the issue.
   const settled = await storeScoped(store.id).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true, amountCents: true } });
   return { ok: true, state: settled.state as IssueState, amountCents: settled.amountCents };

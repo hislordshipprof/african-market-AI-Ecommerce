@@ -11,7 +11,7 @@ import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { FakeStripeError, fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -3006,6 +3006,67 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     });
     expect((released!.after as { alert: string }).alert).toBe("store_and_platform");
     expect(cancelledPayments.has(pi)).toBe(true);
+  });
+
+  it("a seeded e2e hold is registered before open refund requests are reconciled", async () => {
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    resetFakeStripe();
+    try {
+      const order = await createTestOrder("CANCELLING");
+      const pi = `pi_seed_${order.id}`;
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { paymentIntentId: pi } });
+        await tx.refundRequest.create({
+          data: {
+            storeId,
+            orderId: order.id,
+            paymentIntentId: pi,
+            key: `refund:${order.id}:1`,
+            amountCents: 100,
+            refundApplicationFee: false,
+            state: "UNKNOWN",
+          },
+        });
+      });
+      await expect(reconcileStuckOrder(storeId, order.id)).resolves.toBeDefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a hold release whose response is lost still writes capture_released on the next sweep", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: order.totalAuthorizedCents },
+      });
+    });
+    await seedFifthCapture(order.id);
+    setNextCaptureFailure(pi, 1);
+    const cancel = fakeStripeProvider.cancelPaymentIntent.bind(fakeStripeProvider);
+    vi.spyOn(fakeStripeProvider, "cancelPaymentIntent").mockImplementationOnce(async (id, key) => {
+      await cancel(id, key);
+      throw new FakeStripeError("api_error", "Internal server error", 500, "StripeAPIError");
+    });
+    try {
+      const first = await reconcileStuckOrder(storeId, order.id);
+      expect(first).toMatchObject({ ok: false, waiting: true });
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(cancelledPayments.has(pi)).toBe(true);
+
+    const second = await reconcileStuckOrder(storeId, order.id);
+    expect(second).toEqual({ ok: true, action: "finalized_cancel" });
+    expect((await storeScoped(storeId).order.findUnique({ where: { id: order.id } }))!.status).toBe("CANCELLED");
+    const released = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "capture_released" },
+    });
+    expect(released.map((row) => row.after)).toEqual([{ alert: "store_and_platform" }]);
   });
 
   it("settle stays pending when the fresh retrieve is neither succeeded nor canceled", async () => {

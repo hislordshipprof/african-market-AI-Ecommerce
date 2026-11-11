@@ -94,6 +94,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   });
 
   afterAll(async () => {
+    // A parallel platform-wide confirm-request run can alert on this file's low-confidence listing.
+    if (storeA) await storeScoped(storeA).copilotAlert.deleteMany({});
+    if (storeB) await storeScoped(storeB).copilotAlert.deleteMany({});
     if (storeA) await storeScoped(storeA).cart.deleteMany({});
     if (storeB) await storeScoped(storeB).cart.deleteMany({});
     if (storeA) await storeScoped(storeA).listing.deleteMany({});

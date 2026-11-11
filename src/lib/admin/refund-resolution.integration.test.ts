@@ -18,12 +18,18 @@ vi.mock("next/cache", () => ({
   revalidateTag: () => {},
 }));
 
+vi.mock("../inngest/notify", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../inngest/notify")>()),
+  scheduleOrderNotification: vi.fn(),
+}));
+
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { getURLFromRedirectError } from "next/dist/client/components/redirect";
 import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
 import { authPrisma, findStuckTransitionalOrders, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { recordReconcileResult } from "../inngest/functions";
+import { scheduleOrderNotification } from "../inngest/notify";
 import { setStripeProvider } from "../stripe";
 import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundCreatedLate, setRefundStatus } from "../stripe/fake";
 import { RefundNotCreatedError } from "../stripe/errors";
@@ -223,6 +229,62 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     await authPrisma.user.deleteMany({
       where: { email: { in: [emailAdmin, emailAdmin2, emailOwner, emailBare] } },
     });
+  });
+
+  it("the refund queue reads Stripe for several orders at once, within a bound, with each order's reads together", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Queue concurrency" },
+    });
+    const pis = new Set<string>();
+    for (let i = 0; i < 10; i += 1) {
+      const pi = `pi_queue_${i}_${RUN}`;
+      pis.add(pi);
+      setAuthorizedAmount(pi, 1000);
+      await fakeStripeProvider.capturePaymentIntent(pi, 1000, `queue-cap-${i}`);
+      await storeScoped(storeAId).order.create({
+        data: {
+          storeId: storeAId,
+          number: 28500 + i,
+          customerId: customer.id,
+          status: "REFUND_FAILED",
+          fulfillment: "pickup",
+          subtotalCents: 1000,
+          bufferCents: 0,
+          totalAuthorizedCents: 1000,
+          totalCents: 1000,
+          paymentIntentId: pi,
+        },
+      });
+    }
+    let inFlight = 0;
+    let peak = 0;
+    const track = <A extends unknown[], R>(original: (...args: A) => Promise<R>) =>
+      async (...args: A): Promise<R> => {
+        if (!pis.has(args[0] as string)) return original(...args);
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          return await original(...args);
+        } finally {
+          inFlight -= 1;
+        }
+      };
+    const retrieve = fakeStripeProvider.retrievePaymentIntent.bind(fakeStripeProvider);
+    const list = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    vi.spyOn(fakeStripeProvider, "retrievePaymentIntent").mockImplementation(track(retrieve));
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(track(list));
+    try {
+      const rows = (await listRefundFailedOrders()).filter((row) => row.orderNumber >= 28500 && row.orderNumber < 28510);
+      expect(rows.map((row) => row.capturedCents)).toEqual(Array(10).fill(1000));
+    } finally {
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+      await storeScoped(storeAId).order.deleteMany({ where: { paymentIntentId: { in: [...pis] } } });
+    }
+    expect(peak).toBeGreaterThan(2);
+    expect(peak).toBeLessThanOrEqual(8);
   });
 
   it("the amount owed is captured minus succeeded refunds", async () => {
@@ -1373,6 +1435,82 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     return { entered: enteredGate, release };
   }
 
+  it("resolving reads Stripe without holding the store lock, and a Stripe error after the commit keeps the resolution", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Lock-free read" },
+    });
+    const pi = `pi_lock_free_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "lock-free-cap");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "lock-free-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 28520,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const storeLockHeld = () =>
+      authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        try {
+          await tx.$queryRaw`SELECT id FROM stores WHERE id = ${storeAId} FOR UPDATE NOWAIT`;
+          return false;
+        } catch {
+          return true;
+        }
+      });
+    const original = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    const lockedReads: boolean[] = [];
+    let readsAfterCommit = 0;
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id: string) => {
+      if (id === pi) {
+        const status = (await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status;
+        // After the commit the shared refund evaluation re-reads under the lock, as the webhook does.
+        if (status === "REFUND_FAILED") lockedReads.push(await storeLockHeld());
+        else {
+          readsAfterCommit += 1;
+          throw Object.assign(new Error("Stripe 500"), { code: "api_error" });
+        }
+      }
+      return original(id);
+    });
+    vi.mocked(scheduleOrderNotification).mockClear();
+    let scheduled: unknown[][] = [];
+    try {
+      expect(await resolveRefundFailed(order.id, "Paid by Zelle", 1000, 1000)).toEqual({ ok: true });
+      scheduled = [...vi.mocked(scheduleOrderNotification).mock.calls];
+    } finally {
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
+    expect(lockedReads.length).toBeGreaterThan(0);
+    expect(lockedReads).not.toContain(true);
+    expect(readsAfterCommit).toBe(1);
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+    expect(await storeScoped(storeAId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+    expect(scheduled).toEqual([[storeAId, order.id, "cancelled"]]);
+    // The baseline is stored, so the next evaluation (webhook or sweep) still alerts on a refund that moved.
+    await fakeStripeProvider.refundPayment(pi, 1000, "lock-free-late");
+    await evaluateOrderRefundState(order.id);
+    const late = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_after_manual_resolution" },
+    });
+    expect(late?.after).toMatchObject({ overpaidCents: 1000, alert: "store_and_platform" });
+  });
+
   it("a counted refund reversed between the resolution snapshot and commit is refused", async () => {
     asAdmin(cookiesAdmin);
     const customer = await storeScoped(storeAId).customer.create({
@@ -1421,6 +1559,59 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: order.id, action: "refund_resolved_manually" },
     })).toBeNull();
+  });
+
+  it("a counted refund reversed after the resolve reads Stripe still raises the underpayment alert", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Reversed mid resolve" },
+    });
+    const pi = `pi_mid_reverse_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "mid-reverse-cap");
+    const counted = await fakeStripeProvider.refundPayment(pi, 400, "mid-reverse-ok");
+    const failed = await fakeStripeProvider.refundPayment(pi, 600, "mid-reverse-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26631,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const original = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    let calls = 0;
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id: string) => {
+      const live = await original(id);
+      if (id !== pi) return live;
+      calls += 1;
+      if (calls === 2) {
+        // The refund fails and its webhook evaluates while the resolve still holds the stale list.
+        setRefundStatus(counted.refundId, "failed");
+        await evaluateOrderRefundState(order.id);
+      }
+      return live;
+    });
+    try {
+      expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle", 600, 600)).toEqual({ ok: true });
+    } finally {
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+    const alert = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_reversed_after_resolution" },
+    });
+    expect(alert?.after).toMatchObject({ underpaidCents: 400, alert: "store_and_platform" });
   });
 
   it("a refund succeeding between the resolution snapshot and commit is refused", async () => {
