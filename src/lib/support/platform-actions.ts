@@ -18,6 +18,7 @@ export type EscalatedThread = {
   state: string;
   escalationReason: string | null;
   escalatedAt: string;
+  ageMinutes: number;
   messages: (ThreadMessage & { senderName: string | null })[];
 };
 
@@ -47,6 +48,7 @@ export async function listEscalatedThreads(): Promise<EscalatedThread[]> {
       },
     }),
   );
+  const now = Date.now();
   return threads
     .map((t) => ({
       id: t.id,
@@ -57,6 +59,7 @@ export async function listEscalatedThreads(): Promise<EscalatedThread[]> {
       state: t.state,
       escalationReason: t.escalationReason,
       escalatedAt: t.escalatedAt!.toISOString(),
+      ageMinutes: Math.max(0, Math.floor((now - t.escalatedAt!.getTime()) / 60_000)),
       messages: t.messages.map((m) => ({
         id: m.id,
         sender: m.sender as ThreadMessage["sender"],

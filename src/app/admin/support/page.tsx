@@ -9,8 +9,7 @@ const SENDER_LABEL: Record<string, string> = { customer: "Customer", store: "Sto
 const when = (iso: string, timeZone: string) =>
   new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone }).format(new Date(iso));
 
-function age(iso: string, now: number): string {
-  const minutes = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
+function age(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   return hours < 48 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
@@ -18,7 +17,6 @@ function age(iso: string, now: number): string {
 
 export default async function SupportQueuePage() {
   const threads = await listEscalatedThreads();
-  const now = Date.now();
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -46,7 +44,7 @@ export default async function SupportQueuePage() {
                 <span className="text-foreground">Order #{thread.orderNumber}</span>
                 <span className="text-muted-foreground">{TOPIC_LABEL[thread.topic] ?? thread.topic}</span>
                 <span className="text-muted-foreground">{REASON_LABEL[thread.escalationReason ?? ""] ?? "Escalated"}</span>
-                <span className="text-muted-foreground tabular-nums">{age(thread.escalatedAt, now)} ago</span>
+                <span className="text-muted-foreground tabular-nums">{age(thread.ageMinutes)} ago</span>
                 <span className={thread.state === "escalated" ? "font-medium text-destructive" : "text-muted-foreground"}>
                   {thread.state === "escalated" ? "Waiting" : "Answered"}
                 </span>
