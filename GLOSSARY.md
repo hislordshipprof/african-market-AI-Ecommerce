@@ -118,6 +118,12 @@ _Avoid_: Store AI, store assistant
 **Daily digest**:
 The Store copilot's end-of-day summary for a store owner.
 
+**Copilot alert**:
+A stock alert the Store copilot raises for the store owner: sold out, running low (a counted listing at 5 or fewer, or a status listing marked low), or an order that needs a low or ask-store item. Owners only; at most 2 pushes per store per hour.
+
+**Confirm-request**:
+A Copilot alert asking the owner to confirm a listing whose confidence fell below 0.3. The owner answers with one tap ("Still have N", "Sold out" or "In stock"), which recounts the listing at confidence 1. It is not a Stock proposal and does not expire.
+
 ## Ordering and fulfillment
 
 **Order**:

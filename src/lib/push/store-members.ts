@@ -8,11 +8,13 @@ let warnedNoKeys = false;
 /**
  * One push to each current member's subscribed device in this store. The device groups
  * notifications by `message.tag`. Never throws for a push failure; a gone subscription is deleted.
+ * `roles` limits the push to members with one of those roles.
  */
 export async function pushToStoreMembers(
   storeId: string,
   message: PushMessage,
   env: Record<string, string | undefined> = process.env,
+  options: { roles?: string[] } = {},
 ): Promise<void> {
   const sender = pushSender(env);
   if (!sender) {
@@ -28,7 +30,10 @@ export async function pushToStoreMembers(
   if (subscriptions.length === 0) return;
 
   const members = await scoped.storeMembership.findMany({
-    where: { userId: { in: [...new Set(subscriptions.map((s) => s.userId))] } },
+    where: {
+      userId: { in: [...new Set(subscriptions.map((s) => s.userId))] },
+      ...(options.roles ? { role: { in: options.roles } } : {}),
+    },
     select: { userId: true },
   });
   const memberIds = new Set(members.map((m) => m.userId));

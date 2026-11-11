@@ -65,6 +65,7 @@ model Store {
   copilotConversations CopilotConversation[]
   copilotClientMessages CopilotClientMessage[]
   stockProposals StockProposal[]
+  copilotAlerts  CopilotAlert[]
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
   pushSubscriptions PushSubscription[]
@@ -117,6 +118,7 @@ model User {
   supportMessages          SupportMessage[]
   copilotConversations     CopilotConversation[]
   stockProposalDecisions   StockProposal[] @relation("StockProposalDecision")
+  copilotAlertResolutions  CopilotAlert[]  @relation("CopilotAlertResolution")
 
   @@map("users")
 }
@@ -498,6 +500,30 @@ model StockProposal {
   @@index([listingId])
   @@index([decidedById])
   @@map("stock_proposals")
+}
+
+/// A stock alert or confirm-request for the owner. No foreign key to listings or orders: RLS checks them.
+model CopilotAlert {
+  id           String    @id @default(cuid())
+  storeId      String    @map("store_id")
+  kind         String
+  listingId    String    @map("listing_id")
+  orderId      String?   @map("order_id")
+  state        String    @default("open")
+  dedupeKey    String    @map("dedupe_key")
+  pushedAt     DateTime? @map("pushed_at")
+  resolvedById String?   @map("resolved_by_id")
+  resolvedAt   DateTime? @map("resolved_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  store      Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  resolvedBy User? @relation("CopilotAlertResolution", fields: [resolvedById], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, dedupeKey])
+  @@index([storeId, state, pushedAt])
+  @@index([storeId, listingId, state])
+  @@index([resolvedById])
+  @@map("copilot_alerts")
 }
 
 model StoreBanner {

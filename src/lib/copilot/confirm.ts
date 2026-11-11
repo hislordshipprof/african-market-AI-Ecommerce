@@ -55,8 +55,77 @@ function fits(kind: string, stockMode: string): boolean {
   return stockMode === "counted";
 }
 
+type StockTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
+
+/**
+ * The copilot's one stock write, under the caller's store and listing locks: a stock event,
+ * the new qty or status at confidence 1, and a `listing.stock_change` audit row naming the owner.
+ */
+async function writeStockChange(
+  tx: StockTx,
+  storeId: string,
+  listing: ListingRow,
+  change: { kind: ProposalKind; quantity: number; statusValue: string | null },
+  actor: CopilotActor,
+  idempotencyKey: string,
+  source: Record<string, string>,
+  now: Date,
+) {
+  const { kind, quantity } = change;
+  const liveQty = listing.qty ?? 0;
+  let nextQty = listing.qty;
+  let delta = 0;
+  if (kind === "restock") {
+    nextQty = liveQty + quantity;
+    delta = quantity;
+  } else if (kind === "counter_sale") {
+    nextQty = Math.max(0, liveQty - quantity);
+    delta = -quantity;
+  } else if (kind === "recount") {
+    nextQty = quantity;
+    delta = quantity - liveQty;
+  }
+
+  await tx.stockEvent.create({
+    data: {
+      storeId,
+      listingId: listing.id,
+      type: EVENT_TYPE[kind],
+      delta,
+      actorId: actor.id,
+      idempotencyKey,
+      createdAt: now,
+    },
+  });
+  const updated = await tx.listing.update({
+    where: { id: listing.id },
+    data: {
+      ...(kind === "set_status" ? { status: change.statusValue } : { qty: nextQty }),
+      confidence: 1,
+      confidenceUpdatedAt: now,
+    },
+  });
+  const beforeStock = listing.stockMode === "counted" ? { qty: listing.qty } : { status: listing.status };
+  const afterStock = kind === "set_status"
+    ? { status: updated.status, source: "copilot", ...source }
+    : { qty: updated.qty, source: "copilot", ...source };
+  await tx.auditLog.create({
+    data: {
+      storeId,
+      actorId: actor.id,
+      actorEmail: actor.email,
+      action: "listing.stock_change",
+      entityType: "listing",
+      entityId: listing.id,
+      before: beforeStock,
+      after: afterStock,
+    },
+  });
+  return updated;
+}
+
 async function confirmedResult(
-  tx: Parameters<Parameters<typeof storeScopedTransaction>[1]>[0],
+  tx: StockTx,
   proposal: ProposalRow,
   listing: ListingRow,
 ): Promise<ConfirmResult> {
@@ -128,58 +197,11 @@ export async function confirmProposal(storeId: string, proposalId: string, actor
         return { ok: false, code: "not_found" };
       }
 
-      let nextQty = listing.qty;
-      let nextStatus = listing.status;
-      let delta = 0;
-      if (kind === "restock") {
-        nextQty = liveQty + quantity;
-        delta = quantity;
-      } else if (kind === "counter_sale") {
-        nextQty = Math.max(0, liveQty - quantity);
-        delta = -quantity;
-      } else if (kind === "recount") {
-        nextQty = quantity;
-        delta = quantity - liveQty;
-      } else {
-        nextStatus = proposal.statusValue;
-        delta = 0;
-      }
-
-      await tx.stockEvent.create({
-        data: {
-          storeId,
-          listingId: listing.id,
-          type: EVENT_TYPE[kind],
-          delta,
-          actorId: actor.id,
-          idempotencyKey: `copilot:${proposalId}`,
-          createdAt: now,
-        },
-      });
-      const updated = await tx.listing.update({
-        where: { id: listing.id },
-        data: {
-          ...(kind === "set_status" ? { status: nextStatus } : { qty: nextQty }),
-          confidence: 1,
-          confidenceUpdatedAt: now,
-        },
-      });
-      const beforeStock = listing.stockMode === "counted" ? { qty: listing.qty } : { status: listing.status };
-      const afterStock = kind === "set_status"
-        ? { status: updated.status, source: "copilot", proposalId }
-        : { qty: updated.qty, source: "copilot", proposalId };
-      await tx.auditLog.create({
-        data: {
-          storeId,
-          actorId: actor.id,
-          actorEmail: actor.email,
-          action: "listing.stock_change",
-          entityType: "listing",
-          entityId: listing.id,
-          before: beforeStock,
-          after: afterStock,
-        },
-      });
+      const updated = await writeStockChange(tx, storeId, listing, {
+        kind,
+        quantity,
+        statusValue: proposal.statusValue,
+      }, actor, `copilot:${proposalId}`, { proposalId }, now);
 
       const decided = await tx.stockProposal.findUniqueOrThrow({ where: { id: proposalId } });
       return {
@@ -243,5 +265,64 @@ export async function rejectProposal(storeId: string, proposalId: string, actor:
       },
     });
     return { ok: true };
+  }, WRITE_TRANSACTION);
+}
+
+export type AlertAnswer = { answer: "still_have"; qty: number } | { answer: "sold_out" } | { answer: "in_stock" };
+
+export type AnswerResult =
+  | { ok: true; listing: { qty: number | null; status: string | null } }
+  | { ok: false; code: "not_found" | "stale" };
+
+/** "Still have N" and "Sold out" recount a counted listing; "Sold out" and "In stock" set a status listing. */
+function changeFor(answer: AlertAnswer, stockMode: string): { kind: ProposalKind; quantity: number; statusValue: string | null } | null {
+  if (stockMode === "counted") {
+    if (answer.answer === "still_have") return { kind: "recount", quantity: answer.qty, statusValue: null };
+    if (answer.answer === "sold_out") return { kind: "recount", quantity: 0, statusValue: null };
+    return null;
+  }
+  if (answer.answer === "sold_out") return { kind: "set_status", quantity: 0, statusValue: "out_of_stock" };
+  if (answer.answer === "in_stock") return { kind: "set_status", quantity: 0, statusValue: "in_stock" };
+  return null;
+}
+
+/**
+ * The owner's one-tap answer to an open alert. Writes through the same locked stock write as a
+ * proposal, with no StockProposal, then resolves this alert and every open alert on the listing.
+ * Callers authenticate the owner before this.
+ */
+export async function answerAlert(storeId: string, alertId: string, answer: AlertAnswer, actor: CopilotActor): Promise<AnswerResult> {
+  const peek = await storeScoped(storeId).copilotAlert.findUnique({
+    where: { id: alertId },
+    select: { listingId: true, state: true },
+  });
+  if (!peek || peek.state !== "open") return { ok: false, code: "not_found" };
+
+  return storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockListingRow(tx, peek.listingId);
+    const now = new Date();
+    const listing = await tx.listing.findUnique({
+      where: { id: peek.listingId },
+      include: { masterProduct: { select: { name: true } } },
+    });
+    if (!listing) return { ok: false, code: "not_found" };
+    const change = changeFor(answer, listing.stockMode);
+    if (!change) return { ok: false, code: "stale" };
+
+    const claimed = await txQuery<Array<{ id: string }>>(tx, Prisma.sql`
+      UPDATE copilot_alerts
+      SET state = 'resolved', resolved_by_id = ${actor.id}, resolved_at = ${now}
+      WHERE id = ${alertId} AND state = 'open'
+      RETURNING id
+    `);
+    if (claimed.length === 0) return { ok: false, code: "not_found" };
+
+    const updated = await writeStockChange(tx, storeId, listing, change, actor, `copilot-alert:${alertId}`, { alertId }, now);
+    await tx.copilotAlert.updateMany({
+      where: { listingId: listing.id, state: "open" },
+      data: { state: "resolved", resolvedById: actor.id, resolvedAt: now },
+    });
+    return { ok: true, listing: { qty: updated.qty, status: updated.status } };
   }, WRITE_TRANSACTION);
 }
