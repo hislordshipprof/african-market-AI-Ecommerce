@@ -1429,6 +1429,59 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     return { entered: enteredGate, release };
   }
 
+  it("resolving reads Stripe without holding the store lock", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Lock-free read" },
+    });
+    const pi = `pi_lock_free_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "lock-free-cap");
+    const failed = await fakeStripeProvider.refundPayment(pi, 1000, "lock-free-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 28520,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const storeLockHeld = () =>
+      authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        try {
+          await tx.$queryRaw`SELECT id FROM stores WHERE id = ${storeAId} FOR UPDATE NOWAIT`;
+          return false;
+        } catch {
+          return true;
+        }
+      });
+    const original = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    const lockedReads: boolean[] = [];
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id: string) => {
+      if (id === pi) lockedReads.push(await storeLockHeld());
+      return original(id);
+    });
+    try {
+      expect(await resolveRefundFailed(order.id, "Paid by Zelle", 1000, 1000)).toEqual({ ok: true });
+    } finally {
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
+    expect(lockedReads.length).toBeGreaterThan(0);
+    expect(lockedReads).not.toContain(true);
+  });
+
   it("a counted refund reversed between the resolution snapshot and commit is refused", async () => {
     asAdmin(cookiesAdmin);
     const customer = await storeScoped(storeAId).customer.create({

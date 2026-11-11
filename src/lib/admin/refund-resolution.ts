@@ -229,6 +229,16 @@ export async function resolveRefundFailed(
     .filter((row) => requestIsOpen(row))
     .map((row) => row.id)
     .sort();
+  // Read Stripe before taking the store lock (ADR-0014); the lock re-checks the order and its requests.
+  let fresh = observeRefunds([]);
+  if (order.paymentIntentId) {
+    try {
+      fresh = observeRefunds(await getStripeProvider().listRefunds(order.paymentIntentId));
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code !== "resource_missing") throw err;
+    }
+  }
 
   let notifyCancel = false;
   return storeScopedTransaction(order.storeId, async (tx) => {
@@ -237,15 +247,6 @@ export async function resolveRefundFailed(
     const current = await tx.order.findUnique({ where: { id: orderId } });
     if (!current || current.status !== "REFUND_FAILED") {
       return { ok: false as const, error: "already resolved" };
-    }
-    let fresh = observeRefunds([]);
-    if (current.paymentIntentId) {
-      try {
-        fresh = observeRefunds(await getStripeProvider().listRefunds(current.paymentIntentId));
-      } catch (err) {
-        const code = (err as { code?: string }).code;
-        if (code !== "resource_missing") throw err;
-      }
     }
     const openNow = (await tx.refundRequest.findMany({ where: { orderId } }))
       .filter((row) => requestIsOpen(row))
