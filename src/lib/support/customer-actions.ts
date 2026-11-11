@@ -7,11 +7,8 @@ import { revalidateTag } from "next/cache";
 import { getStore } from "../get-store";
 import { clientIp } from "../assistant/client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
-import { scheduleAfterResponse } from "../schedule-after-response";
 import { parseInput } from "../security/parse-input";
-import { pushToStoreMembers } from "../push/store-members";
-import { messageBodySchema, orderMessagesTag, postCustomerMessage, SUPPORT_TOPICS } from "./thread";
-import { scheduleSlaTimer } from "./escalation";
+import { announceCustomerMessage, messageBodySchema, orderMessagesTag, postCustomerMessage, SUPPORT_TOPICS } from "./thread";
 
 const HOUR_MS = 60 * 60 * 1000;
 const PER_TOKEN_PER_HOUR = 30;
@@ -44,15 +41,6 @@ export async function sendOrderMessageAction(input: unknown): Promise<SendResult
   if (!posted) return { ok: false, error: "We couldn't find this order." };
 
   revalidateTag(orderMessagesTag(token), { expire: 0 });
-  if (posted.topic === "order") scheduleSlaTimer(store.id, posted.messageId);
-  scheduleAfterResponse(
-    () => pushToStoreMembers(store.id, {
-      title: "New message",
-      body: `Order #${posted.orderNumber}: ${body.slice(0, 120)}`,
-      url: `/store-admin/messages?store=${encodeURIComponent(store.slug)}&thread=${posted.threadId}`,
-      tag: `support-${posted.threadId}`,
-    }),
-    "support_push_failed",
-  );
+  announceCustomerMessage(store, posted, body);
   return { ok: true };
 }
