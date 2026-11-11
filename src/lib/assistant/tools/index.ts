@@ -37,7 +37,7 @@ export { toolInputSchemas } from "./schemas";
 export function assistantTools(ctx: AssistantContext) {
   return exactAssistantKeys({
     search_catalog: tool({
-      description: "Search this store's catalog.",
+      description: "Search this store's catalog. query is the product words only. pack is a size or pack the customer named, such as \"400 g tin\" or \"bag\". exclude is words the customer ruled out, such as onion. Match name or match synonym is a fit. Match near is not a fit on an explicit add. pack chooses the variant whose label shows it.",
       inputSchema: searchCatalogInput,
       execute: (input, options) => searchCatalog({ ...ctx, toolCallId: options.toolCallId }, input),
     }),

@@ -159,18 +159,13 @@ function addOutputAdded(output: unknown): boolean {
   });
 }
 
-/** Letters and digits, accents folded, with a plural folded onto its singular. */
-export function tokensOf(text: string): string[] {
+function tokensOf(text: string): string[] {
   const stripped = text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
   const spaced = stripped.replace(/[^\p{L}\p{N}]+/gu, " ").trim();
   if (!spaced) return [];
-  return spaced.split(/\s+/).map(foldPlural);
-}
-
-function foldPlural(token: string): string {
-  if (/^[\p{L}]{6,}$/u.test(token) && token.endsWith("toes")) return token.slice(0, -2);
-  if (/^[\p{L}]{4,}$/u.test(token) && token.endsWith("s")) return token.slice(0, -1);
-  return token;
+  return spaced.split(/\s+/).map((token) => (
+    /^[\p{L}]{4,}$/u.test(token) && token.endsWith("s") ? token.slice(0, -1) : token
+  ));
 }
 
 function containsRun(haystack: readonly string[], needle: readonly string[]): boolean {

@@ -7,7 +7,15 @@ const listingIds = (max: number) =>
   z.array(z.string().min(1)).min(1).max(max);
 
 export const searchCatalogInput = z.object({
-  query: z.string().min(1).max(100),
+  query: z.string().min(1).max(100).describe(
+    "Product words only. Leave out command words, a quantity, a size, and a pack.",
+  ),
+  pack: z.string().min(1).max(100).optional().describe(
+    "The size or pack the customer named, such as 400 g tin or bag.",
+  ),
+  exclude: z.string().min(1).max(100).optional().describe(
+    "Words the customer excluded, such as onion. A listing whose name matches them is left out.",
+  ),
   limit: z.number().int().min(1).max(10).default(8),
 });
 

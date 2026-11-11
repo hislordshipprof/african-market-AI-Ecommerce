@@ -16,9 +16,9 @@ import {
 } from "../../cart/service";
 import { storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
-import { isAcceptanceLed, namesForListing, textNamesProduct, tokensOf, type AcceptanceTurn } from "../shown";
+import { isAcceptanceLed, namesForListing, textNamesProduct, type AcceptanceTurn } from "../shown";
 import { listingImage } from "../../storefront/images";
-import { searchListings } from "../../storefront/service";
+import { searchCatalogHits } from "../../storefront/service";
 import { stockBadge } from "../../storefront/stock-badge";
 import { mayBeUnavailable, type StockFacts } from "./availability";
 import {
@@ -137,57 +137,7 @@ function factsOf(listing: StockFacts): StockFacts {
   };
 }
 
-const MATCH_COMMAND_WORDS = new Set(["add", "some", "a", "an", "the", "please", "of", "and"]);
-const MATCH_PACK_WORDS = new Set(["tin", "can", "bag", "pack", "packet", "bottle", "jar", "sachet", "carton", "crate"]);
-const MATCH_SIZE_UNITS = new Set(["g", "kg", "lb", "lbs", "oz", "ml", "l", "litre", "liter", "litres", "liters"]);
-const MATCH_JOINED_SIZE = /^\d+(?:\.\d+)?(?:g|kg|lb|lbs|oz|ml|l)$/;
 const MATCH_RANK = { name: 0, synonym: 1, near: 2 } as const;
-
-/** Product words of a request or a catalog term. Sizes, packs, and exclusions are not words. */
-function productWords(value: string): string[] {
-  const withoutChip = value.replace(/\([^)]*\)/g, " ");
-  const head = withoutChip.split(/\b(?:without|no)\b/i)[0] ?? "";
-  const tokens = tokensOf(head);
-  const words: string[] = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index] ?? "";
-    if (MATCH_COMMAND_WORDS.has(token) || MATCH_PACK_WORDS.has(token) || MATCH_JOINED_SIZE.test(token)) continue;
-    if (/^\d+$/.test(token)) {
-      if (MATCH_SIZE_UNITS.has(tokens[index + 1] ?? "")) index += 1;
-      continue;
-    }
-    if (MATCH_SIZE_UNITS.has(token)) continue;
-    words.push(token);
-  }
-  return words;
-}
-
-function sameWordSet(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((word) => rightSet.has(word));
-}
-
-/** How a search hit relates to the query. synonym is a catalog local name; near is not an identity. */
-export function catalogMatch(
-  query: string,
-  name: string,
-  altName: string | undefined,
-  synonymTerms: string[],
-  variantLabels: string[] = [],
-): { match: "name" | "synonym" | "near"; matchedTerm?: string } {
-  const wanted = productWords(query);
-  if (wanted.length === 0) return { match: "near" };
-  const titleWords = new Set(tokensOf([name, altName ?? "", ...variantLabels].join(" ")));
-  if (wanted.every((word) => titleWords.has(word))) return { match: "name" };
-  let matchedTerm: string | undefined;
-  for (const term of synonymTerms) {
-    const termWords = productWords(term);
-    if (termWords.length === 0 || !sameWordSet(wanted, termWords)) continue;
-    if (!matchedTerm || term.length > matchedTerm.length) matchedTerm = term;
-  }
-  return matchedTerm ? { match: "synonym", matchedTerm } : { match: "near" };
-}
 
 type CatalogItem = {
   listingId: string;
@@ -206,41 +156,20 @@ export async function searchCatalog(ctx: AssistantContext, input: unknown): Prom
   const parsed = parseToolInput(searchCatalogInput, input);
   const query = parsed.query.trim();
   if (!query) return recordRead(ctx, "search_catalog", parsed, { ok: true, items: [] });
-  const found = await searchListings(ctx.storeId, query);
-  const details = found.length === 0
-    ? []
-    : await storeScoped(ctx.storeId).listing.findMany({
-      where: { id: { in: found.map((item) => item.id) } },
-      select: {
-        id: true,
-        variants: { select: { label: true } },
-        masterProduct: { select: { synonyms: { select: { term: true } } } },
-      },
-    });
-  const byListing = new Map(details.map((listing) => [listing.id, listing]));
-  const items: CatalogItem[] = found.map((item) => {
-    const detail = byListing.get(item.id);
-    const matched = catalogMatch(
-      query,
-      item.name,
-      item.altName,
-      detail?.masterProduct?.synonyms.map((synonym) => synonym.term) ?? [],
-      detail?.variants.map((variant) => variant.label) ?? [],
-    );
-    return {
-      listingId: item.id,
-      name: item.name,
-      ...(item.altName ? { altName: item.altName } : {}),
-      variantId: item.variantId ?? null,
-      packLabel: item.packLabel ?? "Each",
-      priceCents: item.price,
-      imageUrl: item.imageUrl ?? null,
-      mayBeUnavailable: item.badge !== "in-stock",
-      badge: item.badge,
-      match: matched.match,
-      ...(matched.matchedTerm ? { matchedTerm: matched.matchedTerm } : {}),
-    };
-  });
+  const found = await searchCatalogHits(ctx.storeId, query, parsed.exclude?.trim() ?? "");
+  const items: CatalogItem[] = found.map((item) => ({
+    listingId: item.id,
+    name: item.name,
+    ...(item.altName ? { altName: item.altName } : {}),
+    variantId: item.variantId ?? null,
+    packLabel: item.packLabel ?? "Each",
+    priceCents: item.price,
+    imageUrl: item.imageUrl ?? null,
+    mayBeUnavailable: item.badge !== "in-stock",
+    badge: item.badge,
+    match: item.match,
+    ...(item.matchedTerm ? { matchedTerm: item.matchedTerm } : {}),
+  }));
   if (items.some((item) => item.match === "name")) {
     for (const item of items) {
       if (item.match !== "synonym") continue;

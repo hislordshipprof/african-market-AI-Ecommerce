@@ -7,7 +7,6 @@ import { addLine } from "../../cart/service";
 import { platformAdmin, storeScoped } from "../../db";
 import {
   addToCart,
-  catalogMatch,
   checkAvailability,
   getCartSummary,
   offerChoices,
@@ -664,30 +663,49 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
 
   it("search keeps plural, script, pack, and near rows, and a name fit beats a synonym", async () => {
     const suffix = randomUUID().slice(0, 8);
-    expect(catalogMatch("star", "Maggi cubes", undefined, [], ["star pack"])).toMatchObject({ match: "name" });
-    const rows = [
-      ["yams", `White yam ${suffix}`, undefined, "name"],
-      ["tomatoes", `Fresh tomato ${suffix}`, undefined, "name"],
-      ["maggi cube", `Maggi Star seasoning cubes ${suffix}`, undefined, "name"],
-      ["chocolat indigene", `chocolat indigène ${suffix}`, undefined, "name"],
-      ["bag of rice", `Rice ${suffix}`, undefined, "name"],
-      ["Gino tomato paste 400 g", `Gino tomato paste ${suffix}`, "400g tin", "name"],
-      [`Gino tomato paste ${suffix} (70g tin)`, `Gino tomato paste ${suffix}`, "70g tin", "name"],
-      ["drinks", `Zobo drink ${suffix}`, undefined, "name"],
-      ["onion", `Red onions ${suffix}`, undefined, "name"],
-    ] as const;
-    for (const [query, name, label, match] of rows) {
+    const rows: Array<{ query: string; name: string; pack?: string; label?: string; match: string; bare?: boolean }> = [
+      { query: "yams", name: `White yam ${suffix}`, match: "name" },
+      { query: "tomatoes", name: `Fresh tomato ${suffix}`, match: "name" },
+      { query: "maggi cube", name: `Maggi Star seasoning cubes ${suffix}`, match: "name" },
+      { query: "chocolat indigene", name: `chocolat indigène ${suffix}`, match: "name" },
+      { query: "rice", name: `Rice ${suffix}`, pack: "bag", match: "name" },
+      { query: "Gino tomato paste", name: `Gino tomato paste ${suffix}`, pack: "400 g", label: "400g tin", match: "name" },
+      { query: "Gino tomato paste", name: `Gino tomato paste ${suffix}`, pack: "70g tin", label: "70g tin", match: "name" },
+      { query: "drinks", name: `Zobo drink ${suffix}`, match: "name" },
+      { query: "onion", name: `Red onions ${suffix}`, match: "name" },
+      { query: "star", name: `Maggi cubes ${suffix}`, label: "star pack", match: "name", bare: true },
+    ];
+    for (const row of rows) {
       const item = await makeListing(storeA, {
         name: "ignored",
         customName: null,
-        master: { name, imageUrl: null },
+        master: { name: row.name, imageUrl: null },
         price: 450,
-        ...(label ? { label } : {}),
+        ...(row.label ? { label: row.label } : {}),
       });
-      const found = await searchCatalog(ctx(), { query: `${query} ${suffix}` });
-      const hit = searchItems(found).find((row) => row.listingId === item.listingId);
-      expect(hit?.match, `${query} ${suffix}`).toBe(match);
+      const found = await searchCatalog(ctx(), {
+        query: row.bare ? row.query : `${row.query} ${suffix}`,
+        ...(row.pack ? { pack: row.pack } : {}),
+      });
+      const hit = searchItems(found).find((itemRow) => itemRow.listingId === item.listingId);
+      expect(hit?.match, `${row.query} ${suffix}`).toBe(row.match);
     }
+    const plain = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Plain tomato paste ${suffix}`, imageUrl: null },
+      price: 450,
+    });
+    const onion = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Tomato paste with onion ${suffix}`, imageUrl: null },
+      price: 500,
+    });
+    const excluded = await searchCatalog(ctx(), { query: `tomato paste ${suffix}`, exclude: "onion" });
+    const excludedIds = searchItems(excluded).map((row) => row.listingId);
+    expect(excludedIds).toContain(plain.listingId);
+    expect(excludedIds).not.toContain(onion.listingId);
     const berbere = await makeListing(storeA, {
       name: "ignored",
       customName: null,
