@@ -32,6 +32,7 @@ model Store {
   autoAcceptOrders     Boolean  @default(false) @map("auto_accept_orders")
   autoRefundLimitCents    Int      @default(2500) @map("auto_refund_limit_cents")
   supportSlaMinutes       Int      @default(30) @map("support_sla_minutes")
+  digestHour              Int      @default(20) @map("digest_hour")
   stripeAccountId        String?  @unique @map("stripe_account_id")
   stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
   createdAt              DateTime @default(now()) @map("created_at")
@@ -66,6 +67,7 @@ model Store {
   copilotClientMessages CopilotClientMessage[]
   stockProposals StockProposal[]
   copilotAlerts  CopilotAlert[]
+  copilotDigests CopilotDigest[]
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
   pushSubscriptions PushSubscription[]
@@ -524,6 +526,19 @@ model CopilotAlert {
   @@index([storeId, listingId, state])
   @@index([resolvedById])
   @@map("copilot_alerts")
+}
+
+/// One per store per local day, claimed before the digest email goes out.
+model CopilotDigest {
+  id        String   @id @default(cuid())
+  storeId   String   @map("store_id")
+  localDate String   @map("local_date")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, localDate])
+  @@map("copilot_digests")
 }
 
 model StoreBanner {

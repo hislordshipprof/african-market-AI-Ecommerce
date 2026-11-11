@@ -15,6 +15,7 @@ import { sendNewOrderPush } from "../push/new-order";
 import { slotStart } from "../admin/orders-to-check-query";
 import { supportSlaEscalation } from "../support/escalation";
 import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
+import { copilotDailyDigest } from "../copilot/digest";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -411,4 +412,5 @@ export const inngestFunctions = [
   sendCustomerNotification,
   supportSlaEscalation,
   copilotOrderStockAlerts,
+  copilotDailyDigest,
 ];
