@@ -1,66 +1,91 @@
-import { afterAll, describe, expect, it } from "vitest";
-import { PrismaClient } from "@prisma/client";
-import { testPrismaClient } from "@/lib/test-prisma";
-import { storeScoped } from "../db";
-import { sendOrderAuthorized } from "./send";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { platformAdmin, platformAdminTransaction, storeScoped } from "../db";
+import { placeOrder, computeQuote } from "../checkout/service";
+import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
 
 const enabled = process.env.INNGEST_DEV_SMOKE === "1";
 const devUrl = process.env.INNGEST_DEV_URL ?? "http://127.0.0.1:8288";
 const SWEEP_SLUG = "african-markets-order/sweep-orphaned-authorized";
+const TIMERS = [
+  { slug: "african-markets-order/acceptance-alert", name: "alert" },
+  { slug: "african-markets-order/auto-cancel", name: "cancel" },
+];
 
 /**
- * Opt-in: start the app with INNGEST_DEV=1, then
+ * Opt-in: start the app with INNGEST_DEV=1 and INNGEST_BASE_URL at the Dev Server, then
  * `pnpm dlx inngest-cli@latest dev --no-discovery --host 127.0.0.1 --port 8288 -u http://localhost:3100/api/inngest`.
  * CLI 1.49 answers runs through POST /v0/gql. GET /v1/runs is 404.
- * Run with INNGEST_DEV=1 INNGEST_DEV_SMOKE=1.
+ * Run with INNGEST_DEV=1 INNGEST_DEV_SMOKE=1 (and INNGEST_BASE_URL / INNGEST_DEV_URL for another port).
+ * Checkout uses the local fake Stripe, so no keys are needed.
  */
 describe.skipIf(!enabled)("Inngest Dev Server smoke", () => {
-  const created: string[] = [];
-  let raw: PrismaClient | undefined;
+  const run = `t473-smoke-${Date.now()}`;
+  const contact = { name: "Ada", phone: "+15551234567", email: "ada@t473-smoke.test" };
+  let storeId = "";
+  let storeAccountId = "";
+  let variantId = "";
 
-  afterAll(async () => {
-    if (!raw || created.length === 0) return;
-    await raw.$transaction(async (tx) => {
-      await tx.$executeRaw`SET LOCAL ROLE app_user`;
-      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
-      await tx.order.deleteMany({ where: { id: { in: created } } });
-    });
-    await raw.$disconnect();
-  });
-
-  it("a real authorized order starts acceptance and auto-cancel on the Dev Server", async () => {
-    raw = testPrismaClient();
-    const store = await raw.store.findUniqueOrThrow({ where: { slug: "mama-ngozi" } });
-    const customer = await storeScoped(store.id).customer.findFirstOrThrow({ where: { storeId: store.id } });
-    const order = await storeScoped(store.id).order.create({
+  beforeAll(async () => {
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("CI", "true");
+    resetFakeCheckoutPayments();
+    const store = await platformAdmin.store.create({
       data: {
-        storeId: store.id,
-        number: 800000 + (Date.now() % 100000),
-        customerId: customer.id,
-        status: "AUTHORIZED",
-        fulfillment: "pickup",
-        subtotalCents: 1000,
-        bufferCents: 100,
-        totalAuthorizedCents: 1100,
-        totalCents: 1000,
-        paymentIntentId: `pi_smoke_${Date.now()}`,
+        slug: run,
+        name: "Smoke market",
+        stripeAccountId: `acct_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+        stripeOnboardingStatus: "complete",
+        pickupEnabled: true,
       },
     });
-    created.push(order.id);
+    storeId = store.id;
+    storeAccountId = store.stripeAccountId!;
+    const listing = await storeScoped(storeId).listing.create({
+      data: { storeId, customName: "Smoke pack", price: 500, stockMode: "unlimited" },
+    });
+    variantId = (await storeScoped(storeId).listingVariant.create({
+      data: { listingId: listing.id, label: "V", price: 500, weightG: 100 },
+    })).id;
+  });
 
-    await sendOrderAuthorized(store.id, order.id);
-    const sent = await storeScoped(store.id).order.findUnique({ where: { id: order.id } });
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    if (!storeId) return;
+    const scoped = storeScoped(storeId);
+    await scoped.order.deleteMany({ where: { storeId } });
+    await scoped.cart.deleteMany({ where: { storeId } });
+    await scoped.customer.deleteMany({ where: { storeId } });
+    await scoped.listing.deleteMany({ where: { storeId } });
+    await platformAdminTransaction(async (tx) => {
+      await tx.auditLog.deleteMany({ where: { storeId } });
+      await tx.store.delete({ where: { id: storeId } });
+    });
+    resetFakeCheckoutPayments();
+  });
+
+  it("placeOrder sends order/authorized and both timers plan and sleep on the Dev Server", async () => {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId } });
+    await storeScoped(storeId).cartLine.create({
+      data: { storeId, cartId: cart.id, variantId, qty: 1, swapRule: "exact_only" },
+    });
+    const hold = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], contact, "pickup").holdCents;
+    const pi = await getCheckoutPayments().createPaymentIntent({
+      amount: hold,
+      currency: "usd",
+      capture_method: "manual",
+      on_behalf_of: storeAccountId,
+      transfer_data: { destination: storeAccountId },
+      metadata: { store_id: storeId, cart_id: cart.id },
+    }, `smoke-${crypto.randomUUID()}`);
+    await getCheckoutPayments().confirmPaymentIntent(pi.id, { payment_method: "pm_card_visa" });
+
+    const placed = await placeOrder(storeId, 0, cart.id, contact, "pickup", null, null, pi.id, null);
+    const runs = await waitForSleepingTimers(`order-authorized-${placed.token}`);
+    const sent = await storeScoped(storeId).order.findUnique({ where: { id: placed.token } });
     expect(sent?.inngestEventSentAt).toBeTruthy();
-    const eventId = `order-authorized-${order.id}`;
-    const runs = await waitForRuns(eventId);
-    const slugs = runs.map((run) => run.slug);
-    expect(slugs).toEqual(
-      expect.arrayContaining([
-        "african-markets-order/acceptance-alert",
-        "african-markets-order/auto-cancel",
-      ]),
-    );
-    await Promise.all(runs.map((run) => cancelRun(run.id)));
+    expect(runs.map((timer) => timer.slug).sort()).toEqual(TIMERS.map((timer) => timer.slug).sort());
+    await Promise.all(runs.map((timer) => cancelRun(timer.id)));
   }, 40_000);
 
   it("an overlapping sweep is skipped", async () => {
@@ -73,21 +98,34 @@ describe.skipIf(!enabled)("Inngest Dev Server smoke", () => {
 
 type DevRun = { id: string; slug: string; status: string };
 
-async function waitForRuns(eventId: string): Promise<DevRun[]> {
+/** Each timer run has planned its deadline and is sleeping on it. */
+async function waitForSleepingTimers(eventId: string): Promise<DevRun[]> {
   const deadline = Date.now() + 25_000;
   let internalId = "";
   while (Date.now() < deadline) {
     internalId = internalId || (await eventInternalId(eventId));
     if (internalId) {
       const runs = (await listRuns("2026-01-01T00:00:00Z")).filter((run) => run.triggerIDs.includes(internalId));
-      const slugs = new Set(runs.map((run) => run.slug));
-      if (slugs.has("african-markets-order/acceptance-alert") && slugs.has("african-markets-order/auto-cancel")) {
-        return runs.map(({ id, slug, status }) => ({ id, slug, status }));
+      const sleeping = [];
+      for (const timer of TIMERS) {
+        const found = runs.find((run) => run.slug === timer.slug);
+        if (found && (await timerSleeping(found.id, timer.name))) sleeping.push(found);
       }
+      if (sleeping.length === TIMERS.length) return sleeping.map(({ id, slug, status }) => ({ id, slug, status }));
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error(`Dev Server did not start both runs for ${eventId} (internal ${internalId || "missing"})`);
+  throw new Error(`Dev Server timers did not plan and sleep for ${eventId} (internal ${internalId || "missing"})`);
+}
+
+async function timerSleeping(runId: string, name: string): Promise<boolean> {
+  const body = await gql<{ run: { trace: { childrenSpans: { name: string; status: string }[] } | null } }>(
+    `query ($runID: String!) { run(runID: $runID) { trace { childrenSpans { name status } } } }`,
+    { runID: runId },
+  );
+  const spans = body.run.trace?.childrenSpans ?? [];
+  const status = (span: string) => spans.find((child) => child.name === span)?.status;
+  return status(`${name}-plan-0`) === "COMPLETED" && status(`${name}-sleep-0`) === "WAITING";
 }
 
 async function waitForSweepRuns(from: string): Promise<DevRun[]> {
