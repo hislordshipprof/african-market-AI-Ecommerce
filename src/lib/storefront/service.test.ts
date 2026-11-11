@@ -262,26 +262,27 @@ describe.skipIf(!hasDb)("Storefront service (DB integration)", () => {
   });
 
   afterAll(async () => {
-    // Clean up in reverse order of dependencies
+    // Clean up in reverse order of dependencies. By store, not by this run's ids: the
+    // stores are upserted, so an interrupted run's rows would block the store delete.
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.storeCollectionListing.deleteMany({ where: { collectionId } }),
+      rawPrisma.storeCollectionListing.deleteMany({ where: { collection: { storeId: { in: [storeAId, storeBId] } } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.storeCollection.deleteMany({ where: { id: collectionId } }),
+      rawPrisma.storeCollection.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listingVariant.deleteMany({ where: { listingId: { in: [listingAId, listingBId, inactiveListingId, e2eListingId, frozenListingId, customOnlyListingId] } } }),
+      rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId: { in: [storeAId, storeBId] } } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
-      rawPrisma.listing.deleteMany({ where: { id: { in: [listingAId, listingBId, inactiveListingId, e2eListingId, frozenListingId, customOnlyListingId] } } }),
+      rawPrisma.listing.deleteMany({ where: { storeId: { in: [storeAId, storeBId] } } }),
     ]);
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
