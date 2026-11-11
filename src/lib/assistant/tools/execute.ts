@@ -79,7 +79,7 @@ function auditedInput(ctx: AssistantContext, input: unknown): unknown {
   };
 }
 
-async function recordRead(
+export async function recordRead(
   ctx: AssistantContext,
   tool: string,
   input: unknown,

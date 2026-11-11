@@ -13,10 +13,15 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
+import { checkDeliveryArea, forwardToStore, getOrderStatus, getStoreInfo } from "./store-questions";
 import {
   addToCartInput,
   cartSummaryInput,
   checkAvailabilityInput,
+  checkDeliveryAreaInput,
+  forwardToStoreInput,
+  getOrderStatusInput,
+  getStoreInfoInput,
   removeFromCartInput,
   searchCatalogInput,
   offerChoicesInput,
@@ -80,6 +85,26 @@ export function assistantTools(ctx: AssistantContext) {
       description: "Offer 2 to 6 products from this store and wait for the customer to pick one.",
       inputSchema: offerChoicesInput,
       execute: (input, options) => offerChoices({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    get_order_status: tool({
+      description: "Status of the signed-in customer's own orders at this store. Omit order_number for the newest.",
+      inputSchema: getOrderStatusInput,
+      execute: (input, options) => getOrderStatus({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    check_delivery_area: tool({
+      description: "Check whether a street address is inside this store's delivery area.",
+      inputSchema: checkDeliveryAreaInput,
+      execute: (input, options) => checkDeliveryArea({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    get_store_info: tool({
+      description: "This store's hours, minimum order, pickup, delivery, refund policy and story.",
+      inputSchema: getStoreInfoInput,
+      execute: (input, options) => getStoreInfo({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    forward_to_store: tool({
+      description: "Send a complaint or refund request about the customer's own order to the store's order messages.",
+      inputSchema: forwardToStoreInput,
+      execute: (input, options) => forwardToStore({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
   });
 }
