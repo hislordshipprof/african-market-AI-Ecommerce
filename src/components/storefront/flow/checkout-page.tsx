@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Clock, MapPin, ShoppingBag, Truck } from "lucide-react";
-import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
+import { loadStripe, type Appearance, type Stripe as StripeJs } from "@stripe/stripe-js";
 import {
   Elements,
   PaymentElement,
@@ -85,7 +85,7 @@ function StripeCardInput({ harness }: { harness?: boolean }) {
   }
   return (
     <div className={styles.stripeCard}>
-      <PaymentElement options={{ layout: "tabs" }} />
+      <PaymentElement options={{ layout: "tabs", wallets: { link: "never" } }} />
     </div>
   );
 }
@@ -747,6 +747,40 @@ export function CheckoutPage({
   );
 }
 
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+// Stripe renders in an iframe, so it needs the store's resolved colors, not CSS variables.
+function readStoreStripeAppearance(): Appearance {
+  const dark = window.matchMedia(DARK_QUERY).matches;
+  const css = getComputedStyle(document.body);
+  const token = (name: string) => css.getPropertyValue(`--color-${name}`).trim();
+  return {
+    theme: dark ? "night" : "stripe",
+    variables: {
+      colorPrimary: token("primary-text"),
+      colorBackground: token("surface"),
+      colorText: token("ink"),
+      colorTextSecondary: token("muted"),
+      borderRadius: "8px",
+    },
+    rules: {
+      ".Label": { color: token("ink") },
+      ...(dark ? { ".Input": { borderColor: token("line-strong") } } : {}),
+    },
+  };
+}
+
+function useStoreStripeAppearance(): Appearance {
+  const [appearance, setAppearance] = useState(readStoreStripeAppearance);
+  useEffect(() => {
+    const query = window.matchMedia(DARK_QUERY);
+    const update = () => setAppearance(readStoreStripeAppearance());
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return appearance;
+}
+
 function StripeWrapper({
   config,
   estimatedHoldCents,
@@ -761,6 +795,7 @@ function StripeWrapper({
     [config],
   );
   const amount = Math.max(estimatedHoldCents, 50);
+  const appearance = useStoreStripeAppearance();
   return (
     <Elements
       stripe={stripePromise}
@@ -770,10 +805,7 @@ function StripeWrapper({
         currency: "usd",
         captureMethod: "manual",
         onBehalfOf: config.onBehalfOf,
-        appearance: {
-          theme: "stripe",
-          variables: { colorPrimary: "#16a34a" },
-        },
+        appearance,
       }}
     >
       {children}

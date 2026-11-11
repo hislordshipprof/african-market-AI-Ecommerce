@@ -97,6 +97,7 @@ Auth: email magic link / password + optional SMS OTP for customers; store users 
 - If cart > 50 lb: delivery options become *Pickup*, *Store delivery* (if store has a driver), or *Scheduled van* (if offered).
 - **Store closed:** orders are still accepted. The customer sees when the store opens and an estimated ready time. The card is authorized now and the order joins the queue at opening. A store with no opening in the next 7 days, or whose next opening is more than 6 × 24 hours away, refuses the order before any card is held ("This store isn't taking orders right now"), because a card hold lasts 7 days. Scheduled delivery slots come later.
 - Payment: card / Apple Pay / Google Pay via Stripe. **Authorize at checkout (total + small buffer), capture the final amount after picking** (see §10). Auth window 7 days; pickup orders > 6 days out not allowed.
+- The Stripe Payment Element takes the store's theme: its colors are read from the store's tokens, with Stripe's `night` theme in dark mode, so labels stay AA in both schemes (#379). Stripe Link is turned off in the Payment Element, so our "Save this card for next time" is the only save offer.
 - Delivery instructions, apartment/gate code, leave-at-door toggle (disabled when frozen items present).
 - Tip (default 15%, editable), passed 100% to courier.
 
