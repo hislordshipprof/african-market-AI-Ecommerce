@@ -10,7 +10,7 @@ import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
-import { deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
+import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -1208,7 +1208,8 @@ function deliveredRejection(order: { status: string; fulfillment: string } | nul
 
 /**
  * Store delivery only, and only with a photo. The photo is uploaded first; if the
- * transition is then rejected, the order is unchanged and the object is unreferenced.
+ * transition is then rejected, the order is unchanged and the photo is deleted. A thrown
+ * transaction keeps it: the commit may have landed, and a lost proof is worse than an orphan.
  */
 export async function markDelivered(
   storeId: string,
@@ -1251,8 +1252,14 @@ export async function markDelivered(
     const notify = await recordOrderNotification(tx, storeId, orderId, "delivered");
     return { ok: true as const, notify };
   });
-  if (result.ok && result.notify) scheduleOrderNotification(storeId, orderId, "delivered");
-  return result.ok ? { ok: true } : { ok: false, error: result.error };
+  if (!result.ok) {
+    await deleteDeliveryProof(key).catch((err: unknown) => {
+      console.error(JSON.stringify({ event: "delivery_proof_orphaned", orderId, key, message: err instanceof Error ? err.message : "unknown" }));
+    });
+    return { ok: false, error: result.error };
+  }
+  if (result.notify) scheduleOrderNotification(storeId, orderId, "delivered");
+  return { ok: true };
 }
 
 export async function autoCancelOrder(

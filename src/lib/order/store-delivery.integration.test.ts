@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { PrismaClient } from "@prisma/client";
 
 const bucket = vi.hoisted(() => new Map<string, { body: Uint8Array; contentType: string; bucket: string }>());
+const afterPut = vi.hoisted(() => ({ run: null as null | (() => Promise<void>) }));
 vi.mock("@aws-sdk/client-s3", () => {
   class PutObjectCommand {
     constructor(readonly input: { Bucket: string; Key: string; Body: Uint8Array; ContentType: string }) {}
@@ -9,22 +10,31 @@ vi.mock("@aws-sdk/client-s3", () => {
   class GetObjectCommand {
     constructor(readonly input: { Key: string }) {}
   }
+  class DeleteObjectCommand {
+    constructor(readonly input: { Bucket: string; Key: string }) {}
+  }
   class S3Client {
-    async send(command: PutObjectCommand | GetObjectCommand) {
+    async send(command: PutObjectCommand | GetObjectCommand | DeleteObjectCommand) {
       if (command instanceof PutObjectCommand) {
         bucket.set(command.input.Key, { body: command.input.Body, contentType: command.input.ContentType, bucket: command.input.Bucket });
+        await afterPut.run?.();
+        return {};
+      }
+      if (command instanceof DeleteObjectCommand) {
+        if (bucket.get(command.input.Key)?.bucket !== command.input.Bucket) throw new Error("NoSuchKey");
+        bucket.delete(command.input.Key);
         return {};
       }
       throw new Error("NoSuchKey");
     }
   }
-  return { S3Client, PutObjectCommand, GetObjectCommand };
+  return { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand };
 });
 
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { markDelivered, markOutForDelivery } from "./service";
-import { PROOF_PHOTO_NOT_IMAGE, PROOF_PHOTO_TOO_LARGE, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
+import { PROOF_PHOTO_MISSING, PROOF_PHOTO_NOT_IMAGE, PROOF_PHOTO_TOO_LARGE, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 import { CSV_ACTION_BODY_LIMIT_BYTES } from "../listing/csv-file-cap";
 import sharp from "sharp";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests } from "../email/send";
@@ -70,10 +80,11 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     setEmailSenderForTests(null);
     setSmsSenderForTests(null);
     bucket.clear();
-    process.env.R2_ACCOUNT_ID = "test-account";
-    process.env.R2_ACCESS_KEY_ID = "test-key";
-    process.env.R2_SECRET_ACCESS_KEY = "test-secret";
-    process.env.R2_BUCKET = "catalog-bucket";
+    afterPut.run = null;
+    vi.stubEnv("R2_ACCOUNT_ID", "test-account");
+    vi.stubEnv("R2_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("R2_SECRET_ACCESS_KEY", "test-secret");
+    vi.stubEnv("R2_BUCKET", "catalog-bucket");
     vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
   });
 
@@ -154,7 +165,7 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     expect(after.order.deliveredAt).toBeInstanceOf(Date);
     expect(after.order.completedAt).toBeInstanceOf(Date);
     expect(after.order.deliveryProofUploadedAt).toBeInstanceOf(Date);
-    expect(after.order.deliveryProofKey).toMatch(new RegExp(`^delivery-proof/${order.id}/\\d+\\.jpg$`));
+    expect(after.order.deliveryProofKey).toMatch(new RegExp(`^delivery-proof/${order.id}/\\d+-[a-f0-9]{16}\\.jpg$`));
     expect(bucket.get(after.order.deliveryProofKey!)?.contentType).toBe("image/jpeg");
     expect(bucket.get(after.order.deliveryProofKey!)?.bucket).toBe("proof-bucket");
     expect(after.events.map((event) => event.type).sort()).toEqual(["delivered", "out_for_delivery"]);
@@ -174,10 +185,14 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     const pdf = new TextEncoder().encode("%PDF-1.7 not a photo");
     const oversize = new Uint8Array(CSV_ACTION_BODY_LIMIT_BYTES + 1);
     oversize.set(JPEG_HEADER);
-    expect(await markDelivered(storeId, order.id, oversize)).toEqual({ ok: false, error: PROOF_PHOTO_TOO_LARGE });
-    for (const photo of [null, new Uint8Array(0), pdf, oversize]) {
-      const result = await markDelivered(storeId, order.id, photo);
-      expect(result.ok).toBe(false);
+    const cases: Array<[Uint8Array | null, string]> = [
+      [null, PROOF_PHOTO_MISSING],
+      [new Uint8Array(0), PROOF_PHOTO_MISSING],
+      [pdf, PROOF_PHOTO_NOT_IMAGE],
+      [oversize, PROOF_PHOTO_TOO_LARGE],
+    ];
+    for (const [photo, error] of cases) {
+      expect(await markDelivered(storeId, order.id, photo)).toEqual({ ok: false, error });
     }
     const after = await state(order.id);
     expect(after.order.status).toBe("OUT_FOR_DELIVERY");
@@ -209,6 +224,20 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     expect(after.order.status).toBe("DELIVERED");
     expect(after.events.map((event) => event.type).sort()).toEqual(["delivered", "out_for_delivery"]);
     expect(bucket.size).toBe(1);
+  });
+
+  it("a photo uploaded for a delivery another staff member completed first is removed from the bucket", async () => {
+    const order = await readyOrder();
+    await markOutForDelivery(storeId, order.id);
+    afterPut.run = async () => {
+      afterPut.run = null;
+      await storeScoped(storeId).order.update({ where: { id: order.id }, data: { status: "DELIVERED" } });
+    };
+    expect(await markDelivered(storeId, order.id, JPEG)).toEqual({ ok: false, error: "Cannot mark delivered in status DELIVERED" });
+    const after = await state(order.id);
+    expect(after.order.deliveryProofKey).toBeNull();
+    expect(after.events.map((event) => event.type)).toEqual(["out_for_delivery"]);
+    expect(bucket.size).toBe(0);
   });
 
   it("store B's staff cannot send out or deliver store A's order", async () => {

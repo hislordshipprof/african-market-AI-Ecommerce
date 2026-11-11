@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export type R2Credentials = {
   accountId: string;
@@ -68,11 +68,15 @@ export function isServableCatalogKey(key: string): boolean {
   return ALLOWED_KEY_RE.test(key);
 }
 
-const DELIVERY_PROOF_KEY_RE = /^delivery-proof\/[a-z0-9]+\/\d+\.jpg$/;
+const DELIVERY_PROOF_KEY_RE = /^delivery-proof\/[a-z0-9]+\/\d+(-[a-f0-9]{16})?\.jpg$/;
 
-/** Private proof photos, always re-encoded to JPEG. Never servable by the catalog route. */
+/**
+ * Private proof photos, always re-encoded to JPEG. Never servable by the catalog route.
+ * The random suffix keeps two uploads in one millisecond from sharing a key.
+ */
 export function deliveryProofKey(orderId: string, timestamp: number): string {
-  return `delivery-proof/${orderId}/${timestamp}.jpg`;
+  const suffix = Buffer.from(crypto.getRandomValues(new Uint8Array(8))).toString("hex");
+  return `delivery-proof/${orderId}/${timestamp}-${suffix}.jpg`;
 }
 
 export function isDeliveryProofKey(key: string): boolean {
@@ -91,6 +95,14 @@ export async function uploadDeliveryProof(key: string, body: Buffer | Uint8Array
   await getR2Client().send(
     new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "image/jpeg" }),
   );
+}
+
+/** Removes a proof photo no order references, after its transition was rejected. */
+export async function deleteDeliveryProof(key: string): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isDeliveryProofKey(key)) throw new Error("not a delivery-proof key");
+  await getR2Client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
 const ISSUE_PHOTO_KEY_RE = /^issue-photo\/[a-z0-9]+\/[a-z0-9]+\.jpg$/;
