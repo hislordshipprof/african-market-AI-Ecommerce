@@ -797,21 +797,47 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         });
         return order;
       }
-      const abandoned = await acceptedOrder(25 * hour, null);
+      const timedOut = await acceptedOrder(25 * hour, null);
       const fresh = await acceptedOrder(23 * hour, null);
       const scheduled = await acceptedOrder(25 * hour, new Date(Date.now() + 48 * hour).toISOString());
 
       await handler({ step: makeFakeStep() });
 
       const status = async (id: string) => (await storeScoped(storeId).order.findUnique({ where: { id } }))!.status;
-      expect(await status(abandoned.id)).toBe("CANCELLED");
-      expect(cancelledPayments.has(abandoned.paymentIntentId!)).toBe(true);
-      const cause = await storeScoped(storeId).auditLog.findMany({ where: { entityId: abandoned.id, action: "pick_timeout" } });
+      expect(await status(timedOut.id)).toBe("CANCELLED");
+      expect(cancelledPayments.has(timedOut.paymentIntentId!)).toBe(true);
+      const cause = await storeScoped(storeId).auditLog.findMany({ where: { entityId: timedOut.id, action: "pick_timeout" } });
       expect(cause).toHaveLength(1);
       expect(await status(fresh.id)).toBe("ACCEPTED");
       expect(await status(scheduled.id)).toBe("ACCEPTED");
       expect(cancelledPayments.has(fresh.paymentIntentId!)).toBe(false);
       expect(cancelledPayments.has(scheduled.paymentIntentId!)).toBe(false);
+    });
+
+    it("cancels an order whose pickup slot would run past the card hold at created + 6 d 12 h", async () => {
+      const { sweepOrphanedAuthorized } = await import("./functions");
+      const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+      const hour = 3600_000;
+      const createdAt = new Date(Date.now() - (6 * 24 + 12) * hour - 60_000);
+      const acceptedAt = new Date(createdAt.getTime() + hour);
+      const capped = await createTestOrder();
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: capped.id },
+          data: {
+            status: "ACCEPTED",
+            createdAt,
+            acceptedAt,
+            inngestEventSentAt: new Date(),
+            pickupSlot: new Date(acceptedAt.getTime() + 6 * 24 * hour).toISOString(),
+          },
+        });
+      });
+
+      await handler({ step: makeFakeStep() });
+
+      expect((await storeScoped(storeId).order.findUnique({ where: { id: capped.id } }))!.status).toBe("CANCELLED");
+      expect(cancelledPayments.has(capped.paymentIntentId!)).toBe(true);
     });
   });
 

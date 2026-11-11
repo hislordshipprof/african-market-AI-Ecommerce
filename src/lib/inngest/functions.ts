@@ -247,7 +247,7 @@ const PICK_TIMEOUT_BATCH = 50;
 const PICK_TIMEOUT_SCAN = 4 * PICK_TIMEOUT_BATCH;
 
 /**
- * An ACCEPTED/PICKING order is abandoned 24 h after the later of acceptance and
+ * An ACCEPTED/PICKING order times out 24 h after the later of acceptance and
  * its pickup slot start, and never later than created_at + HOLD_SAFETY_CAP_MS.
  */
 export function pickTimeoutDeadline(order: { createdAt: Date; acceptedAt: Date; pickupSlot: string | null }): number {
