@@ -36,7 +36,8 @@ import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/m
 import { setSpendClock } from "../assistant/spend";
 import { auth } from "../auth";
 import { authPrisma, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
-import { chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
+import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
+import { createConfirmRequests } from "./alerts";
 import { FIXED_ERROR } from "./types";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -405,6 +406,51 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     expect(kept).toMatchObject({ ok: true, listing: { qty: 15 } });
     expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: palmId } })).qty).toBe(7);
   }, 60_000);
+
+  it("a listing that falls below 0.3 gets a confirm-request; only store A's owner can answer it, with one recount", async () => {
+    const crayfishId = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Crayfish", price: 500, stockMode: "counted", qty: 3, confidence: 0.25 },
+    })).id;
+    const lowAlert = await storeScoped(storeAId).copilotAlert.create({
+      data: { storeId: storeAId, kind: "running_low", listingId: crayfishId, dedupeKey: `running_low:${crayfishId}:t430` },
+    });
+    await createConfirmRequests();
+    await createConfirmRequests();
+    const requests = await storeScoped(storeAId).copilotAlert.findMany({
+      where: { listingId: crayfishId, kind: "confirm_request" },
+    });
+    expect(requests).toHaveLength(1);
+    const alertId = requests[0]!.id;
+    const stockChanges = () => storeScoped(storeAId).auditLog.count({
+      where: { action: "listing.stock_change", entityId: crayfishId },
+    });
+
+    asStore(storeASlug, cookiesStaff);
+    await expect(answerCopilotAlert({ alertId, answer: "still_have", qty: 8 })).rejects.toThrow(/NEXT_REDIRECT:/);
+    asStore(storeBSlug, cookiesB);
+    expect(await answerCopilotAlert({ alertId, answer: "still_have", qty: 8 })).toEqual({ ok: false, code: "not_found" });
+    expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: crayfishId } })).qty).toBe(3);
+    expect(await storeScoped(storeAId).stockEvent.count({ where: { listingId: crayfishId } })).toBe(0);
+    expect(await stockChanges()).toBe(0);
+    expect((await storeScoped(storeAId).copilotAlert.findUniqueOrThrow({ where: { id: alertId } })).state).toBe("open");
+
+    asStore(storeASlug, cookiesA);
+    expect(await answerCopilotAlert({ alertId, answer: "still_have", qty: 8 })).toMatchObject({ ok: true, listing: { qty: 8 } });
+    const listing = await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: crayfishId } });
+    expect([listing.qty, listing.confidence]).toEqual([8, 1]);
+    const events = await storeScoped(storeAId).stockEvent.findMany({ where: { listingId: crayfishId } });
+    expect(events.map((e) => [e.type, e.delta, e.actorId])).toEqual([["recount", 5, ownerAId]]);
+    const audits = await storeScoped(storeAId).auditLog.findMany({
+      where: { action: "listing.stock_change", entityId: crayfishId },
+    });
+    expect(audits.map((a) => a.actorId)).toEqual([ownerAId]);
+    const alerts = await storeScoped(storeAId).copilotAlert.findMany({ where: { id: { in: [alertId, lowAlert.id] } } });
+    expect(alerts.map((a) => [a.state, a.resolvedById])).toEqual([["resolved", ownerAId], ["resolved", ownerAId]]);
+    expect(await storeScoped(storeAId).stockProposal.count({ where: { listingId: crayfishId } })).toBe(0);
+
+    expect(await answerCopilotAlert({ alertId, answer: "still_have", qty: 2 })).toEqual({ ok: false, code: "not_found" });
+    expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: crayfishId } })).qty).toBe(8);
+  }, 30_000);
 
   it("a report that fits two listings offers both and one tap drafts the chosen one", async () => {
     const ofadaId = (await storeScoped(storeAId).listing.create({

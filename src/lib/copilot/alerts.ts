@@ -1,4 +1,4 @@
-import { Prisma, platform, storeScoped, storeScopedTransaction, txQuery } from "../db";
+import { Prisma, platform, platformAdminTransaction, storeScoped, storeScopedTransaction, txQuery } from "../db";
 import { pushToStoreMembers } from "../push/store-members";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
@@ -197,4 +197,49 @@ export async function pushCopilotAlerts(
     url: `/store-admin/copilot?store=${encodeURIComponent(store.slug)}`,
     tag: "copilot-alerts",
   }, env, { roles: ["owner"] });
+}
+
+/** Where the storefront shows "ask store" (owner decision 2026-11-10). */
+const CONFIRM_REQUEST_BELOW = 0.3;
+
+/**
+ * After the daily confidence run: one confirm-request for each active listing below 0.3
+ * that has no open one. A listing leaves that set only when an answer sets confidence 1,
+ * so this is the listings that just crossed. The key is per listing per store day.
+ * Returns the stores that got a new request.
+ */
+export async function createConfirmRequests(): Promise<string[]> {
+  const rows = await platformAdminTransaction((tx) => tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+    SELECT l.id, l.store_id
+    FROM listings l
+    WHERE l.active AND l.confidence < ${CONFIRM_REQUEST_BELOW}
+      AND NOT EXISTS (
+        SELECT 1 FROM copilot_alerts a
+        WHERE a.store_id = l.store_id AND a.listing_id = l.id
+          AND a.kind = 'confirm_request' AND a.state = 'open'
+      )
+    ORDER BY l.store_id, l.id
+  `);
+  const byStore = new Map<string, string[]>();
+  for (const row of rows) byStore.set(row.store_id, [...(byStore.get(row.store_id) ?? []), row.id]);
+
+  const stores: string[] = [];
+  for (const [storeId, listingIds] of byStore) {
+    try {
+      const day = await storeDay(storeId);
+      const created = await writeAlerts(storeId, listingIds.map((listingId) => ({
+        kind: "confirm_request" as const,
+        listingId,
+        dedupeKey: `confirm_request:${listingId}:${day}`,
+      })));
+      if (created > 0) stores.push(storeId);
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: "confirm_requests_store_failed",
+        storeId,
+        message: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }
+  return stores;
 }

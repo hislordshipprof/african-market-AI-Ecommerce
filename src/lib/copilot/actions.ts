@@ -5,11 +5,12 @@ import { requireStoreOwner } from "../store-admin/session";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
 import { chooseListing } from "./choices";
-import { confirmProposal, rejectProposal } from "./confirm";
+import { answerAlert, confirmProposal, rejectProposal, type AnswerResult } from "./confirm";
 import { sendCopilotTurn } from "./turn";
 import {
   FIXED_ERROR,
   MESSAGE_MAX,
+  QUANTITY_MAX,
   type ChooseResult,
   type ConfirmResult,
   type RejectResult,
@@ -31,6 +32,16 @@ const chooseSchema = z.strictObject({
   messageId: z.string().min(1).max(200),
   listingId: z.string().min(1).max(200),
 });
+
+const answerSchema = z.discriminatedUnion("answer", [
+  z.strictObject({
+    alertId: z.string().min(1).max(200),
+    answer: z.literal("still_have"),
+    qty: z.number().int().min(0).max(QUANTITY_MAX),
+  }),
+  z.strictObject({ alertId: z.string().min(1).max(200), answer: z.literal("sold_out") }),
+  z.strictObject({ alertId: z.string().min(1).max(200), answer: z.literal("in_stock") }),
+]);
 
 const invalidRequest: SendResult = {
   ok: false,
@@ -98,6 +109,25 @@ export async function chooseProposalListing(input: unknown): Promise<ChooseResul
     return await chooseListing(session.store.id, { id: session.user.id, email: session.user.email }, parsed.data);
   } catch (error) {
     console.error("[copilot] choose failed", { errorType: error instanceof Error ? error.name : "Error" });
+    return { ok: false, code: "not_found" };
+  }
+}
+
+/** The owner's one-tap answer to a copilot alert: "Still have N", "Sold out" or "In stock". */
+export async function answerCopilotAlert(input: unknown): Promise<AnswerResult> {
+  const session = await requireStoreOwner();
+  const parsed = parseInput(answerSchema, input);
+  if (!parsed.ok) return { ok: false, code: "not_found" };
+  const { alertId, ...answer } = parsed.data;
+  try {
+    const result = await answerAlert(session.store.id, alertId, answer, {
+      id: session.user.id,
+      email: session.user.email,
+    });
+    if (result.ok) revalidateStorefront(session.store.id);
+    return result;
+  } catch (error) {
+    console.error("[copilot] answer failed", { errorType: error instanceof Error ? error.name : "Error" });
     return { ok: false, code: "not_found" };
   }
 }

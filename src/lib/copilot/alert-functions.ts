@@ -1,5 +1,5 @@
 import { inngest } from "../inngest/client";
-import { createOrderStockAlerts, pushCopilotAlerts } from "./alerts";
+import { createConfirmRequests, createOrderStockAlerts, pushCopilotAlerts } from "./alerts";
 
 /** Runs on the after-commit event, so stock is already reserved and a failure never touches checkout. */
 export const copilotOrderStockAlerts = inngest.createFunction(
@@ -15,3 +15,11 @@ export const copilotOrderStockAlerts = inngest.createFunction(
     if (created > 0) await step.run("push-alerts", () => pushCopilotAlerts(storeId));
   },
 );
+
+/** After the daily confidence run: confirm-requests, then one capped push per store that got one. */
+export async function runConfirmRequestSteps(step: { run<T>(id: string, fn: () => Promise<T>): Promise<unknown> }): Promise<void> {
+  const stores = (await step.run("copilot-confirm-requests", () => createConfirmRequests())) as string[];
+  for (const storeId of stores) {
+    await step.run(`copilot-push-${storeId}`, () => pushCopilotAlerts(storeId));
+  }
+}

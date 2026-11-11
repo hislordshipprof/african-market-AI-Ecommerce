@@ -14,7 +14,7 @@ import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing
 import { sendNewOrderPush } from "../push/new-order";
 import { slotStart } from "../admin/orders-to-check-query";
 import { supportSlaEscalation } from "../support/escalation";
-import { copilotOrderStockAlerts } from "../copilot/alert-functions";
+import { copilotOrderStockAlerts, runConfirmRequestSteps } from "../copilot/alert-functions";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -392,10 +392,11 @@ export const dailyConfidence = inngest.createFunction(
       const page: ConfidenceBatchResult = await step.run(`recompute-confidence-${batch}`, () =>
         recomputeConfidenceBatch(previous),
       );
-      if (page.nextCursor === null) return;
+      if (page.nextCursor === null) break;
       cursor = page.nextCursor;
       batch += 1;
     }
+    await runConfirmRequestSteps(step);
   },
 );
 
