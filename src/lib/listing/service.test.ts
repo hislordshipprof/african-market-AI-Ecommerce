@@ -50,6 +50,8 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.auditLog.deleteMany({ where: { storeId } }),
+      // A parallel platform-wide confirm-request run can alert on the decayed listing.
+      rawPrisma.copilotAlert.deleteMany({ where: { storeId } }),
       rawPrisma.stockEvent.deleteMany({ where: { storeId } }),
       rawPrisma.stockEvent.deleteMany({ where: { actorId: userId } }),
       rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId } } }),
