@@ -902,3 +902,79 @@ describe.skipIf(!hasDb)("support threads and messages: storeScoped(B) cannot rea
     expect(await storeScoped(storeAId).supportMessage.count({ where: { threadId: threadAId } })).toBe(1);
   });
 });
+
+describe.skipIf(!hasDb)("owner reports and their items: storeScoped(B) cannot read or write store A's rows", () => {
+  let storeAId = "";
+  let storeBId = "";
+  let reportAId = "";
+  let itemAId = "";
+  let listingAId = "";
+  let actorId = "";
+  let raw: PrismaClient;
+
+  beforeAll(async () => {
+    raw = testPrismaClient();
+    const stamp = Date.now().toString(36);
+    storeAId = (await raw.store.create({
+      data: { slug: `report-rls-a-${stamp}`, name: "Report RLS A", themePreset: "palm-and-shea" },
+    })).id;
+    storeBId = (await raw.store.create({
+      data: { slug: `report-rls-b-${stamp}`, name: "Report RLS B", themePreset: "palm-and-shea" },
+    })).id;
+    actorId = `report-rls-${stamp}`;
+    await raw.user.create({ data: { id: actorId, email: `${actorId}@example.com`, name: "Reporter" } });
+    listingAId = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Gari", price: 500, stockMode: "counted", qty: 3 },
+    })).id;
+    reportAId = (await storeScoped(storeAId).ownerReport.create({
+      data: { storeId: storeAId, actorId, type: "voice", rawTranscript: "20 gari", aiExtraction: { items: [] } },
+    })).id;
+    itemAId = (await storeScoped(storeAId).ownerReportItem.create({
+      data: {
+        storeId: storeAId, reportId: reportAId, extractedName: "gari", extractedQty: 20,
+        listingId: listingAId, matchConfidence: 1, kind: "restock", proposedDelta: 20, status: "pending",
+      },
+    })).id;
+  });
+
+  afterAll(async () => {
+    for (const id of [storeAId, storeBId]) {
+      if (!id) continue;
+      await storeScoped(id).ownerReport.deleteMany({});
+      await storeScoped(id).listing.deleteMany({});
+    }
+    await raw.store.deleteMany({ where: { id: { in: [storeAId, storeBId].filter(Boolean) } } });
+    await raw.user.deleteMany({ where: { id: actorId } });
+    await raw.$disconnect();
+  });
+
+  it("owner reports: storeScoped(B) reads none of A's, cannot insert one for A, and updates nothing", async () => {
+    expect(await storeScoped(storeBId).ownerReport.findUnique({ where: { id: reportAId } })).toBeNull();
+    await expect(
+      storeScoped(storeBId).ownerReport.create({
+        data: { storeId: storeAId, actorId, type: "voice", rawTranscript: "x", aiExtraction: {} },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).ownerReport.updateMany({
+      where: { id: reportAId },
+      data: { status: "rejected", decidedById: actorId, decidedAt: new Date() },
+    })).count).toBe(0);
+    expect((await storeScoped(storeAId).ownerReport.findUnique({ where: { id: reportAId } }))?.status).toBe("pending");
+  });
+
+  it("owner report items: storeScoped(B) reads none of A's, cannot add one to A's report, and updates nothing", async () => {
+    expect(await storeScoped(storeBId).ownerReportItem.findMany()).toEqual([]);
+    for (const storeId of [storeAId, storeBId]) {
+      await expect(
+        storeScoped(storeBId).ownerReportItem.create({
+          data: { storeId, reportId: reportAId, extractedName: "rice", extractedQty: 1, status: "unmatched" },
+        }),
+      ).rejects.toSatisfy(isRlsRejection);
+    }
+    expect((await storeScoped(storeBId).ownerReportItem.updateMany({
+      where: { id: itemAId },
+      data: { status: "confirmed" },
+    })).count).toBe(0);
+    expect((await storeScoped(storeAId).ownerReportItem.findUnique({ where: { id: itemAId } }))?.status).toBe("pending");
+  });
+});

@@ -68,6 +68,8 @@ model Store {
   stockProposals StockProposal[]
   copilotAlerts  CopilotAlert[]
   copilotDigests CopilotDigest[]
+  ownerReports OwnerReport[]
+  ownerReportItems OwnerReportItem[]
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
   pushSubscriptions PushSubscription[]
@@ -121,6 +123,8 @@ model User {
   copilotConversations     CopilotConversation[]
   stockProposalDecisions   StockProposal[] @relation("StockProposalDecision")
   copilotAlertResolutions  CopilotAlert[]  @relation("CopilotAlertResolution")
+  ownerReports             OwnerReport[]   @relation("OwnerReportActor")
+  ownerReportDecisions     OwnerReport[]   @relation("OwnerReportDecision")
 
   @@map("users")
 }
@@ -378,6 +382,7 @@ model Listing {
   masterProduct  MasterProduct? @relation(fields: [masterProductId], references: [id])
   variants       ListingVariant[]
   stockEvents    StockEvent[]
+  ownerReportItems OwnerReportItem[]
   collectionItems StoreCollectionListing[]
 
   @@index([storeId])
@@ -539,6 +544,62 @@ model CopilotDigest {
 
   @@unique([storeId, localDate])
   @@map("copilot_digests")
+}
+
+/// A voice or photo stock report from a store member (#21). Nothing is written to stock until the owner confirms.
+model OwnerReport {
+  id            String    @id @default(cuid())
+  storeId       String    @map("store_id")
+  actorId       String    @map("actor_id")
+  /// voice | invoice_photo | shelf_photo
+  type          String
+  /// pending | confirmed | rejected | partial
+  status        String    @default("pending")
+  rawTranscript String?   @map("raw_transcript")
+  imageKey      String?   @map("image_key")
+  aiExtraction  Json      @map("ai_extraction")
+  decidedById   String?   @map("decided_by_id")
+  decidedAt     DateTime? @map("decided_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  store     Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  actor     User              @relation("OwnerReportActor", fields: [actorId], references: [id], onDelete: Restrict)
+  decidedBy User?             @relation("OwnerReportDecision", fields: [decidedById], references: [id], onDelete: Restrict)
+  items     OwnerReportItem[]
+
+  @@index([storeId])
+  @@index([storeId, status, createdAt])
+  @@index([actorId])
+  @@index([decidedById])
+  @@map("owner_reports")
+}
+
+/// One extracted line of an owner report. `listingId` is null when nothing matched; such a line stays `unmatched`.
+model OwnerReportItem {
+  id              String   @id @default(cuid())
+  reportId        String   @map("report_id")
+  storeId         String   @map("store_id")
+  extractedName   String   @map("extracted_name")
+  extractedQty    Int?     @map("extracted_qty")
+  unit            String?
+  listingId       String?  @map("listing_id")
+  matchConfidence Float    @default(0) @map("match_confidence")
+  /// restock (counted listing) | set_status (status listing, to in_stock)
+  kind            String?
+  proposedDelta   Int?     @map("proposed_delta")
+  /// pending | confirmed | rejected | unmatched
+  status          String
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  report  OwnerReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  store   Store       @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  listing Listing?    @relation(fields: [listingId], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([reportId])
+  @@index([listingId])
+  @@map("owner_report_items")
 }
 
 model StoreBanner {

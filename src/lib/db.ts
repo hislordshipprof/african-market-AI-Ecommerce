@@ -117,6 +117,8 @@ export function storeScoped(storeId: string) {
     copilotClientMessage: wrapDelegate(storeId, prisma.copilotClientMessage),
     stockProposal: wrapDelegate(storeId, prisma.stockProposal),
     copilotAlert: wrapDelegate(storeId, prisma.copilotAlert),
+    ownerReport: wrapDelegate(storeId, prisma.ownerReport),
+    ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
     notificationLog: wrapDelegate(storeId, prisma.notificationLog),
     deliveryEvent: wrapDelegate(storeId, prisma.deliveryEvent),
     pushSubscription: wrapDelegate(storeId, prisma.pushSubscription),
@@ -294,7 +296,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -327,6 +329,8 @@ export async function storeScopedTransaction<T>(
       stockProposal: tx.stockProposal,
       copilotAlert: tx.copilotAlert,
       copilotDigest: tx.copilotDigest,
+      ownerReport: tx.ownerReport,
+      ownerReportItem: tx.ownerReportItem,
       notificationLog: tx.notificationLog,
       deliveryEvent: tx.deliveryEvent,
       pushSubscription: tx.pushSubscription,
