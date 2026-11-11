@@ -277,6 +277,21 @@ async function uncoveredFailure(listed: RefundResult[], captured: number): Promi
   return listed.find((refund) => refund.status === "failed" || refund.status === "canceled") ?? null;
 }
 
+/** Captured minus succeeded and pending refunds: the most any new refund can be. */
+function unrefundedCents(captured: number, listed: RefundResult[]): number {
+  return Math.max(0, captured - countedCents(listed, ["succeeded", "pending", "requires_action"]));
+}
+
+/** What is still refundable on a payment, read from Stripe. */
+export async function remainingCaptureCents(paymentIntentId: string): Promise<number> {
+  const stripe = getStripeProvider();
+  const [pi, listed] = await Promise.all([
+    stripe.retrievePaymentIntent(paymentIntentId),
+    stripe.listRefunds(paymentIntentId),
+  ]);
+  return unrefundedCents(pi.amountReceived, listed);
+}
+
 /** `cancel` refunds the whole remaining capture. `issue` refunds an amount after delivery (#428). */
 export type RefundCause =
   | { cause: "cancel" }
@@ -337,8 +352,7 @@ export async function submitRefund(
     if (failed) return failed;
   }
   const succeeded = countedCents(listed, ["succeeded"]);
-  const pending = countedCents(listed, ["pending", "requires_action"]);
-  const remaining = Math.max(0, captured - succeeded - pending);
+  const remaining = unrefundedCents(captured, listed);
   // ADR-0019: an issue refund never exceeds what is still unrefunded.
   const amount = cause.cause === "issue" ? Math.min(cause.amountCents, remaining) : remaining;
   if (cause.cause === "issue" && amount <= 0) return { blocked: true };
