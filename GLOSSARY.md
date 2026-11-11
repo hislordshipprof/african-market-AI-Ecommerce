@@ -29,6 +29,7 @@ _Avoid_: Picker (a picker is staff doing a pick, not a separate role)
 
 **Platform admin**:
 A member of our team who sets up stores and supports them.
+_Avoid_: Platform team (only the customer-facing label on a platform admin's support reply)
 
 **Customer**:
 A person who buys from a store, whether or not they have an account.
