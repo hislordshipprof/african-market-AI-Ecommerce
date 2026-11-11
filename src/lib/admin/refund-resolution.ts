@@ -9,7 +9,7 @@ import { parseInput, readFormFields } from "../security/parse-input";
 import { getStripeProvider } from "../stripe";
 import { reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
 import { releaseOrderStock } from "../order/stock-ledger";
-import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
+import { systemAuditData } from "../system-actor";
 import { failedAtLabel } from "./failed-at";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
@@ -287,30 +287,19 @@ export async function resolveRefundFailed(
       },
     });
     await tx.auditLog.create({
-      data: {
-        storeId: order.storeId,
-        actorId: SYSTEM_ACTOR_ID,
-        actorEmail: SYSTEM_ACTOR_EMAIL,
-        action: "refund_resolution_baseline",
-        entityType: "order",
-        entityId: orderId,
-        after: {
-          refundedCents: fresh.refundedCents,
-          countedRefundIds: fresh.countedRefundIds,
-        },
-      },
+      data: systemAuditData(order.storeId, orderId, "refund_resolution_baseline", {
+        refundedCents: fresh.refundedCents,
+        countedRefundIds: fresh.countedRefundIds,
+      }),
     });
     if (gap !== 0) {
       console.error(`Manual repayment for order ${orderId} does not match the capture. Store and platform alerted.`);
       await tx.auditLog.create({
-        data: {
-          storeId: order.storeId,
-          actorId: SYSTEM_ACTOR_ID,
-          actorEmail: SYSTEM_ACTOR_EMAIL,
-          action: gap > 0 ? "refund_after_manual_resolution" : "refund_reversed_after_resolution",
-          entityType: "order",
-          entityId: orderId,
-          after: gap > 0
+        data: systemAuditData(
+          order.storeId,
+          orderId,
+          gap > 0 ? "refund_after_manual_resolution" : "refund_reversed_after_resolution",
+          gap > 0
             ? {
                 refundId: fresh.countedRefundIds[0] ?? order.refundId ?? "",
                 overpaidCents: gap,
@@ -321,7 +310,7 @@ export async function resolveRefundFailed(
                 underpaidCents: -gap,
                 alert: "store_and_platform",
               },
-        },
+        ),
       });
     }
     const displayedStale = displayedOwedCents !== capturedCents - fresh.refundedCents;

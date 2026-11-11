@@ -8,7 +8,7 @@ import {
   RefundNotCreatedError,
 } from "../stripe/errors";
 import type { RefundResult } from "../stripe/types";
-import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
+import { systemAuditData } from "../system-actor";
 import { releaseOrderStock } from "./stock-ledger";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
@@ -61,23 +61,6 @@ function countedCents(listed: RefundResult[], statuses: string[]): number {
     .reduce((sum, refund) => sum + refund.amountRefunded, 0);
 }
 
-function systemAudit(
-  storeId: string,
-  orderId: string,
-  action: string,
-  after: Prisma.InputJsonValue,
-) {
-  return {
-    storeId,
-    actorId: SYSTEM_ACTOR_ID,
-    actorEmail: SYSTEM_ACTOR_EMAIL,
-    action,
-    entityType: "order" as const,
-    entityId: orderId,
-    after,
-  };
-}
-
 async function writeAuditOnce(
   tx: Tx,
   storeId: string,
@@ -92,7 +75,7 @@ async function writeAuditOnce(
     return body?.refundId === refundId || body?.key === refundId;
   });
   if (duplicate) return false;
-  await tx.auditLog.create({ data: systemAudit(storeId, orderId, action, after) });
+  await tx.auditLog.create({ data: systemAuditData(storeId, orderId, action, after) });
   return true;
 }
 
@@ -271,15 +254,19 @@ export async function reconcileAbandonedRefundRequests(storeId: string, orderId:
   for (const row of rows) await reconcileRefundRequest(row);
 }
 
+/** Refunds that still cover the charge: succeeded, plus those the bank has not settled yet. */
+export function coveredRefundCents(listed: RefundResult[]): number {
+  return countedCents(listed, ["succeeded", "pending", "requires_action"]);
+}
+
 async function uncoveredFailure(listed: RefundResult[], captured: number): Promise<RefundResult | null> {
-  const covering = countedCents(listed, ["succeeded", "pending", "requires_action"]);
-  if (covering >= captured) return null;
+  if (coveredRefundCents(listed) >= captured) return null;
   return listed.find((refund) => refund.status === "failed" || refund.status === "canceled") ?? null;
 }
 
 /** Captured minus succeeded and pending refunds: the most any new refund can be. */
 function unrefundedCents(captured: number, listed: RefundResult[]): number {
-  return Math.max(0, captured - countedCents(listed, ["succeeded", "pending", "requires_action"]));
+  return Math.max(0, captured - coveredRefundCents(listed));
 }
 
 /** What is still refundable on a payment, read from Stripe. */
@@ -529,7 +516,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
       if (settled > baseline.refundedCents) {
         const refundId = ids.find((id) => !baseline.countedRefundIds.includes(id)) ?? ids.at(-1) ?? "";
         await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "refund_after_manual_resolution", {
+          data: systemAuditData(order.storeId, orderId, "refund_after_manual_resolution", {
             refundId,
             overpaidCents: settled - baseline.refundedCents,
             alert: "store_and_platform",
@@ -541,7 +528,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
           ?? listed.find((refund) => refund.status === "failed" || refund.status === "canceled")?.refundId
           ?? "";
         await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "refund_reversed_after_resolution", {
+          data: systemAuditData(order.storeId, orderId, "refund_reversed_after_resolution", {
             refundId,
             underpaidCents: baseline.refundedCents - settled,
             alert: "store_and_platform",
@@ -552,7 +539,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
       const sameIds = ids.length === baseline.countedRefundIds.length && ids.every((id) => baseline.countedRefundIds.includes(id));
       if (settled !== baseline.refundedCents || !sameIds) {
         await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "refund_resolution_baseline", {
+          data: systemAuditData(order.storeId, orderId, "refund_resolution_baseline", {
             refundedCents: settled,
             countedRefundIds: ids,
           }),
@@ -577,7 +564,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
       });
       if (!existing) {
         await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "anomaly_refund", {
+          data: systemAuditData(order.storeId, orderId, "anomaly_refund", {
             refundId,
             amountRefunded: settled,
           }),
