@@ -54,7 +54,7 @@ The reason is the shared dev bucket `african-markets-dev`. A catalog prune delet
 
 - Every report names the commit SHA it checked. A report for an older SHA doesn't count.
 - Scripts propagate failures; no `|| true` on the build or review step.
-- The coordinator never builds; it plans the queue, checks evidence and previews, and merges via `ship-pr`.
+- The coordinator never builds; it plans the queue, checks evidence and previews, and merges with `scripts/merge-ticket.sh`.
 
 ## No agent reviews its own work (owner-approved 2026-11-02)
 

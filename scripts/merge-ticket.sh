@@ -79,7 +79,8 @@ if { [ "$CMP" = "0" ] || [ "$DISJOINT" = "yes" ]; } && [ "$PENDING_OR_FAILED" = 
   # The squash message is written here, not left to GitHub's default: the default copies every AI
   # "Co-Authored-By" trailer from the PR's commits onto main (owner rule: no AI co-author on commits).
   # DEPLOY=1 ends the subject with "[deploy]", the only thing that builds production (scripts/vercel-ignore.sh).
-  SQUASH_SUBJECT="$(gh api "repos/$REPO/pulls/$PR" --jq .title) (#$PR)${DEPLOY:+ [deploy]}"
+  SQUASH_SUBJECT="$(gh api "repos/$REPO/pulls/$PR" --jq .title) (#$PR)"
+  [ "${DEPLOY:-}" = 1 ] && SQUASH_SUBJECT+=" [deploy]"
   SQUASH_BODY=$(gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[] | "* " + .commit.message + "\n"' \
     | bash "$ROOT/scripts/strip-ai-coauthors.sh")
   # Pinned to the commit the checks above read: a later push fails the merge instead of landing untested.
@@ -131,7 +132,7 @@ else
     echo "ship-ticket.sh did not change PR #$PR. Not merged; see its log."
   else
     echo "PR #$PR was repaired and its head is now $NEW_SHA. That commit has not been reviewed. Not merged."
-    echo "Next: scripts/review-ticket.sh $N, then scripts/merge-ticket.sh $SELF_ARGS."
+    echo "Next: scripts/review-ticket.sh $N, then $([ "${DEPLOY:-}" = 1 ] && echo "DEPLOY=1 ")scripts/merge-ticket.sh $SELF_ARGS."
   fi
   exit 5
 fi
