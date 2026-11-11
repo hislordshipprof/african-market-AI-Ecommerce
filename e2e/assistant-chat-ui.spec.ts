@@ -763,10 +763,10 @@ test("closing a failed file turn removes Retry without turning it into a text tu
 
 test("file presence cannot enable Retry for terminal or message-rate-limited errors", async ({ page }) => {
   const cases = [
-    [503, "assistant_unavailable", "The helper isn't available right now."],
-    [404, "assistant_disabled", "The helper isn't available right now."],
+    [503, "assistant_unavailable", "Shop with AI isn't available right now."],
+    [404, "assistant_disabled", "Shop with AI isn't available right now."],
     [403, "store_suspended", "This store isn't taking orders right now."],
-    [503, "assistant_resting", "The helper is resting right now. You can keep shopping the usual way."],
+    [503, "assistant_resting", "Shop with AI is resting right now. You can keep shopping the usual way."],
     [429, "rate_limited", "Too many messages."],
   ] as const;
   for (const [status, code, title] of cases) {

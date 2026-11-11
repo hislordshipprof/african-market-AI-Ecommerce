@@ -19,7 +19,7 @@ describe("assistant route errors", () => {
     }
     expect(mapRouteError({ code: "assistant_resting", parsed: true }).terminal).toBe(true);
     expect(mapRouteError({ code: "assistant_unavailable", parsed: true }).title).toBe(
-      "The helper isn't available right now.",
+      "Shop with AI isn't available right now.",
     );
     expect(mapRouteError({ code: "store_suspended", parsed: true }).title).toBe(
       "This store isn't taking orders right now.",

@@ -19,7 +19,7 @@
 .sf-hero-background { position:absolute; inset:0; animation:sf-ken-burns 12s ease-in-out infinite alternate; }
 .sf-hero-background img { object-fit:cover; }
 /* Neutral scrim on the text side only, so the food keeps its own colour. */
-.sf-hero-shade { position:absolute; inset:0; background:linear-gradient(90deg,rgb(8 10 9 / 80%),rgb(8 10 9 / 72%) 52%,rgb(8 10 9 / 0%) 78%); }
+.sf-hero-shade { position:absolute; inset:0; background:linear-gradient(90deg,rgb(var(--sf-scrim) / 80%),rgb(var(--sf-scrim) / 72%) 52%,rgb(var(--sf-scrim) / 0%) 78%); }
 .sf-hero-word { position:absolute; top:-22px; right:2%; font-family:var(--font-display); font-size:clamp(130px,22vw,350px); font-weight:800; line-height:1.1; letter-spacing:-.07em; opacity:.12; color:#fff; pointer-events:none; }
 .sf-hero-inner { height:100%; position:relative; }
 .sf-hero-copy { padding:60px 0 20px; max-width:52%; height:calc(100% - 80px); justify-content:safe center; overflow-y:auto; scrollbar-color:var(--color-accent) transparent; scrollbar-width:thin; }
@@ -153,7 +153,7 @@
   .sf-hero-subject .sf-product-image img { padding:6px; }
   .sf-hero-subject-label { display:none; }
   .sf-hero-word { top:210px; right:0; font-size:130px; }
-  .sf-hero-shade { background:linear-gradient(180deg,rgb(8 10 9 / 80%),rgb(8 10 9 / 72%) 62%,rgb(8 10 9 / 15%)); }
+  .sf-hero-shade { background:linear-gradient(180deg,rgb(var(--sf-scrim) / 80%),rgb(var(--sf-scrim) / 72%) 62%,rgb(var(--sf-scrim) / 15%)); }
   .sf-glass-one { top:auto; bottom:80px; right:auto; left:0; font-size:13px; padding:10px 12px; }
   .sf-glass-two,.sf-round-badge,.sf-hero-offer { display:none; }
   .sf-hero-controls { width:calc(100% - 32px); bottom:12px; }

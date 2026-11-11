@@ -164,7 +164,9 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 
 **The Text Primary Rule.** Primary used as text (links, chip labels, step chips) uses `primary-text`, computed from `primary`: it clears 4.5:1 on `bg`, `surface`, `raised` and `soft`, and in dark 5.5:1 on all four, so tinted tiles stay AA. Fills keep `primary`. Light presets already pass, so their `primary-text` equals `primary`.
 
-**The Photo Well Rule.** Product images (cards, quick view, product page, cart and basket thumbnails, assistant cards, aisle tiles) sit on `photo-well`, a neutral ground per preset. Light keeps the soft tint (#EBF3EC Palm & Shea); dark uses a warm off-white (#ECEBE5 Palm & Shea, #EEEAE3 Cocoa, #EBEBE6 Lagoon) with a quiet inset edge, so brown cut-outs keep their edges. Text on the well uses `on-photo-well`.
+**The Photo Well Rule** (owner, 2026-11-10). Product images (cards, quick view, product page, aisle tiles) sit on `photo-well`, a neutral ground per preset. Light keeps the soft tint (#EBF3EC Palm & Shea); dark uses a warm off-white (#ECEBE5 Palm & Shea, #EEEAE3 Cocoa, #EBEBE6 Lagoon) with a quiet inset edge, so brown cut-outs keep their edges. Cart, basket and assistant-card thumbnails take the well in dark only; in light they keep their own grounds (`bg` for cart and basket, `raised` for assistant cards). Text on the well uses `on-photo-well`.
+
+**The Scrim Rule.** Shades over photos (hero, collection and category tiles) use `scrim` (#080A09, `--sf-scrim`) at the alpha the text needs, never a hard-coded black.
 
 **The Separate Semantics Rule.** Deal, success and error colors belong to the system, not the brand. Errors always carry an icon and text, never color alone.
 
@@ -260,7 +262,7 @@ The shared background is `StorySurface` (`src/components/story-surface/`, #35). 
 **Don't**
 - Use yellow, amber, purple/indigo or gradient text.
 - Put eyebrow labels above headings, colored side borders on cards, or emoji as icons.
-- Use stock "smiling woman in a headwrap" heroes, flag colors or patterns as wallpaper.
+- Use stock "smiling woman in a headwrap" heroes, flag colors or patterns as wallpaper. The home page story strip shows a marked placeholder until the store adds its own photo (owner, 2026-11-10).
 - Show the platform's brand on a storefront beyond the "Powered by" footer.
 
 ## Design round 4: storefront presentation

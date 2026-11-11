@@ -96,8 +96,8 @@ A pending owner report the Store copilot drafted and has not applied. Stock chan
 ## Assistants
 
 **Shopper assistant**:
-The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: only the customer's tap on a **Confirm card** places the order.
-_Avoid_: AI shopper, chatbot
+The AI that shops with a customer: finds items (with photos), builds the cart, confirms the summary and takes them through checkout, and answers their questions about a store. On the storefront first, later on the store's WhatsApp. It never pays by itself: only the customer's tap on a **Confirm card** places the order. Shoppers see it labelled "Shop with AI" (owner, 2026-11-10), so it is plainly an AI.
+_Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 
 **Choice chips**:
 The tappable product options the Shopper assistant shows when more than one item fits. The server also draws them when a reply names two or more products from a single search and the model did not offer a choice. Tapping a chip sends that product's name and pack back as the customer's pick.
