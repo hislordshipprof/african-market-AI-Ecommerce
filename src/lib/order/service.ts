@@ -550,7 +550,7 @@ async function settleUnconfirmedCapture(
   }
 
   if (pi.status === "canceled") {
-    await finalizeCancelFromSweep(storeId, orderId, "reconcile_cancel");
+    await finalizeCancelFromSweep(storeId, orderId, await canceledHoldAction(storeId, orderId));
     return {
       ok: false,
       error: "Payment authorization was released — order cancelled; contact the customer",
@@ -1407,7 +1407,7 @@ export async function reconcileStuckOrder(
   }
 
   if (pi.status === "canceled") {
-    return finalizeCancelFromSweep(storeId, orderId);
+    return finalizeCancelFromSweep(storeId, orderId, await canceledHoldAction(storeId, orderId));
   }
 
   if (pi.status === "requires_capture") {
@@ -1551,6 +1551,15 @@ async function finalizeCaptureFromSweep(
   if (notifyReady) scheduleOrderNotification(storeId, orderId, "ready");
 
   return { ok: true, action: "finalized_capture" };
+}
+
+/** A canceled hold we asked to release keeps its release audit and alert, even if the cancel's response was lost. */
+async function canceledHoldAction(storeId: string, orderId: string): Promise<"reconcile_cancel" | "capture_released"> {
+  const rows = await storeScopedTransaction(storeId, (tx) =>
+    tx.auditLog.findMany({ where: orderAuditWhere(orderId, "cancel_retry") }),
+  );
+  const released = rows.some((row) => (row.after as { releaseHold?: unknown } | null)?.releaseHold === true);
+  return released ? "capture_released" : "reconcile_cancel";
 }
 
 async function finalizeCancelFromSweep(
