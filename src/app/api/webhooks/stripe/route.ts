@@ -29,7 +29,7 @@ const webhookEventSchema = z.looseObject({
 /** Before capture the hold can end on Stripe's side; these orders follow it. */
 const PROVIDER_CANCELLABLE = ["AUTHORIZED", "ACCEPTED", "PICKING", "CANCELLING"];
 
-/** Our own cancel echoes back here, so an order already CANCELLING or CANCELLED must stay a no-op. Returns false when Stripe should retry. */
+/** Our own cancel echoes back here: a CANCELLED order stays a no-op, a CANCELLING one resumes. Returns false when Stripe should retry. */
 async function handlePaymentIntentCanceled(
   paymentIntent: { id: string; cancellationReason: string | null },
   eventId: string | null,

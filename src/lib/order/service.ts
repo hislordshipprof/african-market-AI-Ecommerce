@@ -1332,7 +1332,12 @@ export async function cancelOrder(
 
   // Phase 3: one cancellation write, which also returns the order's reserved stock.
   const finalize = await finalizeCancelledOrder(storeId, orderId, validation.action, { from: ["CANCELLING"] });
-  if (!finalize.wrote) return { ok: false, error: "Order status changed during cancellation" };
+  if (!finalize.wrote) {
+    // A racing echo, timer or sweep may have finalized first; that is still a cancel.
+    const current = await storeScoped(storeId).order.findUnique({ where: { id: orderId } });
+    if (current?.status === "CANCELLED") return { ok: true };
+    return { ok: false, error: "Order status changed during cancellation" };
+  }
 
   return { ok: true };
 }

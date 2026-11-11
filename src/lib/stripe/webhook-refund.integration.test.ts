@@ -645,4 +645,40 @@ describe.skipIf(!hasDb)("signed Stripe webhooks (lane DB)", () => {
     expect(echo.status).toBe(200);
     expect(await cancelTrail(placed.orderId, listingId)).toEqual(ours);
   }, 30_000);
+  it("an echo that finalizes before our store cancel leaves the staff result ok and one cancellation", async () => {
+    const { listingId, variantId } = await countedListing(storeA, 10, "Echo race");
+    const placed = await placeOrder(storeA, [{ variantId, qty: 2 }]);
+    await acceptOrder(storeA, placed.orderId, 15);
+    let echoStatus = 0;
+    setStripeProvider({
+      ...fakeStripeProvider,
+      verifyWebhookSignature: (input) => stripeProvider.verifyWebhookSignature(input),
+      cancelPaymentIntent: async (paymentIntentId, idempotencyKey) => {
+        const cancelled = await fakeStripeProvider.cancelPaymentIntent(paymentIntentId, idempotencyKey);
+        if (echoStatus) return cancelled;
+        echoStatus = -1;
+        echoStatus = (await postIntentCanceled(`evt_race_${placed.orderId}`, paymentIntentId, null)).status;
+        return cancelled;
+      },
+    });
+    try {
+      expect(await cancelOrder(storeA, placed.orderId, {
+        action: "store_cancel",
+        actor: { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL },
+        reason: "store_closed",
+        note: null,
+      })).toEqual({ ok: true });
+    } finally {
+      setStripeProvider({
+        ...fakeStripeProvider,
+        verifyWebhookSignature: (input) => stripeProvider.verifyWebhookSignature(input),
+      });
+    }
+    expect(echoStatus).toBe(200);
+    expect(await cancelTrail(placed.orderId, listingId)).toMatchObject({
+      status: "CANCELLED",
+      audits: ["store_cancel"],
+      stock: { qty: 10, events: [["reservation", -2], ["reservation_release", 2]] },
+    });
+  }, 30_000);
 });
