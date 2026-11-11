@@ -120,7 +120,7 @@ export function CustomerSignIn({
           {step === "sent" && (
             <div className="flex flex-col items-center gap-4 py-2">
               <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
-                <Mail className="size-6 text-primary-text" />
+                <Mail className="size-6" style={{ color: "var(--color-primary-text)" }} />
               </div>
               <p className="text-center text-sm text-muted-foreground">
                 Click the link in your email to sign in. The link expires in

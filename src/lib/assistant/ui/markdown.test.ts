@@ -50,6 +50,9 @@ describe("assistant markdown subset", () => {
       const [block] = parseMarkdown(`[click](${href})`);
       expect(block).toEqual({ type: "paragraph", children: [{ type: "text", text: "click" }] });
     }
+    expect(parseMarkdown("[**x**](javascript:1)")).toEqual([
+      { type: "paragraph", children: [{ type: "strong", children: [{ type: "text", text: "x" }] }] },
+    ]);
   });
 
   it("keeps a same-site link's href exactly as written", () => {

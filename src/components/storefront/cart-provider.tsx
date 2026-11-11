@@ -154,13 +154,15 @@ export function CartProvider({
     pendingUndoRef.current = next;
     setPendingUndo(next);
     window.clearTimeout(undoTimer.current);
-    const { remainingMs } = livePendingUndo(next, undoClock());
-    if (remainingMs > 0) undoTimer.current = window.setTimeout(() => setPending(livePendingUndo(pendingUndoRef.current, undoClock()).entries), remainingMs);
+    // Re-check when the soonest entry expires, so each removal leaves the bar after its own 6 s.
+    const now = undoClock();
+    const live = livePendingUndo(next, now).entries;
+    if (live.length) undoTimer.current = window.setTimeout(() => setPending(livePendingUndo(pendingUndoRef.current, undoClock()).entries), Math.min(...live.map((entry) => entry.until - now)));
   }
   function undoToast(entries: PendingUndo[], duration: number) {
     toast(undoMessage(entries), {
       duration,
-      action: { label: "Undo", onClick: () => entries.forEach((entry) => restoreRemoved(entry.removed)) },
+      action: { label: "Undo", onClick: () => livePendingUndo(entries, undoClock()).entries.forEach((entry) => restoreRemoved(entry.removed)) },
     });
   }
   function closeCart() {
@@ -892,7 +894,7 @@ export function CartProvider({
             <button
               type="button"
               onClick={() => {
-                const entries = pendingUndoRef.current;
+                const { entries } = livePendingUndo(pendingUndoRef.current, undoClock());
                 setPending([]);
                 entries.forEach((entry) => restoreRemoved(entry.removed));
               }}

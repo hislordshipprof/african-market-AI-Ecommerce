@@ -75,7 +75,7 @@ function inline(source: string): Inline[] {
         flush();
         const target = linkTarget(match[2]);
         if (target) out.push({ type: "link", ...target, children: inline(match[1]) });
-        else text = match[1];
+        else out.push(...inline(match[1]));
         i += match[0].length;
         continue;
       }

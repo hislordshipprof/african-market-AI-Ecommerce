@@ -60,7 +60,7 @@ export function mapRouteError(input: {
   if (known === "assistant_resting") {
     return {
       code,
-      title: "The helper is resting right now. You can keep shopping the usual way.",
+      title: "Shop with AI is resting right now. You can keep shopping the usual way.",
       searchHref: "/search",
       terminal: true,
       retry: false,
@@ -69,7 +69,7 @@ export function mapRouteError(input: {
   if (known === "assistant_unavailable" || known === "assistant_disabled") {
     return {
       code,
-      title: "The helper isn't available right now.",
+      title: "Shop with AI isn't available right now.",
       searchHref: "/search",
       terminal: true,
       retry: false,

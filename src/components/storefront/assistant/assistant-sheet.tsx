@@ -1043,6 +1043,7 @@ function CardView({
                 imageUrl: card.imageUrl ?? undefined,
                 packLabel: card.packLabel,
               }}
+              disabled={disabled || card.askStore}
             />
           </div>
         ) : null}

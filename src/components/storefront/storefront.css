@@ -2,6 +2,8 @@
 .sf-storefront {
   --sf-radius: 12px;
   --sf-on-deep: var(--store-on-primary-deep, #fff);
+  /* DESIGN.md `scrim` (#080A09) as RGB channels, for photo and hero shades at any alpha. */
+  --sf-scrim: 8 10 9;
   background: var(--color-bg);
   color: var(--color-ink);
   font-family: var(--font-body);
@@ -489,8 +491,8 @@
   inset: 0;
   background: linear-gradient(
     0deg,
-    rgba(0, 0, 0, 0.82),
-    rgba(0, 0, 0, 0.03) 90%
+    rgb(var(--sf-scrim) / 82%),
+    rgb(var(--sf-scrim) / 3%) 90%
   );
 }
 .sf-offer-copy {
@@ -557,10 +559,10 @@
 }
 /* Collection titles are white over the photo: keep the scrim dark through the text block. */
 .sf-collection-card .sf-photo-scrim {
-  background: linear-gradient(0deg, rgb(0 0 0 / 85%), rgb(0 0 0 / 70%) 75%, rgb(0 0 0 / 15%));
+  background: linear-gradient(0deg, rgb(var(--sf-scrim) / 85%), rgb(var(--sf-scrim) / 70%) 75%, rgb(var(--sf-scrim) / 15%));
 }
 .sf-category-tile .sf-photo-scrim {
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.8), transparent 95%);
+  background: linear-gradient(0deg, rgb(var(--sf-scrim) / 80%), transparent 95%);
 }
 .sf-category-tile > div:last-child {
   position: absolute;

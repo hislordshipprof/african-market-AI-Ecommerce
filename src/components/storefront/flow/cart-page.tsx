@@ -156,7 +156,7 @@ export function CartPage({
   const quoteFailed = summary.kind === "fallback";
   const [selected, select] = useState<CartLine | null>(null);
   const [, startTransition] = useTransition();
-  const remaining = Math.max(0, settings.minimumOrderCents - subtotal);
+  const minimum = minimumOrderGate(subtotal, settings.minimumOrderCents);
   const invalid = lines.some((line) => {
     const item = catalog.find(
       (item) => cartItemKey(item) === cartItemKey(line),
@@ -337,7 +337,7 @@ export function CartPage({
                     aria-label="Minimum order progress"
                   />
                   <p className={styles.muted}>
-                    {minimumOrderGate(subtotal, settings.minimumOrderCents).message ??
+                    {minimum.message ??
                       "You've reached the minimum order."}
                   </p>
                 </>
@@ -347,7 +347,7 @@ export function CartPage({
                   Review unavailable items and quantities above.
                 </p>
               )}
-              {remaining || invalid || !settings.takingOrders ? (
+              {!minimum.met || invalid || !settings.takingOrders ? (
                 <Button disabled className={styles.full}>
                   Continue to checkout
                 </Button>
@@ -369,7 +369,7 @@ export function CartPage({
             <small>Subtotal</small>
             <strong>{money(subtotal)}</strong>
           </div>
-          {remaining || invalid || !settings.takingOrders ? (
+          {!minimum.met || invalid || !settings.takingOrders ? (
             <Button disabled>Checkout</Button>
           ) : (
             <Link className="sf-button" href="/checkout">

@@ -7,8 +7,10 @@ export function minimumOrderGate(
 ): { met: boolean; message: string | null } {
   const minimum = Math.max(0, minimumCents);
   if (subtotalCents >= minimum) return { met: true, message: null };
-  return {
-    met: false,
-    message: `${money(minimum - subtotalCents)} more to reach the ${money(minimum)} minimum`,
-  };
+  return { met: false, message: minimumOrderMessage(minimum - subtotalCents, minimum) };
+}
+
+/** The one wording for a basket under the store minimum, wherever it shows. */
+export function minimumOrderMessage(missingCents: number, minimumCents: number): string {
+  return `${money(missingCents)} more to reach the ${money(minimumCents)} minimum`;
 }

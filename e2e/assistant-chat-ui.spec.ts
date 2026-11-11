@@ -140,7 +140,7 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await page.getByTestId("assistant-composer").fill("show my basket");
   await page.getByTestId("assistant-composer").press("Enter");
   await expect(dialog.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
-  await expect(dialog.locator('[class*="summary"]').getByText(/to reach the .+ minimum order/)).toBeVisible();
+  await expect(dialog.locator('[class*="summary"]').getByText(/more to reach the .+ minimum/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
   await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();
@@ -763,10 +763,10 @@ test("closing a failed file turn removes Retry without turning it into a text tu
 
 test("file presence cannot enable Retry for terminal or message-rate-limited errors", async ({ page }) => {
   const cases = [
-    [503, "assistant_unavailable", "The helper isn't available right now."],
-    [404, "assistant_disabled", "The helper isn't available right now."],
+    [503, "assistant_unavailable", "Shop with AI isn't available right now."],
+    [404, "assistant_disabled", "Shop with AI isn't available right now."],
     [403, "store_suspended", "This store isn't taking orders right now."],
-    [503, "assistant_resting", "The helper is resting right now. You can keep shopping the usual way."],
+    [503, "assistant_resting", "Shop with AI is resting right now. You can keep shopping the usual way."],
     [429, "rate_limited", "Too many messages."],
   ] as const;
   for (const [status, code, title] of cases) {
