@@ -1,17 +1,24 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { lockListingRows, storeScoped, storeScopedTransaction } from "../db";
 import { isRlsRejection } from "../listing/cross-store-write";
 import { reserveOrderStock } from "../order/stock-ledger";
 import { makeFakeStep } from "../inngest/fake-step";
+import { PushTestSender, setPushSenderForTests } from "../push/sender";
 import { copilotOrderStockAlerts } from "./alert-functions";
+import { pushCopilotAlerts } from "./alerts";
 
 type Handler = (ctx: { event: { data: Record<string, unknown> }; step: ReturnType<typeof makeFakeStep> }) => Promise<unknown>;
 const orderAlertsHandler = (copilotOrderStockAlerts as unknown as { fn: Handler }).fn;
 
 const hasDb = !!process.env.DATABASE_URL;
 const RUN = `t430-${Date.now().toString(36)}`;
+const VAPID_ENV = { NODE_ENV: "test", VAPID_PUBLIC_KEY: "public", VAPID_PRIVATE_KEY: "private" };
+const PUSH_KEYS = {
+  p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
+  auth: "tBHItJI5svbpez7KI4CCXg",
+};
 
 describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
   let raw: PrismaClient;
@@ -85,6 +92,10 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
     await raw.$disconnect();
   });
 
+  afterEach(() => {
+    setPushSenderForTests(null);
+  });
+
   it("copilot_alerts: storeScoped(B) reads none of A's alerts, cannot insert one for A, and updates nothing", async () => {
     const listingAId = await counted(storeAId, "Gari", 3);
     const alert = await storeScoped(storeAId).copilotAlert.create({
@@ -135,5 +146,45 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
       ["sold_out", null],
     ]);
     expect(await alertsFor(plentyId)).toEqual([]);
+  });
+
+  it("ten alerts in twenty minutes send at most two owner pushes in the hour; the rest wait for the next allowed push", async () => {
+    const storeId = (await raw.store.create({
+      data: { slug: `alerts-cap-${RUN}`, name: "Alerts Cap", themePreset: "palm-and-shea" },
+    })).id;
+    const ownerId = `alerts-owner-${RUN}`;
+    const staffId = `alerts-staff-${RUN}`;
+    await raw.user.createMany({ data: [ownerId, staffId].map((id) => ({ id, name: id, email: `${id}@example.com` })) });
+    await storeScoped(storeId).storeMembership.createMany({
+      data: [{ storeId, userId: ownerId, role: "owner" }, { storeId, userId: staffId, role: "staff" }],
+    });
+    for (const userId of [ownerId, staffId]) {
+      await storeScoped(storeId).pushSubscription.create({
+        data: { storeId, userId, endpoint: `https://fcm.googleapis.com/fcm/send/${userId}`, ...PUSH_KEYS },
+      });
+    }
+    const sender = new PushTestSender();
+    setPushSenderForTests(sender);
+
+    const start = Date.now();
+    const alertIds: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const listingId = await counted(storeId, `Item ${i}`, 2);
+      alertIds.push((await storeScoped(storeId).copilotAlert.create({
+        data: { storeId, kind: "running_low", listingId, dedupeKey: `running_low:${listingId}:cap` },
+      })).id);
+      await pushCopilotAlerts(storeId, VAPID_ENV, start + i * 2 * 60_000);
+    }
+
+    expect(sender.sent).toHaveLength(2);
+    expect(sender.sent.every((push) => push.endpoint.endsWith(ownerId))).toBe(true);
+    const after = await storeScoped(storeId).copilotAlert.findMany({ orderBy: { createdAt: "asc" } });
+    expect(after.map((a) => a.pushedAt !== null)).toEqual([true, true, false, false, false, false, false, false, false, false]);
+    expect(after.every((a) => a.state === "open")).toBe(true);
+
+    await pushCopilotAlerts(storeId, VAPID_ENV, start + 61 * 60_000);
+    expect(sender.sent).toHaveLength(3);
+    expect(sender.sent[2]!.message.body).toMatch(/8/);
+    expect((await storeScoped(storeId).copilotAlert.count({ where: { pushedAt: null } }))).toBe(0);
   });
 });

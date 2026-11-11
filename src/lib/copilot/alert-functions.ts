@@ -1,5 +1,5 @@
 import { inngest } from "../inngest/client";
-import { createOrderStockAlerts } from "./alerts";
+import { createOrderStockAlerts, pushCopilotAlerts } from "./alerts";
 
 /** Runs on the after-commit event, so stock is already reserved and a failure never touches checkout. */
 export const copilotOrderStockAlerts = inngest.createFunction(
@@ -11,6 +11,7 @@ export const copilotOrderStockAlerts = inngest.createFunction(
   async ({ event, step }) => {
     const { orderId, storeId } = event.data as { orderId?: string; storeId?: string };
     if (!orderId || !storeId) return;
-    await step.run("create-alerts", () => createOrderStockAlerts(storeId, orderId));
+    const created = await step.run("create-alerts", () => createOrderStockAlerts(storeId, orderId));
+    if (created > 0) await step.run("push-alerts", () => pushCopilotAlerts(storeId));
   },
 );
