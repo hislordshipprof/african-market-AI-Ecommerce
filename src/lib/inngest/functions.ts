@@ -14,6 +14,7 @@ import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing
 import { sendNewOrderPush } from "../push/new-order";
 import { slotStart } from "../admin/orders-to-check-query";
 import { supportSlaEscalation } from "../support/escalation";
+import { copilotOrderStockAlerts } from "../copilot/alert-functions";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -408,4 +409,5 @@ export const inngestFunctions = [
   dailyConfidence,
   sendCustomerNotification,
   supportSlaEscalation,
+  copilotOrderStockAlerts,
 ];
