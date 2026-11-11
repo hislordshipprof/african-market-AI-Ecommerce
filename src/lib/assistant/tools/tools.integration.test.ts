@@ -706,6 +706,15 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     const excludedIds = searchItems(excluded).map((row) => row.listingId);
     expect(excludedIds).toContain(plain.listingId);
     expect(excludedIds).not.toContain(onion.listingId);
+    const sack = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Plain rice ${suffix}`, imageUrl: null },
+      price: 450,
+      label: "onion sack",
+    });
+    const labelOnly = await searchCatalog(ctx(), { query: `rice ${suffix}`, exclude: "onion" });
+    expect(searchItems(labelOnly).map((row) => row.listingId)).toContain(sack.listingId);
     const berbere = await makeListing(storeA, {
       name: "ignored",
       customName: null,
@@ -714,6 +723,31 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     });
     const berbereMaster = (await storeScoped(storeA).listing.findUniqueOrThrow({ where: { id: berbere.listingId } })).masterProductId;
     await platformAdmin.productSynonym.create({ data: { productId: berbereMaster!, term: "በርበሬ" } });
+    const token = `zzqx${suffix}`;
+    const named = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Basket of ${token}`, imageUrl: null },
+      price: 450,
+    });
+    const decoy = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Unrelated seasoning ${suffix}`, imageUrl: null },
+      price: 450,
+    });
+    const decoyMaster = (await storeScoped(storeA).listing.findUniqueOrThrow({ where: { id: decoy.listingId } })).masterProductId;
+    await platformAdmin.productSynonym.create({ data: { productId: decoyMaster!, term: token } });
+    for (let index = 0; index < 50; index += 1) {
+      await makeListing(storeA, {
+        name: "ignored",
+        customName: null,
+        master: { name: `${token}aaa${String(index).padStart(2, "0")}`, imageUrl: null },
+        price: 450,
+      });
+    }
+    const first = await searchCatalog(ctx(), { query: token, limit: 1 });
+    expect(searchItems(first)[0]?.listingId).toBe(named.listingId);
     const amharic = await searchCatalog(ctx(), { query: "በርበሬ" });
     expect(searchItems(amharic).find((row) => row.listingId === berbere.listingId))
       .toMatchObject({ match: "synonym", matchedTerm: "በርበሬ" });

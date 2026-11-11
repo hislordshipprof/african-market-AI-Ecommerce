@@ -339,7 +339,8 @@ async function readSearchListings(
       WHERE lv.listing_id = l.id
     ) labels ON true
     CROSS JOIN LATERAL (
-      SELECT unaccent(coalesce(l.custom_name, '') || ' ' || coalesce(mp.name, '') || ' ' || coalesce(labels.blob, '')) AS doc
+      SELECT unaccent(coalesce(l.custom_name, '') || ' ' || coalesce(mp.name, '')) AS title,
+             unaccent(coalesce(l.custom_name, '') || ' ' || coalesce(mp.name, '') || ' ' || coalesce(labels.blob, '')) AS doc
     ) name_doc
     LEFT JOIN LATERAL (
       SELECT ps.term
@@ -365,12 +366,19 @@ async function readSearchListings(
       ) terms WHERE term IS NOT NULL AND term <> ''
     ) relevance
     CROSS JOIN LATERAL (
-      SELECT strict_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.doc)) AS score
+      SELECT strict_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.doc)) AS score,
+             strict_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.title)) AS title_score
     ) typo
     WHERE l.active = true AND ${notE2eListingSql}
       AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND typo.score > 0.3))
-      AND (${excluded} = '' OR NOT (to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${excluded}))))
-    ORDER BY relevance.rank, relevance.fuzzy DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
+      AND (${excluded} = '' OR NOT (to_tsvector('english', name_doc.title) @@ plainto_tsquery('english', unaccent(${excluded}))))
+    ORDER BY
+      CASE
+        WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 0
+        WHEN synonym_hit.term IS NOT NULL THEN 1
+        ELSE 2
+      END,
+      relevance.rank, GREATEST(relevance.fuzzy, typo.title_score) DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
     LIMIT 50
     `,
   );
