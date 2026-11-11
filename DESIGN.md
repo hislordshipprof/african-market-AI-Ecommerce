@@ -168,6 +168,8 @@ Three Theme presets (ADR-0011). A store's brand color, when set, replaces `prima
 
 **The Scrim Rule.** Shades over photos (hero, collection and category tiles) use `scrim` (#080A09, `--sf-scrim`) at the alpha the text needs, never a hard-coded black.
 
+**The Logo Plate Rule.** The header logo sits on a white plate (#FFFFFF) in both themes, so dark lettering reads in dark mode. Before showing it, the storefront samples the logo: a transparent logo needs a fifth of its marked pixels at 3:1 against the plate; a logo that is nearly all opaque brings its own panel, so its lettering is measured against that panel's main colour. A logo that fails shows the store's initials on `primary-deep` instead. The plate stays hidden until the check answers, so the header never flashes a logo it then replaces.
+
 **The Separate Semantics Rule.** Deal, success and error colors belong to the system, not the brand. Errors always carry an icon and text, never color alone.
 
 ## Typography
