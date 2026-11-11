@@ -13,6 +13,7 @@ import { runAssistantRetention } from "../assistant/retention";
 import { recomputeConfidenceBatch, type ConfidenceBatchResult } from "../listing/confidence-job";
 import { sendNewOrderPush } from "../push/new-order";
 import { slotStart } from "../admin/orders-to-check-query";
+import { supportSlaEscalation } from "../support/escalation";
 
 const RECONCILE_FAILED_COOLDOWN_MS = 3600_000;
 
@@ -406,4 +407,5 @@ export const inngestFunctions = [
   assistantRetention,
   dailyConfidence,
   sendCustomerNotification,
+  supportSlaEscalation,
 ];
