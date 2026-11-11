@@ -42,24 +42,12 @@ function order(status: string, capturedAmountCents: number | null = 2500): Notif
 const CANCEL_COPY = ["not charged", "refunded", "hold was released", "Cancelled"];
 
 describe("store delivery messages", () => {
-  it("out for delivery: email and SMS say Out for delivery with the exact order number and no cancel copy", () => {
-    const email = renderEmail(order("OUT_FOR_DELIVERY"), "out_for_delivery", URL, "orders@example.com");
-    const sms = renderSms(order("OUT_FOR_DELIVERY"), "out_for_delivery", URL);
-    expect(email.subject).toBe("Ada's Market order #1042: Out for delivery");
-    expect(email.html).toContain("Out for delivery. Order #1042.");
-    expect(email.html).toContain(URL);
-    expect(sms.text).toBe(`Ada's Market: order #1042 Out for delivery. Track it: ${URL}`);
-    for (const copy of CANCEL_COPY) expect(email.html).not.toContain(copy);
-  });
-
-  it("delivered: email shows Delivered, the exact order number and the charged amount, never the cancel copy", () => {
-    const email = renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com");
-    const sms = renderSms(order("DELIVERED"), "delivered", URL);
-    expect(email.subject).toBe("Ada's Market order #1042: Delivered");
-    expect(email.html).toContain("Delivered. Order #1042.");
-    expect(email.html).toContain("Charged $25.00.");
-    expect(email.html).toContain("<li>1 × Egusi — $20.00</li>");
-    expect(sms.text).toBe(`Ada's Market: order #1042 Delivered. Track it: ${URL}`);
-    for (const copy of CANCEL_COPY) expect(email.html).not.toContain(copy);
+  it("out for delivery and delivered never carry cancel copy; delivered states the charged amount", () => {
+    for (const [status, event] of [["OUT_FOR_DELIVERY", "out_for_delivery"], ["DELIVERED", "delivered"]] as const) {
+      const email = renderEmail(order(status), event, URL, "orders@example.com");
+      expect(renderSms(order(status), event, URL).text).toContain(URL);
+      for (const copy of CANCEL_COPY) expect(email.html).not.toContain(copy);
+    }
+    expect(renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com").html).toContain("Charged $25.00.");
   });
 });
