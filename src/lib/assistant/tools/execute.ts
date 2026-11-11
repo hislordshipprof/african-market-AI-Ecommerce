@@ -151,6 +151,7 @@ export async function searchCatalog(ctx: AssistantContext, input: unknown): Prom
     priceCents: item.price,
     imageUrl: item.imageUrl ?? null,
     mayBeUnavailable: item.badge !== "in-stock",
+    badge: item.badge,
   }));
   return recordRead(ctx, "search_catalog", parsed, { ok: true, items });
 }

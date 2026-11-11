@@ -36,6 +36,7 @@ describe("assistant cards", () => {
             priceCents: 500,
             imageUrl: null,
             mayBeUnavailable: true,
+            badge: "ask-store",
           }],
         },
       },
@@ -50,6 +51,7 @@ describe("assistant cards", () => {
             name: "Stockfish",
             imageUrl: "/images/stock.jpg",
             mayBeUnavailable: false,
+            badge: "limited",
             variants: [
               { variantId: "v-b", label: "Large", priceCents: 900 },
               { variantId: "v-a", label: "Small", priceCents: 700 },
@@ -131,7 +133,8 @@ describe("assistant cards", () => {
     expect(JSON.stringify(cards)).not.toContain("missing-listing");
     expect(JSON.stringify(cards)).not.toContain("$1.00");
     const shown = cards.find((card) => card.kind === "product" && card.name === "Stockfish");
-    expect(shown).toMatchObject({ packLabel: "Small", priceCents: 700, priceLabel: "$7.00" });
+    expect(shown).toMatchObject({ packLabel: "Small", priceCents: 700, priceLabel: "$7.00", askStore: false });
+    expect(cards.find((card) => card.kind === "product" && card.name === "Egusi")).toMatchObject({ askStore: true });
     const choices = cards.find((card) => card.kind === "choices");
     expect(choices && choices.kind === "choices" ? choices.options.map((option) => option.sendText) : []).toEqual([
       "Egusi (400 g)",
