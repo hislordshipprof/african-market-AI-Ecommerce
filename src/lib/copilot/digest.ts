@@ -1,5 +1,5 @@
 import { resolveAuthBaseUrl } from "../auth";
-import { platform, storeScoped, storeScopedTransaction } from "../db";
+import { platform, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { sendEmail } from "../email/send";
 import { inngest } from "../inngest/client";
 import { isValidTimezone } from "../order/store-hours";
@@ -7,6 +7,8 @@ import { stockBadge, type StockBadge } from "../storefront/stock-badge";
 import { describeAlerts, type AlertKind, type AlertView } from "./alerts";
 import { listingLabel } from "./cards";
 
+/** Owner decision 2026-11-10: 20:00 store time unless the owner changes it. */
+export const DEFAULT_DIGEST_HOUR = 20;
 const STORES_PER_PAGE = 100;
 const BEST_SELLERS = 5;
 const CONFIRM_REQUESTS_SHOWN = 20;
@@ -212,6 +214,32 @@ export async function runDigestPage(
   if (due > 0 && failed === due) throw new Error(`Copilot digest failed for all ${due} due stores in this page`);
   const last = stores.at(-1)?.id ?? null;
   return { nextCursor: stores.length < STORES_PER_PAGE ? null : last, due, sent, failed };
+}
+
+export async function loadDigestHour(storeId: string): Promise<number> {
+  const store = await platform.store.findUnique({ where: { id: storeId }, select: { digestHour: true } });
+  return store?.digestHour ?? DEFAULT_DIGEST_HOUR;
+}
+
+/** The owner's local send hour, 0 to 23, with an audit row. */
+export async function setDigestHour(storeId: string, hour: number, actor: { id: string; email: string }): Promise<void> {
+  await platformAdminTransaction(async (tx) => {
+    const before = await tx.store.findUnique({ where: { id: storeId }, select: { digestHour: true } });
+    if (!before || before.digestHour === hour) return;
+    await tx.store.update({ where: { id: storeId }, data: { digestHour: hour } });
+    await tx.auditLog.create({
+      data: {
+        storeId,
+        actorId: actor.id,
+        actorEmail: actor.email,
+        action: "store.digest_hour",
+        entityType: "store",
+        entityId: storeId,
+        before: { digestHour: before.digestHour },
+        after: { digestHour: hour },
+      },
+    });
+  });
 }
 
 /** Hourly; each store's owners get one email at the store's local digest hour. */

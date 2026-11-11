@@ -112,7 +112,9 @@ describe.skipIf(!hasDb)("copilot daily digest (lane database)", () => {
     expect(html).not.toContain("is sold out");
     expect(html).toContain("Do you still have Gari Ijebu?");
     expect(html).toMatch(/Orders today: 1\b/);
-    expect(html).toMatch(/Puna Yam: 4 sold.*Gari Ijebu: 1 sold/s);
+    expect(html).toContain("Gari Ijebu: 1 sold");
+    expect(html.indexOf("Puna Yam: 4 sold")).toBeGreaterThan(-1);
+    expect(html.indexOf("Puna Yam: 4 sold")).toBeLessThan(html.indexOf("Gari Ijebu: 1 sold"));
     expect(html).not.toContain("Store B Plantain");
   });
 

@@ -2,15 +2,18 @@ import Link from "next/link";
 import { Store } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
 import { listOpenAlerts } from "@/lib/copilot/alerts";
+import { loadDigestHour } from "@/lib/copilot/digest";
 import { loadCopilotPanel } from "@/lib/copilot/turn";
 import { AlertsPanel } from "./alerts-panel";
 import { CopilotPanel } from "./copilot-panel";
+import { DigestSetting } from "./digest-setting";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
-  const [panel, alerts] = await Promise.all([
+  const [panel, alerts, digestHour] = await Promise.all([
     loadCopilotPanel(session.store.id, session.user.id),
     listOpenAlerts(session.store.id),
+    loadDigestHour(session.store.id),
   ]);
 
   return (
@@ -37,6 +40,7 @@ export default async function CopilotPage() {
           messages={panel.messages}
           proposals={panel.proposals}
         />
+        <DigestSetting hour={digestHour} />
       </main>
     </div>
   );
