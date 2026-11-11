@@ -72,6 +72,6 @@ export async function confirmOwnerReportItems(input: unknown): Promise<ConfirmRe
     return result;
   } catch (error) {
     console.error("[copilot] report confirm failed", { errorType: error instanceof Error ? error.name : "Error" });
-    return { ok: false, code: "not_found" };
+    return { ok: false, code: "failed" };
   }
 }

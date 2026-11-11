@@ -53,7 +53,7 @@ import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/m
 import { setSpendClock } from "../assistant/spend";
 import { auth } from "../auth";
 import { authPrisma, storeScoped } from "../db";
-import { matchReportItem } from "./owner-report";
+import { listPendingOwnerReports, matchReportItem } from "./owner-report";
 import { confirmOwnerReportItems, submitPhotoReport, submitVoiceReport } from "./report-actions";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -249,6 +249,24 @@ describe.skipIf(!hasDb)("owner reports (real auth, lane database)", () => {
     expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: ids.gari } })).qty).toBe(15);
     expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: ids.egusi } })).qty).toBe(egusiBefore);
     expect(await storeScoped(storeAId).stockEvent.count()).toBe(events + 1);
+  });
+
+  it("a report not settled in the same page view comes back as pending, newest first, until dismissed", async () => {
+    extraction([{ name: "egusi", quantity: 2 }, { name: "Dragon Fruit Juice", quantity: 6 }]);
+    const sent = await submitVoiceReport({ transcript: "two egusi and six dragon fruit juice" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+
+    const pending = await listPendingOwnerReports(storeAId);
+    expect(pending[0]).toEqual(sent.report);
+    expect(pending[0]!.items.map((item) => item.status)).toEqual(["pending", "unmatched"]);
+    expect(pending.every((report) => report.status === "pending")).toBe(true);
+    expect(await listPendingOwnerReports(storeBId)).toEqual([]);
+
+    const dismissed = await confirmOwnerReportItems({ reportId: sent.report.id, itemIds: [] });
+    expect(dismissed.ok && dismissed.report.status).toBe("rejected");
+    expect((await listPendingOwnerReports(storeAId)).map((report) => report.id)).not.toContain(sent.report.id);
+    expect(await storeScoped(storeAId).auditLog.count({ where: { action: "owner_report.reject", entityId: sent.report.id } })).toBe(1);
   });
 
   it("a status listing's line sets it in stock", async () => {

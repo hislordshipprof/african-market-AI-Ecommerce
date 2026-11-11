@@ -39,6 +39,7 @@ const MATCH_SEVERAL = 0.6;
 export const REPORT_PHOTO_INVALID = "Add one photo of the invoice or shelf: a JPEG, PNG or WebP image.";
 export const REPORT_STORAGE_NOT_SET_UP = "Photo reports are not set up for this store yet.";
 export const REPORT_TOO_LONG = "Say or type a stock report of 1,000 characters or less.";
+export const REPORT_EMPTY = "Say or type what came in first.";
 
 const EXTRACT_PROMPT = `You read a grocery store's stock report: a spoken note from the owner, a supplier invoice photo, or a shelf photo. Call report_items once with every item you can name and how many units arrived or are on the shelf.
 
@@ -179,7 +180,7 @@ export type CreateReportResult =
 
 export type ConfirmReportResult =
   | { ok: true; report: OwnerReportCard }
-  | { ok: false; code: "not_found" | "already_decided" };
+  | { ok: false; code: "not_found" | "already_decided" | "failed" };
 
 export async function loadOwnerReport(storeId: string, reportId: string): Promise<OwnerReportCard | null> {
   const report = await storeScoped(storeId).ownerReport.findUnique({
@@ -215,6 +216,20 @@ export async function loadOwnerReport(storeId: string, reportId: string): Promis
   };
 }
 
+/** Reports still waiting for the owner shown on the copilot page; older ones show as these are settled. */
+export const PENDING_REPORTS_SHOWN = 20;
+
+export async function listPendingOwnerReports(storeId: string): Promise<OwnerReportCard[]> {
+  const rows = await storeScoped(storeId).ownerReport.findMany({
+    where: { status: "pending" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: PENDING_REPORTS_SHOWN,
+    select: { id: true },
+  });
+  const reports = await Promise.all(rows.map((row) => loadOwnerReport(storeId, row.id)));
+  return reports.filter((report): report is OwnerReportCard => report !== null);
+}
+
 async function gate(storeId: string, userId: string): Promise<CreateReportResult | null> {
   if (configMissing()) return { ok: false, code: "copilot_unavailable", message: UNAVAILABLE_MESSAGE };
   try {
@@ -245,7 +260,8 @@ export async function createOwnerReport(storeId: string, actor: CopilotActor, in
   let source: ReportSource;
   if (input.type === "voice") {
     const transcript = input.transcript.trim();
-    if (!transcript || transcript.length > MESSAGE_MAX) return { ok: false, code: "invalid_request", message: REPORT_TOO_LONG };
+    if (!transcript) return { ok: false, code: "invalid_request", message: REPORT_EMPTY };
+    if (transcript.length > MESSAGE_MAX) return { ok: false, code: "invalid_request", message: REPORT_TOO_LONG };
     source = { type: "voice", transcript };
   } else {
     if (!deliveryProofBucket()) return { ok: false, code: "storage_not_set_up", message: REPORT_STORAGE_NOT_SET_UP };
@@ -402,6 +418,19 @@ export async function confirmOwnerReport(
       where: { id: reportId },
       data: { status, decidedById: actor.id, decidedAt: now },
     });
+    if (confirmed === 0) {
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: actor.id,
+          actorEmail: actor.email,
+          action: "owner_report.reject",
+          entityType: "owner_report",
+          entityId: reportId,
+          after: { proposedBy: "copilot", reportedBy: report.actorId },
+        },
+      });
+    }
     return true;
   }, WRITE_TRANSACTION);
   if (!decided) return { ok: false, code: "already_decided" };
