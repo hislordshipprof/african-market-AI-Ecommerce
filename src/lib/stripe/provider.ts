@@ -14,6 +14,9 @@ import { RefundNotCreatedError, WebhookSecretMissingError, mapRefundStatus, over
 
 let _stripeClient: Stripe | null = null;
 
+// Stripe's autoPagingToArray maximum; a real order never has this many refunds.
+const REFUND_LIST_CAP = 10_000;
+
 export function getStripeClient(): Stripe {
   if (_stripeClient) return _stripeClient;
   const key = process.env.STRIPE_SECRET_KEY;
@@ -248,7 +251,10 @@ export const stripeProvider: StripeProvider = {
     const stripe = getStripeClient();
     const listed = await stripe.refunds
       .list({ payment_intent: paymentIntentId, limit: 100 })
-      .autoPagingToArray({ limit: 10_000 });
+      .autoPagingToArray({ limit: REFUND_LIST_CAP });
+    if (listed.length >= REFUND_LIST_CAP) {
+      console.error(JSON.stringify({ event: "stripe_refund_list_cap_reached" }));
+    }
     return listed.map((refund) => ({
       refundId: refund.id,
       amountRefunded: refund.amount,
