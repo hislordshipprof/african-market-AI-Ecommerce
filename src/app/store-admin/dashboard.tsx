@@ -42,20 +42,23 @@ export function StoreAdminDashboard({
   return (
     <div className="min-h-dvh bg-background">
       <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Store className="size-5" />
             </div>
-            <div>
-              <h1 className="text-base font-semibold text-foreground">
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-semibold text-foreground">
                 {storeName}
               </h1>
-              <p className="text-xs text-muted-foreground">Store Admin</p>
+              <p className="truncate text-xs text-muted-foreground">
+                <span className="sm:hidden">{userName}</span>
+                <span className="hidden sm:inline">Store Admin</span>
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">{userName}</span>
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="hidden text-sm text-muted-foreground sm:inline">{userName}</span>
             <Badge variant="secondary">{role}</Badge>
           </div>
         </div>
