@@ -1,4 +1,5 @@
 import { money } from "@/lib/format";
+import { minimumOrderMessage } from "@/lib/storefront/minimum-order";
 import { ASSISTANT_FIXED_ERROR, ASSISTANT_TOOL_NAMES, type AssistantToolName } from "../contract";
 
 export const CARD_TOOL_ERROR = ASSISTANT_FIXED_ERROR;
@@ -357,7 +358,7 @@ function summaryCards(callId: string, output: unknown): AssistantCard[] {
     missingCents,
     missingLabel: money(missingCents),
     gapLabel: missingCents > 0
-      ? `${money(missingCents)} to reach the ${money(typeof body.minimumOrderCents === "number" ? body.minimumOrderCents : 0)} minimum order`
+      ? minimumOrderMessage(missingCents, typeof body.minimumOrderCents === "number" ? body.minimumOrderCents : 0)
       : null,
   }];
 }

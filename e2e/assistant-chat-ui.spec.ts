@@ -140,7 +140,7 @@ test("choice chips and the basket summary are keyboard reachable", async ({ page
   await page.getByTestId("assistant-composer").fill("show my basket");
   await page.getByTestId("assistant-composer").press("Enter");
   await expect(dialog.getByRole("link", { name: "Looks good" })).toBeVisible({ timeout: 20_000 });
-  await expect(dialog.locator('[class*="summary"]').getByText(/to reach the .+ minimum order/)).toBeVisible();
+  await expect(dialog.locator('[class*="summary"]').getByText(/more to reach the .+ minimum/)).toBeVisible();
   await page.getByRole("button", { name: "Change something" }).click();
   await expect(page.getByRole("dialog", { name: "Shop with AI" })).toBeVisible();
   await expect(page.getByTestId("assistant-composer")).toBeFocused();

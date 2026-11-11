@@ -358,7 +358,7 @@ describe("assistant cards", () => {
     }]);
     expect(cards[0]).toMatchObject({
       kind: "summary",
-      gapLabel: "$24.01 to reach the $35.00 minimum order",
+      gapLabel: "$24.01 more to reach the $35.00 minimum",
     });
   });
 });
