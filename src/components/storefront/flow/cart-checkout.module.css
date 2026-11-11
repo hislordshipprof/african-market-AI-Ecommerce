@@ -253,6 +253,7 @@
   display: block;
   margin-top: 4px;
   font-weight: 400;
+  color: var(--muted-foreground);
 }
 .field small {
   font-weight: 400;
