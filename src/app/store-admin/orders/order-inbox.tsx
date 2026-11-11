@@ -54,6 +54,7 @@ import { RESOLVED_LINE_STATUSES, type StoreCancelReason } from "@/lib/order/cons
 import { sortPickListLines } from "@/lib/order/pick-sort";
 import { money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
+import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 
@@ -318,9 +319,13 @@ export function OrderInbox({
     startTransition(async () => {
       let jpeg: Blob;
       try {
-        jpeg = await jpegBlob(photo);
+        jpeg = await jpegBlob(photo, PHOTO_UPLOAD_MAX_BYTES);
       } catch {
         toast.error("This browser can't read that photo. Take it again or choose another one");
+        return;
+      }
+      if (jpeg.size > PHOTO_UPLOAD_MAX_BYTES) {
+        toast.error("The delivery photo is too large. Take it again or choose a smaller one");
         return;
       }
       const form = new FormData();

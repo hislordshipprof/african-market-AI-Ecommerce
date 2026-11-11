@@ -34,8 +34,7 @@ vi.mock("@aws-sdk/client-s3", () => {
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { markDelivered, markOutForDelivery } from "./service";
-import { PROOF_PHOTO_MISSING, PROOF_PHOTO_NOT_IMAGE, PROOF_PHOTO_TOO_LARGE, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
-import { CSV_ACTION_BODY_LIMIT_BYTES } from "../listing/csv-file-cap";
+import { DELIVERY_PROOF_MAX_BYTES, PROOF_PHOTO_MISSING, PROOF_PHOTO_NOT_IMAGE, PROOF_PHOTO_TOO_LARGE, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 import sharp from "sharp";
 import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests } from "../email/send";
 import { clearTestSentSms, getTestSentSms, setSmsSenderForTests } from "../notifications/sms";
@@ -183,7 +182,7 @@ describe.skipIf(!hasDb)("store delivery driver flow", () => {
     const order = await readyOrder();
     await markOutForDelivery(storeId, order.id);
     const pdf = new TextEncoder().encode("%PDF-1.7 not a photo");
-    const oversize = new Uint8Array(CSV_ACTION_BODY_LIMIT_BYTES + 1);
+    const oversize = new Uint8Array(DELIVERY_PROOF_MAX_BYTES + 1);
     oversize.set(JPEG_HEADER);
     const cases: Array<[Uint8Array | null, string]> = [
       [null, PROOF_PHOTO_MISSING],

@@ -1,8 +1,7 @@
-import { CSV_ACTION_BODY_LIMIT_BYTES } from "../listing/csv-file-cap";
+import { PHOTO_UPLOAD_MAX_BYTES } from "../listing/csv-file-cap";
 import { cleanJpeg } from "../image/server-jpeg";
 
-/** Nothing larger can arrive: the photo comes through a server action. */
-export const DELIVERY_PROOF_MAX_BYTES = CSV_ACTION_BODY_LIMIT_BYTES;
+export const DELIVERY_PROOF_MAX_BYTES = PHOTO_UPLOAD_MAX_BYTES;
 const MAX_INPUT_PIXELS = 16_777_216;
 
 export const STORE_DELIVERY_ONLY = "Only a store-delivery order can be sent out or marked delivered";
