@@ -8,7 +8,7 @@ A gap is either `fixed in #309` or `listed, not fixed` with a reason. An endpoin
 |---|---|---|---|---|---|---|---|---|
 | `src/app/account/actions.ts` syncCustomerAction | customer | session inside the action | signed-in user; customers | no caller input | none | no | none | fixed in #309 |
 | `src/app/api/address/suggest/route.ts` GET | guest | public | getStore() from the host | query length; under 3 characters returns an empty list | 30/min per IP and 600/min platform; over either returns an empty list | no | none | listed, not fixed |
-| `src/app/api/assistant/chat/route.ts` POST | guest | same origin | host store; carts, ai_conversations, ai_actions, assistant_undo_receipts | message envelope; extra keys stripped | 60/hour per IP and 30/hour per cart | no | none | fixed in #309 |
+| `src/app/api/assistant/chat/route.ts` POST | guest | same origin | host store; carts, ai_conversations, ai_actions, assistant_undo_receipts; the signed-in customer's own orders and their support threads (#26) | message envelope; extra keys stripped | 60/hour per IP and 30/hour per cart | no | none | fixed in #309 |
 | `src/app/api/auth/[...all]/route.ts` GET | guest | Better Auth | getStore() from the host | enabled groups: email-and-password, magic-link, two-factor; relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
 | `src/app/api/auth/[...all]/route.ts` POST | guest | Better Auth | getStore() from the host | enabled groups: email-and-password, magic-link, two-factor; relative callback URLs only; unknown keys kept | none | auth | none | fixed in #309 |
 | `src/app/api/catalog-image/[...key]/route.ts` GET | guest | public | getStore() from the host | key segments; rejects .. and backslash | none | no | none | fixed in #309 |
