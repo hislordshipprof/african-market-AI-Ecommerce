@@ -16,6 +16,9 @@ export default async function StoreListPage() {
           <Link href="/admin/orders/check" className="text-sm text-primary underline">
             Orders to check
           </Link>
+          <Link href="/admin/support" className="text-sm text-primary underline">
+            Messages
+          </Link>
           <Link
             href="/admin/stores/new"
             className="rounded-full bg-[#1F5A43] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#123726]"
