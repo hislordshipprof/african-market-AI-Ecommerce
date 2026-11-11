@@ -80,9 +80,9 @@ agent_run() {
       [ "$role" = ship ] && flags+=(--disallowedTools "Bash(gh pr merge:*)")
       # A session started from the desktop app passes its own sign-in to child processes, so a headless run would
       # bill the parent account instead of the chosen profile. Drop those variables when a profile is chosen.
-      local runner=()
+      local runner=(env)
       if [ -n "${AGENT_CLAUDE_CONFIG_DIR:-}" ]; then
-        local v; runner=(env)
+        local v
         for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
           case "$v" in CLAUDE_CODE_DISABLE_BACKGROUND_TASKS) ;; CLAUDE_CODE_*|CLAUDE_AGENT_SDK_*|ANTHROPIC_*) runner+=(-u "$v") ;; esac
         done
