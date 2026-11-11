@@ -23,7 +23,7 @@ import {
   STORE_DELIVERY_ONLY,
 } from "./delivery-proof";
 import { platform } from "../db";
-import { STAFF_GENERIC_ERROR } from "./staff-copy";
+import { STAFF_GENERIC_ERROR, redactedErrorMessage } from "./staff-copy";
 
 const ALLOWED_STAFF_ERRORS = new Set([
   "Order not found",
@@ -64,9 +64,7 @@ function isAllowListed(message: string): boolean {
 
 function staffFailure(action: string, orderId: string, err: unknown): { ok: false; error: string } {
   const raw = err instanceof Error ? err.message : typeof err === "string" ? err : "unknown failure";
-  const message = raw
-    .replace(/[^\s<>"]+@[^\s<>"]+/g, "[redacted]")
-    .replace(/\+?\d[\d\s().-]{8,}\d/g, "[redacted]");
+  const message = redactedErrorMessage(err);
   console.error(JSON.stringify({ event: "order_action_failed", action, orderId, message }));
   if (isAllowListed(raw)) return { ok: false, error: raw };
   return { ok: false, error: STAFF_GENERIC_ERROR };

@@ -5,6 +5,7 @@ import { deliveryProofBucket, issuePhotoKey, uploadIssuePhoto } from "../r2";
 import { money } from "../format";
 import { prepareProofPhoto } from "./delivery-proof";
 import { evaluateOrderRefundState, submitRefund } from "./refund-requests";
+import { redactedErrorMessage } from "./staff-copy";
 
 export const ISSUE_TYPES = ["missing", "damaged", "wrong", "poor_freshness"] as const;
 export type IssueType = (typeof ISSUE_TYPES)[number];
@@ -157,8 +158,8 @@ export async function submitIssueReport(
       await storeScoped(store.id).issueReport.update({ where: { id: issueId }, data: { amountCents: refund.amountRefunded } });
     }
   } catch (err) {
-    // A reserved request is replayed by the ledger sweep; the issue stays auto_refunded.
-    console.error(`Issue refund for order ${order.id} did not finish: ${(err as Error).message}`);
+    // An open request is replayed by the ledger sweep; one Stripe refused is marked refund_failed by the evaluation below.
+    console.error(`Issue refund for order ${order.id} did not finish: ${redactedErrorMessage(err)}`);
   }
   const issue = await storeScoped(store.id).issueReport.findUniqueOrThrow({ where: { id: issueId } });
   if (!issue.refundRequestId) {
