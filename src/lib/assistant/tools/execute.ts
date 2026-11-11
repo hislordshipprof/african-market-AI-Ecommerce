@@ -474,15 +474,76 @@ function isExplicitProductAdd(text: string): boolean {
   return !isAcceptanceLed(text) && !isRecipeMessage(text) && /\badd\b/i.test(text);
 }
 
-async function turnActions(ctx: AssistantContext) {
-  if (!ctx.turnMessageId) return [];
+async function turnActions(ctx: AssistantContext, turnId: string | undefined) {
+  if (!turnId) return [];
   const actions = await storeScoped(ctx.storeId).aiAction.findMany({
     where: { conversationId: ctx.conversationId, tool: { in: ["search_catalog", "offer_choices"] } },
   });
   return actions.filter((action) => {
     const input = action.input;
-    return !!input && typeof input === "object" && (input as { _turn?: unknown })._turn === ctx.turnMessageId;
+    return !!input && typeof input === "object" && (input as { _turn?: unknown })._turn === turnId;
   });
+}
+
+function textOfMessage(message: { parts?: unknown }): string {
+  if (!Array.isArray(message.parts)) return "";
+  return message.parts
+    .map((part) => (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+      ? (part as { text: string }).text
+      : ""))
+    .join(" ");
+}
+
+async function priorUserMessage(ctx: AssistantContext): Promise<{ id: string; text: string } | null> {
+  if (!ctx.turnMessageId) return null;
+  const conversation = await storeScoped(ctx.storeId).aiConversation.findUnique({
+    where: { id: ctx.conversationId },
+    select: { messages: true },
+  });
+  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  const index = messages.findIndex((message) => (
+    !!message && typeof message === "object"
+    && (message as { role?: unknown; id?: unknown }).role === "user"
+    && (message as { id?: unknown }).id === ctx.turnMessageId
+  ));
+  if (index < 0) return null;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const message = messages[cursor];
+    if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "user") continue;
+    const id = (message as { id?: unknown }).id;
+    if (typeof id !== "string") return null;
+    return { id, text: textOfMessage(message as { parts?: unknown }) };
+  }
+  return null;
+}
+
+function rememberSearchLabels(
+  actions: Array<{ tool: string; output: unknown }>,
+  nearListings: Set<string>,
+  fitListings: Set<string>,
+  offeredVariants: Set<string>,
+) {
+  for (const action of actions) {
+    const output = action.output;
+    if (!output || typeof output !== "object") continue;
+    const body = output as { items?: unknown; options?: unknown };
+    if (action.tool === "search_catalog" && Array.isArray(body.items)) {
+      for (const item of body.items) {
+        if (!item || typeof item !== "object") continue;
+        const row = item as { listingId?: unknown; match?: unknown };
+        if (typeof row.listingId !== "string") continue;
+        if (row.match === "near") nearListings.add(row.listingId);
+        else fitListings.add(row.listingId);
+      }
+    }
+    if (action.tool === "offer_choices" && Array.isArray(body.options)) {
+      for (const option of body.options) {
+        if (!option || typeof option !== "object") continue;
+        const row = option as { variantId?: unknown };
+        if (typeof row.variantId === "string") offeredVariants.add(row.variantId);
+      }
+    }
+  }
 }
 
 async function itemsNotShown(
@@ -495,27 +556,15 @@ async function itemsNotShown(
   const nearListings = new Set<string>();
   const fitListings = new Set<string>();
   const offeredVariants = new Set<string>();
+  let confirmingExplicitAdd = false;
   if (!acceptance.led && explicitAdd) {
-    for (const action of await turnActions(ctx)) {
-      const output = action.output;
-      if (!output || typeof output !== "object") continue;
-      const body = output as { items?: unknown; options?: unknown };
-      if (action.tool === "search_catalog" && Array.isArray(body.items)) {
-        for (const item of body.items) {
-          if (!item || typeof item !== "object") continue;
-          const row = item as { listingId?: unknown; match?: unknown };
-          if (typeof row.listingId !== "string") continue;
-          if (row.match === "near") nearListings.add(row.listingId);
-          else fitListings.add(row.listingId);
-        }
-      }
-      if (action.tool === "offer_choices" && Array.isArray(body.options)) {
-        for (const option of body.options) {
-          if (!option || typeof option !== "object") continue;
-          const row = option as { variantId?: unknown };
-          if (typeof row.variantId === "string") offeredVariants.add(row.variantId);
-        }
-      }
+    rememberSearchLabels(await turnActions(ctx, ctx.turnMessageId), nearListings, fitListings, offeredVariants);
+  }
+  if (acceptance.led) {
+    const prior = await priorUserMessage(ctx);
+    if (prior && isExplicitProductAdd(prior.text)) {
+      confirmingExplicitAdd = true;
+      rememberSearchLabels(await turnActions(ctx, prior.id), nearListings, fitListings, offeredVariants);
     }
   }
   const ids = [...new Set(items.map((item) => item.variant_id))];
@@ -555,6 +604,9 @@ async function itemsNotShown(
       const inReply = !acceptance.lastReplyEmpty && textNamesProduct(acceptance.lastReplyText, names);
       const inCustomer = textNamesProduct(acceptance.customerText, names);
       if (!inReply && !inCustomer) refused.set(item.variant_id, names[0] ?? item.variant_id);
+      else if (confirmingExplicitAdd && nearListings.has(listing.id) && !fitListings.has(listing.id) && !offeredVariants.has(item.variant_id)) {
+        refused.set(item.variant_id, names[0] ?? item.variant_id);
+      }
       continue;
     }
     if (nearListings.has(listing.id) && !fitListings.has(listing.id) && !offeredVariants.has(item.variant_id)) {

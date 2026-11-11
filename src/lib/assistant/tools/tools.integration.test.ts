@@ -773,6 +773,39 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(result).toMatchObject({ ok: true, qty: 1 });
   });
 
+  it("yes after an explicit add does not add the near product that reply named", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const name = `Pounded yam flour ${suffix}`;
+    const item = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name, imageUrl: null },
+      price: 450,
+    });
+    const asked = `asked-${suffix}`;
+    const yes = `yes-near-${suffix}`;
+    await storeScoped(storeA).aiConversation.update({
+      where: { id: talk.conversationId },
+      data: {
+        messages: [
+          { role: "user", id: asked, parts: [{ type: "text", text: `Add 1 Ayoola ${suffix}.` }] },
+          { role: "assistant", id: `reply-${suffix}`, parts: [{ type: "text", text: `The only result is ${name}.` }] },
+          { role: "user", id: yes, parts: [{ type: "text", text: "yes" }] },
+        ],
+      },
+    });
+    await searchCatalog(ctx({ ...talk, turnMessageId: asked }), { query: `Ayoola poundo yam ${suffix}` });
+    const result = await addToCart(ctx({ ...talk, turnMessageId: yes, acceptance: {
+      led: true,
+      customerText: "yes",
+      lastReplyText: `The only result is ${name}.`,
+      lastReplyEmpty: false,
+    } }), { items: [{ variant_id: item.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: false, code: "not_shown" });
+    expect(await storeScoped(storeA).cartLine.count({ where: { cartId: talk.cartId } })).toBe(0);
+  });
+
   it("a named pick from offer_choices still adds a variant search labelled near", async () => {
     const suffix = randomUUID().slice(0, 8);
     const talk = await freshCart();
