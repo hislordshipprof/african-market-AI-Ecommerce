@@ -7,6 +7,7 @@ import { loadCopilotPanel } from "@/lib/copilot/turn";
 import { AlertsPanel } from "./alerts-panel";
 import { CopilotPanel } from "./copilot-panel";
 import { DigestSetting } from "./digest-setting";
+import { OwnerReportPanel } from "./owner-report-panel";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
@@ -41,6 +42,7 @@ export default async function CopilotPage() {
           proposals={panel.proposals}
         />
         <DigestSetting hour={digestHour} />
+        <OwnerReportPanel />
       </main>
     </div>
   );
