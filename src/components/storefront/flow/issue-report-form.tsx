@@ -29,12 +29,16 @@ async function submitReport(previous: ReportIssueResult, form: FormData): Promis
 export function IssueReportForm({ token, lines }: { token: string; lines: ReportLine[] }) {
   const [result, action, pending] = useActionState<ReportIssueResult, FormData>(submitReport, null);
   if (result?.ok) {
+    const refunded = result.state === "auto_refunded";
+    const failed = result.state === "refund_failed";
     return (
-      <FlowCard title={result.state === "auto_refunded" ? "Refund on its way" : "Sent to the store"}>
+      <FlowCard title={refunded ? "Refund on its way" : failed ? "Refund did not go through" : "Sent to the store"}>
         <p role="status">
-          {result.state === "auto_refunded"
+          {refunded
             ? "We've refunded those items to your card. We'll email and text you when the refund is issued."
-            : "The store will review your report and get back to you."}
+            : failed
+              ? result.message
+              : "The store will review your report and get back to you."}
         </p>
         <Link className="sf-button" href={`/order/${token}`}>Back to order</Link>
       </FlowCard>

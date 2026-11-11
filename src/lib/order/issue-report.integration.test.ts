@@ -147,7 +147,7 @@ describe.skipIf(!hasDb)("customer issue report", () => {
       note: "Box was crushed",
       photo: JPEG,
     });
-    expect(result).toEqual({ ok: true, state: "auto_refunded" });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 2100 });
     const after = await written(order.id);
     expect(after.issues).toHaveLength(1);
     expect(after.requests).toHaveLength(1);
@@ -186,7 +186,7 @@ describe.skipIf(!hasDb)("customer issue report", () => {
       note: null,
       photo: JPEG,
     });
-    expect(result).toEqual({ ok: true, state: "auto_refunded" });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 1600 });
     expect((await written(order.id)).order.status).toBe("REFUNDED");
   });
 
@@ -216,7 +216,7 @@ describe.skipIf(!hasDb)("customer issue report", () => {
       note: null,
       photo: JPEG,
     });
-    expect(result).toEqual({ ok: true, state: "refund_failed" });
+    expect(result).toEqual({ ok: true, state: "refund_failed", amountCents: 900 });
     expect((await written(order.id)).order.status).toBe("COMPLETED");
   });
 
@@ -234,7 +234,7 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     });
     refuse.mockRestore();
     quiet.mockRestore();
-    expect(result).toEqual({ ok: true, state: "refund_failed" });
+    expect(result).toEqual({ ok: true, state: "refund_failed", amountCents: 900 });
     const after = await written(order.id);
     expect(after.issues[0].state).toBe("refund_failed");
     expect(after.order.status).toBe("COMPLETED");
@@ -255,7 +255,7 @@ describe.skipIf(!hasDb)("customer issue report", () => {
       note: null,
       photo: JPEG,
     });
-    expect(result).toEqual({ ok: true, state: "in_review" });
+    expect(result).toEqual({ ok: true, state: "in_review", amountCents: 4100 });
     const after = await written(order.id);
     expect(after.issues[0]).toMatchObject({ amountCents: 4100, state: "in_review", refundRequestId: null });
     expect(after.requests).toHaveLength(0);

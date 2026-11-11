@@ -100,7 +100,7 @@ export async function submitIssueReport(
   token: string,
   input: IssueReportInput,
   now = new Date(),
-): Promise<{ ok: true; state: IssueState } | { ok: false; error: string }> {
+): Promise<{ ok: true; state: IssueState; amountCents: number } | { ok: false; error: string }> {
   const early = refusal(
     await storeScoped(store.id).order.findUnique({ where: { trackingToken: token }, include: orderForIssue }),
     input,
@@ -146,7 +146,7 @@ export async function submitIssueReport(
     throw err;
   }
   if (!created.ok) return created;
-  if (created.state === "in_review") return { ok: true, state: "in_review" };
+  if (created.state === "in_review") return { ok: true, state: "in_review", amountCents: created.amount };
 
   try {
     const refund = await submitRefund(store.id, order.id, created.paymentIntentId, {
@@ -165,10 +165,10 @@ export async function submitIssueReport(
   if (!issue.refundRequestId) {
     // No request was reserved (blocked, or another refund is open): the store reviews it.
     await storeScoped(store.id).issueReport.update({ where: { id: issueId }, data: { state: "in_review" } });
-    return { ok: true, state: "in_review" };
+    return { ok: true, state: "in_review", amountCents: issue.amountCents };
   }
   await evaluateOrderRefundState(order.id);
   // Stripe can answer the create as failed; the evaluation has then marked the issue.
-  const settled = await storeScoped(store.id).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true } });
-  return { ok: true, state: settled.state as IssueState };
+  const settled = await storeScoped(store.id).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true, amountCents: true } });
+  return { ok: true, state: settled.state as IssueState, amountCents: settled.amountCents };
 }

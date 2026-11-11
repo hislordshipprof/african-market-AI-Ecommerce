@@ -7,7 +7,7 @@ import { parseInput } from "../security/parse-input";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { clientIp } from "../assistant/client-ip";
 import { DELIVERY_PROOF_MAX_BYTES } from "./delivery-proof";
-import { ISSUE_LINES_INVALID, ISSUE_PHOTO_INVALID, ISSUE_TYPES, submitIssueReport, type IssueState } from "./issue-report";
+import { ISSUE_LINES_INVALID, ISSUE_PHOTO_INVALID, ISSUE_TYPES, issueStateMessage, submitIssueReport, type IssueState } from "./issue-report";
 
 const reportSchema = z.strictObject({
   token: z.string().min(1).max(200),
@@ -20,7 +20,7 @@ const IP_LIMIT = 20;
 const WINDOW_MS = 60 * 60 * 1000;
 const TOO_MANY = "Too many tries. Wait a while, then try again.";
 
-export type ReportIssueResult = { ok: true; state: IssueState } | { ok: false; error: string } | null;
+export type ReportIssueResult = { ok: true; state: IssueState; message: string } | { ok: false; error: string } | null;
 
 /** Public: the tracking token is the only credential, so it is rate limited per token and per IP. */
 export async function reportIssueAction(_previous: ReportIssueResult, form: FormData): Promise<ReportIssueResult> {
@@ -49,10 +49,13 @@ export async function reportIssueAction(_previous: ReportIssueResult, form: Form
   if (!byToken.ok || !byIp.ok) return { ok: false, error: TOO_MANY };
 
   const store = await getStore();
-  return submitIssueReport(store, parsed.data.token, {
+  const result = await submitIssueReport(store, parsed.data.token, {
     type: parsed.data.type,
     lines: parsed.data.lines,
     note: parsed.data.note,
     photo: new Uint8Array(await file.arrayBuffer()),
   });
+  if (!result.ok) return result;
+  // The form is client code, so it gets the tracking page's wording from here.
+  return { ok: true, state: result.state, message: issueStateMessage(result) };
 }
