@@ -7,6 +7,7 @@ export const ISSUE_NOT_FOUND = "Problem not found";
 export const ISSUE_ALREADY_HANDLED = "This problem was already handled";
 export const ISSUE_DECLINE_REASON_MISSING = "Write why you are declining";
 export const ISSUE_REFUND_NOT_STARTED = "The refund could not be started. Try again.";
+export const ISSUE_REFUND_FAILED = "The refund did not go through. The platform has been alerted; do not refund the customer yourself.";
 export const ISSUE_AMOUNT_ABOVE_ISSUE = "Enter an amount from $0.01 up to the reported amount.";
 export const ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX = "That is more than is left to refund on this order";
 
@@ -137,6 +138,9 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
     return { ok: false, error: ISSUE_REFUND_NOT_STARTED };
   }
   await evaluateOrderRefundState(issue.orderId);
+  // Stripe can refuse the create; the evaluation has then marked the issue refund_failed.
+  const settled = await storeScoped(storeId).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true } });
+  if (settled.state === "refund_failed") return { ok: false, error: ISSUE_REFUND_FAILED };
   return { ok: true };
 }
 
