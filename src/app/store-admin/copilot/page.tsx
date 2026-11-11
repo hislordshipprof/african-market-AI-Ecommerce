@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { Store } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
+import { listOpenAlerts } from "@/lib/copilot/alerts";
 import { loadCopilotPanel } from "@/lib/copilot/turn";
+import { AlertsPanel } from "./alerts-panel";
 import { CopilotPanel } from "./copilot-panel";
 
 export default async function CopilotPage() {
   const session = await requireStoreOwner();
-  const panel = await loadCopilotPanel(session.store.id, session.user.id);
+  const [panel, alerts] = await Promise.all([
+    loadCopilotPanel(session.store.id, session.user.id),
+    listOpenAlerts(session.store.id),
+  ]);
 
   return (
     <div className="min-h-dvh bg-background">
@@ -26,6 +31,7 @@ export default async function CopilotPage() {
         </div>
       </header>
       <main className="mx-auto max-w-2xl px-4 py-6">
+        <AlertsPanel alerts={alerts} />
         <CopilotPanel
           conversationId={panel.conversationId}
           messages={panel.messages}

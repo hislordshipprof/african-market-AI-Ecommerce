@@ -243,3 +243,16 @@ export async function createConfirmRequests(): Promise<string[]> {
   }
   return stores;
 }
+
+const PAGE_ALERTS = 50;
+
+/** Open alerts for the copilot page, newest first. */
+export async function listOpenAlerts(storeId: string): Promise<AlertView[]> {
+  const alerts = await storeScoped(storeId).copilotAlert.findMany({
+    where: { state: "open" },
+    orderBy: { createdAt: "desc" },
+    take: PAGE_ALERTS,
+    select: { id: true, kind: true, listingId: true, orderId: true, createdAt: true },
+  });
+  return describeAlerts(storeId, alerts);
+}
