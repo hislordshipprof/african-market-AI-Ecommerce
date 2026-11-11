@@ -77,7 +77,7 @@ async function bestEffort(fn: () => Promise<void>): Promise<void> {
   }
 }
 
-function configMissing(): boolean {
+export function configMissing(): boolean {
   try {
     assistantModelId();
   } catch {

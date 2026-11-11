@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { OwnerReportPanel } from "./copilot/owner-report-panel";
 import { Store, Users, Package, Settings, CreditCard, ShoppingBag, MessageSquare, MessagesSquare } from "lucide-react";
 
 interface Props {
@@ -167,6 +168,12 @@ export function StoreAdminDashboard({
                 </CardHeader>
               </Card>
             </Link>
+          )}
+
+          {role !== "owner" && (
+            <Card className="px-6 sm:col-span-2">
+              <OwnerReportPanel submitOnly />
+            </Card>
           )}
 
           <Link href={`/store-admin/listings?store=${storeParam}`}>

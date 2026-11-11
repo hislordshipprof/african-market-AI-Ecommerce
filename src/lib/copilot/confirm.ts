@@ -61,7 +61,7 @@ type StockTx = Parameters<Parameters<typeof storeScopedTransaction>[1]>[0];
  * The copilot's one stock write, under the caller's store and listing locks: a stock event,
  * the new qty or status at confidence 1, and a `listing.stock_change` audit row naming the owner.
  */
-async function writeStockChange(
+export async function writeStockChange(
   tx: StockTx,
   storeId: string,
   listing: ListingRow,
