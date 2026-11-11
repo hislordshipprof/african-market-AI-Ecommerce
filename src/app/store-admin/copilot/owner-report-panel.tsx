@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { CircleAlert, Mic, Square } from "lucide-react";
+import { Camera, CircleAlert, Mic, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   beginSpeech,
@@ -42,10 +42,20 @@ function reported(item: OwnerReportItemCard): string {
 /**
  * Voice note or photo in; matched lines to tick, unmatched lines to read. Stock changes only on Confirm.
  * `submitOnly` (staff on the dashboard) sends the report and leaves confirming to the owner.
+ * `embedded` drops the heading: the copilot page shows this panel as a tab of its Report stock card.
  */
-export function OwnerReportPanel({ pending: waiting = [], submitOnly = false }: { pending?: OwnerReportCard[]; submitOnly?: boolean }) {
+export function OwnerReportPanel({
+  pending: waiting = [],
+  submitOnly = false,
+  embedded = false,
+}: {
+  pending?: OwnerReportCard[];
+  submitOnly?: boolean;
+  embedded?: boolean;
+}) {
   const [text, setText] = useState("");
   const [speech, setSpeech] = useState<SpeechState | null>(null);
+  const [photoName, setPhotoName] = useState<string | null>(null);
   const [photoType, setPhotoType] = useState<"invoice_photo" | "shelf_photo">("invoice_photo");
   const [reports, setReports] = useState<OwnerReportCard[]>(waiting);
   const [sent, setSent] = useState(false);
@@ -132,9 +142,14 @@ export function OwnerReportPanel({ pending: waiting = [], submitOnly = false }: 
       form.set("photo", new File([jpeg], "report.jpg", { type: "image/jpeg" }));
       const result = await submitPhotoReport(form);
       if (!result.ok) return setError(result.message);
-      if (photoRef.current) photoRef.current.value = "";
+      clearPhoto();
       showReport(result.report);
     });
+  }
+
+  function clearPhoto() {
+    if (photoRef.current) photoRef.current.value = "";
+    setPhotoName(null);
   }
 
   const listening = speech?.listening ?? false;
@@ -142,9 +157,11 @@ export function OwnerReportPanel({ pending: waiting = [], submitOnly = false }: 
   return (
     <section
       aria-label="Voice and photo reports"
-      className={submitOnly ? "flex flex-col gap-4" : "mt-10 flex flex-col gap-4 border-t border-border pt-8"}
+      className={submitOnly || embedded ? "flex flex-col gap-4" : "mt-10 flex flex-col gap-4 border-t border-border pt-8"}
     >
-      <h2 className="font-display text-[1.375rem] leading-tight font-bold text-foreground">Report stock by voice or photo</h2>
+      {!embedded && (
+        <h2 className="font-display text-[1.375rem] leading-tight font-bold text-foreground">Report stock by voice or photo</h2>
+      )}
       <p className="max-w-[65ch] text-base leading-6 text-muted-foreground">
         Say what came in, or snap the supplier invoice or a shelf. Nothing changes until {submitOnly ? "the owner confirms" : "you confirm"}.
       </p>
@@ -184,7 +201,38 @@ export function OwnerReportPanel({ pending: waiting = [], submitOnly = false }: 
             </label>
           ))}
         </div>
-        <input ref={photoRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="text-sm" />
+        <input
+          ref={photoRef}
+          id="owner-report-photo"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          capture="environment"
+          className="peer sr-only"
+          onChange={(event) => setPhotoName(event.target.files?.[0]?.name ?? null)}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <label
+            htmlFor="owner-report-photo"
+            className="inline-flex min-h-12 cursor-pointer items-center gap-2 rounded-full border border-border bg-card px-5 text-sm font-medium text-foreground hover:bg-muted peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50"
+          >
+            <Camera className="size-4" aria-hidden="true" />
+            {photoName ? "Change photo" : "Take or choose photo"}
+          </label>
+          {photoName && (
+            <span className="inline-flex min-h-9 max-w-full items-center gap-1 rounded-full bg-muted pr-1 pl-3 text-sm text-foreground">
+              <span className="truncate">{photoName}</span>
+              <button
+                type="button"
+                onClick={clearPhoto}
+                disabled={pending}
+                aria-label={`Remove ${photoName}`}
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+              >
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </span>
+          )}
+        </div>
         <Button type="button" onClick={sendPhoto} disabled={pending} className="min-h-12 self-start rounded-full px-6">
           Read photo
         </Button>

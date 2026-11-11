@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type KeyboardEvent, type ReactNode } from "react";
 import { CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,11 +49,17 @@ export function CopilotPanel({
   conversationId: initialConversationId,
   messages: initialMessages,
   proposals: initialProposals,
+  voiceAndPhoto,
+  voiceAndPhotoWaiting = 0,
 }: {
   conversationId: string | null;
   messages: PanelMessage[];
   proposals: StockProposalCard[];
+  /** The voice-and-photo report panel, shown as the second tab of this one Report stock card. */
+  voiceAndPhoto?: ReactNode;
+  voiceAndPhotoWaiting?: number;
 }) {
+  const [tab, setTab] = useState<"chat" | "media">("chat");
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState(initialMessages);
   const [proposals, setProposals] = useState(initialProposals);
@@ -177,13 +183,26 @@ export function CopilotPanel({
     return `Put ${card.afterQty ?? 0} on the shelf`;
   }
 
+  const tabs = [
+    { id: "chat", label: "Chat" },
+    { id: "media", label: voiceAndPhotoWaiting > 0 ? `Voice or photo (${voiceAndPhotoWaiting})` : "Voice or photo" },
+  ] as const;
+
+  function tabKey(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const next = tab === "chat" ? "media" : "chat";
+    setTab(next);
+    document.getElementById(`report-tab-${next}`)?.focus();
+  }
+
   return (
-    <div className="flex min-h-[calc(100dvh-4.75rem)] flex-col gap-8">
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <h2 className="font-display text-[1.375rem] leading-tight font-bold text-balance text-foreground">
-            Report stock
-          </h2>
+    <section aria-labelledby="report-stock-heading" className="flex flex-col gap-6">
+      <div className="flex min-h-11 flex-wrap items-end justify-between gap-3">
+        <h2 id="report-stock-heading" className="font-display text-[1.375rem] leading-tight font-bold text-balance text-foreground">
+          Report stock
+        </h2>
+        {tab === "chat" ? (
           <Button
             type="button"
             variant="outline"
@@ -198,161 +217,200 @@ export function CopilotPanel({
           >
             New chat
           </Button>
-        </div>
-        <p className="max-w-[65ch] text-base leading-6 text-muted-foreground">
-          Say what came in, what you sold at the counter, or what you counted. The shelf stays put until you tap Confirm.
-        </p>
-
-        {proposals.length === 0 && messages.length === 0 ? (
-          <p className="rounded-xl border border-border bg-card px-4 py-5 text-base text-muted-foreground">
-            Nothing waiting. Tell the copilot what came in or what you counted.
-          </p>
-        ) : null}
-        {settled.length > 0 ? (
-        <section aria-label="Settled changes" className="flex flex-col gap-3">
-          {settled.map((card) => (
-            <article key={card.id} className="rounded-xl border border-border bg-card px-4 py-4">
-              <h3 className="font-display text-xl leading-tight font-bold text-foreground">{card.listingName}</h3>
-              <p className="mt-2 font-display text-[1.75rem] leading-none font-bold tracking-tight text-foreground tabular-nums">
-                {shelfLine(card)}
-              </p>
-              <p className="mt-2 text-sm text-muted-foreground">{KIND[card.kind]} · {stateLine(card.state)}</p>
-            </article>
-          ))}
-        </section>
-        ) : null}
-
-        {messages.length > 0 ? (
-          <section aria-label="Conversation" className="flex flex-col gap-3">
-            {messages.map((message, index) => (
-              <div key={`${message.role}-${index}`} className="flex flex-col gap-3">
-                <p
-                  className={message.role === "owner"
-                    ? "max-w-[65ch] whitespace-pre-wrap rounded-xl bg-muted px-4 py-3 text-base leading-6 text-foreground"
-                    : "max-w-[65ch] whitespace-pre-wrap text-base leading-6 text-foreground"}
-                >
-                  <span className="mb-1 block text-[0.8125rem] font-semibold">{message.role === "owner" ? "You" : "Copilot"}</span>
-                  {plain(message.text)}
-                </p>
-                {message.messageId && message.choices?.map((choice) => {
-                  const messageId = message.messageId!;
-                  const chosen = choice.candidates.find((candidate) => candidate.listingId === choice.chosenListingId);
-                  return (
-                    <section
-                      key={choice.candidates.map((candidate) => candidate.listingId).join(":")}
-                      aria-label={choice.nearOnly ? "Did you mean" : "Which one"}
-                      className="max-w-[65ch] rounded-xl border border-border bg-card px-4 py-4"
-                    >
-                      <h3 className="font-display text-xl leading-tight font-bold text-foreground">
-                        {choice.nearOnly ? "Did you mean?" : "Which one?"}
-                      </h3>
-                      <p className="mt-1 text-sm text-muted-foreground tabular-nums">{choiceChange(choice)}</p>
-                      {chosen ? (
-                        <p className="mt-3 text-sm text-foreground">You picked {chosen.name}. Confirm it below.</p>
-                      ) : choice.open ? (
-                        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                          {choice.candidates.map((candidate) => {
-                            const key = `${messageId}:${candidate.listingId}`;
-                            return (
-                              <Button
-                                key={candidate.listingId}
-                                type="button"
-                                variant="outline"
-                                disabled={pending}
-                                className="min-h-11 justify-start rounded-full px-5 text-left whitespace-normal"
-                                onClick={() => choose(messageId, candidate.listingId)}
-                              >
-                                {busy?.kind === "choose" && busy.key === key ? "Drafting…" : candidate.name}
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="mt-3 text-sm text-muted-foreground">This choice is closed. Send the report again.</p>
-                      )}
-                    </section>
-                  );
-                })}
-              </div>
-            ))}
-          </section>
         ) : null}
       </div>
-
-      <form
-        className="-mx-4 mt-auto border-t border-border bg-background px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!pending && trimmed) send();
-        }}
-      >
-        {waiting.length > 0 ? (
-          <div className="mb-4 flex flex-col gap-3" aria-label="Waiting for you">
-            {waiting.map((card) => {
-              const writing = busy?.kind === "confirm" && busy.id === card.id;
-              return (
-                <article key={card.id} className="rounded-xl border border-border bg-card px-4 py-4">
-                  <h3 className="font-display text-xl leading-tight font-bold text-foreground">{card.listingName}</h3>
-                  <p className="mt-2 font-display text-[1.75rem] leading-none font-bold tracking-tight text-foreground tabular-nums">
-                    {shelfLine(card)}
-                  </p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {KIND[card.kind]} · {writing ? "Writing the shelf…" : stateLine(card.state)}
-                  </p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      disabled={pending}
-                      className="min-h-12 rounded-full px-6"
-                      onClick={() => decide(card.id, "confirm")}
-                    >
-                      {confirmLabel(card)}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={pending}
-                      className="min-h-12 rounded-full px-6"
-                      onClick={() => decide(card.id, "dismiss")}
-                    >
-                      Dismiss
-                    </Button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : null}
-        {notice ? (
-          <p className="mb-3 flex items-start gap-2 text-sm text-destructive" role="alert">
-            <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <span>{notice}</span>
-          </p>
-        ) : null}
-        <label htmlFor="copilot-report" className="text-[0.8125rem] font-semibold text-foreground">
-          Stock report
-        </label>
-        <textarea
-          id="copilot-report"
-          name="report"
-          value={text}
-          maxLength={1000}
-          rows={2}
-          disabled={pending}
-          autoComplete="off"
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Got 20 bags of gari"
-          className="mt-2 min-h-16 w-full resize-none rounded-xl border border-border bg-card px-3 py-3 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-        />
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <p className="text-[0.8125rem] text-muted-foreground tabular-nums" aria-live="polite">
-            {text.length > 0 ? `${text.length} / 1000` : "Up to 1,000 characters"}
-          </p>
-          <Button type="submit" disabled={pending || trimmed.length === 0} className="min-h-12 rounded-full px-6">
-            {busy?.kind === "send" ? "Sending" : "Send"}
-          </Button>
+      {voiceAndPhoto ? (
+        <div role="tablist" aria-label="How to report" className="flex flex-wrap gap-2">
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              id={`report-tab-${item.id}`}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              aria-controls={`report-panel-${item.id}`}
+              tabIndex={tab === item.id ? 0 : -1}
+              onClick={() => setTab(item.id)}
+              onKeyDown={tabKey}
+              className={`min-h-11 rounded-full border px-4 text-sm font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring/50 ${
+                tab === item.id
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border bg-card text-foreground hover:bg-muted"
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
-      </form>
-    </div>
+      ) : null}
+      {voiceAndPhoto ? (
+        <div id="report-panel-media" role="tabpanel" aria-labelledby="report-tab-media" hidden={tab !== "media"}>
+          {voiceAndPhoto}
+        </div>
+      ) : null}
+      <div
+        id="report-panel-chat"
+        role={voiceAndPhoto ? "tabpanel" : undefined}
+        aria-labelledby={voiceAndPhoto ? "report-tab-chat" : undefined}
+        hidden={tab !== "chat"}
+        className="flex flex-col gap-6"
+      >
+        <div className="flex flex-col gap-6">
+          <p className="max-w-[65ch] text-base leading-6 text-muted-foreground">
+            Say what came in, what you sold at the counter, or what you counted. The shelf stays put until you tap Confirm.
+          </p>
+
+          {proposals.length === 0 && messages.length === 0 ? (
+            <p className="rounded-xl border border-border bg-card px-4 py-5 text-base text-muted-foreground">
+              Nothing waiting. Tell the copilot what came in or what you counted.
+            </p>
+          ) : null}
+          {settled.length > 0 ? (
+          <section aria-label="Settled changes" className="flex flex-col gap-3">
+            {settled.map((card) => (
+              <article key={card.id} className="rounded-xl border border-border bg-card px-4 py-4">
+                <h3 className="font-display text-xl leading-tight font-bold text-foreground">{card.listingName}</h3>
+                <p className="mt-2 font-display text-[1.75rem] leading-none font-bold tracking-tight text-foreground tabular-nums">
+                  {shelfLine(card)}
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">{KIND[card.kind]} · {stateLine(card.state)}</p>
+              </article>
+            ))}
+          </section>
+          ) : null}
+
+          {messages.length > 0 ? (
+            <section aria-label="Conversation" className="flex flex-col gap-3">
+              {messages.map((message, index) => (
+                <div key={`${message.role}-${index}`} className="flex flex-col gap-3">
+                  <p
+                    className={message.role === "owner"
+                      ? "max-w-[65ch] whitespace-pre-wrap rounded-xl bg-muted px-4 py-3 text-base leading-6 text-foreground"
+                      : "max-w-[65ch] whitespace-pre-wrap text-base leading-6 text-foreground"}
+                  >
+                    <span className="mb-1 block text-[0.8125rem] font-semibold">{message.role === "owner" ? "You" : "Copilot"}</span>
+                    {plain(message.text)}
+                  </p>
+                  {message.messageId && message.choices?.map((choice) => {
+                    const messageId = message.messageId!;
+                    const chosen = choice.candidates.find((candidate) => candidate.listingId === choice.chosenListingId);
+                    return (
+                      <section
+                        key={choice.candidates.map((candidate) => candidate.listingId).join(":")}
+                        aria-label={choice.nearOnly ? "Did you mean" : "Which one"}
+                        className="max-w-[65ch] rounded-xl border border-border bg-card px-4 py-4"
+                      >
+                        <h3 className="font-display text-xl leading-tight font-bold text-foreground">
+                          {choice.nearOnly ? "Did you mean?" : "Which one?"}
+                        </h3>
+                        <p className="mt-1 text-sm text-muted-foreground tabular-nums">{choiceChange(choice)}</p>
+                        {chosen ? (
+                          <p className="mt-3 text-sm text-foreground">You picked {chosen.name}. Confirm it below.</p>
+                        ) : choice.open ? (
+                          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                            {choice.candidates.map((candidate) => {
+                              const key = `${messageId}:${candidate.listingId}`;
+                              return (
+                                <Button
+                                  key={candidate.listingId}
+                                  type="button"
+                                  variant="outline"
+                                  disabled={pending}
+                                  className="min-h-11 justify-start rounded-full px-5 text-left whitespace-normal"
+                                  onClick={() => choose(messageId, candidate.listingId)}
+                                >
+                                  {busy?.kind === "choose" && busy.key === key ? "Drafting…" : candidate.name}
+                                </Button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-sm text-muted-foreground">This choice is closed. Send the report again.</p>
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
+              ))}
+            </section>
+          ) : null}
+        </div>
+
+        <form
+          className="-mx-4 border-t border-border bg-background px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!pending && trimmed) send();
+          }}
+        >
+          {waiting.length > 0 ? (
+            <div className="mb-4 flex flex-col gap-3" aria-label="Waiting for you">
+              {waiting.map((card) => {
+                const writing = busy?.kind === "confirm" && busy.id === card.id;
+                return (
+                  <article key={card.id} className="rounded-xl border border-border bg-card px-4 py-4">
+                    <h3 className="font-display text-xl leading-tight font-bold text-foreground">{card.listingName}</h3>
+                    <p className="mt-2 font-display text-[1.75rem] leading-none font-bold tracking-tight text-foreground tabular-nums">
+                      {shelfLine(card)}
+                    </p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {KIND[card.kind]} · {writing ? "Writing the shelf…" : stateLine(card.state)}
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        disabled={pending}
+                        className="min-h-12 rounded-full px-6"
+                        onClick={() => decide(card.id, "confirm")}
+                      >
+                        {confirmLabel(card)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={pending}
+                        className="min-h-12 rounded-full px-6"
+                        onClick={() => decide(card.id, "dismiss")}
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
+          {notice ? (
+            <p className="mb-3 flex items-start gap-2 text-sm text-destructive" role="alert">
+              <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <span>{notice}</span>
+            </p>
+          ) : null}
+          <label htmlFor="copilot-report" className="text-[0.8125rem] font-semibold text-foreground">
+            Stock report
+          </label>
+          <textarea
+            id="copilot-report"
+            name="report"
+            value={text}
+            maxLength={1000}
+            rows={2}
+            disabled={pending}
+            autoComplete="off"
+            onChange={(event) => setText(event.target.value)}
+            placeholder="Got 20 bags of gari"
+            className="mt-2 min-h-16 w-full resize-none rounded-xl border border-border bg-card px-3 py-3 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-[0.8125rem] text-muted-foreground tabular-nums" aria-live="polite">
+              {text.length > 0 ? `${text.length} / 1000` : "Up to 1,000 characters"}
+            </p>
+            <Button type="submit" disabled={pending || trimmed.length === 0} className="min-h-12 rounded-full px-6">
+              {busy?.kind === "send" ? "Sending" : "Send"}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </section>
   );
 }

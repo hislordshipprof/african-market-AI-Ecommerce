@@ -14,8 +14,6 @@ export function AlertsPanel({ alerts: initialAlerts }: { alerts: AlertView[] }) 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  if (alerts.length === 0) return null;
-
   function answer(alert: AlertView, choice: Answer) {
     setBusyId(alert.id);
     startTransition(async () => {
@@ -36,6 +34,11 @@ export function AlertsPanel({ alerts: initialAlerts }: { alerts: AlertView[] }) 
     <section aria-label="Stock alerts" className="mb-8 flex flex-col gap-3">
       <h2 className="font-display text-[1.375rem] leading-tight font-bold text-balance text-foreground">Stock alerts</h2>
       {notice ? <p role="status" className="text-sm text-destructive">{notice}</p> : null}
+      {alerts.length === 0 ? (
+        <p className="rounded-xl border border-border bg-card px-4 py-4 text-base text-muted-foreground">
+          No stock alerts. Items that sell out or run low show up here.
+        </p>
+      ) : null}
       {alerts.map((alert) => {
         const raw = counts[alert.id] ?? "";
         const qty = /^\d{1,6}$/.test(raw) ? Number(raw) : null;
