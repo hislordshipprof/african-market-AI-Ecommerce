@@ -1,8 +1,7 @@
-import { CSV_ACTION_BODY_LIMIT_BYTES } from "../listing/csv-file-cap";
+import { PHOTO_UPLOAD_MAX_BYTES } from "../listing/csv-file-cap";
+import { cleanJpeg } from "../image/server-jpeg";
 
-/** Nothing larger can arrive: the photo comes through a server action. */
-export const DELIVERY_PROOF_MAX_BYTES = CSV_ACTION_BODY_LIMIT_BYTES;
-const MAX_EDGE = 2000;
+export const DELIVERY_PROOF_MAX_BYTES = PHOTO_UPLOAD_MAX_BYTES;
 const MAX_INPUT_PIXELS = 16_777_216;
 
 export const STORE_DELIVERY_ONLY = "Only a store-delivery order can be sent out or marked delivered";
@@ -36,13 +35,7 @@ export async function prepareProofPhoto(
   if (!isPhotoType(bytes)) return { ok: false, error: PROOF_PHOTO_NOT_IMAGE };
   const { default: sharp } = await import("sharp");
   try {
-    const jpeg = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "warning", animated: false })
-      .rotate()
-      .resize({ width: MAX_EDGE, height: MAX_EDGE, fit: "inside", withoutEnlargement: true })
-      .flatten({ background: "#ffffff" })
-      .toColorspace("srgb")
-      .jpeg({ quality: 85 })
-      .toBuffer();
+    const jpeg = await cleanJpeg(sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "warning", animated: false }));
     return { ok: true, jpeg };
   } catch {
     return { ok: false, error: PROOF_PHOTO_NOT_IMAGE };

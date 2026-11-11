@@ -1,5 +1,10 @@
-/** Browser only: downscale a photo to a 2000px long edge and encode it as JPEG 0.85. */
-export async function jpegBlob(file: Blob): Promise<Blob> {
+const QUALITIES = [0.85, 0.7, 0.55, 0.4];
+
+/**
+ * Browser only: downscale a photo to a 2000px long edge and encode it as JPEG 0.85,
+ * stepping the quality down until it fits `maxBytes`. Returns the smallest try if none fits.
+ */
+export async function jpegBlob(file: Blob, maxBytes = Infinity): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   try {
     const edge = Math.max(bitmap.width, bitmap.height);
@@ -12,9 +17,13 @@ export async function jpegBlob(file: Blob): Promise<Blob> {
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
-    if (!blob) throw new Error("encode");
-    return blob;
+    let blob: Blob | null = null;
+    for (const quality of QUALITIES) {
+      blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+      if (!blob) throw new Error("encode");
+      if (blob.size <= maxBytes) break;
+    }
+    return blob!;
   } finally {
     bitmap.close();
   }

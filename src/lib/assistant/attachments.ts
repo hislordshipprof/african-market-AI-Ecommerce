@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { generateId } from "ai";
 import { scrubCardNumbers, scrubFileNameCards } from "./card-scrub";
 import type { PdfRead } from "./pdf-document";
+import { cleanJpeg } from "../image/server-jpeg";
 
 export const TEXT_BODY_CAP = 16 * 1024;
 export const FILE_BODY_CAP = 4_300_000;
@@ -314,13 +315,7 @@ async function reencodePhoto(bytes: Buffer): Promise<{ ok: true; bytes: Buffer }
     const width = meta.width ?? 0;
     const height = meta.height ?? 0;
     if (width > MAX_EDGE || height > MAX_EDGE || width * height > MAX_PIXELS) return attachmentFailure("attachment_pixels");
-    const encoded = await image
-      .rotate()
-      .resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true })
-      .flatten({ background: "#ffffff" })
-      .toColorspace("srgb")
-      .jpeg({ quality: 85 })
-      .toBuffer();
+    const encoded = await cleanJpeg(image);
     return { ok: true, bytes: encoded };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";

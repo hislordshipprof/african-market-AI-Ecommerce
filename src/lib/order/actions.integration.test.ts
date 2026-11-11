@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
   process.env.AUTH_RATE_LIMIT_RELAXED = "1";
@@ -54,10 +54,13 @@ import {
   cancelOrderAction,
   completePickupAction,
   declineIssueAction,
+  markDeliveredAction,
+  markOutForDeliveryAction,
   markReadyAction,
 } from "./actions";
 import { acceptOrder, markLinePicked, markLineShort } from "./service";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
+import sharp from "sharp";
 
 const BASE = "http://localhost:3000/api/auth";
 const RUN = `t186-${Date.now()}`;
@@ -88,6 +91,14 @@ async function authPost(path: string, body: unknown, cookies?: string): Promise<
   return auth.handler(
     new Request(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) }),
   );
+}
+
+async function deliveredForm(orderId: string): Promise<FormData> {
+  const jpeg = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#c0392b" } }).jpeg().toBuffer();
+  const form = new FormData();
+  form.set("orderId", orderId);
+  form.set("photo", new File([new Uint8Array(jpeg)], "delivery.jpg", { type: "image/jpeg" }));
+  return form;
 }
 
 function asStore(slug: string, cookies: string): void {
@@ -184,6 +195,10 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     auditId = audit.id;
   }, 60_000);
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   afterAll(async () => {
     setStripeProvider(null);
     const emails = [emailA, emailB];
@@ -243,12 +258,18 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     ).rejects.toThrow();
 
     asStore(storeBSlug, cookiesB);
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
     const ready = await markReadyAction(orderId);
     const pickup = await completePickupAction(orderId);
     const crossCancel = await cancelOrderAction(orderId, { reason: "other" });
+    const sentOut = await markOutForDeliveryAction(orderId);
+    const delivered = await markDeliveredAction(await deliveredForm(orderId));
     expect(ready).toEqual({ ok: false, error: "Order not found" });
     expect(pickup).toEqual({ ok: false, error: "Order not found" });
     expect(crossCancel).toEqual({ ok: false, error: "Order not found" });
+    expect(sentOut).toEqual({ ok: false, error: "Order not found" });
+    expect(delivered).toEqual({ ok: false, error: "Order not found" });
+    expect([...bucket.keys()].some((key) => key.startsWith("delivery-proof/"))).toBe(false);
 
     // Store A's own staff cannot cancel after capture either: that is a refund, not a cancel.
     asStore(storeASlug, cookiesA);
@@ -270,9 +291,11 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
   it("a signed-out request redirects to the store sign-in", async () => {
     headerState.delete("cookie");
     headerState.set("x-store-slug", storeASlug);
-    await expect(markReadyAction(orderId)).rejects.toSatisfy((error: unknown) => {
-      return isRedirectError(error) && getURLFromRedirectError(error) === `/store-admin/sign-in?store=${storeASlug}`;
-    });
+    const toSignIn = (error: unknown) =>
+      isRedirectError(error) && getURLFromRedirectError(error) === `/store-admin/sign-in?store=${storeASlug}`;
+    await expect(markReadyAction(orderId)).rejects.toSatisfy(toSignIn);
+    await expect(markOutForDeliveryAction(orderId)).rejects.toSatisfy(toSignIn);
+    await expect(markDeliveredAction(await deliveredForm(orderId))).rejects.toSatisfy(toSignIn);
     const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderId } });
     expect(after?.status).toBe("AWAITING_PICKUP");
   });
