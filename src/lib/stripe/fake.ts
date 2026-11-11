@@ -48,7 +48,6 @@ type IdemRecord = {
   fingerprint: string;
   error?: unknown;
   value?: unknown;
-  refundId?: string;
 };
 
 function stripeApiError(message: string): FakeStripeError {
@@ -105,6 +104,7 @@ const cancelUnexpected = new Set<string>();
 const refundErrorBudget = new Map<string, number>();
 const retrieveScript = new Map<string, string[]>();
 const idempotency = new Map<string, IdemRecord>();
+const inFlightKeys = new Set<string>();
 const captureCalls: string[] = [];
 let captureHold: Promise<void> | null = null;
 let releaseCaptureHold: (() => void) | null = null;
@@ -148,6 +148,7 @@ function reset() {
   refundErrorBudget.clear();
   retrieveScript.clear();
   idempotency.clear();
+  inFlightKeys.clear();
   lateRefundKeys.clear();
   captureCalls.length = 0;
   captureHold = null;
@@ -183,10 +184,6 @@ function refundView(refundId: string): RefundResult {
   };
 }
 
-function isRefundResult(value: unknown): value is RefundResult {
-  return !!value && typeof value === "object" && "refundId" in value && "amountRefunded" in value;
-}
-
 async function withIdempotency<T>(
   key: string | undefined,
   fingerprint: string,
@@ -201,20 +198,22 @@ async function withIdempotency<T>(
         lateRefundKeys.delete(key);
       } else {
         if (existing.error) throw existing.error;
-        if (existing.refundId) return refundView(existing.refundId) as T;
-        return existing.value as T;
+        // Stripe replays the saved first response, not the object's current state.
+        return structuredClone(existing.value) as T;
       }
     }
+    if (inFlightKeys.has(key)) {
+      throw new FakeStripeError(
+        "idempotency_key_in_use",
+        "There is currently another in-progress request using this Idempotent Key",
+        409,
+      );
+    }
+    inFlightKeys.add(key);
   }
   try {
     const value = await run();
-    if (key) {
-      idempotency.set(key, {
-        fingerprint,
-        value,
-        refundId: isRefundResult(value) ? value.refundId : undefined,
-      });
-    }
+    if (key) idempotency.set(key, { fingerprint, value: structuredClone(value) });
     return value;
   } catch (error) {
     const statusCode = (error as { statusCode?: number }).statusCode;
@@ -222,6 +221,8 @@ async function withIdempotency<T>(
       idempotency.set(key, { fingerprint, error });
     }
     throw error;
+  } finally {
+    if (key) inFlightKeys.delete(key);
   }
 }
 

@@ -360,7 +360,7 @@ describe("Fake Stripe state machine (K6)", () => {
     });
   });
 
-  it("a replaced failed refund keeps its own id and replays as failed", async () => {
+  it("a refund later marked failed replays its saved first response, while retrieve and list stay live", async () => {
     const pi = "pi_refund_replace";
     setAuthorizedAmount(pi, 1000);
     await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
@@ -371,7 +371,25 @@ describe("Fake Stripe state machine (K6)", () => {
     expect(new Set([first.refundId, failed.refundId, replacement.refundId]).size).toBe(3);
     expect(await fakeStripeProvider.listRefunds(pi)).toHaveLength(3);
     const replay = await fakeStripeProvider.refundPayment(pi, 300, "r2");
-    expect(replay).toEqual({ refundId: failed.refundId, amountRefunded: 300, status: "failed" });
+    expect(replay).toEqual({ refundId: failed.refundId, amountRefunded: 300, status: "succeeded" });
+    expect((await fakeStripeProvider.retrieveRefund(failed.refundId)).status).toBe("failed");
+    expect((await fakeStripeProvider.listRefunds(pi)).find((r) => r.refundId === failed.refundId)?.status).toBe("failed");
+  });
+
+  it("a concurrent request with an in-flight refund key is refused instead of refunding twice", async () => {
+    const pi = "pi_refund_concurrent_key";
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "cap");
+    const results = await Promise.allSettled([
+      fakeStripeProvider.refundPayment(pi, 400, "same"),
+      fakeStripeProvider.refundPayment(pi, 400, "same"),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((r) => r.status === "rejected")).toMatchObject({
+      reason: { code: "idempotency_key_in_use", statusCode: 409 },
+    });
+    expect(await fakeStripeProvider.listRefunds(pi)).toHaveLength(1);
+    expect((await fakeStripeProvider.refundPayment(pi, 400, "same")).amountRefunded).toBe(400);
   });
 
   it("listing refunds for an unknown PaymentIntent is resource_missing", async () => {
