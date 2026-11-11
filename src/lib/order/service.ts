@@ -1363,6 +1363,7 @@ export async function reconcileStuckOrder(
   });
 
   if (order?.paymentIntentId) {
+    await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
     await reconcileOpenRefundRequests(storeId, orderId);
     await reconcileAbandonedRefundRequests(storeId, orderId);
   }
@@ -1376,7 +1377,6 @@ export async function reconcileStuckOrder(
     return { ok: false, error: "Order has no payment intent" };
   }
 
-  await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
   const stripe = getStripeProvider();
   const pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
 

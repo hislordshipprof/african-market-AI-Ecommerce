@@ -3008,6 +3008,33 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(cancelledPayments.has(pi)).toBe(true);
   });
 
+  it("a seeded e2e hold is registered before open refund requests are reconciled", async () => {
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    resetFakeStripe();
+    try {
+      const order = await createTestOrder("CANCELLING");
+      const pi = `pi_seed_${order.id}`;
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { paymentIntentId: pi } });
+        await tx.refundRequest.create({
+          data: {
+            storeId,
+            orderId: order.id,
+            paymentIntentId: pi,
+            key: `refund:${order.id}:1`,
+            amountCents: 100,
+            refundApplicationFee: false,
+            state: "UNKNOWN",
+          },
+        });
+      });
+      await expect(reconcileStuckOrder(storeId, order.id)).resolves.toBeDefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("a hold release whose response is lost still writes capture_released on the next sweep", async () => {
     const order = await createTestOrder("CAPTURING");
     const pi = order.paymentIntentId!;
