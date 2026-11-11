@@ -428,17 +428,17 @@ async function recordIssueRefundFailure(
   const failed = listed.find((refund) =>
     (refund.status === "failed" || refund.status === "canceled")
     && (refund.reservationKey === request.key || refund.refundId === request.providerRefundId));
-  if (!failed) return null;
+  // Stripe refused the create, so no refund exists and nothing will replay it. Not ABANDONED: that can still become a refund.
+  const refused = request.state === "NOT_CREATED";
+  if (!failed && !refused) return null;
   if (issue.state !== "refund_failed") {
     await tx.issueReport.update({ where: { id: issue.id }, data: { state: "refund_failed" } });
   }
-  const wrote = await writeAuditOnce(tx, storeId, orderId, "issue_refund_failed", failed.refundId, {
-    refundId: failed.refundId,
-    refundStatus: failed.status,
-    issueReportId: issue.id,
-    alert: "store_and_platform",
-  });
-  return wrote ? failed.refundId : null;
+  const alertKey = failed ? failed.refundId : request.key;
+  const wrote = await writeAuditOnce(tx, storeId, orderId, "issue_refund_failed", alertKey, failed
+    ? { refundId: failed.refundId, refundStatus: failed.status, issueReportId: issue.id, alert: "store_and_platform" }
+    : { key: request.key, refundStatus: "not_created", issueReportId: issue.id, alert: "store_and_platform" });
+  return wrote ? alertKey : null;
 }
 
 function succeededCents(listed: RefundResult[]): number {

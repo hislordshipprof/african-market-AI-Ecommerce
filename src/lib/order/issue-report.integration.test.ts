@@ -220,6 +220,32 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     expect((await written(order.id)).order.status).toBe("COMPLETED");
   });
 
+  it("a refund Stripe refuses at creation marks the issue refund_failed with one alert", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 900 }], 1);
+    const refuse = vi.spyOn(fakeStripeProvider, "refundPayment").mockRejectedValue(
+      Object.assign(new Error("charge is disputed"), { type: "StripeInvalidRequestError", statusCode: 400, code: "charge_disputed" }),
+    );
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await submitIssueReport(store, token, {
+      type: "missing",
+      lines: [{ lineId: order.lines[0].id, qty: 1 }],
+      note: null,
+      photo: JPEG,
+    });
+    refuse.mockRestore();
+    quiet.mockRestore();
+    expect(result).toEqual({ ok: true, state: "refund_failed" });
+    const after = await written(order.id);
+    expect(after.issues[0].state).toBe("refund_failed");
+    expect(after.order.status).toBe("COMPLETED");
+    const alerts = await storeScoped(store.id).auditLog.findMany({ where: { entityId: order.id, action: "issue_refund_failed" } });
+    expect(alerts).toHaveLength(1);
+    const issueRequest = after.requests.find((request) => request.id === after.issues[0].refundRequestId);
+    expect(alerts[0].after).toMatchObject({ key: issueRequest!.key });
+    await evaluateOrderRefundState(order.id);
+    expect(await storeScoped(store.id).auditLog.count({ where: { entityId: order.id, action: "issue_refund_failed" } })).toBe(1);
+  });
+
   it("an amount $1 over the limit goes to review with no refund and the order unchanged", async () => {
     const { order, token } = await completedOrder([{ qtyPicked: 1, unitPriceCents: 4100 }], 2);
     const calls = refundRequests.length;
