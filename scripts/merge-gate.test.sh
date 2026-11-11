@@ -88,8 +88,10 @@ guard pr checks 7 && ok "guard passes other gh calls" || bad "guard blocked pr c
 
 # A login shell puts Homebrew's gh ahead of the guard, so a Claude ship session also needs the tool itself denied.
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "$CLAUDE_ARGS"\n' > "$T/bin/claude"; chmod +x "$T/bin/claude"
-denied() { ( AGENT_ENGINE=claude REVIEW_ENGINE=claude CLAUDE_ARGS="$T/args" PATH="$T/bin:$PATH"; export AGENT_ENGINE REVIEW_ENGINE CLAUDE_ARGS PATH; . "$ROOT/scripts/agent-cli.sh"; agent_run "$1" "$T/log" prompt ); grep -qx 'Bash(gh pr merge:\*)' "$T/args"; }
+# Runs with no profile set (macOS bash 3.2 errors on an empty array under set -u), and clears the args file so a
+# crash before claude starts fails both checks instead of passing the second one.
+denied() { rm -f "$T/args"; ( unset AGENT_CLAUDE_CONFIG_DIR; AGENT_ENGINE=claude REVIEW_ENGINE=claude CLAUDE_ARGS="$T/args" PATH="$T/bin:$PATH"; export AGENT_ENGINE REVIEW_ENGINE CLAUDE_ARGS PATH; . "$ROOT/scripts/agent-cli.sh"; agent_run "$1" "$T/log" prompt ); grep -qx 'Bash(gh pr merge:\*)' "$T/args"; }
 denied ship && ok "a Claude ship session has gh pr merge denied" || bad "a Claude ship session has gh pr merge denied"
-denied review && bad "a review session had gh pr merge denied" || ok "other Claude sessions are unchanged"
+denied review && bad "a review session had gh pr merge denied" || { [ -s "$T/args" ] && ok "other Claude sessions are unchanged" || bad "a review session never started claude"; }
 
 exit "$fail"
