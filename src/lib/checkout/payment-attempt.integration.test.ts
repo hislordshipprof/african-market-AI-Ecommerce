@@ -488,6 +488,13 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
     await releaseOrphanHolds(await findOrphanHoldCarts({ storeIds: [storeId] }));
   }
 
+  /** Earlier tests leave carts in the sweep; checking them now puts them behind a test's own carts. */
+  function checkLeftoverCarts() {
+    return storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+      UPDATE carts SET orphan_checked_at = now() WHERE store_id = ${storeId} AND payment_intent_id IS NOT NULL
+    `);
+  }
+
   it("releases a hold with no order 61 min after authorization, and placeOrder then refuses it", async () => {
     const held = await heldCart(61 * 60_000, 61 * 60_000);
     await sweep();
@@ -524,6 +531,7 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
       for (let i = 0; i < count; i += 1) carts.push(await deadCart(writtenAgoMs));
       return carts;
     };
+    await checkLeftoverCarts();
     const dayOld = await deadCarts(25, 25 * 60 * 60_000);
     const unpaid = [...await deadCarts(50, 4 * 60 * 60_000), ...await deadCarts(50, 2 * 60 * 60_000)];
     const held = await heldCart(3 * 60 * 60_000, 61 * 60_000);
@@ -552,6 +560,7 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
   }
 
   it("stamps a cart whose check fails and clears one whose intent Stripe no longer has, so neither blocks a held card", async () => {
+    await checkLeftoverCarts();
     const missing = [];
     for (let i = 0; i < 50; i += 1) missing.push(await cartHolding(`pi_fake_missing_${run}_${i}`, 2 * 60 * 60_000));
     const failing = [];
