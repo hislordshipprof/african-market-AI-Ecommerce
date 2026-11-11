@@ -1,6 +1,6 @@
 import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { money } from "../format";
-import { evaluateOrderRefundState, remainingCaptureCents, submitRefund } from "./refund-requests";
+import { evaluateOrderRefundStateAfterCommit, remainingCaptureCents, submitRefund } from "./refund-requests";
 import { redactedErrorMessage } from "./staff-copy";
 
 export const ISSUE_NOT_FOUND = "Problem not found";
@@ -137,7 +137,7 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
     });
     return { ok: false, error: ISSUE_REFUND_NOT_STARTED };
   }
-  await evaluateOrderRefundState(issue.orderId);
+  await evaluateOrderRefundStateAfterCommit(issue.orderId);
   // Stripe can refuse the create; the evaluation has then marked the issue refund_failed.
   const settled = await storeScoped(storeId).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true } });
   if (settled.state === "refund_failed") return { ok: false, error: ISSUE_REFUND_FAILED };
