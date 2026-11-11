@@ -4,7 +4,7 @@
 # (every production build runs `prisma migrate deploy` against the production database).
 #   Production (main): builds only when the merge commit subject ends with "[deploy]".
 #     The coordinator adds it to the squash subject at a milestone, e.g.
-#     gh pr merge <n> --squash --subject "<title> (#<n>) [deploy]"
+#     DEPLOY=1 scripts/merge-ticket.sh <issue>   (only with the owner's go)
 #   Preview: builds only on "[preview]" commits.
 
 if [ "$VERCEL_ENV" = "production" ]; then
