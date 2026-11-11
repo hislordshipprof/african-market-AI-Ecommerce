@@ -45,9 +45,10 @@ export async function findOrderForTracking(storeId: string, token: string) {
  * with the tracking token itself: an order id opens the page but never the photo.
  */
 export function deliveryProofTokenFor(
-  order: { status: string; deliveryProofKey: string | null; trackingToken: string | null },
+  order: { deliveredAt: Date | null; deliveryProofKey: string | null; trackingToken: string | null },
   urlToken: string,
 ): string | null {
-  if (order.status !== "DELIVERED" || !order.deliveryProofKey || !order.trackingToken) return null;
+  // deliveredAt, not status: an issue refund moves a delivered order on to Refunded (#462).
+  if (!order.deliveredAt || !order.deliveryProofKey || !order.trackingToken) return null;
   return order.trackingToken === urlToken ? order.trackingToken : null;
 }

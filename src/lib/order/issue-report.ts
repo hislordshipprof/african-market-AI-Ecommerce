@@ -4,7 +4,7 @@ import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { deliveryProofBucket, issuePhotoKey, uploadIssuePhoto } from "../r2";
 import { money } from "../format";
 import { prepareProofPhoto } from "./delivery-proof";
-import { evaluateOrderRefundStateAfterCommit, submitRefund } from "./refund-requests";
+import { evaluateOrderRefundStateAfterCommit, recordIssueRefundNotStarted, submitRefund } from "./refund-requests";
 import { redactedErrorMessage } from "./staff-copy";
 
 export const ISSUE_TYPES = ["missing", "damaged", "wrong", "poor_freshness"] as const;
@@ -101,17 +101,14 @@ export async function submitIssueReport(
   input: IssueReportInput,
   now = new Date(),
 ): Promise<{ ok: true; state: IssueState; amountCents: number } | { ok: false; error: string }> {
-  const early = refusal(
-    await storeScoped(store.id).order.findUnique({ where: { trackingToken: token }, include: orderForIssue }),
-    input,
-    now,
-  );
+  const found = await storeScoped(store.id).order.findUnique({ where: { trackingToken: token }, include: orderForIssue });
+  const early = refusal(found, input, now);
   if ("error" in early) return { ok: false, error: early.error };
   if (!deliveryProofBucket()) return { ok: false, error: ISSUE_STORAGE_NOT_SET_UP };
   const prepared = await prepareProofPhoto(input.photo);
   if (!prepared.ok) return { ok: false, error: ISSUE_PHOTO_INVALID };
 
-  const order = await storeScoped(store.id).order.findUniqueOrThrow({ where: { trackingToken: token }, select: { id: true } });
+  const order = found!;
   const issueId = randomBytes(12).toString("hex");
   const photoKey = issuePhotoKey(order.id, issueId);
   await uploadIssuePhoto(photoKey, prepared.jpeg);
@@ -148,20 +145,24 @@ export async function submitIssueReport(
   if (!created.ok) return created;
   if (created.state === "in_review") return { ok: true, state: "in_review", amountCents: created.amount };
 
+  let threw = false;
   try {
-    const refund = await submitRefund(store.id, order.id, created.paymentIntentId, {
+    await submitRefund(store.id, order.id, created.paymentIntentId, {
       cause: "issue",
       amountCents: created.amount,
       issueReportId: issueId,
     });
-    if ("amountRefunded" in refund && refund.amountRefunded < created.amount) {
-      await storeScoped(store.id).issueReport.update({ where: { id: issueId }, data: { amountCents: refund.amountRefunded } });
-    }
   } catch (err) {
     // An open request is replayed by the ledger sweep; one Stripe refused is marked refund_failed by the evaluation below.
     console.error(`Issue refund for order ${order.id} did not finish: ${redactedErrorMessage(err)}`);
+    threw = true;
   }
   const issue = await storeScoped(store.id).issueReport.findUniqueOrThrow({ where: { id: issueId } });
+  if (!issue.refundRequestId && threw) {
+    // It threw before a request was saved, so no sweep replays it: alert instead of waiting for review.
+    await recordIssueRefundNotStarted(store.id, order.id, issueId);
+    return { ok: true, state: "refund_failed", amountCents: issue.amountCents };
+  }
   if (!issue.refundRequestId) {
     // No request was reserved (blocked, or another refund is open): the store reviews it.
     await storeScoped(store.id).issueReport.update({ where: { id: issueId }, data: { state: "in_review" } });

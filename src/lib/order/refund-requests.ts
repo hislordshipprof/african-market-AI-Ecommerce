@@ -376,7 +376,8 @@ export async function submitRefund(
       },
     });
     if (cause.cause === "issue" && cause.issueReportId) {
-      await tx.issueReport.update({ where: { id: cause.issueReportId }, data: { refundRequestId: row.id } });
+      // The issue shows what is refunded, capped at the unrefunded capture, even if the create call then fails.
+      await tx.issueReport.update({ where: { id: cause.issueReportId }, data: { refundRequestId: row.id, amountCents: amount } });
     }
     return { open: null, row };
   });
@@ -440,6 +441,16 @@ async function recordIssueRefundFailure(
     ? { refundId: failed.refundId, refundStatus: failed.status, issueReportId: issue.id, alert: "store_and_platform" }
     : { key: request.key, refundStatus: "not_created", issueReportId: issue.id, alert: "store_and_platform" });
   return wrote ? alertKey : null;
+}
+
+/** An issue refund that threw before its request was saved: nothing exists to replay, so it is failed (#462). */
+export async function recordIssueRefundNotStarted(storeId: string, orderId: string, issueReportId: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await tx.issueReport.update({ where: { id: issueReportId }, data: { state: "refund_failed" } });
+    await writeAuditOnce(tx, storeId, orderId, "issue_refund_failed", issueReportId,
+      { key: issueReportId, refundStatus: "not_started", issueReportId, alert: "store_and_platform" });
+  });
 }
 
 function succeededCents(listed: RefundResult[]): number {
