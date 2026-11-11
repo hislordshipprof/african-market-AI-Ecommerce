@@ -19,6 +19,7 @@ export type StoreThreadSummary = {
   id: string;
   orderNumber: number;
   state: string;
+  escalatedAt: Date | null;
   lastCustomerAt: Date | null;
   lastReplyAt: Date | null;
   unread: number;
@@ -33,29 +34,54 @@ function toMessage(row: { id: string; sender: string; body: string; createdAt: D
   return { id: row.id, sender: row.sender as ThreadMessage["sender"], body: row.body, createdAt: row.createdAt.toISOString() };
 }
 
+export const SUPPORT_TOPICS = ["order", "payment", "delivery", "app"] as const;
+export type SupportTopic = (typeof SUPPORT_TOPICS)[number];
+
 /**
  * The order comes from the tracking token in this store only; there is no order-id fallback.
- * Opens the order's thread on the first message. Null when the token is unknown here.
+ * Opens the order's thread on the first message with `topic`; later messages keep the thread's topic.
+ * A payment, delivery or app thread is the platform's, so each customer message escalates it at once.
+ * An order thread reopens if resolved; the SLA timer escalates it. Null when the token is unknown here.
  */
 export async function postCustomerMessage(
   storeId: string,
   token: string,
   body: string,
-): Promise<{ threadId: string; orderNumber: number } | null> {
+  topic: SupportTopic = "order",
+): Promise<{ threadId: string; orderNumber: number; messageId: string; topic: SupportTopic; sentAt: string } | null> {
   return storeScopedTransaction(storeId, async (tx) => {
     const order = await tx.order.findUnique({ where: { trackingToken: token }, select: { id: true, number: true } });
     if (!order) return null;
-    await tx.supportThread.createMany({ data: [{ storeId, orderId: order.id }], skipDuplicates: true });
+    await tx.supportThread.createMany({ data: [{ storeId, orderId: order.id, topic }], skipDuplicates: true });
     const now = new Date();
-    const thread = await tx.supportThread.update({
+    const current = await tx.supportThread.findUniqueOrThrow({
       where: { orderId: order.id },
-      data: { lastCustomerAt: now },
+      select: { id: true, topic: true, state: true },
+    });
+    const platformTopic = current.topic !== "order";
+    const thread = await tx.supportThread.update({
+      where: { id: current.id },
+      data: {
+        lastCustomerAt: now,
+        ...(platformTopic && current.state !== "escalated"
+          ? { state: "escalated", escalatedAt: now, escalationReason: "topic" }
+          : current.state === "resolved"
+            ? { state: "open" }
+            : {}),
+      },
+      select: { id: true, topic: true },
+    });
+    const message = await tx.supportMessage.create({
+      data: { storeId, threadId: thread.id, sender: "customer", body, createdAt: now },
       select: { id: true },
     });
-    await tx.supportMessage.create({
-      data: { storeId, threadId: thread.id, sender: "customer", body, createdAt: now },
-    });
-    return { threadId: thread.id, orderNumber: order.number };
+    return {
+      threadId: thread.id,
+      orderNumber: order.number,
+      messageId: message.id,
+      topic: thread.topic as SupportTopic,
+      sentAt: now.toISOString(),
+    };
   });
 }
 
@@ -81,7 +107,7 @@ export async function readCustomerMessages(storeId: string, token: string): Prom
 /** Unread is the customer messages since the store's last reply. Newest customer message first. */
 export async function listStoreThreads(storeId: string): Promise<StoreThreadSummary[]> {
   return storeScopedRawQuery<StoreThreadSummary>(storeId, Prisma.sql`
-    SELECT t.id, o.number AS "orderNumber", t.state,
+    SELECT t.id, o.number AS "orderNumber", t.state, t.escalated_at AS "escalatedAt",
            t.last_customer_at AS "lastCustomerAt", t.last_reply_at AS "lastReplyAt",
            (SELECT count(*)::int FROM support_messages m
              WHERE m.thread_id = t.id AND m.sender = 'customer'
@@ -107,6 +133,7 @@ export async function getStoreThread(storeId: string, threadId: string) {
     select: {
       id: true,
       state: true,
+      escalatedAt: true,
       order: { select: { number: true, status: true, customer: { select: { name: true } } } },
       messages: {
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -118,6 +145,7 @@ export async function getStoreThread(storeId: string, threadId: string) {
   return {
     id: thread.id,
     state: thread.state,
+    escalatedAt: thread.escalatedAt,
     orderNumber: thread.order.number,
     orderStatus: thread.order.status,
     customerName: thread.order.customer.name,
@@ -127,7 +155,8 @@ export async function getStoreThread(storeId: string, threadId: string) {
 
 /**
  * A store member's reply. The first reply on a thread records one "store_replied" row per channel;
- * later replies record none (`notify` is false). Null when the thread is not this store's.
+ * later replies record none (`notify` is false). A reply sets the thread back to open and keeps
+ * escalatedAt. Null when the thread is not this store's.
  */
 export async function replyAsStore(
   storeId: string,
@@ -145,7 +174,7 @@ export async function replyAsStore(
     await tx.supportMessage.create({
       data: { storeId, threadId, sender: "store", senderUserId: userId, body, createdAt: now },
     });
-    await tx.supportThread.update({ where: { id: threadId }, data: { lastReplyAt: now } });
+    await tx.supportThread.update({ where: { id: threadId }, data: { lastReplyAt: now, state: "open" } });
     const notify = await recordOrderNotification(tx, storeId, thread.orderId, "store_replied");
     return { orderId: thread.orderId, trackingToken: thread.order.trackingToken, notify };
   });

@@ -31,6 +31,7 @@ model Store {
   pickupEnabled        Boolean  @default(false) @map("pickup_enabled")
   autoAcceptOrders     Boolean  @default(false) @map("auto_accept_orders")
   autoRefundLimitCents    Int      @default(2500) @map("auto_refund_limit_cents")
+  supportSlaMinutes       Int      @default(30) @map("support_sla_minutes")
   stripeAccountId        String?  @unique @map("stripe_account_id")
   stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
   createdAt              DateTime @default(now()) @map("created_at")
@@ -934,6 +935,8 @@ model SupportThread {
   state          String    @default("open")
   lastCustomerAt DateTime? @map("last_customer_at")
   lastReplyAt    DateTime? @map("last_reply_at")
+  escalatedAt    DateTime? @map("escalated_at")
+  escalationReason String? @map("escalation_reason")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
@@ -943,6 +946,7 @@ model SupportThread {
 
   @@unique([id, storeId])
   @@index([storeId, lastCustomerAt])
+  @@index([escalatedAt])
   @@map("support_threads")
 }
 
