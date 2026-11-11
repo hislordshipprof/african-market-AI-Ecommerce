@@ -1468,8 +1468,14 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
       });
     const original = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
     const lockedReads: boolean[] = [];
+    let readsAfterCommit = 0;
     vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id: string) => {
-      if (id === pi) lockedReads.push(await storeLockHeld());
+      if (id === pi) {
+        const status = (await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status;
+        // After the commit the shared refund evaluation re-reads under the lock, as the webhook does.
+        if (status === "REFUND_FAILED") lockedReads.push(await storeLockHeld());
+        else readsAfterCommit += 1;
+      }
       return original(id);
     });
     try {
@@ -1480,6 +1486,7 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     }
     expect(lockedReads.length).toBeGreaterThan(0);
     expect(lockedReads).not.toContain(true);
+    expect(readsAfterCommit).toBe(1);
   });
 
   it("a counted refund reversed between the resolution snapshot and commit is refused", async () => {
@@ -1530,6 +1537,59 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     expect(await storeScoped(storeAId).auditLog.findFirst({
       where: { entityId: order.id, action: "refund_resolved_manually" },
     })).toBeNull();
+  });
+
+  it("a counted refund reversed after the resolve reads Stripe still raises the underpayment alert", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Reversed mid resolve" },
+    });
+    const pi = `pi_mid_reverse_${RUN}`;
+    setAuthorizedAmount(pi, 1000);
+    await fakeStripeProvider.capturePaymentIntent(pi, 1000, "mid-reverse-cap");
+    const counted = await fakeStripeProvider.refundPayment(pi, 400, "mid-reverse-ok");
+    const failed = await fakeStripeProvider.refundPayment(pi, 600, "mid-reverse-fail");
+    setRefundStatus(failed.refundId, "failed");
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number: 26631,
+        customerId: customer.id,
+        status: "REFUND_FAILED",
+        fulfillment: "pickup",
+        subtotalCents: 1000,
+        bufferCents: 0,
+        totalAuthorizedCents: 1000,
+        totalCents: 1000,
+        capturedAmountCents: 1000,
+        paymentIntentId: pi,
+        refundId: failed.refundId,
+      },
+    });
+    const original = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    let calls = 0;
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id: string) => {
+      const live = await original(id);
+      if (id !== pi) return live;
+      calls += 1;
+      if (calls === 2) {
+        // The refund fails and its webhook evaluates while the resolve still holds the stale list.
+        setRefundStatus(counted.refundId, "failed");
+        await evaluateOrderRefundState(order.id);
+      }
+      return live;
+    });
+    try {
+      expect(await resolveRefundFailed(order.id, "Paid 600 by Zelle", 600, 600)).toEqual({ ok: true });
+    } finally {
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+    }
+    expect((await storeScoped(storeAId).order.findUnique({ where: { id: order.id } }))?.status).toBe("CANCELLED");
+    const alert = await storeScoped(storeAId).auditLog.findFirst({
+      where: { entityId: order.id, action: "refund_reversed_after_resolution" },
+    });
+    expect(alert?.after).toMatchObject({ underpaidCents: 400, alert: "store_and_platform" });
   });
 
   it("a refund succeeding between the resolution snapshot and commit is refused", async () => {

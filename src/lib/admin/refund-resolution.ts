@@ -7,7 +7,7 @@ import { requirePlatformAdmin } from "./session";
 import { parseRepaidDollars } from "./repaid-dollars";
 import { parseInput, readFormFields } from "../security/parse-input";
 import { getStripeProvider } from "../stripe";
-import { reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
+import { evaluateOrderRefundState, reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
 import { releaseOrderStock } from "../order/stock-ledger";
 import { systemAuditData } from "../system-actor";
 import { failedAtLabel } from "./failed-at";
@@ -322,7 +322,9 @@ export async function resolveRefundFailed(
         ? { message: gap !== 0 ? BALANCE_CHANGED : "The balance changed since you loaded this page." }
         : {}),
     };
-  }, { timeout: 20_000 }).then((result) => {
+  }, { timeout: 20_000 }).then(async (result) => {
+    // Stripe was read before the lock; re-read it against the baseline so a refund that moved since alerts.
+    if (result.ok) await evaluateOrderRefundState(orderId);
     if (notifyCancel) scheduleOrderNotification(order.storeId, orderId, "cancelled");
     if (result.ok && !result.message) revalidatePath("/admin/orders");
     return result;
