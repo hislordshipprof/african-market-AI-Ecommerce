@@ -10,6 +10,30 @@ vi.mock("next/headers", () => ({
   headers: async () => headerState,
 }));
 
+const bucket = vi.hoisted(() => new Map<string, Uint8Array>());
+const bucketReads = vi.hoisted(() => [] as string[]);
+vi.mock("@aws-sdk/client-s3", () => {
+  class PutObjectCommand {
+    constructor(readonly input: { Key: string; Body: Uint8Array }) {}
+  }
+  class GetObjectCommand {
+    constructor(readonly input: { Key: string }) {}
+  }
+  class S3Client {
+    async send(command: PutObjectCommand | GetObjectCommand) {
+      if (command instanceof PutObjectCommand) {
+        bucket.set(command.input.Key, command.input.Body);
+        return {};
+      }
+      bucketReads.push(command.input.Key);
+      const body = bucket.get(command.input.Key);
+      if (!body) throw new Error("NoSuchKey");
+      return { Body: { transformToWebStream: () => new Blob([new Uint8Array(body)]).stream() }, ContentType: "image/jpeg" };
+    }
+  }
+  return { S3Client, PutObjectCommand, GetObjectCommand };
+});
+
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => () => fn(),
   revalidateTag: () => {},
@@ -22,8 +46,16 @@ import { generateTOTP } from "../../../e2e/totp";
 import { auth } from "../auth";
 import { authPrisma, platformSessionUser, storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
-import { cancelledPayments, fakeStripeProvider } from "../stripe/fake";
-import { cancelOrderAction, completePickupAction, markReadyAction } from "./actions";
+import { cancelledPayments, fakeStripeProvider, refundRequests, setAuthorizedAmount } from "../stripe/fake";
+import { issuePhotoKey } from "../r2";
+import { GET as getIssuePhoto } from "../../app/api/issue-photo/[issueId]/route";
+import {
+  approveIssueAction,
+  cancelOrderAction,
+  completePickupAction,
+  declineIssueAction,
+  markReadyAction,
+} from "./actions";
 import { acceptOrder, markLinePicked, markLineShort } from "./service";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 
@@ -163,6 +195,8 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
       await tx.$executeRaw`DELETE FROM cart_lines WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM carts WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM notification_logs WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM issue_reports WHERE store_id IN (${storeAId}, ${storeBId})`;
+      await tx.$executeRaw`DELETE FROM refund_requests WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM order_lines WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM orders WHERE store_id IN (${storeAId}, ${storeBId})`;
       await tx.$executeRaw`DELETE FROM customers WHERE store_id IN (${storeAId}, ${storeBId})`;
@@ -283,5 +317,134 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
       where: { orderId: placed.orderId, event: "cancelled" },
     });
     expect(told.length).toBeGreaterThan(0);
+  }, 30_000);
+
+  /** A completed pickup order captured at `capturedCents`, with an in-review issue of `issueCents`. */
+  async function issueToReview(number: number, capturedCents: number, issueCents: number) {
+    const customer = await storeScoped(storeAId).customer.create({ data: { storeId: storeAId, name: `Issue ${number}` } });
+    const pi = `pi_issue_${number}_${RUN}`;
+    setAuthorizedAmount(pi, capturedCents);
+    await fakeStripeProvider.capturePaymentIntent(pi, capturedCents, `cap-issue-${number}-${RUN}`);
+    const order = await storeScoped(storeAId).order.create({
+      data: {
+        storeId: storeAId,
+        number,
+        customerId: customer.id,
+        status: "COMPLETED",
+        fulfillment: "pickup",
+        subtotalCents: capturedCents,
+        bufferCents: 0,
+        totalAuthorizedCents: capturedCents,
+        totalCents: capturedCents,
+        capturedAmountCents: capturedCents,
+        paymentIntentId: pi,
+        completedAt: new Date(),
+      },
+    });
+    const issueId = `iss${number}${Date.now()}`;
+    const photoKey = issuePhotoKey(order.id, issueId);
+    bucket.set(photoKey, new Uint8Array([0xff, 0xd8, 0xff, 0xd9]));
+    await storeScoped(storeAId).issueReport.create({
+      data: { id: issueId, storeId: storeAId, orderId: order.id, type: "damaged", lines: [], photoKey, amountCents: issueCents, state: "in_review" },
+    });
+    return { orderId: order.id, issueId, pi };
+  }
+
+  async function reviewed(orderId: string) {
+    const scoped = storeScoped(storeAId);
+    return {
+      order: await scoped.order.findUniqueOrThrow({ where: { id: orderId } }),
+      issue: await scoped.issueReport.findUniqueOrThrow({ where: { orderId } }),
+      requests: await scoped.refundRequest.findMany({ where: { orderId } }),
+      audits: await scoped.auditLog.findMany({ where: { entityId: orderId, action: { startsWith: "issue_" } } }),
+    };
+  }
+
+  it("the owner approves $15 of a $60 issue: one $15 refund, issue approved, order Partly refunded, audit names the owner", async () => {
+    const { orderId, issueId } = await issueToReview(601, 8000, 6000);
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(issueId, 1500)).toEqual({ ok: true });
+    const after = await reviewed(orderId);
+    expect(after.requests.map((row) => row.amountCents)).toEqual([1500]);
+    expect(after.issue.state).toBe("approved");
+    expect(after.issue.refundRequestId).toBe(after.requests[0]!.id);
+    expect(after.order.status).toBe("PARTIALLY_REFUNDED");
+    expect(after.audits).toHaveLength(1);
+    expect(after.audits[0]).toMatchObject({ action: "issue_approved", actorId: ownerAId, actorEmail: emailA });
+    expect(after.audits[0]!.after).toMatchObject({ issueReportId: issueId, amountCents: 1500 });
+  }, 30_000);
+
+  it("a decline with a reason calls no Stripe, leaves the order and writes one audit row", async () => {
+    const { orderId, issueId, pi } = await issueToReview(602, 8000, 6000);
+    asStore(storeASlug, cookiesA);
+    expect(await declineIssueAction(issueId, "  ")).toEqual({ ok: false, error: "Write why you are declining" });
+    expect(await declineIssueAction(issueId, "Photo shows a different product")).toEqual({ ok: true });
+    const after = await reviewed(orderId);
+    expect(refundRequests.some((call) => call.paymentIntentId === pi)).toBe(false);
+    expect(after.requests).toHaveLength(0);
+    expect(after.issue.state).toBe("declined");
+    expect(after.order.status).toBe("COMPLETED");
+    expect(after.audits).toHaveLength(1);
+    expect(after.audits[0]).toMatchObject({ action: "issue_declined", actorId: ownerAId });
+    expect(after.audits[0]!.after).toMatchObject({ reason: "Photo shows a different product" });
+  }, 30_000);
+
+  it("two approve clicks at once create exactly one refund request", async () => {
+    const { orderId, issueId, pi } = await issueToReview(603, 8000, 6000);
+    asStore(storeASlug, cookiesA);
+    const results = await Promise.all([approveIssueAction(issueId), approveIssueAction(issueId)]);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    const after = await reviewed(orderId);
+    expect(after.requests.map((row) => row.amountCents)).toEqual([6000]);
+    expect(refundRequests.filter((call) => call.paymentIntentId === pi)).toHaveLength(1);
+    expect(after.audits.filter((row) => row.action === "issue_approved")).toHaveLength(1);
+  }, 30_000);
+
+  it("staff of store B can neither approve store A's issue nor view its photo; signed out sees no photo", async () => {
+    const { orderId, issueId, pi } = await issueToReview(604, 8000, 6000);
+    const photo = (id: string) => getIssuePhoto(new Request(`http://localhost/api/issue-photo/${id}`), { params: Promise.resolve({ issueId: id }) });
+
+    vi.stubEnv("R2_ACCOUNT_ID", "test-account");
+    vi.stubEnv("R2_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("R2_SECRET_ACCESS_KEY", "test-secret");
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
+    asStore(storeBSlug, cookiesB);
+    bucketReads.length = 0;
+    expect(await approveIssueAction(issueId)).toEqual({ ok: false, error: "Problem not found" });
+    expect(await declineIssueAction(issueId, "Not ours")).toEqual({ ok: false, error: "Problem not found" });
+    const crossed = await photo(issueId);
+    expect(crossed.status).toBe(404);
+    expect(bucketReads).toEqual([]);
+
+    headerState.delete("cookie");
+    headerState.set("x-store-slug", storeASlug);
+    await expect(photo(issueId)).rejects.toSatisfy((error: unknown) => isRedirectError(error));
+    expect(bucketReads).toEqual([]);
+
+    const after = await reviewed(orderId);
+    expect(after.issue.state).toBe("in_review");
+    expect(after.requests).toHaveLength(0);
+    expect(after.audits).toHaveLength(0);
+    expect(refundRequests.some((call) => call.paymentIntentId === pi)).toBe(false);
+
+    asStore(storeASlug, cookiesA);
+    const own = await photo(issueId);
+    vi.unstubAllEnvs();
+    expect(own.status).toBe(200);
+    expect(own.headers.get("Cache-Control")).toBe("private, no-store");
+  }, 30_000);
+
+  it("a partial amount above the remaining capture is refused with an allow-listed message", async () => {
+    const { orderId, issueId, pi } = await issueToReview(605, 8000, 6000);
+    await fakeStripeProvider.refundPayment(pi, 7000, `earlier-${RUN}`);
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(issueId, 1500)).toEqual({
+      ok: false,
+      error: "That is more than is left to refund on this order ($10.00).",
+    });
+    const after = await reviewed(orderId);
+    expect(after.issue.state).toBe("in_review");
+    expect(after.requests).toHaveLength(0);
+    expect(after.audits).toHaveLength(0);
   }, 30_000);
 });

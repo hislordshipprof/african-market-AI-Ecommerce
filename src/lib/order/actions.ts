@@ -24,6 +24,17 @@ import {
 } from "./delivery-proof";
 import { platform } from "../db";
 import { STAFF_GENERIC_ERROR, redactedErrorMessage } from "./staff-copy";
+import {
+  ISSUE_ALREADY_HANDLED,
+  ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX,
+  ISSUE_AMOUNT_ABOVE_ISSUE,
+  ISSUE_DECLINE_REASON_MISSING,
+  ISSUE_NOT_FOUND,
+  ISSUE_REFUND_FAILED,
+  ISSUE_REFUND_NOT_STARTED,
+  approveIssue,
+  declineIssue,
+} from "./issue-review";
 
 const ALLOWED_STAFF_ERRORS = new Set([
   "Order not found",
@@ -44,6 +55,12 @@ const ALLOWED_STAFF_ERRORS = new Set([
   PROOF_PHOTO_NOT_IMAGE,
   PROOF_PHOTO_TOO_LARGE,
   PROOF_STORAGE_NOT_SET_UP,
+  ISSUE_NOT_FOUND,
+  ISSUE_ALREADY_HANDLED,
+  ISSUE_AMOUNT_ABOVE_ISSUE,
+  ISSUE_DECLINE_REASON_MISSING,
+  ISSUE_REFUND_NOT_STARTED,
+  ISSUE_REFUND_FAILED,
 ]);
 
 function isAllowListed(message: string): boolean {
@@ -58,7 +75,8 @@ function isAllowListed(message: string): boolean {
     message.startsWith("Cannot cancel order in status ") ||
     message.startsWith("Line already resolved") ||
     message.startsWith("Retrying in ") ||
-    message.startsWith("Capture amount ")
+    message.startsWith("Capture amount ") ||
+    message.startsWith(ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX)
   );
 }
 
@@ -187,5 +205,31 @@ export async function cancelOrderAction(orderId: string, input: { reason: string
       reason: parsed.data.reason,
       note: parsed.data.note || null,
     }),
+  );
+}
+
+const issueAmountSchema = z.number().int().min(1).max(10_000_000).optional();
+const declineReasonSchema = z.string().trim().min(1).max(500);
+
+/** Any store member (owner decision 2). No amount refunds the whole issue. */
+export async function approveIssueAction(issueId: string, amountCents?: number) {
+  const session = await requireStoreMember();
+  const id = parseInput(orderIdSchema, issueId);
+  if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
+  const amount = parseInput(issueAmountSchema, amountCents);
+  if (!amount.ok) return { ok: false as const, error: ISSUE_AMOUNT_ABOVE_ISSUE };
+  return runStaffAction("approveIssue", id.data, () =>
+    approveIssue(session.store.id, id.data, { id: session.user.id, email: session.user.email }, amount.data),
+  );
+}
+
+export async function declineIssueAction(issueId: string, reason: string) {
+  const session = await requireStoreMember();
+  const id = parseInput(orderIdSchema, issueId);
+  if (!id.ok) return { ok: false as const, error: ISSUE_NOT_FOUND };
+  const parsed = parseInput(declineReasonSchema, reason);
+  if (!parsed.ok) return { ok: false as const, error: ISSUE_DECLINE_REASON_MISSING };
+  return runStaffAction("declineIssue", id.data, () =>
+    declineIssue(session.store.id, id.data, { id: session.user.id, email: session.user.email }, parsed.data),
   );
 }

@@ -109,6 +109,7 @@ interface Props {
   vapidPublicKey: string | null;
   autoAcceptOrders: boolean;
   defaultPrepMinutes: number;
+  problems?: React.ReactNode;
 }
 
 export function OrderInbox({
@@ -118,6 +119,7 @@ export function OrderInbox({
   vapidPublicKey,
   autoAcceptOrders,
   defaultPrepMinutes,
+  problems,
 }: Props) {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get("store") ?? storeSlug;
@@ -635,6 +637,7 @@ export function OrderInbox({
           </div>
         ) : (
           <div>
+            {problems}
             {orders.length === 0 ? (
               <div className="py-20 text-center">
                 <ShoppingBag className="mx-auto mb-4 size-12 text-muted-foreground/50" />

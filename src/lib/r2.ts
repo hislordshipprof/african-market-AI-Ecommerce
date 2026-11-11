@@ -131,6 +131,15 @@ export async function streamDeliveryProof(
   return getObject(bucket, key);
 }
 
+/** Read through the store-member issue-photo route only. */
+export async function streamIssuePhoto(
+  key: string,
+): Promise<{ body: ReadableStream; contentType: string } | null> {
+  const bucket = deliveryProofBucket();
+  if (!bucket || !isIssuePhotoKey(key)) return null;
+  return getObject(bucket, key);
+}
+
 async function getObject(
   bucket: string,
   key: string,

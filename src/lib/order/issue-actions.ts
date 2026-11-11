@@ -6,6 +6,8 @@ import { getStore } from "../get-store";
 import { parseInput } from "../security/parse-input";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { clientIp } from "../assistant/client-ip";
+import { scheduleAfterResponse } from "../schedule-after-response";
+import { sendIssueToReviewPush } from "../push/issue-to-review";
 import { DELIVERY_PROOF_MAX_BYTES } from "./delivery-proof";
 import { ISSUE_LINES_INVALID, ISSUE_PHOTO_INVALID, ISSUE_TYPES, issueStateMessage, submitIssueReport, type IssueState } from "./issue-report";
 
@@ -56,6 +58,9 @@ export async function reportIssueAction(_previous: ReportIssueResult, form: Form
     photo: new Uint8Array(await file.arrayBuffer()),
   });
   if (!result.ok) return result;
+  if (result.state === "in_review") {
+    scheduleAfterResponse(() => sendIssueToReviewPush(store, parsed.data.token), "issue_push_failed");
+  }
   // The form is client code, so it gets the tracking page's wording from here.
   return { ok: true, state: result.state, message: issueStateMessage(result) };
 }
