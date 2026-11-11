@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { revalidateTag } from "next/cache";
 import { confirmDeliveryAddress } from "../../address/confirm";
 import { platform, storeScoped } from "../../db";
 import { isStoreOpen, isValidTimezone } from "../../order/store-hours";
+import { takeRateLimit } from "../../rate-limit/app-limiter";
 import {
   announceCustomerMessage,
   MESSAGE_MAX_CHARS,
@@ -26,6 +28,7 @@ const MESSAGES: Record<string, string> = {
   street_required: "Give a street address with the city, state and ZIP so the store can check it.",
   no_store_location: "This store has not set its address yet, so delivery cannot be checked.",
   forward_failed: "The message could not be sent to the store. Try again.",
+  rate_limited: "Too many messages to the store about this order. Please wait and try again.",
 };
 
 function fail(code: string, message?: string): ToolResult {
@@ -34,6 +37,9 @@ function fail(code: string, message?: string): ToolResult {
 
 const ORDER_LIMIT = 5;
 const ISSUE_MAX_CHARS = 600;
+// The same per-order budget as the customer's own messages (support/customer-actions.ts).
+const MESSAGES_PER_ORDER_PER_HOUR = 30;
+const HOUR_MS = 60 * 60 * 1000;
 
 /** The latest timestamp the order carries, as its last event. */
 function lastEvent(order: {
@@ -259,14 +265,22 @@ export async function forwardToStore(ctx: AssistantContext, input: unknown): Pro
   if (!body.success) return recordRead(ctx, "forward_to_store", parsed, fail("forward_failed"));
   const store = await platform.store.findUnique({ where: { id: ctx.storeId }, select: { id: true, slug: true } });
   if (!store) return recordRead(ctx, "forward_to_store", parsed, fail("store_not_found"));
+  const limitKey = order.trackingToken
+    ? `support-message:token:${createHash("sha256").update(order.trackingToken).digest("hex").slice(0, 32)}`
+    : `support-message:order:${order.id}`;
+  const limit = await takeRateLimit(limitKey, MESSAGES_PER_ORDER_PER_HOUR, HOUR_MS);
+  if (!limit.ok) return recordRead(ctx, "forward_to_store", parsed, fail("rate_limited"));
   const posted = await postCustomerMessageForOrder(ctx.storeId, order.id, body.data);
   if (!posted) return recordRead(ctx, "forward_to_store", parsed, fail("forward_failed"));
   if (order.trackingToken) revalidateTag(orderMessagesTag(order.trackingToken), { expire: 0 });
   announceCustomerMessage(store, posted, body.data);
-  return recordRead(ctx, "forward_to_store", parsed, {
+  const result: ToolResult = {
     ok: true,
     forwarded: true,
     orderNumber: posted.orderNumber,
     continueIn: "The order's messages on the order tracking page or the account page.",
-  });
+  };
+  // The store already has the message; reporting an audit failure would invite a duplicate retry.
+  const recorded = await recordRead(ctx, "forward_to_store", parsed, result);
+  return recorded.ok ? recorded : result;
 }
