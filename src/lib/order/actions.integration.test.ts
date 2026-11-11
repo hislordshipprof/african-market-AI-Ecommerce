@@ -28,7 +28,7 @@ vi.mock("@aws-sdk/client-s3", () => {
       bucketReads.push(command.input.Key);
       const body = bucket.get(command.input.Key);
       if (!body) throw new Error("NoSuchKey");
-      return { Body: { transformToWebStream: () => new Blob([body]).stream() }, ContentType: "image/jpeg" };
+      return { Body: { transformToWebStream: () => new Blob([new Uint8Array(body)]).stream() }, ContentType: "image/jpeg" };
     }
   }
   return { S3Client, PutObjectCommand, GetObjectCommand };
