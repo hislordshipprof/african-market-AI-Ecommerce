@@ -3,7 +3,7 @@ import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_pr
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import {
   CATALOG_PRUNE_MIN_AGE_MS,
   catalogPruneMode,
@@ -14,6 +14,7 @@ import {
 import { deleteCatalogCandidates, listCatalogObjects } from "./catalog-prune-execute";
 import { createFakeR2 } from "./catalog-prune-fake-r2";
 import { resolveDirectUrl } from "./env";
+import { deleteDeliveryProof } from "./r2";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = new Date("2026-06-15T12:00:00.000Z");
@@ -792,7 +793,35 @@ describe("catalog prune guard and planner", () => {
     for (const root of tree) walk(path.join(process.cwd(), root));
     expect(deleteHits.filter((file) => !file.endsWith(".test.ts"))).toEqual([
       path.normalize("src/lib/catalog-prune-execute.ts"),
+      path.normalize("src/lib/r2.ts"),
     ]);
+    const r2Source = readFileSync(path.join(process.cwd(), "src", "lib", "r2.ts"), "utf8");
+    expect(r2Source.match(/new DeleteObject/g)).toHaveLength(1);
+  });
+
+  it("the r2.ts delete only ever targets the proof bucket with a proof key", async () => {
+    vi.stubEnv("R2_ACCOUNT_ID", "acct-sentinel");
+    vi.stubEnv("R2_ACCESS_KEY_ID", ACCESS);
+    vi.stubEnv("R2_SECRET_ACCESS_KEY", SECRET);
+    vi.stubEnv("R2_BUCKET", BUCKET);
+    vi.stubEnv("R2_PROOF_BUCKET", "proof-bucket");
+    const send = vi.spyOn(S3Client.prototype, "send").mockResolvedValue({} as never);
+    try {
+      await deleteDeliveryProof("delivery-proof/ord1/1700000000000-0123456789abcdef.jpg");
+      expect(send).toHaveBeenCalledTimes(1);
+      const sent = send.mock.calls[0][0] as { constructor: { name: string }; input: { Bucket: string; Key: string } };
+      expect(sent.constructor.name).toBe("DeleteObjectCommand");
+      expect(sent.input).toEqual({ Bucket: "proof-bucket", Key: "delivery-proof/ord1/1700000000000-0123456789abcdef.jpg" });
+      for (const key of ["catalog/a.jpg", "issue-photo/ord1/iss1.jpg", "delivery-proof/../catalog/a.jpg"]) {
+        await expect(deleteDeliveryProof(key)).rejects.toThrow("not a delivery-proof key");
+      }
+      vi.stubEnv("R2_PROOF_BUCKET", "");
+      await expect(deleteDeliveryProof("delivery-proof/ord1/1700000000000.jpg")).rejects.toThrow("R2_PROOF_BUCKET is required");
+      expect(send).toHaveBeenCalledTimes(1);
+    } finally {
+      send.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
 });
 
