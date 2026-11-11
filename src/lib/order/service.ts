@@ -494,12 +494,19 @@ async function settleUnconfirmedCapture(
     throw err;
   }
 
-  if (pi.status === "succeeded") {
-    await finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
-    return { ok: true, capturedAmountCents: pi.amountReceived };
+  const settled = await settlePaymentStatus(storeId, order, order.paymentIntentId, pi);
+  if (settled.outcome === "captured") {
+    return { ok: true, capturedAmountCents: settled.capturedAmountCents };
+  }
+  if (settled.outcome === "cancelled") {
+    return {
+      ok: false,
+      error: "Payment authorization was released — order cancelled; contact the customer",
+      resolved: "cancelled",
+    };
   }
 
-  if (pi.status === "requires_capture") {
+  if (settled.outcome === "authorized") {
     const reservedRelease = await reserveAttempt(storeId, orderId, "cancel_retry", { releaseHold: true });
     if (!reservedRelease.ok) {
       return { ok: false, error: "Card capture is still confirming with the bank", resolved: "waiting" };
@@ -542,15 +549,6 @@ async function settleUnconfirmedCapture(
       }
     }
     await finalizeCancelFromSweep(storeId, orderId, "capture_released");
-    return {
-      ok: false,
-      error: "Payment authorization was released — order cancelled; contact the customer",
-      resolved: "cancelled",
-    };
-  }
-
-  if (pi.status === "canceled") {
-    await finalizeCancelFromSweep(storeId, orderId, await canceledHoldAction(storeId, orderId));
     return {
       ok: false,
       error: "Payment authorization was released — order cancelled; contact the customer",
@@ -1380,37 +1378,12 @@ export async function reconcileStuckOrder(
   const stripe = getStripeProvider();
   const pi = await stripe.retrievePaymentIntent(order.paymentIntentId);
 
-  if (pi.status === "succeeded") {
-    if (order.status === "CANCELLING") {
-      let refund;
-      if (order.refundId) {
-        refund = await stripe.retrieveRefund(order.refundId);
-      } else {
-        refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
-        if (refundBlocked(refund)) return { ok: true, action: "already_resolved" };
-        if (refundInFlight(refund)) {
-          return { ok: false, error: "Refund is still confirming with the bank", waiting: true };
-        }
-      }
-      const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
-      if (settled.outcome === "blocked") return { ok: true, action: "already_resolved" };
-      if (settled.outcome !== "refunded") {
-        return {
-          ok: false,
-          error: settled.error,
-          waiting: settled.outcome === "pending" || settled.outcome === "waiting",
-        };
-      }
-      return { ok: true, action: "anomaly_refund" };
-    }
-    return finalizeCaptureFromSweep(storeId, orderId, order.fulfillment, pi.amountReceived);
-  }
+  const settledStatus = await settlePaymentStatus(storeId, order, order.paymentIntentId, pi);
+  if (settledStatus.outcome === "captured") return { ok: true, action: "finalized_capture" };
+  if (settledStatus.outcome === "cancelled") return { ok: true, action: "finalized_cancel" };
+  if (settledStatus.outcome === "refund") return settledStatus.result;
 
-  if (pi.status === "canceled") {
-    return finalizeCancelFromSweep(storeId, orderId, await canceledHoldAction(storeId, orderId));
-  }
-
-  if (pi.status === "requires_capture") {
+  if (settledStatus.outcome === "authorized") {
     if (order.status === "CAPTURING") {
       const stored = storedCaptureAmount(order.capturedAmountCents);
       if (!stored.ok) return { ...stored, waiting: true };
@@ -1488,26 +1461,7 @@ export async function reconcileStuckOrder(
         if (err instanceof ProviderStateError) {
           const freshPi = await stripe.retrievePaymentIntent(order.paymentIntentId);
           if (freshPi.status === "succeeded") {
-            let refund;
-            if (order.refundId) {
-              refund = await stripe.retrieveRefund(order.refundId);
-            } else {
-              refund = await refundCapturedBalance(order.paymentIntentId, orderId, storeId);
-              if (refundBlocked(refund)) return { ok: true, action: "already_resolved" };
-              if (refundInFlight(refund)) {
-                return { ok: false, error: "Refund is still confirming with the bank", waiting: true };
-              }
-            }
-            const settled = await settleCapturedRefund(storeId, orderId, order.paymentIntentId, refund);
-            if (settled.outcome === "blocked") return { ok: true, action: "already_resolved" };
-            if (settled.outcome !== "refunded") {
-              return {
-                ok: false,
-                error: settled.error,
-                waiting: settled.outcome === "pending" || settled.outcome === "waiting",
-              };
-            }
-            return { ok: true, action: "anomaly_refund" };
+            return refundCapturedCancellation(storeId, order, order.paymentIntentId);
           }
         }
         throw err;
@@ -1517,6 +1471,66 @@ export async function reconcileStuckOrder(
   }
 
   return { ok: true, action: "unknown_stripe_status" };
+}
+
+type SettlingOrder = { id: string; status: string; fulfillment: string; refundId: string | null };
+
+/** What a PaymentIntent status settles: `succeeded` and `canceled` finalize here; `authorized` and `pending` are left to the caller. */
+type PaymentStatusSettlement =
+  | { outcome: "captured"; capturedAmountCents: number }
+  | { outcome: "cancelled" }
+  | { outcome: "refund"; result: ReconcileResult }
+  | { outcome: "authorized" }
+  | { outcome: "pending" };
+
+/** The one Stripe status ladder for the capture settle and the stuck-order sweep. Call it outside the store lock. */
+async function settlePaymentStatus(
+  storeId: string,
+  order: SettlingOrder,
+  paymentIntentId: string,
+  pi: { status: string; amountReceived: number },
+): Promise<PaymentStatusSettlement> {
+  if (pi.status === "succeeded") {
+    if (order.status === "CANCELLING") {
+      return { outcome: "refund", result: await refundCapturedCancellation(storeId, order, paymentIntentId) };
+    }
+    await finalizeCaptureFromSweep(storeId, order.id, order.fulfillment, pi.amountReceived);
+    return { outcome: "captured", capturedAmountCents: pi.amountReceived };
+  }
+  if (pi.status === "canceled") {
+    await finalizeCancelFromSweep(storeId, order.id, await canceledHoldAction(storeId, order.id));
+    return { outcome: "cancelled" };
+  }
+  if (pi.status === "requires_capture") return { outcome: "authorized" };
+  return { outcome: "pending" };
+}
+
+/** A cancelling order whose payment was captured anyway: refund the captured balance. */
+async function refundCapturedCancellation(
+  storeId: string,
+  order: SettlingOrder,
+  paymentIntentId: string,
+): Promise<ReconcileResult> {
+  let refund;
+  if (order.refundId) {
+    refund = await getStripeProvider().retrieveRefund(order.refundId);
+  } else {
+    refund = await refundCapturedBalance(paymentIntentId, order.id, storeId);
+    if (refundBlocked(refund)) return { ok: true, action: "already_resolved" };
+    if (refundInFlight(refund)) {
+      return { ok: false, error: "Refund is still confirming with the bank", waiting: true };
+    }
+  }
+  const settled = await settleCapturedRefund(storeId, order.id, paymentIntentId, refund);
+  if (settled.outcome === "blocked") return { ok: true, action: "already_resolved" };
+  if (settled.outcome !== "refunded") {
+    return {
+      ok: false,
+      error: settled.error,
+      waiting: settled.outcome === "pending" || settled.outcome === "waiting",
+    };
+  }
+  return { ok: true, action: "anomaly_refund" };
 }
 
 async function finalizeCaptureFromSweep(
