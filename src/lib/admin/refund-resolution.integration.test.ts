@@ -225,6 +225,62 @@ describe.skipIf(!hasDb)("refund resolution (real auth.handler, lane DB)", () => 
     });
   });
 
+  it("the refund queue reads Stripe for several orders at once, within a bound, with each order's reads together", async () => {
+    asAdmin(cookiesAdmin);
+    const customer = await storeScoped(storeAId).customer.create({
+      data: { storeId: storeAId, name: "Queue concurrency" },
+    });
+    const pis = new Set<string>();
+    for (let i = 0; i < 10; i += 1) {
+      const pi = `pi_queue_${i}_${RUN}`;
+      pis.add(pi);
+      setAuthorizedAmount(pi, 1000);
+      await fakeStripeProvider.capturePaymentIntent(pi, 1000, `queue-cap-${i}`);
+      await storeScoped(storeAId).order.create({
+        data: {
+          storeId: storeAId,
+          number: 28500 + i,
+          customerId: customer.id,
+          status: "REFUND_FAILED",
+          fulfillment: "pickup",
+          subtotalCents: 1000,
+          bufferCents: 0,
+          totalAuthorizedCents: 1000,
+          totalCents: 1000,
+          paymentIntentId: pi,
+        },
+      });
+    }
+    let inFlight = 0;
+    let peak = 0;
+    const track = <A extends unknown[], R>(original: (...args: A) => Promise<R>) =>
+      async (...args: A): Promise<R> => {
+        if (!pis.has(args[0] as string)) return original(...args);
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          return await original(...args);
+        } finally {
+          inFlight -= 1;
+        }
+      };
+    const retrieve = fakeStripeProvider.retrievePaymentIntent.bind(fakeStripeProvider);
+    const list = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    vi.spyOn(fakeStripeProvider, "retrievePaymentIntent").mockImplementation(track(retrieve));
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(track(list));
+    try {
+      const rows = (await listRefundFailedOrders()).filter((row) => row.orderNumber >= 28500 && row.orderNumber < 28510);
+      expect(rows.map((row) => row.capturedCents)).toEqual(Array(10).fill(1000));
+    } finally {
+      vi.restoreAllMocks();
+      setStripeProvider(fakeStripeProvider);
+      await storeScoped(storeAId).order.deleteMany({ where: { paymentIntentId: { in: [...pis] } } });
+    }
+    expect(peak).toBeGreaterThan(2);
+    expect(peak).toBeLessThanOrEqual(8);
+  });
+
   it("the amount owed is captured minus succeeded refunds", async () => {
     asAdmin(cookiesAdmin);
     const rows = await listRefundFailedOrders();

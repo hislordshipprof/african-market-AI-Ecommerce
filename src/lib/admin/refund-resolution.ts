@@ -7,7 +7,7 @@ import { requirePlatformAdmin } from "./session";
 import { parseRepaidDollars } from "./repaid-dollars";
 import { parseInput, readFormFields } from "../security/parse-input";
 import { getStripeProvider } from "../stripe";
-import { findOpenRefundRequest, reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
+import { reconcileOpenRefundRequests, requestIsOpen } from "../order/refund-requests";
 import { releaseOrderStock } from "../order/stock-ledger";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import { failedAtLabel } from "./failed-at";
@@ -93,6 +93,21 @@ async function refundBalance(paymentIntentId: string | null): Promise<RefundObse
   }
 }
 
+const QUEUE_PROVIDER_CONCURRENCY = 4;
+
+async function mapBounded<T, R>(items: T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await run(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
   await requirePlatformAdmin();
   const orders = await platformAdminTransaction((tx) =>
@@ -114,20 +129,35 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
   for (const failure of failures) {
     if (!failureByOrder.has(failure.entityId)) failureByOrder.set(failure.entityId, failure);
   }
-  const rows: RefundFailedRow[] = [];
-  for (const order of orders) {
+  const openRequests = orders.length
+    ? await platformAdminTransaction((tx) =>
+        tx.refundRequest.findMany({
+          where: { orderId: { in: orders.map((order) => order.id) } },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        }),
+      )
+    : [];
+  const reservationByOrder = new Map<string, (typeof openRequests)[number]>();
+  for (const request of openRequests) {
+    if (requestIsOpen(request) && !reservationByOrder.has(request.orderId)) {
+      reservationByOrder.set(request.orderId, request);
+    }
+  }
+  return mapBounded(orders, QUEUE_PROVIDER_CONCURRENCY, async (order): Promise<RefundFailedRow> => {
     const failureRows = failures.filter(
       (row) => row.entityId === order.id && recordedRefundId(row.after) === order.refundId,
     );
     const failure = failureRows[failureRows.length - 1] ?? failureByOrder.get(order.id);
-    const capturedCents = await capturedCentsFor(order);
-    const balance = await refundBalance(order.paymentIntentId);
-    const reservation = await findOpenRefundRequest(order.storeId, order.id);
+    const [capturedCents, balance] = await Promise.all([
+      capturedCentsFor(order),
+      refundBalance(order.paymentIntentId),
+    ]);
+    const reservation = reservationByOrder.get(order.id);
     const matched = reservation?.providerRefundId
       ? balance.listed.find((refund) => refund.refundId === reservation.providerRefundId)
       : undefined;
     const reservationOpen = !!reservation && (reservation.state !== "CREATED" || !matched || refundStillOpen(matched.status));
-    rows.push({
+    return {
       orderId: order.id,
       storeName: order.store.name,
       orderNumber: order.number,
@@ -137,9 +167,8 @@ export async function listRefundFailedOrders(): Promise<RefundFailedRow[]> {
       failedRefundId: order.refundId ?? "",
       failedAtLabel: failedAtLabel(failure?.createdAt ?? order.updatedAt, order.store.timezone),
       bankRefundPending: balance.bankRefundPending || reservationOpen,
-    });
-  }
-  return rows;
+    };
+  });
 }
 
 export type ResolveResult =
