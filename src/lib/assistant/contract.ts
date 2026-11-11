@@ -21,6 +21,10 @@ export const ASSISTANT_TOOL_NAMES = [
   "set_swap_rule",
   "get_cart_summary",
   "offer_choices",
+  "get_order_status",
+  "check_delivery_area",
+  "get_store_info",
+  "forward_to_store",
 ] as const;
 
 export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];

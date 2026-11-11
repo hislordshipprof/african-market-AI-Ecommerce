@@ -58,6 +58,26 @@ export const offerChoicesInput = z.object({
 
 export const cartSummaryInput = z.object({});
 
+const orderNumber = z.number().int().min(1).max(2_147_483_647).optional();
+
+export const getOrderStatusInput = z.object({
+  order_number: orderNumber,
+});
+
+export const checkDeliveryAreaInput = z.object({
+  line1: z.string().trim().max(100).optional(),
+  city: z.string().trim().max(60).optional(),
+  state: z.string().trim().max(30).optional(),
+  zip: z.string().trim().regex(/^\d{5}(-\d{4})?$/),
+});
+
+export const getStoreInfoInput = z.object({});
+
+export const forwardToStoreInput = z.object({
+  order_number: orderNumber,
+  issue: z.string().trim().min(1).max(600),
+});
+
 export const toolInputSchemas = exactAssistantKeys({
   search_catalog: searchCatalogInput,
   show_products: showProductsInput,
@@ -69,6 +89,10 @@ export const toolInputSchemas = exactAssistantKeys({
   set_swap_rule: setSwapRuleInput,
   get_cart_summary: cartSummaryInput,
   offer_choices: offerChoicesInput,
+  get_order_status: getOrderStatusInput,
+  check_delivery_area: checkDeliveryAreaInput,
+  get_store_info: getStoreInfoInput,
+  forward_to_store: forwardToStoreInput,
 });
 
 function toolInput(input: unknown): unknown {

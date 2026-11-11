@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { Prisma, storeScoped, storeScopedRawQuery, storeScopedTransaction } from "../db";
 import { recordOrderNotification } from "../notifications/record";
+import { pushToStoreMembers } from "../push/store-members";
+import { scheduleAfterResponse } from "../schedule-after-response";
+import { scheduleSlaTimer } from "./escalation";
 
-const MESSAGE_MAX_CHARS = 1000;
+export const MESSAGE_MAX_CHARS = 1000;
 // Postgres text rejects NUL, so refuse it here instead of failing in the insert.
 export const messageBodySchema = z.string().trim().min(1).max(MESSAGE_MAX_CHARS).refine((body) => !body.includes("\u0000"));
 const THREAD_LIST_LIMIT = 100;
@@ -48,9 +51,32 @@ export async function postCustomerMessage(
   token: string,
   body: string,
   topic: SupportTopic = "order",
-): Promise<{ threadId: string; orderNumber: number; messageId: string; topic: SupportTopic; sentAt: string } | null> {
+): Promise<PostedCustomerMessage | null> {
+  return postToOrderThread(storeId, { trackingToken: token }, body, topic);
+}
+
+type PostedCustomerMessage = { threadId: string; orderNumber: number; messageId: string; topic: SupportTopic; sentAt: string };
+
+/**
+ * The shopper assistant's hand-off: the caller has already proved the signed-in customer owns `orderId`.
+ * Same thread rules as `postCustomerMessage`, on the order thread.
+ */
+export async function postCustomerMessageForOrder(
+  storeId: string,
+  orderId: string,
+  body: string,
+): Promise<PostedCustomerMessage | null> {
+  return postToOrderThread(storeId, { id: orderId }, body, "order");
+}
+
+async function postToOrderThread(
+  storeId: string,
+  where: { trackingToken: string } | { id: string },
+  body: string,
+  topic: SupportTopic,
+): Promise<PostedCustomerMessage | null> {
   return storeScopedTransaction(storeId, async (tx) => {
-    const order = await tx.order.findUnique({ where: { trackingToken: token }, select: { id: true, number: true } });
+    const order = await tx.order.findUnique({ where, select: { id: true, number: true } });
     if (!order) return null;
     await tx.supportThread.createMany({ data: [{ storeId, orderId: order.id, topic }], skipDuplicates: true });
     const now = new Date();
@@ -83,6 +109,24 @@ export async function postCustomerMessage(
       sentAt: now.toISOString(),
     };
   });
+}
+
+/** After a customer message: the SLA timer for an order thread and a push to the store's members. */
+export function announceCustomerMessage(
+  store: { id: string; slug: string },
+  posted: Pick<PostedCustomerMessage, "threadId" | "orderNumber" | "messageId" | "topic">,
+  body: string,
+): void {
+  if (posted.topic === "order") scheduleSlaTimer(store.id, posted.messageId);
+  scheduleAfterResponse(
+    () => pushToStoreMembers(store.id, {
+      title: "New message",
+      body: `Order #${posted.orderNumber}: ${body.slice(0, 120)}`,
+      url: `/store-admin/messages?store=${encodeURIComponent(store.slug)}&thread=${posted.threadId}`,
+      tag: `support-${posted.threadId}`,
+    }),
+    "support_push_failed",
+  );
 }
 
 /** What the tracking page shows. Null when the token is unknown in this store. */
