@@ -66,6 +66,7 @@ function cancellationAuditAction(acceptedAt: Date | null): "void_zero_amount" | 
 
 export type CancelCause =
   | { action: "auto_cancel" }
+  | { action: "pick_timeout" }
   | { action: "provider_canceled"; stripeEventId: string | null; cancellationReason: string | null }
   | {
       action: "store_cancel";
@@ -74,10 +75,11 @@ export type CancelCause =
       note: string | null;
     };
 
-const CANCEL_CAUSE_ACTIONS: CancelCause["action"][] = ["store_cancel", "provider_canceled", "auto_cancel"];
+const CANCEL_CAUSE_ACTIONS: CancelCause["action"][] = ["store_cancel", "provider_canceled", "auto_cancel", "pick_timeout"];
 
 const CANCELLABLE_FROM: Record<CancelCause["action"], OrderStatus[]> = {
   auto_cancel: ["AUTHORIZED"],
+  pick_timeout: ["ACCEPTED", "PICKING"],
   store_cancel: ["AUTHORIZED", "ACCEPTED", "PICKING"],
   provider_canceled: ["AUTHORIZED", "ACCEPTED", "PICKING"],
 };

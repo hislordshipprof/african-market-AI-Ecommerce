@@ -574,6 +574,8 @@ model Cart {
   source              String  @default("manual")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
+  /// Last time the orphan-hold sweep found this cart's intent not held; cleared when the shopper reopens payment.
+  orphanCheckedAt DateTime? @map("orphan_checked_at")
 
   store    Store     @relation(fields: [storeId], references: [id])
   user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)

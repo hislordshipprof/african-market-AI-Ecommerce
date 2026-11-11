@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { authPrisma, customerScoped, platformAdmin, storeScoped } from "../db";
 import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
-import { computeQuote, createPaymentIntent, placeOrder } from "./service";
+import { BasketChangedError, computeQuote, createPaymentIntent, placeOrder, releaseOrphanHolds } from "./service";
+import { findOrphanHoldCarts, storeScopedTransaction } from "../db";
 import { prepareSignedInPaymentIntent, SavedCardUnavailableError } from "./saved-card-payment";
 import { ensureStripeCustomer } from "../customer-account/stripe-customer";
 import { SAVED_CARD_PURPOSE, SAVED_CARD_TERMS_VERSION } from "../customer-account/consent";
@@ -441,5 +442,100 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
       attemptToken: null,
     }, storeAccountId)).rejects.toBeInstanceOf(SavedCardUnavailableError);
     retrieve.mockRestore();
+  });
+
+  async function heldCart(createdAgoMs: number, authorizedAgoMs: number) {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId } });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() - createdAgoMs);
+      const prepared = await prepareSignedInPaymentIntent(storeId, cart.id, 4200, {
+        actorUserId: userId,
+        saveCard: false,
+        savedCardId: null,
+        attemptToken: null,
+      }, storeAccountId);
+      vi.setSystemTime(Date.now() + createdAgoMs - authorizedAgoMs);
+      await getCheckoutPayments().confirmPaymentIntent(prepared.paymentIntentId, { payment_method: "pm_card_visa" });
+      return { cartId: cart.id, paymentIntentId: prepared.paymentIntentId };
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  async function deadCart(writtenAgoMs: number) {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId } });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() - writtenAgoMs);
+      const prepared = await prepareSignedInPaymentIntent(storeId, cart.id, 4200, {
+        actorUserId: userId,
+        saveCard: false,
+        savedCardId: null,
+        attemptToken: null,
+      }, storeAccountId);
+      return { cartId: cart.id, paymentIntentId: prepared.paymentIntentId };
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  function releaseRow(paymentIntentId: string) {
+    return storeScopedTransaction(storeId, (tx) => tx.paymentIntentRelease.findUnique({ where: { paymentIntentId } }));
+  }
+
+  async function sweep() {
+    await releaseOrphanHolds(await findOrphanHoldCarts({ storeIds: [storeId] }));
+  }
+
+  it("releases a hold with no order 61 min after authorization, and placeOrder then refuses it", async () => {
+    const held = await heldCart(61 * 60_000, 61 * 60_000);
+    await sweep();
+    const released = await releaseRow(held.paymentIntentId);
+    expect(released?.storeId).toBe(storeId);
+    expect((await getCheckoutPayments().retrievePaymentIntent(held.paymentIntentId)).status).toBe("canceled");
+    const contact = { name: "Ada", phone: "+15551234567", email: "ada@example.test" };
+    await expect(placeOrder(storeId, 0, held.cartId, contact, "pickup", null, null, held.paymentIntentId, userId))
+      .rejects.toBeInstanceOf(BasketChangedError);
+    const fresh = await prepareSignedInPaymentIntent(storeId, held.cartId, 4200, {
+      actorUserId: userId,
+      saveCard: false,
+      savedCardId: null,
+      attemptToken: null,
+    }, storeAccountId);
+    expect(fresh.paymentIntentId).not.toBe(held.paymentIntentId);
+  });
+
+  it("leaves a hold inside the grace untouched, also on an intent created 3 h ago and authorized 5 min ago", async () => {
+    const recent = await heldCart(5 * 60_000, 5 * 60_000);
+    const reused = await heldCart(3 * 60 * 60_000, 5 * 60_000);
+    await sweep();
+    for (const held of [recent, reused]) {
+      expect((await getCheckoutPayments().retrievePaymentIntent(held.paymentIntentId)).status).toBe("requires_capture");
+      expect(await releaseRow(held.paymentIntentId)).toBeNull();
+      const cart = await storeScoped(storeId).cart.findUnique({ where: { id: held.cartId } });
+      expect(cart?.paymentIntentId).toBe(held.paymentIntentId);
+    }
+  });
+
+  it("reaches an orphan hold behind carts that never paid, and cancels carts dead for 24 h", async () => {
+    const deadCarts = async (count: number, writtenAgoMs: number) => {
+      const carts = [];
+      for (let i = 0; i < count; i += 1) carts.push(await deadCart(writtenAgoMs));
+      return carts;
+    };
+    const dayOld = await deadCarts(25, 25 * 60 * 60_000);
+    const unpaid = [...await deadCarts(50, 4 * 60 * 60_000), ...await deadCarts(50, 2 * 60 * 60_000)];
+    const held = await heldCart(3 * 60 * 60_000, 61 * 60_000);
+    for (let run = 0; run < 3; run += 1) await sweep();
+    expect((await getCheckoutPayments().retrievePaymentIntent(held.paymentIntentId)).status).toBe("canceled");
+    expect(await releaseRow(held.paymentIntentId)).not.toBeNull();
+    for (const dead of dayOld) {
+      expect((await getCheckoutPayments().retrievePaymentIntent(dead.paymentIntentId)).status).toBe("canceled");
+      expect(await releaseRow(dead.paymentIntentId)).not.toBeNull();
+    }
+    for (const dead of unpaid) {
+      expect((await getCheckoutPayments().retrievePaymentIntent(dead.paymentIntentId)).status).toBe("requires_payment_method");
+    }
   });
 });

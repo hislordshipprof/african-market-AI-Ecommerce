@@ -223,6 +223,7 @@ export async function prepareSignedInPaymentIntent(
       throw new Error("Payment already confirmed for this cart");
     }
     if (plan.action === "reuse") {
+      await tx.cart.update({ where: { id: cartId }, data: { orphanCheckedAt: null } });
       return {
         kind: "ready" as const,
         clientSecret: plan.clientSecret,

@@ -14,6 +14,8 @@ const realFindStuck = dbModule.findStuckTransitionalOrders;
 const realFindOrphaned = dbModule.findOrphanedAuthorizedOrders;
 const realFindPending = dbModule.findPendingOrderNotifications;
 const realExpireNotifications = dbModule.expireStaleOrderNotifications;
+const realFindPickTimeout = dbModule.findPickTimeoutCandidates;
+const realFindOrphanHolds = dbModule.findOrphanHoldCarts;
 
 /** Tue 2026-11-03 14:00 America/New_York (UTC-5). */
 const OPEN_AT = "2026-11-03T19:00:00.000Z";
@@ -125,22 +127,26 @@ describe("sweep configuration", () => {
     expect(reconcileStuckTransitional.opts.singleton).toEqual({ mode: "skip" });
   });
 
-  it("the notification function is not deduplicated per order, and an idle sweep runs one step", async () => {
+  it("the notification function is not deduplicated per order, and an idle sweep runs its three finder steps", async () => {
     const { sendCustomerNotification, sweepOrphanedAuthorized } = await import("./functions");
     const idempotency = (sendCustomerNotification as { opts?: { idempotency?: unknown } }).opts?.idempotency;
     if (idempotency != null) expect(String(idempotency)).toContain("data.event");
     vi.spyOn(dbModule, "findOrphanedAuthorizedOrders").mockImplementation(async () => realFindOrphaned({ storeIds: [] }));
     vi.spyOn(dbModule, "findPendingOrderNotifications").mockImplementation(async () => realFindPending({ storeIds: [] }));
     vi.spyOn(dbModule, "expireStaleOrderNotifications").mockImplementation(async () => realExpireNotifications({ storeIds: [] }));
+    vi.spyOn(dbModule, "findPickTimeoutCandidates").mockImplementation(async (opts) => realFindPickTimeout({ ...opts, storeIds: [] }));
+    vi.spyOn(dbModule, "findOrphanHoldCarts").mockImplementation(async (opts) => realFindOrphanHolds({ ...opts, storeIds: [] }));
     try {
       const step = makeFakeStep();
       const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
       await handler({ step });
-      expect(step.runs).toEqual(["find-orphaned"]);
+      expect(step.runs).toEqual(["find-orphaned", "find-pick-timeouts", "release-orphan-holds"]);
     } finally {
       vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
       vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
       vi.mocked(dbModule.expireStaleOrderNotifications).mockRestore();
+      vi.mocked(dbModule.findPickTimeoutCandidates).mockRestore();
+      vi.mocked(dbModule.findOrphanHoldCarts).mockRestore();
     }
   });
 });
@@ -292,6 +298,12 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       if (opts?.storeIds) return realExpireNotifications(opts);
       return realExpireNotifications({ storeIds: ownStores() });
     });
+    vi.spyOn(dbModule, "findPickTimeoutCandidates").mockImplementation(async (opts) => {
+      return realFindPickTimeout({ ...opts, storeIds: opts.storeIds ?? ownStores() });
+    });
+    vi.spyOn(dbModule, "findOrphanHoldCarts").mockImplementation(async (opts) => {
+      return realFindOrphanHolds({ ...opts, storeIds: opts?.storeIds ?? ownStores() });
+    });
   });
 
   afterEach(() => {
@@ -299,6 +311,8 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
     vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
     vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();
     vi.mocked(dbModule.expireStaleOrderNotifications).mockRestore();
+    vi.mocked(dbModule.findPickTimeoutCandidates).mockRestore();
+    vi.mocked(dbModule.findOrphanHoldCarts).mockRestore();
   });
 
   describe("dailyConfidence", () => {
@@ -761,6 +775,43 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       } finally {
         spy.mockRestore();
       }
+    });
+
+    it("cancels an ACCEPTED order 24 h after acceptance with pick_timeout; fresh and scheduled orders are untouched", async () => {
+      const { sweepOrphanedAuthorized } = await import("./functions");
+      const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+      const hour = 3600_000;
+      async function acceptedOrder(acceptedAgoMs: number, pickupSlot: string | null) {
+        const order = await createTestOrder();
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: {
+              status: "ACCEPTED",
+              createdAt: new Date(Date.now() - acceptedAgoMs - 60_000),
+              acceptedAt: new Date(Date.now() - acceptedAgoMs),
+              inngestEventSentAt: new Date(),
+              pickupSlot,
+            },
+          });
+        });
+        return order;
+      }
+      const abandoned = await acceptedOrder(25 * hour, null);
+      const fresh = await acceptedOrder(23 * hour, null);
+      const scheduled = await acceptedOrder(25 * hour, new Date(Date.now() + 48 * hour).toISOString());
+
+      await handler({ step: makeFakeStep() });
+
+      const status = async (id: string) => (await storeScoped(storeId).order.findUnique({ where: { id } }))!.status;
+      expect(await status(abandoned.id)).toBe("CANCELLED");
+      expect(cancelledPayments.has(abandoned.paymentIntentId!)).toBe(true);
+      const cause = await storeScoped(storeId).auditLog.findMany({ where: { entityId: abandoned.id, action: "pick_timeout" } });
+      expect(cause).toHaveLength(1);
+      expect(await status(fresh.id)).toBe("ACCEPTED");
+      expect(await status(scheduled.id)).toBe("ACCEPTED");
+      expect(cancelledPayments.has(fresh.paymentIntentId!)).toBe(false);
+      expect(cancelledPayments.has(scheduled.paymentIntentId!)).toBe(false);
     });
   });
 

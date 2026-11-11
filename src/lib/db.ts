@@ -708,6 +708,81 @@ export async function findOrphanedAuthorizedOrders(opts?: {
   });
 }
 
+/**
+ * ACCEPTED/PICKING orders that may be past the pick timeout: accepted before
+ * `acceptedBefore` or created before `createdBefore`. The caller applies the
+ * pickup slot, which is free text.
+ */
+export async function findPickTimeoutCandidates(opts: {
+  acceptedBefore: Date;
+  createdBefore: Date;
+  limit: number;
+  storeIds?: readonly string[];
+}): Promise<Array<{ id: string; storeId: string; createdAt: Date; acceptedAt: Date; pickupSlot: string | null }>> {
+  if (opts.storeIds && opts.storeIds.length === 0) return [];
+  const inStores = opts.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; created_at: Date; accepted_at: Date; pickup_slot: string | null }>>`
+      SELECT id, store_id, created_at, accepted_at, pickup_slot FROM orders
+      WHERE status IN ('ACCEPTED', 'PICKING')
+        AND accepted_at IS NOT NULL
+        AND (accepted_at < ${opts.acceptedBefore} OR created_at < ${opts.createdBefore})
+        ${inStores}
+      ORDER BY (pickup_slot IS NULL OR created_at < ${opts.createdBefore}) DESC, created_at ASC
+      LIMIT ${opts.limit}
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      storeId: r.store_id,
+      createdAt: r.created_at,
+      acceptedAt: r.accepted_at,
+      pickupSlot: r.pickup_slot,
+    }));
+  });
+}
+
+/**
+ * Carts holding a PaymentIntent with no order and no release tombstone, not
+ * written in the last `untouchedFor` ms (a hold cannot be older than that and
+ * still unused for longer). Never-checked carts first, then least recently
+ * checked, oldest first, so carts that never paid cannot starve a real hold.
+ */
+export async function findOrphanHoldCarts(opts?: {
+  untouchedFor?: number;
+  limit?: number;
+  storeIds?: readonly string[];
+}): Promise<Array<{ storeId: string; cartId: string; paymentIntentId: string; updatedAt: Date }>> {
+  if (opts?.storeIds && opts.storeIds.length === 0) return [];
+  const before = new Date(Date.now() - (opts?.untouchedFor ?? 60 * 60_000));
+  const inStores = opts?.storeIds ? Prisma.sql`AND c.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; payment_intent_id: string; updated_at: Date }>>`
+      SELECT c.id, c.store_id, c.payment_intent_id, c.updated_at FROM carts c
+      WHERE c.payment_intent_id IS NOT NULL
+        AND c.updated_at < ${before}
+        AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.payment_intent_id = c.payment_intent_id)
+        AND NOT EXISTS (SELECT 1 FROM payment_intent_releases r WHERE r.payment_intent_id = c.payment_intent_id)
+        ${inStores}
+      ORDER BY c.orphan_checked_at ASC NULLS FIRST, c.updated_at ASC
+      LIMIT ${opts?.limit ?? 50}
+    `;
+    return rows.map((r) => ({
+      storeId: r.store_id,
+      cartId: r.id,
+      paymentIntentId: r.payment_intent_id,
+      updatedAt: r.updated_at,
+    }));
+  });
+}
+
+/** Moves a checked cart to the back of the orphan-hold sweep. Raw SQL so `updated_at` is kept. */
+export async function markOrphanHoldChecked(storeId: string, cartId: string, paymentIntentId: string): Promise<void> {
+  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+    UPDATE carts SET orphan_checked_at = now()
+    WHERE id = ${cartId} AND store_id = ${storeId} AND payment_intent_id = ${paymentIntentId}
+  `);
+}
+
 const NOTIFICATION_RESEND_MS = 5 * 60_000;
 const NOTIFICATION_EXPIRE_MS = 2 * 60 * 60_000;
 

@@ -55,7 +55,8 @@ export type OrderAlertRow = {
   createdAt: Date;
 };
 
-function slotStart(slot: string | null, acceptedAt: number): number | null {
+/** The pickup slot's start in ms; null when unparseable or more than 7 days after acceptance. */
+export function slotStart(slot: string | null, acceptedAt: number): number | null {
   if (!slot) return null;
   const at = Date.parse(slot);
   return Number.isNaN(at) || at > acceptedAt + SLOT_HORIZON_MS ? null : at;
