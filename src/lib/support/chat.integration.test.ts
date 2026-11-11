@@ -7,6 +7,7 @@ vi.mock("next/headers", () => ({ headers: async () => headerState }));
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => () => fn(),
   revalidateTag: () => {},
+  revalidatePath: () => {},
 }));
 vi.mock("next/navigation", () => ({
   redirect: (path: string) => {
@@ -24,7 +25,10 @@ import { storeScoped } from "../db";
 import { PushTestSender, setPushSenderForTests } from "../push/sender";
 import { sendOrderMessageAction } from "./customer-actions";
 import { replyToThreadAction } from "./store-actions";
-import { listStoreThreads } from "./thread";
+import { listStoreThreads, postCustomerMessage, readCustomerMessages, replyAsStore } from "./thread";
+import { makeFakeStep } from "../inngest/fake-step";
+import { supportSlaEscalation } from "./escalation";
+import { listEscalatedThreads, replyAsPlatformAction, resolveThreadAction } from "./platform-actions";
 
 const hasDb = !!process.env.DATABASE_URL;
 const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -35,13 +39,21 @@ const keys = {
 
 type FakeSession = Awaited<ReturnType<typeof auth.api.getSession>>;
 
-function signInAs(userId: string | null): void {
+function signInAs(userId: string | null, role?: "platform_admin"): void {
   vi.spyOn(auth.api, "getSession").mockResolvedValue(
     (userId
-      ? { user: { id: userId, twoFactorEnabled: true }, session: { twoFactorVerified: true } }
+      ? { user: { id: userId, email: `${userId}@example.com`, role, twoFactorEnabled: true }, session: { twoFactorVerified: true } }
       : null) as unknown as FakeSession,
   );
 }
+
+/** Every day 09:00-20:00 America/New_York. */
+const DAILY_HOURS = Object.fromEntries(
+  ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => [day, { open: "09:00", close: "20:00" }]),
+);
+
+type SlaHandler = (ctx: { event: { data: { storeId: string; messageId: string } }; step: ReturnType<typeof makeFakeStep> }) => Promise<void>;
+const slaHandler = (supportSlaEscalation as unknown as { fn: SlaHandler }).fn;
 
 function onStore(slug: string): void {
   headerState.set("x-store-slug", slug);
@@ -64,6 +76,7 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
   let storeB = "";
   const memberA = `chat-member-a-${suffix}`;
   const memberB = `chat-member-b-${suffix}`;
+  const admin = `chat-admin-${suffix}`;
   let sender: PushTestSender;
 
   async function order(storeId: string, number: number) {
@@ -91,9 +104,9 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
   beforeAll(async () => {
     raw = testPrismaClient();
     storeA = (await raw.store.create({ data: { slug: slugA, name: "Chat A", themePreset: "palm-and-shea" } })).id;
-    storeB = (await raw.store.create({ data: { slug: slugB, name: "Chat B", themePreset: "palm-and-shea" } })).id;
+    storeB = (await raw.store.create({ data: { slug: slugB, name: "Chat B", themePreset: "palm-and-shea", hours: DAILY_HOURS, timezone: "America/New_York" } })).id;
     await raw.user.createMany({
-      data: [memberA, memberB].map((id) => ({ id, name: id, email: `${id}@example.com`, twoFactorEnabled: true })),
+      data: [memberA, memberB, admin].map((id) => ({ id, name: id, email: `${id}@example.com`, twoFactorEnabled: true })),
     });
     await storeScoped(storeA).storeMembership.create({ data: { storeId: storeA, userId: memberA, role: "staff" } });
     await storeScoped(storeB).storeMembership.create({ data: { storeId: storeB, userId: memberB, role: "staff" } });
@@ -110,6 +123,7 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     setPushSenderForTests(null);
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
@@ -126,7 +140,8 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
       await scoped.customer.deleteMany({});
       await scoped.storeMembership.deleteMany({});
     }
-    await raw.user.deleteMany({ where: { id: { in: [memberA, memberB] } } });
+    await raw.auditLog.deleteMany({ where: { storeId: { in: [storeA, storeB] } } });
+    await raw.user.deleteMany({ where: { id: { in: [memberA, memberB, admin] } } });
     await raw.store.deleteMany({ where: { id: { in: [storeA, storeB] } } });
     await raw.$disconnect();
   });
@@ -199,5 +214,115 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
     expect(await replyToThreadAction({ threadId: thread.id, body: "Not yours" })).toMatchObject({ ok: false });
     expect(await storeScoped(storeA).supportMessage.count({ where: { threadId: thread.id } })).toBe(1);
     expect(await storeScoped(storeA).notificationLog.count({ where: { orderId: placed.id } })).toBe(0);
+  });
+
+  describe("escalation", () => {
+    /** Store B is open 09:00-20:00 New York; SLA is the default 30 open minutes. Tue 2026-11-03 14:00 New York. */
+    const OPEN_AT = new Date("2026-11-03T19:00:00.000Z");
+
+    async function messageAt(at: Date, number: number) {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(at);
+      const placed = await order(storeB, number);
+      const posted = (await postCustomerMessage(storeB, placed.token, "Hello?"))!;
+      return { ...placed, ...posted };
+    }
+
+    const thread = (id: string) =>
+      storeScoped(storeB).supportThread.findUniqueOrThrow({ where: { id }, select: { state: true, escalatedAt: true, escalationReason: true } });
+
+    it("no reply in 30 open minutes escalates once, and a replay changes nothing", async () => {
+      const sent = await messageAt(OPEN_AT, 10);
+      const event = { data: { storeId: storeB, messageId: sent.messageId } };
+      const step = makeFakeStep({ onSleepUntil: (until) => void vi.setSystemTime(until.getTime() + 60_000) });
+      await slaHandler({ event, step });
+
+      expect(step.sleepUntils.map((s) => s.until)).toEqual(["2026-11-03T19:30:00.000Z"]);
+      const first = await thread(sent.threadId);
+      expect(first).toMatchObject({ state: "escalated", escalationReason: "sla" });
+      expect(first.escalatedAt).not.toBeNull();
+
+      vi.setSystemTime(OPEN_AT.getTime() + 45 * 60_000);
+      await slaHandler({ event, step: makeFakeStep() });
+      expect(await thread(sent.threadId)).toEqual(first);
+      expect((await listStoreThreads(storeB)).find((t) => t.id === sent.threadId)?.state).toBe("escalated");
+    });
+
+    it("a staff reply at minute 10 leaves the thread open when the timer wakes", async () => {
+      const sent = await messageAt(OPEN_AT, 11);
+      const step = makeFakeStep({
+        onSleepUntil: async (until) => {
+          vi.setSystemTime(OPEN_AT.getTime() + 10 * 60_000);
+          await replyAsStore(storeB, memberB, sent.threadId, "On it");
+          vi.setSystemTime(until);
+        },
+      });
+      await slaHandler({ event: { data: { storeId: storeB, messageId: sent.messageId } }, step });
+
+      expect(step.sleepNames).toHaveLength(1);
+      expect(await thread(sent.threadId)).toEqual({ state: "open", escalatedAt: null, escalationReason: null });
+    });
+
+    it("a message at 19:50 counts 10 open minutes tonight and 20 tomorrow from 09:00", async () => {
+      const sent = await messageAt(new Date("2026-11-04T00:50:00.000Z"), 12);
+      const step = makeFakeStep({ onSleepUntil: (until) => void vi.setSystemTime(until) });
+      await slaHandler({ event: { data: { storeId: storeB, messageId: sent.messageId } }, step });
+
+      expect(step.sleepUntils.map((s) => s.until)).toEqual(["2026-11-04T14:20:00.000Z"]);
+      expect(await thread(sent.threadId)).toMatchObject({ state: "escalated", escalationReason: "sla" });
+    });
+  });
+
+  describe("platform admin queue", () => {
+    it("a payment thread is escalated at once and listed across stores; an open order thread is not", async () => {
+      const payment = await order(storeA, 20);
+      const quiet = await order(storeB, 21);
+      onStore(slugA);
+      expect(await sendOrderMessageAction({ token: payment.token, body: "Charged twice", topic: "payment" })).toEqual({ ok: true });
+      await postCustomerMessage(storeB, quiet.token, "Hi");
+      const delivery = await order(storeB, 22);
+      await postCustomerMessage(storeB, delivery.token, "Courier lost", "delivery");
+
+      signInAs(admin, "platform_admin");
+      const queue = await listEscalatedThreads();
+      const ours = queue.filter((t) => ["Chat A", "Chat B"].includes(t.storeName));
+      expect(ours.map((t) => [t.storeName, t.orderNumber, t.topic, t.escalationReason])).toEqual(
+        expect.arrayContaining([
+          ["Chat A", 20, "payment", "topic"],
+          ["Chat B", 22, "delivery", "topic"],
+        ]),
+      );
+      expect(ours.some((t) => t.orderNumber === 21)).toBe(false);
+    });
+
+    it("an admin reply reaches the customer as the platform and reopens the thread; resolve closes it", async () => {
+      const placed = await order(storeA, 23);
+      const posted = (await postCustomerMessage(storeA, placed.token, "App crashed", "app"))!;
+
+      signInAs(admin, "platform_admin");
+      expect(await replyAsPlatformAction({ threadId: posted.threadId, body: "We are looking into it" })).toEqual({ ok: true });
+      const seen = await poll(slugA, placed.token);
+      expect(seen.body.messages.at(-1)).toMatchObject({ sender: "platform", body: "We are looking into it" });
+      const reopened = await storeScoped(storeA).supportThread.findUniqueOrThrow({ where: { id: posted.threadId } });
+      expect(reopened.state).toBe("open");
+      expect(reopened.escalatedAt).not.toBeNull();
+
+      expect(await resolveThreadAction({ threadId: posted.threadId })).toEqual({ ok: true });
+      expect((await listEscalatedThreads()).some((t) => t.id === posted.threadId)).toBe(false);
+      expect((await readCustomerMessages(storeA, placed.token))?.map((m) => m.sender)).toEqual(["customer", "platform"]);
+    });
+
+    it("a store session or no session is refused the queue, the reply and resolve", async () => {
+      const placed = await order(storeA, 24);
+      const posted = (await postCustomerMessage(storeA, placed.token, "Refund?", "payment"))!;
+      for (const user of [memberA, null]) {
+        signInAs(user);
+        await expect(listEscalatedThreads()).rejects.toThrow("REDIRECT:/admin/sign-in");
+        await expect(replyAsPlatformAction({ threadId: posted.threadId, body: "x" })).rejects.toThrow("REDIRECT:/admin/sign-in");
+        await expect(resolveThreadAction({ threadId: posted.threadId })).rejects.toThrow("REDIRECT:/admin/sign-in");
+      }
+      expect(await storeScoped(storeA).supportMessage.count({ where: { threadId: posted.threadId } })).toBe(1);
+      expect((await storeScoped(storeA).supportThread.findUniqueOrThrow({ where: { id: posted.threadId } })).state).toBe("escalated");
+    });
   });
 });
