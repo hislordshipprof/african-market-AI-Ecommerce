@@ -33,5 +33,8 @@ describe("logoReadableOn", () => {
       expect(readable(pixels([90, [...panel]], [10, panel === TEAL ? WHITE : INK]))).toBe(true);
     }
     expect(readable(pixels([90, WHITE], [10, [230, 236, 232, 255]]))).toBe(false);
+    // A solid panel with no lettering is the mark itself: measured against the plate.
+    expect(readable(pixels([100, [255, 0, 0, 255]]))).toBe(true);
+    expect(readable(pixels([100, WHITE]))).toBe(false);
   });
 });
