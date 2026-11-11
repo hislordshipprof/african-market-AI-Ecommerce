@@ -4,7 +4,7 @@ import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { deliveryProofBucket, issuePhotoKey, uploadIssuePhoto } from "../r2";
 import { money } from "../format";
 import { prepareProofPhoto } from "./delivery-proof";
-import { evaluateOrderRefundStateAfterCommit, submitRefund } from "./refund-requests";
+import { evaluateOrderRefundStateAfterCommit, recordIssueRefundNotStarted, submitRefund } from "./refund-requests";
 import { redactedErrorMessage } from "./staff-copy";
 
 export const ISSUE_TYPES = ["missing", "damaged", "wrong", "poor_freshness"] as const;
@@ -148,6 +148,7 @@ export async function submitIssueReport(
   if (!created.ok) return created;
   if (created.state === "in_review") return { ok: true, state: "in_review", amountCents: created.amount };
 
+  let threw = false;
   try {
     const refund = await submitRefund(store.id, order.id, created.paymentIntentId, {
       cause: "issue",
@@ -160,8 +161,14 @@ export async function submitIssueReport(
   } catch (err) {
     // An open request is replayed by the ledger sweep; one Stripe refused is marked refund_failed by the evaluation below.
     console.error(`Issue refund for order ${order.id} did not finish: ${redactedErrorMessage(err)}`);
+    threw = true;
   }
   const issue = await storeScoped(store.id).issueReport.findUniqueOrThrow({ where: { id: issueId } });
+  if (!issue.refundRequestId && threw) {
+    // It threw before a request was saved, so no sweep replays it: alert instead of waiting for review.
+    await recordIssueRefundNotStarted(store.id, order.id, issueId);
+    return { ok: true, state: "refund_failed", amountCents: issue.amountCents };
+  }
   if (!issue.refundRequestId) {
     // No request was reserved (blocked, or another refund is open): the store reviews it.
     await storeScoped(store.id).issueReport.update({ where: { id: issueId }, data: { state: "in_review" } });

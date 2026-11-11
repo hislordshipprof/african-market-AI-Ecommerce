@@ -442,6 +442,16 @@ async function recordIssueRefundFailure(
   return wrote ? alertKey : null;
 }
 
+/** An issue refund that threw before its request was saved: nothing exists to replay, so it is failed (#462). */
+export async function recordIssueRefundNotStarted(storeId: string, orderId: string, issueReportId: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await tx.issueReport.update({ where: { id: issueReportId }, data: { state: "refund_failed" } });
+    await writeAuditOnce(tx, storeId, orderId, "issue_refund_failed", issueReportId,
+      { key: issueReportId, refundStatus: "not_started", issueReportId, alert: "store_and_platform" });
+  });
+}
+
 function succeededCents(listed: RefundResult[]): number {
   return countedCents(listed, ["succeeded"]);
 }
