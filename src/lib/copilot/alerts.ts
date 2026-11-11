@@ -209,7 +209,7 @@ const CONFIRM_REQUEST_BELOW = 0.3;
  * Returns the stores that got a new request.
  */
 export async function createConfirmRequests(): Promise<string[]> {
-  const rows = await platformAdminTransaction((tx) => tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+  const rows = await platformAdminTransaction((tx) => txQuery<Array<{ id: string; store_id: string }>>(tx, Prisma.sql`
     SELECT l.id, l.store_id
     FROM listings l
     WHERE l.active AND l.confidence < ${CONFIRM_REQUEST_BELOW}
@@ -219,7 +219,7 @@ export async function createConfirmRequests(): Promise<string[]> {
           AND a.kind = 'confirm_request' AND a.state = 'open'
       )
     ORDER BY l.store_id, l.id
-  `);
+  `));
   const byStore = new Map<string, string[]>();
   for (const row of rows) byStore.set(row.store_id, [...(byStore.get(row.store_id) ?? []), row.id]);
 
