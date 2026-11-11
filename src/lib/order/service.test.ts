@@ -4005,6 +4005,97 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(logs).toHaveLength(1);
   });
 
+  describe("payment-status settlement matrix (#474)", () => {
+    const PENDING = ["processing", "requires_action", "requires_payment_method", "requires_confirmation"];
+    const SETTLE_ACTIONS = ["reconcile_capture", "reconcile_cancel", "capture_released", "anomaly_refund"];
+
+    async function seedExhaustedCapture(orderId: string) {
+      await seedFifthCapture(orderId);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.auditLog.create({
+          data: {
+            storeId,
+            actorId: SYSTEM_ACTOR_ID,
+            actorEmail: SYSTEM_ACTOR_EMAIL,
+            action: "capture_retry",
+            entityType: "order",
+            entityId: orderId,
+            after: { attempt: 5 },
+          },
+        });
+      });
+    }
+
+    /** Runs the sweep with Stripe scripted to `statuses`; the exhausted run reaches the capture settle. */
+    async function settleWith(orderStatus: "CAPTURING" | "CANCELLING", statuses: string[], exhausted: boolean) {
+      const order = await createTestOrder(orderStatus);
+      const pi = order.paymentIntentId!;
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { capturedAmountCents: 5500 } });
+      });
+      if (exhausted) await seedExhaustedCapture(order.id);
+      if (statuses.includes("succeeded")) capturedPayments.set(pi, 5500);
+      scriptRetrieveStatuses(pi, statuses);
+      const result = await reconcileStuckOrder(storeId, order.id);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      const audits = await storeScoped(storeId).auditLog.findMany({
+        where: { entityId: order.id, action: { in: SETTLE_ACTIONS } },
+      });
+      return {
+        result,
+        status: updated!.status,
+        capturedAmountCents: updated!.capturedAmountCents,
+        audits: audits.map((log) => log.action).sort(),
+        cancelled: cancelledPayments.has(pi),
+        refunded: refundedPayments.get(pi) ?? 0,
+      };
+    }
+
+    type Row = [piStatus: string, result: object, status: string, audits: string[], cancelled: boolean, refunded: number];
+    const finalizedCapture = { ok: true, action: "finalized_capture" };
+    const finalizedCancel = { ok: true, action: "finalized_cancel" };
+
+    it.each<Row>([
+      ["succeeded", finalizedCapture, "AWAITING_PICKUP", ["reconcile_capture"], false, 0],
+      ["canceled", finalizedCancel, "CANCELLED", ["reconcile_cancel"], false, 0],
+      ["requires_capture", finalizedCancel, "CANCELLED", ["capture_released"], true, 0],
+      ...PENDING.map((status): Row => [
+        status,
+        { ok: false, error: "Card capture is still confirming with the bank", waiting: true },
+        "CAPTURING",
+        [],
+        false,
+        0,
+      ]),
+    ])("capture settle after the last attempt: Stripe %s", async (piStatus, result, status, audits, cancelled) => {
+      const outcome = await settleWith("CAPTURING", ["requires_capture", piStatus], true);
+      const capturedAmountCents = status === "CANCELLED" ? null : 5500;
+      expect(outcome).toEqual({ result, status, capturedAmountCents, audits, cancelled, refunded: 0 });
+    });
+
+    it.each<Row>([
+      ["succeeded", finalizedCapture, "AWAITING_PICKUP", ["reconcile_capture"], false, 0],
+      ["canceled", finalizedCancel, "CANCELLED", ["reconcile_cancel"], false, 0],
+      ["requires_capture", finalizedCapture, "AWAITING_PICKUP", ["reconcile_capture"], false, 0],
+      ...PENDING.map((status): Row => [status, { ok: true, action: "unknown_stripe_status" }, "CAPTURING", [], false, 0]),
+    ])("sweep of a CAPTURING order: Stripe %s", async (piStatus, result, status, audits) => {
+      const outcome = await settleWith("CAPTURING", [piStatus], false);
+      const capturedAmountCents = status === "CANCELLED" ? null : 5500;
+      expect(outcome).toEqual({ result, status, capturedAmountCents, audits, cancelled: false, refunded: 0 });
+    });
+
+    it.each<Row>([
+      ["succeeded", { ok: true, action: "anomaly_refund" }, "CANCELLED", ["anomaly_refund"], false, 5500],
+      ["canceled", finalizedCancel, "CANCELLED", ["reconcile_cancel"], false, 0],
+      ["requires_capture", finalizedCancel, "CANCELLED", ["reconcile_cancel"], true, 0],
+      ...PENDING.map((status): Row => [status, { ok: true, action: "unknown_stripe_status" }, "CANCELLING", [], false, 0]),
+    ])("sweep of a CANCELLING order: Stripe %s", async (piStatus, result, status, audits, cancelled, refunded) => {
+      const outcome = await settleWith("CANCELLING", [piStatus], false);
+      const capturedAmountCents = status === "CANCELLED" ? null : 5500;
+      expect(outcome).toEqual({ result, status, capturedAmountCents, audits, cancelled, refunded });
+    });
+  });
+
   describe("stock ledger", () => {
     async function pickAll(orderId: string) {
       await acceptOrder(storeId, orderId, 15);
