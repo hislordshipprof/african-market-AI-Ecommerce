@@ -16,9 +16,9 @@ import {
 } from "../../cart/service";
 import { storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
-import { namesForListing, textNamesProduct, type AcceptanceTurn } from "../shown";
+import { isAcceptanceLed, namesForListing, textNamesProduct, type AcceptanceTurn } from "../shown";
 import { listingImage } from "../../storefront/images";
-import { searchListings } from "../../storefront/service";
+import { searchCatalogHits } from "../../storefront/service";
 import { stockBadge } from "../../storefront/stock-badge";
 import { mayBeUnavailable, type StockFacts } from "./availability";
 import {
@@ -137,12 +137,27 @@ function factsOf(listing: StockFacts): StockFacts {
   };
 }
 
+const MATCH_RANK = { name: 0, synonym: 1, near: 2 } as const;
+
+type CatalogItem = {
+  listingId: string;
+  name: string;
+  altName?: string;
+  variantId: string | null;
+  packLabel: string;
+  priceCents: number;
+  imageUrl: string | null;
+  mayBeUnavailable: boolean;
+  match: "name" | "synonym" | "near";
+  matchedTerm?: string;
+};
+
 export async function searchCatalog(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(searchCatalogInput, input);
   const query = parsed.query.trim();
   if (!query) return recordRead(ctx, "search_catalog", parsed, { ok: true, items: [] });
-  const found = await searchListings(ctx.storeId, query);
-  const items = found.slice(0, parsed.limit).map((item) => ({
+  const found = await searchCatalogHits(ctx.storeId, query, parsed.exclude?.trim() ?? "");
+  const items: CatalogItem[] = found.map((item) => ({
     listingId: item.id,
     name: item.name,
     ...(item.altName ? { altName: item.altName } : {}),
@@ -152,8 +167,21 @@ export async function searchCatalog(ctx: AssistantContext, input: unknown): Prom
     imageUrl: item.imageUrl ?? null,
     mayBeUnavailable: item.badge !== "in-stock",
     badge: item.badge,
+    match: item.match,
+    ...(item.matchedTerm ? { matchedTerm: item.matchedTerm } : {}),
   }));
-  return recordRead(ctx, "search_catalog", parsed, { ok: true, items });
+  if (items.some((item) => item.match === "name")) {
+    for (const item of items) {
+      if (item.match !== "synonym") continue;
+      item.match = "near";
+      delete item.matchedTerm;
+    }
+  }
+  const ordered = items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => MATCH_RANK[left.item.match] - MATCH_RANK[right.item.match] || left.index - right.index)
+    .map((row) => row.item);
+  return recordRead(ctx, "search_catalog", parsed, { ok: true, items: ordered.slice(0, parsed.limit) });
 }
 
 export async function showProducts(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
@@ -367,12 +395,107 @@ function withLineMoney<T extends { ok: true; lineId: string; qty: number; added:
   };
 }
 
+function isRecipeMessage(text: string): boolean {
+  return /\b(?:people|person|serves|cook|cooking|recipe)\b/i.test(text);
+}
+
+function isExplicitProductAdd(text: string): boolean {
+  return !isAcceptanceLed(text) && !isRecipeMessage(text) && /\badd\b/i.test(text);
+}
+
+async function turnActions(ctx: AssistantContext, turnId: string | undefined) {
+  if (!turnId) return [];
+  const actions = await storeScoped(ctx.storeId).aiAction.findMany({
+    where: { conversationId: ctx.conversationId, tool: { in: ["search_catalog", "offer_choices"] } },
+  });
+  return actions.filter((action) => {
+    const input = action.input;
+    return !!input && typeof input === "object" && (input as { _turn?: unknown })._turn === turnId;
+  });
+}
+
+function textOfMessage(message: { parts?: unknown }): string {
+  if (!Array.isArray(message.parts)) return "";
+  return message.parts
+    .map((part) => (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+      ? (part as { text: string }).text
+      : ""))
+    .join(" ");
+}
+
+async function priorUserMessage(ctx: AssistantContext): Promise<{ id: string; text: string } | null> {
+  if (!ctx.turnMessageId) return null;
+  const conversation = await storeScoped(ctx.storeId).aiConversation.findUnique({
+    where: { id: ctx.conversationId },
+    select: { messages: true },
+  });
+  const messages = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  const index = messages.findIndex((message) => (
+    !!message && typeof message === "object"
+    && (message as { role?: unknown; id?: unknown }).role === "user"
+    && (message as { id?: unknown }).id === ctx.turnMessageId
+  ));
+  if (index < 0) return null;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const message = messages[cursor];
+    if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "user") continue;
+    const id = (message as { id?: unknown }).id;
+    if (typeof id !== "string") return null;
+    return { id, text: textOfMessage(message as { parts?: unknown }) };
+  }
+  return null;
+}
+
+function rememberSearchLabels(
+  actions: Array<{ tool: string; output: unknown }>,
+  nearListings: Set<string>,
+  fitListings: Set<string>,
+  offeredVariants: Set<string>,
+) {
+  for (const action of actions) {
+    const output = action.output;
+    if (!output || typeof output !== "object") continue;
+    const body = output as { items?: unknown; options?: unknown };
+    if (action.tool === "search_catalog" && Array.isArray(body.items)) {
+      for (const item of body.items) {
+        if (!item || typeof item !== "object") continue;
+        const row = item as { listingId?: unknown; match?: unknown };
+        if (typeof row.listingId !== "string") continue;
+        if (row.match === "near") nearListings.add(row.listingId);
+        else fitListings.add(row.listingId);
+      }
+    }
+    if (action.tool === "offer_choices" && Array.isArray(body.options)) {
+      for (const option of body.options) {
+        if (!option || typeof option !== "object") continue;
+        const row = option as { variantId?: unknown };
+        if (typeof row.variantId === "string") offeredVariants.add(row.variantId);
+      }
+    }
+  }
+}
+
 async function itemsNotShown(
   ctx: AssistantContext,
   items: Array<{ variant_id: string; qty: number }>,
 ): Promise<Array<{ variantId: string; name: string }>> {
   const acceptance = ctx.acceptance;
   if (!acceptance) return [];
+  const explicitAdd = isExplicitProductAdd(acceptance.customerText);
+  const nearListings = new Set<string>();
+  const fitListings = new Set<string>();
+  const offeredVariants = new Set<string>();
+  let confirmingExplicitAdd = false;
+  if (!acceptance.led && explicitAdd) {
+    rememberSearchLabels(await turnActions(ctx, ctx.turnMessageId), nearListings, fitListings, offeredVariants);
+  }
+  if (acceptance.led) {
+    const prior = await priorUserMessage(ctx);
+    if (prior && isExplicitProductAdd(prior.text)) {
+      confirmingExplicitAdd = true;
+      rememberSearchLabels(await turnActions(ctx, prior.id), nearListings, fitListings, offeredVariants);
+    }
+  }
   const ids = [...new Set(items.map((item) => item.variant_id))];
   const rows = await storeScoped(ctx.storeId).listingVariant.findMany({
     where: { id: { in: ids } },
@@ -406,9 +529,18 @@ async function itemsNotShown(
       masterProduct: listing.masterProduct,
       variants: listing.variants,
     });
-    const inReply = !acceptance.lastReplyEmpty && textNamesProduct(acceptance.lastReplyText, names);
-    const inCustomer = textNamesProduct(acceptance.customerText, names);
-    if (!inReply && !inCustomer) refused.set(item.variant_id, names[0] ?? item.variant_id);
+    if (acceptance.led) {
+      const inReply = !acceptance.lastReplyEmpty && textNamesProduct(acceptance.lastReplyText, names);
+      const inCustomer = textNamesProduct(acceptance.customerText, names);
+      if (!inReply && !inCustomer) refused.set(item.variant_id, names[0] ?? item.variant_id);
+      else if (confirmingExplicitAdd && nearListings.has(listing.id) && !fitListings.has(listing.id) && !offeredVariants.has(item.variant_id)) {
+        refused.set(item.variant_id, names[0] ?? item.variant_id);
+      }
+      continue;
+    }
+    if (nearListings.has(listing.id) && !fitListings.has(listing.id) && !offeredVariants.has(item.variant_id)) {
+      refused.set(item.variant_id, names[0] ?? item.variant_id);
+    }
   }
   return [...refused].map(([variantId, name]) => ({ variantId, name }));
 }
@@ -430,7 +562,7 @@ function describedAdd(applied: AppliedAddLine) {
 
 export async function addToCart(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(addToCartInput, input);
-  if (ctx.acceptance?.led) {
+  if (ctx.acceptance) {
     const notShown = await itemsNotShown(ctx, parsed.items);
     if (notShown.length > 0) {
       return recordRead(ctx, "add_to_cart", parsed, {

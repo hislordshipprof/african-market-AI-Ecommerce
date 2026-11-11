@@ -1,5 +1,4 @@
 import { cachedStorefrontRead } from "./cache";
-import { listingRelevanceJoin, listingRelevanceWhere } from "./search-relevance";
 import { storeScoped, platform, storeScopedRawQuery, Prisma } from "../db";
 import { orderPacks } from "./pack-order";
 import { stockBadge, type StockBadge, type StockBadgeInput } from "./stock-badge";
@@ -274,6 +273,13 @@ export interface SearchResult {
   weightG?: number;
 }
 
+export type CatalogMatch = "name" | "synonym" | "near";
+
+export interface SearchHit extends SearchResult {
+  match: CatalogMatch;
+  matchedTerm?: string;
+}
+
 interface RawSearchRow {
   id: string;
   custom_name: string | null;
@@ -291,13 +297,17 @@ interface RawSearchRow {
   weight_g: number | null;
   frozen: boolean;
   perishable: boolean;
+  match: string;
+  matched_term: string | null;
 }
 
 async function readSearchListings(
   storeId: string,
   query: string,
-): Promise<SearchResult[]> {
+  exclude = "",
+): Promise<SearchHit[]> {
   const trimmed = query.trim();
+  const excluded = exclude.trim();
   if (!trimmed) return [];
 
   const results = await storeScopedRawQuery<RawSearchRow>(
@@ -306,7 +316,16 @@ async function readSearchListings(
     SELECT l.id, l.custom_name, mp.name AS master_product_name, mp.image_url AS master_product_image, c.slug AS category_slug,
       l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable,
       pack.price AS min_variant_price, pack.id AS variant_id,
-      pack.label AS pack_label, pack.weight_g
+      pack.label AS pack_label, pack.weight_g,
+      CASE
+        WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 'name'
+        WHEN synonym_hit.term IS NOT NULL THEN 'synonym'
+        ELSE 'near'
+      END AS match,
+      CASE
+        WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN NULL
+        ELSE synonym_hit.term
+      END AS matched_term
     FROM listings l
     LEFT JOIN master_products mp ON l.master_product_id = mp.id
     LEFT JOIN categories c ON mp.category_id = c.id
@@ -314,9 +333,52 @@ async function readSearchListings(
       SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
       WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id COLLATE "C" LIMIT 1
     ) pack ON true
-    ${listingRelevanceJoin(trimmed)}
-    WHERE l.active = true AND ${notE2eListingSql} AND ${listingRelevanceWhere(trimmed)}
-    ORDER BY relevance.rank, relevance.fuzzy DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
+    LEFT JOIN LATERAL (
+      SELECT string_agg(lv.label, ' ') AS blob
+      FROM listing_variants lv
+      WHERE lv.listing_id = l.id
+    ) labels ON true
+    CROSS JOIN LATERAL (
+      SELECT unaccent(coalesce(l.custom_name, '') || ' ' || coalesce(mp.name, '')) AS title,
+             unaccent(coalesce(l.custom_name, '') || ' ' || coalesce(mp.name, '') || ' ' || coalesce(labels.blob, '')) AS doc
+    ) name_doc
+    LEFT JOIN LATERAL (
+      SELECT ps.term
+      FROM product_synonyms ps
+      WHERE ps.product_id = mp.id
+        AND (
+          lower(unaccent(ps.term)) = lower(unaccent(${trimmed}))
+          OR to_tsvector('english', unaccent(ps.term)) @@ plainto_tsquery('english', unaccent(${trimmed}))
+        )
+      ORDER BY (lower(unaccent(ps.term)) = lower(unaccent(${trimmed}))) DESC, length(ps.term) DESC, ps.term
+      LIMIT 1
+    ) synonym_hit ON true
+    CROSS JOIN LATERAL (
+      SELECT MIN(CASE
+        WHEN lower(unaccent(term)) = lower(unaccent(${trimmed})) THEN 0
+        WHEN starts_with(lower(unaccent(term)), lower(unaccent(${trimmed}))) THEN 1
+        WHEN to_tsvector('english', unaccent(term)) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 2
+        ELSE 3 END) AS rank,
+        MAX(similarity(lower(unaccent(${trimmed})), lower(unaccent(term)))) AS fuzzy
+      FROM (
+        SELECT l.custom_name AS term UNION ALL SELECT mp.name
+        UNION ALL SELECT ps.term FROM product_synonyms ps WHERE ps.product_id = mp.id
+      ) terms WHERE term IS NOT NULL AND term <> ''
+    ) relevance
+    CROSS JOIN LATERAL (
+      SELECT strict_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.doc)) AS score,
+             strict_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.title)) AS title_score
+    ) typo
+    WHERE l.active = true AND ${notE2eListingSql}
+      AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND typo.score > 0.3))
+      AND (${excluded} = '' OR NOT (to_tsvector('english', name_doc.title) @@ plainto_tsquery('english', unaccent(${excluded}))))
+    ORDER BY
+      CASE
+        WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 0
+        WHEN synonym_hit.term IS NOT NULL THEN 1
+        ELSE 2
+      END,
+      relevance.rank, GREATEST(relevance.fuzzy, typo.title_score) DESC, LOWER(COALESCE(l.custom_name, mp.name)), l.id
     LIMIT 50
     `,
   );
@@ -341,6 +403,8 @@ async function readSearchListings(
         qty: row.qty,
         status: row.status,
       } satisfies StockBadgeInput),
+      match: row.match === "name" || row.match === "synonym" ? row.match : "near",
+      ...(row.matched_term ? { matchedTerm: row.matched_term } : {}),
     };
   });
 }
@@ -541,8 +605,27 @@ export function getListingDetail(storeId: string, listingId: string) {
   return cachedStorefrontRead(storeId, JSON.stringify(["getListingDetail", listingId]), () => readGetListingDetail(storeId, listingId));
 }
 
+function loadSearch(storeId: string, query: string, exclude = "") {
+  return cachedStorefrontRead(
+    storeId,
+    JSON.stringify(["searchListings", query, exclude]),
+    () => readSearchListings(storeId, query, exclude),
+  );
+}
+
+function withoutMatch(row: SearchHit): SearchResult {
+  const { match, matchedTerm, ...rest } = row;
+  void match;
+  void matchedTerm;
+  return rest;
+}
+
 export function searchListings(storeId: string, query: string) {
-  return cachedStorefrontRead(storeId, JSON.stringify(["searchListings", query]), () => readSearchListings(storeId, query));
+  return loadSearch(storeId, query).then((rows) => rows.map(withoutMatch));
+}
+
+export function searchCatalogHits(storeId: string, query: string, exclude = "") {
+  return loadSearch(storeId, query, exclude);
 }
 
 export function getActiveListings(storeId: string) {
