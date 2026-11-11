@@ -5,7 +5,7 @@ import { isIdempotencyKeyInUse, isRetryableProviderError } from "../stripe/error
 import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, findOpenRefundRequest, openRefundRequest, reconcileAbandonedRefundRequests, reconcileOpenRefundRequests, submitRefund } from "./refund-requests";
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
-import { RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
+import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification } from "../notifications/record";
@@ -82,8 +82,8 @@ const CANCEL_CAUSE_ACTIONS: CancelCause["action"][] = ["store_cancel", "provider
 const CANCELLABLE_FROM: Record<CancelCause["action"], OrderStatus[]> = {
   auto_cancel: ["AUTHORIZED"],
   pick_timeout: ["ACCEPTED", "PICKING"],
-  store_cancel: ["AUTHORIZED", "ACCEPTED", "PICKING"],
-  provider_canceled: ["AUTHORIZED", "ACCEPTED", "PICKING"],
+  store_cancel: [...CANCELLABLE_BEFORE_CAPTURE],
+  provider_canceled: [...CANCELLABLE_BEFORE_CAPTURE],
 };
 
 /** Stripe ended the hold itself: `expired` on API 2025-03-31.basil and later, `automatic` before. */

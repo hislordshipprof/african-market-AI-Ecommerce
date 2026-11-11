@@ -5,6 +5,7 @@ import { getStripeProvider } from "@/lib/stripe";
 import { updateStoreOnboardingStatus } from "@/lib/stripe/update-store-status";
 import { cancelOrder, markTerminalRefundFailure, reconcileStuckOrder } from "@/lib/order/service";
 import { applyProviderRefund, evaluateOrderRefundState } from "@/lib/order/refund-requests";
+import { CANCELLABLE_BEFORE_CAPTURE } from "@/lib/order/constants";
 import { isRetryableProviderError, WebhookSecretMissingError } from "@/lib/stripe/errors";
 import type { RefundResult } from "@/lib/stripe/types";
 import { parseInput } from "@/lib/security/parse-input";
@@ -27,7 +28,7 @@ const webhookEventSchema = z.looseObject({
 });
 
 /** Before capture the hold can end on Stripe's side; these orders follow it. */
-const PROVIDER_CANCELLABLE = ["AUTHORIZED", "ACCEPTED", "PICKING", "CANCELLING"];
+const PROVIDER_CANCELLABLE: readonly string[] = [...CANCELLABLE_BEFORE_CAPTURE, "CANCELLING"];
 
 /** Our own cancel echoes back here: a CANCELLED order stays a no-op, a CANCELLING one resumes. Returns false when Stripe should retry. */
 async function handlePaymentIntentCanceled(
