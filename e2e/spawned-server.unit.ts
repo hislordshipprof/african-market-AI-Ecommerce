@@ -34,11 +34,11 @@ function killTree(pid: number): Promise<void> {
   });
 }
 
-function listenOn(port: number): Promise<{ port: number; close: () => Promise<void> }> {
+function listenOn(port: number, host?: string): Promise<{ port: number; close: () => Promise<void> }> {
   return new Promise((resolve, reject) => {
     const server = createNetServer();
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
+    server.listen(port, host ?? "127.0.0.1", () => {
       const address = server.address();
       const actual = typeof address === "object" && address ? address.port : port;
       resolve({
@@ -78,6 +78,8 @@ function httpOn(
 }
 
 it("gives each lane its own smoke port", () => {
+  // Parallel workers in one lane each get their own port too (#419).
+  expect(new Set([laneSmokePort("3000", "0"), laneSmokePort("3000", "1"), laneSmokePort("3000", "3")]).size).toBe(3);
   expect(laneSmokePort("3000")).toBe(3299);
   expect(laneSmokePort("3100")).toBe(3399);
   expect(laneSmokePort("3200")).toBe(3499);
@@ -90,13 +92,16 @@ it("rejects an E2E_PORT that cannot host a smoke port", () => {
   expect(() => laneSmokePort("65535")).toThrow(/port/i);
 });
 
-it("does not return a port a dummy listener already holds", async () => {
-  const held = await listenOn(0);
-  try {
-    expect(await reservePort(held.port)).not.toBe(held.port);
-    expect(await reservePort(held.port)).not.toBe(held.port);
-  } finally {
-    await held.close();
+it("does not return a port a dummy listener already holds, on loopback or all interfaces", async () => {
+  // `next start` listens on all interfaces (::); a loopback-only probe missed it (#419).
+  for (const host of ["127.0.0.1", "::"]) {
+    const held = await listenOn(0, host);
+    try {
+      expect(await reservePort(held.port)).not.toBe(held.port);
+      expect(await reservePort(held.port)).not.toBe(held.port);
+    } finally {
+      await held.close();
+    }
   }
 });
 
