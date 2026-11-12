@@ -70,6 +70,13 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 
 - **Library:** Vercel AI SDK (`ai` + `@ai-sdk/anthropic`), installed as published at ai-sdk.dev. Not LangChain or LangGraph: the flow is a single agent with about 10 tools, and the SDK gives streaming to React, typed tools and step limits without an orchestration layer we don't need.
 - **Model:** **Claude Haiku 5.5** by default. The #146 eval separates the customer-visible CI gate from the model verdict. The gate fails on a hallucinated item, an excluded item in the cart, an ungrounded amount that the shopper still sees, a safety-rule miss, micro precision below 0.90 or micro recall below 0.85 on shopper-supplied lists, or fewer than 85% of dish-only cases passing. A dish-only case ("jollof for 6", no list) passes when the cart has the dish's core items this store sells, any brand, pack or quantity, with nothing made up, no excluded item, and a servings question when servings are unclear. Dish cases stay out of the precision and recall counts (owner, 2026-11-11). Egusi greens count only leaves, fresh, frozen or dried, not leaf powders such as baobab or moringa. "Agushi" names both whole and ground egusi, so either one passes, and so does one short question that names both with nothing added (owner, 2026-11-11). Amounts the grounder removes, and amounts the model stated before a tool had returned them, keep the verdict at `sonnet-candidate` even when the gate passes. `haiku-ok` requires the gate and a raw reply with none of those amount misses. Switching to **Claude Sonnet 5.5** is a later decision. The model id is a config setting, not code.
+- **Model decision (owner, 2026-11-11): Haiku 5.5 at its default settings.** The #146 comparison ran the same 200 cases and floors on three settings. Effort high made no measurable change. Sonnet cost about 18 times as much, was slower, and added before the shopper answered in all 20 some-then-one cases.
+
+  | Run | List precision / recall | Dish pass | Made-up items | Ordering slips | Median / p90 per turn | Run cost |
+  |---|---|---|---|---|---|---|
+  | Haiku 5.5 default | 1.000 / 0.884 | 38/40 | 1 | 0 | 2.7 s / 3.6 s | $0.232 |
+  | Haiku 5.5 effort high | 1.000 / 0.888 | 38/40 | 0 | 0 | 2.7 s / 3.5 s | $0.234 |
+  | Sonnet 5.5 default | 0.900 / 0.789 | 40/40 | 0 | 20 | 3.7 s / 6.2 s | $4.158 |
 - **Spend cap:**
   - **$10 total** for this build phase, covering all assistant and eval calls through the app's AI client, measured from token usage;
   - at the cap the assistant switches off with a "the helper is resting" message, the storefront keeps working, and the platform admin is alerted;
