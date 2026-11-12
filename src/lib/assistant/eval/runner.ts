@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { callCostMicros } from "../cost";
 import { createChatHandler } from "../chat-handler";
-import { createAssistantModel } from "../model";
+import { assistantModelId, createAssistantModel } from "../model";
 import { storeScoped } from "../../db";
 import { usdMentions } from "./money";
 import { adjustTicketSpend, tryReserveTicket } from "./report";
@@ -44,6 +44,8 @@ export interface RunEvalOptions {
   retryDelayMs?: (attempt: number, retryAfterSeconds: number | null) => number;
   maxAttempts?: number;
   whileWaitingForStrips?: () => void;
+  /** Wall time of each customer turn, for the model comparison. */
+  onTurnMs?: (ms: number) => void;
   cleanup?: (stores: CreatedEvalStores) => Promise<void>;
   ticketSpendPath?: string;
 }
@@ -344,8 +346,10 @@ async function oneAttempt(
   for (let turn = 0; turn < evalCase.turns.length; turn += 1) {
     const started = exchanges.length;
     const messageId = `e${randomBytes(8).toString("hex")}`;
+    const turnStarted = performance.now();
     const response = await handler(requestFor(stores.slugA, evalCase.turns[turn] ?? "", messageId, ip, cookie));
     const bodyText = await response.text();
+    options.onTurnMs?.(performance.now() - turnStarted);
     await Promise.all(exchanges.slice(started).map((exchange) => exchange.done));
     const turnExchanges = exchanges.slice(started);
     for (const exchange of turnExchanges) exchange.turn = turn + 1;
@@ -740,7 +744,7 @@ function spendOf(exchanges: RecordedExchange[]): { micros: bigint; unresolved: b
     inputTokens += exchange.usage.inputTokens?.total ?? 0;
     outputTokens += exchange.usage.outputTokens?.total ?? 0;
     try {
-      micros += callCostMicros("claude-haiku-5-5", exchange.usage);
+      micros += callCostMicros(assistantModelId(), exchange.usage);
     } catch {
       unresolved = true;
       unknownSends += 1;

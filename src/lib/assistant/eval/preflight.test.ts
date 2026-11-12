@@ -33,6 +33,9 @@ describe("shopper assistant eval preflight", () => {
     }))).toMatch(/local app_runtime/);
     expect(refuseLiveEval(allowedEnv({ ASSISTANT_MODEL: "claude-not-a-model" }))).toMatch(/invalid/);
     expect(refuseLiveEval(allowedEnv({ ASSISTANT_MODEL: "claude-sonnet-5-5" }))).toMatch(/claude-haiku-5-5/);
+    expect(refuseLiveEval(allowedEnv({ ASSISTANT_MODEL: "claude-sonnet-5-5", ASSISTANT_EVAL_COMPARE_DIR: "/tmp/compare" }))).toBeNull();
+    expect(refuseLiveEval(allowedEnv({ ASSISTANT_EVAL_EFFORT: "high" }))).toMatch(/ASSISTANT_EVAL_COMPARE_DIR/);
+    expect(refuseLiveEval(allowedEnv({ ASSISTANT_EVAL_EFFORT: "max", ASSISTANT_EVAL_COMPARE_DIR: "/tmp/compare" }))).toMatch(/low, medium or high/);
     expect(refuseLiveEval(allowedEnv({ APP_RUNTIME_PASSWORD: undefined }))).toMatch(/APP_RUNTIME_PASSWORD/);
   });
 

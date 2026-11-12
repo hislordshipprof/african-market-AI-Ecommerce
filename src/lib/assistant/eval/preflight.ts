@@ -71,10 +71,12 @@ export function refuseLiveEval(env: EvalEnv): string | null {
   if (key === E2E_FAKE_ANTHROPIC_KEY) return "The live eval refuses the fake Anthropic key.";
   try {
     const model = assistantModelId(env as NodeJS.ProcessEnv);
-    if (model !== "claude-haiku-5-5") return "This eval runs only on claude-haiku-5-5.";
+    if (model !== "claude-haiku-5-5" && !env.ASSISTANT_EVAL_COMPARE_DIR) return "This eval runs only on claude-haiku-5-5.";
   } catch {
     return "ASSISTANT_MODEL is invalid.";
   }
+  if (env.ASSISTANT_EVAL_EFFORT && !env.ASSISTANT_EVAL_COMPARE_DIR) return "ASSISTANT_EVAL_EFFORT needs ASSISTANT_EVAL_COMPARE_DIR.";
+  if (env.ASSISTANT_EVAL_EFFORT && !["low", "medium", "high"].includes(env.ASSISTANT_EVAL_EFFORT)) return "ASSISTANT_EVAL_EFFORT must be low, medium or high.";
   const secret = env.BETTER_AUTH_SECRET;
   if (!secret || secret.length < 32) {
     return "BETTER_AUTH_SECRET is missing or shorter than 32 characters.";
