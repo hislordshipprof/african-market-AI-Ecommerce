@@ -110,6 +110,13 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(byId.get(listing.plain.listingId)).toMatchObject({ match: "name", needs: { peanuts: "ok", [`yellow onion ${suffix}`]: "ok" } });
     expect(byId.get(listing.unknown.listingId)).toMatchObject({ match: "cannot_confirm", needs: { peanuts: "unknown" } });
 
+    // An unresolved term cannot be checked: it is reported, and it does not mark every product unknown.
+    const unchecked = await conversation(storeA);
+    await setShopperNeeds(unchecked, { avoid_ingredients: [`zzunknown ${suffix}`] });
+    const uncheckedResult = await searchCatalog(unchecked, { query: `paste ${suffix}` });
+    expect(uncheckedResult).toMatchObject({ cannotCheck: [`zzunknown ${suffix}`] });
+    expect(items(uncheckedResult).find((item) => item.listingId === listing.plain.listingId)?.match).toBe("name");
+
     const halal = await conversation(storeA);
     await setShopperNeeds(halal, { avoid_allergens: [], require_claims: ["halal"], avoid_ingredients: [] });
     const halalIds = items(await searchCatalog(halal, { query: `paste ${suffix}` })).map((item) => item.listingId);

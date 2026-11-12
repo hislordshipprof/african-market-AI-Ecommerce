@@ -17,6 +17,7 @@ import {
 import { storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
 import {
+  cannotCheck,
   changeConstraints,
   constraintStatuses,
   hasConstraints,
@@ -213,7 +214,12 @@ export async function searchCatalog(ctx: AssistantContext, input: unknown): Prom
     .map((item, index) => ({ item, index }))
     .sort((left, right) => MATCH_RANK[left.item.match] - MATCH_RANK[right.item.match] || left.index - right.index)
     .map((row) => row.item);
-  return recordRead(ctx, "search_catalog", parsed, { ok: true, items: ordered.slice(0, parsed.limit) });
+  const unchecked = cannotCheck(constraints);
+  return recordRead(ctx, "search_catalog", parsed, {
+    ok: true,
+    items: ordered.slice(0, parsed.limit),
+    ...(unchecked.length > 0 ? { cannotCheck: unchecked } : {}),
+  });
 }
 
 export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
@@ -229,7 +235,7 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     avoidAllergens: saved.avoidAllergens,
     requireClaims: saved.requireClaims,
     avoidIngredients: saved.avoidIngredients.map((item) => item.term),
-    cannotCheck: saved.avoidIngredients.filter((item) => !item.ingredientId).map((item) => item.term),
+    cannotCheck: cannotCheck(saved),
   });
 }
 

@@ -46,7 +46,7 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       execute: (input, options) => searchCatalog({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     set_shopper_needs: tool({
-      description: "Save what the customer must avoid or needs, from their own words: allergens, dietary claims, and ingredients. Kept for this conversation. Searches and adds check it.",
+      description: "Save what the customer must avoid or needs, from their own words: allergens, dietary claims, and ingredients. Kept for this conversation. Searches and adds check it. Not for a product choice, such as paste instead of fresh tomato.",
       inputSchema: setShopperNeedsInput,
       execute: (input, options) => setShopperNeeds({ ...ctx, toolCallId: options.toolCallId }, input),
     }),

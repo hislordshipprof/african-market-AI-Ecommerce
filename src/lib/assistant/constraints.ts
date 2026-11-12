@@ -45,8 +45,13 @@ export function parseConstraints(raw: unknown): ShopperConstraints {
   };
 }
 
+/** Only constraints that can be checked; an unresolved ingredient term cannot. */
 export function hasConstraints(constraints: ShopperConstraints): boolean {
-  return constraints.avoidAllergens.length + constraints.requireClaims.length + constraints.avoidIngredients.length > 0;
+  return Object.values(shopperNeed(constraints)).some((values) => values.length > 0);
+}
+
+export function cannotCheck(constraints: ShopperConstraints): string[] {
+  return constraints.avoidIngredients.filter((item) => !item.ingredientId).map((item) => item.term);
 }
 
 export function shopperNeed(constraints: ShopperConstraints): ShopperNeed {
@@ -111,7 +116,10 @@ export async function changeConstraints(
   });
 }
 
-/** Each constraint by name: checkNeed on one constraint at a time. An unresolved ingredient is always unknown. */
+/**
+ * Each constraint by name: checkNeed on one constraint at a time. An unresolved ingredient has nothing to
+ * check against, so it is left out here and reported as cannotCheck instead.
+ */
 export function constraintStatuses(attributes: ProductAttributes, constraints: ShopperConstraints): Record<string, ConstraintStatus> {
   const status = (need: ShopperNeed): ConstraintStatus => {
     const result = checkNeed(attributes, need);
@@ -121,7 +129,7 @@ export function constraintStatuses(attributes: ProductAttributes, constraints: S
   for (const allergen of constraints.avoidAllergens) out[allergen] = status({ avoidAllergens: [allergen] });
   for (const claim of constraints.requireClaims) out[claim] = status({ requireClaims: [claim] });
   for (const item of constraints.avoidIngredients) {
-    out[item.term] = item.ingredientId ? status({ avoidIngredientIds: [item.ingredientId] }) : "unknown";
+    if (item.ingredientId) out[item.term] = status({ avoidIngredientIds: [item.ingredientId] });
   }
   return out;
 }
