@@ -44,12 +44,12 @@ export async function createEvalStores(fixture: CatalogFixture): Promise<Created
   const slugA = `golden-eval-a-${runId}`;
   const slugB = `golden-eval-b-${runId}`;
   const storeA = await platformAdmin.store.create({
-    data: storeData(slugA, fixture, runId),
+    data: storeData(slugA, fixture),
   });
   let storeBId = "";
   try {
     const storeB = await platformAdmin.store.create({
-      data: storeData(slugB, fixture, runId),
+      data: storeData(slugB, fixture),
     });
     storeBId = storeB.id;
     writeLease(runId, [slugA, slugB]);
@@ -93,7 +93,7 @@ export async function createEvalStores(fixture: CatalogFixture): Promise<Created
   }
 }
 
-function storeData(slug: string, fixture: CatalogFixture, runId: string) {
+function storeData(slug: string, fixture: CatalogFixture) {
   return {
     slug,
     name: fixture.store.name,
@@ -102,7 +102,6 @@ function storeData(slug: string, fixture: CatalogFixture, runId: string) {
     hours: fixture.store.hours,
     minimumOrderCents: fixture.store.minimumOrderCents,
     pickupEnabled: fixture.store.pickupEnabled,
-    deliveryInfo: `eval-run:${runId}`,
     status: "active",
   };
 }
@@ -140,16 +139,18 @@ export function leaseFresh(runId: string, now = Date.now()): boolean {
   }
 }
 
+const OWNED_SLUG = /^golden-eval-[ab]-([0-9a-f]{16})$/;
+
 /** Removes eval stores whose lease is stale. A fresh lease is another live run. */
 export async function sweepAbandonedEvalStores(ownRunId: string): Promise<void> {
   const stores = await platformAdmin.store.findMany({
     where: { slug: { startsWith: "golden-eval-" } },
-    select: { id: true, deliveryInfo: true, createdAt: true },
+    select: { id: true, slug: true, createdAt: true },
   });
   for (const store of stores) {
-    if (!store.deliveryInfo?.startsWith("eval-run:")) continue;
-    const runId = store.deliveryInfo.slice("eval-run:".length);
-    if (runId === "" || runId === ownRunId) continue;
+    // The run id lives in the slug: store fields reach the model's context, so they must not vary per run.
+    const runId = OWNED_SLUG.exec(store.slug)?.[1];
+    if (!runId || runId === ownRunId) continue;
     if (leaseFresh(runId)) continue;
     const age = Date.now() - store.createdAt.getTime();
     const leased = existsSync(join(LEASE_DIR, `${runId}.json`));

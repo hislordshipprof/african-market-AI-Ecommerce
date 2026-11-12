@@ -10,6 +10,7 @@ import { publishEvalReport, buildReport } from "./report";
 import { fingerprintFromParts } from "./fingerprint";
 import { assessReport } from "./gate";
 import { runEval, type AttemptContext } from "./runner";
+import { storeContextMessage } from "../system-prompt";
 import { bindingFromFixture, scoreCase, type CatalogBinding } from "./score";
 import type { CatalogFixture, EvalCase, FixtureListing } from "./types";
 
@@ -712,6 +713,18 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     await platformAdmin.store.delete({ where: { id: young.id } }).catch(() => {});
     await platformAdmin.store.delete({ where: { id: aged.id } }).catch(() => {});
     await deleteOwnedStores(live);
+    leftover.splice(0, leftover.length);
+  }, 90_000);
+
+  it("two runs give the model the same store context, so their fingerprints match", async () => {
+    const catalog = fixture([listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)]);
+    const first = await createEvalStores(catalog);
+    const second = await createEvalStores(catalog);
+    leftover.push(first, second);
+    const context = async (id: string) => storeContextMessage(await platformAdmin.store.findUniqueOrThrow({ where: { id } }), new Date(catalog.pinnedNow));
+    expect(await context(second.storeAId)).toBe(await context(first.storeAId));
+    await deleteOwnedStores(first);
+    await deleteOwnedStores(second);
     leftover.splice(0, leftover.length);
   }, 90_000);
 
