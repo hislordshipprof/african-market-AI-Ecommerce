@@ -1,12 +1,15 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 
-const { headerState } = vi.hoisted(() => ({ headerState: new Headers() }));
+const { headerState, clearedTags, cachedTags } = vi.hoisted(() => ({ headerState: new Headers(), clearedTags: [] as string[], cachedTags: [] as string[] }));
 
 vi.mock("next/headers", () => ({ headers: async () => headerState }));
 vi.mock("next/cache", () => ({
-  unstable_cache: (fn: () => unknown) => () => fn(),
-  revalidateTag: () => {},
+  unstable_cache: (fn: () => unknown, _keys: string[], options: { tags: string[] }) => {
+    cachedTags.push(...options.tags);
+    return () => fn();
+  },
+  revalidateTag: (tag: string) => void clearedTags.push(tag),
   revalidatePath: () => {},
 }));
 vi.mock("next/navigation", () => ({
@@ -25,7 +28,7 @@ import { storeScoped } from "../db";
 import { PushTestSender, setPushSenderForTests } from "../push/sender";
 import { sendOrderMessageAction } from "./customer-actions";
 import { replyToThreadAction } from "./store-actions";
-import { listStoreThreads, postCustomerMessage, readCustomerMessages, replyAsStore } from "./thread";
+import { listStoreThreads, orderMessagesTag, postCustomerMessage, readCustomerMessages, replyAsStore } from "./thread";
 import { makeFakeStep } from "../inngest/fake-step";
 import { supportSlaEscalation } from "./escalation";
 import { listEscalatedThreads, replyAsPlatformAction, resolveThreadAction } from "./platform-actions";
@@ -68,7 +71,7 @@ async function poll(slug: string, token: string) {
   return { status: response.status, body: response.status === 200 ? await response.json() : null };
 }
 
-describe.skipIf(!hasDb)("customer to store chat", () => {
+describe.skipIf(!hasDb)("support thread", () => {
   let raw: PrismaClient;
   const slugA = `chat-a-${suffix}`;
   const slugB = `chat-b-${suffix}`;
@@ -116,6 +119,8 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
   });
 
   beforeEach(() => {
+    clearedTags.length = 0;
+    cachedTags.length = 0;
     sender = new PushTestSender();
     setPushSenderForTests(sender);
     vi.stubEnv("VAPID_PUBLIC_KEY", "public");
@@ -150,6 +155,10 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
     const placed = await order(storeA, 1);
     onStore(slugA);
     expect(await sendOrderMessageAction({ token: placed.token, body: "Where is my order?" })).toEqual({ ok: true });
+    // The poll route caches under this tag; without the clear the customer's own message vanishes for a poll.
+    expect(clearedTags).toEqual([orderMessagesTag(placed.token)]);
+    await poll(slugA, placed.token);
+    expect(cachedTags).toContain(clearedTags[0]);
 
     const threads = await listStoreThreads(storeA);
     expect(threads).toHaveLength(1);
@@ -160,7 +169,9 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
 
     signInAs(memberA);
     onStore(slugA);
+    clearedTags.length = 0;
     expect(await replyToThreadAction({ threadId: threads[0].id, body: "Packing it now" })).toEqual({ ok: true });
+    expect(clearedTags).toEqual([orderMessagesTag(placed.token)]);
 
     const seen = await poll(slugA, placed.token);
     expect(seen.body.messages.map((m: { sender: string; body: string }) => [m.sender, m.body])).toEqual([
@@ -301,6 +312,7 @@ describe.skipIf(!hasDb)("customer to store chat", () => {
 
       signInAs(admin, "platform_admin");
       expect(await replyAsPlatformAction({ threadId: posted.threadId, body: "We are looking into it" })).toEqual({ ok: true });
+    expect(clearedTags).toContain(orderMessagesTag(placed.token));
       const seen = await poll(slugA, placed.token);
       expect(seen.body.messages.at(-1)).toMatchObject({ sender: "platform", body: "We are looking into it" });
       const reopened = await storeScoped(storeA).supportThread.findUniqueOrThrow({ where: { id: posted.threadId } });
