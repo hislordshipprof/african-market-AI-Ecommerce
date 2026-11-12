@@ -538,9 +538,9 @@ Second metro, native apps, batch picking, scheduled van slots, nationwide shippi
 ## 18. Open questions
 
 1. ~~Launch metro~~ **Resolved:** US-wide (ADR-0001). Was: DMV vs Houston. Need: which market owners we already know, current ACS B05006 data, Uber Direct/DoorDash coverage check for target store addresses.
-2. **Pricing numbers:** subscription tier ($49? $99?) and per-order fee ($1–2? 3%?). Validate with 3–5 store owners.
+2. **Pricing numbers:** subscription tier ($49? $99?) and per-order fee ($1–2? 3%?). Validate with 3–5 store owners. Proposed in [ADR-0021](../adr/0021-pricing-and-courier-plan.md), awaiting the owner's decision.
 3. **Merchant of record & tax:** (build approach settled in ADR-0008; advisor sign-off still needed) confirm destination-charge setup and marketplace-facilitator obligations per state with a tax advisor.
-4. **Uber Direct account:** confirm multi-location/organization setup and US pricing for platform accounts; confirm weight limits with both providers.
+4. **Uber Direct account:** confirm multi-location/organization setup and US pricing for platform accounts; confirm weight limits with both providers. Courier costs and build order are in [ADR-0021](../adr/0021-pricing-and-courier-plan.md).
 5. **Brand:** (storefronts are store-branded per ADR-0003; only the platform name remains open) platform name and whether customers see the platform brand at all on tenant stores ("powered by").
 6. ~~Customer accounts~~ **Resolved:** ADR-0002. Was: one platform login (current spec) vs per-store accounts; affects phase-2 marketplace.
 7. ~~Customer support~~ **Resolved:** the store is first line (in-app chat, refunds). A platform admin handles payment, courier and app issues, or steps in when a store doesn't respond within the SLA (30 open minutes, set per store; owner decision 2026-11-10).
