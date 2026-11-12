@@ -2,16 +2,22 @@ import type { PrismaClient } from "@prisma/client";
 
 // No app database client here: prisma/seed.ts imports this file.
 
-/** Folded dish name: lower case, accents and punctuation dropped, single spaces. */
+/**
+ * Folded dish name in any script: case-folded, Latin accents dropped, punctuation to single spaces.
+ * Marks are stripped only after Latin letters; in scripts such as Devanagari a mark is part of the letter.
+ */
 export function dishKey(text: string): string {
-  return text
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
+  const key = text
+    .normalize("NFKC")
     .toLowerCase()
+    .normalize("NFKD")
+    .replace(/(\p{Script=Latin})\p{M}+/gu, "$1")
+    .normalize("NFC")
     .replace(/&/g, " and ")
-    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/[^\p{L}\p{N}\p{M} ]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+  return /[\p{L}\p{N}]/u.test(key) ? key : "";
 }
 
 export interface SeedRecipe {

@@ -94,6 +94,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     vi.unstubAllEnvs();
     await platform.recipe.deleteMany({ where: { key: { startsWith: "kelewele " } } });
     await platform.recipe.deleteMany({ where: { key: { startsWith: "egusi stew " } } });
+    await platform.recipe.deleteMany({ where: { key: { startsWith: "ዶሮ ወጥ " } } });
     for (const id of [storeA, storeB].filter(Boolean)) {
       await storeScoped(id).cart.deleteMany({});
       await storeScoped(id).listing.deleteMany({});
@@ -168,6 +169,29 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(again.requests).toHaveLength(0);
     expect(second).toMatchObject({ ok: true, lookedUp: false, source: "https://recipes.example/kelewele" });
     expect(second.inStock.map((item) => item.listingId)).toEqual([rice.listingId]);
+  });
+
+  it("saves a dish named in another script once and serves it from the base the next time", async () => {
+    const doro = `ዶሮ ወጥ ${suffix}`;
+    const fake = createFakeAnthropicFetch({ steps: [lookupStep("ዶሮ ወጥ", ["rice"], "https://recipes.example/doro")] });
+    const first = await getRecipe(ctxA, { dish: doro, servings: 4 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
+    expect(first).toMatchObject({ ok: true, lookedUp: true, source: "https://recipes.example/doro" });
+    expect(await raw.recipe.count({ where: { key: doro } })).toBe(1);
+    const again = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
+    const second = await getRecipe(ctxA, { dish: doro, servings: 4 }, { lookupModel: createAssistantModel({ fetch: again.fetch }) });
+    expect(again.requests).toHaveLength(0);
+    expect(second).toMatchObject({ ok: true, lookedUp: false, source: "https://recipes.example/doro" });
+  });
+
+  it("takes no lookup slot and makes no search for a name with no letters or digits", async () => {
+    const day = new Date("2033-04-15T12:00:00Z");
+    const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["rice"])] });
+    const result = await getRecipe(ctxA, { dish: "!!!", servings: 2 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }), now: () => day });
+    expect(result).toMatchObject({ ok: false, code: "recipe_not_found" });
+    expect(fake.requests).toHaveLength(0);
+    for (let index = 0; index < RECIPE_LOOKUPS_PER_STORE_DAY; index += 1) {
+      expect(await takeLookupSlot(storeA, day)).toBe(true);
+    }
   });
 
   it("never lets a looked-up dish take over a curated dish's name", async () => {

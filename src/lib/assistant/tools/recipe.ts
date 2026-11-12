@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 import { Prisma } from "@prisma/client";
 import { storeScoped, storeScopedRawQuery } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
+import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
 import { stockBadge } from "../../storefront/stock-badge";
 import { recordRead, type AssistantContext, type ToolResult } from "./execute";
@@ -150,6 +151,12 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
   if (parsed.servings == null) {
     return recordRead(ctx, "get_recipe", parsed, { ok: true, askServings: true, dish: parsed.dish });
   }
+  const notFound = () => recordRead(ctx, "get_recipe", parsed, {
+    ok: false,
+    code: "recipe_not_found",
+    message: "I couldn't find a recipe for that dish. Tell me the ingredients and I'll find them.",
+  });
+  if (!dishKey(parsed.dish)) return notFound();
   let recipe = await findRecipe(parsed.dish);
   let lookedUp = false;
   if (!recipe) {
@@ -161,22 +168,14 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
         message: "I can't look up new recipes for this store today. Tell me the ingredients and I'll find them.",
       });
     }
-    let found = null;
     try {
       const lookup = await lookUpDishOnline(parsed.dish, { model: deps.lookupModel });
-      found = lookup.found;
       await addConversationCost(ctx, lookup.costMicros);
+      if (lookup.found) recipe = await saveLookedUpRecipe(parsed.dish, lookup.found);
     } catch (error) {
       console.error("[assistant] recipe lookup failed", error);
     }
-    if (!found) {
-      return recordRead(ctx, "get_recipe", parsed, {
-        ok: false,
-        code: "recipe_not_found",
-        message: "I couldn't find a recipe for that dish. Tell me the ingredients and I'll find them.",
-      });
-    }
-    recipe = await saveLookedUpRecipe(parsed.dish, found);
+    if (!recipe) return notFound();
     lookedUp = true;
   }
   const groups = await placeIngredients(ctx.storeId, recipe, parsed.servings, parsed.exclude ?? []);
