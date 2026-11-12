@@ -27,6 +27,7 @@ import { createChatHandler } from "./chat-handler";
 import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
 import { scriptedAssistantFetch } from "./fake-model";
 import { createAssistantModel } from "./model";
+import { WEB_SEARCH_MICROS } from "./cost";
 import { RECIPE_RULE } from "./system-prompt";
 import { createFakeAnthropicFetch, judgeMessagesRequest } from "./messages-api-double";
 import * as spend from "./spend";
@@ -1685,6 +1686,36 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     const body = fake.requests[0]?.body as { tools?: Array<{ name: string }>; system?: Array<{ text: string }> };
     expect((body.tools ?? []).map((tool) => tool.name)).toContain("get_recipe");
     expect(body.system?.[0]?.text).toContain(RECIPE_RULE);
+  });
+
+  it("runs a recipe lookup on the chat's own model and counts its cost on the conversation", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    const dish = `kelewele chat ${randomUUID().slice(0, 8)}`;
+    const fake = createFakeAnthropicFetch({
+      steps: [
+        { kind: "tool", toolName: "get_recipe", toolInput: { dish, servings: 2 } },
+        {
+          kind: "tool",
+          toolName: "report_ingredients",
+          toolInput: { dish_name: "Kelewele", ingredients: ["egusi"], source_url: "https://recipes.example/kelewele" },
+          webSearch: { query: "kelewele recipe", results: [{ url: "https://recipes.example/kelewele", title: "Kelewele" }] },
+        },
+        { kind: "text", text: "Here is the list." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const response = await handler(request(`${dish} for 2`, { ip: "203.0.113.191" }));
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(fake.requests).toHaveLength(3);
+    const cookie = response.headers.get("set-cookie") ?? "";
+    const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
+    await vi.waitFor(async () => {
+      const conversation = await storeScoped(storeId).aiConversation.findFirstOrThrow({ where: { cartId } });
+      expect(conversation.inFlightUntil).toBeNull();
+      expect(conversation.costMicros).toBeGreaterThan(WEB_SEARCH_MICROS);
+    });
+    await raw.recipe.deleteMany({ where: { key: dish } });
   });
 
   it("a photo list reports what was found and the gaps, and the next yes adds the found items", async () => {

@@ -7,7 +7,7 @@ import { recordRead, type AssistantContext, type ToolResult } from "./execute";
 import { getRecipeInput, parseToolInput } from "./schemas";
 
 export interface RecipeDeps {
-  /** Model for the web lookup. Production builds one per lookup. */
+  /** Model for the web lookup: the chat's own model, so its calls are metered like the chat's. */
   lookupModel?: LanguageModel;
   now?: () => Date;
 }
@@ -101,6 +101,19 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
   return { inStock, lowOrOut, notCarried };
 }
 
+/** The chat saves only its own steps' cost, so the lookup adds its own to the conversation. */
+async function addConversationCost(ctx: AssistantContext, micros: bigint): Promise<void> {
+  if (micros === BigInt(0)) return;
+  try {
+    await storeScoped(ctx.storeId).aiConversation.update({
+      where: { id: ctx.conversationId },
+      data: { costMicros: { increment: micros } },
+    });
+  } catch (error) {
+    console.error("[assistant] recipe lookup cost not saved", error);
+  }
+}
+
 export async function getRecipe(ctx: AssistantContext, input: unknown, deps: RecipeDeps = {}): Promise<ToolResult> {
   const parsed = parseToolInput(getRecipeInput, input);
   if (parsed.servings == null) {
@@ -119,7 +132,9 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
     }
     let found = null;
     try {
-      found = await lookUpDishOnline(parsed.dish, { model: deps.lookupModel });
+      const lookup = await lookUpDishOnline(parsed.dish, { model: deps.lookupModel });
+      found = lookup.found;
+      await addConversationCost(ctx, lookup.costMicros);
     } catch (error) {
       console.error("[assistant] recipe lookup failed", error);
     }

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authPrisma } from "../db";
-import { WEB_SEARCH_MICROS, lookUpDishOnline } from "./recipes";
+import { WEB_SEARCH_MICROS } from "./cost";
+import { lookUpDishOnline } from "./recipes";
 import { setSpendClock } from "./spend";
 
 const DAY = "2099-11-11";
@@ -22,10 +23,11 @@ describe.skipIf(!live)("recipe lookup live sandbox", () => {
 
   it("looks up a real dish with Anthropic's web search and keeps a source the search returned", async () => {
     const before = await dayCost();
-    const found = await lookUpDishOnline("kelewele");
+    const { found, costMicros } = await lookUpDishOnline("kelewele");
     expect(found).not.toBeNull();
     expect(found!.ingredients.length).toBeGreaterThan(0);
     expect(found!.sourceUrl).toMatch(/^https?:\/\//);
-    expect((await dayCost()) - before).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS);
+    expect(costMicros).toBeGreaterThan(WEB_SEARCH_MICROS);
+    expect((await dayCost()) - before).toBe(costMicros);
   }, 120_000);
 });

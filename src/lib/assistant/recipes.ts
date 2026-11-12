@@ -4,14 +4,13 @@ import { APICallError, generateText, stepCountIs, tool, type LanguageModel, type
 import { z } from "zod";
 import { platform } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
+import { WEB_SEARCH_MICROS, billedSearches, callCostMicros, tokenUsageOf } from "./cost";
 import { assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
 import { dishKey } from "./recipe-base";
 import { recordSpend, utcDay } from "./spend";
 
 /** Web lookups each store may start per UTC day (owner guardrail, #25). */
 export const RECIPE_LOOKUPS_PER_STORE_DAY = 20;
-/** Web search is billed per search: $10 per 1,000. */
-export const WEB_SEARCH_MICROS = BigInt(10_000);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_INGREDIENTS = 25;
 /** One lookup may continue a paused search turn once. */
@@ -28,6 +27,12 @@ export interface LookedUpDish {
   name: string;
   ingredients: string[];
   sourceUrl: string;
+}
+
+export interface LookupResult {
+  found: LookedUpDish | null;
+  /** Tokens and searches of the calls that returned; the model's spend middleware put them in the ledger. */
+  costMicros: bigint;
 }
 
 /** Order when a name matches several rows: exact key, then curated, then the oldest. */
@@ -124,13 +129,6 @@ function resultUrls(output: unknown): string[] {
   );
 }
 
-/** Searches Anthropic billed, from the response usage. */
-function billedSearches(usage: unknown): number {
-  const count = (usage as { server_tool_use?: { web_search_requests?: unknown } } | null | undefined)?.server_tool_use
-    ?.web_search_requests;
-  return typeof count === "number" && count > 0 ? count : 0;
-}
-
 function billedSearchesInError(error: unknown): number {
   if (!APICallError.isInstance(error) || !error.responseBody) return 0;
   try {
@@ -140,7 +138,10 @@ function billedSearchesInError(error: unknown): number {
   }
 }
 
-/** Never throws: a paid lookup is kept even when the ledger write fails. Retries once like the spend middleware. */
+/**
+ * A call that threw never reached the spend middleware, so its billed searches are recorded here.
+ * Never throws; retries once like the middleware.
+ */
 async function recordSearchSpend(searches: number): Promise<void> {
   if (searches === 0) return;
   const micros = WEB_SEARCH_MICROS * BigInt(searches);
@@ -159,15 +160,16 @@ async function recordSearchSpend(searches: number): Promise<void> {
 /**
  * One lookup with Anthropic's web search: one model call, plus one continuation after pause_turn.
  * Haiku takes only the basic web_search_20250305 tool; the dynamic-filtering version is Sonnet and Opus only.
- * Returns null when nothing usable came back.
+ * found is null when nothing usable came back.
  */
 export async function lookUpDishOnline(
   dish: string,
   deps: { model?: LanguageModel } = {},
-): Promise<LookedUpDish | null> {
+): Promise<LookupResult> {
   const model = deps.model ?? createAssistantModel();
   const messages: ModelMessage[] = [{ role: "user", content: `Dish: ${dish.slice(0, 80)}` }];
   const urls: string[] = [];
+  let costMicros = BigInt(0);
   let call;
   for (let turn = 0; turn < LOOKUP_TURNS; turn += 1) {
     let result;
@@ -192,9 +194,7 @@ export async function lookUpDishOnline(
       await recordSearchSpend(billedSearchesInError(error));
       throw error;
     }
-    await recordSearchSpend(
-      result.steps.reduce((sum, step) => sum + billedSearches(step.providerMetadata?.anthropic?.usage), 0),
-    );
+    for (const step of result.steps) costMicros += callCostMicros(assistantModelId(), tokenUsageOf(step.usage));
     for (const part of result.steps.flatMap((step) => step.content)) {
       if (part.type === "tool-result" && part.toolName === "web_search") urls.push(...resultUrls(part.output));
     }
@@ -204,7 +204,7 @@ export async function lookUpDishOnline(
     messages.push(...result.response.messages);
   }
   const parsed = reportInput.safeParse(call?.input);
-  if (!parsed.success || urls.length === 0) return null;
+  if (!parsed.success || urls.length === 0) return { found: null, costMicros };
   const seen = new Set<string>();
   const ingredients: string[] = [];
   for (const raw of parsed.data.ingredients) {
@@ -215,8 +215,8 @@ export async function lookUpDishOnline(
     ingredients.push(name);
     if (ingredients.length === MAX_INGREDIENTS) break;
   }
-  if (ingredients.length === 0) return null;
+  if (ingredients.length === 0) return { found: null, costMicros };
   // The source must be a page the search returned, never a link the model wrote.
   const sourceUrl = urls.includes(parsed.data.source_url) ? parsed.data.source_url : urls[0];
-  return { name: cleanName(parsed.data.dish_name) || dish, ingredients, sourceUrl };
+  return { found: { name: cleanName(parsed.data.dish_name) || dish, ingredients, sourceUrl }, costMicros };
 }

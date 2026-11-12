@@ -7,7 +7,8 @@ import { testPrismaClient } from "../../test-prisma";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-api-double";
 import { createAssistantModel } from "../model";
 import { seedRecipeBase, type SeedRecipe } from "../recipe-base";
-import { RECIPE_LOOKUPS_PER_STORE_DAY, WEB_SEARCH_MICROS, takeLookupSlot } from "../recipes";
+import { WEB_SEARCH_MICROS } from "../cost";
+import { RECIPE_LOOKUPS_PER_STORE_DAY, takeLookupSlot } from "../recipes";
 import { failNextSpendWrites } from "../spend";
 import type { AssistantContext } from "./execute";
 import { getRecipe } from "./recipe";
@@ -212,8 +213,8 @@ describe.skipIf(!hasDb)("get_recipe", () => {
 
   it("keeps a paid lookup when the spend write fails once, and records the search on the retry", async () => {
     const before = await spentToday();
-    // The token metering write fails twice (it retries once), then the search write fails once.
-    failNextSpendWrites(3);
+    // The metering write for the lookup call (tokens and search) fails once, then its retry lands.
+    failNextSpendWrites(1);
     const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["rice"])] });
     const result = await getRecipe(ctxA, { dish: `${dish} spend`, servings: 2 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
     failNextSpendWrites(0);
