@@ -225,9 +225,12 @@ function collectHallucinations(input: ScoreInput, binding: CatalogBinding): Hall
   const seen = new Set<string>();
   const returned = new Set(input.returnedLineIds);
   const ownLines = new Set(input.cartLineIds);
+  const packs = new Map<string, number>();
+  for (const variant of binding.byVariantId.values()) packs.set(variant.listingId, (packs.get(variant.listingId) ?? 0) + 1);
+  const singlePack = new Set([...binding.aListingIds].filter((id) => packs.get(id) === 1));
   for (const tool of input.tools) {
     walkIds(tool.input, (field, id) => {
-      const item = classifyId(field, id, binding, returned, ownLines, tool.tool);
+      const item = classifyId(field, id, binding, returned, ownLines, tool.tool, singlePack);
       pushItem(found, seen, item);
     });
     walkIds(tool.output, (field, id) => {
@@ -236,7 +239,7 @@ function collectHallucinations(input: ScoreInput, binding: CatalogBinding): Hall
     });
     if (outputCode(tool.output) === "audit_failed") {
       walkIds(tool.input, (field, id) => {
-        const item = classifyId(field, id, binding, returned, ownLines, tool.tool);
+        const item = classifyId(field, id, binding, returned, ownLines, tool.tool, singlePack);
         pushItem(found, seen, item);
       });
     }
@@ -266,6 +269,7 @@ function classifyId(
   returnedLines: Set<string>,
   ownLines: Set<string>,
   tool: string,
+  singlePack: Set<string>,
 ): HallucinatedItem | null {
   const cross = binding.bListingIds.has(id) || binding.bVariantIds.has(id);
   if (LISTING_FIELDS.has(field)) {
@@ -276,6 +280,8 @@ function classifyId(
   }
   if (VARIANT_FIELDS.has(field)) {
     if (binding.aVariantIds.has(id)) return null;
+    // add_to_cart resolves a listing id with exactly one variant to that variant.
+    if (tool === "add_to_cart" && singlePack.has(id)) return null;
     return { tool, field, id, crossStore: cross };
   }
   if (LINE_FIELDS.has(field)) {

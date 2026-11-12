@@ -584,6 +584,25 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(rows.find((row) => row.lineId === line!.id)?.qty).toBe(2);
   });
 
+  it("add_to_cart takes a listing id with one variant, and refuses a many-variant, foreign or invented one", async () => {
+    const single = await makeListing(storeA, { name: "One Pack Egusi", price: 310, confidence: 0.5 });
+    const backup = await makeListing(storeA, { name: "One Pack Backup", price: 320 });
+    const added = await addToCart(ctx(), {
+      items: [{ variant_id: single.listingId, qty: 1, backup_variant_id: backup.listingId }],
+    });
+    expect(added).toMatchObject({ ok: true, variantId: single.variantId, swapRule: "named_substitute", substituteVariantId: backup.variantId });
+    const many = await makeListing(storeA, { name: "Two Pack Rice", price: 330 });
+    await storeScoped(storeA).listingVariant.create({
+      data: { listingId: many.listingId, label: "10 lb", price: 600, weightG: 4536 },
+    });
+    const foreignListing = await storeScoped(storeB).listingVariant.findUnique({ where: { id: variantB } });
+    for (const id of [many.listingId, foreignListing!.listingId, "cmwcn204c0034zg0mihbisxd10"]) {
+      const refused = await addToCart(ctx(), { items: [{ variant_id: id, qty: 1 }] });
+      expect(refused).toMatchObject({ ok: false, code: "variant_not_found" });
+    }
+    expect(await storeScoped(storeA).cartLine.count({ where: { variant: { listingId: many.listingId } } })).toBe(0);
+  });
+
   it("a bad backup is ignored and the line uses store_suggests", async () => {
     const item = await makeListing(storeA, { name: "Bad Backup", price: 90, confidence: 0.4 });
     const inactive = await makeListing(storeA, { name: "Inactive Backup", price: 90, active: false });

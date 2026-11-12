@@ -560,12 +560,31 @@ function describedAdd(applied: AppliedAddLine) {
   };
 }
 
+// The model sometimes sends a listingId where a variantId belongs; that is only unambiguous with one variant.
+async function resolveSingleVariantListings(
+  storeId: string,
+  items: Array<{ variant_id: string; qty: number; backup_variant_id?: string }>,
+) {
+  const ids = [...new Set(items.flatMap((item) => [item.variant_id, item.backup_variant_id ?? []].flat()))];
+  const listings = await storeScoped(storeId).listing.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, variants: { select: { id: true } } },
+  });
+  const single = new Map(listings.filter((row) => row.variants.length === 1).map((row) => [row.id, row.variants[0].id]));
+  return items.map((item) => ({
+    ...item,
+    variant_id: single.get(item.variant_id) ?? item.variant_id,
+    ...(item.backup_variant_id ? { backup_variant_id: single.get(item.backup_variant_id) ?? item.backup_variant_id } : {}),
+  }));
+}
+
 export async function addToCart(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
-  const parsed = parseToolInput(addToCartInput, input);
+  const raw = parseToolInput(addToCartInput, input);
+  const parsed = { ...raw, items: await resolveSingleVariantListings(ctx.storeId, raw.items) };
   if (ctx.acceptance) {
     const notShown = await itemsNotShown(ctx, parsed.items);
     if (notShown.length > 0) {
-      return recordRead(ctx, "add_to_cart", parsed, {
+      return recordRead(ctx, "add_to_cart", raw, {
         ok: false,
         code: "not_shown",
         message: MESSAGES.not_shown,
@@ -573,7 +592,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       });
     }
   }
-  return recordWrite(ctx, "add_to_cart", parsed, async (tx) => {
+  return recordWrite(ctx, "add_to_cart", raw, async (tx) => {
     const items = [];
     for (const item of parsed.items) {
       const applied = await applyAddLine(tx, ctx.storeId, ctx.cartId, item.variant_id, item.qty, {

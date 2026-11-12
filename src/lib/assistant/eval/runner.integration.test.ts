@@ -238,8 +238,19 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
   }, 90_000);
 
   it("rejects wrong resource types and another cart line in the same store", async () => {
-    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    const listings = [
+      listing("garri", "garri-white", "A", 499),
+      listing("rice", "rice-parboiled-long-grain", "A", 199, {
+        variants: [
+          { key: "rice-5lb", label: "5 lb", priceCents: 199, weightG: 2268 },
+          { key: "rice-10lb", label: "10 lb", priceCents: 349, weightG: 4536 },
+        ],
+      }),
+      listing("yam", "yam-white-puna", "B", 899),
+    ];
     let foreignLine = "";
+    let riceListing = "";
+    let garriListing = "";
     const result = await run([evalCase({
       id: "wrong-type",
       category: "single-item",
@@ -249,21 +260,26 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       gaps: [],
     })], listings, async (ctx) => {
       const variantId = ctx.binding.byVariantKey.get("garri-pack")?.id ?? "";
-      const listingId = ctx.binding.byListingKey.get("garri")?.id ?? "";
+      garriListing = ctx.binding.byListingKey.get("garri")?.id ?? "";
+      riceListing = ctx.binding.byListingKey.get("rice")?.id ?? "";
       const cart = await storeScoped(ctx.stores.storeAId).cart.create({ data: { storeId: ctx.stores.storeAId } });
       const line = await storeScoped(ctx.stores.storeAId).cartLine.create({
         data: { storeId: ctx.stores.storeAId, cartId: cart.id, variantId, qty: 1, swapRule: "exact_only" },
       });
       foreignLine = line.id;
       return scripted(ctx, [
-        { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: listingId, qty: 1 }] } },
+        { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: riceListing, qty: 1 }] } },
+        { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: garriListing, qty: 1 }] } },
         { kind: "tool", toolName: "update_cart", toolInput: { line_id: line.id, qty: 2 } },
         { kind: "text", text: "Done." },
       ]);
     }, { maxAttempts: 1 });
     const scored = result.result.cases[0];
     expect(scored?.pass).toBe(false);
-    expect(scored?.hallucinated.some((item) => item.field === "variant_id" && item.crossStore === false)).toBe(true);
+    expect(scored?.hallucinated.some((item) => item.field === "variant_id" && item.id === riceListing && item.crossStore === false)).toBe(true);
+    // add_to_cart takes a listing id that has one variant, so it is not made up.
+    expect(scored?.hallucinated.some((item) => item.id === garriListing)).toBe(false);
+    expect(scored?.finalCart.map((line) => line.variantKey)).toEqual(["garri-pack"]);
     expect(scored?.hallucinated.some((item) => item.field === "line_id" && item.id === foreignLine)).toBe(true);
   }, 90_000);
 
