@@ -179,7 +179,7 @@ Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant default
 | `get_recipe(dish, servings)` | Ingredient list from curated recipe base, scaled |
 | `check_availability(listing_ids)` | Returns stock confidence + price |
 | `suggest_substitutes(listing_id)` | Ranked culturally valid swaps |
-| `add_to_cart / update_cart / remove_from_cart` | Cart edits, visible to user in real time |
+| `add_to_cart / update_cart / remove_from_cart` | Cart edits, visible to user in real time. `add_to_cart` also takes a listing id that has exactly one variant (#146) |
 | `set_swap_rule(line_id, rule)` | Records customer's preference |
 | `show_products(listing_ids)` | Product cards with catalog photo, price and stock, drawn from data |
 | `get_cart_summary()` | Item summary card for the shopper to confirm |
@@ -240,8 +240,8 @@ Later tools, not in v1: `list_orders`, `build_pick_list`, `mark_line_short`, `in
 - Built by platform team + store owner contributions; reviewed before publishing.
 
 ### 8.4 Evaluation
-- Golden test set (~200 requests: "jollof for 10", "Ethiopian breakfast", "ata rodo and tatashe", photo lists) scored on cart precision/recall, hallucinated items (must be 0), correct gap reporting.
-- Run on every prompt/model change; sample 1% of live conversations for review.
+- Golden test set of 200 English text requests, including "jollof for 10", "Ethiopian breakfast", and "ata rodo and tatashe". Shopper-supplied lists are scored on cart precision and recall. Dish-only requests pass or fail on core items the store sells, with at least 85% passing ([ADR-0018](../adr/0018-agentic-shopper-assistant.md)). A synonym that names two products, such as agushi for whole or ground egusi, passes on either one. A request that matches more than one product in the store, such as nech teff, also passes on one short question naming the store's matches. A made-up item that reaches the cart or a reply, an excluded item or an amount the customer still sees fails the run; a made-up id a tool refused is reported as a rejected attempt. The official result averages two full runs for the rate floors, and each run must have no harmful made-up item and no excluded item. Correct gap reporting is recorded and does not by itself fail the build. Checkout paths wait for #247. Photo and PDF lists are deferred.
+- The committed report is checked in CI against the current prompt, tools, model, dataset and catalog. A live Anthropic run is opt-in (`ASSISTANT_EVAL_LIVE=1`), uses Haiku, and stops at $2 for the run and $20 for the ticket (owner decision on #146, 2026-11-11). `haiku-ok` also requires that the model stated no price the grounder had to remove. `sonnet-candidate` records that miss without hiding it behind the grounder. Sample review of live conversations comes later.
 
 ### 8.5 Later: agentic commerce
 Expose store catalogs and checkout via an MCP server and the Agentic Commerce Protocol (ACP) so ChatGPT/Gemini agents can shop tenants with user approval (phase 3).

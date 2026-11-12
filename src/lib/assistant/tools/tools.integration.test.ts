@@ -18,6 +18,7 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
+import { acceptanceForTurn } from "../shown";
 import { addToCartInput, offerChoicesInput, searchCatalogInput, toolInputSchemas } from "./schemas";
 
 const { headerState, cartCookies } = vi.hoisted(() => ({
@@ -298,6 +299,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
         customerText: "yes",
         lastReplyText: "Egusi and Foreign Rice",
         lastReplyEmpty: false,
+        lastReplyListingIds: [],
       },
     }), {
       items: [
@@ -419,6 +421,17 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(checked).toMatchObject({ ok: true, items: [{ mayBeUnavailable: true }] });
     const shown = await showProducts(ctx(), { listing_ids: [item.listingId] });
     expect(shown).toMatchObject({ cards: [{ mayBeUnavailable: true }] });
+  });
+
+  it("set_swap_rule keeps a backup on a may-be-unavailable line and refuses exact_only", async () => {
+    const item = await makeListing(storeA, { name: "Low Stock Ofada", price: 236, confidence: 0.4 });
+    await addToCart(ctx(), { items: [{ variant_id: item.variantId, qty: 1 }] });
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const result = await setSwapRule(ctx(), { line_id: line!.id, rule: "exact_only" });
+    expect(result).toMatchObject({ ok: false, code: "backup_required" });
+    const still = await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } });
+    expect(still?.swapRule).toBe("store_suggests");
+    expect(await setSwapRule(ctx(), { line_id: line!.id, rule: "store_suggests" })).toMatchObject({ ok: true, swapRule: "store_suggests" });
   });
 
   it("confidence 0.5 with a valid backup sets named_substitute", async () => {
@@ -582,6 +595,25 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     if (!summary.ok) return;
     const rows = summary.lines as Array<{ lineId: string; qty: number }>;
     expect(rows.find((row) => row.lineId === line!.id)?.qty).toBe(2);
+  });
+
+  it("add_to_cart takes a listing id with one variant, and refuses a many-variant, foreign or invented one", async () => {
+    const single = await makeListing(storeA, { name: "One Pack Egusi", price: 310, confidence: 0.5 });
+    const backup = await makeListing(storeA, { name: "One Pack Backup", price: 320 });
+    const added = await addToCart(ctx(), {
+      items: [{ variant_id: single.listingId, qty: 1, backup_variant_id: backup.listingId }],
+    });
+    expect(added).toMatchObject({ ok: true, variantId: single.variantId, swapRule: "named_substitute", substituteVariantId: backup.variantId });
+    const many = await makeListing(storeA, { name: "Two Pack Rice", price: 330 });
+    await storeScoped(storeA).listingVariant.create({
+      data: { listingId: many.listingId, label: "10 lb", price: 600, weightG: 4536 },
+    });
+    const foreignListing = await storeScoped(storeB).listingVariant.findUnique({ where: { id: variantB } });
+    for (const id of [many.listingId, foreignListing!.listingId, "cmwcn204c0034zg0mihbisxd10"]) {
+      const refused = await addToCart(ctx(), { items: [{ variant_id: id, qty: 1 }] });
+      expect(refused).toMatchObject({ ok: false, code: "variant_not_found" });
+    }
+    expect(await storeScoped(storeA).cartLine.count({ where: { variant: { listingId: many.listingId } } })).toBe(0);
   });
 
   it("a bad backup is ignored and the line uses store_suggests", async () => {
@@ -794,6 +826,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: `Add 1 Ayoola ${suffix}.`,
       lastReplyText: "",
       lastReplyEmpty: true,
+      lastReplyListingIds: [],
     } });
     const found = await searchCatalog(context, { query: `Ayoola poundo yam ${suffix}` });
     expect(searchItems(found).find((row) => row.listingId === item.listingId)?.match).toBe("near");
@@ -819,9 +852,41 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: "yes",
       lastReplyText: `I can add ${name}.`,
       lastReplyEmpty: false,
+      lastReplyListingIds: [],
     } });
     await searchCatalog(context, { query: `Otherbrand ${suffix}` });
     const result = await addToCart(context, { items: [{ variant_id: item.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: true, qty: 1 });
+  });
+
+  it("yes adds a product the proposal's search returned even when the reply shortened its name", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const item = await makeListing(storeA, {
+      name: `Eru / okazi / afang / fumbwa leaves ${suffix} (Gnetum), dried and shredded`,
+      price: 450,
+    });
+    const proposalTurn = `propose-${suffix}`;
+    const found = await searchCatalog(ctx({ ...talk, turnMessageId: proposalTurn }), { query: `eru ${suffix}` });
+    expect(searchItems(found).some((row) => row.listingId === item.listingId)).toBe(true);
+    const yes = `yes-eru-${suffix}`;
+    const messages = [
+      { role: "user", id: proposalTurn, parts: [{ type: "text", text: `Egusi soup ${suffix} for 4 people.` }] },
+      {
+        role: "assistant",
+        id: `reply-${suffix}`,
+        parts: [
+          { type: "tool-search_catalog", state: "output-available", output: found },
+          { type: "text", text: "- Eru / okazi leaves (Gnetum), dried and shredded, 1 pack\n\nWant me to add these?" },
+        ],
+      },
+      { role: "user", id: yes, parts: [{ type: "text", text: "Yes, add those." }] },
+    ];
+    const result = await addToCart(ctx({
+      ...talk,
+      turnMessageId: yes,
+      acceptance: acceptanceForTurn(messages, yes, "Yes, add those."),
+    }), { items: [{ variant_id: item.variantId, qty: 1 }] });
     expect(result).toMatchObject({ ok: true, qty: 1 });
   });
 
@@ -853,6 +918,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: "yes",
       lastReplyText: `The only result is ${name}.`,
       lastReplyEmpty: false,
+      lastReplyListingIds: [],
     } }), { items: [{ variant_id: item.variantId, qty: 1 }] });
     expect(result).toMatchObject({ ok: false, code: "not_shown" });
     expect(await storeScoped(storeA).cartLine.count({ where: { cartId: talk.cartId } })).toBe(0);
@@ -879,6 +945,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: `Add Cameroon pepper ${suffix} (pack)`,
       lastReplyText: "",
       lastReplyEmpty: true,
+      lastReplyListingIds: [],
     } });
     await searchCatalog(context, { query: `Ayoola ${suffix}` });
     await offerChoices(context, {
@@ -906,6 +973,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: "I want to cook jollof rice for 4 people.",
       lastReplyText: "",
       lastReplyEmpty: true,
+      lastReplyListingIds: [],
     } });
     await searchCatalog(context, { query: `seasoning ${suffix}` });
     const result = await addToCart(context, { items: [{ variant_id: item.variantId, qty: 1 }] });

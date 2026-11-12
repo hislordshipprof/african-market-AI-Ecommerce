@@ -39,5 +39,8 @@ blob-report/
 # Builder run logs and reports
 .builder/
 
+# Partial shopper-assistant eval. The committed report stays tracked.
+src/lib/assistant/eval/partial-report.json
+
 # Local browser profile directories (left by screenshot/validation tools)
 .validation-*/

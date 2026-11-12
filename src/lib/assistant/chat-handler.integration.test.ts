@@ -2543,6 +2543,96 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(calls).toBeGreaterThan(callsBeforeOther);
   });
 
+  it.each([
+    ["a text-only second turn", { kind: "text", text: "Which size?" }],
+    ["a second turn with a rejected tool input", { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: "egusi", qty: 0 }] } }],
+  ] as const)("turn 3 still sees a product id only turn 1's tool result held, after %s", async (_label, second) => {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "egusi" } },
+        { kind: "text", text: "I found egusi." },
+        second,
+        ...(second.kind === "tool" ? [{ kind: "text" as const, text: "That did not work." }] : []),
+        { kind: "text", text: "Adding it." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie: `cart_id=${encodeURIComponent(cart.id)}`,
+    };
+    for (const [index, text] of ["egusi please", "the small one", "add it"].entries()) {
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: { ...headers, "x-forwarded-for": `203.0.113.${240 + index}` },
+        body: JSON.stringify({ message: { id: `ids-kept-${cart.id}-${index}`, role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      expect(response.status).toBe(200);
+      await response.text();
+    }
+    expect(JSON.stringify(fake.requests[1]?.body)).toContain(variantId);
+    const last = fake.requests.at(-1)?.body as { system?: Array<{ text?: string }> } | undefined;
+    const system = (last?.system ?? []).map((block) => block.text ?? "").join("\n");
+    expect(system).toContain(`Egusi, Each: ${variantId}`);
+  });
+
+  it("does not send an earlier turn's thinking block back, because its signature is bound to that turn's prefix", async () => {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    vi.stubEnv("ASSISTANT_MODEL", "claude-sonnet-5-5");
+    const bodies: string[] = [];
+    const event = (data: unknown) => `data: ${JSON.stringify(data)}\n\n`;
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      bodies.push(typeof init?.body === "string" ? init.body : "");
+      const thinking = bodies.length === 1
+        ? [
+            event({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }),
+            event({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Plan the reply." } }),
+            event({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig-turn-1" } }),
+            event({ type: "content_block_stop", index: 0 }),
+          ]
+        : [];
+      const text = thinking.length > 0 ? 1 : 0;
+      const sse = [
+        event({ type: "message_start", message: { id: "msg_fake", model: "claude-sonnet-5-5", role: "assistant", usage: { input_tokens: 10, output_tokens: 0 } } }),
+        ...thinking,
+        event({ type: "content_block_start", index: text, content_block: { type: "text", text: "" } }),
+        event({ type: "content_block_delta", index: text, delta: { type: "text_delta", text: "Here you go." } }),
+        event({ type: "content_block_stop", index: text }),
+        event({ type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 4 } }),
+        event({ type: "message_stop" }),
+      ].join("");
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream", "request-id": `req_think_${bodies.length}` } });
+    };
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fetchImpl }) });
+    for (const [index, text] of ["egusi please", "and palm oil"].entries()) {
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host,
+          origin: `http://${host}`,
+          "x-store-slug": slug,
+          "x-forwarded-for": `203.0.113.${230 + index}`,
+          cookie: `cart_id=${encodeURIComponent(cart.id)}`,
+        },
+        body: JSON.stringify({ message: { id: `thinking-${cart.id}-${index}`, role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      expect(response.status).toBe(200);
+      await response.text();
+    }
+    expect(bodies).toHaveLength(2);
+    const second = JSON.parse(bodies[1] ?? "{}") as { messages: Array<{ role: string; content: unknown }> };
+    expect(JSON.stringify(second.messages)).toContain("Here you go.");
+    expect(JSON.stringify(second.messages)).not.toContain("sig-turn-1");
+  });
+
   it("keeps a successful tool call in the next turn and does not audit a card number as a listing id", async () => {
     const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });

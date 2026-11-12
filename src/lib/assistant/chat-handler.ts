@@ -37,7 +37,7 @@ import {
 } from "./contract";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
-import { acceptanceForTurn } from "./shown";
+import { acceptanceForTurn, shownProductIds } from "./shown";
 import { clientIp } from "./client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { requireSameOrigin } from "../security/same-origin";
@@ -53,6 +53,13 @@ const IP_LIMIT = 60;
 const CART_LIMIT = 30;
 const FILE_LIMIT = 10;
 const LEASE_MS = 90_000;
+/** Exported so the shopper-assistant eval can fingerprint the step cap. */
+export const ASSISTANT_STEP_CAP = 8;
+/**
+ * Exported so the shopper-assistant eval can fingerprint the output limit.
+ * 1024 cut off a 25-item list's parallel searches mid-call and ended the turn with an empty cart (#146).
+ */
+export const ASSISTANT_MAX_OUTPUT_TOKENS = 4096;
 const FIXED_ERROR = "Sorry, something went wrong. Please try again.";
 const STEP_LIMIT_TEXT = "I've done as much as I can in one go. Tell me what you'd like next.";
 const RESTING_MESSAGE = "The helper is resting right now. You can still shop and check out as usual.";
@@ -230,7 +237,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     let modelMessages: ModelMessage[];
     try {
       let attachmentIndex = 0;
-      modelMessages = await convertToModelMessages(sentHistory, {
+      modelMessages = await convertToModelMessages(withoutReasoning(sentHistory), {
         tools,
         convertDataPart: (part) => {
           if (part.type !== "data-attachment") return undefined;
@@ -254,15 +261,15 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
           content: ASSISTANT_STATIC_PROMPT,
           providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
         },
-        { role: "system", content: storeContextMessage(store, at) },
+        { role: "system", content: storeContextMessage(store, at, shownProductIds(sentHistory)) },
         ...modelMessages,
       ],
       allowSystemInMessages: true,
       tools,
       ...(fileTurn ? { activeTools: [...FILE_TURN_TOOLS] } : {}),
       toolCallConcurrency: 1,
-      stopWhen: stepCountIs(8),
-      maxOutputTokens: 1024,
+      stopWhen: stepCountIs(ASSISTANT_STEP_CAP),
+      maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
       maxRetries: 0,
       streamRetries: 0,
       timeout: { totalMs: fileTurn ? 45_000 : 55_000 },
@@ -347,7 +354,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         if (openReply) replyParts.push(openReply);
         const steps = await Promise.resolve(result.steps).catch(() => []);
         const last = steps.at(-1);
-        if (steps.length >= 8 && last?.finishReason === "tool-calls") {
+        if (steps.length >= ASSISTANT_STEP_CAP && last?.finishReason === "tool-calls") {
           writer.write({ type: "text-start", id: "step-limit" });
           writer.write({ type: "text-delta", id: "step-limit", delta: STEP_LIMIT_TEXT });
           writer.write({ type: "text-end", id: "step-limit" });
@@ -506,6 +513,18 @@ function coerceToolInputs(messages: UIMessage[]): UIMessage[] {
       return part;
     }),
   }));
+}
+
+/**
+ * Earlier turns' thinking blocks are left out. Their signatures bind them to the
+ * exact system prompt and messages of that turn, which the next turn changes.
+ */
+function withoutReasoning(messages: UIMessage[]): UIMessage[] {
+  return messages.flatMap((message) => {
+    if (message.role !== "assistant") return [message];
+    const parts = message.parts.filter((part) => part.type !== "reasoning");
+    return parts.length === 0 ? [] : [{ ...message, parts }];
+  });
 }
 
 async function usableHistory(messages: UIMessage[], tools: ReturnType<typeof assistantTools>): Promise<UIMessage[]> {

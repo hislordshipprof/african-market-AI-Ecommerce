@@ -59,6 +59,7 @@ const MESSAGES: Record<string, string> = {
   audit_failed: "Could not record this action.",
   not_enough_choices: "There are not enough choices to pick from.",
   not_shown: "Nothing was added. Tell me which items you want, and I'll add them.",
+  backup_required: "This item may be unavailable, so it keeps a backup: Let the store suggest or a named substitute.",
 };
 
 function fail(code: string): ToolFailure {
@@ -530,7 +531,9 @@ async function itemsNotShown(
       variants: listing.variants,
     });
     if (acceptance.led) {
-      const inReply = !acceptance.lastReplyEmpty && textNamesProduct(acceptance.lastReplyText, names);
+      const inReply = !acceptance.lastReplyEmpty && (
+        acceptance.lastReplyListingIds.includes(listing.id) || textNamesProduct(acceptance.lastReplyText, names)
+      );
       const inCustomer = textNamesProduct(acceptance.customerText, names);
       if (!inReply && !inCustomer) refused.set(item.variant_id, names[0] ?? item.variant_id);
       else if (confirmingExplicitAdd && nearListings.has(listing.id) && !fitListings.has(listing.id) && !offeredVariants.has(item.variant_id)) {
@@ -560,12 +563,31 @@ function describedAdd(applied: AppliedAddLine) {
   };
 }
 
+// The model sometimes sends a listingId where a variantId belongs; that is only unambiguous with one variant.
+async function resolveSingleVariantListings(
+  storeId: string,
+  items: Array<{ variant_id: string; qty: number; backup_variant_id?: string }>,
+) {
+  const ids = [...new Set(items.flatMap((item) => [item.variant_id, item.backup_variant_id ?? []].flat()))];
+  const listings = await storeScoped(storeId).listing.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, variants: { select: { id: true } } },
+  });
+  const single = new Map(listings.filter((row) => row.variants.length === 1).map((row) => [row.id, row.variants[0].id]));
+  return items.map((item) => ({
+    ...item,
+    variant_id: single.get(item.variant_id) ?? item.variant_id,
+    ...(item.backup_variant_id ? { backup_variant_id: single.get(item.backup_variant_id) ?? item.backup_variant_id } : {}),
+  }));
+}
+
 export async function addToCart(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
-  const parsed = parseToolInput(addToCartInput, input);
+  const raw = parseToolInput(addToCartInput, input);
+  const parsed = { ...raw, items: await resolveSingleVariantListings(ctx.storeId, raw.items) };
   if (ctx.acceptance) {
     const notShown = await itemsNotShown(ctx, parsed.items);
     if (notShown.length > 0) {
-      return recordRead(ctx, "add_to_cart", parsed, {
+      return recordRead(ctx, "add_to_cart", raw, {
         ok: false,
         code: "not_shown",
         message: MESSAGES.not_shown,
@@ -573,7 +595,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       });
     }
   }
-  return recordWrite(ctx, "add_to_cart", parsed, async (tx) => {
+  return recordWrite(ctx, "add_to_cart", raw, async (tx) => {
     const items = [];
     for (const item of parsed.items) {
       const applied = await applyAddLine(tx, ctx.storeId, ctx.cartId, item.variant_id, item.qty, {
@@ -670,8 +692,13 @@ export async function removeFromCart(ctx: AssistantContext, input: unknown): Pro
 export async function setSwapRule(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(setSwapRuleInput, input);
   return recordWrite(ctx, "set_swap_rule", parsed, async (tx) => {
-    const line = await tx.cartLine.findUnique({ where: { id: parsed.line_id } });
+    const line = await tx.cartLine.findUnique({
+      where: { id: parsed.line_id },
+      include: { variant: { include: { listing: true } } },
+    });
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
+    // ADR-0018: a may-be-unavailable line always carries a backup.
+    if (parsed.rule === "exact_only" && mayBeUnavailable(line.variant.listing)) return fail("backup_required");
     if (parsed.rule === "named_substitute") {
       const substituteId = parsed.substitute_variant_id;
       const substitute = substituteId
