@@ -1,11 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-
-const NAME_MAX = 100;
-
-/** One spelling per ingredient: trimmed, lower case, single spaces. */
-export function normaliseIngredientName(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, " ").slice(0, NAME_MAX);
-}
+import { normaliseIngredientName } from "./attributes";
 
 type IngredientTx = Pick<PrismaClient, "ingredient" | "ingredientSynonym">;
 
@@ -27,12 +21,18 @@ export async function resolveIngredients(
     ...bySynonym.map((s) => [s.term, s.ingredientId] as const),
     ...byName.map((i) => [i.name, i.id] as const),
   ]);
+  const missing = wanted.filter((name) => !found.has(name));
+  if (opts.create && missing.length > 0) {
+    // Another approval may create the same ingredient at once: skip the duplicate, then read it by name.
+    await tx.ingredient.createMany({ data: missing.map((name) => ({ name })), skipDuplicates: true });
+    const created = await tx.ingredient.findMany({ where: { name: { in: missing } }, select: { id: true, name: true } });
+    for (const ingredient of created) found.set(ingredient.name, ingredient.id);
+  }
   const ids = new Set<string>();
   const unmatched: string[] = [];
   for (const name of wanted) {
     const id = found.get(name);
     if (id) ids.add(id);
-    else if (opts.create) ids.add((await tx.ingredient.upsert({ where: { name }, create: { name }, update: {} })).id);
     else unmatched.push(name);
   }
   return { ids: [...ids], unmatched };
