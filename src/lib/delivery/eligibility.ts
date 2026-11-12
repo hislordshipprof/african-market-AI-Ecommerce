@@ -1,3 +1,5 @@
+import { platform } from "@/lib/db";
+
 const GRAMS_PER_LB = 453.59237;
 
 export interface CourierWeightLine {
@@ -24,4 +26,10 @@ export function checkCourierEligibility(
   const totalG = items.reduce((sum, item) => sum + item.weightG * item.quantity, 0);
   if (totalG > limitG) return { eligible: false, reason: "order_over_limit" };
   return { eligible: true };
+}
+
+/** The limit is an adjustable platform setting (spec D4), one row seeded by migration. */
+export async function readCourierWeightSettings(): Promise<CourierWeightSettings> {
+  const row = await platform.platformSettings.findUniqueOrThrow({ where: { id: "platform" } });
+  return { courierWeightLimitLb: row.courierWeightLimitLb };
 }
