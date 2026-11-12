@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 import { storeScoped } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
-import { mayBeUnavailable } from "./availability";
+import { stockBadge } from "../../storefront/stock-badge";
 import { recordRead, type AssistantContext, type ToolResult } from "./execute";
 import { getRecipeInput, parseToolInput } from "./schemas";
 
@@ -15,7 +15,7 @@ export interface RecipeDeps {
 interface StoreItem {
   listingId: string;
   name: string;
-  variantId: string | null;
+  variantId: string;
   packLabel: string;
   priceCents: number;
   mayBeUnavailable: boolean;
@@ -23,26 +23,28 @@ interface StoreItem {
 
 interface Placed extends StoreItem {
   ingredient: string;
+  /** Other recipe ingredients this same item fills. */
+  covers?: string[];
   amount?: string;
   backupVariantId?: string;
 }
 
-/** Cheapest variant of this store's active listing for a master product. */
+/** Cheapest variant of this store's active listing for a master product. A listing without a variant cannot be added. */
 async function listingForMaster(storeId: string, masterProductId: string): Promise<StoreItem | null> {
   const listing = await storeScoped(storeId).listing.findFirst({
     where: { masterProductId, active: true },
     include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }], take: 1 } },
     orderBy: [{ confidence: "desc" }, { id: "asc" }],
   });
-  if (!listing) return null;
-  const variant = listing.variants[0];
+  const variant = listing?.variants[0];
+  if (!listing || !variant) return null;
   return {
     listingId: listing.id,
     name: listing.customName || listing.masterProduct?.name || "Unnamed",
-    variantId: variant?.id ?? null,
-    packLabel: variant?.label ?? "Each",
-    priceCents: variant?.price ?? listing.price,
-    mayBeUnavailable: mayBeUnavailable(listing),
+    variantId: variant.id,
+    packLabel: variant.label,
+    priceCents: variant.price,
+    mayBeUnavailable: stockBadge(listing) !== "in-stock",
   };
 }
 
@@ -51,14 +53,14 @@ async function searchFits(storeId: string, name: string): Promise<StoreItem[]> {
   const hits = await searchCatalogHits(storeId, name);
   const fits = hits.filter((hit) => hit.match === "name" || hit.match === "synonym");
   const ranked = fits.some((hit) => hit.match === "name") ? fits.filter((hit) => hit.match === "name") : fits;
-  return ranked.map((hit) => ({
+  return ranked.flatMap((hit) => hit.variantId ? [{
     listingId: hit.id,
     name: hit.name,
-    variantId: hit.variantId ?? null,
+    variantId: hit.variantId,
     packLabel: hit.packLabel ?? "Each",
     priceCents: hit.price,
     mayBeUnavailable: hit.badge !== "in-stock",
-  }));
+  }] : []);
 }
 
 function scaledAmount(qty: number | null, unit: string | null, base: number | null, servings: number): string | undefined {
@@ -71,24 +73,30 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
   const inStock: Placed[] = [];
   const lowOrOut: Placed[] = [];
   const notCarried: string[] = [];
-  const used = new Set<string>();
+  const placedByListing = new Map<string, Placed>();
   for (const ingredient of recipe.ingredients) {
     const fits = await searchFits(storeId, ingredient.name);
     const mapped = ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null;
     const pick = mapped ?? fits.find((item) => !item.mayBeUnavailable) ?? fits[0];
-    if (!pick || used.has(pick.listingId)) {
-      if (!pick) notCarried.push(ingredient.name);
+    if (!pick) {
+      notCarried.push(ingredient.name);
       continue;
     }
-    used.add(pick.listingId);
+    const already = placedByListing.get(pick.listingId);
+    if (already) {
+      already.covers = [...(already.covers ?? []), ingredient.name];
+      continue;
+    }
     const amount = scaledAmount(ingredient.qty, ingredient.unit, recipe.servings, servings);
     const placed: Placed = { ingredient: ingredient.name, ...(amount ? { amount } : {}), ...pick };
+    placedByListing.set(pick.listingId, placed);
     if (!pick.mayBeUnavailable) {
       inStock.push(placed);
       continue;
     }
-    const backup = fits.find((item) => item.listingId !== pick.listingId && !item.mayBeUnavailable && item.variantId);
-    lowOrOut.push(backup?.variantId ? { ...placed, backupVariantId: backup.variantId } : placed);
+    const backup = fits.find((item) => item.listingId !== pick.listingId && !item.mayBeUnavailable);
+    if (backup) placed.backupVariantId = backup.variantId;
+    lowOrOut.push(placed);
   }
   return { inStock, lowOrOut, notCarried };
 }
