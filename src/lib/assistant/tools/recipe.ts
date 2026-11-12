@@ -1,7 +1,7 @@
 import type { LanguageModel } from "ai";
 import { Prisma } from "@prisma/client";
 import { storeScoped, storeScopedRawQuery } from "../../db";
-import { searchCatalogHits } from "../../storefront/service";
+import { excludeMatchSql, searchCatalogHits } from "../../storefront/service";
 import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
 import { stockBadge } from "../../storefront/stock-badge";
@@ -66,27 +66,22 @@ async function searchFits(storeId: string, name: string): Promise<StoreItem[]> {
 }
 
 /**
- * The catalog search's exclude match: Postgres English text search on the name.
+ * The names the customer ruled out, in one query, with the catalog search's exclude match.
  * An ingredient is also ruled out when its whole name is inside an exclusion: "yellow onion" rules out onion.
  */
-async function ruledOut(storeId: string, name: string, exclude: readonly string[], ingredient = false): Promise<boolean> {
-  if (exclude.length === 0) return false;
-  const rows = await storeScopedRawQuery<{ hit: boolean }>(
+async function ruledOut(storeId: string, names: readonly string[], exclude: readonly string[], ingredient = false): Promise<Set<string>> {
+  if (exclude.length === 0 || names.length === 0) return new Set();
+  const rows = await storeScopedRawQuery<{ name: string }>(
     storeId,
     Prisma.sql`
-    SELECT EXISTS (
-      SELECT 1 FROM unnest(${[...exclude]}::text[]) AS word
-      WHERE to_tsvector('english', unaccent(${name})) @@ plainto_tsquery('english', unaccent(word))
-        OR (${ingredient} AND to_tsvector('english', unaccent(word)) @@ plainto_tsquery('english', unaccent(${name})))
-    ) AS hit`,
+    SELECT n.name FROM unnest(${[...names]}::text[]) AS n(name)
+    WHERE EXISTS (
+      SELECT 1 FROM unnest(${[...exclude]}::text[]) AS e(word)
+      WHERE ${excludeMatchSql(Prisma.sql`unaccent(n.name)`, Prisma.sql`e.word`)}
+        OR (${ingredient} AND ${excludeMatchSql(Prisma.sql`unaccent(e.word)`, Prisma.sql`n.name`)})
+    )`,
   );
-  return rows[0]?.hit === true;
-}
-
-async function allowed(storeId: string, items: StoreItem[], exclude: readonly string[]): Promise<StoreItem[]> {
-  const kept: StoreItem[] = [];
-  for (const item of items) if (!(await ruledOut(storeId, item.name, exclude))) kept.push(item);
-  return kept;
+  return new Set(rows.map((row) => row.name));
 }
 
 function scaledAmount(qty: number | null, unit: string | null, base: number | null, servings: number): string | undefined {
@@ -99,16 +94,20 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
   const inStock: Placed[] = [];
   const lowOrOut: Placed[] = [];
   const notCarried: string[] = [];
-  const excluded: string[] = [];
+  const out = await ruledOut(storeId, recipe.ingredients.map((row) => row.name), exclude, true);
+  const excluded = recipe.ingredients.filter((row) => out.has(row.name)).map((row) => row.name);
+  const wanted = recipe.ingredients.filter((row) => !out.has(row.name));
+  const found = await Promise.all(wanted.map(async (ingredient) => ({
+    ingredient,
+    fits: await searchFits(storeId, ingredient.name),
+    master: ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null,
+  })));
+  const items = found.flatMap((row) => [...row.fits, ...(row.master ? [row.master] : [])]);
+  const outItems = await ruledOut(storeId, [...new Set(items.map((item) => item.name))], exclude);
   const placedByListing = new Map<string, Placed>();
-  for (const ingredient of recipe.ingredients) {
-    if (await ruledOut(storeId, ingredient.name, exclude, true)) {
-      excluded.push(ingredient.name);
-      continue;
-    }
-    const fits = await allowed(storeId, await searchFits(storeId, ingredient.name), exclude);
-    const master = ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null;
-    const [mapped] = master ? await allowed(storeId, [master], exclude) : [];
+  for (const { ingredient, fits: hits, master } of found) {
+    const fits = hits.filter((item) => !outItems.has(item.name));
+    const mapped = master && !outItems.has(master.name) ? master : undefined;
     const pick = mapped ?? fits.find((item) => !item.mayBeUnavailable) ?? fits[0];
     if (!pick) {
       notCarried.push(ingredient.name);
