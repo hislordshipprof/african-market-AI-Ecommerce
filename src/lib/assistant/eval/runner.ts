@@ -5,7 +5,7 @@ import { createChatHandler } from "../chat-handler";
 import { createAssistantModel } from "../model";
 import { storeScoped } from "../../db";
 import { usdMentions } from "./money";
-import { adjustTicketSpend, readTicketSpend, tryReserveTicket } from "./report";
+import { adjustTicketSpend, tryReserveTicket } from "./report";
 import { bindingFromFixture, scoreCase, type CatalogBinding, type ObservedTool, type TextBlock } from "./score";
 import {
   createEvalStores,
@@ -86,32 +86,30 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
         cursor += 1;
         const evalCase = options.cases[index];
         if (!evalCase) return;
-        const admitted = await budget.admit();
+        const holds = { open: 0 };
+        const admitted = await budget.admit(holds);
         if (!admitted) {
           aborted = { reason: budget.ticketBlocked ? "ticket budget" : "budget" };
           return;
         }
         let caseMicros = BigInt(0);
-        let unresolvedAttempt = false;
+        let threw = false;
         try {
-          const outcome = await attemptStore.run(`case:${evalCase.id}`, () => runCase(evalCase, index, created, binding, options, budget, () => aborted, (body) => {
+          const outcome = await attemptStore.run(`case:${evalCase.id}`, () => runCase(evalCase, index, created, binding, options, budget, holds, () => aborted, (body) => {
             if (!firstRequestBody && body) firstRequestBody = body;
           }, stripWatches));
           caseMicros = outcome.costMicros;
           if (outcome.abort) aborted = { reason: outcome.abort };
-          if (outcome.unresolved) {
-            result.unresolvedSpend = true;
-            unresolvedAttempt = true;
-          }
+          if (outcome.unresolved) result.unresolvedSpend = true;
           result.inputTokens += outcome.inputTokens;
           result.outputTokens += outcome.outputTokens;
           result.cases.push(outcome.caseResult);
         } catch (error) {
+          threw = true;
           aborted = { reason: error instanceof Error ? error.message : "worker failed" };
           result.unresolvedSpend = true;
-          unresolvedAttempt = true;
         } finally {
-          await budget.release(unresolvedAttempt, caseMicros);
+          if (holds.open > 0) await budget.finishAttempt(holds, threw, BigInt(0));
           result.spendMicros += caseMicros;
         }
       }
@@ -178,6 +176,7 @@ async function runCase(
   binding: CatalogBinding,
   options: RunEvalOptions,
   budget: Budget,
+  holds: ReserveHolds,
   aborted: () => { reason: string } | null,
   onRequest: (body: Record<string, unknown> | null) => void,
   stripWatches: StripWatch[],
@@ -195,7 +194,7 @@ async function runCase(
   while (attempts < maxAttempts) {
     if (aborted()) break;
     if (attempts > 0) {
-      const again = await budget.admitRetry();
+      const again = await budget.admitRetry(holds);
       if (!again) return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, "budget", true, inputTokens, outputTokens, unresolved);
     }
     attempts += 1;
@@ -204,7 +203,7 @@ async function runCase(
     cost += outcome.costMicros;
     inputTokens += outcome.inputTokens;
     outputTokens += outcome.outputTokens;
-    await budget.settleAttempt(outcome.costMicros);
+    await budget.finishAttempt(holds, outcome.unresolved, outcome.costMicros);
     if (outcome.sticky) sticky = true;
     unresolved = unresolved || outcome.unresolved;
     provenance.push(...outcome.caseResult.requestProvenance);
@@ -891,11 +890,14 @@ function attemptLogs(id: string): string[] {
   return logLines.get(id) ?? [];
 }
 
+interface ReserveHolds {
+  open: number;
+}
+
 interface Budget {
-  admit: () => Promise<boolean>;
-  admitRetry: () => Promise<boolean>;
-  settleAttempt: (actual: bigint) => Promise<void>;
-  release: (unresolved?: boolean, knownMicros?: bigint) => Promise<void>;
+  admit: (holds: ReserveHolds) => Promise<boolean>;
+  admitRetry: (holds: ReserveHolds) => Promise<boolean>;
+  finishAttempt: (holds: ReserveHolds, unresolved: boolean, knownMicros: bigint) => Promise<void>;
   ticketBlocked: boolean;
 }
 
@@ -914,7 +916,7 @@ function createBudget(options: RunEvalOptions): Budget {
     get ticketBlocked() {
       return ticketBlocked;
     },
-    admit: () => run(() => {
+    admit: (holds) => run(() => {
       const overTicket = ticketUsed() + RESERVE_MICROS > options.ticketCapMicros;
       const overRun = spent + inflight + RESERVE_MICROS > options.maxMicros;
       if (overTicket || overRun) {
@@ -926,26 +928,33 @@ function createBudget(options: RunEvalOptions): Budget {
         return false;
       }
       inflight += RESERVE_MICROS;
+      holds.open += 1;
       return true;
     }),
-    admitRetry: () => run(() => {
-      const overTicket = ticketUsed() > options.ticketCapMicros || (options.ticketSpendPath ? readTicketSpend(options.ticketSpendPath) > options.ticketCapMicros : false);
-      const overRun = spent + inflight > options.maxMicros;
+    admitRetry: (holds) => run(() => {
+      const overTicket = ticketUsed() + RESERVE_MICROS > options.ticketCapMicros;
+      const overRun = spent + inflight + RESERVE_MICROS > options.maxMicros;
       if (overTicket || overRun) {
         ticketBlocked = overTicket;
         return false;
       }
+      if (options.ticketSpendPath && !tryReserveTicket(RESERVE_MICROS, options.ticketCapMicros, options.ticketSpendPath)) {
+        ticketBlocked = true;
+        return false;
+      }
+      inflight += RESERVE_MICROS;
+      holds.open += 1;
       return true;
     }),
-    settleAttempt: (actual) => run(() => {
-      const safe = actual < BigInt(0) ? BigInt(0) : actual;
+    finishAttempt: (holds, unresolved, knownMicros) => run(() => {
+      if (holds.open <= 0) return;
+      holds.open -= 1;
+      const safe = knownMicros < BigInt(0) ? BigInt(0) : knownMicros;
       spent += safe;
-      if (options.ticketSpendPath) adjustTicketSpend(safe, options.ticketSpendPath);
-    }),
-    release: (unresolved = false, knownMicros = BigInt(0)) => run(() => {
+      if (options.ticketSpendPath && safe > BigInt(0)) adjustTicketSpend(safe, options.ticketSpendPath);
       if (inflight >= RESERVE_MICROS) inflight -= RESERVE_MICROS;
       else inflight = BigInt(0);
-      if (unresolved && knownMicros <= BigInt(0)) {
+      if (unresolved && safe <= BigInt(0)) {
         spent += RESERVE_MICROS;
         return;
       }

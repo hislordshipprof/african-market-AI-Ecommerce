@@ -80,10 +80,10 @@ const LINE_FIELDS = new Set(["line_id"]);
 
 export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: string[]): ScoreOutput {
   const assignment = assignGroups(input.cart, input.evalCase, binding);
-  const precisionDenominator = input.cart.length === 0 ? 1 : input.cart.length;
-  const precisionNumerator = input.cart.length === 0 ? 1 : assignment.acceptable;
-  const recallDenominator = input.evalCase.mustHave.length === 0 ? 1 : input.evalCase.mustHave.length;
-  const recallNumerator = input.evalCase.mustHave.length === 0 ? 1 : assignment.satisfied;
+  const precisionDenominator = input.cart.length;
+  const precisionNumerator = input.cart.length === 0 ? 0 : assignment.acceptable;
+  const recallDenominator = input.evalCase.mustHave.length;
+  const recallNumerator = input.evalCase.mustHave.length === 0 ? 0 : assignment.satisfied;
   const hallucinated = collectHallucinations(input, binding);
   const ungroundedAmountsShown = input.savedTexts.flatMap((block) => disallowedAmounts(block, input, binding));
   const temporalViolations = input.observedTexts.flatMap((block) => disallowedAmounts(block, input, binding));

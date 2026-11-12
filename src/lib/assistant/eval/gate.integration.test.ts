@@ -4,6 +4,7 @@ import { canonicalJson } from "./canonical";
 import { assessReport, checkCommittedEval } from "./gate";
 import { formatUsdFromMicros } from "./money";
 import { summarize } from "./report";
+import { scoreCase, type CatalogBinding, type ScoreOutput } from "./score";
 import { fingerprintFromParts, type Fingerprint } from "./fingerprint";
 import type { EvalReport } from "./report";
 import type { CaseResult, EvalCase } from "./types";
@@ -117,6 +118,73 @@ function report(cases: CaseResult[], current = fingerprint(), extra: Partial<Eva
   };
 }
 
+function twoPackBinding(): CatalogBinding {
+  const pack = (key: string, variantKey: string) => ({
+    id: variantKey,
+    key: variantKey,
+    listingKey: key,
+    listingId: key,
+    store: "A" as const,
+    priceCents: 100,
+  });
+  const garri = pack("garri", "garri-pack");
+  const rice = pack("rice", "rice-pack");
+  const listing = (key: string) => ({
+    id: key,
+    key,
+    store: "A" as const,
+    confidence: 1,
+    stockMode: "unlimited",
+    qty: null,
+    status: null,
+    active: true,
+  });
+  return {
+    byListingKey: new Map([["garri", listing("garri")], ["rice", listing("rice")]]),
+    byVariantKey: new Map([["garri-pack", garri], ["rice-pack", rice]]),
+    byListingId: new Map([["garri", "garri"], ["rice", "rice"]]),
+    byVariantId: new Map([["garri-pack", garri], ["rice-pack", rice]]),
+    aListingIds: new Set(["garri", "rice"]),
+    aVariantIds: new Set(["garri-pack", "rice-pack"]),
+    bListingIds: new Set(),
+    bVariantIds: new Set(),
+    minimumOrderCents: 1500,
+  };
+}
+
+function caseFromScore(id: string, category: CaseResult["category"], scored: ScoreOutput, gapRequired: boolean): CaseResult {
+  return {
+    id,
+    category,
+    pass: scored.pass,
+    reason: scored.reason,
+    attempts: 1,
+    precision: scored.precision,
+    recall: scored.recall,
+    precisionNumerator: scored.precisionNumerator,
+    precisionDenominator: scored.precisionDenominator,
+    recallNumerator: scored.recallNumerator,
+    recallDenominator: scored.recallDenominator,
+    hallucinated: scored.hallucinated,
+    strippedAmounts: [],
+    ungroundedAmountsShown: scored.ungroundedAmountsShown,
+    temporalViolations: scored.temporalViolations,
+    gapsReported: scored.gapsReported,
+    safetyFailures: scored.safetyFailures,
+    stickyIntegrity: false,
+    finalCart: [],
+    steps: 1,
+    stepLimitHit: false,
+    toolInputErrors: 0,
+    quantityChecks: 0,
+    quantityHits: 0,
+    gapRequired,
+    costMicros: "0",
+    anthropicRequestIds: [`req_${id}`],
+    requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${id}` }],
+  };
+}
+
 describe("shopper assistant eval gate", () => {
   it("rejects stale fingerprints malformed evidence and inconsistent summaries", () => {
     const current = fingerprint("current prompt");
@@ -221,6 +289,57 @@ describe("shopper assistant eval gate", () => {
     }).reasons.join(" ")).toContain("cart does not match unmet");
   });
 
+  it("empty gap cases do not dilute one wrong cart in the micro averages", () => {
+    const binding = twoPackBinding();
+    const wrong = scoreCase({
+      evalCase: {
+        id: "asked-garri",
+        category: "single-item",
+        turns: ["Add garri."],
+        mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+        mayHave: [],
+        gaps: [],
+      },
+      cart: [{ key: "rice", variantKey: "rice-pack", qty: 1, swapRule: "exact_only", substituteVariantKey: null }],
+      tools: [],
+      savedTexts: [],
+      observedTexts: [],
+      strippedAmounts: [],
+      successfulWriteTurns: [],
+      returnedLineIds: [],
+      cartLineIds: [],
+      stepLimitHit: false,
+    }, binding, []);
+    const gaps = Array.from({ length: 9 }, (_, index) => scoreCase({
+      evalCase: {
+        id: `gap-${index}`,
+        category: "out-of-stock",
+        turns: ["Add the missing one."],
+        mustHave: [],
+        mayHave: [],
+        gaps: [{ mention: ["unavailable"] }],
+      },
+      cart: [],
+      tools: [],
+      savedTexts: [],
+      observedTexts: [],
+      strippedAmounts: [],
+      successfulWriteTurns: [],
+      returnedLineIds: [],
+      cartLineIds: [],
+      stepLimitHit: false,
+    }, binding, ["That one is unavailable."]));
+    const cases = [caseFromScore("asked-garri", "single-item", wrong, false), ...gaps.map((item, index) => caseFromScore(`gap-${index}`, "out-of-stock", item, true))];
+    const verdict = assessReport(report(cases), {
+      fingerprint: fingerprint(),
+      caseIds: cases.map((item) => item.id),
+      model: "claude-haiku-5-5",
+    });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reasons).toContain("micro precision below 0.90");
+    expect(verdict.reasons).toContain("micro recall below 0.85");
+  });
+
   it.skipIf(!hasDb)("uses only the injected fake under hosted CI and with inherited local live flags", async () => {
     vi.stubEnv("E2E_FAKE_ASSISTANT", "1");
     vi.stubEnv("CI", "true");
@@ -254,6 +373,7 @@ describe("shopper assistant eval gate", () => {
     expect(probeModel).toBe("claude-sonnet-5-5");
     expect(spy).not.toHaveBeenCalled();
     expect(verdict.reasons.join(" ")).not.toContain("api.anthropic.com");
+    expect(verdict.ok).toBe(true);
     expect(evalConfig.test?.include).toEqual(["src/lib/assistant/eval/live.entry.ts"]);
     expect(JSON.stringify(baseConfig.test?.include)).not.toContain("live.entry");
     spy.mockRestore();

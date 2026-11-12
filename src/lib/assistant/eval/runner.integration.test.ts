@@ -847,6 +847,34 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(result.result.complete).toBe(false);
   }, 60_000);
 
+  it("a billed retry keeps the reserve for the request that reported no usage", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    const dir = mkdtempSync(join(tmpdir(), "eval-ticket-"));
+    const ticket = join(dir, "ticket-spend.json");
+    writeFileSync(ticket, "{\"schemaVersion\":1,\"micros\":\"0\",\"usd\":\"0.000000\"}\n");
+    const result = await run([evalCase({
+      id: "retry-after-reset",
+      category: "single-item",
+      turns: ["Add garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    })], listings, (ctx) => {
+      if (ctx.attempt === 1) return async () => { throw new Error("socket reset after request was sent"); };
+      return createFakeAnthropicFetch({
+        expectedKey: KEY,
+        steps: [
+          { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: ctx.binding.byVariantKey.get("garri-pack")?.id ?? "", qty: 1 }] }, inputTokens: 1000, outputTokens: 2 },
+          { kind: "text", text: "Added garri.", inputTokens: 20, outputTokens: 2 },
+        ],
+      }).fetch;
+    }, { maxAttempts: 2, ticketSpendPath: ticket });
+    const saved = JSON.parse(readFileSync(ticket, "utf8")) as { micros: string };
+    expect(result.result.spendMicros > BigInt(0)).toBe(true);
+    expect(result.result.unresolvedSpend).toBe(true);
+    expect(saved.micros).toBe((BigInt(150000) + result.result.spendMicros).toString());
+  }, 90_000);
+
   it("records a truncated attempt's measured cost without also keeping the reserve", async () => {
     const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
     const dir = mkdtempSync(join(tmpdir(), "eval-ticket-"));
