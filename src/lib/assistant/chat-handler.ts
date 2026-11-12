@@ -234,7 +234,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     let modelMessages: ModelMessage[];
     try {
       let attachmentIndex = 0;
-      modelMessages = await convertToModelMessages(sentHistory, {
+      modelMessages = await convertToModelMessages(withoutReasoning(sentHistory), {
         tools,
         convertDataPart: (part) => {
           if (part.type !== "data-attachment") return undefined;
@@ -510,6 +510,18 @@ function coerceToolInputs(messages: UIMessage[]): UIMessage[] {
       return part;
     }),
   }));
+}
+
+/**
+ * Earlier turns' thinking blocks are left out. Their signatures bind them to the
+ * exact system prompt and messages of that turn, which the next turn changes.
+ */
+function withoutReasoning(messages: UIMessage[]): UIMessage[] {
+  return messages.flatMap((message) => {
+    if (message.role !== "assistant") return [message];
+    const parts = message.parts.filter((part) => part.type !== "reasoning");
+    return parts.length === 0 ? [] : [{ ...message, parts }];
+  });
 }
 
 async function usableHistory(messages: UIMessage[], tools: ReturnType<typeof assistantTools>): Promise<UIMessage[]> {
