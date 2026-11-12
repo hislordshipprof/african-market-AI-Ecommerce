@@ -1674,6 +1674,47 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(actions).toHaveLength(0);
   });
 
+  it("a photo list reports what was found and the gaps, and the next yes adds the found items", async () => {
+    const png = readFileSync(new URL("./fixtures/sample.png", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    const fake = createFakeAnthropicFetch({
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "egusi" } },
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "ugu leaves" } },
+        { kind: "text", text: "From your list I found Egusi. Ugu leaves is not carried here. Want me to add these?" },
+        { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: variantId, qty: 1 }] } },
+        { kind: "text", text: "Added 1 Egusi." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const send = (id: string, parts: unknown[]) => handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.181",
+        cookie,
+      },
+      body: JSON.stringify({ message: { id, role: "user", parts } }),
+    }));
+    const photo = await send("photo-list-01", [
+      { type: "text", text: "here is my list" },
+      { type: "file", mediaType: "image/png", filename: "list.png", url: `data:image/png;base64,${png.toString("base64")}` },
+    ]);
+    const photoBody = await photo.text();
+    expect(photo.status, photoBody).toBe(200);
+    expect(photoBody).toContain("Ugu leaves is not carried here");
+    expect(await storeScoped(storeId).cartLine.count({ where: { cartId: cart.id } })).toBe(0);
+    const yes = await send("photo-list-02", [{ type: "text", text: "yes" }]);
+    expect(yes.status, await yes.text()).toBe(200);
+    const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId: cart.id } });
+    expect(lines.map((line) => [line.variantId, line.qty])).toEqual([[variantId, 1]]);
+  });
+
   it("files reach the model only on their own turn and are never saved", async () => {
     const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
     const pdf = readFileSync(new URL("./fixtures/two-page.pdf", import.meta.url));
