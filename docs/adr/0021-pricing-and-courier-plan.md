@@ -1,6 +1,6 @@
 # 21. Pricing: where the platform earns money, and the courier plan
 
-Date: 2026-11-12 · Status: **proposed** (owner to decide) · Refines spec D3 and open questions 2 and 4; touches ADR-0006
+Date: 2026-11-12 · Status: **accepted** 2026-11-12 (owner accepted the recommended option in full) · Refines spec D3 and open questions 2 and 4; touches ADR-0006
 
 ## Where we are today
 The platform earns **$0 per order**.
@@ -70,7 +70,7 @@ Store delivery and Pickup already cover stores with their own drivers and orders
 - written US pricing for a platform account;
 - each provider's grocery weight limit, in writing.
 
-## Decisions for the owner
+## Decisions (accepted 2026-11-12: items 1–4 as recommended; 5 and 6 are open tasks before launch)
 1. The subscription tiers and prices ($49 / $99), and the pilot offer (3 months free for 5 stores).
 2. The per-order fee: who pays (the customer, recommended, or the store), and the amount (3%, $0.99 min, $2.99 max).
 3. Delivery: keep it at cost, no markup (recommended), or add a fee.
@@ -78,7 +78,7 @@ Store delivery and Pickup already cover stores with their own drivers and orders
 5. Validate 1–2 with 3–5 store owners before launch (spec open question 2).
 6. Tax: confirm with the tax advisor whether a customer service fee changes the marketplace-facilitator position (spec open question 3).
 
-## Consequences once accepted
+## Consequences
 - Spec D3, §10 (charge model) and §18 open questions 2 and 4 are updated.
-- New tickets: Stripe Billing subscriptions; the service fee in checkout, cart, receipts and payouts; the card-fee split in `platform-fee.ts`.
+- New tickets: #494 (Stripe Billing subscriptions, plan features, pilot offer) and #495 (the service fee in cart, checkout, receipts and payouts, plus the card-fee split in `platform-fee.ts`).
 - `PLATFORM_PER_ORDER_FEE_CENTS` is replaced by the service-fee rule.
