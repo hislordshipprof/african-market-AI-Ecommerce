@@ -15,8 +15,9 @@ const RANK: Record<OrderNotifyEvent, number> = {
   completed: 4,
   cancelled: 5,
   refunded: 6,
-  // Not a status step: it never supersedes one, and skipReason never skips it.
+  // Not status steps: they never supersede one. skipReason never skips a reply.
   store_replied: -1,
+  substitution: -1,
 };
 const CANCEL_STATUSES = new Set(["CANCELLING", "CANCELLED", "REFUND_FAILED"]);
 const loggedUrl = new Set<string>();
@@ -155,6 +156,8 @@ async function higherSent(
 
 function skipReason(event: OrderNotifyEvent, status: string, blockedByLater: boolean): string | null {
   if (event === "store_replied") return null;
+  // A prompt is only worth sending while the order still waits for the answer.
+  if (event === "substitution") return status === "SUBSTITUTION_PENDING" ? null : "superseded";
   if (event !== "cancelled" && CANCEL_STATUSES.has(status)) return "superseded";
   if (event !== "placed" && blockedByLater) return "superseded";
   return null;
@@ -170,7 +173,7 @@ async function runChannel(
   const claimed = await claim(storeId, order.id, event, channel.kind);
   if (!claimed) return { status: "unchanged", reason: null };
   const url = order.trackingToken
-    ? orderTrackingUrl(order.store, order.trackingToken, env)
+    ? orderTrackingUrl(order.store, order.trackingToken, env, event === "substitution" ? "/substitutions" : "")
     : null;
   if (!url) {
     if (!loggedUrl.has("tracking_url_unavailable")) {

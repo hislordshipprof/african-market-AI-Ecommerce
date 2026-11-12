@@ -26,7 +26,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { createListingAction, deactivateListingAction, updateListingAction } from "../listing/actions";
-import { acceptOrderAction, markLinePickedAction } from "../order/actions";
+import { acceptOrderAction, markLinePickedAction, markLineShortAction } from "../order/actions";
 import { csvCommitAction } from "../listing/csv-import-actions";
 import { inviteMemberAction, removeMemberAction } from "../store-admin/actions";
 import { setStoreStatus } from "../admin/actions";
@@ -316,11 +316,13 @@ describe("action authorization", () => {
       expect(accepted.ok).toBe(false);
       const picked = await markLinePickedAction(lineId);
       expect(picked.ok).toBe(false);
+      expect(await markLineShortAction(lineId, 0)).toEqual({ ok: false, error: "Order line not found" });
       const order = await storeScoped(storeB).order.findUnique({ where: { id: orderId } });
       const line = await storeScoped(storeB).orderLine.findUnique({ where: { id: lineId } });
       expect(order?.status).toBe("AUTHORIZED");
       expect(line?.status).toBe("pending");
       expect(line?.qtyPicked).toBe(0);
+      expect(await storeScoped(storeB).substitutionRequest.count({ where: { orderLineId: lineId } })).toBe(0);
     });
   });
 

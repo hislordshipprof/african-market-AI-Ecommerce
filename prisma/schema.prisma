@@ -57,6 +57,7 @@ model Store {
   orders          Order[]
   refundRequests  RefundRequest[]
   issueReports    IssueReport[]
+  substitutionRequests SubstitutionRequest[]
   listingImports  ListingImport[]
   aiConversations AiConversation[]
   aiActions       AiAction[]
@@ -408,6 +409,8 @@ model ListingVariant {
   substituteCartLines      CartLine[]  @relation("substituteVariant")
   orderLines               OrderLine[]
   substituteOrderLines     OrderLine[] @relation("substituteOrderLine")
+  substitutedOrderLines    OrderLine[] @relation("substitutedOrderLine")
+  substitutionProposals    SubstitutionRequest[]
 
   @@index([listingId])
   @@map("listing_variants")
@@ -928,6 +931,7 @@ model Order {
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
   supportThreads SupportThread[]
+  substitutionRequests SubstitutionRequest[]
 
   @@unique([id, storeId])
   @@unique([storeId, number])
@@ -1082,18 +1086,51 @@ model OrderLine {
   unitPriceCents      Int      @map("unit_price_cents")
   swapRule            String   @default("exact_only") @map("swap_rule")
   status              String   @default("pending")
+  /// The variant the customer's answer or swap rule put in for the units found short (#13).
+  substitutedVariantId      String? @map("substituted_variant_id")
+  substitutedUnitPriceCents Int?    @map("substituted_unit_price_cents")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
 
   order              Order          @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
   listingVariant     ListingVariant @relation(fields: [listingVariantId], references: [id])
   substituteVariant  ListingVariant? @relation("substituteOrderLine", fields: [substituteVariantId], references: [id], onDelete: Restrict)
+  substitutedVariant ListingVariant? @relation("substitutedOrderLine", fields: [substitutedVariantId], references: [id], onDelete: Restrict)
+  substitutionRequest SubstitutionRequest?
 
   @@index([storeId])
   @@index([orderId])
   @@index([listingVariantId])
   @@index([substituteVariantId])
+  @@index([substitutedVariantId])
   @@map("order_lines")
+}
+
+/// One customer prompt for one short line (#13). Status: pending, approved, declined, timed_out.
+model SubstitutionRequest {
+  id                     String    @id @default(cuid())
+  storeId                String    @map("store_id")
+  orderId                String    @map("order_id")
+  orderLineId            String    @unique @map("order_line_id")
+  /// Null when only a refund is offered.
+  proposedVariantId      String?   @map("proposed_variant_id")
+  proposedUnitPriceCents Int?      @map("proposed_unit_price_cents")
+  /// Units found short: a swap replaces this many.
+  qty                    Int
+  status                 String    @default("pending")
+  expiresAt              DateTime  @map("expires_at")
+  answeredAt             DateTime? @map("answered_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  store           Store           @relation(fields: [storeId], references: [id])
+  order           Order           @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  orderLine       OrderLine       @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  proposedVariant ListingVariant? @relation(fields: [proposedVariantId], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([orderId])
+  @@index([proposedVariantId])
+  @@map("substitution_requests")
 }
 
 model ListingImport {

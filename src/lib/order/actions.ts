@@ -7,6 +7,7 @@ import {
   getStoreOrders,
   acceptOrder,
   markLinePicked,
+  markLineShort,
   markReady,
   completePickup,
   markOutForDelivery,
@@ -50,6 +51,7 @@ const ALLOWED_STAFF_ERRORS = new Set([
   "Payment authorization expired or was voided — order cancelled; contact the customer",
   "Payment authorization was released — order cancelled; contact the customer",
   "Order status changed during cancellation",
+  "Quantity found must be a whole number below the quantity ordered",
   STORE_DELIVERY_ONLY,
   PROOF_PHOTO_MISSING,
   PROOF_PHOTO_NOT_IMAGE,
@@ -69,6 +71,7 @@ function isAllowListed(message: string): boolean {
     message.startsWith("Cannot mark ready for order in status ") ||
     message.startsWith("Cannot accept order in status ") ||
     message.startsWith("Cannot pick lines for order in status ") ||
+    message.startsWith("Cannot mark lines short for order in status ") ||
     message.startsWith("Cannot complete pickup for order in status ") ||
     message.startsWith("Cannot send out for delivery in status ") ||
     message.startsWith("Cannot mark delivered in status ") ||
@@ -150,6 +153,15 @@ export async function markLinePickedAction(lineId: string) {
   const id = parseInput(orderIdSchema, lineId);
   if (!id.ok) return { ok: false as const, error: "Order line not found" };
   return runStaffAction("markLinePicked", id.data, () => markLinePicked(session.store.id, id.data));
+}
+
+export async function markLineShortAction(lineId: string, qtyFound: number) {
+  const session = await requireStoreMember();
+  const id = parseInput(orderIdSchema, lineId);
+  const found = parseInput(z.number().int().min(0).max(100_000), qtyFound);
+  if (!id.ok) return { ok: false as const, error: "Order line not found" };
+  if (!found.ok) return { ok: false as const, error: "Quantity found must be a whole number below the quantity ordered" };
+  return runStaffAction("markLineShort", id.data, () => markLineShort(session.store.id, id.data, found.data));
 }
 
 export async function markReadyAction(orderId: string) {

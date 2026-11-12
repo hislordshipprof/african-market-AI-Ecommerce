@@ -140,7 +140,7 @@ describe("sweep configuration", () => {
       const step = makeFakeStep();
       const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
       await handler({ step });
-      expect(step.runs).toEqual(["find-orphaned", "find-pick-timeouts", "release-orphan-holds"]);
+      expect(step.runs).toEqual(["find-orphaned", "find-pick-timeouts", "find-expired-substitutions", "release-orphan-holds"]);
     } finally {
       vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
       vi.mocked(dbModule.findPendingOrderNotifications).mockRestore();

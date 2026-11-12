@@ -111,7 +111,7 @@ export function httpsLogo(url: string | null): string | null {
 }
 
 /** Pickup is Awaiting pickup. Delivery is Ready. Matches fulfilledStatus(). */
-export function statusForEvent(event: Exclude<OrderNotifyEvent, "store_replied">, fulfillment: string): string {
+export function statusForEvent(event: Exclude<OrderNotifyEvent, "store_replied" | "substitution">, fulfillment: string): string {
   switch (event) {
     case "placed":
       return "AUTHORIZED";
@@ -217,6 +217,7 @@ export type RenderedMessage = {
 /** The subject and first line: the order status, or that the store answered the customer's message. */
 function headline(order: NotifyOrder, event: OrderNotifyEvent): string {
   if (event === "store_replied") return "The store replied";
+  if (event === "substitution") return "An item is short: choose a swap or a refund";
   // A refund can be part of the order, so its message never reads as the order status.
   if (event === "refunded") return "Refund issued";
   return customerStatusLabel(statusForEvent(event, order.fulfillment));
@@ -242,7 +243,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   }
   parts.push(`<p>${escapeHtml(status)}. Order #${order.number}.</p>`);
   if (around) parts.push(`<p>Ready around ${escapeHtml(around)}.</p>`);
-  if (event !== "cancelled" && event !== "store_replied" && event !== "refunded") parts.push(`<ul>${lineRows(order, event)}</ul>`);
+  if (event !== "cancelled" && event !== "store_replied" && event !== "refunded" && event !== "substitution") parts.push(`<ul>${lineRows(order, event)}</ul>`);
   if (event === "placed" || event === "accepted") {
     const estimate = order.subtotalCents + order.tipCents + order.deliveryFeeCents;
     parts.push(`<p>Estimated total ${escapeHtml(money(estimate))}.</p>`);
@@ -264,8 +265,10 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
     parts.push(`<p>${escapeHtml(cancelCopy(order))}</p>`);
   } else if (event === "refunded") {
     parts.push(`<p>Your refund is on its way to your card. Banks usually take 5 to 10 business days to show it.</p>`);
+  } else if (event === "substitution") {
+    parts.push(`<p>The store could not find everything you ordered. You have 10 minutes to choose; after that your swap preference applies.</p>`);
   }
-  const linkText = event === "store_replied" ? "Read the reply" : "Track your order";
+  const linkText = event === "store_replied" ? "Read the reply" : event === "substitution" ? "Choose now" : "Track your order";
   parts.push(`<p><a href="${escapeHtml(url)}">${linkText}</a></p>`);
   parts.push(`</div>`);
   parts.push(`<p style="font-size:12px">Powered by the Platform</p>`);
@@ -281,6 +284,9 @@ export function renderSms(order: NotifyOrder, event: OrderNotifyEvent, url: stri
   const name = smsStoreName(order.store.name);
   if (event === "store_replied") {
     return { to: order.customer.phone ?? "", text: `${name}: The store replied about order #${order.number}. Read it: ${url}` };
+  }
+  if (event === "substitution") {
+    return { to: order.customer.phone ?? "", text: `${name}: an item in order #${order.number} is short. Choose a swap or refund within 10 min: ${url}` };
   }
   const status = headline(order, event);
   let text = `${name}: order #${order.number} ${status}. Track it: ${url}`;
