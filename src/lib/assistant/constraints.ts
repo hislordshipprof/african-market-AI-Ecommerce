@@ -8,8 +8,9 @@ import { resolveIngredients } from "../catalog/ingredients";
 export interface ShopperConstraints {
   avoidAllergens: Allergen[];
   requireClaims: DietaryClaim[];
-  /** An ingredient term with no known ingredient keeps a null id: nothing can be checked against it. */
-  avoidIngredients: Array<{ term: string; ingredientId: string | null }>;
+  avoidIngredients: Array<{ term: string; ingredientId: string }>;
+  /** One form of a known ingredient the customer would rather skip, such as fresh tomato. It gates nothing. */
+  preferences: string[];
   /** Listings refused as unknown, by the user message whose turn refused them. */
   asked: Record<string, string>;
   /** Unknown listings the customer confirmed, one at a time. */
@@ -18,7 +19,7 @@ export interface ShopperConstraints {
 
 export type ConstraintStatus = "ok" | "excluded" | "unknown";
 
-const EMPTY: ShopperConstraints = { avoidAllergens: [], requireClaims: [], avoidIngredients: [], asked: {}, confirmed: [] };
+const EMPTY: ShopperConstraints = { avoidAllergens: [], requireClaims: [], avoidIngredients: [], preferences: [], asked: {}, confirmed: [] };
 
 function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -37,28 +38,24 @@ export function parseConstraints(raw: unknown): ShopperConstraints {
     avoidIngredients: ingredients.flatMap((item) => {
       if (!item || typeof item !== "object") return [];
       const row = item as { term?: unknown; ingredientId?: unknown };
-      if (typeof row.term !== "string") return [];
-      return [{ term: row.term, ingredientId: typeof row.ingredientId === "string" ? row.ingredientId : null }];
+      if (typeof row.term !== "string" || typeof row.ingredientId !== "string") return [];
+      return [{ term: row.term, ingredientId: row.ingredientId }];
     }),
+    preferences: strings(record.preferences),
     asked,
     confirmed: Array.isArray(record.confirmed) ? record.confirmed as ShopperConstraints["confirmed"] : [],
   };
 }
 
-/** Only constraints that can be checked; an unresolved ingredient term cannot. */
 export function hasConstraints(constraints: ShopperConstraints): boolean {
   return Object.values(shopperNeed(constraints)).some((values) => values.length > 0);
-}
-
-export function cannotCheck(constraints: ShopperConstraints): string[] {
-  return constraints.avoidIngredients.filter((item) => !item.ingredientId).map((item) => item.term);
 }
 
 export function shopperNeed(constraints: ShopperConstraints): ShopperNeed {
   return {
     avoidAllergens: constraints.avoidAllergens,
     requireClaims: constraints.requireClaims,
-    avoidIngredientIds: constraints.avoidIngredients.flatMap((item) => (item.ingredientId ? [item.ingredientId] : [])),
+    avoidIngredientIds: constraints.avoidIngredients.map((item) => item.ingredientId),
   };
 }
 
@@ -91,35 +88,73 @@ export async function updateConstraints(
   });
 }
 
-/** Adds and removes constraints. Ingredient terms resolve through the ingredient names and synonyms. */
+/**
+ * Known ingredients whose name or synonym the term contains, or that contain the term, with the catalog
+ * search's English text match: "fresh tomato" finds tomato. They are only offered in a question, never enforced.
+ */
+async function closestIngredients(tx: ScopedTx, term: string): Promise<string[]> {
+  const rows = await tx.$queryRaw<Array<{ name: string }>>(Prisma.sql`
+    SELECT i.name FROM ingredients i
+    WHERE EXISTS (
+      SELECT 1 FROM (SELECT i.name AS known UNION ALL SELECT s.term FROM ingredient_synonyms s WHERE s.ingredient_id = i.id) k
+      WHERE to_tsvector('english', unaccent(${term})) @@ plainto_tsquery('english', unaccent(k.known))
+         OR to_tsvector('english', unaccent(k.known)) @@ plainto_tsquery('english', unaccent(${term}))
+    )
+    ORDER BY similarity(i.name, ${term}) DESC, i.name
+    LIMIT 3
+  `);
+  return rows.map((row) => row.name);
+}
+
+export interface ConstraintChange {
+  constraints: ShopperConstraints;
+  /** Terms that name no known ingredient but are close to one: the customer chooses all of it or only that form. */
+  ask: Array<{ term: string; closest: string[] }>;
+  /** Terms close to no known ingredient: this store's product data cannot check them. */
+  cannotCheck: string[];
+}
+
+/**
+ * Adds and removes constraints. An ingredient term that is a known name or synonym is a hard constraint.
+ * A term only close to one is kept as a preference until the customer says it means all of it.
+ */
 export async function changeConstraints(
   storeId: string,
   conversationId: string,
   input: { avoidAllergens: Allergen[]; requireClaims: DietaryClaim[]; avoidIngredients: string[]; remove: string[] },
-): Promise<ShopperConstraints> {
-  return updateConstraints(storeId, conversationId, async (constraints, tx) => {
-    const resolved = await Promise.all(input.avoidIngredients.map(async (term) => {
-      const found = await resolveIngredients(tx, [term], { create: false });
-      return { term: term.trim().toLowerCase(), ingredientId: found.ids[0] ?? null };
-    }));
+): Promise<ConstraintChange> {
+  const ask: ConstraintChange["ask"] = [];
+  const unchecked: string[] = [];
+  const constraints = await updateConstraints(storeId, conversationId, async (constraints, tx) => {
     constraints.avoidAllergens = [...new Set([...constraints.avoidAllergens, ...input.avoidAllergens])];
     constraints.requireClaims = [...new Set([...constraints.requireClaims, ...input.requireClaims])];
-    for (const item of resolved) {
-      if (item.term === "") continue;
-      if (constraints.avoidIngredients.some((kept) => kept.term === item.term)) continue;
-      constraints.avoidIngredients.push(item);
+    for (const raw of input.avoidIngredients) {
+      const term = raw.trim().toLowerCase();
+      if (term === "") continue;
+      const found = await resolveIngredients(tx, [term], { create: false });
+      const ingredientId = found.ids[0];
+      if (ingredientId) {
+        if (!constraints.avoidIngredients.some((kept) => kept.term === term)) constraints.avoidIngredients.push({ term, ingredientId });
+        continue;
+      }
+      const closest = await closestIngredients(tx, term);
+      if (closest.length === 0) {
+        unchecked.push(term);
+        continue;
+      }
+      ask.push({ term, closest });
+      if (!constraints.preferences.includes(term)) constraints.preferences.push(term);
     }
     const removed = new Set(input.remove.map((name) => name.trim().toLowerCase()));
     constraints.avoidAllergens = constraints.avoidAllergens.filter((name) => !removed.has(name));
     constraints.requireClaims = constraints.requireClaims.filter((name) => !removed.has(name));
     constraints.avoidIngredients = constraints.avoidIngredients.filter((item) => !removed.has(item.term));
+    constraints.preferences = constraints.preferences.filter((term) => !removed.has(term));
   });
+  return { constraints, ask, cannotCheck: unchecked };
 }
 
-/**
- * Each constraint by name: checkNeed on one constraint at a time. An unresolved ingredient has nothing to
- * check against, so it is left out here and reported as cannotCheck instead.
- */
+/** Each constraint by name: checkNeed on one constraint at a time. */
 export function constraintStatuses(attributes: ProductAttributes, constraints: ShopperConstraints): Record<string, ConstraintStatus> {
   const status = (need: ShopperNeed): ConstraintStatus => {
     const result = checkNeed(attributes, need);
@@ -128,9 +163,7 @@ export function constraintStatuses(attributes: ProductAttributes, constraints: S
   const out: Record<string, ConstraintStatus> = {};
   for (const allergen of constraints.avoidAllergens) out[allergen] = status({ avoidAllergens: [allergen] });
   for (const claim of constraints.requireClaims) out[claim] = status({ requireClaims: [claim] });
-  for (const item of constraints.avoidIngredients) {
-    if (item.ingredientId) out[item.term] = status({ avoidIngredientIds: [item.ingredientId] });
-  }
+  for (const item of constraints.avoidIngredients) out[item.term] = status({ avoidIngredientIds: [item.ingredientId] });
   return out;
 }
 

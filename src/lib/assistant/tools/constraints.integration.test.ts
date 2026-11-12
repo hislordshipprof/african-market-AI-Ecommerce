@@ -84,20 +84,53 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     await platformAdmin.ingredient.deleteMany({ where: { id: { in: ingredients } } });
   });
 
-  it("saves constraints from the shopper's words, resolving ingredients by synonym and keeping unresolved terms", async () => {
+  it("saves an ingredient the shopper names by its synonym as a hard constraint, with no question", async () => {
     const ctx = await conversation(storeA);
-    const result = await setShopperNeeds(ctx, {
-      avoid_allergens: ["peanuts"],
-      require_claims: [],
-      avoid_ingredients: [`yellow onion ${suffix}`, `zzunknown ${suffix}`],
-    });
-    expect(result).toMatchObject({ ok: true, cannotCheck: [`zzunknown ${suffix}`] });
+    const result = await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"], avoid_ingredients: [`yellow onion ${suffix}`] });
+    expect(result).toMatchObject({ ok: true, avoidAllergens: ["peanuts"], avoidIngredients: [`yellow onion ${suffix}`] });
+    expect(result).not.toHaveProperty("ask");
+    expect(result).not.toHaveProperty("cannotCheck");
     const saved = await readConstraints(storeA, ctx.conversationId);
     expect(saved.avoidAllergens).toEqual(["peanuts"]);
-    expect(saved.avoidIngredients).toEqual([
-      { term: `yellow onion ${suffix}`, ingredientId: onionId },
-      { term: `zzunknown ${suffix}`, ingredientId: null },
-    ]);
+    expect(saved.avoidIngredients).toEqual([{ term: `yellow onion ${suffix}`, ingredientId: onionId }]);
+  });
+
+  it("an allergen is a hard constraint with no question", async () => {
+    const ctx = await conversation(storeA);
+    const result = await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+    expect(result).not.toHaveProperty("ask");
+    expect(await addToCart(ctx, { items: [{ variant_id: listing.peanut.variantId, qty: 1 }] })).toMatchObject({ code: "excluded" });
+  });
+
+  it("asks about a term that only names a form of a known ingredient: all blocks every form, only that form is a preference", async () => {
+    const ctx = await conversation(storeA);
+    const asked = await setShopperNeeds(ctx, { avoid_ingredients: [`fresh tomato ${suffix}`] });
+    expect(asked).toMatchObject({ ok: true, ask: [{ term: `fresh tomato ${suffix}`, closest: expect.arrayContaining([`tomato ${suffix}`]) }], preferences: [`fresh tomato ${suffix}`] });
+    expect((await readConstraints(storeA, ctx.conversationId)).avoidIngredients).toEqual([]);
+    // Only fresh: a preference gates nothing, so the paste (made of tomato) is added.
+    expect(items(await searchCatalog(ctx, { query: `paste plain ${suffix}` })).find((item) => item.listingId === listing.plain.listingId)?.match).toBe("name");
+    expect(await addToCart(ctx, { items: [{ variant_id: listing.plain.variantId, qty: 1 }] })).toMatchObject({ ok: true, added: 1 });
+
+    // All tomato: a hard constraint on the ingredient blocks the paste.
+    const all = await conversation(storeA);
+    await setShopperNeeds(all, { avoid_ingredients: [`fresh tomato ${suffix}`] });
+    const saved = await setShopperNeeds(all, { avoid_ingredients: [`tomato ${suffix}`] });
+    expect(saved).not.toHaveProperty("ask");
+    expect(await addToCart(all, { items: [{ variant_id: listing.plain.variantId, qty: 1 }] })).toMatchObject({ ok: false, code: "excluded" });
+    expect(items(await searchCatalog(all, { query: `paste plain ${suffix}` })).map((item) => item.listingId)).not.toContain(listing.plain.listingId);
+  });
+
+  it("says once that a term with no close ingredient cannot be checked, and saves nothing for it", async () => {
+    const ctx = await conversation(storeA);
+    const result = await setShopperNeeds(ctx, { avoid_ingredients: [`zzunknown ${suffix}`] });
+    expect(result).toMatchObject({ ok: true, cannotCheck: [`zzunknown ${suffix}`] });
+    expect(result).not.toHaveProperty("ask");
+    const saved = await readConstraints(storeA, ctx.conversationId);
+    expect(saved.avoidIngredients).toEqual([]);
+    expect(saved.preferences).toEqual([]);
+    const search = await searchCatalog(ctx, { query: `paste ${suffix}` });
+    expect(search).not.toHaveProperty("cannotCheck");
+    expect(items(search).find((item) => item.listingId === listing.plain.listingId)?.match).toBe("name");
   });
 
   it("filters search in SQL: excluded never returns, unknown returns marked and not as a fit", async () => {
@@ -109,13 +142,6 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(byId.has(listing.peanut.listingId)).toBe(false);
     expect(byId.get(listing.plain.listingId)).toMatchObject({ match: "name", needs: { peanuts: "ok", [`yellow onion ${suffix}`]: "ok" } });
     expect(byId.get(listing.unknown.listingId)).toMatchObject({ match: "cannot_confirm", needs: { peanuts: "unknown" } });
-
-    // An unresolved term cannot be checked: it is reported, and it does not mark every product unknown.
-    const unchecked = await conversation(storeA);
-    await setShopperNeeds(unchecked, { avoid_ingredients: [`zzunknown ${suffix}`] });
-    const uncheckedResult = await searchCatalog(unchecked, { query: `paste ${suffix}` });
-    expect(uncheckedResult).toMatchObject({ cannotCheck: [`zzunknown ${suffix}`] });
-    expect(items(uncheckedResult).find((item) => item.listingId === listing.plain.listingId)?.match).toBe("name");
 
     const halal = await conversation(storeA);
     await setShopperNeeds(halal, { avoid_allergens: [], require_claims: ["halal"], avoid_ingredients: [] });
