@@ -92,8 +92,8 @@ export async function updateConstraints(
  * Known ingredients whose name or synonym the term contains, or that contain the term, with the catalog
  * search's English text match: "fresh tomato" finds tomato. They are only offered in a question, never enforced.
  */
-async function closestIngredients(tx: ScopedTx, term: string): Promise<string[]> {
-  const rows = await tx.$queryRaw<Array<{ name: string }>>(Prisma.sql`
+async function closestIngredients(storeId: string, term: string): Promise<string[]> {
+  const rows = await storeScopedRawQuery<{ name: string }>(storeId, Prisma.sql`
     SELECT i.name FROM ingredients i
     WHERE EXISTS (
       SELECT 1 FROM (SELECT i.name AS known UNION ALL SELECT s.term FROM ingredient_synonyms s WHERE s.ingredient_id = i.id) k
@@ -125,24 +125,25 @@ export async function changeConstraints(
 ): Promise<ConstraintChange> {
   const ask: ConstraintChange["ask"] = [];
   const unchecked: string[] = [];
-  const constraints = await updateConstraints(storeId, conversationId, async (constraints, tx) => {
+  const known: Array<{ term: string; ingredientId: string }> = [];
+  for (const term of [...new Set(input.avoidIngredients.map((raw) => raw.trim().toLowerCase()))]) {
+    if (term === "") continue;
+    const ingredientId = (await storeScopedTransaction(storeId, (tx) => resolveIngredients(tx, [term], { create: false }))).ids[0];
+    if (ingredientId) {
+      known.push({ term, ingredientId });
+      continue;
+    }
+    const closest = await closestIngredients(storeId, term);
+    if (closest.length > 0) ask.push({ term, closest });
+    else unchecked.push(term);
+  }
+  const constraints = await updateConstraints(storeId, conversationId, (constraints) => {
     constraints.avoidAllergens = [...new Set([...constraints.avoidAllergens, ...input.avoidAllergens])];
     constraints.requireClaims = [...new Set([...constraints.requireClaims, ...input.requireClaims])];
-    for (const raw of input.avoidIngredients) {
-      const term = raw.trim().toLowerCase();
-      if (term === "") continue;
-      const found = await resolveIngredients(tx, [term], { create: false });
-      const ingredientId = found.ids[0];
-      if (ingredientId) {
-        if (!constraints.avoidIngredients.some((kept) => kept.term === term)) constraints.avoidIngredients.push({ term, ingredientId });
-        continue;
-      }
-      const closest = await closestIngredients(tx, term);
-      if (closest.length === 0) {
-        unchecked.push(term);
-        continue;
-      }
-      ask.push({ term, closest });
+    for (const item of known) {
+      if (!constraints.avoidIngredients.some((kept) => kept.term === item.term)) constraints.avoidIngredients.push(item);
+    }
+    for (const { term } of ask) {
       if (!constraints.preferences.includes(term)) constraints.preferences.push(term);
     }
     const removed = new Set(input.remove.map((name) => name.trim().toLowerCase()));
