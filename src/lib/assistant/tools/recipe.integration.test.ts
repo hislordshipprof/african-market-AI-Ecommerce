@@ -10,8 +10,7 @@ import { seedRecipeBase, type SeedRecipe } from "../recipe-base";
 import { WEB_SEARCH_MICROS } from "../cost";
 import { RECIPE_LOOKUPS_PER_STORE_DAY, saveLookedUpRecipe, takeLookupSlot } from "../recipes";
 import { failNextSpendWrites } from "../spend";
-import type { AssistantContext } from "./execute";
-import { setShopperNeeds, type AssistantContext as Ctx } from "./execute";
+import { setShopperNeeds, type AssistantContext } from "./execute";
 import { getRecipe } from "./recipe";
 
 vi.mock("next/cache", () => ({
@@ -60,7 +59,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
   const dish = `kelewele ${suffix}`;
   const ingredientIds: string[] = [];
 
-  async function conversation(storeId: string): Promise<Ctx> {
+  async function conversation(storeId: string): Promise<AssistantContext> {
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "ai" } });
     const talk = await storeScoped(storeId).aiConversation.create({ data: { storeId, cartId: cart.id, model: "claude-haiku-5-5", messages: [] } });
     return { storeId, cartId: cart.id, conversationId: talk.id, actorUserId: null };

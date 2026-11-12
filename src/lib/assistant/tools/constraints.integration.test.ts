@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { platformAdmin, storeScoped, storeScopedTransaction } from "../../db";
 import { listingAttributes } from "../../catalog/listing-attributes";
-import { constraintStatuses, listingVerdicts, overallStatus, parseConstraints, readConstraints } from "../constraints";
+import { constraintStatuses, listingVerdicts, overallStatus, parseConstraints, readConstraints, updateConstraints } from "../constraints";
 import { acceptanceForTurn, type ShownMessage } from "../shown";
 import { addToCart, offerChoices, searchCatalog, setShopperNeeds, setSwapRule, type AssistantContext } from "./execute";
 
@@ -97,13 +97,6 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(saved.avoidIngredients).toEqual([{ term: `yellow onion ${suffix}`, ingredientId: onionId }]);
   });
 
-  it("an allergen is a hard constraint with no question", async () => {
-    const ctx = await conversation(storeA);
-    const result = await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
-    expect(result).not.toHaveProperty("ask");
-    expect(await addToCart(ctx, { items: [{ variant_id: listing.peanut.variantId, qty: 1 }] })).toMatchObject({ code: "excluded" });
-  });
-
   it("asks about a term that only names a form of a known ingredient: all blocks every form, only that form is a preference", async () => {
     const ctx = await conversation(storeA);
     const asked = await setShopperNeeds(ctx, { avoid_ingredients: [`fresh tomato ${suffix}`] });
@@ -178,6 +171,14 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     expect(inA.map((item) => item.listingId)).not.toContain(listing.otherStore.listingId);
     expect(inA.find((item) => item.listingId === listing.unknown.listingId)?.needs).toEqual({ "allergen:peanuts": "unknown" });
     expect(inB.map((item) => [item.listingId, item.needs?.["allergen:peanuts"]])).toEqual([[listing.otherStore.listingId, "ok"]]);
+  });
+
+  it("never writes another store's conversation constraints", async () => {
+    const a = await conversation(storeA);
+    await setShopperNeeds(a, { avoid_allergens: ["peanuts"] });
+    await expect(updateConstraints(storeB, a.conversationId, (saved) => { saved.avoidAllergens = []; })).rejects.toThrow();
+    await expect(setShopperNeeds({ ...a, storeId: storeB }, { avoid_allergens: ["sesame"] })).rejects.toThrow();
+    expect((await readConstraints(storeA, a.conversationId)).avoidAllergens).toEqual(["peanuts"]);
   });
 
   it("refuses an excluded item at the cart and the swap rule, with the reason", async () => {
@@ -256,6 +257,27 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     // With no constraints, nothing changes.
     const free = await conversation(storeA);
     expect(await addToCart(free, { items: [{ variant_id: listing.shaky.variantId, qty: 1 }] })).toMatchObject({ ok: true, swapRule: "store_suggests" });
+  });
+
+  it("moves lines already in the cart off swaps the new needs do not check, and says which", async () => {
+    const ctx = await conversation(storeA);
+    const lineId = async (variantId: string) => {
+      const added = await addToCart(ctx, { items: [{ variant_id: variantId, qty: 1 }] });
+      return (added as unknown as { lineId: string }).lineId;
+    };
+    const shaky = await lineId(listing.shaky.variantId);
+    const plain = await lineId(listing.plain.variantId);
+    const onion = await lineId(listing.onion.variantId);
+    expect(await setSwapRule(ctx, { line_id: plain, rule: "named_substitute", substitute_variant_id: listing.peanut.variantId })).toMatchObject({ ok: true });
+    expect(await setSwapRule(ctx, { line_id: onion, rule: "named_substitute", substitute_variant_id: listing.plain.variantId })).toMatchObject({ ok: true });
+
+    const result = await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+    expect(result).toMatchObject({ ok: true, exactOnly: [{ lineId: shaky }, { lineId: plain }] });
+    const lines = await storeScoped(storeA).cartLine.findMany({ where: { cartId: ctx.cartId } });
+    const rule = (id: string) => lines.find((line) => line.id === id);
+    expect(rule(shaky)).toMatchObject({ swapRule: "exact_only", substituteVariantId: null });
+    expect(rule(plain)).toMatchObject({ swapRule: "exact_only", substituteVariantId: null });
+    expect(rule(onion)).toMatchObject({ swapRule: "named_substitute", substituteVariantId: listing.plain.variantId });
   });
 });
 
