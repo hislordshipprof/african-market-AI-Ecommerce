@@ -55,8 +55,11 @@ const FILE_LIMIT = 10;
 const LEASE_MS = 90_000;
 /** Exported so the shopper-assistant eval can fingerprint the step cap. */
 export const ASSISTANT_STEP_CAP = 8;
-/** Exported so the shopper-assistant eval can fingerprint the output limit. */
-export const ASSISTANT_MAX_OUTPUT_TOKENS = 1024;
+/**
+ * Exported so the shopper-assistant eval can fingerprint the output limit.
+ * 1024 cut off a 25-item list's parallel searches mid-call and ended the turn with an empty cart (#146).
+ */
+export const ASSISTANT_MAX_OUTPUT_TOKENS = 4096;
 const FIXED_ERROR = "Sorry, something went wrong. Please try again.";
 const STEP_LIMIT_TEXT = "I've done as much as I can in one go. Tell me what you'd like next.";
 const RESTING_MESSAGE = "The helper is resting right now. You can still shop and check out as usual.";
