@@ -189,6 +189,27 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(result.notCarried).toEqual(["ginger"]);
   });
 
+  it("continues a search turn that pauses without reporting, on the same lookup", async () => {
+    const day = new Date("2032-03-15T12:00:00Z");
+    const before = await spentToday();
+    const pause: FakeAnthropicStep = { kind: "pause", webSearch: { query: "kelewele recipe", results: [{ url: "https://recipes.example/first", title: "Kelewele" }] } };
+    const fake = createFakeAnthropicFetch({ steps: [pause, lookupStep("Kelewele", ["rice"])] });
+    const result = await getRecipe(ctxA, { dish: `${dish} paused`, servings: 2 }, {
+      lookupModel: createAssistantModel({ fetch: fake.fetch }),
+      now: () => day,
+    });
+    expect(result).toMatchObject({ ok: true, lookedUp: true });
+    expect(fake.requests).toHaveLength(2);
+    const resent = fake.requests[1].body?.messages as Array<{ role: string; content: Array<{ type: string }> }>;
+    expect(resent.at(-1)?.role).toBe("assistant");
+    expect(resent.at(-1)?.content.map((block) => block.type)).toContain("web_search_tool_result");
+    expect((await spentToday()) - before).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS * BigInt(2));
+    for (let index = 1; index < RECIPE_LOOKUPS_PER_STORE_DAY; index += 1) {
+      expect(await takeLookupSlot(storeA, day)).toBe(true);
+    }
+    expect(await takeLookupSlot(storeA, day)).toBe(false);
+  });
+
   it("keeps a paid lookup when the spend write fails once, and records the search on the retry", async () => {
     const before = await spentToday();
     // The token metering write fails twice (it retries once), then the search write fails once.

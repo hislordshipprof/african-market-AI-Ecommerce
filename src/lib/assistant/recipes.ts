@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { anthropic } from "@ai-sdk/anthropic";
-import { APICallError, generateText, stepCountIs, tool, type LanguageModel } from "ai";
+import { APICallError, generateText, stepCountIs, tool, type LanguageModel, type ModelMessage } from "ai";
 import { z } from "zod";
 import { platform } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
@@ -14,6 +14,8 @@ export const RECIPE_LOOKUPS_PER_STORE_DAY = 20;
 export const WEB_SEARCH_MICROS = BigInt(10_000);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_INGREDIENTS = 25;
+/** One lookup may continue a paused search turn once. */
+const LOOKUP_TURNS = 2;
 
 export interface RecipeRow {
   name: string;
@@ -155,8 +157,8 @@ async function recordSearchSpend(searches: number): Promise<void> {
 }
 
 /**
- * One model call with Anthropic's web search. Haiku takes only the basic
- * web_search_20250305 tool; the dynamic-filtering version is Sonnet and Opus only.
+ * One lookup with Anthropic's web search: one model call, plus one continuation after pause_turn.
+ * Haiku takes only the basic web_search_20250305 tool; the dynamic-filtering version is Sonnet and Opus only.
  * Returns null when nothing usable came back.
  */
 export async function lookUpDishOnline(
@@ -164,36 +166,43 @@ export async function lookUpDishOnline(
   deps: { model?: LanguageModel } = {},
 ): Promise<LookedUpDish | null> {
   const model = deps.model ?? createAssistantModel();
-  let result;
-  try {
-    result = await generateText({
-      model,
-      system: LOOKUP_SYSTEM,
-      prompt: `Dish: ${dish.slice(0, 80)}`,
-      tools: {
-        web_search: anthropic.tools.webSearch_20250305({ maxUses: 3 }),
-        report_ingredients: tool({
-          description: "Report the dish's ingredient names and the source page.",
-          inputSchema: reportInput,
-        }),
-      },
-      stopWhen: stepCountIs(1),
-      maxOutputTokens: 2048,
-      maxRetries: 0,
-      providerOptions: assistantProviderOptions(assistantModelId()),
-    });
-  } catch (error) {
-    await recordSearchSpend(billedSearchesInError(error));
-    throw error;
+  const messages: ModelMessage[] = [{ role: "user", content: `Dish: ${dish.slice(0, 80)}` }];
+  const urls: string[] = [];
+  let call;
+  for (let turn = 0; turn < LOOKUP_TURNS; turn += 1) {
+    let result;
+    try {
+      result = await generateText({
+        model,
+        system: LOOKUP_SYSTEM,
+        messages,
+        tools: {
+          web_search: anthropic.tools.webSearch_20250305({ maxUses: 3 }),
+          report_ingredients: tool({
+            description: "Report the dish's ingredient names and the source page.",
+            inputSchema: reportInput,
+          }),
+        },
+        stopWhen: stepCountIs(1),
+        maxOutputTokens: 2048,
+        maxRetries: 0,
+        providerOptions: assistantProviderOptions(assistantModelId()),
+      });
+    } catch (error) {
+      await recordSearchSpend(billedSearchesInError(error));
+      throw error;
+    }
+    await recordSearchSpend(
+      result.steps.reduce((sum, step) => sum + billedSearches(step.providerMetadata?.anthropic?.usage), 0),
+    );
+    for (const part of result.steps.flatMap((step) => step.content)) {
+      if (part.type === "tool-result" && part.toolName === "web_search") urls.push(...resultUrls(part.output));
+    }
+    call = result.toolCalls.find((item) => item.toolName === "report_ingredients");
+    // A long search turn can end in pause_turn; sending it back lets Anthropic finish it.
+    if (call || result.rawFinishReason !== "pause_turn") break;
+    messages.push(...result.response.messages);
   }
-  await recordSearchSpend(
-    result.steps.reduce((sum, step) => sum + billedSearches(step.providerMetadata?.anthropic?.usage), 0),
-  );
-  const parts = result.steps.flatMap((step) => step.content);
-  const urls = parts.flatMap((part) =>
-    part.type === "tool-result" && part.toolName === "web_search" ? resultUrls(part.output) : [],
-  );
-  const call = result.toolCalls.find((item) => item.toolName === "report_ingredients");
   const parsed = reportInput.safeParse(call?.input);
   if (!parsed.success || urls.length === 0) return null;
   const seen = new Set<string>();

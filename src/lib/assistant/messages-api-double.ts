@@ -441,7 +441,8 @@ export function createMessagesApiDouble(expectedKey: string): MessagesApiDouble 
 }
 
 export interface FakeAnthropicStep {
-  kind: "text" | "tool" | "error";
+  /** pause: the web search blocks only, ending in pause_turn (non-streaming only). */
+  kind: "text" | "tool" | "error" | "pause";
   text?: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
@@ -597,7 +598,7 @@ export function createFakeAnthropicFetch(options?: {
       );
     }
     const usage = usageOf(step);
-    if (step.kind === "tool") {
+    if (step.kind === "tool" || step.kind === "pause") {
       const content: Array<Record<string, unknown>> = [];
       if (step.webSearch) {
         const declared = (Array.isArray(body?.tools) ? body.tools : []).some(
@@ -610,10 +611,10 @@ export function createFakeAnthropicFetch(options?: {
           );
         }
         content.push(
-          { type: "server_tool_use", id: "srvtoolu_fake_0", name: "web_search", input: { query: step.webSearch.query } },
+          { type: "server_tool_use", id: `srv${toolId}`, name: "web_search", input: { query: step.webSearch.query } },
           {
             type: "web_search_tool_result",
-            tool_use_id: "srvtoolu_fake_0",
+            tool_use_id: `srv${toolId}`,
             content: step.webSearch.results.map((result) => ({
               type: "web_search_result",
               url: result.url,
@@ -625,6 +626,19 @@ export function createFakeAnthropicFetch(options?: {
         );
       }
       if (step.text) content.push({ type: "text", text: step.text });
+      const searchUsage = step.webSearch ? { ...usage, server_tool_use: { web_search_requests: 1 } } : usage;
+      if (step.kind === "pause") {
+        return Response.json({
+          id: "msg_fake",
+          type: "message",
+          role: "assistant",
+          model,
+          content,
+          stop_reason: "pause_turn",
+          stop_sequence: null,
+          usage: searchUsage,
+        });
+      }
       content.push({
         type: "tool_use",
         id: toolId,
@@ -639,7 +653,7 @@ export function createFakeAnthropicFetch(options?: {
         content,
         stop_reason: "tool_use",
         stop_sequence: null,
-        usage: step.webSearch ? { ...usage, server_tool_use: { web_search_requests: 1 } } : usage,
+        usage: searchUsage,
       });
     }
     return Response.json({
