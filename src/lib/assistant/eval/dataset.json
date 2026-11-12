@@ -4934,18 +4934,7 @@
         "min": 1,
         "max": 1
       }
-    ],
-    "clarify": {
-      "options": [
-        [
-          "whole",
-          "seeds"
-        ],
-        [
-          "ground"
-        ]
-      ]
-    }
+    ]
   },
   {
     "id": "synonym-nech-teff-5",
@@ -5102,18 +5091,7 @@
         "min": 1,
         "max": 1
       }
-    ],
-    "clarify": {
-      "options": [
-        [
-          "whole",
-          "seeds"
-        ],
-        [
-          "ground"
-        ]
-      ]
-    }
+    ]
   },
   {
     "id": "synonym-nech-teff-10",
@@ -5270,18 +5248,7 @@
         "min": 1,
         "max": 1
       }
-    ],
-    "clarify": {
-      "options": [
-        [
-          "whole",
-          "seeds"
-        ],
-        [
-          "ground"
-        ]
-      ]
-    }
+    ]
   },
   {
     "id": "synonym-nech-teff-15",
@@ -5438,18 +5405,7 @@
         "min": 1,
         "max": 1
       }
-    ],
-    "clarify": {
-      "options": [
-        [
-          "whole",
-          "seeds"
-        ],
-        [
-          "ground"
-        ]
-      ]
-    }
+    ]
   },
   {
     "id": "synonym-nech-teff-20",
@@ -5606,18 +5562,7 @@
         "min": 1,
         "max": 1
       }
-    ],
-    "clarify": {
-      "options": [
-        [
-          "whole",
-          "seeds"
-        ],
-        [
-          "ground"
-        ]
-      ]
-    }
+    ]
   },
   {
     "id": "synonym-nech-teff-25",
@@ -5774,18 +5719,7 @@
         "min": 1,
         "max": 1
       }
-    ],
-    "clarify": {
-      "options": [
-        [
-          "whole",
-          "seeds"
-        ],
-        [
-          "ground"
-        ]
-      ]
-    }
+    ]
   },
   {
     "id": "synonym-nech-teff-30",

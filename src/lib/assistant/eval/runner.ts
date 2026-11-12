@@ -83,7 +83,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
     heartbeat = setInterval(() => writeLease(created.runId, [created.slugA, created.slugB]), 20_000);
     heartbeat.unref?.();
     result.sessionUser = "app_runtime";
-    const binding = bindingFromFixture(options.fixture, created.ids);
+    const binding = bindingFromFixture(options.fixture, created.ids, created.masterCatalog);
     const ledgerBefore = await readLedger();
     const stripWatches: StripWatch[] = [];
     let cursor = 0;
@@ -617,6 +617,8 @@ async function scoreAttempt(args: {
     dish: args.evalCase.dish != null,
     dishMisses: scored.dishMisses,
     clarifyReply: scored.clarifyReply,
+    clarifyOptions: scored.clarifyOptions,
+    clarifyChoices: scored.clarifyChoices,
     droppedAttempts: 0,
     costMicros: "0",
     anthropicRequestIds: [],
@@ -942,6 +944,8 @@ function blankCase(evalCase: EvalCase): CaseResult {
     dish: evalCase.dish != null,
     dishMisses: evalCase.dish ? ["incomplete"] : [],
     clarifyReply: null,
+    clarifyOptions: [],
+    clarifyChoices: [],
     droppedAttempts: 0,
     costMicros: "0",
     anthropicRequestIds: [],

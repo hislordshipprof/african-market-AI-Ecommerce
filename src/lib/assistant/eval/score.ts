@@ -1,3 +1,4 @@
+import type { MasterCatalogRow } from "./fingerprint";
 import { hasForeignCurrency, ratio, usdAmountsInText } from "./money";
 import type {
   CartSnapshotLine,
@@ -18,7 +19,7 @@ export interface BoundVariant {
 }
 
 export interface CatalogBinding {
-  byListingKey: Map<string, { id: string; key: string; store: "A" | "B"; confidence: number; stockMode: string; qty: number | null; status: string | null; active: boolean }>;
+  byListingKey: Map<string, { id: string; key: string; store: "A" | "B"; confidence: number; stockMode: string; qty: number | null; status: string | null; active: boolean; name?: string }>;
   byVariantKey: Map<string, BoundVariant>;
   byListingId: Map<string, string>;
   byVariantId: Map<string, BoundVariant>;
@@ -58,6 +59,14 @@ export interface ScoreInput {
   returnedLineIds: string[];
   cartLineIds: string[];
   stepLimitHit: boolean;
+  /** The committed clarify claim the gate re-checks; a run derives it from its tools instead. */
+  clarify?: ClarifyClaim;
+}
+
+/** Listings a clarifying question offered, and the choice-card names the shopper saw (none when the reply named them). */
+export interface ClarifyClaim {
+  options: string[];
+  choices: string[];
 }
 
 export interface ScoreOutput {
@@ -75,6 +84,8 @@ export interface ScoreOutput {
   safetyFailures: string[];
   dishMisses: string[];
   clarifyReply: string | null;
+  clarifyOptions: string[];
+  clarifyChoices: string[];
   pass: boolean;
   reason: string;
 }
@@ -91,7 +102,8 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
   const precisionDenominator = dish ? 0 : input.cart.length;
   const precisionNumerator = dish || input.cart.length === 0 ? 0 : assignment.acceptable;
   const recallDenominator = input.evalCase.mustHave.length;
-  const clarifyReply = acceptedClarifyReply(input);
+  const clarify = input.clarify ?? clarifyFromTools(input, binding);
+  const clarifyReply = acceptedClarifyReply(input, clarify, binding);
   const recallNumerator = input.evalCase.mustHave.length === 0 ? 0 : clarifyReply != null ? recallDenominator : assignment.satisfied;
   const { hallucinated, rejectedAttempts } = collectHallucinations(input, binding);
   const ungroundedAmountsShown = input.savedTexts.flatMap((block) => disallowedAmounts(block, input, binding));
@@ -130,6 +142,8 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
     safetyFailures: uniqueSafety,
     dishMisses,
     clarifyReply,
+    clarifyOptions: clarifyReply != null ? clarify.options : [],
+    clarifyChoices: clarifyReply != null ? clarify.choices : [],
     pass,
     reason: reason || "recall",
   };
@@ -137,15 +151,65 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
 
 const CLARIFY_MAX_CHARS = 400;
 
-/** The final reply, when the case allows a clarifying question, nothing was added, and one short question names every option. */
-function acceptedClarifyReply(input: ScoreInput): string | null {
-  const clarify = input.evalCase.clarify;
-  if (!clarify || input.cart.length > 0) return null;
-  const finalTurn = input.evalCase.turns.length;
+/**
+ * Owner rule (2026-11-12): when the requested item matches more than one product in the store, one short
+ * question naming the options, with nothing added, passes. The options are the listings this turn's search
+ * returned as fits, shown either on offer_choices cards or named in the reply; one must be the requested item.
+ */
+function acceptedClarifyReply(input: ScoreInput, clarify: ClarifyClaim, binding: CatalogBinding): string | null {
+  const { evalCase } = input;
+  if (evalCase.dish || evalCase.mustHave.length !== 1 || input.cart.length > 0) return null;
+  const finalTurn = evalCase.turns.length;
   const reply = input.savedTexts.filter((block) => block.turn === finalTurn).map((block) => block.text).join("\n").trim();
   if (reply === "" || reply.length > CLARIFY_MAX_CHARS || (reply.match(/\?/g) ?? []).length !== 1) return null;
-  const folded = reply.toLowerCase();
-  return clarify.options.every((terms) => terms.some((term) => folded.includes(term.toLowerCase()))) ? reply : null;
+  const options = [...new Set(clarify.options)];
+  if (options.length < 2 || options.length !== clarify.options.length) return null;
+  const names = options.map((key) => {
+    const listing = binding.byListingKey.get(key);
+    return listing && listing.store === "A" && listing.active ? listing.name ?? null : null;
+  });
+  if (names.some((name) => name == null)) return null;
+  if (!clarify.choices.every((choice) => names.includes(choice))) return null;
+  const requested = evalCase.mustHave[0]?.options.map((option) => option.listingKey) ?? [];
+  if (!options.some((key) => requested.includes(key))) return null;
+  const shown = [reply, ...clarify.choices].join("\n");
+  return names.every((name) => clarify.choices.includes(name as string) || textNamesListing(shown, name as string)) ? reply : null;
+}
+
+/** Every word of the listing name outside brackets appears in the text. */
+function textNamesListing(text: string, name: string): boolean {
+  const words = (value: string) => value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const present = new Set(words(text));
+  const head = words(name.replace(/\([^)]*\)/g, " "));
+  return head.length > 0 && head.every((word) => present.has(word));
+}
+
+/** The final turn's offer_choices listings, or else its search fits, kept only when the same turn's search returned every one as a fit. */
+function clarifyFromTools(input: ScoreInput, binding: CatalogBinding): ClarifyClaim {
+  const finalTurn = input.evalCase.turns.length;
+  const fits = new Set<string>();
+  const offered = new Map<string, string>();
+  for (const tool of input.tools) {
+    if (tool.turn !== finalTurn || tool.errored || !tool.output || typeof tool.output !== "object") continue;
+    const body = tool.output as { ok?: unknown; items?: unknown; options?: unknown };
+    if (body.ok !== true) continue;
+    if (tool.tool === "search_catalog" && Array.isArray(body.items)) {
+      for (const row of body.items as Array<{ listingId?: unknown; match?: unknown }>) {
+        const key = typeof row?.listingId === "string" ? binding.byListingId.get(row.listingId) : undefined;
+        if (key && row.match !== "near") fits.add(key);
+      }
+    }
+    if (tool.tool === "offer_choices" && Array.isArray(body.options)) {
+      offered.clear();
+      for (const row of body.options as Array<{ listingId?: unknown; name?: unknown }>) {
+        const key = typeof row?.listingId === "string" ? binding.byListingId.get(row.listingId) : undefined;
+        if (key && typeof row.name === "string") offered.set(key, row.name);
+      }
+    }
+  }
+  const options = offered.size > 0 ? [...offered.keys()] : [...fits];
+  if (!options.every((key) => fits.has(key))) return { options: [], choices: [] };
+  return { options: options.sort(), choices: offered.size > 0 ? [...offered.values()] : [] };
 }
 
 /** Core ingredients missing from a dish cart. The gate recomputes these from the committed cart. */
@@ -433,7 +497,11 @@ function collectCents(value: unknown, into: Set<number>): void {
   }
 }
 
-export function bindingFromFixture(fixture: CatalogFixture, ids: Map<string, { listingId: string; variants: Map<string, string> }>): CatalogBinding {
+export function bindingFromFixture(
+  fixture: CatalogFixture,
+  ids: Map<string, { listingId: string; variants: Map<string, string> }>,
+  masterCatalog: readonly MasterCatalogRow[] = [],
+): CatalogBinding {
   const byListingKey = new Map<string, CatalogBinding["byListingKey"] extends Map<string, infer V> ? V : never>();
   const byVariantKey = new Map<string, BoundVariant>();
   const byListingId = new Map<string, string>();
@@ -454,6 +522,7 @@ export function bindingFromFixture(fixture: CatalogFixture, ids: Map<string, { l
       qty: listing.qty,
       status: listing.status,
       active: listing.active,
+      name: masterCatalog.find((product) => product.id === listing.masterProductId)?.name,
     });
     byListingId.set(created.listingId, listing.key);
     if (listing.store === "A") aListingIds.add(created.listingId);

@@ -71,8 +71,6 @@ export interface EvalCase {
   /** Listings the shopper ruled out. One in the cart is a safety failure. */
   excluded?: string[];
   dish?: DishExpect;
-  /** One short question that names every option, with nothing added, also passes. Each option lists terms, any one of which names it. */
-  clarify?: { options: string[][] };
 }
 
 export interface FixtureVariant {
@@ -160,6 +158,9 @@ export interface CaseResult {
   dishMisses: string[];
   /** The final reply when it was an accepted clarifying question; the gate re-checks it. */
   clarifyReply: string | null;
+  /** Listing keys that accepted question offered, and the choice-card names it showed; the gate re-checks both. */
+  clarifyOptions: string[];
+  clarifyChoices: string[];
   /** Attempts ended by a request whose usage never arrived; their reserve stays spent. A completed case never ends on one. */
   droppedAttempts: number;
   costMicros: string;

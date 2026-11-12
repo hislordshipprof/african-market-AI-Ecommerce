@@ -84,6 +84,8 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
     dish: false,
     dishMisses: [],
     clarifyReply: null,
+    clarifyOptions: [],
+    clarifyChoices: [],
     droppedAttempts: 0,
     costMicros: "1",
     anthropicRequestIds: [`req_${id}`],
@@ -114,6 +116,14 @@ function report(cases: CaseResult[], current = fingerprint(), extra: Partial<Eva
   };
 }
 
+const LISTING_NAMES: Record<string, string> = {
+  garri: "Garri",
+  rice: "Rice",
+  "paste-a": "Egusi (melon seeds), shelled",
+  "paste-b": "Egusi, ground",
+  "onion-paste": "Onion paste",
+};
+
 function twoPackBinding(): CatalogBinding {
   const pack = (key: string, variantKey: string) => ({
     id: variantKey,
@@ -134,6 +144,7 @@ function twoPackBinding(): CatalogBinding {
     qty: null,
     status: null,
     active: true,
+    name: LISTING_NAMES[key],
   });
   return {
     byListingKey: new Map(keys.map((key) => [key, listing(key)])),
@@ -180,6 +191,8 @@ function caseFromScore(id: string, category: CaseResult["category"], scored: Sco
     dish: category === "recipe-to-cart",
     dishMisses: scored.dishMisses,
     clarifyReply: scored.clarifyReply,
+    clarifyOptions: scored.clarifyOptions,
+    clarifyChoices: scored.clarifyChoices,
     droppedAttempts: 0,
     costMicros: "0",
     anthropicRequestIds: [`req_${id}`],
@@ -536,22 +549,39 @@ describe("shopper assistant eval gate", () => {
     expect(assessOfficial(run("a", 10), expected).ok).toBe(false);
   });
 
-  it("passes a synonym case on either option or on one short question that names both", () => {
+  it("passes an ambiguous request on either option or on one short question naming the store's matches", () => {
     const binding = twoPackBinding();
     const agushi: EvalCase = {
       id: "agushi",
       category: "synonym",
       turns: ["Add 1 agushi."],
-      mustHave: [{ options: [{ listingKey: "paste-a", variantKeys: ["paste-a-pack"] }, { listingKey: "paste-b", variantKeys: ["paste-b-pack"] }] }],
+      mustHave: [{ options: [{ listingKey: "paste-a", variantKeys: ["paste-a-pack"] }] }],
       mayHave: [],
       gaps: [],
-      clarify: { options: [["whole"], ["ground"]] },
     };
     const line = (key: string): CartSnapshotLine => ({ key, variantKey: `${key}-pack`, qty: 1, swapRule: "exact_only", substituteVariantKey: null });
-    const score = (cart: CartSnapshotLine[], reply: string) => scoreCase({
+    const search = (match: string): ObservedTool => ({
+      tool: "search_catalog",
+      input: { query: "agushi" },
+      output: { ok: true, items: [
+        { listingId: "paste-a", variantId: "paste-a-pack", name: LISTING_NAMES["paste-a"], match: "synonym" },
+        { listingId: "paste-b", variantId: "paste-b-pack", name: LISTING_NAMES["paste-b"], match },
+      ] },
+      turn: 1,
+    });
+    const offer: ObservedTool = {
+      tool: "offer_choices",
+      input: { options: [{ listing_id: "paste-a", variant_id: "paste-a-pack" }, { listing_id: "paste-b", variant_id: "paste-b-pack" }] },
+      output: { ok: true, options: [
+        { listingId: "paste-a", variantId: "paste-a-pack", name: LISTING_NAMES["paste-a"] },
+        { listingId: "paste-b", variantId: "paste-b-pack", name: LISTING_NAMES["paste-b"] },
+      ], notFound: [] },
+      turn: 1,
+    };
+    const score = (cart: CartSnapshotLine[], reply: string, tools: ObservedTool[]) => scoreCase({
       evalCase: agushi,
       cart,
-      tools: [],
+      tools,
       savedTexts: [{ turn: 1, text: reply, priorOutputs: [], saved: true }],
       observedTexts: [],
       strippedAmounts: [],
@@ -560,19 +590,38 @@ describe("shopper assistant eval gate", () => {
       cartLineIds: [],
       stepLimitHit: false,
     }, binding, [reply]);
-    const question = "Agushi is egusi. Do you want whole egusi seeds or ground egusi?";
-    expect(score([line("paste-b")], "Added ground egusi.").pass).toBe(true);
-    const asked = score([], question);
-    expect([asked.pass, asked.recallNumerator, asked.clarifyReply]).toEqual([true, 1, question]);
-    expect(score([], "Do you want whole egusi seeds?").pass).toBe(false);
-    expect(score([], `${question} Or something else?`).pass).toBe(false);
-    expect(score([], `${"Agushi is egusi, a melon seed. ".repeat(12)}${question}`).pass).toBe(false);
-    expect(score([line("paste-a")], question).clarifyReply).toBeNull();
+    const carded = "Agushi is egusi, and the store has two. Which one would you like?";
+    const named = "Which would you like: Egusi (melon seeds), shelled, or Egusi, ground?";
+
+    expect(score([line("paste-a")], "Added it.", [search("name")]).pass).toBe(true);
+    const asked = score([], carded, [search("name"), offer]);
+    expect([asked.pass, asked.recallNumerator, asked.clarifyReply, asked.clarifyOptions, asked.clarifyChoices])
+      .toEqual([true, 1, carded, ["paste-a", "paste-b"], [LISTING_NAMES["paste-a"], LISTING_NAMES["paste-b"]]]);
+    const inReply = score([], named, [search("synonym")]);
+    expect([inReply.pass, inReply.clarifyOptions, inReply.clarifyChoices]).toEqual([true, ["paste-a", "paste-b"], []]);
+
+    expect(score([], "Do you want the shelled egusi?", [search("name")]).pass).toBe(false);
+    expect(score([], carded, [search("near"), offer]).pass).toBe(false);
+    expect(score([], carded, [offer]).pass).toBe(false);
+    expect(score([], `${carded} Or something else?`, [search("name"), offer]).pass).toBe(false);
+    expect(score([], `${"Agushi is egusi, a melon seed. ".repeat(12)}${carded}`, [search("name"), offer]).pass).toBe(false);
+    expect(score([line("paste-b")], carded, [search("name"), offer]).clarifyReply).toBeNull();
+    const otherItem = { ...agushi, mustHave: [{ options: [{ listingKey: "rice", variantKeys: ["rice-pack"] }] }] };
+    expect(scoreCase({
+      evalCase: otherItem, cart: [], tools: [search("name"), offer],
+      savedTexts: [{ turn: 1, text: carded, priorOutputs: [], saved: true }],
+      observedTexts: [], strippedAmounts: [], successfulWriteTurns: [], returnedLineIds: [], cartLineIds: [], stepLimitHit: false,
+    }, binding, [carded]).clarifyReply).toBeNull();
 
     const expected = { fingerprint: fingerprint(), caseIds: ["agushi"], model: "claude-haiku-5-5", cases: [agushi], binding };
     expect(assessReport(report([caseFromScore("agushi", "synonym", asked, false)]), expected).reasons).toEqual([]);
-    const forged = { ...caseFromScore("agushi", "synonym", asked, false), clarifyReply: "Do you want whole egusi?" };
-    expect(assessReport(report([forged]), expected).reasons).toContain("cart does not match agushi");
+    expect(assessReport(report([caseFromScore("agushi", "synonym", inReply, false)]), expected).reasons).toEqual([]);
+    const forgedReply = { ...caseFromScore("agushi", "synonym", inReply, false), clarifyReply: "Do you want the shelled egusi?" };
+    const forgedChoice = { ...caseFromScore("agushi", "synonym", asked, false), clarifyChoices: [LISTING_NAMES["paste-a"], "Melon seeds, any"] };
+    const forgedOptions = { ...caseFromScore("agushi", "synonym", asked, false), clarifyOptions: ["paste-a"] };
+    for (const forged of [forgedReply, forgedChoice, forgedOptions]) {
+      expect(assessReport(report([forged]), expected).reasons).toContain("cart does not match agushi");
+    }
   });
 
   it.skipIf(!hasDb)("rejects a report whose model is not the default Haiku fingerprint", async () => {

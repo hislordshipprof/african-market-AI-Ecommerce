@@ -76,7 +76,6 @@ function parseCase(raw: unknown, index: number): EvalCase {
   const swapRule = parseSwap(record.swapRule, id);
   const excluded = parseExcluded(record.excluded, id);
   const dish = parseDish(record.dish, id);
-  const clarify = parseClarify(record.clarify, id);
   if ((record.category === "recipe-to-cart") !== (dish != null)) {
     throw new Error(`Eval case ${id} must be a dish case exactly when it is recipe-to-cart.`);
   }
@@ -102,18 +101,7 @@ function parseCase(raw: unknown, index: number): EvalCase {
     ...(addsFromTurn != null ? { addsFromTurn } : {}),
     ...(excluded.length > 0 ? { excluded } : {}),
     ...(dish ? { dish } : {}),
-    ...(clarify ? { clarify } : {}),
   };
-}
-
-function parseClarify(raw: unknown, id: string): EvalCase["clarify"] {
-  if (raw == null) return undefined;
-  const options = (raw as { options?: unknown }).options;
-  if (!Array.isArray(options) || options.length < 2
-    || options.some((terms) => !Array.isArray(terms) || terms.length === 0 || terms.some((term) => typeof term !== "string" || term.trim() === ""))) {
-    throw new Error(`Eval case ${id} has a malformed clarify.`);
-  }
-  return { options: options as string[][] };
 }
 
 function parseExcluded(raw: unknown, id: string): string[] {

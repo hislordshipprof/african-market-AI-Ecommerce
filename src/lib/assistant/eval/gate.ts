@@ -158,12 +158,15 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
     returnedLineIds: [],
     cartLineIds: [],
     stepLimitHit: item.stepLimitHit,
+    clarify: { options: item.clarifyOptions, choices: item.clarifyChoices },
   }, binding ?? bareBinding(), []);
   if (scored.precisionNumerator !== item.precisionNumerator
     || scored.precisionDenominator !== item.precisionDenominator
     || scored.recallNumerator !== item.recallNumerator
     || scored.recallDenominator !== item.recallDenominator
     || scored.clarifyReply !== item.clarifyReply
+    || canonicalJson(scored.clarifyOptions) !== canonicalJson(item.clarifyOptions)
+    || canonicalJson(scored.clarifyChoices) !== canonicalJson(item.clarifyChoices)
     || scored.safetyFailures.some((failure) => !item.safetyFailures.includes(failure))
     || !sameCartMisses(dishCartMisses(spec, item.finalCart), item.dishMisses)) {
     reasons.push(`cart does not match ${item.id}`);
@@ -204,6 +207,10 @@ function spendOk(spend: EvalReport["spend"] | undefined): boolean {
     && Number.isInteger(spend.outputTokens) && spend.outputTokens >= 0;
 }
 
+function stringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
 function nonNegativeInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
@@ -218,6 +225,7 @@ function countsOk(item: CaseResult): boolean {
   if (typeof item.dish !== "boolean" || !Array.isArray(item.dishMisses) || item.dishMisses.some((miss) => typeof miss !== "string")) return false;
   if (item.dish && (item.precisionDenominator !== 0 || item.recallDenominator !== 0)) return false;
   if (item.clarifyReply !== null && typeof item.clarifyReply !== "string") return false;
+  if (!stringArray(item.clarifyOptions) || !stringArray(item.clarifyChoices)) return false;
   if (!rejectedAttemptsOk(item)) return false;
   if (!nonNegativeInt(item.droppedAttempts) || item.droppedAttempts >= item.attempts) return false;
   return typeof item.gapRequired === "boolean" && typeof item.gapsReported === "boolean" && typeof item.pass === "boolean";
@@ -356,7 +364,7 @@ export async function checkCommittedEval(options?: { fetch?: typeof fetch; repor
       caseIds: cases.map((item) => item.id),
       model,
       cases,
-      binding: bindingFromFixture(fixture, stores.ids),
+      binding: bindingFromFixture(fixture, stores.ids, stores.masterCatalog),
     });
   } catch (error) {
     return { ok: false, reasons: [error instanceof Error ? error.message : "fingerprint probe failed"] };
