@@ -179,7 +179,7 @@ Model: Claude via tool use, through the Vercel AI SDK. Shopper assistant default
 | `get_recipe(dish, servings)` | Ingredient list from curated recipe base, scaled |
 | `check_availability(listing_ids)` | Returns stock confidence + price |
 | `suggest_substitutes(listing_id)` | Ranked culturally valid swaps |
-| `add_to_cart / update_cart / remove_from_cart` | Cart edits, visible to user in real time |
+| `add_to_cart / update_cart / remove_from_cart` | Cart edits, visible to user in real time. `add_to_cart` also takes a listing id that has exactly one variant (#146) |
 | `set_swap_rule(line_id, rule)` | Records customer's preference |
 | `show_products(listing_ids)` | Product cards with catalog photo, price and stock, drawn from data |
 | `get_cart_summary()` | Item summary card for the shopper to confirm |
