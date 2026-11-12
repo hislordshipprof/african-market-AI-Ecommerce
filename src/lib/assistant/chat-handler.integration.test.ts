@@ -27,7 +27,7 @@ import { createChatHandler } from "./chat-handler";
 import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
 import { scriptedAssistantFetch } from "./fake-model";
 import { createAssistantModel } from "./model";
-import { ASSISTANT_STATIC_PROMPT, RECIPE_RULE } from "./system-prompt";
+import { RECIPE_RULE } from "./system-prompt";
 import { createFakeAnthropicFetch, judgeMessagesRequest } from "./messages-api-double";
 import * as spend from "./spend";
 
@@ -1675,23 +1675,16 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(actions).toHaveLength(0);
   });
 
-  it("sends get_recipe and its rule only with ASSISTANT_RECIPES_ENABLED", async () => {
+  it("offers get_recipe and its rule on every chat turn", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
-    const sent: Array<{ tools: string[]; system: string }> = [];
-    for (const flag of ["", "1"]) {
-      vi.stubEnv("ASSISTANT_RECIPES_ENABLED", flag);
-      const fake = createFakeAnthropicFetch({ steps: [{ kind: "text", text: "ok" }] });
-      const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-      const response = await handler(request("jollof for 10", { ip: `203.0.113.19${flag || "0"}` }));
-      expect(response.status).toBe(200);
-      await response.text();
-      const body = fake.requests[0]?.body as { tools?: Array<{ name: string }>; system?: Array<{ text: string }> };
-      sent.push({ tools: (body.tools ?? []).map((tool) => tool.name), system: body.system?.[0]?.text ?? "" });
-    }
-    expect(sent[0].tools).not.toContain("get_recipe");
-    expect(sent[0].system).toBe(ASSISTANT_STATIC_PROMPT);
-    expect(sent[1].tools).toContain("get_recipe");
-    expect(sent[1].system).toContain(RECIPE_RULE);
+    const fake = createFakeAnthropicFetch({ steps: [{ kind: "text", text: "ok" }] });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const response = await handler(request("jollof for 10", { ip: "203.0.113.190" }));
+    expect(response.status).toBe(200);
+    await response.text();
+    const body = fake.requests[0]?.body as { tools?: Array<{ name: string }>; system?: Array<{ text: string }> };
+    expect((body.tools ?? []).map((tool) => tool.name)).toContain("get_recipe");
+    expect(body.system?.[0]?.text).toContain(RECIPE_RULE);
   });
 
   it("a photo list reports what was found and the gaps, and the next yes adds the found items", async () => {
