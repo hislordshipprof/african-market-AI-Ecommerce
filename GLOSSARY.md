@@ -113,7 +113,13 @@ _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 The tappable product options the Shopper assistant shows when more than one item fits. The server also draws them when a reply names two or more products from a single search and the model did not offer a choice. Tapping a chip sends that product's name and pack back as the customer's pick.
 
 **Shopper constraint**:
-An allergen to avoid, a dietary claim that must hold, or an ingredient to avoid, taken from the customer's words and saved on the conversation (#485). The Shopper assistant checks them on Product attributes only, never by matching product names: search leaves out an excluded listing, and add and swap refuse one with the reason. An ingredient term that matches no Ingredient or local name is an unresolved constraint: the assistant says it can't check it.
+An allergen to avoid, a dietary claim that must hold, or an ingredient to avoid, taken from the customer's words and saved on the conversation (#485). The Shopper assistant checks them on Product attributes only, never by matching product names: search leaves out an excluded listing, and add and swap refuse one with the reason. A constraint is hard: it gates search, recipes, add and swap. An ingredient term that names only a form of a known Ingredient, such as fresh tomato, triggers the clarify rule; one close to no known Ingredient is not saved, and the assistant says once that it can't check it.
+
+**Shopper preference**:
+A form of a known Ingredient the customer would rather skip, such as fresh tomato, saved on the conversation (#485). Unlike a Shopper constraint it gates nothing and never gives Cannot confirm: the assistant skips products of that form when it chooses from search results.
+
+**Clarify rule**:
+When a ruled-out term matches no Ingredient or local name but is close to one in the ingredient table, the assistant carries on and asks one short question: avoid all of that Ingredient, or only that form? "All" saves a Shopper constraint on the Ingredient; "only that form" keeps the Shopper preference (#485, owner 2026-11-12).
 
 **Cannot confirm**:
 A listing whose attribute for a Shopper constraint is unknown. It is shown marked as such, never as a fit, and added only after the customer's next message confirms that one item. The confirmation is recorded on the conversation.
