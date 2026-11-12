@@ -196,7 +196,7 @@ function clarifyFromTools(input: ScoreInput, binding: CatalogBinding): ClarifyCl
     if (tool.tool === "search_catalog" && Array.isArray(body.items)) {
       for (const row of body.items as Array<{ listingId?: unknown; match?: unknown }>) {
         const key = typeof row?.listingId === "string" ? binding.byListingId.get(row.listingId) : undefined;
-        if (key && row.match !== "near") fits.add(key);
+        if (key && (row.match === "name" || row.match === "synonym")) fits.add(key);
       }
     }
     if (tool.tool === "offer_choices" && Array.isArray(body.options)) {
