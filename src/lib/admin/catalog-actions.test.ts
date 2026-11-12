@@ -277,6 +277,7 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     const legacy = await asAdmin((tx) => tx.attributeProposal.create({
       data: { productId: p.id, ingredientsRead: true, ingredients: [], allergensRead: false, dietaryRead: false },
     }));
+    expect((await listAttributeProposals()).find((candidate) => candidate.id === legacy.id)?.ingredients).toBeNull();
     expect(await approveAttributeProposal(legacy.id)).toEqual({ success: true });
     const after = await attributesOf(p.id);
     expect(after.ingredientsStatus).toBe("unknown");

@@ -8,7 +8,7 @@ import { parseInput } from "../security/parse-input";
 import { assistantModelId } from "../assistant/model";
 import { assistantSpendState } from "../assistant/spend";
 import { extractProductAttributes } from "../catalog/attribute-extract";
-import { attributeGroup } from "../catalog/attributes";
+import { attributeGroup, type AttributeGroupName } from "../catalog/attributes";
 import { resolveIngredients } from "../catalog/ingredients";
 
 const productIdSchema = z.string().min(1).max(200);
@@ -321,6 +321,11 @@ export type AttributeProposalRow = {
   createdAt: Date;
 };
 
+function reviewedValues(name: AttributeGroupName, raw: string[] | null): string[] | null {
+  const group = attributeGroup(name, raw, "admin_review");
+  return group.ok && group.group ? group.group.values : null;
+}
+
 export async function listAttributeProposals(): Promise<AttributeProposalRow[]> {
   await requirePlatformAdmin();
   const rows = await platformAdmin.attributeProposal.findMany({
@@ -334,9 +339,10 @@ export async function listAttributeProposals(): Promise<AttributeProposalRow[]> 
     productId: row.productId,
     productName: row.masterProduct.name,
     imageUrl: row.masterProduct.imageUrl,
-    ingredients: row.ingredientsRead ? row.ingredients : null,
-    allergens: row.allergensRead ? row.allergens : null,
-    dietaryClaims: row.dietaryRead ? row.dietaryClaims : null,
+    // The queue shows what approving would write.
+    ingredients: reviewedValues("ingredients", row.ingredientsRead ? row.ingredients : null),
+    allergens: reviewedValues("allergens", row.allergensRead ? row.allergens : null),
+    dietaryClaims: reviewedValues("dietary", row.dietaryRead ? row.dietaryClaims : null),
     createdAt: row.createdAt,
   }));
 }
