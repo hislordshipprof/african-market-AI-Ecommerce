@@ -16,6 +16,18 @@ describe("assistant cards", () => {
     ], { turnFailed: true })[0]?.kind).not.toBe("skeleton");
   });
 
+  it("marks a search or recipe item the shopper's needs cannot confirm, so its card has no quick-add", () => {
+    const item = (name: string, cannotConfirm: boolean) => ({
+      listingId: `l-${name}`, name, variantId: `v-${name}`, packLabel: "Each", priceCents: 300, imageUrl: null, mayBeUnavailable: false, badge: "in-stock",
+      ...(cannotConfirm ? { cannotConfirm: true, needs: { "allergen:peanuts": "unknown" } } : {}),
+    });
+    const cards = cardsFromParts([
+      { type: "tool-search_catalog", toolCallId: "s", state: "output-available", input: { query: "paste" }, output: { ok: true, items: [item("Mystery", true), item("Plain", false)] } },
+      { type: "tool-get_recipe", toolCallId: "r", state: "output-available", output: { ok: true, inStock: [item("Curry", true)], lowOrOut: [] } },
+    ]);
+    expect(cards.map((card) => card.kind === "product" && [card.name, card.cannotConfirm])).toEqual([["Mystery", true], ["Plain", false], ["Curry", true]]);
+  });
+
   it("maps every tool part state to exactly one card kind", () => {
     const cards = cardsFromParts([
       text,
@@ -52,6 +64,8 @@ describe("assistant cards", () => {
             imageUrl: "/images/stock.jpg",
             mayBeUnavailable: false,
             badge: "limited",
+            needs: { "allergen:peanuts": "unknown" },
+            cannotConfirm: true,
             variants: [
               { variantId: "v-b", label: "Large", priceCents: 900 },
               { variantId: "v-a", label: "Small", priceCents: 700 },
@@ -133,8 +147,8 @@ describe("assistant cards", () => {
     expect(JSON.stringify(cards)).not.toContain("missing-listing");
     expect(JSON.stringify(cards)).not.toContain("$1.00");
     const shown = cards.find((card) => card.kind === "product" && card.name === "Stockfish");
-    expect(shown).toMatchObject({ packLabel: "Small", priceCents: 700, priceLabel: "$7.00", askStore: false });
-    expect(cards.find((card) => card.kind === "product" && card.name === "Egusi")).toMatchObject({ askStore: true });
+    expect(shown).toMatchObject({ packLabel: "Small", priceCents: 700, priceLabel: "$7.00", askStore: false, cannotConfirm: true });
+    expect(cards.find((card) => card.kind === "product" && card.name === "Egusi")).toMatchObject({ askStore: true, cannotConfirm: false });
     const choices = cards.find((card) => card.kind === "choices");
     expect(choices && choices.kind === "choices" ? choices.options.map((option) => option.sendText) : []).toEqual([
       "Egusi (400 g)",

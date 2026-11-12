@@ -15,6 +15,8 @@ export type ProductCard = {
   mayBeUnavailable: boolean;
   /** The shelf disables quick-add for "ask-store" items; the chat card does too. */
   askStore: boolean;
+  /** The shopper's saved needs cannot be confirmed for it: the card says so and has no quick-add. */
+  cannotConfirm: boolean;
   /** What the card's quick-add puts in the basket; null when the tool did not say. */
   listingId: string | null;
   variantId: string | null;
@@ -195,6 +197,7 @@ function productFromSearch(item: unknown, key: string): ProductCard | null {
     imageUrl,
     mayBeUnavailable: item.mayBeUnavailable === true,
     askStore: item.badge === "ask-store",
+    cannotConfirm: item.cannotConfirm === true,
     listingId: typeof item.listingId === "string" ? item.listingId : null,
     variantId: typeof item.variantId === "string" ? item.variantId : null,
   };
@@ -244,6 +247,7 @@ function productFromShow(card: unknown, key: string): ProductCard | null {
     imageUrl,
     mayBeUnavailable: card.mayBeUnavailable === true,
     askStore: card.badge === "ask-store",
+    cannotConfirm: card.cannotConfirm === true,
     listingId: typeof card.listingId === "string" ? card.listingId : null,
     variantId: typeof cheapest.variantId === "string" ? cheapest.variantId : null,
   };
