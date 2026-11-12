@@ -264,6 +264,25 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     expect((await attributesOf(p.id)).allergensStatus).toBe("unknown");
   });
 
+  it("attributes: a read of only blank ingredient names stays unknown in the queue and after approve, never 'none'", async () => {
+    const p = await seed("blank-ingredients", "active");
+    scriptAttributes({ ingredients: [" ", ""], allergens: null, dietaryClaims: null });
+    const { proposalId } = await proposeProductAttributes(p.id);
+    const row = (await listAttributeProposals()).find((candidate) => candidate.id === proposalId);
+    expect(row?.ingredients).toBeNull();
+    expect(await approveAttributeProposal(proposalId!)).toEqual({ success: true });
+    expect((await attributesOf(p.id)).ingredientsStatus).toBe("unknown");
+
+    // A proposal stored before the rule, read but empty, still cannot make ingredients reviewed.
+    const legacy = await asAdmin((tx) => tx.attributeProposal.create({
+      data: { productId: p.id, ingredientsRead: true, ingredients: [], allergensRead: false, dietaryRead: false },
+    }));
+    expect(await approveAttributeProposal(legacy.id)).toEqual({ success: true });
+    const after = await attributesOf(p.id);
+    expect(after.ingredientsStatus).toBe("unknown");
+    expect(after.ingredients).toHaveLength(0);
+  });
+
   it("attributes: approving one proposal supersedes the product's other pending ones", async () => {
     const p = await seed("supersede", "active");
     scriptAttributes({ ingredients: null, allergens: ["milk"], dietaryClaims: null });

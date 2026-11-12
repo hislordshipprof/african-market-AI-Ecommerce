@@ -8,6 +8,7 @@ import { parseInput } from "../security/parse-input";
 import { assistantModelId } from "../assistant/model";
 import { assistantSpendState } from "../assistant/spend";
 import { extractProductAttributes } from "../catalog/attribute-extract";
+import { attributeGroup } from "../catalog/attributes";
 import { resolveIngredients } from "../catalog/ingredients";
 
 const productIdSchema = z.string().min(1).max(200);
@@ -368,21 +369,24 @@ export async function approveAttributeProposal(proposalId: string): Promise<Cata
       dietaryClaims?: string[];
       dietaryStatus?: string;
     } = {};
+    const ingredients = attributeGroup("ingredients", proposal.ingredientsRead ? proposal.ingredients : null, "admin_review");
+    const allergens = attributeGroup("allergens", proposal.allergensRead ? proposal.allergens : null, "admin_review");
+    const dietary = attributeGroup("dietary", proposal.dietaryRead ? proposal.dietaryClaims : null, "admin_review");
     let ingredientIds: string[] | null = null;
-    if (proposal.ingredientsRead) {
-      ingredientIds = (await resolveIngredients(tx, proposal.ingredients, { create: true })).ids;
+    if (ingredients.ok && ingredients.group) {
+      ingredientIds = (await resolveIngredients(tx, ingredients.group.values, { create: true })).ids;
       await tx.masterProductIngredient.deleteMany({ where: { productId: product.id } });
       await tx.masterProductIngredient.createMany({
         data: ingredientIds.map((ingredientId) => ({ productId: product.id, ingredientId })),
       });
       data.ingredientsStatus = "reviewed";
     }
-    if (proposal.allergensRead) {
-      data.allergens = proposal.allergens;
+    if (allergens.ok && allergens.group) {
+      data.allergens = allergens.group.values;
       data.allergensStatus = "reviewed";
     }
-    if (proposal.dietaryRead) {
-      data.dietaryClaims = proposal.dietaryClaims;
+    if (dietary.ok && dietary.group) {
+      data.dietaryClaims = dietary.group.values;
       data.dietaryStatus = "reviewed";
     }
     await tx.masterProduct.update({ where: { id: product.id }, data });

@@ -113,4 +113,17 @@ describe("product attribute extraction (fake Messages API)", () => {
       dietaryClaims: null,
     });
   });
+
+  it("an ingredient list of only blank names is unread, never 'no ingredients'", async () => {
+    script([{
+      kind: "tool",
+      toolName: "product_attributes",
+      toolInput: { ingredients: [" ", ""], allergens: null, dietaryClaims: null },
+    }]);
+    expect(await extractProductAttributes({ name: "Ogiri", description: null, imageUrl: null })).toEqual({
+      ingredients: null,
+      allergens: null,
+      dietaryClaims: null,
+    });
+  });
 });
