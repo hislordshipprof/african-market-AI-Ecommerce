@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import type { ReviewProduct } from "@/lib/admin/catalog-actions";
 import {
   approveProduct,
+  proposeProductAttributes,
   rejectProduct,
   updateReviewProduct,
 } from "@/lib/admin/catalog-actions";
@@ -258,6 +259,18 @@ export function ReviewTable({
     });
   }
 
+  function handleProposeAttributes(productId: string) {
+    setActionError(null);
+    startTransition(async () => {
+      const result = await proposeProductAttributes(productId);
+      if (result.error) {
+        setActionError(result.error);
+      } else {
+        router.push("/admin/catalog/review?status=attributes");
+      }
+    });
+  }
+
   function goToPage(p: number) {
     const params = new URLSearchParams(window.location.search);
     params.set("page", String(p));
@@ -364,6 +377,14 @@ export function ReviewTable({
               >
                 Reject
               </button>
+              <button
+                type="button"
+                onClick={() => handleProposeAttributes(p.id)}
+                disabled={isPending}
+                className="rounded-full border border-[#DCDFD6] px-3 py-2 text-xs font-medium text-[#15201A] hover:bg-[#f0f0f0] disabled:opacity-50 dark:border-[#333] dark:text-white dark:hover:bg-[#222]"
+              >
+                Read attributes
+              </button>
             </div>
           </div>
         ))}
@@ -431,6 +452,14 @@ export function ReviewTable({
                       className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
                     >
                       Reject
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleProposeAttributes(p.id)}
+                      disabled={isPending}
+                      className="rounded-full border border-[#DCDFD6] px-3 py-1.5 text-xs font-medium text-[#15201A] hover:bg-[#f0f0f0] disabled:opacity-50 dark:border-[#444] dark:text-white dark:hover:bg-[#222]"
+                    >
+                      Read attributes
                     </button>
                   </div>
                 </td>
