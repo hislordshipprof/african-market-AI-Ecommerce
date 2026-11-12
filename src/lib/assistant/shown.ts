@@ -23,6 +23,8 @@ export interface AcceptanceTurn {
   customerText: string;
   lastReplyText: string;
   lastReplyEmpty: boolean;
+  /** Listings a search or recommendation tool returned to the model in the last reply. */
+  lastReplyListingIds: string[];
 }
 
 export interface ShownPart {
@@ -117,7 +119,24 @@ export function acceptanceForTurn(
     customerText,
     lastReplyText: previous ? textOf(previous) : "",
     lastReplyEmpty: !previous || replyCountsAsEmpty(previous),
+    lastReplyListingIds: previous ? returnedListingIds(previous) : [],
   };
+}
+
+const RETURNED_LISTING_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes"]);
+
+function returnedListingIds(message: ShownMessage): string[] {
+  const ids = new Set<string>();
+  for (const part of message.parts) {
+    const name = toolNameOf(part);
+    if (!name || !RETURNED_LISTING_TOOLS.has(name) || !outputOk(part.output)) continue;
+    const body = part.output as { items?: unknown; cards?: unknown };
+    for (const row of [...arrayOf(body.items), ...arrayOf(body.cards)]) {
+      const listingId = (row as { listingId?: unknown }).listingId;
+      if (typeof listingId === "string") ids.add(listingId);
+    }
+  }
+  return [...ids];
 }
 
 export function replyCountsAsEmpty(message: ShownMessage): boolean {

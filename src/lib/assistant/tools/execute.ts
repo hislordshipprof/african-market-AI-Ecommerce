@@ -531,7 +531,9 @@ async function itemsNotShown(
       variants: listing.variants,
     });
     if (acceptance.led) {
-      const inReply = !acceptance.lastReplyEmpty && textNamesProduct(acceptance.lastReplyText, names);
+      const inReply = !acceptance.lastReplyEmpty && (
+        acceptance.lastReplyListingIds.includes(listing.id) || textNamesProduct(acceptance.lastReplyText, names)
+      );
       const inCustomer = textNamesProduct(acceptance.customerText, names);
       if (!inReply && !inCustomer) refused.set(item.variant_id, names[0] ?? item.variant_id);
       else if (confirmingExplicitAdd && nearListings.has(listing.id) && !fitListings.has(listing.id) && !offeredVariants.has(item.variant_id)) {

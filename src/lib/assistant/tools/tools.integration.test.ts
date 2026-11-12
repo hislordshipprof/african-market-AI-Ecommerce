@@ -18,6 +18,7 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
+import { acceptanceForTurn } from "../shown";
 import { addToCartInput, offerChoicesInput, searchCatalogInput, toolInputSchemas } from "./schemas";
 
 const { headerState, cartCookies } = vi.hoisted(() => ({
@@ -298,6 +299,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
         customerText: "yes",
         lastReplyText: "Egusi and Foreign Rice",
         lastReplyEmpty: false,
+        lastReplyListingIds: [],
       },
     }), {
       items: [
@@ -824,6 +826,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: `Add 1 Ayoola ${suffix}.`,
       lastReplyText: "",
       lastReplyEmpty: true,
+      lastReplyListingIds: [],
     } });
     const found = await searchCatalog(context, { query: `Ayoola poundo yam ${suffix}` });
     expect(searchItems(found).find((row) => row.listingId === item.listingId)?.match).toBe("near");
@@ -849,9 +852,41 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: "yes",
       lastReplyText: `I can add ${name}.`,
       lastReplyEmpty: false,
+      lastReplyListingIds: [],
     } });
     await searchCatalog(context, { query: `Otherbrand ${suffix}` });
     const result = await addToCart(context, { items: [{ variant_id: item.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: true, qty: 1 });
+  });
+
+  it("yes adds a product the proposal's search returned even when the reply shortened its name", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const item = await makeListing(storeA, {
+      name: `Eru / okazi / afang / fumbwa leaves ${suffix} (Gnetum), dried and shredded`,
+      price: 450,
+    });
+    const proposalTurn = `propose-${suffix}`;
+    const found = await searchCatalog(ctx({ ...talk, turnMessageId: proposalTurn }), { query: `eru ${suffix}` });
+    expect(searchItems(found).some((row) => row.listingId === item.listingId)).toBe(true);
+    const yes = `yes-eru-${suffix}`;
+    const messages = [
+      { role: "user", id: proposalTurn, parts: [{ type: "text", text: `Egusi soup ${suffix} for 4 people.` }] },
+      {
+        role: "assistant",
+        id: `reply-${suffix}`,
+        parts: [
+          { type: "tool-search_catalog", state: "output-available", output: found },
+          { type: "text", text: "- Eru / okazi leaves (Gnetum), dried and shredded, 1 pack\n\nWant me to add these?" },
+        ],
+      },
+      { role: "user", id: yes, parts: [{ type: "text", text: "Yes, add those." }] },
+    ];
+    const result = await addToCart(ctx({
+      ...talk,
+      turnMessageId: yes,
+      acceptance: acceptanceForTurn(messages, yes, "Yes, add those."),
+    }), { items: [{ variant_id: item.variantId, qty: 1 }] });
     expect(result).toMatchObject({ ok: true, qty: 1 });
   });
 
@@ -883,6 +918,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: "yes",
       lastReplyText: `The only result is ${name}.`,
       lastReplyEmpty: false,
+      lastReplyListingIds: [],
     } }), { items: [{ variant_id: item.variantId, qty: 1 }] });
     expect(result).toMatchObject({ ok: false, code: "not_shown" });
     expect(await storeScoped(storeA).cartLine.count({ where: { cartId: talk.cartId } })).toBe(0);
@@ -909,6 +945,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: `Add Cameroon pepper ${suffix} (pack)`,
       lastReplyText: "",
       lastReplyEmpty: true,
+      lastReplyListingIds: [],
     } });
     await searchCatalog(context, { query: `Ayoola ${suffix}` });
     await offerChoices(context, {
@@ -936,6 +973,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       customerText: "I want to cook jollof rice for 4 people.",
       lastReplyText: "",
       lastReplyEmpty: true,
+      lastReplyListingIds: [],
     } });
     await searchCatalog(context, { query: `seasoning ${suffix}` });
     const result = await addToCart(context, { items: [{ variant_id: item.variantId, qty: 1 }] });
