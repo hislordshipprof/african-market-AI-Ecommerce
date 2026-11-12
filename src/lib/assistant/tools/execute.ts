@@ -25,6 +25,7 @@ import {
   readConstraints,
   shopperNeed,
   updateConstraints,
+  unknownNeeds,
   verdictReason,
   type ConstraintStatus,
   type ListingVerdict,
@@ -76,6 +77,7 @@ const MESSAGES: Record<string, string> = {
   backup_required: "This item may be unavailable, so it keeps a backup: Let the store suggest or a named substitute.",
   excluded: "That item does not meet the customer's needs.",
   cannot_confirm: "I can't confirm that item meets the customer's needs.",
+  unchecked_swap: "The store's own swap does not check the customer's needs. Name a substitute that meets them, or Exact item only for a refund.",
 };
 
 function fail(code: string): ToolFailure {
@@ -276,11 +278,13 @@ async function gateListings(ctx: AssistantContext, listingIds: string[]): Promis
   const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
   if (!hasConstraints(constraints) || listingIds.length === 0) return refused;
   const verdicts = await listingVerdicts(ctx.storeId, listingIds, constraints);
-  const confirmedBefore = new Set(constraints.confirmed.map((row) => row.listingId));
+  // A confirmation covers only the constraints that were unknown when the customer gave it.
+  const confirmedBefore = (verdict: ListingVerdict) => constraints.confirmed.some((row) =>
+    row.listingId === verdict.listingId && unknownNeeds(verdict).every((name) => row.needs.includes(name)));
   const unknown: string[] = [];
   for (const verdict of verdicts.values()) {
     if (verdict.status === "excluded") refused.set(verdict.listingId, refusal(verdict));
-    else if (verdict.status === "unknown" && !confirmedBefore.has(verdict.listingId)) unknown.push(verdict.listingId);
+    else if (verdict.status === "unknown" && !confirmedBefore(verdict)) unknown.push(verdict.listingId);
   }
   if (unknown.length === 0) return refused;
   const confirming = new Set<string>();
@@ -302,7 +306,7 @@ async function gateListings(ctx: AssistantContext, listingIds: string[]): Promis
   await updateConstraints(ctx.storeId, ctx.conversationId, (saved) => {
     const at = new Date().toISOString();
     for (const id of unknown) {
-      if (confirming.has(id)) saved.confirmed.push({ listingId: id, messageId: ctx.turnMessageId!, at });
+      if (confirming.has(id)) saved.confirmed.push({ listingId: id, messageId: ctx.turnMessageId!, at, needs: unknownNeeds(verdicts.get(id)!) });
       else if (ctx.turnMessageId) saved.asked[id] = ctx.turnMessageId;
     }
   });
@@ -758,6 +762,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
     [...new Set(allowed.flatMap((item) => (item.backup_variant_id ? listingOf.get(item.backup_variant_id) ?? [] : [])))],
   );
   const backupRefused = (id: string | undefined) => !!id && backups.has(listingOf.get(id) ?? "");
+  const constrained = hasConstraints(await readConstraints(ctx.storeId, ctx.conversationId));
   return recordWrite(ctx, "add_to_cart", raw, async (tx) => {
     const items = [];
     for (const item of allowed) {
@@ -776,7 +781,9 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       if (applied.created && flagged) {
         const backupId = backupRefused(item.backup_variant_id) ? undefined : item.backup_variant_id;
         const backup = await chooseBackup(tx, ctx.storeId, item.variant_id, backupId);
-        swapRule = backup.swapRule;
+        // The store's own swap checks no needs, so a constrained line with no checked backup is refunded.
+        const unchecked = constrained && backup.swapRule === "store_suggests";
+        swapRule = unchecked ? "exact_only" : backup.swapRule;
         substituteVariantId = backup.substituteVariantId;
         await tx.cartLine.update({
           where: { id: applied.lineId },
@@ -856,6 +863,8 @@ export async function removeFromCart(ctx: AssistantContext, input: unknown): Pro
 
 export async function setSwapRule(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(setSwapRuleInput, input);
+  const constrained = hasConstraints(await readConstraints(ctx.storeId, ctx.conversationId));
+  if (constrained && parsed.rule === "store_suggests") return recordRead(ctx, "set_swap_rule", parsed, fail("unchecked_swap"));
   if (parsed.rule === "named_substitute" && parsed.substitute_variant_id) {
     const substitute = await storeScoped(ctx.storeId).listingVariant.findUnique({
       where: { id: parsed.substitute_variant_id },
@@ -870,8 +879,8 @@ export async function setSwapRule(ctx: AssistantContext, input: unknown): Promis
       include: { variant: { include: { listing: true } } },
     });
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
-    // ADR-0018: a may-be-unavailable line always carries a backup.
-    if (parsed.rule === "exact_only" && mayBeUnavailable(line.variant.listing)) return fail("backup_required");
+    // ADR-0018: a may-be-unavailable line always carries a backup, unless the customer's needs leave a refund.
+    if (parsed.rule === "exact_only" && !constrained && mayBeUnavailable(line.variant.listing)) return fail("backup_required");
     if (parsed.rule === "named_substitute") {
       const substituteId = parsed.substitute_variant_id;
       const substitute = substituteId

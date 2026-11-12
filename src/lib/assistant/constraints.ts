@@ -13,8 +13,8 @@ export interface ShopperConstraints {
   preferences: string[];
   /** Listings refused as unknown, by the user message whose turn refused them. */
   asked: Record<string, string>;
-  /** Unknown listings the customer confirmed, one at a time. */
-  confirmed: Array<{ listingId: string; messageId: string; at: string }>;
+  /** Unknown listings the customer confirmed, one at a time, with the constraint names unknown at that time. */
+  confirmed: Array<{ listingId: string; messageId: string; at: string; needs: string[] }>;
 }
 
 export type ConstraintStatus = "ok" | "excluded" | "unknown";
@@ -43,7 +43,14 @@ export function parseConstraints(raw: unknown): ShopperConstraints {
     }),
     preferences: strings(record.preferences),
     asked,
-    confirmed: Array.isArray(record.confirmed) ? record.confirmed as ShopperConstraints["confirmed"] : [],
+    confirmed: Array.isArray(record.confirmed)
+      ? record.confirmed.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as Record<string, unknown>;
+        if (typeof row.listingId !== "string" || typeof row.messageId !== "string" || typeof row.at !== "string") return [];
+        return [{ listingId: row.listingId, messageId: row.messageId, at: row.at, needs: strings(row.needs) }];
+      })
+      : [],
   };
 }
 
@@ -201,6 +208,11 @@ export async function listingVerdicts(
     const needs = constraintStatuses(attributesFromRow(row), constraints);
     return [row.id, { listingId: row.id, status: row.excluded ? "excluded" : overallStatus(needs), needs }];
   }));
+}
+
+/** The constraint names a listing cannot be confirmed for. */
+export function unknownNeeds(verdict: ListingVerdict): string[] {
+  return Object.entries(verdict.needs).filter(([, value]) => value === "unknown").map(([name]) => name);
 }
 
 /** Why a listing is refused, in the customer's terms. */
