@@ -252,7 +252,8 @@ function collectHallucinations(input: ScoreInput, binding: CatalogBinding): Hall
 
 function pushItem(found: HallucinatedItem[], seen: Set<string>, item: HallucinatedItem | null): void {
   if (!item) return;
-  const key = `${item.field}:${item.id}:${item.crossStore}`;
+  // One invented id is one item, even when a tool output echoes it under other fields.
+  const key = `${item.id}:${item.crossStore}`;
   if (seen.has(key)) return;
   seen.add(key);
   found.push(item);
