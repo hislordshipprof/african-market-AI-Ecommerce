@@ -232,15 +232,42 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     avoidIngredients: parsed.avoid_ingredients,
     remove: parsed.remove,
   });
-  return recordRead(ctx, "set_shopper_needs", parsed, {
-    ok: true,
+  const output = {
+    ok: true as const,
     avoidAllergens: saved.avoidAllergens,
     requireClaims: saved.requireClaims,
     avoidIngredients: saved.avoidIngredients.map((item) => item.term),
     preferences: saved.preferences,
     ...(ask.length > 0 ? { ask } : {}),
     ...(cannotCheck.length > 0 ? { cannotCheck } : {}),
+  };
+  const refund = hasConstraints(saved) ? await uncheckedSwapLines(ctx) : [];
+  if (refund.length === 0) return recordRead(ctx, "set_shopper_needs", parsed, output);
+  // Lines already in the cart follow the needs too: the store's swap and a substitute that fails them become a refund.
+  return recordWrite(ctx, "set_shopper_needs", parsed, async (tx) => {
+    await tx.cartLine.updateMany({
+      where: { cartId: ctx.cartId, id: { in: refund.map((line) => line.lineId) } },
+      data: { swapRule: "exact_only", substituteVariantId: null },
+    });
+    return { ...output, exactOnly: refund };
   });
+}
+
+/** This cart's lines whose swap the saved needs do not check: the store's own swap, or a named substitute the gate refuses. */
+async function uncheckedSwapLines(ctx: AssistantContext): Promise<Array<{ lineId: string; name: string }>> {
+  const lines = await storeScoped(ctx.storeId).cartLine.findMany({
+    where: { cartId: ctx.cartId, swapRule: { in: ["store_suggests", "named_substitute"] } },
+    include: {
+      variant: { include: { listing: { include: { masterProduct: true } } } },
+      substituteVariant: { select: { listingId: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  const substitutes = lines.flatMap((line) => (line.swapRule === "named_substitute" && line.substituteVariant ? [line.substituteVariant.listingId] : []));
+  const refused = await gateListings({ ...ctx, acceptance: undefined, turnMessageId: undefined }, [...new Set(substitutes)]);
+  return lines
+    .filter((line) => line.swapRule === "store_suggests" || !line.substituteVariant || refused.has(line.substituteVariant.listingId))
+    .map((line) => ({ lineId: line.id, name: line.variant.listing.customName || line.variant.listing.masterProduct?.name || "Unnamed" }));
 }
 
 /** Saved constraints checked for listings a tool is about to return; null when there are none. */
