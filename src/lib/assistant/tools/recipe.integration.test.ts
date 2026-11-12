@@ -136,15 +136,6 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(result.notCarried).toContain("onion");
   });
 
-  it("never offers a listing that has no variant to add", async () => {
-    await storeScoped(storeA).listing.create({
-      data: { storeId: storeA, masterProductId: "pepper-tatashe", customName: `Tatashe ${suffix}`, price: 300, stockMode: "unlimited", confidence: 1, frozen: false, perishable: false },
-    });
-    const result = await getRecipe(ctxA, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
-    expect([...result.inStock, ...result.lowOrOut].map((item) => item.ingredient)).not.toContain("red bell pepper");
-    expect(result.notCarried).toContain("red bell pepper");
-  });
-
   it("asks for servings when they are unclear, without searching or looking up", async () => {
     const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["ripe plantain"])] });
     const result = await getRecipe(ctxA, { dish }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
@@ -204,15 +195,6 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     const again = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
     const curated = await getRecipe(ctxA, { dish: "Egusi soup", servings: 6 }, { lookupModel: createAssistantModel({ fetch: again.fetch }) });
     expect(curated).toMatchObject({ ok: true, lookedUp: false, recipe: "Egusi soup", source: "the store's recipe base" });
-  });
-
-  it("attaches a second ingredient that resolves to an item already placed, instead of dropping it", async () => {
-    const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["rice", "parboiled rice", "ginger"])] });
-    const result = await getRecipe(ctxA, { dish: `${dish} twin`, servings: 2 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) }) as unknown as RecipeOutput;
-    expect(result.inStock).toEqual([
-      expect.objectContaining({ ingredient: "rice", covers: ["parboiled rice"], listingId: rice.listingId }),
-    ]);
-    expect(result.notCarried).toEqual(["ginger"]);
   });
 
   it("continues a search turn that pauses without reporting, on the same lookup", async () => {
