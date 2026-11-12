@@ -109,7 +109,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
           aborted = { reason: error instanceof Error ? error.message : "worker failed" };
           result.unresolvedSpend = true;
         } finally {
-          if (holds.open > 0) await budget.finishAttempt(holds, threw, BigInt(0));
+          if (holds.open > 0) await budget.finishAttempt(holds, threw ? 1 : 0, BigInt(0));
           result.spendMicros += caseMicros;
         }
       }
@@ -203,7 +203,7 @@ async function runCase(
     cost += outcome.costMicros;
     inputTokens += outcome.inputTokens;
     outputTokens += outcome.outputTokens;
-    await budget.finishAttempt(holds, outcome.unresolved, outcome.costMicros);
+    await budget.finishAttempt(holds, outcome.unknownSends, outcome.costMicros);
     if (outcome.sticky) sticky = true;
     unresolved = unresolved || outcome.unresolved;
     provenance.push(...outcome.caseResult.requestProvenance);
@@ -314,6 +314,7 @@ async function oneAttempt(
   retry: boolean;
   retryAfterSeconds: number | null;
   unresolved: boolean;
+  unknownSends: number;
   sticky: boolean;
   inputTokens: number;
   outputTokens: number;
@@ -417,6 +418,7 @@ async function oneAttempt(
         retry,
         retryAfterSeconds,
         unresolved: money.unresolved,
+        unknownSends: money.unknownSends,
         sticky: scored.sticky,
         inputTokens: money.inputTokens,
         outputTokens: money.outputTokens,
@@ -438,6 +440,7 @@ async function oneAttempt(
     retry: abort ? false : true,
     retryAfterSeconds,
     unresolved: money.unresolved,
+    unknownSends: money.unknownSends,
     sticky: logged || blank.stickyIntegrity,
     inputTokens: money.inputTokens,
     outputTokens: money.outputTokens,
@@ -454,6 +457,7 @@ async function oneAttempt(
       retry: true,
       retryAfterSeconds: null,
       unresolved: true,
+      unknownSends: Math.max(money.unknownSends, 1),
       sticky: blank.stickyIntegrity,
       inputTokens: money.inputTokens,
       outputTokens: money.outputTokens,
@@ -711,23 +715,32 @@ function classifyProvider(exchange: RecordedExchange): { kind: "ok" | "retry" | 
   return { kind: "ok", reason: "", retryAfterSeconds };
 }
 
-function spendOf(exchanges: RecordedExchange[]): { micros: bigint; unresolved: boolean; inputTokens: number; outputTokens: number } {
+function spendOf(exchanges: RecordedExchange[]): { micros: bigint; unresolved: boolean; unknownSends: number; inputTokens: number; outputTokens: number } {
   let micros = BigInt(0);
   let unresolved = false;
+  let unknownSends = 0;
   let inputTokens = 0;
   let outputTokens = 0;
   for (const exchange of exchanges) {
-    if (exchange.unresolvedUsage && (exchange.status === 0 || (exchange.status >= 200 && exchange.status < 300))) unresolved = true;
-    if (!exchange.usage) continue;
+    const sentWithoutUsage = exchange.unresolvedUsage && (exchange.status === 0 || (exchange.status >= 200 && exchange.status < 300));
+    if (!exchange.usage) {
+      if (sentWithoutUsage) {
+        unresolved = true;
+        unknownSends += 1;
+      }
+      continue;
+    }
+    if (sentWithoutUsage) unresolved = true;
     inputTokens += exchange.usage.inputTokens?.total ?? 0;
     outputTokens += exchange.usage.outputTokens?.total ?? 0;
     try {
       micros += callCostMicros("claude-haiku-5-5", exchange.usage);
     } catch {
       unresolved = true;
+      unknownSends += 1;
     }
   }
-  return { micros, unresolved, inputTokens, outputTokens };
+  return { micros, unresolved, unknownSends, inputTokens, outputTokens };
 }
 
 async function waitSettled(storeId: string, cartId: string, messageId: string, timeoutMs: number): Promise<{ status: string; messages: Array<Record<string, unknown>>; conversationId: string } | null> {
@@ -897,7 +910,7 @@ interface ReserveHolds {
 interface Budget {
   admit: (holds: ReserveHolds) => Promise<boolean>;
   admitRetry: (holds: ReserveHolds) => Promise<boolean>;
-  finishAttempt: (holds: ReserveHolds, unresolved: boolean, knownMicros: bigint) => Promise<void>;
+  finishAttempt: (holds: ReserveHolds, unknownSends: number, knownMicros: bigint) => Promise<void>;
   ticketBlocked: boolean;
 }
 
@@ -946,19 +959,25 @@ function createBudget(options: RunEvalOptions): Budget {
       holds.open += 1;
       return true;
     }),
-    finishAttempt: (holds, unresolved, knownMicros) => run(() => {
+    finishAttempt: (holds, unknownSends, knownMicros) => run(() => {
       if (holds.open <= 0) return;
-      holds.open -= 1;
+      const open = holds.open;
+      holds.open = 0;
       const safe = knownMicros < BigInt(0) ? BigInt(0) : knownMicros;
+      const unknown = unknownSends > 0 ? unknownSends : 0;
+      const held = RESERVE_MICROS * BigInt(open);
+      if (inflight >= held) inflight -= held;
+      else inflight = BigInt(0);
       spent += safe;
       if (options.ticketSpendPath && safe > BigInt(0)) adjustTicketSpend(safe, options.ticketSpendPath);
-      if (inflight >= RESERVE_MICROS) inflight -= RESERVE_MICROS;
-      else inflight = BigInt(0);
-      if (unresolved && safe <= BigInt(0)) {
-        spent += RESERVE_MICROS;
+      if (unknown > open) {
+        spent += RESERVE_MICROS * BigInt(unknown);
+        if (options.ticketSpendPath) adjustTicketSpend(RESERVE_MICROS * BigInt(unknown - open), options.ticketSpendPath);
         return;
       }
-      if (options.ticketSpendPath) adjustTicketSpend(-RESERVE_MICROS, options.ticketSpendPath);
+      if (unknown > 0) spent += RESERVE_MICROS * BigInt(unknown);
+      const release = RESERVE_MICROS * BigInt(open - unknown);
+      if (options.ticketSpendPath && release > BigInt(0)) adjustTicketSpend(-release, options.ticketSpendPath);
     }),
   };
 }
