@@ -4,10 +4,16 @@ export function productionRuntime(env: Record<string, string | undefined> = proc
   return env.NODE_ENV === "production" || env.VERCEL === "1";
 }
 
+/** INNGEST_DEV as the Inngest SDK parses it: `1` or `true`, any case, trimmed. */
+export function inngestDevOn(env: Record<string, string | undefined> = process.env): boolean {
+  const dev = env.INNGEST_DEV?.trim().toLowerCase();
+  return dev === "1" || dev === "true";
+}
+
 /** Local Dev Server may send without an event key. Vercel stays in cloud mode. */
 export function devServerWithoutKey(env: Record<string, string | undefined> = process.env): boolean {
   if (env.VERCEL) return false;
-  return env.INNGEST_DEV === "1";
+  return inngestDevOn(env);
 }
 
 /**
