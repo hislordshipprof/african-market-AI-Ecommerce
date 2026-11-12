@@ -185,6 +185,15 @@ test.describe("Listing management (authenticated)", () => {
         actorEmail: OWNER_EMAIL,
         after: { allergensStatus: "known", allergens: ["peanuts", "sesame"], dietaryStatus: "known", dietaryClaims: ["halal"] },
       });
+
+    await expect(ingredients.getByRole("button", { name: "Use catalog value" })).toHaveCount(0);
+    await allergens.getByRole("button", { name: "Use catalog value" }).click();
+    await dialog.getByRole("button", { name: "Save attributes" }).click();
+    await expect(page.getByText("Attributes saved").last()).toBeVisible({ timeout: 10000 });
+    await page.getByRole("button", { name: `Ingredients and allergens for ${uniqueName}` }).click();
+    await expect(allergens.getByText("Unknown", { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(allergens.getByRole("button", { name: "Use catalog value" })).toHaveCount(0);
+    await expect(dietary.getByText("Set by you")).toBeVisible();
   });
 
   test("switch stock mode from counted to status", async ({ page }) => {
