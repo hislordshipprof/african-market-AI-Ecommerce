@@ -22,7 +22,7 @@ const AWAITING_PICKUP_MS = 48 * HOUR;
 const ALERT_WINDOW_MS = 7 * DAY;
 export const ROW_LIMIT = 200;
 
-const UNCAPTURED = ["AUTHORIZED", "ACCEPTED", "PICKING", "CAPTURING", "CANCELLING"];
+const HOLD_STATES = ["AUTHORIZED", "ACCEPTED", "PICKING", "CAPTURING", "CANCELLING"];
 const FINAL = ["DELIVERED", "COMPLETED", "CANCELLED", "PARTIALLY_REFUNDED", "REFUNDED"];
 export const ALERT_ACTIONS = ["acceptance_alert", "reconcile_failed", "capture_released", "refund_request_unknown", "issue_refund_failed"] as const;
 
@@ -63,7 +63,7 @@ export function slotStart(slot: string | null, acceptedAt: number): number | nul
 }
 
 function stuckReason(order: OrderRecoveryCandidate, now: number): { reason: StuckReason; since: Date } | null {
-  if (UNCAPTURED.includes(order.status) && order.createdAt.getTime() < now - HOLD_EXPIRING_MS) {
+  if (HOLD_STATES.includes(order.status) && order.createdAt.getTime() < now - HOLD_EXPIRING_MS) {
     return { reason: "card hold expiring", since: order.createdAt };
   }
   switch (order.status) {

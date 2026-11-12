@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { listOrdersToCheck } from "@/lib/admin/orders-to-check";
-import { ROW_LIMIT } from "@/lib/admin/orders-to-check-query";
+import { ROW_LIMIT, type OrderAlertRow } from "@/lib/admin/orders-to-check-query";
+import type { OrderRecoveryGroup } from "@/lib/db";
 
-const ALERT_LABELS: Record<string, string> = {
+const ALERT_LABELS: Record<OrderAlertRow["action"], string> = {
   acceptance_alert: "Not accepted in 15 open minutes",
   reconcile_failed: "Reconcile failed",
   capture_released: "Card hold released before capture",
@@ -10,7 +11,7 @@ const ALERT_LABELS: Record<string, string> = {
   issue_refund_failed: "Problem report refund failed",
 };
 
-const GROUP_LABELS: Record<string, string> = {
+const GROUP_LABELS: Record<OrderRecoveryGroup, string> = {
   authorized: "orders waiting for the store to accept",
   uncaptured: "accepted orders not yet charged",
   captured: "charged orders",
@@ -45,7 +46,7 @@ export default async function OrdersToCheckPage() {
       <h2 className="mb-3 text-lg font-semibold text-foreground">Stuck orders</h2>
       {cappedGroups.map((group) => (
         <p key={group} className="mb-3 text-sm text-muted-foreground" data-testid={`stuck-capped-${group}`}>
-          The list may be incomplete: only {ROW_LIMIT} {GROUP_LABELS[group]} were checked, those known to be stuck first, then the oldest.
+          The list may be incomplete: only {ROW_LIMIT} {GROUP_LABELS[group]} were checked, those known to be stuck or due first.
         </p>
       ))}
       {stuck.length === 0 ? (
@@ -106,7 +107,7 @@ export default async function OrdersToCheckPage() {
                 <tr key={`${row.orderId}-${row.action}`} className="border-b border-input last:border-0" data-testid={`alert-row-${row.orderNumber}`}>
                   <td className="px-4 py-3 text-foreground">{row.storeName}</td>
                   <td className="px-4 py-3 text-foreground">#{row.orderNumber}</td>
-                  <td className="px-4 py-3 text-foreground">{ALERT_LABELS[row.action] ?? row.action}</td>
+                  <td className="px-4 py-3 text-foreground">{ALERT_LABELS[row.action]}</td>
                   <td className="px-4 py-3 font-mono text-xs">{row.orderStatus}</td>
                   <td className="px-4 py-3 tabular-nums text-muted-foreground">{formatAge(row.createdAt, now)} ago</td>
                 </tr>
