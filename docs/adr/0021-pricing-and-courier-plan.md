@@ -14,10 +14,34 @@ The platform earns **$0 per order**.
 
 | Lever | Proposal | Why |
 |---|---|---|
-| Store subscription | **Starter $49/month** (storefront, assistant, copilot, pickup and store delivery). **Pro $99/month** (adds courier delivery, custom domain, multiple staff). First 3 months free for the first 5 pilot stores. | Predictable income that covers hosting, AI and support. Well below Shopify plus apps, or a 15–30% marketplace commission. |
+| Store subscription | **Starter $49/month** and **Pro $99/month**; features in [Plan features](#plan-features). First 3 months free for the first 5 pilot stores. | Predictable income that covers hosting, AI and support. Well below Shopify plus apps, or a 15–30% marketplace commission. |
 | Per-order fee | **Customer service fee: 3% of goods, min $0.99, max $2.99**, shown at checkout, on delivery and pickup orders. **0% commission to the store.** | The store keeps 100% of its prices, which is the pitch against Instacart and DoorDash Marketplace. Customers already expect a small fee online. |
 | Delivery | **Keep the courier quote at cost, no markup** (ADR-0006 unchanged). No extra dispatch fee. | Delivery is the price shoppers compare. The service fee already pays for dispatch and support. |
 | Card fee | **The platform pays the card fee on the parts it keeps** (service fee and delivery). The store pays it only on its goods, tax and tip. | Fair, and easy to explain on the payout statement. It costs us about 3% of those parts. |
+
+### Plan features
+Decided 2026-11-12. The rule: **Starter is a complete online store**, and **Pro adds what grows the business or costs us money to run**. Shopper safety and core ordering are never locked behind Pro: allergy and diet rules, swap or refund prompts, cancellations and refunds.
+
+| Area | Starter ($49) | Pro ($99) |
+|---|---|---|
+| Storefront | Branded store at its platform subdomain | Adds the store's **own domain** |
+| Catalog | Shared catalog, CSV import, photos, stock levels | Same |
+| Shopper assistant | Full (lists, recipes, photo lists, allergy and diet limits); fair-use cap of **1,000 chats a month** | **5,000 chats a month** |
+| Orders | Pick list, swap or refund prompt, cancel and refund, issue reports | Same |
+| Fulfilment | Pickup and the store's own delivery | Adds **courier delivery** (DoorDash or Uber, cheaper one picked, automatic switch-over) |
+| Notifications | Email and web push to the store; email and SMS order updates to shoppers | Same |
+| Customer chat | In-app chat with shoppers | Same |
+| Store copilot | Stock alerts and daily digest | Adds **voice and photo stock reports**, and **WhatsApp** for copilot and alerts once built |
+| Staff | Owner + **2 staff** | **Unlimited staff** |
+| Analytics | Per-order payout breakdown | Adds the **analytics dashboard** (#498) |
+| Payouts | Weekly Stripe payouts, per-order breakdown | Same |
+| Directory (Phase 2) | Listed | Same |
+| Support | Email, next business day | **Priority**, same day |
+
+- **Locked features:** a Starter store sees each Pro feature locked, with an upgrade link.
+- **Downgrade:** a downgrade never breaks an order in flight. New orders follow the new plan. Staff over the limit keep read-only access until the owner removes them.
+- **Assistant cap:** past the monthly cap, the assistant tells the shopper it is unavailable and the store keeps selling by browsing. The owner is warned at 80%.
+- **Not in either plan yet:** multiple locations under one account (a higher tier later, if a store asks).
 
 ### Example order
 $60 of goods, an $8.99 courier quote, no tip, tax left out:
