@@ -28,7 +28,7 @@ import { storeScoped } from "../db";
 import { PushTestSender, setPushSenderForTests } from "../push/sender";
 import { sendOrderMessageAction } from "./customer-actions";
 import { replyToThreadAction } from "./store-actions";
-import { listStoreThreads, orderMessagesTag, postCustomerMessage, readCustomerMessages, replyAsStore } from "./thread";
+import { listStoreThreads, orderMessagesTag, storeUnreadCount, postCustomerMessage, readCustomerMessages, replyAsStore } from "./thread";
 import { makeFakeStep } from "../inngest/fake-step";
 import { supportSlaEscalation } from "./escalation";
 import { listEscalatedThreads, replyAsPlatformAction, resolveThreadAction } from "./platform-actions";
@@ -225,6 +225,40 @@ describe.skipIf(!hasDb)("support thread", () => {
     expect(await replyToThreadAction({ threadId: thread.id, body: "Not yours" })).toMatchObject({ ok: false });
     expect(await storeScoped(storeA).supportMessage.count({ where: { threadId: thread.id } })).toBe(1);
     expect(await storeScoped(storeA).notificationLog.count({ where: { orderId: placed.id } })).toBe(0);
+  });
+
+  it("the dashboard badge counts the unread of the threads the Messages list shows, not threads past its cap", async () => {
+    const storeC = (await raw.store.create({ data: { slug: `chat-c-${suffix}`, name: "Chat C", themePreset: "palm-and-shea" } })).id;
+    const scoped = storeScoped(storeC);
+    try {
+      const customer = await scoped.customer.create({ data: { storeId: storeC, name: "Bo", email: `chat-c-${suffix}@example.com` } });
+      const numbers = Array.from({ length: 101 }, (_, i) => i + 1);
+      await scoped.order.createMany({
+        data: numbers.map((number) => ({
+          storeId: storeC, number, customerId: customer.id, status: "ACCEPTED", fulfillment: "pickup",
+          subtotalCents: 1000, bufferCents: 100, totalAuthorizedCents: 1100, totalCents: 1000,
+        })),
+      });
+      const orders = await scoped.order.findMany({ select: { id: true, number: true } });
+      // Order 1's customer wrote first, so its thread is the 101st, past the list's cap of 100.
+      const at = (number: number) => new Date(Date.UTC(2026, 10, 1, 0, number));
+      await scoped.supportThread.createMany({
+        data: orders.map((o) => ({ id: `chat-c-${o.number}-${suffix}`, storeId: storeC, orderId: o.id, lastCustomerAt: at(o.number) })),
+      });
+      await scoped.supportMessage.createMany({
+        data: orders.map((o) => ({ storeId: storeC, threadId: `chat-c-${o.number}-${suffix}`, sender: "customer", body: "Hi", createdAt: at(o.number) })),
+      });
+
+      const listed = await listStoreThreads(storeC);
+      expect(listed.some((t) => t.orderNumber === 1)).toBe(false);
+      expect(await storeUnreadCount(storeC)).toBe(100);
+    } finally {
+      await scoped.supportMessage.deleteMany({});
+      await scoped.supportThread.deleteMany({});
+      await scoped.order.deleteMany({});
+      await scoped.customer.deleteMany({});
+      await raw.store.delete({ where: { id: storeC } });
+    }
   });
 
   describe("escalation", () => {
