@@ -112,6 +112,12 @@ _Avoid_: AI shopper, chatbot, "the helper" in shopper-facing copy
 **Choice chips**:
 The tappable product options the Shopper assistant shows when more than one item fits. The server also draws them when a reply names two or more products from a single search and the model did not offer a choice. Tapping a chip sends that product's name and pack back as the customer's pick.
 
+**Shopper constraint**:
+An allergen to avoid, a dietary claim that must hold, or an ingredient to avoid, taken from the customer's words and saved on the conversation (#485). The Shopper assistant checks them on Product attributes only, never by matching product names: search leaves out an excluded listing, and add and swap refuse one with the reason. An ingredient term that matches no Ingredient or local name is an unresolved constraint: the assistant says it can't check it.
+
+**Cannot confirm**:
+A listing whose attribute for a Shopper constraint is unknown. It is shown marked as such, never as a fit, and added only after the customer's next message confirms that one item. The confirmation is recorded on the conversation.
+
 **Acceptance-led message**:
 A customer message that starts, as a whole word, with yes, ok, okay, sure, go ahead, add those, or add what you suggested. On that turn the Shopper assistant adds a product only when the previous reply or the customer's own message named it.
 
