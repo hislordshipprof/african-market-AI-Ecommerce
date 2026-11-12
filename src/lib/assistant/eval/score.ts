@@ -2,6 +2,7 @@ import type { MasterCatalogRow } from "./fingerprint";
 import { hasForeignCurrency, ratio, usdAmountsInText } from "./money";
 import type {
   CartSnapshotLine,
+  FixtureListing,
   CatalogFixture,
   EvalCase,
   HallucinatedItem,
@@ -19,7 +20,7 @@ export interface BoundVariant {
 }
 
 export interface CatalogBinding {
-  byListingKey: Map<string, { id: string; key: string; store: "A" | "B"; confidence: number; stockMode: string; qty: number | null; status: string | null; active: boolean; name?: string }>;
+  byListingKey: Map<string, { id: string; key: string; store: "A" | "B"; confidence: number; stockMode: string; qty: number | null; status: string | null; active: boolean; name?: string; attributes?: FixtureListing["attributes"] }>;
   byVariantKey: Map<string, BoundVariant>;
   byListingId: Map<string, string>;
   byVariantId: Map<string, BoundVariant>;
@@ -61,6 +62,8 @@ export interface ScoreInput {
   stepLimitHit: boolean;
   /** The committed clarify claim the gate re-checks; a run derives it from its tools instead. */
   clarify?: ClarifyClaim;
+  /** The committed saved-needs claim the gate re-checks; a run derives it from set_shopper_needs instead. */
+  savedNeeds?: boolean;
 }
 
 /** Listings a clarifying question offered, and the choice-card names the shopper saw (none when the reply named them). */
@@ -86,6 +89,7 @@ export interface ScoreOutput {
   clarifyReply: string | null;
   clarifyOptions: string[];
   clarifyChoices: string[];
+  savedNeeds: boolean;
   pass: boolean;
   reason: string;
 }
@@ -98,7 +102,9 @@ const SERVINGS_TERMS = ["how many", "people", "serv", "portion", "guest"];
 
 export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: string[]): ScoreOutput {
   const dish = input.evalCase.dish;
-  const assignment = assignGroups(input.cart, input.evalCase, binding);
+  const needs = savedNeedsFromTools(input.tools);
+  const savedNeeds = input.savedNeeds ?? needs != null;
+  const assignment = assignGroups(input.cart, input.evalCase, binding, (line) => savedNeeds && !namedBackupPasses(line, input.tools, needs, binding));
   const precisionDenominator = dish ? 0 : input.cart.length;
   const precisionNumerator = dish || input.cart.length === 0 ? 0 : assignment.acceptable;
   const recallDenominator = input.evalCase.mustHave.length;
@@ -144,6 +150,7 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
     clarifyReply,
     clarifyOptions: clarifyReply != null ? clarify.options : [],
     clarifyChoices: clarifyReply != null ? clarify.choices : [],
+    savedNeeds,
     pass,
     reason: reason || "recall",
   };
@@ -226,7 +233,7 @@ function servingsMisses(input: ScoreInput): string[] {
   return SERVINGS_TERMS.some((term) => firstReply.includes(term)) ? [] : ["servings not asked"];
 }
 
-function assignGroups(cart: CartSnapshotLine[], evalCase: EvalCase, binding: CatalogBinding): { satisfied: number; acceptable: number; safety: string[] } {
+function assignGroups(cart: CartSnapshotLine[], evalCase: EvalCase, binding: CatalogBinding, refundAllowed: (line: CartSnapshotLine) => boolean): { satisfied: number; acceptable: number; safety: string[] } {
   const used = new Set<number>();
   let satisfied = 0;
   const safety: string[] = [];
@@ -250,11 +257,56 @@ function assignGroups(cart: CartSnapshotLine[], evalCase: EvalCase, binding: Cat
       else safety.push("wrong-quantity");
     }
     const listing = binding.byListingKey.get(line.key);
-    if (listing && mayBeUnavailable(listing) && !["store_suggests", "named_substitute"].includes(line.swapRule) && evalCase.swapRule?.listingKey !== line.key) {
+    if (listing && mayBeUnavailable(listing) && !["store_suggests", "named_substitute"].includes(line.swapRule) && evalCase.swapRule?.listingKey !== line.key
+      && !(line.swapRule === "exact_only" && refundAllowed(line))) {
       safety.push("invalid-swap");
     }
   }
   return { satisfied, acceptable, safety };
+}
+
+interface SavedNeeds {
+  avoidAllergens: string[];
+  requireClaims: string[];
+  avoidIngredients: string[];
+}
+
+/** The needs the last successful set_shopper_needs saved; null when none are saved. */
+function savedNeedsFromTools(tools: ObservedTool[]): SavedNeeds | null {
+  let needs: SavedNeeds | null = null;
+  for (const tool of tools) {
+    if (tool.tool !== "set_shopper_needs" || tool.errored) continue;
+    const body = tool.output as Partial<Record<keyof SavedNeeds | "ok", unknown>> | null;
+    if (body?.ok !== true) continue;
+    const list = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
+    const saved = { avoidAllergens: list(body.avoidAllergens), requireClaims: list(body.requireClaims), avoidIngredients: list(body.avoidIngredients) };
+    needs = saved.avoidAllergens.length + saved.requireClaims.length + saved.avoidIngredients.length > 0 ? saved : null;
+  }
+  return needs;
+}
+
+/**
+ * Owner rule (2026-11-12): under saved needs, Exact item only is right only when no backup passes them.
+ * A backup the model named for this line that the fixture's attributes show passing should have been kept.
+ */
+function namedBackupPasses(line: CartSnapshotLine, tools: ObservedTool[], needs: SavedNeeds | null, binding: CatalogBinding): boolean {
+  if (!needs) return false;
+  for (const tool of tools) {
+    if (tool.tool !== "add_to_cart") continue;
+    const items = (tool.input as { items?: unknown } | null)?.items;
+    if (!Array.isArray(items)) continue;
+    for (const item of items as Array<{ variant_id?: unknown; backup_variant_id?: unknown }>) {
+      if (typeof item?.variant_id !== "string" || typeof item.backup_variant_id !== "string") continue;
+      if (binding.byVariantId.get(item.variant_id)?.listingKey !== line.key) continue;
+      const backup = binding.byVariantId.get(item.backup_variant_id);
+      const attributes = backup ? binding.byListingKey.get(backup.listingKey)?.attributes : undefined;
+      if (attributes
+        && !needs.avoidAllergens.some((allergen) => (attributes.allergens as string[]).includes(allergen))
+        && !needs.avoidIngredients.some((ingredient) => attributes.ingredients.includes(ingredient))
+        && needs.requireClaims.every((claim) => (attributes.dietary as string[]).includes(claim))) return true;
+    }
+  }
+  return false;
 }
 
 function lineMatches(line: CartSnapshotLine, option: PackRef, evalCase: Pick<EvalCase, "qty">): boolean {
@@ -523,6 +575,7 @@ export function bindingFromFixture(
       status: listing.status,
       active: listing.active,
       name: masterCatalog.find((product) => product.id === listing.masterProductId)?.name,
+      attributes: listing.attributes,
     });
     byListingId.set(created.listingId, listing.key);
     if (listing.store === "A") aListingIds.add(created.listingId);

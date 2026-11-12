@@ -169,6 +169,8 @@ export interface CaseResult {
   /** Listing keys that accepted question offered, and the choice-card names it showed; the gate re-checks both. */
   clarifyOptions: string[];
   clarifyChoices: string[];
+  /** True when set_shopper_needs had saved needs; the gate re-scores with it. */
+  savedNeeds: boolean;
   /** Attempts ended by a request whose usage never arrived; their reserve stays spent. A completed case never ends on one. */
   droppedAttempts: number;
   costMicros: string;

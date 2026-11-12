@@ -86,6 +86,7 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
     clarifyReply: null,
     clarifyOptions: [],
     clarifyChoices: [],
+    savedNeeds: false,
     droppedAttempts: 0,
     costMicros: "1",
     anthropicRequestIds: [`req_${id}`],
@@ -193,6 +194,7 @@ function caseFromScore(id: string, category: CaseResult["category"], scored: Sco
     clarifyReply: scored.clarifyReply,
     clarifyOptions: scored.clarifyOptions,
     clarifyChoices: scored.clarifyChoices,
+    savedNeeds: scored.savedNeeds,
     droppedAttempts: 0,
     costMicros: "0",
     anthropicRequestIds: [`req_${id}`],
@@ -449,6 +451,58 @@ describe("shopper assistant eval gate", () => {
     expect(forgedVerdict.reasons).toContain("cart does not match dish-0");
     expect(forgedVerdict.reasons).not.toContain("dish pass rate below 0.85");
     expect(forgedVerdict.ok).toBe(false);
+  });
+
+  it("accepts Exact item only on a may-be-unavailable line only under saved needs with no passing backup (owner, 2026-11-12)", () => {
+    const binding = twoPackBinding();
+    const out = (key: string) => binding.byListingKey.get(key)!;
+    binding.byListingKey.set("paste-a", { ...out("paste-a"), stockMode: "status", status: "out_of_stock" });
+    binding.byListingKey.set("paste-b", { ...out("paste-b"), attributes: { ingredients: ["tomato"], allergens: [], dietary: [] } });
+    binding.byListingKey.set("onion-paste", { ...out("onion-paste"), attributes: { ingredients: ["tomato", "yellow onion"], allergens: [], dietary: [] } });
+    const paste: EvalCase = {
+      id: "paste",
+      category: "single-item",
+      turns: ["No yellow onion. Add 1 paste-a."],
+      mustHave: [{ options: [{ listingKey: "paste-a", variantKeys: ["paste-a-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    };
+    const cart: CartSnapshotLine[] = [{ key: "paste-a", variantKey: "paste-a-pack", qty: 1, swapRule: "exact_only", substituteVariantKey: null }];
+    const needs = { tool: "set_shopper_needs", input: {}, output: { ok: true, avoidAllergens: [], requireClaims: [], avoidIngredients: ["yellow onion"] }, turn: 1 };
+    const noNeeds = { ...needs, output: { ok: true, avoidAllergens: [], requireClaims: [], avoidIngredients: [] } };
+    const add = (backup?: string) => ({
+      tool: "add_to_cart",
+      input: { items: [{ variant_id: "paste-a-pack", qty: 1, ...(backup ? { backup_variant_id: backup } : {}) }] },
+      output: { ok: true },
+      turn: 1,
+    });
+    const score = (tools: ObservedTool[], savedNeeds?: boolean) => scoreCase({
+      evalCase: paste,
+      cart,
+      tools,
+      savedTexts: [{ turn: 1, text: "Added paste-a. Exact item only.", priorOutputs: [], saved: true }],
+      observedTexts: [],
+      strippedAmounts: [],
+      successfulWriteTurns: [1],
+      returnedLineIds: [],
+      cartLineIds: [],
+      stepLimitHit: false,
+      ...(savedNeeds != null ? { savedNeeds } : {}),
+    }, binding, ["Added paste-a. Exact item only."]);
+
+    expect(score([add()]).safetyFailures).toContain("invalid-swap");
+    expect(score([noNeeds, add()]).safetyFailures).toContain("invalid-swap");
+    const refunded = score([needs, add()]);
+    expect(refunded.safetyFailures).toEqual([]);
+    expect(refunded.pass).toBe(true);
+    expect(score([needs, add("onion-paste-pack")]).safetyFailures).toEqual([]);
+    expect(score([needs, add("paste-b-pack")]).safetyFailures).toContain("invalid-swap");
+
+    const expected = { fingerprint: fingerprint(), caseIds: ["paste"], model: "claude-haiku-5-5", cases: [paste], binding };
+    const committed = caseFromScore("paste", "single-item", refunded, false, cart);
+    expect(committed.savedNeeds).toBe(true);
+    expect(assessReport(report([committed]), expected).reasons).not.toContain("cart does not match paste");
+    expect(assessReport(report([{ ...committed, savedNeeds: false }]), expected).reasons).toContain("cart does not match paste");
   });
 
   it("fails a made-up id only when it reaches the cart or a reply, and counts a refused one as a rejected attempt", () => {
