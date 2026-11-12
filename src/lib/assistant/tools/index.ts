@@ -46,7 +46,7 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       execute: (input, options) => searchCatalog({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     set_shopper_needs: tool({
-      description: "Save what the customer must avoid or needs, from their own words: allergens, dietary claims, and ingredients. Kept for this conversation. Searches and adds check it. Not for a product choice, such as paste instead of fresh tomato.",
+      description: "Save what the customer must avoid or needs, from their own words: allergens, dietary claims, and ingredients. Kept for this conversation. Searches, recipes and adds check it. A term that only names a form of a known ingredient returns ask.",
       inputSchema: setShopperNeedsInput,
       execute: (input, options) => setShopperNeeds({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
@@ -116,7 +116,7 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       execute: (input, options) => forwardToStore({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     get_recipe: tool({
-      description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, notCarried, and excluded for what the customer ruled out. Omit servings when the customer did not say how many people; it then returns askServings.",
+      description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, notCarried, and excluded for ingredients whose every item fails the customer's saved needs. Omit servings when the customer did not say how many people; it then returns askServings.",
       inputSchema: getRecipeInput,
       execute: (input, options) => getRecipe({ ...ctx, toolCallId: options.toolCallId }, input, recipeDeps),
     }),

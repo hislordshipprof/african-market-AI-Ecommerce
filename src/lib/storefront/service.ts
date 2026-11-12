@@ -18,11 +18,6 @@ const notE2eListing = {
 /** Same rule for the raw search SQL. LIKE is wrapped so NULL custom_name rows are kept. */
 const notE2eListingSql = Prisma.sql`(l.custom_name IS NULL OR LEFT(l.custom_name, ${E2E_LISTING_PREFIX.length}) <> ${E2E_LISTING_PREFIX})`;
 
-/** The search's exclude match: Postgres English text search of the excluded words in an unaccented name. */
-export function excludeMatchSql(name: Prisma.Sql, words: Prisma.Sql): Prisma.Sql {
-  return Prisma.sql`to_tsvector('english', ${name}) @@ plainto_tsquery('english', unaccent(${words}))`;
-}
-
 /** Cheapest pack first, then id. The projection sorts the same way with UTF-8 bytes. */
 const variantsCheapestFirst = {
   orderBy: [{ price: "asc" as const }, { id: "asc" as const }],

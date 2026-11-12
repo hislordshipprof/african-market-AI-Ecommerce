@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import recipeBase from "../../../../prisma/recipe-base.json";
-import { platform, storeScoped } from "../../db";
+import { platform, platformAdmin, storeScoped, storeScopedTransaction } from "../../db";
 import { testPrismaClient } from "../../test-prisma";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-api-double";
 import { createAssistantModel } from "../model";
@@ -11,6 +11,7 @@ import { WEB_SEARCH_MICROS } from "../cost";
 import { RECIPE_LOOKUPS_PER_STORE_DAY, takeLookupSlot } from "../recipes";
 import { failNextSpendWrites } from "../spend";
 import type { AssistantContext } from "./execute";
+import { setShopperNeeds, type AssistantContext as Ctx } from "./execute";
 import { getRecipe } from "./recipe";
 
 vi.mock("next/cache", () => ({
@@ -21,7 +22,7 @@ vi.mock("next/cache", () => ({
 const hasDb = !!process.env.DATABASE_URL;
 const base = recipeBase as SeedRecipe[];
 
-interface Placed { ingredient: string; covers?: string[]; amount?: string; listingId: string; variantId: string; backupVariantId?: string }
+interface Placed { ingredient: string; covers?: string[]; amount?: string; listingId: string; variantId: string; backupVariantId?: string; cannotConfirm?: boolean; needs?: Record<string, string> }
 interface RecipeOutput {
   ok: boolean;
   code?: string;
@@ -33,6 +34,7 @@ interface RecipeOutput {
   lowOrOut: Placed[];
   notCarried: string[];
   excluded?: string[];
+  preferences?: string[];
 }
 
 function lookupStep(dish: string, ingredients: string[], sourceUrl = "https://recipes.example/kelewele"): FakeAnthropicStep {
@@ -56,6 +58,21 @@ describe.skipIf(!hasDb)("get_recipe", () => {
   let derica = { listingId: "", variantId: "" };
   const suffix = randomUUID().slice(0, 8);
   const dish = `kelewele ${suffix}`;
+  const ingredientIds: string[] = [];
+
+  async function conversation(storeId: string): Promise<Ctx> {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "ai" } });
+    const talk = await storeScoped(storeId).aiConversation.create({ data: { storeId, cartId: cart.id, model: "claude-haiku-5-5", messages: [] } });
+    return { storeId, cartId: cart.id, conversationId: talk.id, actorUserId: null };
+  }
+
+  /** The store states the listing's full ingredient list and no allergens. */
+  async function known(storeId: string, listingId: string, ingredients: string[]) {
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.listingAttributes.create({ data: { listingId, storeId, ingredientsStatus: "known", allergensStatus: "known", allergens: [] } });
+      await tx.listingIngredient.createMany({ data: ingredients.map((ingredientId) => ({ listingId, ingredientId, storeId })) });
+    });
+  }
 
   async function listing(storeId: string, masterProductId: string, name: string, confidence = 1) {
     const row = await storeScoped(storeId).listing.create({
@@ -100,6 +117,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
       await storeScoped(id).listing.deleteMany({});
     }
     await raw.store.deleteMany({ where: { id: { in: [storeA, storeB].filter(Boolean) } } });
+    await platformAdmin.ingredient.deleteMany({ where: { id: { in: ingredientIds } } });
     await raw.$disconnect();
   });
 
@@ -272,11 +290,22 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(await takeLookupSlot(storeB, day)).toBe(true);
   });
 
-  it("leaves out ingredients and items the customer ruled out", async () => {
-    await listing(storeA, "gino-pepper-onion-paste", `Gino pepper and onion mix ${suffix}`);
+  it("leaves out ingredients whose every item fails the saved constraints, with no name matching", async () => {
+    const [onion, tomato, grain] = await Promise.all(["onion", "tomato", "rice"].map((name) =>
+      platformAdmin.ingredient.create({ data: { name: `${name} ${suffix}` } })));
+    ingredientIds.push(onion.id, tomato.id, grain.id);
+    const mix = await listing(storeA, "gino-pepper-onion-paste", `Gino pepper and onion mix ${suffix}`);
+    const pastes = await storeScoped(storeA).listing.findMany({ where: { customName: { contains: `tomato paste ${suffix}` } }, select: { id: true } });
+    await known(storeA, mix.listingId, [onion.id, tomato.id]);
+    await known(storeA, rice.listingId, [grain.id]);
+    for (const paste of pastes) await known(storeA, paste.id, [tomato.id]);
+
     const plain = await getRecipe(ctxA, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
     expect(plain.inStock.map((item) => item.ingredient)).toContain("onion");
-    const result = await getRecipe(ctxA, { dish: "Jollof", servings: 6, exclude: ["onion", "rice"] }) as unknown as RecipeOutput;
+
+    const ruledOut = await conversation(storeA);
+    await setShopperNeeds(ruledOut, { avoid_ingredients: [`onion ${suffix}`, `rice ${suffix}`] });
+    const result = await getRecipe(ruledOut, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
     const offered = [...result.inStock, ...result.lowOrOut];
     expect(offered.map((item) => item.ingredient)).not.toContain("onion");
     expect(offered.map((item) => item.listingId)).not.toContain(rice.listingId);
@@ -284,10 +313,30 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(result.excluded).toEqual(expect.arrayContaining(["onion", "rice"]));
     expect(offered.map((item) => item.ingredient)).toContain("tomato paste");
 
-    // A narrower name rules out the ingredient; another form of it does not.
-    const narrower = await getRecipe(ctxA, { dish: "Jollof", servings: 6, exclude: ["yellow onion", "fresh tomato"] }) as unknown as RecipeOutput;
+    // "No yellow onion, not fresh tomato": both name only a form of a known ingredient, so the assistant asks.
+    const jollof = await conversation(storeA);
+    const asked = await setShopperNeeds(jollof, { avoid_ingredients: [`yellow onion ${suffix}`, `fresh tomato ${suffix}`] }) as unknown as { ask: Array<{ term: string; closest: string[] }> };
+    expect(asked.ask.map((row) => [row.term, row.closest.includes(`${row.term.split(" ")[1]} ${suffix}`)])).toEqual([
+      [`yellow onion ${suffix}`, true],
+      [`fresh tomato ${suffix}`, true],
+    ]);
+    const beforeAnswer = await getRecipe(jollof, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
+    expect(beforeAnswer.inStock.map((item) => item.ingredient)).toContain("onion");
+    expect(beforeAnswer.preferences).toEqual([`yellow onion ${suffix}`, `fresh tomato ${suffix}`]);
+    // The customer answers all onion: onion is left out; tomato paste stays, as fresh tomato is only a preference.
+    await setShopperNeeds(jollof, { avoid_ingredients: [`onion ${suffix}`] });
+    const narrower = await getRecipe(jollof, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
     expect([...narrower.inStock, ...narrower.lowOrOut].map((item) => item.ingredient)).not.toContain("onion");
     expect(narrower.excluded).toEqual(["onion"]);
     expect(narrower.lowOrOut.map((item) => item.ingredient)).toContain("tomato paste");
+  });
+
+  it("marks an item it cannot confirm against the constraints instead of offering it as a fit", async () => {
+    await listing(storeA, "curry-powder-nigerian", `Curry powder ${suffix}`);
+    const ctx = await conversation(storeA);
+    await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+    const result = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
+    const curry = [...result.inStock, ...result.lowOrOut].find((item) => item.ingredient === "curry powder");
+    expect(curry).toMatchObject({ cannotConfirm: true, needs: { peanuts: "unknown" } });
   });
 });

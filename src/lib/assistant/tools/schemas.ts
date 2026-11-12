@@ -100,9 +100,6 @@ export const getRecipeInput = z.object({
   servings: z.number().int().min(1).max(200).optional().describe(
     "How many people the customer said. Omit when the customer did not say.",
   ),
-  exclude: z.array(z.string().trim().min(1).max(60)).max(10).optional().describe(
-    "Each thing the customer ruled out, such as onion. An ingredient or a listing whose name matches one is left out.",
-  ),
 });
 
 export const toolInputSchemas = exactAssistantKeys({
