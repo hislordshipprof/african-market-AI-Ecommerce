@@ -23,6 +23,7 @@ vi.mock("../assistant/model", async (importOriginal) => {
 import { createFakeAnthropicFetch } from "../assistant/messages-api-double";
 import {
   approveAttributeProposal,
+  listAttributeProposals,
   proposeProductAttributes,
   rejectAttributeProposal,
   approveProduct,
@@ -251,5 +252,30 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     expect(proposal.status).toBe("rejected");
     expect((await attributesOf(p.id)).allergensStatus).toBe("unknown");
     expect(await audits(p.id, "catalog.attributes_reject")).toHaveLength(1);
+  });
+
+  it("attributes: an off-enum allergen read stays unknown in the queue and after approve, never 'none'", async () => {
+    const p = await seed("off-enum", "active");
+    scriptAttributes({ ingredients: null, allergens: ["Peanuts", "tree nuts"], dietaryClaims: null });
+    const { proposalId } = await proposeProductAttributes(p.id);
+    const row = (await listAttributeProposals()).find((candidate) => candidate.id === proposalId);
+    expect(row?.allergens).toBeNull();
+    expect(await approveAttributeProposal(proposalId!)).toEqual({ success: true });
+    expect((await attributesOf(p.id)).allergensStatus).toBe("unknown");
+  });
+
+  it("attributes: approving one proposal supersedes the product's other pending ones", async () => {
+    const p = await seed("supersede", "active");
+    scriptAttributes({ ingredients: null, allergens: ["milk"], dietaryClaims: null });
+    const older = (await proposeProductAttributes(p.id)).proposalId!;
+    scriptAttributes({ ingredients: null, allergens: ["peanuts"], dietaryClaims: null });
+    const newer = (await proposeProductAttributes(p.id)).proposalId!;
+
+    expect(await approveAttributeProposal(newer)).toEqual({ success: true });
+    const stale = await asAdmin((tx) => tx.attributeProposal.findUniqueOrThrow({ where: { id: older } }));
+    expect(stale.status).toBe("superseded");
+    expect((await listAttributeProposals()).map((row) => row.id)).not.toContain(older);
+    expect(await approveAttributeProposal(older)).toEqual({ error: "Proposal already reviewed" });
+    expect((await attributesOf(p.id)).allergens).toEqual(["peanuts"]);
   });
 });

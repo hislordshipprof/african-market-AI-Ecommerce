@@ -28,14 +28,14 @@ describe("product attribute extraction (fake Messages API)", () => {
   });
   afterAll(() => vi.unstubAllEnvs());
 
-  it("sends the label photo and description, and keeps only the US top 9 and known claims", async () => {
+  it("sends the label photo and description, and keeps the US top 9 and known claims", async () => {
     const fake = script([{
       kind: "tool",
       toolName: "product_attributes",
       toolInput: {
         ingredients: [" Palm Oil ", "Onion", ""],
-        allergens: ["peanuts", "mustard"],
-        dietaryClaims: ["halal", "organic"],
+        allergens: ["peanuts"],
+        dietaryClaims: ["halal"],
       },
     }]);
     const proposed = await extractProductAttributes({
@@ -53,6 +53,7 @@ describe("product attribute extraction (fake Messages API)", () => {
     expect(text).toContain("Ground peanut, onion and pepper blend");
     expect(text).toContain("https://images.example.com/suya-label.jpg");
     expect(body.tool_choice).toMatchObject({ type: "tool", name: "product_attributes" });
+    expect(JSON.stringify(body.tools)).toContain("crustacean_shellfish");
   });
 
   it("a group the model cannot read comes back null, so it stays unknown", async () => {
@@ -71,6 +72,44 @@ describe("product attribute extraction (fake Messages API)", () => {
     expect(await extractProductAttributes({ name: "Gari", description: null, imageUrl: null })).toEqual({
       ingredients: null,
       allergens: null,
+      dietaryClaims: null,
+    });
+  });
+
+  it("an allergen or claim off the enum leaves that whole group unread, never an empty list", async () => {
+    script([{
+      kind: "tool",
+      toolName: "product_attributes",
+      toolInput: { ingredients: ["groundnut"], allergens: ["Peanuts", "tree nuts"], dietaryClaims: ["halal"] },
+    }]);
+    expect(await extractProductAttributes({ name: "Suya spice", description: null, imageUrl: null })).toEqual({
+      ingredients: ["groundnut"],
+      allergens: null,
+      dietaryClaims: ["halal"],
+    });
+
+    script([{
+      kind: "tool",
+      toolName: "product_attributes",
+      toolInput: { ingredients: null, allergens: ["peanuts", "mustard"], dietaryClaims: ["halal", "organic"] },
+    }]);
+    expect(await extractProductAttributes({ name: "Suya spice", description: null, imageUrl: null })).toEqual({
+      ingredients: null,
+      allergens: null,
+      dietaryClaims: null,
+    });
+  });
+
+  it("an ingredient list over the cap is unread, not cut short", async () => {
+    const seventy = Array.from({ length: 70 }, (_, i) => `ingredient ${i + 1}`);
+    script([{
+      kind: "tool",
+      toolName: "product_attributes",
+      toolInput: { ingredients: seventy, allergens: [], dietaryClaims: null },
+    }]);
+    expect(await extractProductAttributes({ name: "Stock cube", description: null, imageUrl: null })).toEqual({
+      ingredients: null,
+      allergens: [],
       dietaryClaims: null,
     });
   });

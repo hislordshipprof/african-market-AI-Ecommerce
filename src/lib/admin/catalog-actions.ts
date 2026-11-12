@@ -390,6 +390,11 @@ export async function approveAttributeProposal(proposalId: string): Promise<Cata
       where: { id: proposal.id },
       data: { status: "approved", reviewedAt: new Date(), reviewedBy: session.user.id },
     });
+    // An older read must not overwrite this approval later.
+    await tx.attributeProposal.updateMany({
+      where: { productId: product.id, status: "pending" },
+      data: { status: "superseded", reviewedAt: new Date(), reviewedBy: session.user.id },
+    });
     await tx.auditLog.create({
       data: {
         actorId: session.user.id,

@@ -73,7 +73,7 @@ CREATE TABLE "attribute_proposals" (
     CONSTRAINT "attribute_proposals_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "attribute_proposals_product_id_fkey" FOREIGN KEY ("product_id")
         REFERENCES "master_products"("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "attribute_proposals_status_check" CHECK ("status" IN ('pending', 'approved', 'rejected'))
+    CONSTRAINT "attribute_proposals_status_check" CHECK ("status" IN ('pending', 'approved', 'rejected', 'superseded'))
 );
 CREATE INDEX "attribute_proposals_status_created_at_idx" ON "attribute_proposals"("status", "created_at");
 CREATE INDEX "attribute_proposals_product_id_idx" ON "attribute_proposals"("product_id");
