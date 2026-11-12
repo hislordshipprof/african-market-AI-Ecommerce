@@ -5,6 +5,11 @@ import { platformAdmin, platformAdminTransaction, lockMasterProductRow } from ".
 import { requirePlatformAdmin } from "./session";
 import { downloadAndUploadImage } from "../catalog-image";
 import { parseInput } from "../security/parse-input";
+import { assistantModelId } from "../assistant/model";
+import { assistantSpendState } from "../assistant/spend";
+import { extractProductAttributes } from "../catalog/attribute-extract";
+import { attributeGroup, type AttributeGroupName } from "../catalog/attributes";
+import { resolveIngredients } from "../catalog/ingredients";
 
 const productIdSchema = z.string().min(1).max(200);
 
@@ -267,4 +272,189 @@ export async function getReviewStats() {
   ]);
 
   return { needsReview, active, rejected, total: needsReview + active + rejected };
+}
+
+export type ProposeAttributesResult = CatalogActionResult & { proposalId?: string };
+
+/** Claude reads the product's label photo and description into a proposal for review. */
+export async function proposeProductAttributes(productId: string): Promise<ProposeAttributesResult> {
+  await requirePlatformAdmin();
+  const id = parseInput(productIdSchema, productId);
+  if (!id.ok) return { error: "Product not found" };
+
+  const product = await platformAdmin.masterProduct.findUnique({ where: { id: id.data } });
+  if (!product) return { error: "Product not found" };
+  try {
+    if ((await assistantSpendState()).resting) return { error: "AI spend limit reached for today" };
+    const proposed = await extractProductAttributes({
+      name: product.name,
+      description: product.description,
+      imageUrl: product.imageUrl,
+    });
+    const proposal = await platformAdmin.attributeProposal.create({
+      data: {
+        productId: product.id,
+        ingredientsRead: proposed.ingredients !== null,
+        ingredients: proposed.ingredients ?? [],
+        allergensRead: proposed.allergens !== null,
+        allergens: proposed.allergens ?? [],
+        dietaryRead: proposed.dietaryClaims !== null,
+        dietaryClaims: proposed.dietaryClaims ?? [],
+        model: assistantModelId(),
+      },
+    });
+    return { success: true, proposalId: proposal.id };
+  } catch (error) {
+    console.error("[catalog] attribute proposal failed", error instanceof Error ? error.name : "unknown");
+    return { error: "Could not read this product's attributes. Try again later." };
+  }
+}
+
+export type AttributeProposalRow = {
+  id: string;
+  productId: string;
+  productName: string;
+  imageUrl: string | null;
+  ingredients: string[] | null;
+  allergens: string[] | null;
+  dietaryClaims: string[] | null;
+  createdAt: Date;
+};
+
+function reviewedValues(name: AttributeGroupName, raw: string[] | null): string[] | null {
+  const group = attributeGroup(name, raw, "admin_review");
+  return group.ok && group.group ? group.group.values : null;
+}
+
+export async function listAttributeProposals(): Promise<AttributeProposalRow[]> {
+  await requirePlatformAdmin();
+  const rows = await platformAdmin.attributeProposal.findMany({
+    where: { status: "pending" },
+    include: { masterProduct: { select: { name: true, imageUrl: true } } },
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    productId: row.productId,
+    productName: row.masterProduct.name,
+    imageUrl: row.masterProduct.imageUrl,
+    // The queue shows what approving would write.
+    ingredients: reviewedValues("ingredients", row.ingredientsRead ? row.ingredients : null),
+    allergens: reviewedValues("allergens", row.allergensRead ? row.allergens : null),
+    dietaryClaims: reviewedValues("dietary", row.dietaryRead ? row.dietaryClaims : null),
+    createdAt: row.createdAt,
+  }));
+}
+
+const proposalIdSchema = z.string().min(1).max(200);
+
+/** Groups the model read become reviewed on the product; a group it could not read is left as it was. */
+export async function approveAttributeProposal(proposalId: string): Promise<CatalogActionResult> {
+  const session = await requirePlatformAdmin();
+  const id = parseInput(proposalIdSchema, proposalId);
+  if (!id.ok) return { error: "Proposal not found" };
+
+  const preview = await platformAdmin.attributeProposal.findUnique({ where: { id: id.data } });
+  if (!preview) return { error: "Proposal not found" };
+
+  return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
+    await lockMasterProductRow(tx, preview.productId);
+    const proposal = await tx.attributeProposal.findUnique({ where: { id: id.data } });
+    if (!proposal) return { error: "Proposal not found" };
+    if (proposal.status !== "pending") return { error: "Proposal already reviewed" };
+    const product = await tx.masterProduct.findUniqueOrThrow({
+      where: { id: proposal.productId },
+      include: { ingredients: { select: { ingredientId: true } } },
+    });
+
+    const data: {
+      ingredientsStatus?: string;
+      allergens?: string[];
+      allergensStatus?: string;
+      dietaryClaims?: string[];
+      dietaryStatus?: string;
+    } = {};
+    const ingredients = attributeGroup("ingredients", proposal.ingredientsRead ? proposal.ingredients : null, "admin_review");
+    const allergens = attributeGroup("allergens", proposal.allergensRead ? proposal.allergens : null, "admin_review");
+    const dietary = attributeGroup("dietary", proposal.dietaryRead ? proposal.dietaryClaims : null, "admin_review");
+    let ingredientIds: string[] | null = null;
+    if (ingredients.ok && ingredients.group) {
+      ingredientIds = (await resolveIngredients(tx, ingredients.group.values, { create: true })).ids;
+      await tx.masterProductIngredient.deleteMany({ where: { productId: product.id } });
+      await tx.masterProductIngredient.createMany({
+        data: ingredientIds.map((ingredientId) => ({ productId: product.id, ingredientId })),
+      });
+      data.ingredientsStatus = "reviewed";
+    }
+    if (allergens.ok && allergens.group) {
+      data.allergens = allergens.group.values;
+      data.allergensStatus = "reviewed";
+    }
+    if (dietary.ok && dietary.group) {
+      data.dietaryClaims = dietary.group.values;
+      data.dietaryStatus = "reviewed";
+    }
+    await tx.masterProduct.update({ where: { id: product.id }, data });
+    await tx.attributeProposal.update({
+      where: { id: proposal.id },
+      data: { status: "approved", reviewedAt: new Date(), reviewedBy: session.user.id },
+    });
+    // An older read must not overwrite this approval later.
+    await tx.attributeProposal.updateMany({
+      where: { productId: product.id, status: "pending" },
+      data: { status: "superseded", reviewedAt: new Date(), reviewedBy: session.user.id },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "catalog.attributes_approve",
+        entityType: "master_product",
+        entityId: product.id,
+        before: {
+          ingredientsStatus: product.ingredientsStatus,
+          ingredientIds: product.ingredients.map((link) => link.ingredientId),
+          allergens: product.allergens,
+          allergensStatus: product.allergensStatus,
+          dietaryClaims: product.dietaryClaims,
+          dietaryStatus: product.dietaryStatus,
+        },
+        after: { proposalId: proposal.id, ...data, ...(ingredientIds ? { ingredientIds } : {}) },
+      },
+    });
+    return { success: true };
+  });
+}
+
+export async function rejectAttributeProposal(proposalId: string): Promise<CatalogActionResult> {
+  const session = await requirePlatformAdmin();
+  const id = parseInput(proposalIdSchema, proposalId);
+  if (!id.ok) return { error: "Proposal not found" };
+
+  const preview = await platformAdmin.attributeProposal.findUnique({ where: { id: id.data } });
+  if (!preview) return { error: "Proposal not found" };
+
+  return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
+    await lockMasterProductRow(tx, preview.productId);
+    const proposal = await tx.attributeProposal.findUnique({ where: { id: id.data } });
+    if (!proposal) return { error: "Proposal not found" };
+    if (proposal.status !== "pending") return { error: "Proposal already reviewed" };
+    await tx.attributeProposal.update({
+      where: { id: proposal.id },
+      data: { status: "rejected", reviewedAt: new Date(), reviewedBy: session.user.id },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: "catalog.attributes_reject",
+        entityType: "master_product",
+        entityId: proposal.productId,
+        before: { proposalId: proposal.id, status: "pending" },
+        after: { proposalId: proposal.id, status: "rejected" },
+      },
+    });
+    return { success: true };
+  });
 }

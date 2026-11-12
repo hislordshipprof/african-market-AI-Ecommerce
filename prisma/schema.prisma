@@ -49,6 +49,8 @@ model Store {
   memberships  StoreMembership[]
   invites      StoreInvite[]
   listings     Listing[]
+  listingAttributes     ListingAttributes[]
+  listingIngredients    ListingIngredient[]
   stockEvents  StockEvent[]
   banners      StoreBanner[]
   collections  StoreCollection[]
@@ -334,12 +336,19 @@ model MasterProduct {
   originCountries String?   @map("origin_countries")
   status          String    @default("active")
   confidence      String?
+  ingredientsStatus String   @default("unknown") @map("ingredients_status")
+  allergens         String[] @default([])
+  allergensStatus   String   @default("unknown") @map("allergens_status")
+  dietaryClaims     String[] @default([]) @map("dietary_claims")
+  dietaryStatus     String   @default("unknown") @map("dietary_status")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   category Category?  @relation(fields: [categoryId], references: [id])
   listings Listing[]
   synonyms ProductSynonym[]
+  ingredients        MasterProductIngredient[]
+  attributeProposals AttributeProposal[]
 
   @@index([categoryId])
   @@index([status])
@@ -359,6 +368,65 @@ model ProductSynonym {
   @@index([productId])
   @@index([term])
   @@map("product_synonyms")
+}
+
+model Ingredient {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  synonyms       IngredientSynonym[]
+  masterProducts MasterProductIngredient[]
+  listings       ListingIngredient[]
+
+  @@map("ingredients")
+}
+
+model IngredientSynonym {
+  id           String   @id @default(cuid())
+  ingredientId String   @map("ingredient_id")
+  term         String   @unique
+  language     String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@index([ingredientId])
+  @@map("ingredient_synonyms")
+}
+
+model MasterProductIngredient {
+  productId    String @map("product_id")
+  ingredientId String @map("ingredient_id")
+
+  masterProduct MasterProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ingredient    Ingredient    @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([productId, ingredientId])
+  @@index([ingredientId])
+  @@map("master_product_ingredients")
+}
+
+model AttributeProposal {
+  id              String    @id @default(cuid())
+  productId       String    @map("product_id")
+  ingredientsRead Boolean   @map("ingredients_read")
+  ingredients     String[]  @default([])
+  allergensRead   Boolean   @map("allergens_read")
+  allergens       String[]  @default([])
+  dietaryRead     Boolean   @map("dietary_read")
+  dietaryClaims   String[]  @default([]) @map("dietary_claims")
+  status          String    @default("pending")
+  model           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  reviewedAt      DateTime? @map("reviewed_at")
+  reviewedBy      String?   @map("reviewed_by")
+
+  masterProduct MasterProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([productId])
+  @@map("attribute_proposals")
 }
 
 model Listing {
@@ -385,11 +453,45 @@ model Listing {
   stockEvents    StockEvent[]
   ownerReportItems OwnerReportItem[]
   collectionItems StoreCollectionListing[]
+  attributes       ListingAttributes?
+  ingredients      ListingIngredient[]
 
   @@index([storeId])
   @@index([storeId, active])
   @@index([masterProductId])
   @@map("listings")
+}
+
+model ListingAttributes {
+  listingId         String   @id @map("listing_id")
+  storeId           String   @map("store_id")
+  ingredientsStatus String?  @map("ingredients_status")
+  allergens         String[] @default([])
+  allergensStatus   String?  @map("allergens_status")
+  dietaryClaims     String[] @default([]) @map("dietary_claims")
+  dietaryStatus     String?  @map("dietary_status")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  store   Store   @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+  @@map("listing_attributes")
+}
+
+model ListingIngredient {
+  listingId    String @map("listing_id")
+  ingredientId String @map("ingredient_id")
+  storeId      String @map("store_id")
+
+  listing    Listing    @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  store      Store      @relation(fields: [storeId], references: [id])
+
+  @@id([listingId, ingredientId])
+  @@index([storeId])
+  @@index([ingredientId])
+  @@map("listing_ingredients")
 }
 
 model ListingVariant {

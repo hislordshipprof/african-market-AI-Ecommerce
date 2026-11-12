@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { listReviewProducts, getReviewStats } from "@/lib/admin/catalog-actions";
+import { listAttributeProposals, listReviewProducts, getReviewStats } from "@/lib/admin/catalog-actions";
+import { AttributeProposals } from "./attribute-proposals";
 import { ReviewTable } from "./review-table";
 
 export const metadata = { title: "Catalog Review — Platform Admin" };
@@ -11,15 +12,17 @@ export default async function CatalogReviewPage(props: {
   const page = Math.max(1, parseInt(searchParams.page ?? "1", 10) || 1);
   const status = searchParams.status ?? "needs_review";
 
-  const [data, stats] = await Promise.all([
+  const [data, stats, proposals] = await Promise.all([
     listReviewProducts({ status, page, pageSize: 25 }),
     getReviewStats(),
+    listAttributeProposals(),
   ]);
 
   const tabs = [
     { key: "needs_review", label: "Needs review", count: stats.needsReview },
     { key: "active", label: "Active", count: stats.active },
     { key: "rejected", label: "Rejected", count: stats.rejected },
+    { key: "attributes", label: "Attributes", count: proposals.length },
   ];
 
   return (
@@ -65,12 +68,16 @@ export default async function CatalogReviewPage(props: {
         ))}
       </div>
 
-      <ReviewTable
-        products={data.products}
-        total={data.total}
-        page={data.page}
-        pageSize={data.pageSize}
-      />
+      {status === "attributes" ? (
+        <AttributeProposals proposals={proposals} />
+      ) : (
+        <ReviewTable
+          products={data.products}
+          total={data.total}
+          page={data.page}
+          pageSize={data.pageSize}
+        />
+      )}
     </div>
   );
 }

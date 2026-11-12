@@ -253,6 +253,8 @@ export const platformAdmin = {
   category: wrapPlatformAdminDelegate(prisma.category),
   productSynonym: wrapPlatformAdminDelegate(prisma.productSynonym),
   listingImport: wrapPlatformAdminDelegate(prisma.listingImport),
+  attributeProposal: wrapPlatformAdminDelegate(prisma.attributeProposal),
+  ingredient: wrapPlatformAdminDelegate(prisma.ingredient),
 };
 
 /** A transaction as app_user, with the test session time zone applied when one is set. */
@@ -270,7 +272,7 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -289,6 +291,10 @@ export async function platformAdminTransaction<T>(
       masterProduct: tx.masterProduct,
       category: tx.category,
       productSynonym: tx.productSynonym,
+      ingredient: tx.ingredient,
+      ingredientSynonym: tx.ingredientSynonym,
+      masterProductIngredient: tx.masterProductIngredient,
+      attributeProposal: tx.attributeProposal,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
       supportThread: tx.supportThread,
@@ -306,7 +312,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -347,6 +353,10 @@ export async function storeScopedTransaction<T>(
       pushSubscription: tx.pushSubscription,
       supportThread: tx.supportThread,
       supportMessage: tx.supportMessage,
+      listingAttributes: tx.listingAttributes,
+      listingIngredient: tx.listingIngredient,
+      ingredient: tx.ingredient,
+      ingredientSynonym: tx.ingredientSynonym,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
