@@ -753,6 +753,7 @@ describe.skipIf(!hasDb)("delivery events and issue reports: storeScoped(B) canno
   let storeAId = "";
   let storeBId = "";
   let orderAId = "";
+  let deliveryAId = "";
   let raw: PrismaClient;
 
   beforeAll(async () => {
@@ -786,6 +787,13 @@ describe.skipIf(!hasDb)("delivery events and issue reports: storeScoped(B) canno
     await storeScoped(storeAId).deliveryEvent.create({
       data: { storeId: storeAId, orderId: order.id, type: "out_for_delivery", payload: {} },
     });
+    const delivery = await storeScoped(storeAId).delivery.create({
+      data: { storeId: storeAId, orderId: order.id, provider: "doordash", externalId: `dd-${stamp}`, status: "requested", quoteFeeCents: 850 },
+    });
+    deliveryAId = delivery.id;
+    await storeScoped(storeAId).deliveryEvent.create({
+      data: { storeId: storeAId, orderId: order.id, deliveryId: delivery.id, externalEventId: `evt-${stamp}`, type: "courier_assigned", payload: {} },
+    });
     await storeScoped(storeAId).issueReport.create({
       data: { storeId: storeAId, orderId: order.id, type: "damaged", lines: [], amountCents: 100, state: "in_review" },
     });
@@ -796,6 +804,7 @@ describe.skipIf(!hasDb)("delivery events and issue reports: storeScoped(B) canno
       if (!id) continue;
       const scoped = storeScoped(id);
       await scoped.deliveryEvent.deleteMany({});
+      await scoped.delivery.deleteMany({});
       await scoped.order.deleteMany({});
       await scoped.customer.deleteMany({});
     }
@@ -811,7 +820,31 @@ describe.skipIf(!hasDb)("delivery events and issue reports: storeScoped(B) canno
       }),
     ).rejects.toSatisfy(isRlsRejection);
     expect((await storeScoped(storeBId).deliveryEvent.deleteMany({ where: { orderId: orderAId } })).count).toBe(0);
-    expect(await storeScoped(storeAId).deliveryEvent.count({ where: { orderId: orderAId } })).toBe(1);
+    expect(await storeScoped(storeAId).deliveryEvent.count({ where: { orderId: orderAId } })).toBe(2);
+  });
+
+  it("courier deliveries: storeScoped(B) reads none of A's, cannot insert or update one for A", async () => {
+    expect(await storeScoped(storeBId).delivery.findMany()).toEqual([]);
+    await expect(
+      storeScoped(storeBId).delivery.create({
+        data: { storeId: storeAId, orderId: orderAId, provider: "doordash", externalId: "dd-cross-store", status: "requested", quoteFeeCents: 1 },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).delivery.updateMany({ where: { id: deliveryAId }, data: { status: "cancelled" } })).count).toBe(0);
+    const own = await storeScoped(storeAId).delivery.findMany({ where: { orderId: orderAId } });
+    expect(own.map((row) => row.status)).toEqual(["requested"]);
+  });
+
+  it("courier delivery events: storeScoped(B) reads none of A's, cannot insert or update one for A's delivery", async () => {
+    expect(await storeScoped(storeBId).deliveryEvent.findMany({ where: { deliveryId: deliveryAId } })).toEqual([]);
+    await expect(
+      storeScoped(storeBId).deliveryEvent.create({
+        data: { storeId: storeAId, orderId: orderAId, deliveryId: deliveryAId, externalEventId: "evt-cross-store", type: "picked_up", payload: {} },
+      }),
+    ).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScoped(storeBId).deliveryEvent.updateMany({ where: { deliveryId: deliveryAId }, data: { type: "cancelled" } })).count).toBe(0);
+    const own = await storeScoped(storeAId).deliveryEvent.findMany({ where: { deliveryId: deliveryAId } });
+    expect(own.map((row) => row.type)).toEqual(["courier_assigned"]);
   });
 
   it("issue reports: storeScoped(B) reads none of A's, cannot insert or update one for A", async () => {

@@ -35,6 +35,8 @@ model Store {
   digestHour              Int      @default(20) @map("digest_hour")
   stripeAccountId        String?  @unique @map("stripe_account_id")
   stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
+  /// DoorDash Drive external_store_id, set once the platform registers the store (#135).
+  doordashStoreId        String?  @unique @map("doordash_store_id")
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
@@ -57,6 +59,7 @@ model Store {
   carts        Cart[]
   customers    Customer[]
   orders          Order[]
+  deliveries      Delivery[]
   refundRequests  RefundRequest[]
   issueReports    IssueReport[]
   substitutionRequests SubstitutionRequest[]
@@ -1070,6 +1073,7 @@ model Order {
   issueReports   IssueReport[]
   notificationLogs NotificationLog[]
   deliveryEvents DeliveryEvent[]
+  deliveries     Delivery[]
   supportThreads SupportThread[]
   substitutionRequests SubstitutionRequest[]
 
@@ -1156,20 +1160,61 @@ model NotificationLog {
 }
 
 /// One store-delivery step: out_for_delivery or delivered.
+/// One courier booking for an order (DoorDash Drive; Uber Direct later). Fees are the provider's quote, no markup (ADR-0006).
+model Delivery {
+  id             String   @id @default(cuid())
+  storeId        String   @map("store_id")
+  orderId        String   @map("order_id")
+  provider       String
+  externalId     String   @map("external_id")
+  status         String
+  quoteFeeCents  Int      @map("quote_fee_cents")
+  actualFeeCents Int?     @map("actual_fee_cents")
+  trackingUrl    String?  @map("tracking_url")
+  courierJson    Json?    @map("courier_json")
+  proofUrl       String?  @map("proof_url")
+  pin            String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  store  Store           @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order  Order           @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  events DeliveryEvent[]
+
+  @@unique([id, storeId])
+  @@unique([provider, externalId])
+  @@index([storeId, orderId])
+  @@map("deliveries")
+}
+
+/// Store delivery steps (#134) and courier webhook events (#135). created_at is when the event was received.
 model DeliveryEvent {
-  id        String   @id @default(cuid())
-  storeId   String   @map("store_id")
-  orderId   String   @map("order_id")
-  type      String
-  payload   Json     @default("{}")
-  createdAt DateTime @default(now()) @map("created_at")
+  id              String   @id @default(cuid())
+  storeId         String   @map("store_id")
+  orderId         String   @map("order_id")
+  deliveryId      String?  @map("delivery_id")
+  externalEventId String?  @map("external_event_id")
+  type            String
+  payload         Json     @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  order Order @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  store    Store     @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order    Order     @relation(fields: [orderId, storeId], references: [id, storeId], onDelete: Cascade)
+  delivery Delivery? @relation(fields: [deliveryId, storeId], references: [id, storeId], onDelete: Cascade)
 
+  @@unique([deliveryId, externalEventId])
   @@index([storeId])
   @@index([storeId, orderId])
   @@map("delivery_events")
+}
+
+/// Platform-wide settings, one row with id "platform". Readable by every app user; platform admins write.
+model PlatformSettings {
+  id                   String   @id @default("platform")
+  courierWeightLimitLb Int      @default(50) @map("courier_weight_limit_lb")
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
 }
 
 /// Support thread: one per order, customer and store messages about that order.
