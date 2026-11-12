@@ -9,16 +9,6 @@ import { fingerprintFromParts, type Fingerprint } from "./fingerprint";
 import type { EvalReport } from "./report";
 import type { CaseResult, EvalCase } from "./types";
 
-vi.mock("../model", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../model")>();
-  return {
-    ...actual,
-    assistantModelId: (env: NodeJS.ProcessEnv = process.env) => {
-      if (env !== process.env && (env.ASSISTANT_MODEL === undefined || env.ASSISTANT_MODEL === "")) return "claude-sonnet-5-5" as const;
-      return actual.assistantModelId(env);
-    },
-  };
-});
 import baseConfig from "../../../../vitest.config";
 import evalConfig from "../../../../vitest.eval.config";
 
@@ -340,6 +330,42 @@ describe("shopper assistant eval gate", () => {
     expect(verdict.reasons).toContain("micro recall below 0.85");
   });
 
+  it.skipIf(!hasDb)("rejects a report whose model is not the default Haiku fingerprint", async () => {
+    vi.stubEnv("E2E_FAKE_ASSISTANT", "1");
+    vi.stubEnv("CI", "true");
+    vi.stubEnv("ASSISTANT_EVAL_LIVE", "1");
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-api03-live-looking-key");
+    vi.stubEnv("ASSISTANT_MODEL", "claude-sonnet-5-5");
+    const spy = vi.spyOn(globalThis, "fetch");
+    const fake = createFakeAnthropicFetch({
+      expectedKey: "sk-ant-test",
+      steps: [{ kind: "text", text: "probe" }],
+    });
+    let probeModel = "";
+    const verdict = await checkCommittedEval({
+      reportText: JSON.stringify({ model: "claude-sonnet-5-5", schemaVersion: 1 }),
+      fetch: async (input, init) => {
+        const raw = typeof init?.body === "string"
+          ? init.body
+          : input instanceof Request
+            ? await input.clone().text()
+            : "";
+        if (raw) {
+          const parsed = JSON.parse(raw) as { model?: string };
+          if (parsed.model) probeModel = parsed.model;
+        }
+        return fake.fetch(input, init);
+      },
+    });
+    expect(probeModel).toBe("claude-haiku-5-5");
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reasons).toContain("model");
+    expect(verdict.reasons.join(" ")).toContain("fingerprint");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+    vi.unstubAllEnvs();
+  }, 180_000);
+
   it.skipIf(!hasDb)("uses only the injected fake under hosted CI and with inherited local live flags", async () => {
     vi.stubEnv("E2E_FAKE_ASSISTANT", "1");
     vi.stubEnv("CI", "true");
@@ -352,7 +378,7 @@ describe("shopper assistant eval gate", () => {
       expectedKey: "sk-ant-test",
       steps: [{ kind: "text", text: "probe" }],
     });
-    vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
+    vi.stubEnv("ASSISTANT_MODEL", "claude-sonnet-5-5");
     let probeModel = "";
     const verdict = await checkCommittedEval({
       fetch: async (input, init) => {
@@ -370,7 +396,7 @@ describe("shopper assistant eval gate", () => {
       },
     });
     expect(injected).toBeGreaterThan(0);
-    expect(probeModel).toBe("claude-sonnet-5-5");
+    expect(probeModel).toBe("claude-haiku-5-5");
     expect(spy).not.toHaveBeenCalled();
     expect(verdict.reasons.join(" ")).not.toContain("api.anthropic.com");
     expect(verdict.ok).toBe(true);
