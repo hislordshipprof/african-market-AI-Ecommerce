@@ -89,11 +89,11 @@ export function OrderMessages({
                 maxWidth: "85%",
                 padding: "0.5rem 0.75rem",
                 borderRadius: 12,
-                background: message.sender === "customer" ? "var(--color-muted)" : "var(--color-surface)",
+                background: message.sender === "customer" ? "var(--color-raised)" : "var(--color-surface)",
                 border: "1px solid var(--color-line)",
               }}
             >
-              <small style={{ display: "block", opacity: 0.75 }}>
+              <small style={{ display: "block", color: "var(--color-muted)" }}>
                 {message.sender === "customer" ? "You" : message.sender === "platform" ? "Platform team" : storeName} · {time(message.createdAt, timeZone)}
               </small>
               <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{message.body}</span>
