@@ -177,6 +177,7 @@ export type SubstitutionPromptView = {
   status: string;
   expiresAt: string;
   qty: number;
+  exactOnly: boolean;
   original: { name: string; unitPriceCents: number };
   proposed: { name: string; unitPriceCents: number } | null;
   deltaCents: number;
@@ -201,7 +202,7 @@ export async function substitutionPromptsForToken(storeId: string, token: string
         orderBy: { createdAt: "asc" },
         include: {
           proposedVariant: NAMED_VARIANT,
-          orderLine: { select: { status: true, unitPriceCents: true, listingVariant: NAMED_VARIANT } },
+          orderLine: { select: { status: true, swapRule: true, unitPriceCents: true, listingVariant: NAMED_VARIANT } },
         },
       },
     },
@@ -212,6 +213,7 @@ export async function substitutionPromptsForToken(storeId: string, token: string
     status: request.status,
     expiresAt: request.expiresAt.toISOString(),
     qty: request.qty,
+    exactOnly: request.orderLine.swapRule === "exact_only",
     original: { name: variantName(request.orderLine.listingVariant), unitPriceCents: request.orderLine.unitPriceCents },
     proposed: request.proposedVariant
       ? { name: variantName(request.proposedVariant), unitPriceCents: request.proposedUnitPriceCents ?? request.proposedVariant.price }
