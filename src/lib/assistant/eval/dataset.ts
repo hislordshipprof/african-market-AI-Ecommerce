@@ -41,7 +41,8 @@ export function validateDataset(
     assertKeys(item, fixture, options.allowOverlap === true);
   }
   if (options.full) {
-    if (cases.length !== 200) throw new Error(`Eval dataset has ${cases.length} cases, not 200.`);
+    const total = Object.values(CATEGORY_COUNTS).reduce((sum, count) => sum + count, 0);
+    if (cases.length !== total) throw new Error(`Eval dataset has ${cases.length} cases, not ${total}.`);
     for (const category of EVAL_CATEGORIES) {
       const count = cases.filter((item) => item.category === category).length;
       if (count !== CATEGORY_COUNTS[category]) {
@@ -86,7 +87,7 @@ function parseCase(raw: unknown, index: number): EvalCase {
   if (addsFromTurn != null && (!Number.isInteger(addsFromTurn) || addsFromTurn < 1 || addsFromTurn > turns.length)) {
     throw new Error(`Eval case ${id} has an invalid addsFromTurn.`);
   }
-  if (mustHave.length === 0 && gaps.length === 0 && addsFromTurn == null && !dish) {
+  if (mustHave.length === 0 && gaps.length === 0 && addsFromTurn == null && !dish && !excluded?.length) {
     throw new Error(`Eval case ${id} is empty.`);
   }
   return {

@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertAppRuntimeLogin, platform, platformAdmin, storeScoped } from "../../db";
+import { assertAppRuntimeLogin, platform, platformAdmin, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../../db";
+import { resolveIngredients } from "../../catalog/ingredients";
 import type { CatalogFixture } from "./types";
 import type { MasterCatalogRow } from "./fingerprint";
 
@@ -53,6 +54,7 @@ export async function createEvalStores(fixture: CatalogFixture): Promise<Created
     });
     storeBId = storeB.id;
     writeLease(runId, [slugA, slugB]);
+    await seedIngredients(fixture.ingredients ?? []);
     const created = new Map<string, { listingId: string; variants: Map<string, string> }>();
     for (const listing of fixture.listings) {
       const storeId = listing.store === "A" ? storeA.id : storeB.id;
@@ -83,6 +85,7 @@ export async function createEvalStores(fixture: CatalogFixture): Promise<Created
         });
         variants.set(variant.key, saved.id);
       }
+      if (listing.attributes) await seedAttributes(storeId, row.id, listing.attributes);
       created.set(listing.key, { listingId: row.id, variants });
     }
     return { runId, storeAId: storeA.id, storeBId, slugA, slugB, ids: created, masterCatalog };
@@ -91,6 +94,39 @@ export async function createEvalStores(fixture: CatalogFixture): Promise<Created
     if (storeBId) await deleteEvalStore(storeBId).catch(() => {});
     throw error;
   }
+}
+
+/** Ingredients are platform rows shared across runs; creating them again is a no-op. */
+async function seedIngredients(ingredients: NonNullable<CatalogFixture["ingredients"]>) {
+  if (ingredients.length === 0) return;
+  await platformAdminTransaction(async (tx) => {
+    await tx.ingredient.createMany({ data: ingredients.map((item) => ({ name: item.name })), skipDuplicates: true });
+    const rows = await tx.ingredient.findMany({ where: { name: { in: ingredients.map((item) => item.name) } } });
+    const ids = new Map(rows.map((row) => [row.name, row.id]));
+    await tx.ingredientSynonym.createMany({
+      data: ingredients.flatMap((item) => item.synonyms.map((term) => ({ term, ingredientId: ids.get(item.name)! }))),
+      skipDuplicates: true,
+    });
+  });
+}
+
+async function seedAttributes(storeId: string, listingId: string, attributes: NonNullable<CatalogFixture["listings"][number]["attributes"]>) {
+  await storeScopedTransaction(storeId, async (tx) => {
+    const resolved = await resolveIngredients(tx, attributes.ingredients, { create: false });
+    if (resolved.unmatched.length > 0) throw new Error(`Eval ingredients missing: ${resolved.unmatched.join(", ")}`);
+    await tx.listingAttributes.create({
+      data: {
+        listingId,
+        storeId,
+        ingredientsStatus: "known",
+        allergensStatus: "known",
+        allergens: attributes.allergens,
+        dietaryStatus: "known",
+        dietaryClaims: attributes.dietary,
+      },
+    });
+    await tx.listingIngredient.createMany({ data: resolved.ids.map((ingredientId) => ({ listingId, ingredientId, storeId })) });
+  });
 }
 
 function storeData(slug: string, fixture: CatalogFixture) {

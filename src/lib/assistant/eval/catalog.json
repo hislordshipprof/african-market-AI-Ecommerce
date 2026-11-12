@@ -37,6 +37,235 @@
     "minimumOrderCents": 1500,
     "pickupEnabled": true
   },
+  "ingredients": [
+    {
+      "name": "aidan fruit",
+      "synonyms": []
+    },
+    {
+      "name": "amaranth leaves",
+      "synonyms": []
+    },
+    {
+      "name": "ashanti pepper",
+      "synonyms": []
+    },
+    {
+      "name": "bambara nut",
+      "synonyms": []
+    },
+    {
+      "name": "baobab",
+      "synonyms": []
+    },
+    {
+      "name": "baobab leaves",
+      "synonyms": []
+    },
+    {
+      "name": "beans",
+      "synonyms": []
+    },
+    {
+      "name": "bell pepper",
+      "synonyms": []
+    },
+    {
+      "name": "bitter leaf",
+      "synonyms": []
+    },
+    {
+      "name": "cassava",
+      "synonyms": []
+    },
+    {
+      "name": "chicken",
+      "synonyms": []
+    },
+    {
+      "name": "chicken fat",
+      "synonyms": []
+    },
+    {
+      "name": "chili pepper",
+      "synonyms": [
+        "scotch bonnet",
+        "hot pepper"
+      ]
+    },
+    {
+      "name": "cocoyam",
+      "synonyms": []
+    },
+    {
+      "name": "cod",
+      "synonyms": []
+    },
+    {
+      "name": "coriander",
+      "synonyms": []
+    },
+    {
+      "name": "crayfish",
+      "synonyms": []
+    },
+    {
+      "name": "cumin",
+      "synonyms": []
+    },
+    {
+      "name": "dates",
+      "synonyms": []
+    },
+    {
+      "name": "fenugreek",
+      "synonyms": []
+    },
+    {
+      "name": "flavour enhancer",
+      "synonyms": []
+    },
+    {
+      "name": "fonio",
+      "synonyms": []
+    },
+    {
+      "name": "garden egg",
+      "synonyms": []
+    },
+    {
+      "name": "ginger",
+      "synonyms": []
+    },
+    {
+      "name": "gnetum leaves",
+      "synonyms": []
+    },
+    {
+      "name": "goat meat",
+      "synonyms": []
+    },
+    {
+      "name": "grains of selim",
+      "synonyms": []
+    },
+    {
+      "name": "hibiscus",
+      "synonyms": []
+    },
+    {
+      "name": "jute leaves",
+      "synonyms": []
+    },
+    {
+      "name": "locust beans",
+      "synonyms": []
+    },
+    {
+      "name": "maize",
+      "synonyms": []
+    },
+    {
+      "name": "melon seeds",
+      "synonyms": []
+    },
+    {
+      "name": "millet",
+      "synonyms": []
+    },
+    {
+      "name": "moringa",
+      "synonyms": []
+    },
+    {
+      "name": "okra",
+      "synonyms": []
+    },
+    {
+      "name": "onion",
+      "synonyms": [
+        "yellow onion",
+        "red onion",
+        "onions"
+      ]
+    },
+    {
+      "name": "palm kernel oil",
+      "synonyms": []
+    },
+    {
+      "name": "palm oil",
+      "synonyms": []
+    },
+    {
+      "name": "peanuts",
+      "synonyms": [
+        "peanut",
+        "groundnut",
+        "groundnuts"
+      ]
+    },
+    {
+      "name": "pigeon peas",
+      "synonyms": []
+    },
+    {
+      "name": "plantain",
+      "synonyms": []
+    },
+    {
+      "name": "pumpkin leaves",
+      "synonyms": []
+    },
+    {
+      "name": "rice",
+      "synonyms": []
+    },
+    {
+      "name": "roselle leaves",
+      "synonyms": []
+    },
+    {
+      "name": "salt",
+      "synonyms": []
+    },
+    {
+      "name": "sweet potato leaves",
+      "synonyms": []
+    },
+    {
+      "name": "tamarind",
+      "synonyms": []
+    },
+    {
+      "name": "teff",
+      "synonyms": []
+    },
+    {
+      "name": "thyme",
+      "synonyms": []
+    },
+    {
+      "name": "tomato",
+      "synonyms": []
+    },
+    {
+      "name": "turmeric",
+      "synonyms": []
+    },
+    {
+      "name": "wheat",
+      "synonyms": []
+    },
+    {
+      "name": "wheat flour",
+      "synonyms": []
+    },
+    {
+      "name": "yam",
+      "synonyms": []
+    }
+  ],
   "listings": [
     {
       "key": "rice-parboiled-long-grain",
@@ -62,7 +291,21 @@
           "weightG": 4536
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "rice"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "rice-ofada",
@@ -82,7 +325,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "rice"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "tomato-paste-gino",
@@ -102,7 +359,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "tomato"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "pepper-scotch-bonnet",
@@ -122,7 +393,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "chili pepper"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "pepper-tatashe",
@@ -142,7 +427,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "bell pepper"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "thyme-dried",
@@ -162,7 +461,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "thyme"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "curry-powder-nigerian",
@@ -182,7 +495,24 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "turmeric",
+          "coriander",
+          "cumin",
+          "fenugreek"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "maggi-star-cubes",
@@ -202,7 +532,22 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "salt",
+          "palm oil",
+          "wheat flour",
+          "flavour enhancer"
+        ],
+        "allergens": [
+          "wheat"
+        ],
+        "dietary": [
+          "halal",
+          "no_pork"
+        ]
+      }
     },
     {
       "key": "hard-chicken",
@@ -222,7 +567,18 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "chicken"
+        ],
+        "allergens": [],
+        "dietary": [
+          "halal",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "palm-oil-red",
@@ -242,7 +598,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "palm oil"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "egusi-seeds-whole",
@@ -262,7 +632,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "melon seeds"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "egusi-ground",
@@ -282,7 +666,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "melon seeds"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "ugu-leaves-fresh",
@@ -302,7 +700,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "pumpkin leaves"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "crayfish-ground",
@@ -322,7 +734,20 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "crayfish"
+        ],
+        "allergens": [
+          "crustacean_shellfish"
+        ],
+        "dietary": [
+          "halal",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "stockfish-cut",
@@ -342,7 +767,20 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cod"
+        ],
+        "allergens": [
+          "fish"
+        ],
+        "dietary": [
+          "halal",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "teff-flour-ivory",
@@ -362,7 +800,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "teff"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "teff-flour-brown",
@@ -382,7 +834,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "teff"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "berbere",
@@ -402,7 +868,25 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "chili pepper",
+          "fenugreek",
+          "coriander",
+          "ginger",
+          "salt"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "yam-white-puna",
@@ -422,7 +906,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "yam"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "garri-white",
@@ -442,7 +940,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cassava"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "garri-yellow",
@@ -462,7 +974,22 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cassava",
+          "palm oil"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "beans-honey-oloyin",
@@ -482,7 +1009,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "beans"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "beans-brown",
@@ -502,7 +1043,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "beans"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "plantain-ripe",
@@ -522,7 +1077,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "plantain"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "plantain-green",
@@ -542,7 +1111,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "plantain"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "goat-meat-frozen",
@@ -562,7 +1145,17 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "goat meat"
+        ],
+        "allergens": [],
+        "dietary": [
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "ginger-dried-ground",
@@ -582,7 +1175,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "ginger"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "palm-oil-bleached-ofada",
@@ -602,7 +1209,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "palm oil"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "tomato-paste-de-rica",
@@ -622,7 +1243,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "tomato"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "maggi-crayfish-cubes",
@@ -642,7 +1277,23 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "salt",
+          "crayfish",
+          "palm oil",
+          "flavour enhancer"
+        ],
+        "allergens": [
+          "crustacean_shellfish"
+        ],
+        "dietary": [
+          "halal",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "knorr-chicken-cubes",
@@ -662,7 +1313,19 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "salt",
+          "chicken fat",
+          "flavour enhancer"
+        ],
+        "allergens": [],
+        "dietary": [
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "cassava-fufu-flour",
@@ -682,7 +1345,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cassava"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "semolina-honeywell",
@@ -702,7 +1379,22 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "wheat"
+        ],
+        "allergens": [
+          "wheat"
+        ],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork"
+        ]
+      }
     },
     {
       "key": "suya-spice-yaji",
@@ -722,7 +1414,26 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "peanuts",
+          "chili pepper",
+          "ginger",
+          "salt"
+        ],
+        "allergens": [
+          "peanuts"
+        ],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "hibiscus-dried",
@@ -742,7 +1453,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "hibiscus"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "cocoyam-taro",
@@ -762,7 +1487,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cocoyam"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "gino-pepper-onion-paste",
@@ -782,7 +1521,23 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "tomato",
+          "bell pepper",
+          "onion"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "salt-cod-makayabu-saltfish",
@@ -802,7 +1557,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cod",
+          "salt"
+        ],
+        "allergens": [
+          "fish"
+        ],
+        "dietary": [
+          "halal",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "crayfish-whole-dried",
@@ -822,7 +1591,20 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "crayfish"
+        ],
+        "allergens": [
+          "crustacean_shellfish"
+        ],
+        "dietary": [
+          "halal",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "stockfish-whole",
@@ -842,7 +1624,20 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cod"
+        ],
+        "allergens": [
+          "fish"
+        ],
+        "dietary": [
+          "halal",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "cocoyam-tannia",
@@ -862,7 +1657,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cocoyam"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "cocoyam-flour",
@@ -882,7 +1691,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cocoyam"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "akpu-wet-frozen",
@@ -902,7 +1725,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "cassava"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "millet-flour",
@@ -922,7 +1759,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "millet"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "millet-pearl",
@@ -942,7 +1793,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "millet"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "fonio",
@@ -962,7 +1827,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "fonio"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "white-maize-meal",
@@ -982,7 +1861,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "maize"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "baobab-fruit-powder",
@@ -1002,7 +1895,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "baobab"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "baobab-leaf-powder",
@@ -1022,7 +1929,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "baobab leaves"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "moringa-powder",
@@ -1042,7 +1963,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "moringa"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "tamarind",
@@ -1062,7 +1997,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "tamarind"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "dates",
@@ -1082,7 +2031,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "dates"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "bambara-nut",
@@ -1102,7 +2065,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "bambara nut"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "pigeon-peas-dried",
@@ -1122,7 +2099,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "pigeon peas"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "fumbwa-dried-gnetum-leaves",
@@ -1142,7 +2133,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "gnetum leaves"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "jute-leaves",
@@ -1162,7 +2167,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "jute leaves"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "potato-greens",
@@ -1182,7 +2201,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "sweet potato leaves"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "roselle-leaves",
@@ -1202,7 +2235,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "roselle leaves"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "garden-egg",
@@ -1222,7 +2269,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "garden egg"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "okra-dried",
@@ -1242,7 +2303,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "okra"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "ground-hot-pepper",
@@ -1262,7 +2337,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "chili pepper"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "cameroon-pepper",
@@ -1282,7 +2371,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "chili pepper"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "amaranth-leaves",
@@ -1302,7 +2405,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "amaranth leaves"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "bitter-leaf-frozen",
@@ -1322,7 +2439,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "bitter leaf"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "ashanti-pepper",
@@ -1342,7 +2473,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "ashanti pepper"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "grains-of-selim",
@@ -1362,7 +2507,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "grains of selim"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "calabash-nutmeg",
@@ -1402,7 +2561,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "aidan fruit"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "dawadawa-dried",
@@ -1422,7 +2595,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "locust beans"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "palm-kernel-oil",
@@ -1442,7 +2629,21 @@
           "weightG": 2268
         }
       ],
-      "store": "A"
+      "store": "A",
+      "attributes": {
+        "ingredients": [
+          "palm kernel oil"
+        ],
+        "allergens": [],
+        "dietary": [
+          "vegan",
+          "vegetarian",
+          "halal",
+          "kosher",
+          "no_pork",
+          "gluten_free"
+        ]
+      }
     },
     {
       "key": "groundnut-oil",

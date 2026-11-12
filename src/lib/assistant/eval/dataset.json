@@ -7799,5 +7799,119 @@
         "named_substitute"
       ]
     }
+  },
+  {
+    "id": "allergen-shellfish-1",
+    "category": "constraint",
+    "turns": [
+      "I'm allergic to shellfish. Add 1 Maggi seasoning cube."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "maggi-star-cubes",
+            "variantKeys": [
+              "maggi-star-cubes-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "maggi-star-cubes",
+        "variantKey": "maggi-star-cubes-pack",
+        "min": 1,
+        "max": 1
+      }
+    ],
+    "excluded": [
+      "maggi-crayfish-cubes"
+    ]
+  },
+  {
+    "id": "allergen-peanut-1",
+    "category": "constraint",
+    "turns": [
+      "I have a peanut allergy. Add 1 Suya spice."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "suya-spice-yaji",
+        "mention": [
+          "suya"
+        ]
+      }
+    ],
+    "excluded": [
+      "suya-spice-yaji"
+    ]
+  },
+  {
+    "id": "dietary-halal-1",
+    "category": "constraint",
+    "turns": [
+      "I only eat halal. Add 1 Hard chicken."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "hard-chicken",
+            "variantKeys": [
+              "hard-chicken-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "hard-chicken",
+        "variantKey": "hard-chicken-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
+  },
+  {
+    "id": "dietary-vegan-1",
+    "category": "constraint",
+    "turns": [
+      "I'm vegan. Add 1 Ground crayfish."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [
+      {
+        "key": "crayfish-ground",
+        "mention": [
+          "crayfish"
+        ]
+      }
+    ],
+    "excluded": [
+      "crayfish-ground"
+    ]
+  },
+  {
+    "id": "unknown-attribute-1",
+    "category": "constraint",
+    "turns": [
+      "I have a tree nut allergy. Add 1 Calabash nutmeg."
+    ],
+    "mustHave": [],
+    "mayHave": [],
+    "gaps": [],
+    "excluded": [
+      "calabash-nutmeg"
+    ]
   }
 ]
