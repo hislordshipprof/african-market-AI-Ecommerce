@@ -6,148 +6,40 @@
       "Jollof for 8 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-2",
@@ -156,148 +48,40 @@
       "Jollof for 9 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-3",
@@ -306,148 +90,40 @@
       "Jollof for 10 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-4",
@@ -456,298 +132,83 @@
       "Jollof for 11 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-5",
     "category": "recipe-to-cart",
     "turns": [
-      "Jollof for 12 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Jollof. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "For 12 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 3,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": true
+    }
   },
   {
     "id": "jollof-for-ten-6",
@@ -756,148 +217,40 @@
       "Jollof for 8 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-7",
@@ -906,148 +259,40 @@
       "Jollof for 9 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-8",
@@ -1056,148 +301,40 @@
       "Jollof for 10 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-9",
@@ -1206,298 +343,83 @@
       "Jollof for 11 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-10",
     "category": "recipe-to-cart",
     "turns": [
-      "Jollof for 12 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Jollof. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "For 12 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 3,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": true
+    }
   },
   {
     "id": "jollof-for-ten-11",
@@ -1506,148 +428,40 @@
       "Jollof for 8 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-12",
@@ -1656,148 +470,40 @@
       "Jollof for 9 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-13",
@@ -1806,148 +512,40 @@
       "Jollof for 10 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-14",
@@ -1956,298 +554,83 @@
       "Jollof for 11 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-15",
     "category": "recipe-to-cart",
     "turns": [
-      "Jollof for 12 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Jollof. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "For 12 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 3,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": true
+    }
   },
   {
     "id": "jollof-for-ten-16",
@@ -2256,148 +639,40 @@
       "Jollof for 8 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-17",
@@ -2406,148 +681,40 @@
       "Jollof for 9 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-18",
@@ -2556,148 +723,40 @@
       "Jollof for 10 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-19",
@@ -2706,298 +765,83 @@
       "Jollof for 11 people. Use tomato paste, not fresh tomato, and no yellow onion.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 2,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "jollof-for-ten-20",
     "category": "recipe-to-cart",
     "turns": [
-      "Jollof for 12 people. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "Jollof. Use tomato paste, not fresh tomato, and no yellow onion.",
+      "For 12 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "rice-parboiled-long-grain",
-            "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "tomato-paste-gino",
-            "variantKeys": [
-              "tomato-paste-gino-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "pepper-scotch-bonnet",
-            "variantKeys": [
-              "pepper-scotch-bonnet-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "thyme-dried",
-            "variantKeys": [
-              "thyme-dried-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "curry-powder-nigerian",
-            "variantKeys": [
-              "curry-powder-nigerian-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "maggi-star-cubes",
-            "variantKeys": [
-              "maggi-star-cubes-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "hard-chicken",
-            "variantKeys": [
-              "hard-chicken-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-5lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "rice-parboiled-long-grain",
-        "variantKey": "rice-parboiled-long-grain-10lb",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "tomato-paste-gino",
-        "variantKey": "tomato-paste-gino-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "pepper-scotch-bonnet",
-        "variantKey": "pepper-scotch-bonnet-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "thyme-dried",
-        "variantKey": "thyme-dried-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "curry-powder-nigerian",
-        "variantKey": "curry-powder-nigerian-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "maggi-star-cubes",
-        "variantKey": "maggi-star-cubes-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "hard-chicken",
-        "variantKey": "hard-chicken-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      }
+    "addsFromTurn": 3,
+    "excluded": [
+      "gino-pepper-onion-paste"
     ],
-    "addsFromTurn": 2
+    "dish": {
+      "core": [
+        {
+          "label": "rice",
+          "options": [
+            "rice-parboiled-long-grain",
+            "rice-ofada"
+          ]
+        },
+        {
+          "label": "tomato paste",
+          "options": [
+            "tomato-paste-gino",
+            "tomato-paste-de-rica"
+          ]
+        },
+        {
+          "label": "pepper",
+          "options": [
+            "pepper-scotch-bonnet",
+            "ground-hot-pepper",
+            "cameroon-pepper"
+          ]
+        }
+      ],
+      "askServings": true
+    }
   },
   {
     "id": "egusi-soup-1",
@@ -3006,93 +850,36 @@
       "Egusi soup for 4 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "egusi-soup-2",
@@ -3101,93 +888,36 @@
       "Egusi soup for 5 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "egusi-soup-3",
@@ -3196,93 +926,36 @@
       "Egusi soup for 6 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "egusi-soup-4",
@@ -3291,188 +964,75 @@
       "Egusi soup for 7 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "egusi-soup-5",
     "category": "recipe-to-cart",
     "turns": [
-      "Egusi soup for 4 people.",
+      "Egusi soup.",
+      "For 4 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 3,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": true
+    }
   },
   {
     "id": "egusi-soup-6",
@@ -3481,93 +1041,36 @@
       "Egusi soup for 5 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "egusi-soup-7",
@@ -3576,93 +1079,36 @@
       "Egusi soup for 6 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "egusi-soup-8",
@@ -3671,93 +1117,36 @@
       "Egusi soup for 7 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "egusi-soup-9",
@@ -3766,188 +1155,75 @@
       "Egusi soup for 4 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "egusi-soup-10",
     "category": "recipe-to-cart",
     "turns": [
-      "Egusi soup for 5 people.",
+      "Egusi soup.",
+      "For 5 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "egusi-seeds-whole",
-            "variantKeys": [
-              "egusi-seeds-whole-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "ugu-leaves-fresh",
-            "variantKeys": [
-              "ugu-leaves-fresh-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "crayfish-ground",
-            "variantKeys": [
-              "crayfish-ground-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "palm-oil-red",
-            "variantKeys": [
-              "palm-oil-red-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "stockfish-cut",
-            "variantKeys": [
-              "stockfish-cut-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "egusi-seeds-whole",
-        "variantKey": "egusi-seeds-whole-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "ugu-leaves-fresh",
-        "variantKey": "ugu-leaves-fresh-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "crayfish-ground",
-        "variantKey": "crayfish-ground-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "palm-oil-red",
-        "variantKey": "palm-oil-red-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "stockfish-cut",
-        "variantKey": "stockfish-cut-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 3,
+    "dish": {
+      "core": [
+        {
+          "label": "egusi",
+          "options": [
+            "egusi-seeds-whole",
+            "egusi-ground"
+          ]
+        },
+        {
+          "label": "palm oil",
+          "options": [
+            "palm-oil-red",
+            "palm-oil-bleached-ofada"
+          ]
+        },
+        {
+          "label": "leafy greens",
+          "options": [
+            "ugu-leaves-fresh",
+            "bitter-leaf-frozen"
+          ]
+        }
+      ],
+      "askServings": true
+    }
   },
   {
     "id": "ethiopian-breakfast-1",
@@ -3956,45 +1232,28 @@
       "Ethiopian breakfast for 2 people, with teff and berbere.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "ethiopian-breakfast-2",
@@ -4003,45 +1262,28 @@
       "Ethiopian breakfast for 3 people, with teff and berbere.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "ethiopian-breakfast-3",
@@ -4050,45 +1292,28 @@
       "Ethiopian breakfast for 4 people, with teff and berbere.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "ethiopian-breakfast-4",
@@ -4097,92 +1322,59 @@
       "Ethiopian breakfast for 2 people, with teff and berbere.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "ethiopian-breakfast-5",
     "category": "recipe-to-cart",
     "turns": [
-      "Ethiopian breakfast for 3 people, with teff and berbere.",
+      "Ethiopian breakfast, with teff and berbere.",
+      "For 3 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 3,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": true
+    }
   },
   {
     "id": "ethiopian-breakfast-6",
@@ -4191,45 +1383,28 @@
       "Ethiopian breakfast for 4 people, with teff and berbere.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "ethiopian-breakfast-7",
@@ -4238,45 +1413,28 @@
       "Ethiopian breakfast for 2 people, with teff and berbere.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "ethiopian-breakfast-8",
@@ -4285,45 +1443,28 @@
       "Ethiopian breakfast for 3 people, with teff and berbere.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "ethiopian-breakfast-9",
@@ -4332,92 +1473,59 @@
       "Ethiopian breakfast for 4 people, with teff and berbere.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 2,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": false
+    }
   },
   {
     "id": "ethiopian-breakfast-10",
     "category": "recipe-to-cart",
     "turns": [
-      "Ethiopian breakfast for 2 people, with teff and berbere.",
+      "Ethiopian breakfast, with teff and berbere.",
+      "For 2 people.",
       "Yes, add those."
     ],
-    "mustHave": [
-      {
-        "options": [
-          {
-            "listingKey": "teff-flour-ivory",
-            "variantKeys": [
-              "teff-flour-ivory-pack"
-            ]
-          }
-        ]
-      },
-      {
-        "options": [
-          {
-            "listingKey": "berbere",
-            "variantKeys": [
-              "berbere-pack"
-            ]
-          }
-        ]
-      }
-    ],
+    "mustHave": [],
     "mayHave": [],
     "gaps": [],
-    "qty": [
-      {
-        "listingKey": "teff-flour-ivory",
-        "variantKey": "teff-flour-ivory-pack",
-        "min": 1,
-        "max": 20
-      },
-      {
-        "listingKey": "berbere",
-        "variantKey": "berbere-pack",
-        "min": 1,
-        "max": 20
-      }
-    ],
-    "addsFromTurn": 2
+    "addsFromTurn": 3,
+    "dish": {
+      "core": [
+        {
+          "label": "teff",
+          "options": [
+            "teff-flour-ivory",
+            "teff-flour-brown"
+          ]
+        },
+        {
+          "label": "berbere",
+          "options": [
+            "berbere"
+          ]
+        }
+      ],
+      "askServings": true
+    }
   },
   {
     "id": "add-one-1",

@@ -7,7 +7,7 @@ import { summarize } from "./report";
 import { scoreCase, type CatalogBinding, type ScoreOutput } from "./score";
 import { fingerprintFromParts, type Fingerprint } from "./fingerprint";
 import type { EvalReport } from "./report";
-import type { CaseResult, EvalCase } from "./types";
+import type { CartSnapshotLine, CaseResult, EvalCase } from "./types";
 
 import baseConfig from "../../../../vitest.config";
 import evalConfig from "../../../../vitest.eval.config";
@@ -80,6 +80,8 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
     quantityChecks: 0,
     quantityHits: 0,
     gapRequired: false,
+    dish: false,
+    dishMisses: [],
     costMicros: "1",
     anthropicRequestIds: [`req_${id}`],
     requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${id}` }],
@@ -118,8 +120,8 @@ function twoPackBinding(): CatalogBinding {
     store: "A" as const,
     priceCents: 100,
   });
-  const garri = pack("garri", "garri-pack");
-  const rice = pack("rice", "rice-pack");
+  const keys = ["garri", "rice", "paste-a", "paste-b", "onion-paste"];
+  const packs = keys.map((key) => pack(key, `${key}-pack`));
   const listing = (key: string) => ({
     id: key,
     key,
@@ -131,19 +133,19 @@ function twoPackBinding(): CatalogBinding {
     active: true,
   });
   return {
-    byListingKey: new Map([["garri", listing("garri")], ["rice", listing("rice")]]),
-    byVariantKey: new Map([["garri-pack", garri], ["rice-pack", rice]]),
-    byListingId: new Map([["garri", "garri"], ["rice", "rice"]]),
-    byVariantId: new Map([["garri-pack", garri], ["rice-pack", rice]]),
-    aListingIds: new Set(["garri", "rice"]),
-    aVariantIds: new Set(["garri-pack", "rice-pack"]),
+    byListingKey: new Map(keys.map((key) => [key, listing(key)])),
+    byVariantKey: new Map(packs.map((item) => [item.key, item])),
+    byListingId: new Map(keys.map((key) => [key, key])),
+    byVariantId: new Map(packs.map((item) => [item.key, item])),
+    aListingIds: new Set(keys),
+    aVariantIds: new Set(packs.map((item) => item.key)),
     bListingIds: new Set(),
     bVariantIds: new Set(),
     minimumOrderCents: 1500,
   };
 }
 
-function caseFromScore(id: string, category: CaseResult["category"], scored: ScoreOutput, gapRequired: boolean): CaseResult {
+function caseFromScore(id: string, category: CaseResult["category"], scored: ScoreOutput, gapRequired: boolean, cart: CartSnapshotLine[] = []): CaseResult {
   return {
     id,
     category,
@@ -164,13 +166,15 @@ function caseFromScore(id: string, category: CaseResult["category"], scored: Sco
     gapsReported: scored.gapsReported,
     safetyFailures: scored.safetyFailures,
     stickyIntegrity: false,
-    finalCart: [],
+    finalCart: cart,
     steps: 1,
     stepLimitHit: false,
     toolInputErrors: 0,
     quantityChecks: 0,
     quantityHits: 0,
     gapRequired,
+    dish: category === "recipe-to-cart",
+    dishMisses: scored.dishMisses,
     costMicros: "0",
     anthropicRequestIds: [`req_${id}`],
     requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${id}` }],
@@ -330,6 +334,67 @@ describe("shopper assistant eval gate", () => {
     expect(verdict.ok).toBe(false);
     expect(verdict.reasons).toContain("micro precision below 0.90");
     expect(verdict.reasons).toContain("micro recall below 0.85");
+  });
+
+  it("scores dish cases pass or fail on core items, outside the micro counts", () => {
+    const binding = twoPackBinding();
+    const dish: EvalCase = {
+      id: "jollof",
+      category: "recipe-to-cart",
+      turns: ["Jollof. No onion.", "For 6 people.", "Yes, add those."],
+      mustHave: [],
+      mayHave: [],
+      gaps: [],
+      addsFromTurn: 3,
+      excluded: ["onion-paste"],
+      dish: {
+        core: [{ label: "rice", options: ["rice"] }, { label: "tomato paste", options: ["paste-a", "paste-b"] }],
+        askServings: true,
+      },
+    };
+    const line = (key: string, qty = 1): CartSnapshotLine => ({ key, variantKey: `${key}-pack`, qty, swapRule: "exact_only", substituteVariantKey: null });
+    const score = (cart: CartSnapshotLine[], firstReply: string) => scoreCase({
+      evalCase: dish,
+      cart,
+      tools: [],
+      savedTexts: [{ turn: 1, text: firstReply, priorOutputs: [], saved: true }],
+      observedTexts: [],
+      strippedAmounts: [],
+      successfulWriteTurns: [],
+      returnedLineIds: [],
+      cartLineIds: [],
+      stepLimitHit: false,
+    }, binding, [firstReply]);
+    const asks = "How many people are you cooking for?";
+
+    const anyBrand = score([line("rice", 7), line("paste-b"), line("garri")], asks);
+    expect(anyBrand.pass).toBe(true);
+    expect([anyBrand.precisionDenominator, anyBrand.recallDenominator]).toEqual([0, 0]);
+    expect(score([line("rice")], asks).dishMisses).toEqual(["missing tomato paste"]);
+    expect(score([line("rice"), line("paste-a")], "Here is a list.").dishMisses).toEqual(["servings not asked"]);
+    const excluded = score([line("rice"), line("paste-a"), line("onion-paste")], asks);
+    expect(excluded.pass).toBe(false);
+    expect(excluded.safetyFailures).toContain("excluded-item");
+
+    const cart = [line("rice"), line("paste-a")];
+    const dishes = Array.from({ length: 10 }, (_, index) => ({ ...dish, id: `dish-${index}` }));
+    const results = dishes.map((item, index) => {
+      const lines = index < 2 ? [line("rice")] : cart;
+      const result = caseFromScore(item.id, "recipe-to-cart", score(lines, asks), false, lines);
+      result.requestProvenance = [1, 2, 3].map((turn) => ({ attempt: 1, turn, step: 1, requestId: `req_${item.id}_${turn}` }));
+      result.anthropicRequestIds = result.requestProvenance.map((step) => step.requestId);
+      return result;
+    });
+    const expected = { fingerprint: fingerprint(), caseIds: dishes.map((item) => item.id), model: "claude-haiku-5-5", cases: dishes, binding };
+    const verdict = assessReport(report(results), expected);
+    expect(verdict.reasons).toEqual(["dish pass rate below 0.85"]);
+    expect(report(results).summary).toMatchObject({ dishCases: 10, dishPassed: 8, precisionDenominator: 0, recallDenominator: 0 });
+
+    const forged = results.map((item) => ({ ...item, dishMisses: [], pass: true, reason: "ok" }));
+    const forgedVerdict = assessReport(report(forged), expected);
+    expect(forgedVerdict.reasons).toContain("cart does not match dish-0");
+    expect(forgedVerdict.reasons).not.toContain("dish pass rate below 0.85");
+    expect(forgedVerdict.ok).toBe(false);
   });
 
   it.skipIf(!hasDb)("rejects a report whose model is not the default Haiku fingerprint", async () => {

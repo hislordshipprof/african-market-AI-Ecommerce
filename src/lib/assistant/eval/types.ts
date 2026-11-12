@@ -50,6 +50,14 @@ export interface SwapExpect {
   substituteVariantKey?: string;
 }
 
+/** A dish-only request: no shopper list, so the case passes or fails on core items, not item counts. */
+export interface DishExpect {
+  /** Each core ingredient is met by any store A listing in options, at any pack or quantity. */
+  core: Array<{ label: string; options: string[] }>;
+  /** Servings are not given, so the first reply must ask or state them. */
+  askServings: boolean;
+}
+
 export interface EvalCase {
   id: string;
   category: EvalCategory;
@@ -60,6 +68,9 @@ export interface EvalCase {
   qty?: QtyExpect[];
   swapRule?: SwapExpect;
   addsFromTurn?: number;
+  /** Listings the shopper ruled out. One in the cart is a safety failure. */
+  excluded?: string[];
+  dish?: DishExpect;
 }
 
 export interface FixtureVariant {
@@ -140,6 +151,9 @@ export interface CaseResult {
   quantityChecks: number;
   quantityHits: number;
   gapRequired: boolean;
+  /** True for a dish-only case, which is scored pass or fail and stays out of the item-level counts. */
+  dish: boolean;
+  dishMisses: string[];
   costMicros: string;
   anthropicRequestIds: string[];
   requestProvenance: Array<{ attempt: number; turn: number; step: number; requestId: string }>;

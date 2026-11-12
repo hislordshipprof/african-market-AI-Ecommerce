@@ -55,6 +55,10 @@ export interface ReportSummary {
   temporalViolations: number;
   safetyFailures: number;
   passRate: number;
+  /** Dish-only cases are pass or fail and stay out of the micro precision and recall. */
+  dishCases: number;
+  dishPassed: number;
+  dishPassRate: number;
   gapReportingRate: number;
   quantityAccuracy: number;
   steps: number;
@@ -127,6 +131,7 @@ export function summarize(cases: CaseResult[]): ReportSummary {
     grouped.set(item.category, list);
   }
   const overall = breakdown(cases);
+  const dish = breakdown(cases.filter((item) => item.dish));
   const byCategory: ReportSummary["byCategory"] = {};
   for (const [category, items] of grouped) byCategory[category] = breakdown(items);
   return {
@@ -142,6 +147,9 @@ export function summarize(cases: CaseResult[]): ReportSummary {
     temporalViolations,
     safetyFailures,
     passRate: overall.passRate,
+    dishCases: dish.cases,
+    dishPassed: dish.passed,
+    dishPassRate: dish.passRate,
     gapReportingRate: overall.gapReportingRate,
     quantityAccuracy: overall.quantityAccuracy,
     steps: overall.steps,

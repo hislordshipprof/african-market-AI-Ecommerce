@@ -350,10 +350,11 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
         id: "too-soon",
         category: "recipe-to-cart",
         turns: ["Jollof for 4.", "Yes, add those."],
-        mustHave: [{ options: [{ listingKey: "rice", variantKeys: ["rice-5"] }] }],
+        mustHave: [],
         mayHave: [],
         gaps: [],
         addsFromTurn: 2,
+        dish: { core: [{ label: "rice", options: ["rice"] }], askServings: false },
       }),
       evalCase({
         id: "wrong-backup",

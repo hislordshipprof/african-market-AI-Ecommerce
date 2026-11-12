@@ -9,7 +9,7 @@ import { changedFingerprintParts, fingerprintFromRequest, type Fingerprint } fro
 import { formatUsdFromMicros } from "./money";
 import { recordingFetch, type RecordedExchange } from "./recording-fetch";
 import { summarize, type EvalReport, type ReportSummary } from "./report";
-import { bindingFromFixture, scoreCase, type CatalogBinding } from "./score";
+import { bindingFromFixture, dishCartMisses, scoreCase, type CatalogBinding } from "./score";
 import type { CaseResult, EvalCase } from "./types";
 
 const REQUEST_ID = /^req_/;
@@ -78,6 +78,7 @@ export function assessReport(report: unknown, expected: {
   if (summary.safetyFailures > 0) reasons.push("safety failures");
   if (summary.precisionDenominator > 0 && summary.precisionNumerator / summary.precisionDenominator < 0.9) reasons.push("micro precision below 0.90");
   if (summary.recallDenominator > 0 && summary.recallNumerator / summary.recallDenominator < 0.85) reasons.push("micro recall below 0.85");
+  if (summary.dishCases > 0 && summary.dishPassed / summary.dishCases < 0.85) reasons.push("dish pass rate below 0.85");
   return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
 }
 
@@ -106,6 +107,7 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
   }
   if (item.category !== spec.category) reasons.push(`category ${item.id}`);
   if (item.gapRequired !== (spec.gaps.length > 0)) reasons.push(`gap flag ${item.id}`);
+  if (item.dish !== (spec.dish != null)) reasons.push(`dish flag ${item.id}`);
   if (item.pass) {
     for (let turn = 1; turn <= spec.turns.length; turn += 1) {
       if (!item.requestProvenance.some((step) => step.attempt === item.attempts && step.turn === turn)) {
@@ -129,12 +131,19 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
     || scored.precisionDenominator !== item.precisionDenominator
     || scored.recallNumerator !== item.recallNumerator
     || scored.recallDenominator !== item.recallDenominator
-    || scored.safetyFailures.some((failure) => !item.safetyFailures.includes(failure))) {
+    || scored.safetyFailures.some((failure) => !item.safetyFailures.includes(failure))
+    || !sameCartMisses(dishCartMisses(spec, item.finalCart), item.dishMisses)) {
     reasons.push(`cart does not match ${item.id}`);
   }
   const quantityChecks = spec.qty?.length ?? 0;
   const quantityHits = (spec.qty ?? []).filter((rule) => item.finalCart.some((line) => line.key === rule.listingKey && line.variantKey === rule.variantKey && line.qty >= rule.min && line.qty <= rule.max)).length;
   if (item.quantityChecks !== quantityChecks || item.quantityHits !== quantityHits) reasons.push(`quantity counts ${item.id}`);
+}
+
+function sameCartMisses(expected: string[], claimed: unknown): boolean {
+  if (!Array.isArray(claimed)) return false;
+  const cartMisses: string[] = claimed = claimed.filter((miss): miss is string => typeof miss === "string" && miss.startsWith("missing "));
+  return canonicalJson([...expected].sort()) === canonicalJson([...cartMisses].sort());
 }
 
 function bareBinding(): CatalogBinding {
@@ -172,6 +181,8 @@ function countsOk(item: CaseResult): boolean {
   if (!nonNegativeInt(item.attempts) || item.attempts < 1) return false;
   if (!nonNegativeInt(item.steps) || !nonNegativeInt(item.toolInputErrors)) return false;
   if (!nonNegativeInt(item.quantityChecks) || !nonNegativeInt(item.quantityHits) || item.quantityHits > item.quantityChecks) return false;
+  if (typeof item.dish !== "boolean" || !Array.isArray(item.dishMisses) || item.dishMisses.some((miss) => typeof miss !== "string")) return false;
+  if (item.dish && (item.precisionDenominator !== 0 || item.recallDenominator !== 0)) return false;
   return typeof item.gapRequired === "boolean" && typeof item.gapsReported === "boolean" && typeof item.pass === "boolean";
 }
 
@@ -187,6 +198,9 @@ function summaryMatches(claimed: ReportSummary | undefined, summary: ReportSumma
     && claimed.temporalViolations === summary.temporalViolations
     && claimed.safetyFailures === summary.safetyFailures
     && claimed.passRate === summary.passRate
+    && claimed.dishCases === summary.dishCases
+    && claimed.dishPassed === summary.dishPassed
+    && claimed.dishPassRate === summary.dishPassRate
     && claimed.gapReportingRate === summary.gapReportingRate
     && claimed.quantityAccuracy === summary.quantityAccuracy
     && claimed.steps === summary.steps
@@ -221,7 +235,7 @@ function provenanceOk(item: CaseResult, seenIds: Set<string>): boolean {
 function caseLooksPassing(item: CaseResult): boolean {
   const precision = item.precisionDenominator === 0 ? 1 : item.precisionNumerator / item.precisionDenominator;
   const recall = item.recallDenominator === 0 ? 1 : item.recallNumerator / item.recallDenominator;
-  return item.safetyFailures.length === 0 && item.hallucinated.length === 0 && item.ungroundedAmountsShown.length === 0 && item.gapsReported && precision === 1 && recall === 1;
+  return item.safetyFailures.length === 0 && item.hallucinated.length === 0 && item.ungroundedAmountsShown.length === 0 && item.gapsReported && precision === 1 && recall === 1 && Array.isArray(item.dishMisses) && item.dishMisses.length === 0;
 }
 
 /** Drives store A once through the fake and compares the committed report to that fingerprint. */

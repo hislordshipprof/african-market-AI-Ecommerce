@@ -148,27 +148,43 @@ function caseOf(id, category, turns, extra) {
 }
 
 const cases = [];
-const jollof = ["rice-parboiled-long-grain", "tomato-paste-gino", "pepper-scotch-bonnet", "thyme-dried", "curry-powder-nigerian", "maggi-star-cubes", "hard-chicken", "palm-oil-red"].map((id) => listings.find((item) => item.key === id)).filter(Boolean);
-const egusi = ["egusi-seeds-whole", "ugu-leaves-fresh", "crayfish-ground", "palm-oil-red", "stockfish-cut"].map((id) => listings.find((item) => item.key === id)).filter(Boolean);
-const breakfast = ["teff-flour-ivory", "berbere"].map((id) => listings.find((item) => item.key === id)).filter(Boolean);
+// Dish-only requests name no list: each passes on a few core items the store sells, any brand, pack or quantity.
+const sold = (keys) => keys.filter((key) => listings.some((item) => item.key === key && item.store === "A" && item.active));
+const dishes = {
+  jollof: [
+    { label: "rice", options: sold(["rice-parboiled-long-grain", "rice-ofada"]) },
+    { label: "tomato paste", options: sold(["tomato-paste-gino", "tomato-paste-de-rica"]) },
+    { label: "pepper", options: sold(["pepper-scotch-bonnet", "pepper-tatashe", "ground-hot-pepper", "cameroon-pepper"]) },
+  ],
+  egusi: [
+    { label: "egusi", options: sold(["egusi-seeds-whole", "egusi-ground"]) },
+    { label: "palm oil", options: sold(["palm-oil-red", "palm-oil-bleached-ofada"]) },
+    { label: "leafy greens", options: sold(["ugu-leaves-fresh", "bitter-leaf-frozen"]) },
+  ],
+  breakfast: [
+    { label: "teff", options: sold(["teff-flour-ivory", "teff-flour-brown"]) },
+    { label: "berbere", options: sold(["berbere"]) },
+  ],
+};
+function dishCase(id, request, people, core, unclear, excluded) {
+  const turns = unclear
+    ? [request.replace("{for}", ""), `For ${people} people.`, "Yes, add those."]
+    : [request.replace("{for}", ` for ${people} people`), "Yes, add those."];
+  return {
+    ...caseOf(id, "recipe-to-cart", turns, { addsFromTurn: turns.length }),
+    ...(excluded ? { excluded } : {}),
+    dish: { core, askServings: unclear },
+  };
+}
 
 for (let index = 0; index < 20; index += 1) {
-  cases.push(caseOf(`jollof-for-ten-${index + 1}`, "recipe-to-cart", [
-    `Jollof for ${8 + (index % 5)} people. Use tomato paste, not fresh tomato, and no yellow onion.`,
-    "Yes, add those.",
-  ], { mustHave: jollof.map((item) => must(item)), qty: jollof.flatMap((item) => qtyRules(item, 1, 20)), addsFromTurn: 2 }));
+  cases.push(dishCase(`jollof-for-ten-${index + 1}`, "Jollof{for}. Use tomato paste, not fresh tomato, and no yellow onion.", 8 + (index % 5), dishes.jollof, index % 5 === 4, ["gino-pepper-onion-paste"]));
 }
 for (let index = 0; index < 10; index += 1) {
-  cases.push(caseOf(`egusi-soup-${index + 1}`, "recipe-to-cart", [
-    `Egusi soup for ${4 + (index % 4)} people.`,
-    "Yes, add those.",
-  ], { mustHave: egusi.map((item) => must(item)), qty: egusi.flatMap((item) => qtyRules(item, 1, 20)), addsFromTurn: 2 }));
+  cases.push(dishCase(`egusi-soup-${index + 1}`, "Egusi soup{for}.", 4 + (index % 4), dishes.egusi, index % 5 === 4));
 }
 for (let index = 0; index < 10; index += 1) {
-  cases.push(caseOf(`ethiopian-breakfast-${index + 1}`, "recipe-to-cart", [
-    `Ethiopian breakfast for ${2 + (index % 3)} people, with teff and berbere.`,
-    "Yes, add those.",
-  ], { mustHave: breakfast.map((item) => must(item)), qty: breakfast.flatMap((item) => qtyRules(item, 1, 20)), addsFromTurn: 2 }));
+  cases.push(dishCase(`ethiopian-breakfast-${index + 1}`, "Ethiopian breakfast{for}, with teff and berbere.", 2 + (index % 3), dishes.breakfast, index % 5 === 4));
 }
 
 inStock.slice(0, 35).forEach((item, index) => {

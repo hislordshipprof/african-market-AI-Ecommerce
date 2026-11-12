@@ -491,6 +491,7 @@ async function fillAbandonedIntegrity(blank: CaseResult, args: {
     blank.ungroundedAmountsShown = scored.caseResult.ungroundedAmountsShown;
     blank.temporalViolations = scored.caseResult.temporalViolations;
     blank.finalCart = scored.caseResult.finalCart;
+    if (blank.dish) blank.dishMisses = [...scored.caseResult.dishMisses, "incomplete"];
     blank.stickyIntegrity = scored.caseResult.hallucinated.length > 0
       || scored.caseResult.safetyFailures.length > 0
       || scored.caseResult.ungroundedAmountsShown.length > 0
@@ -578,6 +579,8 @@ async function scoreAttempt(args: {
     quantityChecks,
     quantityHits,
     gapRequired: args.evalCase.gaps.length > 0,
+    dish: args.evalCase.dish != null,
+    dishMisses: scored.dishMisses,
     costMicros: "0",
     anthropicRequestIds: [],
     requestProvenance: args.provenance,
@@ -834,9 +837,9 @@ function blankCase(evalCase: EvalCase): CaseResult {
     precision: 0,
     recall: 0,
     precisionNumerator: 0,
-    precisionDenominator: 1,
+    precisionDenominator: evalCase.dish ? 0 : 1,
     recallNumerator: 0,
-    recallDenominator: 1,
+    recallDenominator: evalCase.dish ? 0 : 1,
     hallucinated: [],
     strippedAmounts: [],
     ungroundedAmountsShown: [],
@@ -851,6 +854,8 @@ function blankCase(evalCase: EvalCase): CaseResult {
     quantityChecks: evalCase.qty?.length ?? 0,
     quantityHits: 0,
     gapRequired: evalCase.gaps.length > 0,
+    dish: evalCase.dish != null,
+    dishMisses: evalCase.dish ? ["incomplete"] : [],
     costMicros: "0",
     anthropicRequestIds: [],
     requestProvenance: [],

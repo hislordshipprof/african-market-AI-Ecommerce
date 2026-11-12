@@ -74,11 +74,19 @@ function parseCase(raw: unknown, index: number): EvalCase {
   const gaps = parseGaps(record.gaps, id);
   const qty = parseQty(record.qty, id);
   const swapRule = parseSwap(record.swapRule, id);
+  const excluded = parseExcluded(record.excluded, id);
+  const dish = parseDish(record.dish, id);
+  if ((record.category === "recipe-to-cart") !== (dish != null)) {
+    throw new Error(`Eval case ${id} must be a dish case exactly when it is recipe-to-cart.`);
+  }
+  if (dish && (mustHave.length > 0 || mayHave.length > 0 || qty.length > 0)) {
+    throw new Error(`Eval case ${id} is a dish case and cannot fix a list, pack or quantity.`);
+  }
   const addsFromTurn = record.addsFromTurn == null ? undefined : Number(record.addsFromTurn);
   if (addsFromTurn != null && (!Number.isInteger(addsFromTurn) || addsFromTurn < 1 || addsFromTurn > turns.length)) {
     throw new Error(`Eval case ${id} has an invalid addsFromTurn.`);
   }
-  if (mustHave.length === 0 && gaps.length === 0 && addsFromTurn == null) {
+  if (mustHave.length === 0 && gaps.length === 0 && addsFromTurn == null && !dish) {
     throw new Error(`Eval case ${id} is empty.`);
   }
   return {
@@ -91,7 +99,34 @@ function parseCase(raw: unknown, index: number): EvalCase {
     ...(qty.length > 0 ? { qty } : {}),
     ...(swapRule ? { swapRule } : {}),
     ...(addsFromTurn != null ? { addsFromTurn } : {}),
+    ...(excluded.length > 0 ? { excluded } : {}),
+    ...(dish ? { dish } : {}),
   };
+}
+
+function parseExcluded(raw: unknown, id: string): string[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw) || raw.some((key) => typeof key !== "string" || key === "")) {
+    throw new Error(`Eval case ${id} has a malformed excluded list.`);
+  }
+  return raw as string[];
+}
+
+function parseDish(raw: unknown, id: string): EvalCase["dish"] {
+  if (raw == null) return undefined;
+  const dish = raw as { core?: unknown; askServings?: unknown };
+  if (!Array.isArray(dish.core) || dish.core.length === 0 || typeof dish.askServings !== "boolean") {
+    throw new Error(`Eval case ${id} has a malformed dish.`);
+  }
+  const core = dish.core.map((group) => {
+    const record = (group ?? {}) as { label?: unknown; options?: unknown };
+    if (typeof record.label !== "string" || record.label === "" || !Array.isArray(record.options) || record.options.length === 0
+      || record.options.some((key) => typeof key !== "string")) {
+      throw new Error(`Eval case ${id} has a malformed dish core item.`);
+    }
+    return { label: record.label, options: record.options as string[] };
+  });
+  return { core, askServings: dish.askServings };
 }
 
 function parseGroups(raw: unknown, id: string): MustGroup[] {
@@ -185,6 +220,17 @@ function assertKeys(item: EvalCase, fixture: CatalogFixture, allowOverlap: boole
     }
   }
   for (const option of item.mayHave) assertPack(item.id, option, known);
+  for (const key of item.excluded ?? []) {
+    if (!known.has(key)) throw new Error(`Eval case ${item.id} excludes unknown listing ${key}.`);
+    if (mustKeys.includes(key)) throw new Error(`Eval case ${item.id} both requires and excludes ${key}.`);
+  }
+  for (const group of item.dish?.core ?? []) {
+    for (const key of group.options) {
+      const listing = known.get(key);
+      if (!listing || listing.store !== "A" || !listing.active) throw new Error(`Eval case ${item.id} has core item ${key} that store A does not sell.`);
+      if (item.excluded?.includes(key)) throw new Error(`Eval case ${item.id} both requires and excludes ${key}.`);
+    }
+  }
   const gapKeys = new Set(item.gaps.flatMap((gap) => (gap.key ? [gap.key] : [])));
   for (const key of gapKeys) {
     if (!known.has(key)) throw new Error(`Eval case ${item.id} names unknown gap key ${key}.`);

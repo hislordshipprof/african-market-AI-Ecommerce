@@ -70,6 +70,7 @@ export interface ScoreOutput {
   temporalViolations: number[];
   gapsReported: boolean;
   safetyFailures: string[];
+  dishMisses: string[];
   pass: boolean;
   reason: string;
 }
@@ -78,10 +79,13 @@ const LISTING_FIELDS = new Set(["listing_id", "listing_ids"]);
 const VARIANT_FIELDS = new Set(["variant_id", "backup_variant_id", "substitute_variant_id"]);
 const LINE_FIELDS = new Set(["line_id"]);
 
+const SERVINGS_TERMS = ["how many", "people", "serv", "portion", "guest"];
+
 export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: string[]): ScoreOutput {
+  const dish = input.evalCase.dish;
   const assignment = assignGroups(input.cart, input.evalCase, binding);
-  const precisionDenominator = input.cart.length;
-  const precisionNumerator = input.cart.length === 0 ? 0 : assignment.acceptable;
+  const precisionDenominator = dish ? 0 : input.cart.length;
+  const precisionNumerator = dish || input.cart.length === 0 ? 0 : assignment.acceptable;
   const recallDenominator = input.evalCase.mustHave.length;
   const recallNumerator = input.evalCase.mustHave.length === 0 ? 0 : assignment.satisfied;
   const hallucinated = collectHallucinations(input, binding);
@@ -95,15 +99,17 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
     ...(input.tools.some((tool) => outputCode(tool.output) === "audit_failed") ? ["audit_failed"] : []),
     ...prematureWrites(input),
     ...swapFailures(input, binding),
+    ...(input.cart.some((line) => input.evalCase.excluded?.includes(line.key)) ? ["excluded-item"] : []),
   ];
   const uniqueSafety = [...new Set(safetyFailures)];
+  const dishMisses = [...dishCartMisses(input.evalCase, input.cart), ...servingsMisses(input)];
   const precision = ratio(precisionNumerator, precisionDenominator);
   const recall = ratio(recallNumerator, recallDenominator);
-  const pass = uniqueSafety.length === 0 && precision === 1 && recall === 1 && gapsReported && hallucinated.length === 0 && ungroundedAmountsShown.length === 0;
+  const pass = uniqueSafety.length === 0 && precision === 1 && recall === 1 && gapsReported && hallucinated.length === 0 && ungroundedAmountsShown.length === 0 && dishMisses.length === 0;
   const reason = pass
     ? "ok"
     : uniqueSafety[0]
-      ?? (!gapsReported ? "gap not reported" : precision !== 1 ? "precision" : "recall");
+      ?? (!gapsReported ? "gap not reported" : dishMisses[0] ?? (precision !== 1 ? "precision" : "recall"));
   return {
     precision,
     recall,
@@ -116,9 +122,24 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
     temporalViolations,
     gapsReported,
     safetyFailures: uniqueSafety,
+    dishMisses,
     pass,
     reason: reason || "recall",
   };
+}
+
+/** Core ingredients missing from a dish cart. The gate recomputes these from the committed cart. */
+export function dishCartMisses(evalCase: EvalCase, cart: CartSnapshotLine[]): string[] {
+  if (!evalCase.dish) return [];
+  return evalCase.dish.core
+    .filter((group) => !cart.some((line) => group.options.includes(line.key)))
+    .map((group) => `missing ${group.label}`);
+}
+
+function servingsMisses(input: ScoreInput): string[] {
+  if (!input.evalCase.dish?.askServings) return [];
+  const firstReply = input.savedTexts.filter((block) => block.turn === 1).map((block) => block.text).join("\n").toLowerCase();
+  return SERVINGS_TERMS.some((term) => firstReply.includes(term)) ? [] : ["servings not asked"];
 }
 
 function assignGroups(cart: CartSnapshotLine[], evalCase: EvalCase, binding: CatalogBinding): { satisfied: number; acceptable: number; safety: string[] } {
