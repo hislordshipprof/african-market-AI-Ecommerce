@@ -2543,6 +2543,45 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     expect(calls).toBeGreaterThan(callsBeforeOther);
   });
 
+  it.each([
+    ["a text-only second turn", { kind: "text", text: "Which size?" }],
+    ["a second turn with a rejected tool input", { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: "egusi", qty: 0 }] } }],
+  ] as const)("turn 3 still sees a product id only turn 1's tool result held, after %s", async (_label, second) => {
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    vi.stubEnv("ANTHROPIC_API_KEY", E2E_FAKE_ANTHROPIC_KEY);
+    const fake = createFakeAnthropicFetch({
+      expectedKey: E2E_FAKE_ANTHROPIC_KEY,
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "egusi" } },
+        { kind: "text", text: "I found egusi." },
+        second,
+        ...(second.kind === "tool" ? [{ kind: "text" as const, text: "That did not work." }] : []),
+        { kind: "text", text: "Adding it." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const headers = {
+      "content-type": "application/json",
+      host,
+      origin: `http://${host}`,
+      "x-store-slug": slug,
+      cookie: `cart_id=${encodeURIComponent(cart.id)}`,
+    };
+    for (const [index, text] of ["egusi please", "the small one", "add it"].entries()) {
+      const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+        method: "POST",
+        headers: { ...headers, "x-forwarded-for": `203.0.113.${240 + index}` },
+        body: JSON.stringify({ message: { id: `ids-kept-${cart.id}-${index}`, role: "user", parts: [{ type: "text", text }] } }),
+      }));
+      expect(response.status).toBe(200);
+      await response.text();
+    }
+    expect(JSON.stringify(fake.requests[1]?.body)).toContain(variantId);
+    const last = fake.requests.at(-1)?.body as { system?: Array<{ text?: string }> } | undefined;
+    const system = (last?.system ?? []).map((block) => block.text ?? "").join("\n");
+    expect(system).toContain(`Egusi, Each: ${variantId}`);
+  });
+
   it("keeps a successful tool call in the next turn and does not audit a card number as a listing id", async () => {
     const jpeg = readFileSync(new URL("./fixtures/list-exif.jpg", import.meta.url));
     const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });

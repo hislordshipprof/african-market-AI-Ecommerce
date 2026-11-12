@@ -37,7 +37,7 @@ import {
 } from "./contract";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
-import { acceptanceForTurn } from "./shown";
+import { acceptanceForTurn, shownProductIds } from "./shown";
 import { clientIp } from "./client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { requireSameOrigin } from "../security/same-origin";
@@ -258,7 +258,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
           content: ASSISTANT_STATIC_PROMPT,
           providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
         },
-        { role: "system", content: storeContextMessage(store, at) },
+        { role: "system", content: storeContextMessage(store, at, shownProductIds(sentHistory)) },
         ...modelMessages,
       ],
       allowSystemInMessages: true,

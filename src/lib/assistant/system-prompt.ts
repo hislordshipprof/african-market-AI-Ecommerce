@@ -47,7 +47,7 @@ export interface StoreContextInput {
   minimumOrderCents: number;
 }
 
-export function storeContextMessage(store: StoreContextInput, now: Date): string {
+export function storeContextMessage(store: StoreContextInput, now: Date, shownIds: readonly string[] = []): string {
   const open = isStoreOpen(store.hours, store.timezone, now);
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: store.timezone,
@@ -63,5 +63,8 @@ export function storeContextMessage(store: StoreContextInput, now: Date): string
     `Pickup: ${store.pickupEnabled ? "offered" : "not offered"}`,
     `Delivery: ${store.deliveryInfo ?? "not offered"}`,
     `Minimum order cents: ${store.minimumOrderCents}`,
+    ...(shownIds.length > 0
+      ? ["Product variant ids shown in this chat (copy a variant_id from here, character for character):", ...shownIds]
+      : []),
   ].join("\n");
 }

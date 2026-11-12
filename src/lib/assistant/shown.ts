@@ -130,6 +130,43 @@ export function replyCountsAsEmpty(message: ShownMessage): boolean {
   });
 }
 
+const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products"]);
+const SHOWN_ID_LIMIT = 60;
+
+/**
+ * One line per product variant a read tool showed in this chat, newest last.
+ * The model miscopies long ids from deep in the history; this short table is
+ * a clean place to copy them from.
+ */
+export function shownProductIds(messages: readonly ShownMessage[]): string[] {
+  const rows = new Map<string, string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      const name = toolNameOf(part);
+      if (!name || !SHOWN_ID_TOOLS.has(name) || !outputOk(part.output)) continue;
+      const body = part.output as { items?: unknown; cards?: unknown };
+      for (const row of [...arrayOf(body.items), ...arrayOf(body.cards)]) {
+        const product = row as { name?: unknown; packLabel?: unknown; variantId?: unknown; variants?: unknown };
+        if (typeof product.name !== "string") continue;
+        const variants = Array.isArray(product.variants)
+          ? product.variants as Array<{ variantId?: unknown; label?: unknown }>
+          : [{ variantId: product.variantId, label: product.packLabel }];
+        for (const variant of variants) {
+          if (typeof variant.variantId !== "string") continue;
+          const label = typeof variant.label === "string" ? `, ${variant.label}` : "";
+          rows.delete(variant.variantId);
+          rows.set(variant.variantId, `${product.name}${label}: ${variant.variantId}`);
+        }
+      }
+    }
+  }
+  return [...rows.values()].slice(-SHOWN_ID_LIMIT);
+}
+
+function arrayOf(value: unknown): object[] {
+  return Array.isArray(value) ? value.filter((item): item is object => !!item && typeof item === "object") : [];
+}
+
 function textOf(message: ShownMessage): string {
   return message.parts
     .filter((part) => part.type === "text" && typeof part.text === "string")
