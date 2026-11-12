@@ -1,3 +1,4 @@
+import { formatInZone } from "../format";
 import type { OrderStatus } from "../order/service";
 
 export const ACCOUNT_ORDER_LIMIT = 50;
@@ -72,22 +73,12 @@ function amountLabel(order: AccountOrderRecord): string {
   return `Estimated ${money(order.subtotalCents + order.tipCents + order.deliveryFeeCents)}`;
 }
 
-function dateLabel(createdAt: Date, timeZone: string): string {
-  const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
-  try {
-    return new Intl.DateTimeFormat("en-US", { ...options, timeZone }).format(createdAt);
-  } catch {
-    // `stores.timezone` is free text. A bad value must not take down the account page.
-    return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "America/New_York" }).format(createdAt);
-  }
-}
-
 export function accountOrderRow(order: AccountOrderRecord, timeZone: string): AccountOrderRow {
   return {
     id: order.id,
     number: order.number,
     href: `/order/${encodeURIComponent(order.trackingToken ?? order.id)}`,
-    dateLabel: dateLabel(order.createdAt, timeZone),
+    dateLabel: formatInZone(order.createdAt, timeZone, { month: "short", day: "numeric", year: "numeric" }),
     itemsLabel: `${order.itemCount} ${order.itemCount === 1 ? "item" : "items"}`,
     statusLabel: customerStatusLabel(order.status),
     amountLabel: amountLabel(order),
