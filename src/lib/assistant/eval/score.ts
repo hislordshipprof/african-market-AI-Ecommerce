@@ -154,8 +154,10 @@ function assignGroups(cart: CartSnapshotLine[], evalCase: EvalCase, binding: Cat
 
 function lineMatches(line: CartSnapshotLine, option: PackRef, evalCase: Pick<EvalCase, "qty">): boolean {
   if (line.key !== option.listingKey || !option.variantKeys.includes(line.variantKey)) return false;
-  const qty = (evalCase.qty ?? []).find((rule) => rule.listingKey === line.key && rule.variantKey === line.variantKey);
-  if (!qty) return true;
+  const rules = evalCase.qty ?? [];
+  if (rules.length === 0) return true;
+  const qty = rules.find((rule) => rule.listingKey === line.key && rule.variantKey === line.variantKey);
+  if (!qty) return false;
   return line.qty >= qty.min && line.qty <= qty.max;
 }
 
@@ -179,7 +181,9 @@ function swapFailures(input: ScoreInput, binding: CatalogBinding): string[] {
     if (!rule.allowed.includes(line.swapRule as SwapRuleName)) failures.push("invalid-swap");
     if (rule.substituteVariantKey) {
       const expected = binding.byVariantKey.get(rule.substituteVariantKey);
-      if (!expected || line.swapRule !== "named_substitute") failures.push("wrong-substitute");
+      if (!expected || line.swapRule !== "named_substitute" || line.substituteVariantKey !== rule.substituteVariantKey) {
+        failures.push("wrong-substitute");
+      }
     }
   }
   return failures;

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFakeAnthropicFetch } from "../messages-api-double";
 import { assessReport, checkCommittedEval } from "./gate";
+import { summarize } from "./report";
 import { fingerprintFromParts, type Fingerprint } from "./fingerprint";
 import type { EvalReport } from "./report";
 import type { CaseResult } from "./types";
@@ -70,6 +71,10 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
     finalCart: [],
     steps: 1,
     stepLimitHit: false,
+    toolInputErrors: 0,
+    quantityChecks: 0,
+    quantityHits: 0,
+    gapRequired: false,
     costMicros: "1",
     anthropicRequestIds: [`req_${id}`],
     requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${id}` }],
@@ -77,10 +82,6 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
 }
 
 function report(cases: CaseResult[], current = fingerprint(), extra: Partial<EvalReport> = {}): EvalReport {
-  const precisionNumerator = cases.reduce((sum, item) => sum + item.precisionNumerator, 0);
-  const precisionDenominator = cases.reduce((sum, item) => sum + item.precisionDenominator, 0);
-  const recallNumerator = cases.reduce((sum, item) => sum + item.recallNumerator, 0);
-  const recallDenominator = cases.reduce((sum, item) => sum + item.recallDenominator, 0);
   return {
     schemaVersion: 1,
     fingerprint: current,
@@ -91,19 +92,7 @@ function report(cases: CaseResult[], current = fingerprint(), extra: Partial<Eva
     datasetCases: cases.length,
     complete: true,
     incompleteReason: null,
-    summary: {
-      microPrecision: precisionNumerator / precisionDenominator,
-      microRecall: recallNumerator / recallDenominator,
-      precisionNumerator,
-      precisionDenominator,
-      recallNumerator,
-      recallDenominator,
-      hallucinatedItems: cases.reduce((sum, item) => sum + item.hallucinated.length, 0),
-      ungroundedAmountsShown: cases.reduce((sum, item) => sum + item.ungroundedAmountsShown.length, 0),
-      strippedAmounts: 0,
-      temporalViolations: 0,
-      safetyFailures: cases.reduce((sum, item) => sum + item.safetyFailures.length, 0),
-    },
+    summary: summarize(cases),
     verdict: "haiku-ok",
     verdictReasons: [],
     spend: { micros: "1", usd: "0.000001", ledgerDeltaMicros: "1", conversationMicros: "1", inputTokens: 1, outputTokens: 1 },
@@ -164,6 +153,21 @@ describe("shopper assistant eval gate", () => {
 
     const incomplete = report([passing("one"), passing("two")], current, { complete: false });
     expect(assessReport(incomplete, expectIds).reasons).toContain("incomplete");
+
+    const malformed = report([passing("one"), passing("two")]);
+    malformed.spend = undefined as unknown as EvalReport["spend"];
+    malformed.startedAt = "";
+    malformed.finishedAt = "";
+    malformed.verdict = undefined as unknown as EvalReport["verdict"];
+    malformed.cases[0]!.precisionNumerator = -1;
+    malformed.cases[0]!.precisionDenominator = -1;
+    malformed.cases[0]!.stickyIntegrity = true;
+    malformed.cases[0]!.anthropicRequestIds = [];
+    malformed.cases[1]!.requestProvenance = [{ attempt: 1, turn: 1, step: 1, requestId: "req_one" }];
+    malformed.cases[1]!.anthropicRequestIds = ["req_one"];
+    const rejected = assessReport(malformed, expectIds);
+    expect(rejected.ok).toBe(false);
+    expect(rejected.reasons.join(" ")).toMatch(/spend|startedAt|verdict|invalid counts|sticky integrity|reused request id|missing request provenance/);
 
     const same = fingerprint("current prompt");
     expect(same.sha256).toBe(current.sha256);

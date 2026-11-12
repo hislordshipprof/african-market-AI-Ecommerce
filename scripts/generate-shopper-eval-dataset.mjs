@@ -120,14 +120,18 @@ const statusOut = listings.find((item) => item.store === "A" && item.status === 
 const inactive = listings.find((item) => item.store === "A" && !item.active);
 const nameOf = new Map(products.map((product) => [product.id, product.name]));
 
-function pack(item) {
-  return { listingKey: item.key, variantKeys: item.variants.map((variant) => variant.key) };
+function chosenVariants(item, namedFive) {
+  const variants = namedFive ? item.variants.filter((variant) => variant.label === "5 lb") : item.variants;
+  return variants.length > 0 ? variants : item.variants;
 }
-function must(item) {
-  return { options: [pack(item)] };
+function pack(item, namedFive = false) {
+  return { listingKey: item.key, variantKeys: chosenVariants(item, namedFive).map((variant) => variant.key) };
 }
-function qty(item) {
-  return { listingKey: item.key, variantKey: item.variants[0].key, min: 1, max: 1 };
+function must(item, namedFive = false) {
+  return { options: [pack(item, namedFive)] };
+}
+function qtyRules(item, min, max, namedFive = false) {
+  return chosenVariants(item, namedFive).map((variant) => ({ listingKey: item.key, variantKey: variant.key, min, max }));
 }
 function caseOf(id, category, turns, extra) {
   return {
@@ -152,37 +156,37 @@ for (let index = 0; index < 20; index += 1) {
   cases.push(caseOf(`jollof-for-ten-${index + 1}`, "recipe-to-cart", [
     `Jollof for ${8 + (index % 5)} people. Use tomato paste, not fresh tomato, and no yellow onion.`,
     "Yes, add those.",
-  ], { mustHave: jollof.map(must), qty: jollof.map((item) => ({ ...qty(item), max: 20 })), addsFromTurn: 2 }));
+  ], { mustHave: jollof.map((item) => must(item)), qty: jollof.flatMap((item) => qtyRules(item, 1, 20)), addsFromTurn: 2 }));
 }
 for (let index = 0; index < 10; index += 1) {
   cases.push(caseOf(`egusi-soup-${index + 1}`, "recipe-to-cart", [
     `Egusi soup for ${4 + (index % 4)} people.`,
     "Yes, add those.",
-  ], { mustHave: egusi.map(must), qty: egusi.map((item) => ({ ...qty(item), max: 20 })), addsFromTurn: 2 }));
+  ], { mustHave: egusi.map((item) => must(item)), qty: egusi.flatMap((item) => qtyRules(item, 1, 20)), addsFromTurn: 2 }));
 }
 for (let index = 0; index < 10; index += 1) {
   cases.push(caseOf(`ethiopian-breakfast-${index + 1}`, "recipe-to-cart", [
     `Ethiopian breakfast for ${2 + (index % 3)} people, with teff and berbere.`,
     "Yes, add those.",
-  ], { mustHave: breakfast.map(must), qty: breakfast.map((item) => ({ ...qty(item), max: 20 })), addsFromTurn: 2 }));
+  ], { mustHave: breakfast.map((item) => must(item)), qty: breakfast.flatMap((item) => qtyRules(item, 1, 20)), addsFromTurn: 2 }));
 }
 
 inStock.slice(0, 35).forEach((item, index) => {
   cases.push(caseOf(`add-one-${index + 1}`, "single-item", [
     `Add 1 of the 5 lb ${nameOf.get(item.key)}.`,
-  ], { mustHave: [must(item)], qty: [qty(item)] }));
+  ], { mustHave: [must(item, true)], qty: qtyRules(item, 1, 1, true) }));
 });
 
 const multiPool = inStock.slice(0, 25);
 cases.push(caseOf("add-twenty-five", "multi-item", [
   `Add 1 of each of these: ${multiPool.map((item) => nameOf.get(item.key)).join(", ")}.`,
-], { mustHave: multiPool.map(must), qty: multiPool.map(qty) }));
+], { mustHave: multiPool.map((item) => must(item)), qty: multiPool.flatMap((item) => qtyRules(item, 1, 1)) }));
 for (let index = 0; index < 29; index += 1) {
   const picked = [inStock[index % inStock.length], inStock[(index + 3) % inStock.length], inStock[(index + 7) % inStock.length]];
   const unique = [...new Map(picked.map((item) => [item.key, item])).values()];
   cases.push(caseOf(`add-three-${index + 1}`, "multi-item", [
     `Add 1 of each: ${unique.map((item) => nameOf.get(item.key)).join(", ")}.`,
-  ], { mustHave: unique.map(must), qty: unique.map(qty) }));
+  ], { mustHave: unique.map((item) => must(item)), qty: unique.flatMap((item) => qtyRules(item, 1, 1)) }));
 }
 
 const synonymAsks = [
@@ -195,7 +199,7 @@ const synonymAsks = [
 for (let index = 0; index < 30; index += 1) {
   const ask = synonymAsks[index % synonymAsks.length];
   const item = listings.find((row) => row.key === ask[2]);
-  cases.push(caseOf(`synonym-${ask[0]}-${index + 1}`, "synonym", [ask[1]], { mustHave: [must(item)], qty: [qty(item)] }));
+  cases.push(caseOf(`synonym-${ask[0]}-${index + 1}`, "synonym", [ask[1]], { mustHave: [must(item)], qty: qtyRules(item, 1, 1) }));
 }
 
 for (let index = 0; index < 8; index += 1) {
@@ -203,7 +207,7 @@ for (let index = 0; index < 8; index += 1) {
     `Add 1 ${nameOf.get(countedOut.key)}.`,
   ], {
     mustHave: [must(countedOut)],
-    qty: [qty(countedOut)],
+    qty: qtyRules(countedOut, 1, 1),
     swapRule: { listingKey: countedOut.key, allowed: ["store_suggests", "named_substitute"] },
   }));
 }
@@ -212,7 +216,7 @@ for (let index = 0; index < 7; index += 1) {
     `Add 1 ${nameOf.get(statusOut.key)}.`,
   ], {
     mustHave: [must(statusOut)],
-    qty: [qty(statusOut)],
+    qty: qtyRules(statusOut, 1, 1),
     swapRule: { listingKey: statusOut.key, allowed: ["store_suggests", "named_substitute"] },
   }));
 }
@@ -226,7 +230,7 @@ inStock.slice(35, 55).forEach((item, index) => {
   cases.push(caseOf(`some-then-one-${index + 1}`, "ambiguous-quantity", [
     `I need some ${nameOf.get(item.key)}, but I have not said how many.`,
     `Add 1 of the 5 lb ${nameOf.get(item.key)}.`,
-  ], { mustHave: [must(item)], qty: [qty(item)], addsFromTurn: 2 }));
+  ], { mustHave: [must(item, true)], qty: qtyRules(item, 1, 1, true), addsFromTurn: 2 }));
 });
 
 for (let index = 0; index < 20; index += 1) {
@@ -234,7 +238,7 @@ for (let index = 0; index < 20; index += 1) {
     `Add 1 ${nameOf.get(low.key)} and set a backup swap rule because stock confidence is low.`,
   ], {
     mustHave: [must(low)],
-    qty: [qty(low)],
+    qty: qtyRules(low, 1, 1),
     swapRule: { listingKey: low.key, allowed: ["store_suggests", "named_substitute"] },
   }));
 }

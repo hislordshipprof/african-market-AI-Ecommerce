@@ -99,6 +99,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -239,6 +245,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -387,6 +399,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -527,6 +545,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -675,6 +699,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -815,6 +845,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -963,6 +999,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -1103,6 +1145,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -1251,6 +1299,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -1391,6 +1445,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -1539,6 +1599,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -1679,6 +1745,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -1827,6 +1899,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -1967,6 +2045,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -2115,6 +2199,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -2255,6 +2345,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -2403,6 +2499,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -2543,6 +2645,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -2691,6 +2799,12 @@
         "max": 20
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 20
+      },
+      {
         "listingKey": "tomato-paste-gino",
         "variantKey": "tomato-paste-gino-pack",
         "min": 1,
@@ -2831,6 +2945,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 20
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 20
       },
@@ -4311,8 +4431,7 @@
           {
             "listingKey": "rice-parboiled-long-grain",
             "variantKeys": [
-              "rice-parboiled-long-grain-5lb",
-              "rice-parboiled-long-grain-10lb"
+              "rice-parboiled-long-grain-5lb"
             ]
           }
         ]
@@ -5584,6 +5703,12 @@
         "max": 1
       },
       {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
+        "min": 1,
+        "max": 1
+      },
+      {
         "listingKey": "thyme-dried",
         "variantKey": "thyme-dried-pack",
         "min": 1,
@@ -5774,6 +5899,12 @@
       {
         "listingKey": "rice-parboiled-long-grain",
         "variantKey": "rice-parboiled-long-grain-5lb",
+        "min": 1,
+        "max": 1
+      },
+      {
+        "listingKey": "rice-parboiled-long-grain",
+        "variantKey": "rice-parboiled-long-grain-10lb",
         "min": 1,
         "max": 1
       },

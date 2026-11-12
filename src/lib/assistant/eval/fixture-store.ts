@@ -147,13 +147,12 @@ export async function sweepAbandonedEvalStores(ownRunId: string): Promise<void> 
     select: { id: true, deliveryInfo: true, createdAt: true },
   });
   for (const store of stores) {
-    const runId = store.deliveryInfo?.startsWith("eval-run:")
-      ? store.deliveryInfo.slice("eval-run:".length)
-      : "";
-    if (runId === ownRunId) continue;
-    if (runId && leaseFresh(runId)) continue;
+    if (!store.deliveryInfo?.startsWith("eval-run:")) continue;
+    const runId = store.deliveryInfo.slice("eval-run:".length);
+    if (runId === "" || runId === ownRunId) continue;
+    if (leaseFresh(runId)) continue;
     const age = Date.now() - store.createdAt.getTime();
-    const leased = runId !== "" && existsSync(join(LEASE_DIR, `${runId}.json`));
+    const leased = existsSync(join(LEASE_DIR, `${runId}.json`));
     if (!leased && age < 60 * 60 * 1000) continue;
     await deleteEvalStore(store.id);
   }

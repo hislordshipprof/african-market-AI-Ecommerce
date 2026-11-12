@@ -4,6 +4,8 @@ import { callCostMicros } from "../cost";
 import { createChatHandler } from "../chat-handler";
 import { createAssistantModel } from "../model";
 import { storeScoped } from "../../db";
+import { usdMentions } from "./money";
+import { adjustTicketSpend, readTicketSpend, tryReserveTicket } from "./report";
 import { bindingFromFixture, scoreCase, type CatalogBinding, type ObservedTool, type TextBlock } from "./score";
 import {
   createEvalStores,
@@ -43,6 +45,7 @@ export interface RunEvalOptions {
   maxAttempts?: number;
   whileWaitingForStrips?: () => void;
   cleanup?: (stores: CreatedEvalStores) => Promise<void>;
+  ticketSpendPath?: string;
 }
 
 export interface EvalRun {
@@ -75,6 +78,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
     result.sessionUser = "app_runtime";
     const binding = bindingFromFixture(options.fixture, created.ids);
     const ledgerBefore = await readLedger();
+    const stripWatches: StripWatch[] = [];
     let cursor = 0;
     const workers = Array.from({ length: Math.min(options.concurrency, options.cases.length) }, async () => {
       while (!aborted) {
@@ -91,24 +95,32 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
         try {
           const outcome = await attemptStore.run(`case:${evalCase.id}`, () => runCase(evalCase, index, created, binding, options, budget, () => aborted, (body) => {
             if (!firstRequestBody && body) firstRequestBody = body;
-          }));
+          }, stripWatches));
           caseMicros = outcome.costMicros;
           if (outcome.abort) aborted = { reason: outcome.abort };
           if (outcome.unresolved) result.unresolvedSpend = true;
           result.inputTokens += outcome.inputTokens;
           result.outputTokens += outcome.outputTokens;
           result.cases.push(outcome.caseResult);
+        } catch (error) {
+          aborted = { reason: error instanceof Error ? error.message : "worker failed" };
+          result.unresolvedSpend = true;
         } finally {
-          await budget.settle(caseMicros);
+          await budget.release();
           result.spendMicros += caseMicros;
         }
       }
     });
-    await Promise.all(workers);
+    await Promise.allSettled(workers);
+    if (await drainStrips(stripWatches, result, options.stripTimeoutMs ?? 10_000)) {
+      aborted = aborted ?? { reason: "strip evidence" };
+      result.unresolvedSpend = true;
+    }
     if (logs.unattributed.length > 0) aborted = { reason: "unattributed integrity" };
     const ledgerAfter = await readLedger();
     result.ledgerDeltaMicros = ledgerAfter - ledgerBefore;
-    result.conversationMicros = result.cases.reduce((sum, item) => sum + BigInt(item.costMicros), BigInt(0));
+    const conversations = await storeScoped(created.storeAId).aiConversation.findMany({ select: { costMicros: true } });
+    result.conversationMicros = conversations.reduce((sum, row) => sum + row.costMicros, BigInt(0));
     const ranAll = result.cases.length === options.cases.length;
     const order = new Map(options.cases.map((item, index) => [item.id, index]));
     result.cases.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
@@ -116,6 +128,12 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
     result.incompleteReason = aborted?.reason ?? (result.unresolvedSpend ? "unresolved usage" : ranAll ? null : "budget");
     if (result.incompleteReason === "budget" || result.incompleteReason === "ticket budget") {
       result.complete = false;
+    }
+    const totalsDisagree = result.ledgerDeltaMicros !== result.spendMicros || result.conversationMicros !== result.spendMicros;
+    if (totalsDisagree) {
+      result.unresolvedSpend = true;
+      result.complete = false;
+      result.incompleteReason = result.incompleteReason ?? "spend mismatch";
     }
     return { result, binding, stores: created, firstRequestBody, masterCatalog: created.masterCatalog };
   } catch (error) {
@@ -157,6 +175,7 @@ async function runCase(
   budget: Budget,
   aborted: () => { reason: string } | null,
   onRequest: (body: Record<string, unknown> | null) => void,
+  stripWatches: StripWatch[],
 ): Promise<CaseOutcome> {
   const maxAttempts = options.maxAttempts ?? 3;
   let attempts = 0;
@@ -166,39 +185,48 @@ async function runCase(
   let outputTokens = 0;
   let unresolved = false;
   let last: CaseResult | null = null;
+  const provenance: CaseResult["requestProvenance"] = [];
   while (attempts < maxAttempts) {
     if (aborted()) break;
     if (attempts > 0) {
       const again = await budget.admitRetry();
-      if (!again) return finish(last, evalCase, attempts, cost, "budget", true, inputTokens, outputTokens, unresolved || true);
+      if (!again) return finish(last ? remember(last, provenance) : null, evalCase, attempts, cost, "budget", true, inputTokens, outputTokens, unresolved);
     }
     attempts += 1;
     const attemptKey = `${evalCase.id}:${attempts}`;
-    const outcome = await attemptStore.run(attemptKey, () => oneAttempt(evalCase, index, attempts, stores, binding, options, onRequest));
+    const outcome = await attemptStore.run(attemptKey, () => oneAttempt(evalCase, index, attempts, stores, binding, options, onRequest, stripWatches));
     cost += outcome.costMicros;
     inputTokens += outcome.inputTokens;
     outputTokens += outcome.outputTokens;
+    await budget.settleAttempt(outcome.costMicros);
     if (outcome.sticky) sticky = true;
-    unresolved = outcome.unresolved;
+    unresolved = unresolved || outcome.unresolved;
+    provenance.push(...outcome.caseResult.requestProvenance);
     if (outcome.abort) {
-      return finish(outcome.caseResult, evalCase, attempts, cost, outcome.abort, sticky, inputTokens, outputTokens, unresolved);
+      return finish(remember(outcome.caseResult, provenance), evalCase, attempts, cost, outcome.abort, sticky, inputTokens, outputTokens, unresolved);
     }
     if (!outcome.retry) {
-      last = outcome.caseResult;
-      last.attempts = attempts;
-      last.stickyIntegrity = sticky || last.stickyIntegrity;
-      if (last.stickyIntegrity) {
-        last.pass = false;
-        last.reason = last.reason === "ok" ? "earlier integrity failure" : last.reason;
+      const saved = remember(outcome.caseResult, provenance);
+      saved.attempts = attempts;
+      saved.stickyIntegrity = sticky || saved.stickyIntegrity;
+      if (saved.stickyIntegrity) {
+        saved.pass = false;
+        saved.reason = saved.reason === "ok" ? "earlier integrity failure" : saved.reason;
       }
-      last.costMicros = cost.toString();
-      return { caseResult: last, costMicros: cost, abort: null, unresolved, inputTokens, outputTokens };
+      saved.costMicros = cost.toString();
+      return { caseResult: saved, costMicros: cost, abort: null, unresolved, inputTokens, outputTokens };
     }
-    last = outcome.caseResult;
+    last = remember(outcome.caseResult, provenance);
     const delay = options.retryDelayMs ?? defaultRetryDelay;
     await sleep(delay(attempts, outcome.retryAfterSeconds));
   }
-  return finish(last, evalCase, attempts, cost, null, sticky, inputTokens, outputTokens, unresolved);
+  return finish(last ? remember(last, provenance) : null, evalCase, attempts, cost, null, sticky, inputTokens, outputTokens, unresolved);
+}
+
+function remember(result: CaseResult, provenance: CaseResult["requestProvenance"]): CaseResult {
+  result.requestProvenance = provenance;
+  result.anthropicRequestIds = provenance.map((step) => step.requestId);
+  return result;
 }
 
 function finish(
@@ -229,6 +257,7 @@ async function oneAttempt(
   binding: CatalogBinding,
   options: RunEvalOptions,
   onRequest: (body: Record<string, unknown> | null) => void,
+  stripWatches: StripWatch[],
 ): Promise<{
   caseResult: CaseResult;
   costMicros: bigint;
@@ -241,6 +270,7 @@ async function oneAttempt(
   outputTokens: number;
 }> {
   const exchanges: RecordedExchange[] = [];
+  try {
   const inner = await options.fetchForAttempt({ caseId: evalCase.id, attempt, binding, stores });
   const fetchImpl = recordingFetch(inner, exchanges);
   const handler = createChatHandler({
@@ -304,7 +334,11 @@ async function oneAttempt(
       retry = true;
       break;
     }
-    const strips = await waitStrips(stores.storeAId, settled.conversationId, options.stripTimeoutMs ?? 10_000, turn === evalCase.turns.length - 1 ? options.whileWaitingForStrips : undefined);
+    const expectStrip = amountsMissingFromSaved(turnExchanges, settled.messages);
+    const strips = await waitStrips(stores.storeAId, settled.conversationId, options.stripTimeoutMs ?? 10_000, turn === evalCase.turns.length - 1 ? options.whileWaitingForStrips : undefined, expectStrip);
+    if (strips && (expectStrip || strips.length > 0)) {
+      stripWatches.push({ storeId: stores.storeAId, conversationId: settled.conversationId, caseId: evalCase.id });
+    }
     if (!strips) {
       retry = true;
       break;
@@ -357,6 +391,22 @@ async function oneAttempt(
     inputTokens: money.inputTokens,
     outputTokens: money.outputTokens,
   };
+  } catch (error) {
+    const money = spendOf(exchanges);
+    const blank = blankCase(evalCase);
+    blank.reason = error instanceof Error ? error.message : "attempt failed";
+    return {
+      caseResult: blank,
+      costMicros: money.micros,
+      abort: null,
+      retry: true,
+      retryAfterSeconds: null,
+      unresolved: true,
+      sticky: false,
+      inputTokens: money.inputTokens,
+      outputTokens: money.outputTokens,
+    };
+  }
 }
 
 async function scoreAttempt(args: {
@@ -381,15 +431,20 @@ async function scoreAttempt(args: {
   });
   const cart: CartSnapshotLine[] = lines.map((line) => {
     const bound = args.binding.byVariantId.get(line.variantId);
+    const substitute = line.substituteVariantId ? args.binding.byVariantId.get(line.substituteVariantId) : undefined;
     return {
       key: bound?.listingKey ?? line.variantId,
       variantKey: bound?.key ?? line.variantId,
       qty: line.qty,
       swapRule: line.swapRule,
+      substituteVariantKey: substitute?.key ?? null,
     };
   });
+  const quantityChecks = args.evalCase.qty?.length ?? 0;
+  const quantityHits = (args.evalCase.qty ?? []).filter((rule) => cart.some((line) => line.key === rule.listingKey && line.variantKey === rule.variantKey && line.qty >= rule.min && line.qty <= rule.max)).length;
   const tools = toolsFromMessages(args.messages);
   mergeStreamTools(tools, args.exchanges);
+  const toolInputErrors = tools.filter((tool) => failedToolInput(tool.output)).length;
   const savedTexts = textsFromMessages(args.messages);
   const observedTexts = textsFromExchanges(args.exchanges, tools);
   const replies = [...savedTexts.map((block) => block.text), ...args.messages.flatMap(assistantText)];
@@ -427,6 +482,10 @@ async function scoreAttempt(args: {
     finalCart: cart,
     steps: args.steps,
     stepLimitHit: args.messages.some((message) => JSON.stringify(message).includes("I've done as much as I can in one go")),
+    toolInputErrors,
+    quantityChecks,
+    quantityHits,
+    gapRequired: args.evalCase.gaps.length > 0,
     costMicros: "0",
     anthropicRequestIds: [],
     requestProvenance: args.provenance,
@@ -576,7 +635,7 @@ function spendOf(exchanges: RecordedExchange[]): { micros: bigint; unresolved: b
   let inputTokens = 0;
   let outputTokens = 0;
   for (const exchange of exchanges) {
-    if (exchange.status >= 200 && exchange.status < 300 && exchange.unresolvedUsage) unresolved = true;
+    if (exchange.unresolvedUsage && (exchange.status === 0 || (exchange.status >= 200 && exchange.status < 300))) unresolved = true;
     if (!exchange.usage) continue;
     inputTokens += exchange.usage.inputTokens?.total ?? 0;
     outputTokens += exchange.usage.outputTokens?.total ?? 0;
@@ -606,7 +665,7 @@ async function waitSettled(storeId: string, cartId: string, messageId: string, t
   return null;
 }
 
-async function waitStrips(storeId: string, conversationId: string, timeoutMs: number, onStart?: () => void): Promise<string[] | null> {
+async function waitStrips(storeId: string, conversationId: string, timeoutMs: number, onStart?: () => void, expectStrip = false): Promise<string[] | null> {
   onStart?.();
   let last = -1;
   let stableSince = Date.now();
@@ -618,7 +677,7 @@ async function waitStrips(storeId: string, conversationId: string, timeoutMs: nu
     if (count !== last) {
       last = count;
       stableSince = Date.now();
-    } else if (Date.now() - stableSince >= 2_000) {
+    } else if (Date.now() - stableSince >= 2_000 && !(expectStrip && count === 0)) {
       const rows = await storeScoped(storeId).aiAction.findMany({
         where: { storeId, conversationId, tool: "grounding_strip" },
       });
@@ -686,6 +745,10 @@ function blankCase(evalCase: EvalCase): CaseResult {
     finalCart: [],
     steps: 0,
     stepLimitHit: false,
+    toolInputErrors: 0,
+    quantityChecks: evalCase.qty?.length ?? 0,
+    quantityHits: 0,
+    gapRequired: evalCase.gaps.length > 0,
     costMicros: "0",
     anthropicRequestIds: [],
     requestProvenance: [],
@@ -748,7 +811,8 @@ function attemptLogs(id: string): string[] {
 interface Budget {
   admit: () => Promise<boolean>;
   admitRetry: () => Promise<boolean>;
-  settle: (actual: bigint) => Promise<void>;
+  settleAttempt: (actual: bigint) => Promise<void>;
+  release: () => Promise<void>;
   ticketBlocked: boolean;
 }
 
@@ -757,8 +821,8 @@ function createBudget(options: RunEvalOptions): Budget {
   let inflight = BigInt(0);
   let chain = Promise.resolve();
   let ticketBlocked = false;
-  const blocked = () => spent + inflight >= options.maxMicros || options.priorTicketMicros + spent + inflight >= options.ticketCapMicros;
-  const run = <T>(fn: () => T): Promise<T> => {
+  const ticketUsed = () => options.priorTicketMicros + spent + inflight;
+  const run = <T>(fn: () => T | Promise<T>): Promise<T> => {
     const next = chain.then(fn, fn);
     chain = next.then(() => undefined, () => undefined);
     return next;
@@ -768,26 +832,74 @@ function createBudget(options: RunEvalOptions): Budget {
       return ticketBlocked;
     },
     admit: () => run(() => {
-      if (blocked()) {
-        ticketBlocked = options.priorTicketMicros + spent + inflight >= options.ticketCapMicros;
+      const overTicket = ticketUsed() + RESERVE_MICROS > options.ticketCapMicros;
+      const overRun = spent + inflight + RESERVE_MICROS > options.maxMicros;
+      if (overTicket || overRun) {
+        ticketBlocked = overTicket;
+        return false;
+      }
+      if (options.ticketSpendPath && !tryReserveTicket(RESERVE_MICROS, options.ticketCapMicros, options.ticketSpendPath)) {
+        ticketBlocked = true;
         return false;
       }
       inflight += RESERVE_MICROS;
       return true;
     }),
     admitRetry: () => run(() => {
-      if (spent + inflight >= options.maxMicros || options.priorTicketMicros + spent >= options.ticketCapMicros) {
-        ticketBlocked = options.priorTicketMicros + spent >= options.ticketCapMicros;
+      const overTicket = ticketUsed() > options.ticketCapMicros || (options.ticketSpendPath ? readTicketSpend(options.ticketSpendPath) > options.ticketCapMicros : false);
+      const overRun = spent + inflight > options.maxMicros;
+      if (overTicket || overRun) {
+        ticketBlocked = overTicket;
         return false;
       }
       return true;
     }),
-    settle: (actual) => run(() => {
-      inflight -= RESERVE_MICROS;
-      if (inflight < BigInt(0)) inflight = BigInt(0);
-      spent += actual < BigInt(0) ? BigInt(0) : actual;
+    settleAttempt: (actual) => run(() => {
+      const safe = actual < BigInt(0) ? BigInt(0) : actual;
+      spent += safe;
+      if (options.ticketSpendPath) adjustTicketSpend(safe, options.ticketSpendPath);
+    }),
+    release: () => run(() => {
+      if (inflight >= RESERVE_MICROS) inflight -= RESERVE_MICROS;
+      else inflight = BigInt(0);
+      if (options.ticketSpendPath) adjustTicketSpend(-RESERVE_MICROS, options.ticketSpendPath);
     }),
   };
+}
+
+interface StripWatch {
+  storeId: string;
+  conversationId: string;
+  caseId: string;
+}
+
+function amountsMissingFromSaved(exchanges: RecordedExchange[], messages: Array<Record<string, unknown>>): boolean {
+  const saved = messages.filter((message) => message.role === "assistant").flatMap(assistantText).join("\n");
+  const raw = exchanges.map((exchange) => exchange.text).join("\n");
+  return usdMentions(raw).some((mention) => !saved.includes(mention.trim()));
+}
+
+function failedToolInput(output: unknown): boolean {
+  if (!output || typeof output !== "object") return false;
+  const record = output as { ok?: unknown; error?: unknown };
+  return record.ok === false || (record.error != null && record.error !== false);
+}
+
+async function drainStrips(watches: StripWatch[], result: RunResult, timeoutMs: number): Promise<boolean> {
+  let lost = false;
+  for (const watch of watches) {
+    const later = await waitStrips(watch.storeId, watch.conversationId, timeoutMs);
+    const item = result.cases.find((entry) => entry.id === watch.caseId);
+    if (!later) {
+      lost = true;
+      continue;
+    }
+    if (!item) continue;
+    for (const amount of later) {
+      if (!item.strippedAmounts.includes(amount)) item.strippedAmounts.push(amount);
+    }
+  }
+  return lost;
 }
 
 function sleep(ms: number): Promise<void> {

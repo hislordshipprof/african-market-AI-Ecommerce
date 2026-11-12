@@ -22,15 +22,10 @@ export interface RecordedExchange {
 export function recordingFetch(inner: typeof fetch, sink: RecordedExchange[]): typeof fetch {
   return async (input, init) => {
     const requestBody = await readRequestBody(input, init);
-    const response = await inner(input, init);
-    const status = response.status;
-    const requestId = response.headers.get("request-id");
-    const retryAfter = response.headers.get("retry-after");
-    const contentType = response.headers.get("content-type") ?? "";
     const exchange: RecordedExchange = {
-      status,
-      requestId,
-      retryAfter,
+      status: 0,
+      requestId: null,
+      retryAfter: null,
       errorType: null,
       sseError: false,
       usage: null,
@@ -40,6 +35,22 @@ export function recordingFetch(inner: typeof fetch, sink: RecordedExchange[]): t
       requestBody,
       done: Promise.resolve(),
     };
+    sink.push(exchange);
+    let response: Response;
+    try {
+      response = await inner(input, init);
+    } catch (error) {
+      exchange.errorType = "transport";
+      exchange.unresolvedUsage = true;
+      throw error;
+    }
+    const status = response.status;
+    const requestId = response.headers.get("request-id");
+    const retryAfter = response.headers.get("retry-after");
+    const contentType = response.headers.get("content-type") ?? "";
+    exchange.status = status;
+    exchange.requestId = requestId;
+    exchange.retryAfter = retryAfter;
     if (!response.ok || !response.body) {
       const text = await response.clone().text().catch(() => "");
       const parsed = parseJson(text);
@@ -47,7 +58,6 @@ export function recordingFetch(inner: typeof fetch, sink: RecordedExchange[]): t
       exchange.usage = usageFromJson(parsed);
       exchange.unresolvedUsage = response.ok && exchange.usage == null;
       exchange.done = Promise.resolve();
-      sink.push(exchange);
       return response;
     }
     if (!contentType.includes("text/event-stream")) {
@@ -56,7 +66,6 @@ export function recordingFetch(inner: typeof fetch, sink: RecordedExchange[]): t
       exchange.usage = usageFromJson(parsed);
       exchange.unresolvedUsage = response.ok && exchange.usage == null;
       exchange.text = typeof parsed === "object" && parsed && "content" in (parsed as object) ? "" : text;
-      sink.push(exchange);
       return response;
     }
     const [watch, pass] = response.body.tee();
@@ -67,8 +76,10 @@ export function recordingFetch(inner: typeof fetch, sink: RecordedExchange[]): t
       exchange.text = parsed.text;
       exchange.toolUses = parsed.toolUses;
       if (parsed.sseError) exchange.errorType = "sse_error";
+    }).catch(() => {
+      exchange.unresolvedUsage = true;
+      exchange.errorType = exchange.errorType ?? "transport";
     });
-    sink.push(exchange);
     return new Response(pass, { status: response.status, headers: response.headers });
   };
 }
@@ -94,6 +105,20 @@ function errorTypeOf(value: unknown): string | null {
   return typeof error?.type === "string" ? error.type : null;
 }
 
+/** Anthropic's input_tokens already excludes cache reads and writes. https://platform.claude.com/docs/en/build-with-claude/prompt-caching */
+export function anthropicUsage(input: number, cacheRead: number, cacheWrite: number, output: number): TokenUsage | null {
+  if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) return null;
+  return {
+    inputTokens: {
+      noCache: input,
+      cacheRead,
+      cacheWrite,
+      total: input + cacheRead + cacheWrite,
+    },
+    outputTokens: { total: output },
+  };
+}
+
 function usageFromJson(value: unknown): TokenUsage | null {
   if (!value || typeof value !== "object") return null;
   const usage = (value as { usage?: Record<string, unknown> }).usage;
@@ -102,16 +127,7 @@ function usageFromJson(value: unknown): TokenUsage | null {
   const cacheWrite = numberOrZero(usage.cache_creation_input_tokens);
   const cacheRead = numberOrZero(usage.cache_read_input_tokens);
   const output = numberOrZero(usage.output_tokens);
-  if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) return null;
-  return {
-    inputTokens: {
-      total: input,
-      noCache: Math.max(0, input - cacheRead - cacheWrite),
-      cacheRead,
-      cacheWrite,
-    },
-    outputTokens: { total: output },
-  };
+  return anthropicUsage(input, cacheRead, cacheWrite, output);
 }
 
 function numberOrZero(value: unknown): number {
@@ -138,6 +154,7 @@ async function readSse(stream: ReadableStream<Uint8Array>): Promise<{
   let text = "";
   const toolUses: RecordedToolUse[] = [];
   let current = -1;
+  try {
   while (true) {
     const next = await reader.read();
     if (next.done) break;
@@ -183,20 +200,13 @@ async function readSse(stream: ReadableStream<Uint8Array>): Promise<{
       }
     }
   }
+  } catch {
+    sseError = true;
+  }
   for (const tool of toolUses) {
     if (typeof tool.input === "string") tool.input = parseJson(tool.input) ?? { raw: tool.input };
   }
-  const usage = sawStart
-    ? {
-        inputTokens: {
-          total: inputTokens,
-          noCache: Math.max(0, inputTokens - cacheRead - cacheWrite),
-          cacheRead,
-          cacheWrite,
-        },
-        outputTokens: { total: outputTokens },
-      }
-    : null;
+  const usage = sawStart ? anthropicUsage(inputTokens, cacheRead, cacheWrite, outputTokens) : null;
   return {
     usage,
     unresolvedUsage: !sawDelta,

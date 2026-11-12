@@ -1,11 +1,11 @@
 import { execSync } from "node:child_process";
 import { ASSISTANT_STEP_CAP } from "../chat-handler";
 import { assistantModelId } from "../model";
-import { loadDataset, loadFixture, validateDataset, validateFixture } from "./dataset";
+import { TICKET_SPEND_PATH, loadDataset, loadFixture, validateDataset, validateFixture } from "./dataset";
 import { fingerprintFromRequest } from "./fingerprint";
 import { assessReport } from "./gate";
 import { liveBudgetMicros, liveConcurrency } from "./preflight";
-import { addTicketSpend, buildReport, publishEvalReport, readTicketSpend, summarize, verdictFor } from "./report";
+import { buildReport, publishEvalReport, readTicketSpend, summarize, verdictFor } from "./report";
 import { runEval } from "./runner";
 
 const TICKET_CAP_MICROS = BigInt(4000000);
@@ -51,9 +51,10 @@ export async function runLiveEval(): Promise<void> {
     ticketCapMicros: TICKET_CAP_MICROS,
     full,
     fetchForAttempt: () => globalThis.fetch,
+    ticketSpendPath: TICKET_SPEND_PATH,
   });
   const finishedAt = new Date().toISOString();
-  const ticketTotal = addTicketSpend(run.result.spendMicros);
+  const ticketTotal = readTicketSpend();
   const fingerprint = run.firstRequestBody
     ? fingerprintFromRequest(run.firstRequestBody, {
       dataset,

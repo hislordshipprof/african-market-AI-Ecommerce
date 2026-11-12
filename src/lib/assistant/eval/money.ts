@@ -3,7 +3,8 @@ const USD_FORMS: Array<{ re: RegExp; kind: "dollar" | "cent" }> = [
   { re: /\bUSD\s*(\d{1,7})(?:\.(\d{1,2}))?/gi, kind: "dollar" },
   { re: /\b(\d{1,7})(?:\.(\d{1,2}))?\s*USD\b/gi, kind: "dollar" },
   { re: /\b(\d{1,7})(?:\.(\d{1,2}))?\s+dollars?\b/gi, kind: "dollar" },
-  { re: /\b(\d{1,7})\s*(?:¢|cents?)\b/gi, kind: "cent" },
+  { re: /\b(\d{1,7})\s*cents?\b/gi, kind: "cent" },
+  { re: /\b(\d{1,7})\s*¢(?!\w)/gi, kind: "cent" },
 ];
 
 const FOREIGN = /(?:€|£|₦|₵|₹|¥|₩|₽|₺|₱|₫)\s*\d|\b(?:NGN|GHS|EUR|GBP|XOF|CFA|CAD|AUD)\s*\d|\b\d[\d.,]*\s*(?:naira|cedis?|euros?|pounds?)\b/i;
@@ -18,6 +19,12 @@ export function centsFromParts(whole: string, frac: string): number | null {
   return Number.isSafeInteger(total) ? total : null;
 }
 
+function centAmount(raw: string): number | null {
+  if (!/^\d+$/.test(raw)) return null;
+  const cents = Number(raw);
+  return Number.isSafeInteger(cents) ? cents : null;
+}
+
 /** Integer cents from USD text. Never uses floating multiplication of a parsed decimal. */
 export function usdAmountsInText(text: string): number[] {
   const found: number[] = [];
@@ -26,10 +33,21 @@ export function usdAmountsInText(text: string): number[] {
     let match: RegExpExecArray | null;
     while ((match = form.re.exec(text))) {
       const cents = form.kind === "cent"
-        ? centsFromParts(match[1] ?? "", "")
+        ? centAmount(match[1] ?? "")
         : centsFromParts(match[1] ?? "", match[2] ?? "");
       if (cents != null) found.push(cents);
     }
+  }
+  return found;
+}
+
+/** Surface text of each USD mention, in read order, for comparing a raw reply with the saved one. */
+export function usdMentions(text: string): string[] {
+  const found: string[] = [];
+  for (const form of USD_FORMS) {
+    form.re.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = form.re.exec(text))) found.push(match[0]);
   }
   return found;
 }

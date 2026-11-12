@@ -109,6 +109,7 @@ export interface CartSnapshotLine {
   variantKey: string;
   qty: number;
   swapRule: string;
+  substituteVariantKey: string | null;
 }
 
 export interface CaseResult {
@@ -133,6 +134,10 @@ export interface CaseResult {
   finalCart: CartSnapshotLine[];
   steps: number;
   stepLimitHit: boolean;
+  toolInputErrors: number;
+  quantityChecks: number;
+  quantityHits: number;
+  gapRequired: boolean;
   costMicros: string;
   anthropicRequestIds: string[];
   requestProvenance: Array<{ attempt: number; turn: number; step: number; requestId: string }>;

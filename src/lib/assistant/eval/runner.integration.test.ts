@@ -5,10 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { platformAdmin, platformSessionUser, storeScoped } from "../../db";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-api-double";
 import { createEvalStores, deleteOwnedStores, sweepAbandonedEvalStores, writeLease, type CreatedEvalStores } from "./fixture-store";
+import { loadDataset, loadFixture, validateDataset, validateFixture } from "./dataset";
 import { publishEvalReport, buildReport } from "./report";
 import { fingerprintFromParts } from "./fingerprint";
 import { runEval, type AttemptContext } from "./runner";
-import { scoreCase, type CatalogBinding } from "./score";
+import { bindingFromFixture, scoreCase, type CatalogBinding } from "./score";
 import type { CatalogFixture, EvalCase, FixtureListing } from "./types";
 
 vi.mock("next/cache", () => ({
@@ -323,6 +324,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
         ],
       }),
       listing("low", "egusi-seeds-whole", "A", 700, { confidence: 0.4 }),
+      listing("garri", "garri-white", "A", 600),
       listing("yam", "yam-white-puna", "B", 800),
     ];
     const result = await run([
@@ -365,6 +367,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       const five = current.binding.byVariantKey.get("rice-5")?.id ?? "";
       const ten = current.binding.byVariantKey.get("rice-10")?.id ?? "";
       const low = current.binding.byVariantKey.get("low-pack")?.id ?? "";
+      const garri = current.binding.byVariantKey.get("garri-pack")?.id ?? "";
       if (current.caseId === "wrong-pack") {
         return [{ kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: ten, qty: 1 }] } }, { kind: "text", text: "Added the 10 lb." }];
       }
@@ -374,13 +377,35 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       if (current.caseId === "too-soon") {
         return [{ kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: five, qty: 1 }] } }, { kind: "text", text: "I went ahead and added it." }, { kind: "text", text: "Already in the cart." }];
       }
-      return [{ kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: low, qty: 1 }] } }, { kind: "text", text: "Added with a backup." }];
+      return [{ kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: low, qty: 1, backup_variant_id: garri }] } }, { kind: "text", text: "Added egusi with garri as the named backup." }];
     }), { maxAttempts: 1 });
     const byId = new Map(result.result.cases.map((item) => [item.id, item]));
     expect(byId.get("wrong-pack")?.safetyFailures).toContain("wrong-pack");
     expect(byId.get("wrong-qty")?.safetyFailures).toContain("wrong-quantity");
     expect(byId.get("too-soon")?.safetyFailures).toContain("premature-write");
+    expect(byId.get("wrong-backup")?.pass).toBe(false);
     expect(byId.get("wrong-backup")?.safetyFailures).toContain("wrong-substitute");
+    expect(byId.get("wrong-backup")?.finalCart[0]?.substituteVariantKey).toBe("garri-pack");
+    const committed = validateFixture(loadFixture());
+    const ids = new Map(committed.listings.map((item) => [item.key, {
+      listingId: `listing-${item.key}`,
+      variants: new Map(item.variants.map((variant) => [variant.key, `variant-${variant.key}`])),
+    }]));
+    const addOne = validateDataset(loadDataset(), committed, { full: true }).find((item) => item.id === "add-one-1");
+    const tenPound = scoreCase({
+      evalCase: addOne!,
+      cart: [{ key: "rice-parboiled-long-grain", variantKey: "rice-parboiled-long-grain-10lb", qty: 1, swapRule: "exact_only", substituteVariantKey: null }],
+      tools: [],
+      savedTexts: [],
+      observedTexts: [],
+      strippedAmounts: [],
+      successfulWriteTurns: [],
+      returnedLineIds: [],
+      cartLineIds: [],
+      stepLimitHit: false,
+    }, bindingFromFixture(committed, ids), []);
+    expect(tenPound.pass).toBe(false);
+    expect(tenPound.safetyFailures).toContain("wrong-pack");
   }, 120_000);
 
   it("old totals and future results cannot ground a reply", async () => {
@@ -568,7 +593,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       whileWaitingForStrips: () => {
         setTimeout(() => {
           void insertLateStrip();
-        }, 1_100);
+        }, 3_000);
       },
       cleanup: async (stores) => {
         held = stores;
@@ -608,10 +633,120 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(await platformAdmin.store.findUnique({ where: { id: live.storeAId } })).toBeTruthy();
     expect(await platformAdmin.store.findUnique({ where: { id: abandoned.storeAId } })).toBeNull();
     expect(await platformAdmin.store.findUnique({ where: { id: young.id } })).toBeTruthy();
-    expect(await platformAdmin.store.findUnique({ where: { id: aged.id } })).toBeNull();
+    expect(await platformAdmin.store.findUnique({ where: { id: aged.id } })).toBeTruthy();
     await platformAdmin.store.delete({ where: { id: young.id } }).catch(() => {});
+    await platformAdmin.store.delete({ where: { id: aged.id } }).catch(() => {});
     await deleteOwnedStores(live);
     leftover.splice(0, leftover.length);
+  }, 90_000);
+
+  it("does not admit a case when the reserve would pass the ticket cap", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    const result = await run([evalCase({
+      id: "over-cap",
+      category: "single-item",
+      turns: ["Add garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    })], listings, () => scripted({} as AttemptContext, [{ kind: "text", text: "Added." }]), {
+      priorTicketMicros: BigInt(3999999),
+      ticketCapMicros: BigInt(4000000),
+      maxAttempts: 1,
+    });
+    expect(result.result.cases).toHaveLength(0);
+    expect(result.result.spendMicros).toBe(BigInt(0));
+    expect(result.result.complete).toBe(false);
+    expect(result.result.incompleteReason).toBe("ticket budget");
+  }, 60_000);
+
+  it("a later success keeps unresolved spend and provenance from the truncated attempt", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    let calls = 0;
+    const result = await run([evalCase({
+      id: "retry-truncated",
+      category: "single-item",
+      turns: ["Add garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    })], listings, (ctx) => {
+      calls += 1;
+      if (calls === 1) {
+        return async () => new Response(`data: ${JSON.stringify({
+          type: "message_start",
+          message: { usage: { input_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 3000 } },
+        })}\n\n`, { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_truncated_attempt" } });
+      }
+      const fake = createFakeAnthropicFetch({
+        expectedKey: KEY,
+        steps: [
+          { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: ctx.binding.byVariantKey.get("garri-pack")?.id ?? "", qty: 1 }] }, inputTokens: 20, outputTokens: 2 },
+          { kind: "text", text: "Added.", inputTokens: 20, outputTokens: 2 },
+        ],
+      });
+      return async (input, init) => {
+        const response = await fake.fetch(input, init);
+        const headers = new Headers(response.headers);
+        headers.set("request-id", `req_retry_${calls}`);
+        return new Response(response.body, { status: response.status, headers });
+      };
+    }, { maxAttempts: 2 });
+    const scored = result.result.cases[0];
+    expect(scored?.attempts).toBe(2);
+    expect(scored?.requestProvenance.some((step) => step.attempt === 1 && step.requestId === "req_truncated_attempt")).toBe(true);
+    expect(scored?.requestProvenance.some((step) => step.attempt === 2)).toBe(true);
+    expect(result.result.unresolvedSpend).toBe(true);
+    expect(result.result.complete).toBe(false);
+    expect(result.result.spendMicros > BigInt(100)).toBe(true);
+  }, 90_000);
+
+  it("a thrown worker waits for the sibling attempt before deleting its store", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    let siblingFinished = false;
+    let cleanedAfterSibling = false;
+    const result = await run([
+      evalCase({
+        id: "boom",
+        category: "single-item",
+        turns: ["Add garri."],
+        mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+        mayHave: [],
+        gaps: [],
+      }),
+      evalCase({
+        id: "sibling",
+        category: "single-item",
+        turns: ["Add garri too."],
+        mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+        mayHave: [],
+        gaps: [],
+      }),
+    ], listings, (ctx) => {
+      if (ctx.caseId === "boom") return async () => { throw new Error("worker boom"); };
+      return async (input, init) => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        siblingFinished = true;
+        const fake = createFakeAnthropicFetch({
+          expectedKey: KEY,
+          steps: [
+            { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: ctx.binding.byVariantKey.get("garri-pack")?.id ?? "", qty: 1 }] } },
+            { kind: "text", text: "Added." },
+          ],
+        });
+        return fake.fetch(input, init);
+      };
+    }, {
+      concurrency: 2,
+      maxAttempts: 1,
+      cleanup: async (stores) => {
+        cleanedAfterSibling = siblingFinished;
+        await deleteOwnedStores(stores);
+      },
+    });
+    expect(cleanedAfterSibling).toBe(true);
+    expect(result.result.unresolvedSpend).toBe(true);
+    expect(result.result.complete).toBe(false);
   }, 90_000);
 });
 

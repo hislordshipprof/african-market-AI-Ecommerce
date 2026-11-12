@@ -1,10 +1,10 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { canonicalJson } from "./canonical";
 import { formatUsdFromMicros } from "./money";
 import { PARTIAL_REPORT_PATH, REPORT_PATH, TICKET_SPEND_PATH } from "./dataset";
 import type { Fingerprint } from "./fingerprint";
-import type { CaseResult, RunResult } from "./types";
+import type { CaseResult, EvalCategory, RunResult } from "./types";
 
 export interface EvalReport {
   schemaVersion: 1;
@@ -31,6 +31,17 @@ export interface EvalReport {
   cases: CaseResult[];
 }
 
+export interface CategoryBreakdown {
+  cases: number;
+  passed: number;
+  passRate: number;
+  gapReportingRate: number;
+  quantityAccuracy: number;
+  steps: number;
+  stepLimitHits: number;
+  toolInputErrors: number;
+}
+
 export interface ReportSummary {
   microPrecision: number;
   microRecall: number;
@@ -43,6 +54,51 @@ export interface ReportSummary {
   strippedAmounts: number;
   temporalViolations: number;
   safetyFailures: number;
+  passRate: number;
+  gapReportingRate: number;
+  quantityAccuracy: number;
+  steps: number;
+  stepLimitHits: number;
+  toolInputErrors: number;
+  byCategory: Partial<Record<EvalCategory, CategoryBreakdown>>;
+}
+
+function rate(numerator: number, denominator: number): number {
+  if (denominator === 0) return 1;
+  return numerator / denominator;
+}
+
+function breakdown(items: CaseResult[]): CategoryBreakdown {
+  let passed = 0;
+  let gapCases = 0;
+  let gapsReported = 0;
+  let quantityChecks = 0;
+  let quantityHits = 0;
+  let steps = 0;
+  let stepLimitHits = 0;
+  let toolInputErrors = 0;
+  for (const item of items) {
+    if (item.pass) passed += 1;
+    if (item.gapRequired) {
+      gapCases += 1;
+      if (item.gapsReported) gapsReported += 1;
+    }
+    quantityChecks += item.quantityChecks;
+    quantityHits += item.quantityHits;
+    steps += item.steps;
+    if (item.stepLimitHit) stepLimitHits += 1;
+    toolInputErrors += item.toolInputErrors;
+  }
+  return {
+    cases: items.length,
+    passed,
+    passRate: rate(passed, items.length),
+    gapReportingRate: rate(gapsReported, gapCases),
+    quantityAccuracy: rate(quantityHits, quantityChecks),
+    steps,
+    stepLimitHits,
+    toolInputErrors,
+  };
 }
 
 export function summarize(cases: CaseResult[]): ReportSummary {
@@ -55,6 +111,7 @@ export function summarize(cases: CaseResult[]): ReportSummary {
   let strippedAmounts = 0;
   let temporalViolations = 0;
   let safetyFailures = 0;
+  const grouped = new Map<EvalCategory, CaseResult[]>();
   for (const item of cases) {
     precisionNumerator += item.precisionNumerator;
     precisionDenominator += item.precisionDenominator;
@@ -65,7 +122,13 @@ export function summarize(cases: CaseResult[]): ReportSummary {
     strippedAmounts += item.strippedAmounts.length;
     temporalViolations += item.temporalViolations.length;
     safetyFailures += item.safetyFailures.length;
+    const list = grouped.get(item.category) ?? [];
+    list.push(item);
+    grouped.set(item.category, list);
   }
+  const overall = breakdown(cases);
+  const byCategory: ReportSummary["byCategory"] = {};
+  for (const [category, items] of grouped) byCategory[category] = breakdown(items);
   return {
     microPrecision: precisionDenominator === 0 ? 1 : precisionNumerator / precisionDenominator,
     microRecall: recallDenominator === 0 ? 1 : recallNumerator / recallDenominator,
@@ -78,6 +141,13 @@ export function summarize(cases: CaseResult[]): ReportSummary {
     strippedAmounts,
     temporalViolations,
     safetyFailures,
+    passRate: overall.passRate,
+    gapReportingRate: overall.gapReportingRate,
+    quantityAccuracy: overall.quantityAccuracy,
+    steps: overall.steps,
+    stepLimitHits: overall.stepLimitHits,
+    toolInputErrors: overall.toolInputErrors,
+    byCategory,
   };
 }
 
@@ -153,7 +223,7 @@ export function publishEvalReport(
   return { committed: true, path: committedPath };
 }
 
-export function readTicketSpend(path = TICKET_SPEND_PATH): bigint {
+function readTicketSpendUnlocked(path: string): bigint {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as { micros?: unknown };
     if (typeof parsed.micros === "string" && /^\d+$/.test(parsed.micros)) return BigInt(parsed.micros);
@@ -163,8 +233,61 @@ export function readTicketSpend(path = TICKET_SPEND_PATH): bigint {
   return BigInt(0);
 }
 
+function withTicketLock<T>(path: string, fn: () => T): T {
+  const lock = `${path}.lock`;
+  mkdirSync(dirname(path), { recursive: true });
+  const started = Date.now();
+  let fd: number | null = null;
+  while (fd == null) {
+    try {
+      fd = openSync(lock, "wx");
+    } catch {
+      if (Date.now() - started > 5_000) throw new Error("The eval ticket spend file is locked.");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    try {
+      unlinkSync(lock);
+    } catch {
+      // The next waiter only needs the file to be gone.
+    }
+  }
+}
+
+export function readTicketSpend(path = TICKET_SPEND_PATH): bigint {
+  return withTicketLock(path, () => readTicketSpendUnlocked(path));
+}
+
 export function addTicketSpend(spent: bigint, path = TICKET_SPEND_PATH): bigint {
-  const next = readTicketSpend(path) + (spent < BigInt(0) ? BigInt(0) : spent);
-  writeJsonAtomic(path, { schemaVersion: 1, micros: next.toString(), usd: formatUsdFromMicros(next) });
-  return next;
+  const delta = spent < BigInt(0) ? BigInt(0) : spent;
+  return withTicketLock(path, () => {
+    const next = readTicketSpendUnlocked(path) + delta;
+    writeJsonAtomic(path, { schemaVersion: 1, micros: next.toString(), usd: formatUsdFromMicros(next) });
+    return next;
+  });
+}
+
+/** Reserves headroom in the ticket file. False when the reserve would pass the cap. */
+export function tryReserveTicket(reserve: bigint, cap: bigint, path = TICKET_SPEND_PATH): boolean {
+  return withTicketLock(path, () => {
+    const current = readTicketSpendUnlocked(path);
+    if (current + reserve > cap) return false;
+    const next = current + reserve;
+    writeJsonAtomic(path, { schemaVersion: 1, micros: next.toString(), usd: formatUsdFromMicros(next) });
+    return true;
+  });
+}
+
+/** Moves the persisted ticket total by delta. A negative delta releases a reservation. */
+export function adjustTicketSpend(delta: bigint, path = TICKET_SPEND_PATH): bigint {
+  return withTicketLock(path, () => {
+    const next = readTicketSpendUnlocked(path) + delta;
+    if (next < BigInt(0)) throw new Error("The eval ticket spend would become negative.");
+    writeJsonAtomic(path, { schemaVersion: 1, micros: next.toString(), usd: formatUsdFromMicros(next) });
+    return next;
+  });
 }
