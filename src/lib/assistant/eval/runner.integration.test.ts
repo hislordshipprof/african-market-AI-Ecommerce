@@ -1,8 +1,10 @@
+import { randomInt } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { platformAdmin, platformSessionUser, storeScoped } from "../../db";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { appUserQuery, platformAdmin, platformSessionUser, storeScoped } from "../../db";
+import * as spend from "../spend";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-api-double";
 import { createEvalStores, deleteOwnedStores, sweepAbandonedEvalStores, writeLease, type CreatedEvalStores } from "./fixture-store";
 import { loadDataset, loadFixture, validateDataset, validateFixture } from "./dataset";
@@ -81,7 +83,26 @@ async function scripted(ctx: AttemptContext, script: FakeAnthropicStep[] | ((ctx
 describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
   const leftover: CreatedEvalStores[] = [];
 
+  // The runner diffs the whole ledger. Each test books spend to a day of its own and the
+  // ledger read sees only that day, so spend other test files record cannot skew the delta.
+  beforeEach(() => {
+    const ledgerDay = new Date(Date.UTC(2600, 0, 1) + randomInt(20_000) * 86_400_000);
+    spend.setSpendClock(() => ledgerDay);
+    const realState = spend.assistantSpendState;
+    vi.spyOn(spend, "assistantSpendState").mockImplementation(async (env) => {
+      const state = await realState(env);
+      const rows = await appUserQuery((tx) =>
+        tx.$queryRaw<Array<{ cost: bigint }>>`
+          SELECT COALESCE(SUM(cost_micros), 0) AS cost FROM assistant_spend_days WHERE day = CAST(${spend.utcDay(ledgerDay)} AS date)
+        `,
+      );
+      return { ...state, spentMicros: BigInt(rows[0]?.cost ?? 0) };
+    });
+  });
+
   afterEach(async () => {
+    spend.setSpendClock(null);
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     while (leftover.length > 0) {
       const stores = leftover.pop();
