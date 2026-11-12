@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { platformAdmin, storeScoped, storeScopedTransaction } from "../../db";
 import { listingAttributes } from "../../catalog/listing-attributes";
-import { listingVerdicts, readConstraints } from "../constraints";
+import { constraintStatuses, listingVerdicts, overallStatus, parseConstraints, readConstraints } from "../constraints";
 import { acceptanceForTurn, type ShownMessage } from "../shown";
 import { addToCart, offerChoices, searchCatalog, setShopperNeeds, setSwapRule, type AssistantContext } from "./execute";
 
@@ -144,8 +144,8 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     const byId = new Map(found.map((item) => [item.listingId, item]));
     expect(byId.has(listing.onion.listingId)).toBe(false);
     expect(byId.has(listing.peanut.listingId)).toBe(false);
-    expect(byId.get(listing.plain.listingId)).toMatchObject({ match: "name", needs: { peanuts: "ok", [`yellow onion ${suffix}`]: "ok" } });
-    expect(byId.get(listing.unknown.listingId)).toMatchObject({ match: "cannot_confirm", needs: { peanuts: "unknown" } });
+    expect(byId.get(listing.plain.listingId)).toMatchObject({ match: "name", needs: { "allergen:peanuts": "ok", [`ingredient:${onionId}`]: "ok" } });
+    expect(byId.get(listing.unknown.listingId)).toMatchObject({ match: "cannot_confirm", cannotConfirm: true, needs: { "allergen:peanuts": "unknown" } });
 
     const halal = await conversation(storeA);
     await setShopperNeeds(halal, { avoid_allergens: [], require_claims: ["halal"], avoid_ingredients: [] });
@@ -176,8 +176,8 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     const inA = items(await searchCatalog(a, { query: `mystery ${suffix}` }));
     const inB = items(await searchCatalog(b, { query: `mystery ${suffix}` }));
     expect(inA.map((item) => item.listingId)).not.toContain(listing.otherStore.listingId);
-    expect(inA.find((item) => item.listingId === listing.unknown.listingId)?.needs).toEqual({ peanuts: "unknown" });
-    expect(inB.map((item) => [item.listingId, item.needs?.peanuts])).toEqual([[listing.otherStore.listingId, "ok"]]);
+    expect(inA.find((item) => item.listingId === listing.unknown.listingId)?.needs).toEqual({ "allergen:peanuts": "unknown" });
+    expect(inB.map((item) => [item.listingId, item.needs?.["allergen:peanuts"]])).toEqual([[listing.otherStore.listingId, "ok"]]);
   });
 
   it("refuses an excluded item at the cart and the swap rule, with the reason", async () => {
@@ -217,7 +217,7 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     const confirmed = await addToCart(turn2, { items: [{ variant_id: listing.unknown.variantId, qty: 1 }] });
     expect(confirmed).toMatchObject({ ok: true, added: 1 });
     const saved = await readConstraints(storeA, ctx.conversationId);
-    expect(saved.confirmed).toEqual([expect.objectContaining({ listingId: listing.unknown.listingId, messageId: yes.id, needs: ["peanuts"] })]);
+    expect(saved.confirmed).toEqual([expect.objectContaining({ listingId: listing.unknown.listingId, messageId: yes.id, needs: ["allergen:peanuts"] })]);
 
     // A need added later was never confirmed for this item: it is asked about again.
     await setShopperNeeds(ctx, { avoid_allergens: ["sesame"], require_claims: ["halal"], avoid_ingredients: [] });
@@ -226,7 +226,7 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     await storeScoped(storeA).aiConversation.update({ where: { id: ctx.conversationId }, data: { messages: later as never } });
     const turn3 = { ...ctx, turnMessageId: more.id!, acceptance: acceptanceForTurn(later, more.id!, more.parts[0].text!) };
     const again = await addToCart(turn3, { items: [{ variant_id: listing.unknown.variantId, qty: 1 }] });
-    expect(again).toMatchObject({ ok: false, code: "cannot_confirm", needs: { peanuts: "unknown", sesame: "unknown", halal: "unknown" } });
+    expect(again).toMatchObject({ ok: false, code: "cannot_confirm", needs: { "allergen:peanuts": "unknown", "allergen:sesame": "unknown", "claim:halal": "unknown" } });
     expect(await storeScoped(storeA).cartLine.findFirst({ where: { cartId: ctx.cartId } })).toMatchObject({ qty: 1 });
   });
 
@@ -256,5 +256,19 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     // With no constraints, nothing changes.
     const free = await conversation(storeA);
     expect(await addToCart(free, { items: [{ variant_id: listing.shaky.variantId, qty: 1 }] })).toMatchObject({ ok: true, swapRule: "store_suggests" });
+  });
+});
+
+describe("constraint keys (#485)", () => {
+  it("never lets an ingredient named like an allergen overwrite the allergen's unknown", () => {
+    const attributes = {
+      allergens: { status: "unknown" as const, values: [] },
+      ingredients: { status: "known" as const, ingredientIds: ["ing-rice"] },
+      dietary: { status: "unknown" as const, values: [] },
+    };
+    const constraints = { ...parseConstraints(null), avoidAllergens: ["peanuts" as const], avoidIngredients: [{ term: "peanuts", ingredientId: "ing-peanuts" }] };
+    const needs = constraintStatuses(attributes, constraints);
+    expect(needs).toEqual({ "allergen:peanuts": "unknown", "ingredient:ing-peanuts": "ok" });
+    expect(overallStatus(needs)).toBe("unknown");
   });
 });

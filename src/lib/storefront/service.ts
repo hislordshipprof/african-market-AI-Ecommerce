@@ -6,8 +6,8 @@ import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
 import { effectiveMaxPerOrder } from "../cart/limits";
-import type { ProductAttributes, ShopperNeed } from "../catalog/attributes";
-import { attributesFromRow, effectiveAttributesSql, needExcludesSql, type AttributeRow } from "../catalog/attribute-sql";
+import type { ShopperNeed } from "../catalog/attributes";
+import { effectiveAttributesSql, needExcludesSql } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
@@ -280,11 +280,9 @@ export type CatalogMatch = "name" | "synonym" | "near";
 export interface SearchHit extends SearchResult {
   match: CatalogMatch;
   matchedTerm?: string;
-  /** Present when the search ran with a shopper need. */
-  attributes?: ProductAttributes;
 }
 
-interface RawSearchRow extends Partial<AttributeRow> {
+interface RawSearchRow {
   id: string;
   custom_name: string | null;
   master_product_name: string | null;
@@ -320,7 +318,6 @@ async function readSearchListings(
       l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable,
       pack.price AS min_variant_price, pack.id AS variant_id,
       pack.label AS pack_label, pack.weight_g,
-      ${need ? Prisma.sql`attrs.*,` : Prisma.empty}
       CASE
         WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 'name'
         WHEN synonym_hit.term IS NOT NULL THEN 'synonym'
@@ -410,7 +407,6 @@ async function readSearchListings(
       } satisfies StockBadgeInput),
       match: row.match === "name" || row.match === "synonym" ? row.match : "near",
       ...(row.matched_term ? { matchedTerm: row.matched_term } : {}),
-      ...(need ? { attributes: attributesFromRow(row as AttributeRow) } : {}),
     };
   });
 }

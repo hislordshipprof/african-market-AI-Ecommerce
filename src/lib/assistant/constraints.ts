@@ -13,7 +13,7 @@ export interface ShopperConstraints {
   preferences: string[];
   /** Listings refused as unknown, by the user message whose turn refused them. */
   asked: Record<string, string>;
-  /** Unknown listings the customer confirmed, one at a time, with the constraint names unknown at that time. */
+  /** Unknown listings the customer confirmed, one at a time, with the constraint keys unknown at that time. */
   confirmed: Array<{ listingId: string; messageId: string; at: string; needs: string[] }>;
 }
 
@@ -170,29 +170,33 @@ export async function changeConstraints(
   return { constraints, ask, cannotCheck: unchecked };
 }
 
-/** Each constraint by name: checkNeed on one constraint at a time. */
-export function constraintStatuses(attributes: ProductAttributes, constraints: ShopperConstraints): Record<string, ConstraintStatus> {
+/** A constraint by kind and value, so an allergen and an ingredient with the same name never share a status. */
+export type NeedKey = `allergen:${string}` | `claim:${string}` | `ingredient:${string}`;
+
+/** Each constraint by kind and value: checkNeed on one constraint at a time. */
+export function constraintStatuses(attributes: ProductAttributes, constraints: ShopperConstraints): Record<NeedKey, ConstraintStatus> {
   const status = (need: ShopperNeed): ConstraintStatus => {
     const result = checkNeed(attributes, need);
     return result === "cannot_confirm" ? "unknown" : result;
   };
-  const out: Record<string, ConstraintStatus> = {};
-  for (const allergen of constraints.avoidAllergens) out[allergen] = status({ avoidAllergens: [allergen] });
-  for (const claim of constraints.requireClaims) out[claim] = status({ requireClaims: [claim] });
-  for (const item of constraints.avoidIngredients) out[item.term] = status({ avoidIngredientIds: [item.ingredientId] });
+  const out: Record<NeedKey, ConstraintStatus> = {};
+  for (const allergen of constraints.avoidAllergens) out[`allergen:${allergen}`] = status({ avoidAllergens: [allergen] });
+  for (const claim of constraints.requireClaims) out[`claim:${claim}`] = status({ requireClaims: [claim] });
+  for (const item of constraints.avoidIngredients) out[`ingredient:${item.ingredientId}`] = status({ avoidIngredientIds: [item.ingredientId] });
   return out;
 }
 
-export function overallStatus(statuses: Record<string, ConstraintStatus>): ConstraintStatus {
+export function overallStatus(statuses: Record<NeedKey, ConstraintStatus>): ConstraintStatus {
   const values = Object.values(statuses);
   if (values.includes("excluded")) return "excluded";
   return values.includes("unknown") ? "unknown" : "ok";
 }
 
+/** The one verdict for a listing: every tool output, card and gate reads it unchanged. */
 export interface ListingVerdict {
   listingId: string;
   status: ConstraintStatus;
-  needs: Record<string, ConstraintStatus>;
+  needs: Record<NeedKey, ConstraintStatus>;
 }
 
 /** This store's listings checked against the constraints in SQL. A listing the store cannot see is left out. */
@@ -218,14 +222,28 @@ export async function listingVerdicts(
   }));
 }
 
-/** The constraint names a listing cannot be confirmed for. */
-export function unknownNeeds(verdict: ListingVerdict): string[] {
-  return Object.entries(verdict.needs).filter(([, value]) => value === "unknown").map(([name]) => name);
+/** What a tool returns for a listing it shows: the verdict's needs, and cannotConfirm when it is unknown. */
+export function verdictFields(verdict: ListingVerdict | undefined): { needs?: Record<NeedKey, ConstraintStatus>; cannotConfirm?: true } {
+  if (!verdict) return {};
+  return { needs: verdict.needs, ...(verdict.status === "unknown" ? { cannotConfirm: true as const } : {}) };
+}
+
+/** The constraint keys a listing cannot be confirmed for. */
+export function unknownNeeds(verdict: ListingVerdict): NeedKey[] {
+  return (Object.entries(verdict.needs) as Array<[NeedKey, ConstraintStatus]>).filter(([, value]) => value === "unknown").map(([key]) => key);
+}
+
+/** A constraint key in the customer's terms: the ingredient's saved term, else the value. */
+function needName(key: NeedKey, constraints: ShopperConstraints): string {
+  const value = key.slice(key.indexOf(":") + 1);
+  if (!key.startsWith("ingredient:")) return value;
+  return constraints.avoidIngredients.find((item) => item.ingredientId === value)?.term ?? value;
 }
 
 /** Why a listing is refused, in the customer's terms. */
-export function verdictReason(verdict: ListingVerdict): string {
-  const names = (status: ConstraintStatus) => Object.entries(verdict.needs).filter(([, value]) => value === status).map(([name]) => name);
+export function verdictReason(verdict: ListingVerdict, constraints: ShopperConstraints): string {
+  const names = (status: ConstraintStatus) => (Object.entries(verdict.needs) as Array<[NeedKey, ConstraintStatus]>)
+    .filter(([, value]) => value === status).map(([key]) => needName(key, constraints));
   if (verdict.status === "excluded") return `It does not meet: ${names("excluded").join(", ")}.`;
   return `I can't confirm it meets: ${names("unknown").join(", ")}. Ask the customer about this item before adding it.`;
 }

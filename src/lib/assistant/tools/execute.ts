@@ -18,17 +18,18 @@ import { storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
 import {
   changeConstraints,
-  constraintStatuses,
   hasConstraints,
   listingVerdicts,
-  overallStatus,
   readConstraints,
   shopperNeed,
   updateConstraints,
   unknownNeeds,
+  verdictFields,
   verdictReason,
   type ConstraintStatus,
   type ListingVerdict,
+  type NeedKey,
+  type ShopperConstraints,
 } from "../constraints";
 import { isAcceptanceLed, namesForListing, textNamesProduct, type AcceptanceTurn } from "../shown";
 import { listingImage } from "../../storefront/images";
@@ -170,7 +171,8 @@ type CatalogItem = {
   /** cannot_confirm: a saved constraint is unknown for this listing, so it is not a fit. */
   match: "name" | "synonym" | "near" | "cannot_confirm";
   matchedTerm?: string;
-  needs?: Record<string, ConstraintStatus>;
+  needs?: Record<NeedKey, ConstraintStatus>;
+  cannotConfirm?: true;
 };
 
 export async function searchCatalog(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
@@ -200,16 +202,16 @@ export async function searchCatalog(ctx: AssistantContext, input: unknown): Prom
       delete item.matchedTerm;
     }
   }
-  const kept = constrained ? items.filter((item, index) => {
-    const attributes = found[index]?.attributes;
-    if (!attributes) return false;
-    item.needs = constraintStatuses(attributes, constraints);
-    const status = overallStatus(item.needs);
-    if (status === "unknown") {
+  const verdicts = constrained ? await listingVerdicts(ctx.storeId, items.map((item) => item.listingId), constraints) : null;
+  const kept = verdicts ? items.filter((item) => {
+    const verdict = verdicts.get(item.listingId);
+    if (!verdict || verdict.status === "excluded") return false;
+    Object.assign(item, verdictFields(verdict));
+    if (verdict.status === "unknown") {
       item.match = "cannot_confirm";
       delete item.matchedTerm;
     }
-    return status !== "excluded";
+    return true;
   }) : items;
   const ordered = kept
     .map((item, index) => ({ item, index }))
@@ -248,11 +250,9 @@ async function verdictsFor(ctx: AssistantContext, listingIds: string[]): Promise
   return listingVerdicts(ctx.storeId, listingIds, constraints);
 }
 
-/** An excluded listing is never returned; any other carries its needs, and unknown is marked as not confirmed. */
+/** An excluded listing is never returned; any other carries its verdict's needs, and unknown is marked as not confirmed. */
 function needsOf(verdicts: Map<string, ListingVerdict> | null, listingId: string) {
-  const verdict = verdicts?.get(listingId);
-  if (!verdict) return {};
-  return { needs: verdict.needs, ...(verdict.status === "unknown" ? { cannotConfirm: true } : {}) };
+  return verdictFields(verdicts?.get(listingId));
 }
 
 /** With constraints, a listing the check did not return counts as excluded. */
@@ -261,11 +261,11 @@ function isExcluded(verdicts: Map<string, ListingVerdict> | null, listingId: str
   return !!verdicts && status !== "ok" && status !== "unknown";
 }
 
-type Refusal = ToolFailure & { listingId: string; needs: Record<string, ConstraintStatus> };
+type Refusal = ToolFailure & { listingId: string; needs: Record<NeedKey, ConstraintStatus> };
 
-function refusal(verdict: ListingVerdict): Refusal {
+function refusal(verdict: ListingVerdict, constraints: ShopperConstraints): Refusal {
   const code = verdict.status === "excluded" ? "excluded" : "cannot_confirm";
-  return { ok: false, code, message: `${MESSAGES[code]} ${verdictReason(verdict)}`, listingId: verdict.listingId, needs: verdict.needs };
+  return { ok: false, code, message: `${MESSAGES[code]} ${verdictReason(verdict, constraints)}`, listingId: verdict.listingId, needs: verdict.needs };
 }
 
 /**
@@ -283,7 +283,7 @@ async function gateListings(ctx: AssistantContext, listingIds: string[]): Promis
     row.listingId === verdict.listingId && unknownNeeds(verdict).every((name) => row.needs.includes(name)));
   const unknown: string[] = [];
   for (const verdict of verdicts.values()) {
-    if (verdict.status === "excluded") refused.set(verdict.listingId, refusal(verdict));
+    if (verdict.status === "excluded") refused.set(verdict.listingId, refusal(verdict, constraints));
     else if (verdict.status === "unknown" && !confirmedBefore(verdict)) unknown.push(verdict.listingId);
   }
   if (unknown.length === 0) return refused;
@@ -301,7 +301,7 @@ async function gateListings(ctx: AssistantContext, listingIds: string[]): Promis
     }
   }
   for (const id of unknown) {
-    if (!confirming.has(id)) refused.set(id, refusal(verdicts.get(id)!));
+    if (!confirming.has(id)) refused.set(id, refusal(verdicts.get(id)!, constraints));
   }
   await updateConstraints(ctx.storeId, ctx.conversationId, (saved) => {
     const at = new Date().toISOString();

@@ -338,7 +338,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
     const result = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
     const curry = [...result.inStock, ...result.lowOrOut].find((item) => item.ingredient === "curry powder");
-    expect(curry).toMatchObject({ cannotConfirm: true, needs: { peanuts: "unknown" } });
+    expect(curry).toMatchObject({ cannotConfirm: true, needs: { "allergen:peanuts": "unknown" } });
   });
 
   it("filters each ingredient's search before the result cap, so excluded items cannot crowd out an allowed one", async () => {

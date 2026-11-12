@@ -1,7 +1,7 @@
 import type { LanguageModel } from "ai";
 import { storeScoped } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
-import { hasConstraints, listingVerdicts, readConstraints, shopperNeed, type ConstraintStatus, type ShopperConstraints } from "../constraints";
+import { hasConstraints, listingVerdicts, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
 import type { ShopperNeed } from "../../catalog/attributes";
 import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
@@ -30,8 +30,8 @@ interface Placed extends StoreItem {
   covers?: string[];
   amount?: string;
   backupVariantId?: string;
-  needs?: Record<string, ConstraintStatus>;
-  cannotConfirm?: boolean;
+  needs?: Record<NeedKey, ConstraintStatus>;
+  cannotConfirm?: true;
 }
 
 /** Cheapest variant of this store's active listing for a master product. A listing without a variant cannot be added. */
@@ -119,8 +119,7 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
       ingredient: ingredient.name,
       ...(amount ? { amount } : {}),
       ...pick,
-      ...(verdict ? { needs: verdict.needs } : {}),
-      ...(verdict?.status === "unknown" ? { cannotConfirm: true } : {}),
+      ...verdictFields(verdict),
     };
     placedByListing.set(pick.listingId, placed);
     if (!pick.mayBeUnavailable) {
