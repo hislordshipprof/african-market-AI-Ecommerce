@@ -1,15 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { updateLineQty } from "../cart/service";
-import { storeScoped } from "../db";
+import { appUserQuery, storeScoped } from "../db";
 import { createFakeAnthropicFetch } from "./messages-api-double";
 import { createAssistantModel } from "./model";
 import { ASSISTANT_STATIC_PROMPT } from "./system-prompt";
 import { createChatHandler } from "./chat-handler";
-import { assistantSpendState } from "./spend";
+import { setSpendClock, utcDay } from "./spend";
 
 process.env.ASSISTANT_CHAT_ENABLED = "1";
 
@@ -136,18 +136,32 @@ describe.skipIf(!hasDb)("assistant chat through the Anthropic adapter", () => {
   it("meters every step into the ledger and the conversation", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", KEY);
     vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
-    const before = await assistantSpendState({ ASSISTANT_SPEND_CAP_USD: "1000000" });
-    const fake = createFakeAnthropicFetch({
-      expectedKey: KEY,
-      steps: [
-        { kind: "text", text: "priced", inputTokens: 30, outputTokens: 3 },
-      ],
-    });
-    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
-    const response = await handler(post(slugA, "price this", "203.0.113.103"));
-    await response.text();
-    const after = await assistantSpendState({ ASSISTANT_SPEND_CAP_USD: "1000000" });
-    expect(after.spentMicros).toBeGreaterThan(before.spentMicros);
+    // A day of its own, so spend other test files record cannot pass this check.
+    const ledgerDay = new Date(Date.UTC(2700, 0, 1) + randomInt(20_000) * 86_400_000);
+    const dayTotal = async () => {
+      const rows = await appUserQuery((tx) =>
+        tx.$queryRaw<Array<{ cost: bigint }>>`
+          SELECT COALESCE(SUM(cost_micros), 0) AS cost FROM assistant_spend_days WHERE day = CAST(${utcDay(ledgerDay)} AS date)
+        `,
+      );
+      return BigInt(rows[0]?.cost ?? 0);
+    };
+    setSpendClock(() => ledgerDay);
+    try {
+      const before = await dayTotal();
+      const fake = createFakeAnthropicFetch({
+        expectedKey: KEY,
+        steps: [
+          { kind: "text", text: "priced", inputTokens: 30, outputTokens: 3 },
+        ],
+      });
+      const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+      const response = await handler(post(slugA, "price this", "203.0.113.103"));
+      await response.text();
+      expect(await dayTotal()).toBeGreaterThan(before);
+    } finally {
+      setSpendClock(null);
+    }
     const rows = await storeScoped(storeA).aiConversation.findMany({ where: { storeId: storeA } });
     const priced = rows.find((row) => JSON.stringify(row.messages).includes("price this"));
     expect(priced?.costMicros).toBeGreaterThan(BigInt(0));
