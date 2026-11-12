@@ -8,7 +8,8 @@ import { liveBudgetMicros, liveConcurrency } from "./preflight";
 import { buildReport, publishEvalReport, readTicketSpend, summarize, verdictFor } from "./report";
 import { runEval } from "./runner";
 
-const TICKET_CAP_MICROS = BigInt(4000000);
+// Owner raised the #146 eval budget to $20 on 2026-11-11 (issue #146).
+const TICKET_CAP_MICROS = BigInt(20000000);
 
 export async function runLiveEval(): Promise<void> {
   const startedAt = new Date().toISOString();
@@ -38,7 +39,7 @@ export async function runLiveEval(): Promise<void> {
   }
   const prior = readTicketSpend();
   if (prior >= TICKET_CAP_MICROS) {
-    console.error("This ticket has already spent its $4 eval budget.");
+    console.error("This ticket has already spent its $20 eval budget.");
     process.exit(1);
   }
   const run = await runEval({
