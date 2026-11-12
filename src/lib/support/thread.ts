@@ -28,9 +28,14 @@ export type StoreThreadSummary = {
   unread: number;
 };
 
-/** The customer poll's cache tag. Hashed so the tracking token is never a cache key in the clear. */
+/** A tracking token hashed, so it is never a cache or rate-limit key in the clear. */
+export function trackingTokenKey(token: string): string {
+  return createHash("sha256").update(token).digest("hex").slice(0, 32);
+}
+
+/** The customer poll's cache tag. */
 export function orderMessagesTag(token: string): string {
-  return `order-messages:${createHash("sha256").update(token).digest("hex").slice(0, 32)}`;
+  return `order-messages:${trackingTokenKey(token)}`;
 }
 
 function toMessage(row: { id: string; sender: string; body: string; createdAt: Date }): ThreadMessage {
