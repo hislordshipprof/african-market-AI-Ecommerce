@@ -32,6 +32,7 @@ interface RecipeOutput {
   inStock: Placed[];
   lowOrOut: Placed[];
   notCarried: string[];
+  excluded?: string[];
 }
 
 function lookupStep(dish: string, ingredients: string[], sourceUrl = "https://recipes.example/kelewele"): FakeAnthropicStep {
@@ -252,5 +253,18 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(capped).toMatchObject({ ok: false, code: "lookup_limit" });
     expect(fake.requests).toHaveLength(0);
     expect(await takeLookupSlot(storeB, day)).toBe(true);
+  });
+
+  it("leaves out ingredients and items the customer ruled out", async () => {
+    await listing(storeA, "gino-pepper-onion-paste", `Gino pepper and onion mix ${suffix}`);
+    const plain = await getRecipe(ctxA, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
+    expect(plain.inStock.map((item) => item.ingredient)).toContain("onion");
+    const result = await getRecipe(ctxA, { dish: "Jollof", servings: 6, exclude: ["onion", "rice"] }) as unknown as RecipeOutput;
+    const offered = [...result.inStock, ...result.lowOrOut];
+    expect(offered.map((item) => item.ingredient)).not.toContain("onion");
+    expect(offered.map((item) => item.listingId)).not.toContain(rice.listingId);
+    expect(result.notCarried).not.toContain("onion");
+    expect(result.excluded).toEqual(expect.arrayContaining(["onion", "rice"]));
+    expect(offered.map((item) => item.ingredient)).toContain("tomato paste");
   });
 });

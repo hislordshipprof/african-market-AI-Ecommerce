@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
-import { storeScoped } from "../../db";
+import { Prisma } from "@prisma/client";
+import { storeScoped, storeScopedRawQuery } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
 import { stockBadge } from "../../storefront/stock-badge";
@@ -63,20 +64,46 @@ async function searchFits(storeId: string, name: string): Promise<StoreItem[]> {
   }] : []);
 }
 
+/** The catalog search's exclude match: Postgres English text search on the name. */
+async function ruledOut(storeId: string, name: string, exclude: readonly string[]): Promise<boolean> {
+  if (exclude.length === 0) return false;
+  const rows = await storeScopedRawQuery<{ hit: boolean }>(
+    storeId,
+    Prisma.sql`
+    SELECT EXISTS (
+      SELECT 1 FROM unnest(${[...exclude]}::text[]) AS word
+      WHERE to_tsvector('english', unaccent(${name})) @@ plainto_tsquery('english', unaccent(word))
+    ) AS hit`,
+  );
+  return rows[0]?.hit === true;
+}
+
+async function allowed(storeId: string, items: StoreItem[], exclude: readonly string[]): Promise<StoreItem[]> {
+  const kept: StoreItem[] = [];
+  for (const item of items) if (!(await ruledOut(storeId, item.name, exclude))) kept.push(item);
+  return kept;
+}
+
 function scaledAmount(qty: number | null, unit: string | null, base: number | null, servings: number): string | undefined {
   if (qty == null || !base) return undefined;
   const scaled = Math.round((qty * servings * 100) / base) / 100;
   return unit ? `${scaled} ${unit}` : String(scaled);
 }
 
-async function placeIngredients(storeId: string, recipe: RecipeRow, servings: number) {
+async function placeIngredients(storeId: string, recipe: RecipeRow, servings: number, exclude: readonly string[]) {
   const inStock: Placed[] = [];
   const lowOrOut: Placed[] = [];
   const notCarried: string[] = [];
+  const excluded: string[] = [];
   const placedByListing = new Map<string, Placed>();
   for (const ingredient of recipe.ingredients) {
-    const fits = await searchFits(storeId, ingredient.name);
-    const mapped = ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null;
+    if (await ruledOut(storeId, ingredient.name, exclude)) {
+      excluded.push(ingredient.name);
+      continue;
+    }
+    const fits = await allowed(storeId, await searchFits(storeId, ingredient.name), exclude);
+    const master = ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null;
+    const [mapped] = master ? await allowed(storeId, [master], exclude) : [];
     const pick = mapped ?? fits.find((item) => !item.mayBeUnavailable) ?? fits[0];
     if (!pick) {
       notCarried.push(ingredient.name);
@@ -98,7 +125,7 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
     if (backup) placed.backupVariantId = backup.variantId;
     lowOrOut.push(placed);
   }
-  return { inStock, lowOrOut, notCarried };
+  return { inStock, lowOrOut, notCarried, ...(excluded.length > 0 ? { excluded } : {}) };
 }
 
 /** The chat saves only its own steps' cost, so the lookup adds its own to the conversation. */
@@ -148,7 +175,7 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
     recipe = await saveLookedUpRecipe(parsed.dish, found);
     lookedUp = true;
   }
-  const groups = await placeIngredients(ctx.storeId, recipe, parsed.servings);
+  const groups = await placeIngredients(ctx.storeId, recipe, parsed.servings, parsed.exclude ?? []);
   return recordRead(ctx, "get_recipe", parsed, {
     ok: true,
     askServings: false,

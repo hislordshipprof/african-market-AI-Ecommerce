@@ -109,7 +109,7 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       execute: (input, options) => forwardToStore({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     get_recipe: tool({
-      description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, and notCarried. Omit servings when the customer did not say how many people; it then returns askServings.",
+      description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, notCarried, and excluded for what the customer ruled out. Omit servings when the customer did not say how many people; it then returns askServings.",
       inputSchema: getRecipeInput,
       execute: (input, options) => getRecipe({ ...ctx, toolCallId: options.toolCallId }, input, recipeDeps),
     }),
