@@ -46,6 +46,7 @@ import {
   reactivateListingAction,
   listMasterProductsAction,
 } from "@/lib/listing/actions";
+import { AttributesDialog } from "./attributes-dialog";
 import { listingNeedsWeight } from "./needs-weight";
 import { loadedVariantRow, serializeVariants } from "./variant-form";
 import {
@@ -57,6 +58,7 @@ import {
   Leaf,
   X,
   Upload,
+  ListChecks,
 } from "lucide-react";
 
 interface Variant {
@@ -184,6 +186,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [isPending, startTransition] = useTransition();
   const [createOpen, setCreateOpen] = useState(false);
   const [editListing, setEditListing] = useState<Listing | null>(null);
+  const [attributesListing, setAttributesListing] = useState<Listing | null>(null);
 
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
@@ -627,6 +630,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
                         key={listing.id}
                         listing={listing}
                         onEdit={() => openEdit(listing)}
+                        onAttributes={() => setAttributesListing(listing)}
                         onToggle={() => handleToggleActive(listing)}
                         isPending={isPending}
                       />
@@ -651,6 +655,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
                         key={listing.id}
                         listing={listing}
                         onEdit={() => openEdit(listing)}
+                        onAttributes={() => setAttributesListing(listing)}
                         onToggle={() => handleToggleActive(listing)}
                         isPending={isPending}
                       />
@@ -662,6 +667,13 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
           </div>
         )}
       </main>
+
+      <AttributesDialog
+        key={attributesListing?.id ?? "closed"}
+        listingId={attributesListing?.id ?? null}
+        listingName={attributesListing ? displayNameOf(attributesListing) : ""}
+        onClose={() => setAttributesListing(null)}
+      />
 
       <Dialog open={!!editListing} onOpenChange={(open) => { if (!open) setEditListing(null); }}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
@@ -681,18 +693,24 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   );
 }
 
+function displayNameOf(listing: Listing) {
+  return listing.customName ?? listing.masterProductName ?? "Unnamed";
+}
+
 function ListingRow({
   listing,
   onEdit,
+  onAttributes,
   onToggle,
   isPending,
 }: {
   listing: Listing;
   onEdit: () => void;
+  onAttributes: () => void;
   onToggle: () => void;
   isPending: boolean;
 }) {
-  const displayName = listing.customName ?? listing.masterProductName ?? "Unnamed";
+  const displayName = displayNameOf(listing);
 
   return (
     <div className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
@@ -736,6 +754,15 @@ function ListingRow({
           aria-label={`Edit ${displayName}`}
         >
           <Pencil className="size-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          onClick={onAttributes}
+          aria-label={`Ingredients and allergens for ${displayName}`}
+        >
+          <ListChecks className="size-3.5" />
         </Button>
         <Switch
           checked={listing.active}

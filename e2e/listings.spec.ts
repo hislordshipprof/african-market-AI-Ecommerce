@@ -149,6 +149,44 @@ test.describe("Listing management (authenticated)", () => {
     await expect(listingRow(page, uniqueName).getByText("$7.00")).toBeVisible({ timeout: 5000 });
   });
 
+  test("an owner sets a listing's allergens and dietary claims, with an audit row", async ({ page }) => {
+    const uniqueName = `E2E Attributes ${Date.now()}`;
+    await createListingViaUI(page, { name: uniqueName, price: "4.00" });
+
+    await page.goto(LISTINGS_URL);
+    await page.getByRole("button", { name: `Ingredients and allergens for ${uniqueName}` }).click();
+    const dialog = page.getByRole("dialog");
+    const allergens = dialog.locator("section", { has: page.getByRole("heading", { name: "Allergens", exact: true }) });
+    await expect(allergens.getByText("Unknown", { exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(dialog.getByRole("button", { name: "Save attributes" })).toBeDisabled();
+
+    await allergens.getByRole("switch").click();
+    await allergens.getByRole("button", { name: "Peanuts" }).click();
+    await allergens.getByRole("button", { name: "Sesame" }).click();
+    const dietary = dialog.locator("section", { has: page.getByRole("heading", { name: "Dietary claims", exact: true }) });
+    await dietary.getByRole("switch").click();
+    await dietary.getByRole("button", { name: "Halal" }).click();
+    await dialog.getByRole("button", { name: "Save attributes" }).click();
+    await expect(page.getByText("Attributes saved")).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("button", { name: `Ingredients and allergens for ${uniqueName}` }).click();
+    await expect(allergens.getByText("Set by you")).toBeVisible({ timeout: 10000 });
+    await expect(allergens.getByRole("button", { name: "Peanuts" })).toHaveAttribute("aria-pressed", "true");
+    await expect(allergens.getByRole("button", { name: "Milk" })).toHaveAttribute("aria-pressed", "false");
+    const ingredients = dialog.locator("section", { has: page.getByRole("heading", { name: "Ingredients", exact: true }) });
+    await expect(ingredients.getByText("Unknown", { exact: true })).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const logs = await findListingAuditLogs("mama-ngozi", uniqueName);
+        return logs.find((l) => l.action === "listing.attributes_correct") ?? null;
+      }, { timeout: 10000 })
+      .toMatchObject({
+        actorEmail: OWNER_EMAIL,
+        after: { allergensStatus: "known", allergens: ["peanuts", "sesame"], dietaryStatus: "known", dietaryClaims: ["halal"] },
+      });
+  });
+
   test("switch stock mode from counted to status", async ({ page }) => {
     const uniqueName = `E2E Mode ${Date.now()}`;
     await createListingViaUI(page, {
