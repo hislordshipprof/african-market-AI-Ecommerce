@@ -122,7 +122,7 @@ A form of a known Ingredient the customer would rather skip, such as fresh tomat
 When a ruled-out term matches no Ingredient or local name but is close to one in the ingredient table, the assistant carries on and asks one short question: avoid all of that Ingredient, or only that form? "All" saves a Shopper constraint on the Ingredient; "only that form" keeps the Shopper preference (#485, owner 2026-11-12).
 
 **Cannot confirm**:
-A listing whose attribute for a Shopper constraint is unknown. It is shown marked as such, never as a fit, and added only after the customer's next message confirms that one item. The confirmation is recorded on the conversation.
+A listing whose attribute for a Shopper constraint is unknown. It is shown marked as such, never as a fit, and added only after the customer's next message confirms that one item. The confirmation is recorded on the conversation and covers only the constraints unknown when it was given.
 
 **Acceptance-led message**:
 A customer message that starts, as a whole word, with yes, ok, okay, sure, go ahead, add those, or add what you suggested. On that turn the Shopper assistant adds a product only when the previous reply or the customer's own message named it.
