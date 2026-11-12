@@ -8,6 +8,7 @@ import { createEvalStores, deleteOwnedStores, sweepAbandonedEvalStores, writeLea
 import { loadDataset, loadFixture, validateDataset, validateFixture } from "./dataset";
 import { publishEvalReport, buildReport } from "./report";
 import { fingerprintFromParts } from "./fingerprint";
+import { assessReport } from "./gate";
 import { runEval, type AttemptContext } from "./runner";
 import { bindingFromFixture, scoreCase, type CatalogBinding } from "./score";
 import type { CatalogFixture, EvalCase, FixtureListing } from "./types";
@@ -930,6 +931,72 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(result.result.spendMicros).toBe(BigInt(100));
     expect(saved.micros).toBe("100");
   }, 60_000);
+
+  it("a case whose attempts all fail after an unrelated cart write leaves the run incomplete and the gate shut", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("rice", "rice-parboiled-long-grain", "A", 299)];
+    const cases = Array.from({ length: 20 }, (_, index) => evalCase({
+      id: `retry-proof-${index + 1}`,
+      category: "single-item",
+      turns: ["Add one garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    }));
+    const result = await run(cases, listings, (ctx) => {
+      const failing = ctx.caseId === "retry-proof-20";
+      const variant = ctx.binding.byVariantKey.get(failing ? "rice-pack" : "garri-pack")?.id ?? "";
+      const fake = createFakeAnthropicFetch({
+        expectedKey: KEY,
+        steps: [
+          { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: variant, qty: 1 }] } },
+          { kind: "text", text: "Added." },
+        ],
+      });
+      let calls = 0;
+      return async (input, init) => {
+        calls += 1;
+        const requestId = `req_${ctx.caseId}_${ctx.attempt}_${calls}`;
+        if (failing && calls === 2) {
+          return Response.json({ type: "error", error: { type: "api_error", message: "overloaded" } }, { status: 500, headers: { "request-id": requestId } });
+        }
+        const response = await fake.fetch(input, init);
+        const headers = new Headers(response.headers);
+        headers.set("request-id", requestId);
+        return new Response(response.body, { status: response.status, headers });
+      };
+    });
+    const failed = result.result.cases.at(-1);
+    expect(failed?.attempts).toBe(3);
+    expect(failed?.completed).toBe(false);
+    expect(result.result.complete).toBe(false);
+    expect(result.result.incompleteReason).toBe("attempts exhausted: retry-proof-20");
+
+    const fingerprint = fingerprintFromParts({
+      staticPrompt: "p",
+      storeContext: "s",
+      tools: [],
+      requestParams: { model: "claude-haiku-5-5", maxTokens: 1024, thinking: null, effort: null },
+      stepCap: 8,
+      dataset: cases,
+      fixture: fixture(listings),
+      masterCatalog: result.masterCatalog,
+    });
+    const report = buildReport({
+      result: result.result,
+      fingerprint,
+      model: "claude-haiku-5-5",
+      gitSha: "abc",
+      startedAt: "2026-06-15T16:00:00.000Z",
+      finishedAt: "2026-06-15T17:00:00.000Z",
+      datasetCases: cases.length,
+      gateOk: true,
+    });
+    const expected = { fingerprint, caseIds: cases.map((item) => item.id), model: "claude-haiku-5-5", cases, binding: result.binding ?? undefined };
+    expect(assessReport(report, expected).ok).toBe(false);
+    const flagEdited = assessReport({ ...report, complete: true, incompleteReason: null }, expected);
+    expect(flagEdited.ok).toBe(false);
+    expect(flagEdited.reasons).toEqual(["incomplete case retry-proof-20"]);
+  }, 180_000);
 });
 
 function emptyBinding(): CatalogBinding {

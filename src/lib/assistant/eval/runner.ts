@@ -99,7 +99,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
             if (!firstRequestBody && body) firstRequestBody = body;
           }, stripWatches));
           caseMicros = outcome.costMicros;
-          if (outcome.abort) aborted = { reason: outcome.abort };
+          if (outcome.abort) aborted = aborted ?? { reason: outcome.abort };
           if (outcome.unresolved) result.unresolvedSpend = true;
           result.inputTokens += outcome.inputTokens;
           result.outputTokens += outcome.outputTokens;
@@ -127,8 +127,9 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
     const ranAll = result.cases.length === options.cases.length;
     const order = new Map(options.cases.map((item, index) => [item.id, index]));
     result.cases.sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
-    result.complete = !aborted && ranAll && !result.unresolvedSpend;
-    result.incompleteReason = aborted?.reason ?? (result.unresolvedSpend ? "unresolved usage" : ranAll ? null : "budget");
+    const unfinished = result.cases.find((item) => !item.completed);
+    result.complete = !aborted && ranAll && !result.unresolvedSpend && !unfinished;
+    result.incompleteReason = aborted?.reason ?? (result.unresolvedSpend ? "unresolved usage" : !ranAll ? "budget" : unfinished ? `case did not complete: ${unfinished.id}` : null);
     if (result.incompleteReason === "budget" || result.incompleteReason === "ticket budget") {
       result.complete = false;
     }
@@ -213,6 +214,7 @@ async function runCase(
     if (!outcome.retry) {
       const saved = applyCarry(remember(outcome.caseResult, provenance), carried);
       saved.attempts = attempts;
+      saved.completed = !unresolved;
       saved.stickyIntegrity = sticky || saved.stickyIntegrity;
       if (saved.stickyIntegrity) {
         saved.pass = false;
@@ -227,7 +229,9 @@ async function runCase(
     const delay = options.retryDelayMs ?? defaultRetryDelay;
     await sleep(delay(attempts, outcome.retryAfterSeconds));
   }
-  return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, null, sticky, inputTokens, outputTokens, unresolved);
+  // A sibling's abort also ends the loop early. Only spent attempts stop the run: an unfinished case can never become proof.
+  const exhausted = attempts >= maxAttempts ? `attempts exhausted: ${evalCase.id}` : null;
+  return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, exhausted, sticky, inputTokens, outputTokens, unresolved);
 }
 
 function emptyCarry(): Pick<CaseResult, "hallucinated" | "safetyFailures" | "ungroundedAmountsShown" | "temporalViolations"> {
@@ -294,6 +298,7 @@ function finish(
   caseResult.costMicros = cost.toString();
   caseResult.stickyIntegrity = sticky || caseResult.stickyIntegrity;
   caseResult.pass = false;
+  caseResult.completed = false;
   if (abort) caseResult.reason = abort;
   return { caseResult, costMicros: cost, abort, unresolved, inputTokens, outputTokens };
 }
@@ -550,6 +555,7 @@ async function scoreAttempt(args: {
     id: args.evalCase.id,
     category: args.evalCase.category,
     pass: scored.pass,
+    completed: false,
     reason: scored.reason,
     attempts: 1,
     precision: scored.precision,
@@ -822,6 +828,7 @@ function blankCase(evalCase: EvalCase): CaseResult {
     id: evalCase.id,
     category: evalCase.category,
     pass: false,
+    completed: false,
     reason: "incomplete",
     attempts: 0,
     precision: 0,
@@ -1007,6 +1014,7 @@ async function drainStrips(watches: StripWatch[], result: RunResult, timeoutMs: 
     const item = result.cases.find((entry) => entry.id === watch.caseId);
     if (!later) {
       lost = true;
+      if (item) item.completed = false;
       continue;
     }
     if (!item) continue;

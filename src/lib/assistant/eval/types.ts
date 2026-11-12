@@ -116,6 +116,8 @@ export interface CaseResult {
   id: string;
   category: EvalCategory;
   pass: boolean;
+  /** True only when the final attempt was scored and all its spend is known. A failed score can still be complete. */
+  completed: boolean;
   reason: string;
   attempts: number;
   precision: number;

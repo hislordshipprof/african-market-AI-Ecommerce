@@ -63,6 +63,7 @@ export function assessReport(report: unknown, expected: {
       reasons.push("invalid case");
       continue;
     }
+    if (item.completed !== true) reasons.push(`incomplete case ${item.id}`);
     if (!countsOk(item)) reasons.push(`invalid counts on ${item.id}`);
     if (item.stickyIntegrity !== false) reasons.push("sticky integrity");
     if (!provenanceOk(item, requestIds)) reasons.push(`missing request provenance for ${item.id}`);
