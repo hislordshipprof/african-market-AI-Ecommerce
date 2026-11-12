@@ -11,6 +11,8 @@ import { decideCliCatalogPrune, seedMasterCatalog, type SeedMasterCatalogDeps } 
 import { readCatalogImageReferences } from "../src/lib/catalog-prune-reader";
 import { CatalogPruneRefusal, type DatabaseIdentity } from "../src/lib/catalog-prune";
 import { revalidateSeededStores } from "../scripts/revalidate-storefront";
+import { seedRecipeBase, type SeedRecipe } from "../src/lib/assistant/recipe-base";
+import recipeBase from "./recipe-base.json";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
@@ -824,6 +826,7 @@ export async function runSeed(deps: SeedMasterCatalogDeps = {}) {
   await seedStoreCollections();
 
   await seedMasterCatalog(prisma, { ...deps, execution, priorReferences });
+  await seedRecipeBase(prisma, recipeBase as SeedRecipe[]);
 
   if (process.env.SEED_TEST_ADMIN === "1") {
     await seedTestAdmin();

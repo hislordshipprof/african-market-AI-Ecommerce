@@ -86,6 +86,13 @@ export const forwardToStoreInput = z.object({
   issue: z.string().trim().min(1).max(600),
 });
 
+export const getRecipeInput = z.object({
+  dish: z.string().trim().min(1).max(80).describe("The dish name the customer said, such as jollof rice."),
+  servings: z.number().int().min(1).max(200).optional().describe(
+    "How many people the customer said. Omit when the customer did not say.",
+  ),
+});
+
 export const toolInputSchemas = exactAssistantKeys({
   search_catalog: searchCatalogInput,
   show_products: showProductsInput,
@@ -101,6 +108,7 @@ export const toolInputSchemas = exactAssistantKeys({
   check_delivery_area: checkDeliveryAreaInput,
   get_store_info: getStoreInfoInput,
   forward_to_store: forwardToStoreInput,
+  get_recipe: getRecipeInput,
 });
 
 function toolInput(input: unknown): unknown {

@@ -38,6 +38,19 @@ const RULE_PAD = Array.from({ length: 40 }, (_, index) =>
 
 export const ASSISTANT_STATIC_PROMPT = `${assistantSystemPrompt}\n${RULE_PAD}`;
 
+/** Sent only with get_recipe (#25). It replaces the dish rule's own ingredient searches. */
+export const RECIPE_RULE = [
+  "When the customer names a dish, call get_recipe instead of searching the ingredients yourself. Pass the servings only when the customer said how many people. When it returns askServings, ask how many people and do nothing else.",
+  "From its result, propose one pack count for each inStock item. Name each lowOrOut item as may be unavailable, and when you add it, pass its backupVariantId as backup_variant_id. Name each notCarried ingredient as not carried here, with no substitute.",
+  "Say the list is based on common recipes and name the source it returned. Never claim the recipe is the only way to make the dish.",
+  "Propose nothing that get_recipe did not return. A customer's change, such as for 10 people, no chicken, or I already have rice, revises that proposal.",
+  "If get_recipe fails, say so and offer to find the ingredients the customer lists.",
+].join("\n");
+
+export function assistantStaticPrompt(recipes: boolean): string {
+  return recipes ? `${assistantSystemPrompt}\n${RECIPE_RULE}\n${RULE_PAD}` : ASSISTANT_STATIC_PROMPT;
+}
+
 export interface StoreContextInput {
   name: string;
   hours: unknown;

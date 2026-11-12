@@ -25,6 +25,7 @@ export const ASSISTANT_TOOL_NAMES = [
   "check_delivery_area",
   "get_store_info",
   "forward_to_store",
+  "get_recipe",
 ] as const;
 
 export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];
@@ -86,6 +87,14 @@ export const ASSISTANT_ROUTE_STATUS: Record<AssistantRouteCode, number> = {
 
 export function assistantChatEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.ASSISTANT_CHAT_ENABLED === "1";
+}
+
+/**
+ * get_recipe and its prompt rule are sent only with this flag. #146's committed eval
+ * fingerprints the tools and prompt, so turning it on needs a new eval run first.
+ */
+export function assistantRecipesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.ASSISTANT_RECIPES_ENABLED === "1";
 }
 
 /** Same gate shape as the Stripe CI fake: exact flag, never on Vercel. */

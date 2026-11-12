@@ -153,7 +153,17 @@ function cardsForOutput(tool: string, callId: string, input: unknown, output: un
   if (tool === "add_to_cart") return addedCards(callId, output);
   if (tool === "offer_choices") return choiceCards(callId, output);
   if (tool === "get_cart_summary") return summaryCards(callId, output);
+  if (tool === "get_recipe") return recipeCards(callId, output);
   return [];
+}
+
+function recipeCards(callId: string, output: unknown): AssistantCard[] {
+  const body = isRecord(output) ? output : {};
+  const items = [body.inStock, body.lowOrOut].flatMap((group) => (Array.isArray(group) ? group : []));
+  return items.flatMap((item, index) => {
+    const card = productFromSearch(item, `${callId}:product:${index}`);
+    return card ? [card] : [];
+  });
 }
 
 function searchCards(callId: string, input: unknown, output: unknown): AssistantCard[] {

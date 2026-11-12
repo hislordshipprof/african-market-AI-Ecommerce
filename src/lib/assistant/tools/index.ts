@@ -13,6 +13,7 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
+import { getRecipe } from "./recipe";
 import { checkDeliveryArea, forwardToStore, getOrderStatus, getStoreInfo } from "./store-questions";
 import {
   addToCartInput,
@@ -20,6 +21,7 @@ import {
   checkAvailabilityInput,
   checkDeliveryAreaInput,
   forwardToStoreInput,
+  getRecipeInput,
   getOrderStatusInput,
   getStoreInfoInput,
   removeFromCartInput,
@@ -105,6 +107,11 @@ export function assistantTools(ctx: AssistantContext) {
       description: "Send a complaint or refund request about the customer's own order to the store's order messages.",
       inputSchema: forwardToStoreInput,
       execute: (input, options) => forwardToStore({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    get_recipe: tool({
+      description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, and notCarried. Omit servings when the customer did not say how many people; it then returns askServings.",
+      inputSchema: getRecipeInput,
+      execute: (input, options) => getRecipe({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
   });
 }

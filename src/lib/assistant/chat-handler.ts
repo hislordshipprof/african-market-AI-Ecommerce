@@ -33,7 +33,9 @@ import {
   ASSISTANT_DISABLED_CODE,
   ASSISTANT_DISABLED_MESSAGE,
   ASSISTANT_DISABLED_STATUS,
+  ASSISTANT_TOOL_NAMES,
   assistantChatEnabled,
+  assistantRecipesEnabled,
 } from "./contract";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
@@ -45,7 +47,7 @@ import { callCostMicros, type TokenUsage } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
 import { groundingTransform, keyedUnitPricesFromHistory } from "./grounding";
 import { assistantSpendState, claimCapAlert, utcDay } from "./spend";
-import { ASSISTANT_STATIC_PROMPT, storeContextMessage } from "./system-prompt";
+import { assistantStaticPrompt, storeContextMessage } from "./system-prompt";
 import { assistantTools } from "./tools";
 
 const WINDOW_MS = 60 * 60 * 1000;
@@ -253,12 +255,13 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       return jsonError(503, "assistant_unavailable", FIXED_ERROR);
     }
 
+    const recipes = assistantRecipesEnabled();
     const result = streamText({
       model,
       messages: [
         {
           role: "system",
-          content: ASSISTANT_STATIC_PROMPT,
+          content: assistantStaticPrompt(recipes),
           providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
         },
         { role: "system", content: storeContextMessage(store, at, shownProductIds(sentHistory)) },
@@ -266,7 +269,9 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       ],
       allowSystemInMessages: true,
       tools,
-      ...(fileTurn ? { activeTools: [...FILE_TURN_TOOLS] } : {}),
+      ...(fileTurn
+        ? { activeTools: [...FILE_TURN_TOOLS] }
+        : recipes ? {} : { activeTools: ASSISTANT_TOOL_NAMES.filter((name) => name !== "get_recipe") }),
       toolCallConcurrency: 1,
       stopWhen: stepCountIs(ASSISTANT_STEP_CAP),
       maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
