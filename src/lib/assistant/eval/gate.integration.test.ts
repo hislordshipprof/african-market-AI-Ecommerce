@@ -1,10 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFakeAnthropicFetch } from "../messages-api-double";
+import { canonicalJson } from "./canonical";
 import { assessReport, checkCommittedEval } from "./gate";
+import { formatUsdFromMicros } from "./money";
 import { summarize } from "./report";
 import { fingerprintFromParts, type Fingerprint } from "./fingerprint";
 import type { EvalReport } from "./report";
-import type { CaseResult } from "./types";
+import type { CaseResult, EvalCase } from "./types";
+
+vi.mock("../model", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../model")>();
+  return {
+    ...actual,
+    assistantModelId: (env: NodeJS.ProcessEnv = process.env) => {
+      if (env !== process.env && (env.ASSISTANT_MODEL === undefined || env.ASSISTANT_MODEL === "")) return "claude-sonnet-5-5" as const;
+      return actual.assistantModelId(env);
+    },
+  };
+});
 import baseConfig from "../../../../vitest.config";
 import evalConfig from "../../../../vitest.eval.config";
 
@@ -82,6 +95,8 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
 }
 
 function report(cases: CaseResult[], current = fingerprint(), extra: Partial<EvalReport> = {}): EvalReport {
+  const micros = cases.reduce((sum, item) => sum + BigInt(item.costMicros), BigInt(0));
+  const text = micros.toString();
   return {
     schemaVersion: 1,
     fingerprint: current,
@@ -95,7 +110,7 @@ function report(cases: CaseResult[], current = fingerprint(), extra: Partial<Eva
     summary: summarize(cases),
     verdict: "haiku-ok",
     verdictReasons: [],
-    spend: { micros: "1", usd: "0.000001", ledgerDeltaMicros: "1", conversationMicros: "1", inputTokens: 1, outputTokens: 1 },
+    spend: { micros: text, usd: formatUsdFromMicros(micros), ledgerDeltaMicros: text, conversationMicros: text, inputTokens: 1, outputTokens: 1 },
     sessionUser: "app_runtime",
     cases,
     ...extra,
@@ -172,6 +187,38 @@ describe("shopper assistant eval gate", () => {
     const same = fingerprint("current prompt");
     expect(same.sha256).toBe(current.sha256);
     expect(Object.keys(same.parts).sort()).toEqual(["dataset", "fixture", "masterCatalog", "requestParams", "staticPrompt", "stepCap", "storeContext", "tools"]);
+
+    const roundTrip = report([passing("one")], current);
+    const oneId = { fingerprint: current, caseIds: ["one"], model: "claude-haiku-5-5" };
+    expect(assessReport(roundTrip, oneId).ok).toBe(true);
+    expect(assessReport(JSON.parse(canonicalJson(roundTrip)), oneId).ok).toBe(true);
+
+    const forgedProof = report([passing("proof")]);
+    forgedProof.datasetCases = 999;
+    forgedProof.incompleteReason = "authentication";
+    forgedProof.finishedAt = "2020-01-01T00:00:00.000Z";
+    forgedProof.cases[0]!.precision = -5;
+    forgedProof.cases[0]!.recall = 999;
+    forgedProof.summary.microPrecision = -5;
+    forgedProof.summary.microRecall = 999;
+    const forgedVerdict = assessReport(forgedProof, { fingerprint: current, caseIds: ["proof"], model: "claude-haiku-5-5" });
+    expect(forgedVerdict.ok).toBe(false);
+    expect(forgedVerdict.reasons.join(" ")).toMatch(/dataset cases|incomplete reason|finished before start|summary does not match/);
+
+    const unmetCase: EvalCase = {
+      id: "unmet",
+      category: "single-item",
+      turns: ["Add garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    };
+    expect(assessReport(report([passing("unmet")]), {
+      fingerprint: current,
+      caseIds: ["unmet"],
+      model: "claude-haiku-5-5",
+      cases: [unmetCase],
+    }).reasons.join(" ")).toContain("cart does not match unmet");
   });
 
   it.skipIf(!hasDb)("uses only the injected fake under hosted CI and with inherited local live flags", async () => {
@@ -186,13 +233,25 @@ describe("shopper assistant eval gate", () => {
       expectedKey: "sk-ant-test",
       steps: [{ kind: "text", text: "probe" }],
     });
+    vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
+    let probeModel = "";
     const verdict = await checkCommittedEval({
       fetch: async (input, init) => {
         injected += 1;
+        const raw = typeof init?.body === "string"
+          ? init.body
+          : input instanceof Request
+            ? await input.clone().text()
+            : "";
+        if (raw) {
+          const parsed = JSON.parse(raw) as { model?: string };
+          if (parsed.model) probeModel = parsed.model;
+        }
         return fake.fetch(input, init);
       },
     });
     expect(injected).toBeGreaterThan(0);
+    expect(probeModel).toBe("claude-sonnet-5-5");
     expect(spy).not.toHaveBeenCalled();
     expect(verdict.reasons.join(" ")).not.toContain("api.anthropic.com");
     expect(evalConfig.test?.include).toEqual(["src/lib/assistant/eval/live.entry.ts"]);

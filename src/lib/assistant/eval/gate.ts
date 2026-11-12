@@ -2,12 +2,15 @@ import { readFileSync } from "node:fs";
 import { ASSISTANT_STEP_CAP, createChatHandler } from "../chat-handler";
 import { createAssistantModel, assistantModelId } from "../model";
 import { createFakeAnthropicFetch } from "../messages-api-double";
+import { canonicalJson } from "./canonical";
 import { DATASET_PATH, FIXTURE_PATH, REPORT_PATH, loadDataset, loadFixture, validateDataset, validateFixture } from "./dataset";
 import { createEvalStores, deleteOwnedStores } from "./fixture-store";
 import { changedFingerprintParts, fingerprintFromRequest, type Fingerprint } from "./fingerprint";
+import { formatUsdFromMicros } from "./money";
 import { recordingFetch, type RecordedExchange } from "./recording-fetch";
 import { summarize, type EvalReport, type ReportSummary } from "./report";
-import type { CaseResult } from "./types";
+import { bindingFromFixture, scoreCase, type CatalogBinding } from "./score";
+import type { CaseResult, EvalCase } from "./types";
 
 const REQUEST_ID = /^req_/;
 
@@ -16,18 +19,33 @@ export interface GateResult {
   reasons: string[];
 }
 
-export function assessReport(report: unknown, expected: { fingerprint: Fingerprint; caseIds: string[]; model: string }): GateResult {
+export function assessReport(report: unknown, expected: {
+  fingerprint: Fingerprint;
+  caseIds: string[];
+  model: string;
+  cases?: EvalCase[];
+  binding?: CatalogBinding;
+}): GateResult {
   const reasons: string[] = [];
   if (!report || typeof report !== "object") return { ok: false, reasons: ["report is missing"] };
   const body = report as Partial<EvalReport>;
   if (body.schemaVersion !== 1) reasons.push("schema version");
   if (body.model !== expected.model) reasons.push("model");
   if (body.complete !== true) reasons.push("incomplete");
+  if (body.complete === true && body.incompleteReason != null) reasons.push("incomplete reason");
   if (typeof body.startedAt !== "string" || !Number.isFinite(Date.parse(body.startedAt))) reasons.push("startedAt");
   if (typeof body.finishedAt !== "string" || !Number.isFinite(Date.parse(body.finishedAt))) reasons.push("finishedAt");
+  if (typeof body.startedAt === "string" && typeof body.finishedAt === "string") {
+    const started = Date.parse(body.startedAt);
+    const finished = Date.parse(body.finishedAt);
+    if (Number.isFinite(started) && Number.isFinite(finished) && finished < started) reasons.push("finished before start");
+  }
   if (typeof body.gitSha !== "string" || body.gitSha === "") reasons.push("gitSha");
   if (body.sessionUser !== "app_runtime") reasons.push("session user");
   if (body.verdict !== "haiku-ok" && body.verdict !== "sonnet-candidate") reasons.push("verdict");
+  if (body.verdict === "haiku-ok" && (!Array.isArray(body.verdictReasons) || body.verdictReasons.length > 0)) reasons.push("verdict reasons");
+  if (body.verdict === "sonnet-candidate" && (!Array.isArray(body.verdictReasons) || body.verdictReasons.length === 0)) reasons.push("verdict reasons");
+  if (body.datasetCases !== expected.caseIds.length) reasons.push("dataset cases");
   if (!spendOk(body.spend)) reasons.push("spend");
   if (!body.fingerprint || body.fingerprint.sha256 !== expected.fingerprint.sha256) {
     const changed = body.fingerprint ? changedFingerprintParts(body.fingerprint, expected.fingerprint) : ["fingerprint"];
@@ -49,7 +67,9 @@ export function assessReport(report: unknown, expected: { fingerprint: Fingerpri
     if (item.stickyIntegrity !== false) reasons.push("sticky integrity");
     if (!provenanceOk(item, requestIds)) reasons.push(`missing request provenance for ${item.id}`);
     if (item.pass !== caseLooksPassing(item)) reasons.push(`forged pass flag on ${item.id}`);
+    if (expected.cases) cartAgrees(item, expected.cases, expected.binding, reasons);
   }
+  if (!spendReconciles(body.spend, cases)) reasons.push("spend");
   const summary = summarize(cases);
   if (!summaryMatches(body.summary, summary)) reasons.push("summary does not match the case counts");
   if (summary.hallucinatedItems > 0) reasons.push("hallucinated items");
@@ -58,6 +78,76 @@ export function assessReport(report: unknown, expected: { fingerprint: Fingerpri
   if (summary.precisionDenominator > 0 && summary.precisionNumerator / summary.precisionDenominator < 0.9) reasons.push("micro precision below 0.90");
   if (summary.recallDenominator > 0 && summary.recallNumerator / summary.recallDenominator < 0.85) reasons.push("micro recall below 0.85");
   return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
+}
+
+function spendReconciles(spend: EvalReport["spend"] | undefined, cases: CaseResult[]): boolean {
+  if (!spendOk(spend)) return false;
+  let sum = BigInt(0);
+  for (const item of cases) {
+    if (typeof item?.costMicros !== "string" || !/^\d+$/.test(item.costMicros)) return false;
+    sum += BigInt(item.costMicros);
+  }
+  return spend?.micros === sum.toString()
+    && spend.conversationMicros === spend.micros
+    && (spend.ledgerDeltaMicros == null || spend.ledgerDeltaMicros === spend.micros)
+    && spend.usd === formatUsdFromMicros(sum);
+}
+
+function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding | undefined, reasons: string[]): void {
+  const spec = cases.find((candidate) => candidate.id === item.id);
+  if (!spec) {
+    reasons.push(`unknown case ${item.id}`);
+    return;
+  }
+  if (!Array.isArray(item.finalCart)) {
+    reasons.push(`cart does not match ${item.id}`);
+    return;
+  }
+  if (item.category !== spec.category) reasons.push(`category ${item.id}`);
+  if (item.gapRequired !== (spec.gaps.length > 0)) reasons.push(`gap flag ${item.id}`);
+  if (item.pass) {
+    for (let turn = 1; turn <= spec.turns.length; turn += 1) {
+      if (!item.requestProvenance.some((step) => step.attempt === item.attempts && step.turn === turn)) {
+        reasons.push(`missing turn provenance for ${item.id}`);
+      }
+    }
+  }
+  const scored = scoreCase({
+    evalCase: spec,
+    cart: item.finalCart,
+    tools: [],
+    savedTexts: [],
+    observedTexts: [],
+    strippedAmounts: [],
+    successfulWriteTurns: [],
+    returnedLineIds: [],
+    cartLineIds: [],
+    stepLimitHit: item.stepLimitHit,
+  }, binding ?? bareBinding(), []);
+  if (scored.precisionNumerator !== item.precisionNumerator
+    || scored.precisionDenominator !== item.precisionDenominator
+    || scored.recallNumerator !== item.recallNumerator
+    || scored.recallDenominator !== item.recallDenominator
+    || scored.safetyFailures.some((failure) => !item.safetyFailures.includes(failure))) {
+    reasons.push(`cart does not match ${item.id}`);
+  }
+  const quantityChecks = spec.qty?.length ?? 0;
+  const quantityHits = (spec.qty ?? []).filter((rule) => item.finalCart.some((line) => line.key === rule.listingKey && line.variantKey === rule.variantKey && line.qty >= rule.min && line.qty <= rule.max)).length;
+  if (item.quantityChecks !== quantityChecks || item.quantityHits !== quantityHits) reasons.push(`quantity counts ${item.id}`);
+}
+
+function bareBinding(): CatalogBinding {
+  return {
+    byListingKey: new Map(),
+    byVariantKey: new Map(),
+    byListingId: new Map(),
+    byVariantId: new Map(),
+    aListingIds: new Set(),
+    aVariantIds: new Set(),
+    bListingIds: new Set(),
+    bVariantIds: new Set(),
+    minimumOrderCents: 0,
+  };
 }
 
 function spendOk(spend: EvalReport["spend"] | undefined): boolean {
@@ -100,12 +190,10 @@ function summaryMatches(claimed: ReportSummary | undefined, summary: ReportSumma
     && claimed.quantityAccuracy === summary.quantityAccuracy
     && claimed.steps === summary.steps
     && claimed.stepLimitHits === summary.stepLimitHits
-    && claimed.toolInputErrors === summary.toolInputErrors;
-  return same && canonicalSummary(claimed.byCategory) === canonicalSummary(summary.byCategory);
-}
-
-function canonicalSummary(value: unknown): string {
-  return JSON.stringify(value);
+    && claimed.toolInputErrors === summary.toolInputErrors
+    && claimed.microPrecision === summary.microPrecision
+    && claimed.microRecall === summary.microRecall;
+  return same && canonicalJson(claimed.byCategory) === canonicalJson(summary.byCategory);
 }
 
 function provenanceOk(item: CaseResult, seenIds: Set<string>): boolean {
@@ -143,8 +231,9 @@ export async function checkCommittedEval(options?: { fetch?: typeof fetch; repor
   const previousModel = process.env.ASSISTANT_MODEL;
   const previousEnabled = process.env.ASSISTANT_CHAT_ENABLED;
   const previousCap = process.env.ASSISTANT_SPEND_CAP_USD;
+  const defaultModel = assistantModelId(envWithoutModelOverride());
   process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-  process.env.ASSISTANT_MODEL = "claude-haiku-5-5";
+  process.env.ASSISTANT_MODEL = defaultModel;
   process.env.ASSISTANT_CHAT_ENABLED = "1";
   process.env.ASSISTANT_SPEND_CAP_USD = "1000000";
   const exchanges: RecordedExchange[] = [];
@@ -182,14 +271,20 @@ export async function checkCommittedEval(options?: { fetch?: typeof fetch; repor
       masterCatalog: stores.masterCatalog,
       stepCap: ASSISTANT_STEP_CAP,
     });
-    const model = assistantModelId();
+    const model = defaultModel;
     let report: unknown;
     try {
       report = JSON.parse(options?.reportText ?? readFileSync(REPORT_PATH, "utf8")) as unknown;
     } catch {
       return { ok: false, reasons: ["committed report is missing"] };
     }
-    return assessReport(report, { fingerprint, caseIds: cases.map((item) => item.id), model });
+    return assessReport(report, {
+      fingerprint,
+      caseIds: cases.map((item) => item.id),
+      model,
+      cases,
+      binding: bindingFromFixture(fixture, stores.ids),
+    });
   } catch (error) {
     return { ok: false, reasons: [error instanceof Error ? error.message : "fingerprint probe failed"] };
   } finally {
@@ -199,6 +294,12 @@ export async function checkCommittedEval(options?: { fetch?: typeof fetch; repor
     restore("ASSISTANT_CHAT_ENABLED", previousEnabled);
     restore("ASSISTANT_SPEND_CAP_USD", previousCap);
   }
+}
+
+function envWithoutModelOverride(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.ASSISTANT_MODEL;
+  return env;
 }
 
 function restore(name: string, value: string | undefined): void {

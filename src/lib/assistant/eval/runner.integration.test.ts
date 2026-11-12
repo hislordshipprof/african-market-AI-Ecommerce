@@ -450,6 +450,31 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       stepLimitHit: false,
     }, binding, ["missing"]);
     expect(future.temporalViolations).toContain(999);
+    const earlier = { priceCents: 1099, variantId: "garri-pack" };
+    const savedReply = scoreCase({
+      evalCase: evalCase({
+        id: "saved-price",
+        category: "single-item",
+        turns: ["price", "total"],
+        mustHave: [],
+        mayHave: [],
+        gaps: [],
+      }),
+      cart: [],
+      tools: [{ tool: "search_catalog", input: {}, output: earlier, turn: 1 }],
+      savedTexts: [
+        { turn: 1, text: "Each bag is $10.99.", priorOutputs: [earlier], saved: true },
+        { turn: 2, text: "The old total is $21.98.", priorOutputs: [], saved: true },
+      ],
+      observedTexts: [],
+      strippedAmounts: [],
+      successfulWriteTurns: [],
+      returnedLineIds: [],
+      cartLineIds: [],
+      stepLimitHit: false,
+    }, binding, []);
+    expect(savedReply.ungroundedAmountsShown).toContain(2198);
+    expect(savedReply.ungroundedAmountsShown).not.toContain(1099);
   }, 90_000);
 
   it("concurrent attempts keep scripts request ids errors and spend separate", async () => {
@@ -748,6 +773,79 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(result.result.unresolvedSpend).toBe(true);
     expect(result.result.complete).toBe(false);
   }, 90_000);
+
+  it("a later success keeps an earlier hallucinated tool input", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    const result = await run([evalCase({
+      id: "retry-hallucination",
+      category: "single-item",
+      turns: ["Add the yam.", "Add garri instead."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+      qty: [{ listingKey: "garri", variantKey: "garri-pack", min: 1, max: 1 }],
+    })], listings, (ctx) => {
+      const yam = ctx.binding.byVariantKey.get("yam-pack")?.id ?? "";
+      const garri = ctx.binding.byVariantKey.get("garri-pack")?.id ?? "";
+      let calls = 0;
+      const fake = createFakeAnthropicFetch({
+        expectedKey: KEY,
+        steps: ctx.attempt === 1
+          ? [
+            { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: yam, qty: 1 }] } },
+            { kind: "text", text: "I added the yam." },
+          ]
+          : [
+            { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: garri, qty: 1 }] } },
+            { kind: "text", text: "Added garri." },
+          ],
+      });
+      return async (input, init) => {
+        calls += 1;
+        if (ctx.attempt === 1 && calls === 3) {
+          return new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: "overloaded" } }), {
+            status: 500,
+            headers: { "request-id": "req_1_3", "content-type": "application/json" },
+          });
+        }
+        const response = await fake.fetch(input, init);
+        const headers = new Headers(response.headers);
+        headers.set("request-id", `req_${ctx.attempt}_${calls}`);
+        return new Response(response.body, { status: response.status, headers });
+      };
+    }, { maxAttempts: 2 });
+    const scored = result.result.cases[0];
+    expect(scored?.pass).toBe(false);
+    expect(scored?.stickyIntegrity).toBe(true);
+    expect(scored?.hallucinated.some((item) => item.crossStore)).toBe(true);
+    expect(scored?.finalCart.map((line) => line.key)).toEqual(["garri"]);
+    expect(scored?.precision).toBe(1);
+    expect(scored?.recall).toBe(1);
+    expect(scored?.requestProvenance.some((step) => step.attempt === 1)).toBe(true);
+    expect(scored?.requestProvenance.some((step) => step.attempt === 2)).toBe(true);
+    expect(result.result.complete).toBe(true);
+  }, 90_000);
+
+  it("keeps the ticket reserve when a sent request ends without usage", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    const dir = mkdtempSync(join(tmpdir(), "eval-ticket-"));
+    const ticket = join(dir, "ticket-spend.json");
+    writeFileSync(ticket, "{\"schemaVersion\":1,\"micros\":\"0\",\"usd\":\"0.000000\"}\n");
+    const result = await run([evalCase({
+      id: "socket-reset",
+      category: "single-item",
+      turns: ["Add garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    })], listings, () => async () => {
+      throw new Error("socket reset after request was sent");
+    }, { maxAttempts: 1, ticketSpendPath: ticket });
+    const saved = JSON.parse(readFileSync(ticket, "utf8")) as { micros: string };
+    expect(saved.micros).toBe("150000");
+    expect(result.result.unresolvedSpend).toBe(true);
+    expect(result.result.complete).toBe(false);
+  }, 60_000);
 });
 
 function emptyBinding(): CatalogBinding {

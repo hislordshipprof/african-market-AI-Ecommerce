@@ -16,7 +16,7 @@ import {
 } from "./fixture-store";
 import { recordingFetch, type RecordedExchange } from "./recording-fetch";
 import { validateDataset, validateFixture } from "./dataset";
-import type { CartSnapshotLine, CaseResult, CatalogFixture, EvalCase, RunResult } from "./types";
+import type { CartSnapshotLine, CaseResult, CatalogFixture, EvalCase, HallucinatedItem, RunResult } from "./types";
 
 const attemptStore = new AsyncLocalStorage<string>();
 const RESERVE_MICROS = BigInt(150000);
@@ -92,21 +92,26 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
           return;
         }
         let caseMicros = BigInt(0);
+        let unresolvedAttempt = false;
         try {
           const outcome = await attemptStore.run(`case:${evalCase.id}`, () => runCase(evalCase, index, created, binding, options, budget, () => aborted, (body) => {
             if (!firstRequestBody && body) firstRequestBody = body;
           }, stripWatches));
           caseMicros = outcome.costMicros;
           if (outcome.abort) aborted = { reason: outcome.abort };
-          if (outcome.unresolved) result.unresolvedSpend = true;
+          if (outcome.unresolved) {
+            result.unresolvedSpend = true;
+            unresolvedAttempt = true;
+          }
           result.inputTokens += outcome.inputTokens;
           result.outputTokens += outcome.outputTokens;
           result.cases.push(outcome.caseResult);
         } catch (error) {
           aborted = { reason: error instanceof Error ? error.message : "worker failed" };
           result.unresolvedSpend = true;
+          unresolvedAttempt = true;
         } finally {
-          await budget.release();
+          await budget.release(unresolvedAttempt);
           result.spendMicros += caseMicros;
         }
       }
@@ -186,11 +191,12 @@ async function runCase(
   let unresolved = false;
   let last: CaseResult | null = null;
   const provenance: CaseResult["requestProvenance"] = [];
+  const carried = emptyCarry();
   while (attempts < maxAttempts) {
     if (aborted()) break;
     if (attempts > 0) {
       const again = await budget.admitRetry();
-      if (!again) return finish(last ? remember(last, provenance) : null, evalCase, attempts, cost, "budget", true, inputTokens, outputTokens, unresolved);
+      if (!again) return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, "budget", true, inputTokens, outputTokens, unresolved);
     }
     attempts += 1;
     const attemptKey = `${evalCase.id}:${attempts}`;
@@ -203,10 +209,10 @@ async function runCase(
     unresolved = unresolved || outcome.unresolved;
     provenance.push(...outcome.caseResult.requestProvenance);
     if (outcome.abort) {
-      return finish(remember(outcome.caseResult, provenance), evalCase, attempts, cost, outcome.abort, sticky, inputTokens, outputTokens, unresolved);
+      return finish(applyCarry(remember(outcome.caseResult, provenance), carried), evalCase, attempts, cost, outcome.abort, sticky, inputTokens, outputTokens, unresolved);
     }
     if (!outcome.retry) {
-      const saved = remember(outcome.caseResult, provenance);
+      const saved = applyCarry(remember(outcome.caseResult, provenance), carried);
       saved.attempts = attempts;
       saved.stickyIntegrity = sticky || saved.stickyIntegrity;
       if (saved.stickyIntegrity) {
@@ -216,11 +222,55 @@ async function runCase(
       saved.costMicros = cost.toString();
       return { caseResult: saved, costMicros: cost, abort: null, unresolved, inputTokens, outputTokens };
     }
+    absorbCarry(carried, outcome.caseResult);
+    if (outcome.sticky || outcome.caseResult.hallucinated.length > 0 || outcome.caseResult.safetyFailures.length > 0 || outcome.caseResult.ungroundedAmountsShown.length > 0) sticky = true;
     last = remember(outcome.caseResult, provenance);
     const delay = options.retryDelayMs ?? defaultRetryDelay;
     await sleep(delay(attempts, outcome.retryAfterSeconds));
   }
-  return finish(last ? remember(last, provenance) : null, evalCase, attempts, cost, null, sticky, inputTokens, outputTokens, unresolved);
+  return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, null, sticky, inputTokens, outputTokens, unresolved);
+}
+
+function emptyCarry(): Pick<CaseResult, "hallucinated" | "safetyFailures" | "ungroundedAmountsShown" | "temporalViolations"> {
+  return { hallucinated: [], safetyFailures: [], ungroundedAmountsShown: [], temporalViolations: [] };
+}
+
+function sameHallucination(left: HallucinatedItem, right: HallucinatedItem): boolean {
+  return left.field === right.field && left.id === right.id && left.crossStore === right.crossStore;
+}
+
+function absorbCarry(carried: ReturnType<typeof emptyCarry>, item: CaseResult): void {
+  for (const found of item.hallucinated) {
+    if (!carried.hallucinated.some((have) => sameHallucination(have, found))) carried.hallucinated.push(found);
+  }
+  for (const failure of item.safetyFailures) {
+    if (!carried.safetyFailures.includes(failure)) carried.safetyFailures.push(failure);
+  }
+  for (const amount of item.ungroundedAmountsShown) {
+    if (!carried.ungroundedAmountsShown.includes(amount)) carried.ungroundedAmountsShown.push(amount);
+  }
+  for (const amount of item.temporalViolations) {
+    if (!carried.temporalViolations.includes(amount)) carried.temporalViolations.push(amount);
+  }
+}
+
+function applyCarry(item: CaseResult, carried: ReturnType<typeof emptyCarry>): CaseResult {
+  for (const found of carried.hallucinated) {
+    if (!item.hallucinated.some((have) => sameHallucination(have, found))) item.hallucinated.push(found);
+  }
+  item.safetyFailures = [...new Set([...item.safetyFailures, ...carried.safetyFailures])];
+  for (const amount of carried.ungroundedAmountsShown) {
+    if (!item.ungroundedAmountsShown.includes(amount)) item.ungroundedAmountsShown.push(amount);
+  }
+  for (const amount of carried.temporalViolations) {
+    if (!item.temporalViolations.includes(amount)) item.temporalViolations.push(amount);
+  }
+  if (carried.hallucinated.length > 0 || carried.safetyFailures.length > 0 || carried.ungroundedAmountsShown.length > 0) {
+    item.stickyIntegrity = true;
+    item.pass = false;
+    if (item.reason === "ok") item.reason = "earlier integrity failure";
+  }
+  return item;
 }
 
 function remember(result: CaseResult, provenance: CaseResult["requestProvenance"]): CaseResult {
@@ -270,6 +320,13 @@ async function oneAttempt(
   outputTokens: number;
 }> {
   const exchanges: RecordedExchange[] = [];
+  let cartId = "";
+  let retry = false;
+  let abort: string | null = null;
+  let retryAfterSeconds: number | null = null;
+  let steps = 0;
+  const provenance: CaseResult["requestProvenance"] = [];
+  const observed: TextBlock[] = [];
   try {
   const inner = await options.fetchForAttempt({ caseId: evalCase.id, attempt, binding, stores });
   const fetchImpl = recordingFetch(inner, exchanges);
@@ -279,13 +336,6 @@ async function oneAttempt(
   });
   const ip = `2001:db8:${stores.runId.slice(0, 4)}:${index}:${attempt}`;
   let cookie: string | null = null;
-  let cartId = "";
-  let retry = false;
-  let abort: string | null = null;
-  let retryAfterSeconds: number | null = null;
-  let steps = 0;
-  const provenance: CaseResult["requestProvenance"] = [];
-  const observed: TextBlock[] = [];
   for (let turn = 0; turn < evalCase.turns.length; turn += 1) {
     const started = exchanges.length;
     const messageId = `e${randomBytes(8).toString("hex")}`;
@@ -380,6 +430,8 @@ async function oneAttempt(
   blank.reason = abort ?? "retry";
   blank.anthropicRequestIds = provenance.map((item) => item.requestId);
   blank.requestProvenance = provenance;
+  await fillAbandonedIntegrity(blank, { evalCase, binding, exchanges, cartId, storeId: stores.storeAId, steps, provenance, observed });
+  const logged = attemptLogs(attemptStore.getStore() ?? "").some((line) => /not saved|not recorded/.test(line));
   return {
     caseResult: blank,
     costMicros: money.micros,
@@ -387,7 +439,7 @@ async function oneAttempt(
     retry: abort ? false : true,
     retryAfterSeconds,
     unresolved: money.unresolved,
-    sticky: attemptLogs(attemptStore.getStore() ?? "").some((line) => /not saved|not recorded/.test(line)),
+    sticky: logged || blank.stickyIntegrity,
     inputTokens: money.inputTokens,
     outputTokens: money.outputTokens,
   };
@@ -395,6 +447,7 @@ async function oneAttempt(
     const money = spendOf(exchanges);
     const blank = blankCase(evalCase);
     blank.reason = error instanceof Error ? error.message : "attempt failed";
+    await fillAbandonedIntegrity(blank, { evalCase, binding, exchanges, cartId, storeId: stores.storeAId, steps, provenance, observed });
     return {
       caseResult: blank,
       costMicros: money.micros,
@@ -402,10 +455,40 @@ async function oneAttempt(
       retry: true,
       retryAfterSeconds: null,
       unresolved: true,
-      sticky: false,
+      sticky: blank.stickyIntegrity,
       inputTokens: money.inputTokens,
       outputTokens: money.outputTokens,
     };
+  }
+}
+
+async function fillAbandonedIntegrity(blank: CaseResult, args: {
+  evalCase: EvalCase;
+  binding: CatalogBinding;
+  exchanges: RecordedExchange[];
+  cartId: string;
+  storeId: string;
+  steps: number;
+  provenance: CaseResult["requestProvenance"];
+  observed: TextBlock[];
+}): Promise<void> {
+  if (!args.cartId) return;
+  try {
+    const row = await storeScoped(args.storeId).aiConversation.findFirst({ where: { storeId: args.storeId, cartId: args.cartId } });
+    const messages = Array.isArray(row?.messages) ? row.messages as Array<Record<string, unknown>> : [];
+    if (!row) return;
+    const scored = await scoreAttempt({ ...args, messages, strips: [] });
+    blank.hallucinated = scored.caseResult.hallucinated;
+    blank.safetyFailures = scored.caseResult.safetyFailures;
+    blank.ungroundedAmountsShown = scored.caseResult.ungroundedAmountsShown;
+    blank.temporalViolations = scored.caseResult.temporalViolations;
+    blank.finalCart = scored.caseResult.finalCart;
+    blank.stickyIntegrity = scored.caseResult.hallucinated.length > 0
+      || scored.caseResult.safetyFailures.length > 0
+      || scored.caseResult.ungroundedAmountsShown.length > 0
+      || scored.sticky;
+  } catch {
+    // A transport failure can leave no settled conversation. Request ids still travel with the blank case.
   }
 }
 
@@ -812,7 +895,7 @@ interface Budget {
   admit: () => Promise<boolean>;
   admitRetry: () => Promise<boolean>;
   settleAttempt: (actual: bigint) => Promise<void>;
-  release: () => Promise<void>;
+  release: (unresolved?: boolean) => Promise<void>;
   ticketBlocked: boolean;
 }
 
@@ -859,9 +942,13 @@ function createBudget(options: RunEvalOptions): Budget {
       spent += safe;
       if (options.ticketSpendPath) adjustTicketSpend(safe, options.ticketSpendPath);
     }),
-    release: () => run(() => {
+    release: (unresolved = false) => run(() => {
       if (inflight >= RESERVE_MICROS) inflight -= RESERVE_MICROS;
       else inflight = BigInt(0);
+      if (unresolved) {
+        spent += RESERVE_MICROS;
+        return;
+      }
       if (options.ticketSpendPath) adjustTicketSpend(-RESERVE_MICROS, options.ticketSpendPath);
     }),
   };
