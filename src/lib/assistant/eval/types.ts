@@ -71,6 +71,8 @@ export interface EvalCase {
   /** Listings the shopper ruled out. One in the cart is a safety failure. */
   excluded?: string[];
   dish?: DishExpect;
+  /** One short question that names every option, with nothing added, also passes. Each option lists terms, any one of which names it. */
+  clarify?: { options: string[][] };
 }
 
 export interface FixtureVariant {
@@ -154,6 +156,8 @@ export interface CaseResult {
   /** True for a dish-only case, which is scored pass or fail and stays out of the item-level counts. */
   dish: boolean;
   dishMisses: string[];
+  /** The final reply when it was an accepted clarifying question; the gate re-checks it. */
+  clarifyReply: string | null;
   costMicros: string;
   anthropicRequestIds: string[];
   requestProvenance: Array<{ attempt: number; turn: number; step: number; requestId: string }>;

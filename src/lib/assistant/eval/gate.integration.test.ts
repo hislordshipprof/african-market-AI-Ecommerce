@@ -82,6 +82,7 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
     gapRequired: false,
     dish: false,
     dishMisses: [],
+    clarifyReply: null,
     costMicros: "1",
     anthropicRequestIds: [`req_${id}`],
     requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${id}` }],
@@ -175,6 +176,7 @@ function caseFromScore(id: string, category: CaseResult["category"], scored: Sco
     gapRequired,
     dish: category === "recipe-to-cart",
     dishMisses: scored.dishMisses,
+    clarifyReply: scored.clarifyReply,
     costMicros: "0",
     anthropicRequestIds: [`req_${id}`],
     requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${id}` }],
@@ -395,6 +397,45 @@ describe("shopper assistant eval gate", () => {
     expect(forgedVerdict.reasons).toContain("cart does not match dish-0");
     expect(forgedVerdict.reasons).not.toContain("dish pass rate below 0.85");
     expect(forgedVerdict.ok).toBe(false);
+  });
+
+  it("passes a synonym case on either option or on one short question that names both", () => {
+    const binding = twoPackBinding();
+    const agushi: EvalCase = {
+      id: "agushi",
+      category: "synonym",
+      turns: ["Add 1 agushi."],
+      mustHave: [{ options: [{ listingKey: "paste-a", variantKeys: ["paste-a-pack"] }, { listingKey: "paste-b", variantKeys: ["paste-b-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+      clarify: { options: [["whole"], ["ground"]] },
+    };
+    const line = (key: string): CartSnapshotLine => ({ key, variantKey: `${key}-pack`, qty: 1, swapRule: "exact_only", substituteVariantKey: null });
+    const score = (cart: CartSnapshotLine[], reply: string) => scoreCase({
+      evalCase: agushi,
+      cart,
+      tools: [],
+      savedTexts: [{ turn: 1, text: reply, priorOutputs: [], saved: true }],
+      observedTexts: [],
+      strippedAmounts: [],
+      successfulWriteTurns: [],
+      returnedLineIds: [],
+      cartLineIds: [],
+      stepLimitHit: false,
+    }, binding, [reply]);
+    const question = "Agushi is egusi. Do you want whole egusi seeds or ground egusi?";
+    expect(score([line("paste-b")], "Added ground egusi.").pass).toBe(true);
+    const asked = score([], question);
+    expect([asked.pass, asked.recallNumerator, asked.clarifyReply]).toEqual([true, 1, question]);
+    expect(score([], "Do you want whole egusi seeds?").pass).toBe(false);
+    expect(score([], `${question} Or something else?`).pass).toBe(false);
+    expect(score([], `${"Agushi is egusi, a melon seed. ".repeat(12)}${question}`).pass).toBe(false);
+    expect(score([line("paste-a")], question).clarifyReply).toBeNull();
+
+    const expected = { fingerprint: fingerprint(), caseIds: ["agushi"], model: "claude-haiku-5-5", cases: [agushi], binding };
+    expect(assessReport(report([caseFromScore("agushi", "synonym", asked, false)]), expected).reasons).toEqual([]);
+    const forged = { ...caseFromScore("agushi", "synonym", asked, false), clarifyReply: "Do you want whole egusi?" };
+    expect(assessReport(report([forged]), expected).reasons).toContain("cart does not match agushi");
   });
 
   it.skipIf(!hasDb)("rejects a report whose model is not the default Haiku fingerprint", async () => {

@@ -71,6 +71,7 @@ export interface ScoreOutput {
   gapsReported: boolean;
   safetyFailures: string[];
   dishMisses: string[];
+  clarifyReply: string | null;
   pass: boolean;
   reason: string;
 }
@@ -87,7 +88,8 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
   const precisionDenominator = dish ? 0 : input.cart.length;
   const precisionNumerator = dish || input.cart.length === 0 ? 0 : assignment.acceptable;
   const recallDenominator = input.evalCase.mustHave.length;
-  const recallNumerator = input.evalCase.mustHave.length === 0 ? 0 : assignment.satisfied;
+  const clarifyReply = acceptedClarifyReply(input);
+  const recallNumerator = input.evalCase.mustHave.length === 0 ? 0 : clarifyReply != null ? recallDenominator : assignment.satisfied;
   const hallucinated = collectHallucinations(input, binding);
   const ungroundedAmountsShown = input.savedTexts.flatMap((block) => disallowedAmounts(block, input, binding));
   const temporalViolations = input.observedTexts.flatMap((block) => disallowedAmounts(block, input, binding));
@@ -123,9 +125,23 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
     gapsReported,
     safetyFailures: uniqueSafety,
     dishMisses,
+    clarifyReply,
     pass,
     reason: reason || "recall",
   };
+}
+
+const CLARIFY_MAX_CHARS = 400;
+
+/** The final reply, when the case allows a clarifying question, nothing was added, and one short question names every option. */
+function acceptedClarifyReply(input: ScoreInput): string | null {
+  const clarify = input.evalCase.clarify;
+  if (!clarify || input.cart.length > 0) return null;
+  const finalTurn = input.evalCase.turns.length;
+  const reply = input.savedTexts.filter((block) => block.turn === finalTurn).map((block) => block.text).join("\n").trim();
+  if (reply === "" || reply.length > CLARIFY_MAX_CHARS || (reply.match(/\?/g) ?? []).length !== 1) return null;
+  const folded = reply.toLowerCase();
+  return clarify.options.every((terms) => terms.some((term) => folded.includes(term.toLowerCase()))) ? reply : null;
 }
 
 /** Core ingredients missing from a dish cart. The gate recomputes these from the committed cart. */

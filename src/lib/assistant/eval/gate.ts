@@ -119,7 +119,7 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
     evalCase: spec,
     cart: item.finalCart,
     tools: [],
-    savedTexts: [],
+    savedTexts: typeof item.clarifyReply === "string" ? [{ turn: spec.turns.length, text: item.clarifyReply, priorOutputs: [], saved: true }] : [],
     observedTexts: [],
     strippedAmounts: [],
     successfulWriteTurns: [],
@@ -131,6 +131,7 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
     || scored.precisionDenominator !== item.precisionDenominator
     || scored.recallNumerator !== item.recallNumerator
     || scored.recallDenominator !== item.recallDenominator
+    || scored.clarifyReply !== item.clarifyReply
     || scored.safetyFailures.some((failure) => !item.safetyFailures.includes(failure))
     || !sameCartMisses(dishCartMisses(spec, item.finalCart), item.dishMisses)) {
     reasons.push(`cart does not match ${item.id}`);
@@ -183,6 +184,7 @@ function countsOk(item: CaseResult): boolean {
   if (!nonNegativeInt(item.quantityChecks) || !nonNegativeInt(item.quantityHits) || item.quantityHits > item.quantityChecks) return false;
   if (typeof item.dish !== "boolean" || !Array.isArray(item.dishMisses) || item.dishMisses.some((miss) => typeof miss !== "string")) return false;
   if (item.dish && (item.precisionDenominator !== 0 || item.recallDenominator !== 0)) return false;
+  if (item.clarifyReply !== null && typeof item.clarifyReply !== "string") return false;
   return typeof item.gapRequired === "boolean" && typeof item.gapsReported === "boolean" && typeof item.pass === "boolean";
 }
 
