@@ -90,6 +90,16 @@ _Avoid_: Offline sale, POS sale
 **Owner report**:
 A stock change the store owner tells the Store copilot about (a restock, counter sales, a recount), confirmed with a tap.
 
+**Product attributes**:
+A product's ingredients, allergens (the US top 9) and dietary claims (halal, kosher, vegan, vegetarian, no pork, gluten free). Each group has a status: unknown, known (a store owner stated it) or reviewed (a platform admin approved it). Unknown is never safe: under a shopper's exclusion or dietary need it means "cannot confirm", neither included nor excluded.
+_Avoid_: tags, labels
+
+**Ingredient**:
+One row per ingredient, under one lower-case English name, with its local names as synonyms (e.g. "ata rodo" for scotch bonnet pepper).
+
+**Attribute proposal**:
+Product attributes Claude read from a master product's label photo and description, waiting for a platform admin to approve or reject. Nothing on the product changes until approved.
+
 **Stock proposal**:
 A pending owner report the Store copilot drafted and has not applied. Stock changes only when the owner confirms it. Dismissing it writes nothing to the shelf.
 
