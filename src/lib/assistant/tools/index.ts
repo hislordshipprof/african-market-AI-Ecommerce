@@ -7,6 +7,7 @@ import {
   offerChoices,
   removeFromCart,
   searchCatalog,
+  setShopperNeeds,
   setSwapRule,
   showProducts,
   suggestSubstitutes,
@@ -27,6 +28,7 @@ import {
   removeFromCartInput,
   searchCatalogInput,
   offerChoicesInput,
+  setShopperNeedsInput,
   setSwapRuleInput,
   showProductsInput,
   suggestSubstitutesInput,
@@ -39,9 +41,14 @@ export { toolInputSchemas } from "./schemas";
 export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {}) {
   return exactAssistantKeys({
     search_catalog: tool({
-      description: "Search this store's catalog. query is the product words only, including a brand the customer named. pack is a size or pack the customer named, such as \"400 g tin\" or \"bag\". exclude is words the customer ruled out, such as onion. Match name or match synonym is a fit. Match near is not a fit on an explicit add. Search returns the cheapest variant. When pack does not appear on that variant's label, call show_products and add the variant whose label shows it.",
+      description: "Search this store's catalog. query is the product words only, including a brand the customer named. pack is a size or pack the customer named, such as \"400 g tin\" or \"bag\". Match name or match synonym is a fit. Match near is not a fit on an explicit add. Search returns the cheapest variant. When pack does not appear on that variant's label, call show_products and add the variant whose label shows it.",
       inputSchema: searchCatalogInput,
       execute: (input, options) => searchCatalog({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    set_shopper_needs: tool({
+      description: "Save what the customer must avoid or needs, from their own words: allergens, dietary claims, and ingredients. Kept for this conversation. Searches and adds check it.",
+      inputSchema: setShopperNeedsInput,
+      execute: (input, options) => setShopperNeeds({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     show_products: tool({
       description: "Show product cards for listing ids in this store.",

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { UNSET_MAX_PER_ORDER } from "../../cart/limits";
+import { ALLERGENS, DIETARY_CLAIMS } from "../../catalog/attributes";
 import { scrubKnownStrings } from "../card-scrub";
 import { exactAssistantKeys } from "../contract";
 
@@ -13,10 +14,18 @@ export const searchCatalogInput = z.object({
   pack: z.string().min(1).max(100).optional().describe(
     "The size or pack the customer named, such as 400 g tin or bag.",
   ),
-  exclude: z.string().min(1).max(100).optional().describe(
-    "Words the customer excluded, such as onion. A listing whose name matches them is left out.",
-  ),
   limit: z.number().int().min(1).max(10).default(8),
+});
+
+export const setShopperNeedsInput = z.object({
+  avoid_allergens: z.array(z.enum(ALLERGENS)).max(9).default([]),
+  require_claims: z.array(z.enum(DIETARY_CLAIMS)).max(6).default([]),
+  avoid_ingredients: z.array(z.string().trim().min(1).max(60)).max(10).default([]).describe(
+    "Ingredients the customer rules out, in their words, such as yellow onion.",
+  ),
+  remove: z.array(z.string().trim().min(1).max(60)).max(10).default([]).describe(
+    "Constraints the customer takes back, by the name this tool returned.",
+  ),
 });
 
 export const showProductsInput = z.object({
@@ -98,6 +107,7 @@ export const getRecipeInput = z.object({
 
 export const toolInputSchemas = exactAssistantKeys({
   search_catalog: searchCatalogInput,
+  set_shopper_needs: setShopperNeedsInput,
   show_products: showProductsInput,
   check_availability: checkAvailabilityInput,
   suggest_substitutes: suggestSubstitutesInput,

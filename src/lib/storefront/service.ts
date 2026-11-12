@@ -6,6 +6,8 @@ import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
 import { effectiveMaxPerOrder } from "../cart/limits";
+import type { ProductAttributes, ShopperNeed } from "../catalog/attributes";
+import { attributesFromRow, effectiveAttributesSql, needExcludesSql, type AttributeRow } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
@@ -283,9 +285,11 @@ export type CatalogMatch = "name" | "synonym" | "near";
 export interface SearchHit extends SearchResult {
   match: CatalogMatch;
   matchedTerm?: string;
+  /** Present when the search ran with a shopper need. */
+  attributes?: ProductAttributes;
 }
 
-interface RawSearchRow {
+interface RawSearchRow extends Partial<AttributeRow> {
   id: string;
   custom_name: string | null;
   master_product_name: string | null;
@@ -309,10 +313,9 @@ interface RawSearchRow {
 async function readSearchListings(
   storeId: string,
   query: string,
-  exclude = "",
+  need: ShopperNeed | null = null,
 ): Promise<SearchHit[]> {
   const trimmed = query.trim();
-  const excluded = exclude.trim();
   if (!trimmed) return [];
 
   const results = await storeScopedRawQuery<RawSearchRow>(
@@ -322,6 +325,7 @@ async function readSearchListings(
       l.price, l.confidence, l.stock_mode, l.qty, l.status, l.frozen, l.perishable,
       pack.price AS min_variant_price, pack.id AS variant_id,
       pack.label AS pack_label, pack.weight_g,
+      ${need ? Prisma.sql`attrs.*,` : Prisma.empty}
       CASE
         WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 'name'
         WHEN synonym_hit.term IS NOT NULL THEN 'synonym'
@@ -334,6 +338,7 @@ async function readSearchListings(
     FROM listings l
     LEFT JOIN master_products mp ON l.master_product_id = mp.id
     LEFT JOIN categories c ON mp.category_id = c.id
+    ${need ? effectiveAttributesSql : Prisma.empty}
     LEFT JOIN LATERAL (
       SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
       WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id COLLATE "C" LIMIT 1
@@ -376,7 +381,7 @@ async function readSearchListings(
     ) typo
     WHERE l.active = true AND ${notE2eListingSql}
       AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND typo.score > 0.3))
-      AND (${excluded} = '' OR NOT (${excludeMatchSql(Prisma.sql`name_doc.title`, Prisma.sql`${excluded}`)}))
+      AND NOT ${need ? needExcludesSql(need) : Prisma.sql`false`}
     ORDER BY
       CASE
         WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 0
@@ -410,6 +415,7 @@ async function readSearchListings(
       } satisfies StockBadgeInput),
       match: row.match === "name" || row.match === "synonym" ? row.match : "near",
       ...(row.matched_term ? { matchedTerm: row.matched_term } : {}),
+      ...(need ? { attributes: attributesFromRow(row as AttributeRow) } : {}),
     };
   });
 }
@@ -610,11 +616,11 @@ export function getListingDetail(storeId: string, listingId: string) {
   return cachedStorefrontRead(storeId, JSON.stringify(["getListingDetail", listingId]), () => readGetListingDetail(storeId, listingId));
 }
 
-function loadSearch(storeId: string, query: string, exclude = "") {
+function loadSearch(storeId: string, query: string) {
   return cachedStorefrontRead(
     storeId,
-    JSON.stringify(["searchListings", query, exclude]),
-    () => readSearchListings(storeId, query, exclude),
+    JSON.stringify(["searchListings", query]),
+    () => readSearchListings(storeId, query),
   );
 }
 
@@ -629,8 +635,10 @@ export function searchListings(storeId: string, query: string) {
   return loadSearch(storeId, query).then((rows) => rows.map(withoutMatch));
 }
 
-export function searchCatalogHits(storeId: string, query: string, exclude = "") {
-  return loadSearch(storeId, query, exclude);
+/** The assistant's search. A need filters in SQL before ranking: an excluded listing never comes back. */
+export function searchCatalogHits(storeId: string, query: string, need: ShopperNeed | null = null) {
+  // Attribute reviews do not revalidate store caches, so a need always reads fresh.
+  return need ? readSearchListings(storeId, query, need) : loadSearch(storeId, query);
 }
 
 export function getActiveListings(storeId: string) {

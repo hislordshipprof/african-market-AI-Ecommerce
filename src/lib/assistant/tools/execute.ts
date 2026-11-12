@@ -16,6 +16,19 @@ import {
 } from "../../cart/service";
 import { storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
+import {
+  changeConstraints,
+  constraintStatuses,
+  hasConstraints,
+  listingVerdicts,
+  overallStatus,
+  readConstraints,
+  shopperNeed,
+  updateConstraints,
+  verdictReason,
+  type ConstraintStatus,
+  type ListingVerdict,
+} from "../constraints";
 import { isAcceptanceLed, namesForListing, textNamesProduct, type AcceptanceTurn } from "../shown";
 import { listingImage } from "../../storefront/images";
 import { searchCatalogHits } from "../../storefront/service";
@@ -29,6 +42,7 @@ import {
   removeFromCartInput,
   searchCatalogInput,
   offerChoicesInput,
+  setShopperNeedsInput,
   setSwapRuleInput,
   showProductsInput,
   suggestSubstitutesInput,
@@ -60,6 +74,8 @@ const MESSAGES: Record<string, string> = {
   not_enough_choices: "There are not enough choices to pick from.",
   not_shown: "Nothing was added. Tell me which items you want, and I'll add them.",
   backup_required: "This item may be unavailable, so it keeps a backup: Let the store suggest or a named substitute.",
+  excluded: "That item does not meet the customer's needs.",
+  cannot_confirm: "I can't confirm that item meets the customer's needs.",
 };
 
 function fail(code: string): ToolFailure {
@@ -138,7 +154,7 @@ function factsOf(listing: StockFacts): StockFacts {
   };
 }
 
-const MATCH_RANK = { name: 0, synonym: 1, near: 2 } as const;
+const MATCH_RANK = { name: 0, synonym: 1, cannot_confirm: 2, near: 3 } as const;
 
 type CatalogItem = {
   listingId: string;
@@ -149,15 +165,19 @@ type CatalogItem = {
   priceCents: number;
   imageUrl: string | null;
   mayBeUnavailable: boolean;
-  match: "name" | "synonym" | "near";
+  /** cannot_confirm: a saved constraint is unknown for this listing, so it is not a fit. */
+  match: "name" | "synonym" | "near" | "cannot_confirm";
   matchedTerm?: string;
+  needs?: Record<string, ConstraintStatus>;
 };
 
 export async function searchCatalog(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(searchCatalogInput, input);
   const query = parsed.query.trim();
   if (!query) return recordRead(ctx, "search_catalog", parsed, { ok: true, items: [] });
-  const found = await searchCatalogHits(ctx.storeId, query, parsed.exclude?.trim() ?? "");
+  const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  const constrained = hasConstraints(constraints);
+  const found = await searchCatalogHits(ctx.storeId, query, constrained ? shopperNeed(constraints) : null);
   const items: CatalogItem[] = found.map((item) => ({
     listingId: item.id,
     name: item.name,
@@ -178,11 +198,89 @@ export async function searchCatalog(ctx: AssistantContext, input: unknown): Prom
       delete item.matchedTerm;
     }
   }
-  const ordered = items
+  const kept = constrained ? items.filter((item, index) => {
+    const attributes = found[index]?.attributes;
+    if (!attributes) return false;
+    item.needs = constraintStatuses(attributes, constraints);
+    const status = overallStatus(item.needs);
+    if (status === "unknown") {
+      item.match = "cannot_confirm";
+      delete item.matchedTerm;
+    }
+    return status !== "excluded";
+  }) : items;
+  const ordered = kept
     .map((item, index) => ({ item, index }))
     .sort((left, right) => MATCH_RANK[left.item.match] - MATCH_RANK[right.item.match] || left.index - right.index)
     .map((row) => row.item);
   return recordRead(ctx, "search_catalog", parsed, { ok: true, items: ordered.slice(0, parsed.limit) });
+}
+
+export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
+  const parsed = parseToolInput(setShopperNeedsInput, input);
+  const saved = await changeConstraints(ctx.storeId, ctx.conversationId, {
+    avoidAllergens: parsed.avoid_allergens,
+    requireClaims: parsed.require_claims,
+    avoidIngredients: parsed.avoid_ingredients,
+    remove: parsed.remove,
+  });
+  return recordRead(ctx, "set_shopper_needs", parsed, {
+    ok: true,
+    avoidAllergens: saved.avoidAllergens,
+    requireClaims: saved.requireClaims,
+    avoidIngredients: saved.avoidIngredients.map((item) => item.term),
+    cannotCheck: saved.avoidIngredients.filter((item) => !item.ingredientId).map((item) => item.term),
+  });
+}
+
+type Refusal = ToolFailure & { listingId: string; needs: Record<string, ConstraintStatus> };
+
+function refusal(verdict: ListingVerdict): Refusal {
+  const code = verdict.status === "excluded" ? "excluded" : "cannot_confirm";
+  return { ok: false, code, message: `${MESSAGES[code]} ${verdictReason(verdict)}`, listingId: verdict.listingId, needs: verdict.needs };
+}
+
+/**
+ * The saved constraints at the point of action. Excluded is refused. Unknown is refused and remembered,
+ * until the customer's next message confirms that one item: by naming it, or by a yes when it was the
+ * only item asked about. A confirmation is recorded and holds for the conversation.
+ */
+async function gateListings(ctx: AssistantContext, listingIds: string[]): Promise<Map<string, Refusal>> {
+  const refused = new Map<string, Refusal>();
+  const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  if (!hasConstraints(constraints) || listingIds.length === 0) return refused;
+  const verdicts = await listingVerdicts(ctx.storeId, listingIds, constraints);
+  const confirmedBefore = new Set(constraints.confirmed.map((row) => row.listingId));
+  const unknown: string[] = [];
+  for (const verdict of verdicts.values()) {
+    if (verdict.status === "excluded") refused.set(verdict.listingId, refusal(verdict));
+    else if (verdict.status === "unknown" && !confirmedBefore.has(verdict.listingId)) unknown.push(verdict.listingId);
+  }
+  if (unknown.length === 0) return refused;
+  const confirming = new Set<string>();
+  const prior = ctx.acceptance ? await priorUserMessage(ctx) : null;
+  if (prior && ctx.acceptance) {
+    const askedBefore = Object.entries(constraints.asked).filter(([, messageId]) => messageId === prior.id).map(([id]) => id);
+    const listings = await storeScoped(ctx.storeId).listing.findMany({
+      where: { id: { in: unknown.filter((id) => askedBefore.includes(id)) } },
+      include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }] } },
+    });
+    for (const listing of listings) {
+      const named = textNamesProduct(ctx.acceptance.customerText, namesForListing(listing));
+      if (named || (ctx.acceptance.led && askedBefore.length === 1)) confirming.add(listing.id);
+    }
+  }
+  for (const id of unknown) {
+    if (!confirming.has(id)) refused.set(id, refusal(verdicts.get(id)!));
+  }
+  await updateConstraints(ctx.storeId, ctx.conversationId, (saved) => {
+    const at = new Date().toISOString();
+    for (const id of unknown) {
+      if (confirming.has(id)) saved.confirmed.push({ listingId: id, messageId: ctx.turnMessageId!, at });
+      else if (ctx.turnMessageId) saved.asked[id] = ctx.turnMessageId;
+    }
+  });
+  return refused;
 }
 
 export async function showProducts(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
@@ -595,9 +693,30 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       });
     }
   }
+  const variantRows = await storeScoped(ctx.storeId).listingVariant.findMany({
+    where: { id: { in: parsed.items.flatMap((item) => [item.variant_id, item.backup_variant_id ?? []].flat()) } },
+    select: { id: true, listingId: true },
+  });
+  const listingOf = new Map(variantRows.map((row) => [row.id, row.listingId]));
+  const refused = await gateListings(ctx, [...new Set(parsed.items.flatMap((item) => listingOf.get(item.variant_id) ?? []))]);
+  const refusedItems = parsed.items.flatMap((item) => {
+    const why = refused.get(listingOf.get(item.variant_id) ?? "");
+    return why ? [{ ...why, variantId: item.variant_id }] : [];
+  });
+  const allowed = parsed.items.filter((item) => !refused.has(listingOf.get(item.variant_id) ?? ""));
+  if (allowed.length === 0) {
+    const [first] = refusedItems;
+    return recordRead(ctx, "add_to_cart", raw, refusedItems.length === 1 ? first : { ...first, items: refusedItems });
+  }
+  // A backup is a swap: one the constraints refuse or cannot confirm is not kept.
+  const backups = await gateListings(
+    { ...ctx, acceptance: undefined, turnMessageId: undefined },
+    [...new Set(allowed.flatMap((item) => (item.backup_variant_id ? listingOf.get(item.backup_variant_id) ?? [] : [])))],
+  );
+  const backupRefused = (id: string | undefined) => !!id && backups.has(listingOf.get(id) ?? "");
   return recordWrite(ctx, "add_to_cart", raw, async (tx) => {
     const items = [];
-    for (const item of parsed.items) {
+    for (const item of allowed) {
       const applied = await applyAddLine(tx, ctx.storeId, ctx.cartId, item.variant_id, item.qty, {
         source: "ai",
         clampToMax: true,
@@ -611,7 +730,8 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       let swapRule = applied.swapRule;
       let substituteVariantId: string | null = null;
       if (applied.created && flagged) {
-        const backup = await chooseBackup(tx, ctx.storeId, item.variant_id, item.backup_variant_id);
+        const backupId = backupRefused(item.backup_variant_id) ? undefined : item.backup_variant_id;
+        const backup = await chooseBackup(tx, ctx.storeId, item.variant_id, backupId);
         swapRule = backup.swapRule;
         substituteVariantId = backup.substituteVariantId;
         await tx.cartLine.update({
@@ -632,6 +752,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         ...(substituteVariantId ? { substituteVariantId } : {}),
       });
     }
+    items.push(...refusedItems);
     if (items.length === 1 && items[0].ok === false) return items[0];
     const money = await readCartMoney(tx, ctx.cartId);
     const priced = items.map((item) => (item.ok === true ? withLineMoney(item, money) : item));
@@ -691,6 +812,14 @@ export async function removeFromCart(ctx: AssistantContext, input: unknown): Pro
 
 export async function setSwapRule(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(setSwapRuleInput, input);
+  if (parsed.rule === "named_substitute" && parsed.substitute_variant_id) {
+    const substitute = await storeScoped(ctx.storeId).listingVariant.findUnique({
+      where: { id: parsed.substitute_variant_id },
+      select: { listingId: true },
+    });
+    const why = substitute ? (await gateListings(ctx, [substitute.listingId])).get(substitute.listingId) : undefined;
+    if (why) return recordRead(ctx, "set_swap_rule", parsed, why);
+  }
   return recordWrite(ctx, "set_swap_rule", parsed, async (tx) => {
     const line = await tx.cartLine.findUnique({
       where: { id: parsed.line_id },
