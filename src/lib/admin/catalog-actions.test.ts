@@ -8,7 +8,23 @@ vi.mock("./session", () => ({
   }),
 }));
 
+const fakeState = vi.hoisted(() => ({
+  fetch: (async () => new Response("unscripted", { status: 500 })) as typeof fetch,
+}));
+
+vi.mock("../assistant/model", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../assistant/model")>();
+  return {
+    ...actual,
+    createAssistantModel: () => actual.createAssistantModel({ fetch: fakeState.fetch }),
+  };
+});
+
+import { createFakeAnthropicFetch } from "../assistant/messages-api-double";
 import {
+  approveAttributeProposal,
+  proposeProductAttributes,
+  rejectAttributeProposal,
   approveProduct,
   rejectProduct,
   updateReviewProduct,
@@ -42,6 +58,8 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     asAdmin((tx) => tx.auditLog.findMany({ where: { entityId: id, action } }));
 
   beforeAll(async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    vi.stubEnv("ASSISTANT_MODEL", "");
     raw = testPrismaClient();
     await raw.$connect();
     await asAdmin((tx) =>
@@ -54,9 +72,11 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await asAdmin(async (tx) => {
       await tx.auditLog.deleteMany({ where: { entityId: { in: createdIds } } }).catch(() => {});
       await tx.masterProduct.deleteMany({ where: { id: { in: createdIds } } });
+      await tx.ingredient.deleteMany({ where: { name: { startsWith: RUN } } });
       await tx.user.deleteMany({ where: { id: "catalog-test-admin" } }).catch(() => {});
     });
     await raw.$disconnect();
@@ -178,5 +198,58 @@ describe.skipIf(!hasDb)("Catalog review actions (DB integration)", () => {
     const second = rows.find((r) => r !== first)!;
     expect((second.before as { status: string }).status).toBe((first.after as { status: string }).status);
     expect(after.status).toBe((second.after as { status: string }).status);
+  });
+
+  function scriptAttributes(toolInput: Record<string, unknown>) {
+    fakeState.fetch = createFakeAnthropicFetch({
+      expectedKey: "sk-ant-test",
+      steps: [{ kind: "tool", toolName: "product_attributes", toolInput }],
+    }).fetch;
+  }
+  const attributesOf = (id: string) =>
+    asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({
+      where: { id },
+      include: { ingredients: { include: { ingredient: true } } },
+    }));
+
+  it("attributes: a proposal waits for review and changes nothing until approved", async () => {
+    const p = await seed("propose", "active", { description: "Peanut and onion blend" });
+    scriptAttributes({ ingredients: [`${RUN} peanut`], allergens: ["peanuts"], dietaryClaims: ["halal"] });
+    const proposed = await proposeProductAttributes(p.id);
+    expect(proposed.success).toBe(true);
+    const proposal = await asAdmin((tx) => tx.attributeProposal.findUniqueOrThrow({ where: { id: proposed.proposalId! } }));
+    expect(proposal).toMatchObject({ status: "pending", allergensRead: true, allergens: ["peanuts"] });
+    const after = await attributesOf(p.id);
+    expect(after).toMatchObject({ allergensStatus: "unknown", dietaryStatus: "unknown", ingredientsStatus: "unknown" });
+    expect(after.ingredients).toHaveLength(0);
+  });
+
+  it("attributes: approve marks read groups reviewed, links ingredients by local name, leaves unread groups unknown", async () => {
+    const pepper = await asAdmin((tx) => tx.ingredient.create({
+      data: { name: `${RUN} scotch bonnet pepper`, synonyms: { create: { term: `${RUN} ata rodo`, language: "yo" } } },
+    }));
+    const p = await seed("approve-attrs", "active");
+    scriptAttributes({ ingredients: [`${RUN} Ata Rodo`, `${RUN} onion`], allergens: null, dietaryClaims: ["vegan", "halal"] });
+    const { proposalId } = await proposeProductAttributes(p.id);
+    expect(await approveAttributeProposal(proposalId!)).toEqual({ success: true });
+
+    const after = await attributesOf(p.id);
+    expect(after).toMatchObject({ ingredientsStatus: "reviewed", dietaryStatus: "reviewed", allergensStatus: "unknown" });
+    expect(after.dietaryClaims.sort()).toEqual(["halal", "vegan"]);
+    expect(after.ingredients.map((link) => link.ingredient.name).sort()).toEqual([`${RUN} onion`, `${RUN} scotch bonnet pepper`]);
+    expect(after.ingredients.find((link) => link.ingredient.name.endsWith("pepper"))!.ingredientId).toBe(pepper.id);
+    expect(await audits(p.id, "catalog.attributes_approve")).toHaveLength(1);
+    expect(await approveAttributeProposal(proposalId!)).toEqual({ error: "Proposal already reviewed" });
+  });
+
+  it("attributes: reject leaves the product's attributes as they were", async () => {
+    const p = await seed("reject-attrs", "active");
+    scriptAttributes({ ingredients: null, allergens: [], dietaryClaims: null });
+    const { proposalId } = await proposeProductAttributes(p.id);
+    expect(await rejectAttributeProposal(proposalId!)).toEqual({ success: true });
+    const proposal = await asAdmin((tx) => tx.attributeProposal.findUniqueOrThrow({ where: { id: proposalId! } }));
+    expect(proposal.status).toBe("rejected");
+    expect((await attributesOf(p.id)).allergensStatus).toBe("unknown");
+    expect(await audits(p.id, "catalog.attributes_reject")).toHaveLength(1);
   });
 });
