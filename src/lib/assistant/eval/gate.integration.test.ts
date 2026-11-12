@@ -564,7 +564,7 @@ describe("shopper assistant eval gate", () => {
       tool: "search_catalog",
       input: { query: "agushi" },
       output: { ok: true, items: [
-        { listingId: "paste-a", variantId: "paste-a-pack", name: LISTING_NAMES["paste-a"], match: "synonym" },
+        { listingId: "paste-a", variantId: "paste-a-pack", name: LISTING_NAMES["paste-a"], priceCents: 569, match: "synonym" },
         { listingId: "paste-b", variantId: "paste-b-pack", name: LISTING_NAMES["paste-b"], match },
       ] },
       turn: 1,
@@ -582,7 +582,7 @@ describe("shopper assistant eval gate", () => {
       evalCase: agushi,
       cart,
       tools,
-      savedTexts: [{ turn: 1, text: reply, priorOutputs: [], saved: true }],
+      savedTexts: [{ turn: 1, text: reply, priorOutputs: tools.map((tool) => tool.output), saved: true }],
       observedTexts: [],
       strippedAmounts: [],
       successfulWriteTurns: [],
@@ -619,6 +619,9 @@ describe("shopper assistant eval gate", () => {
     const forgedReply = { ...caseFromScore("agushi", "synonym", inReply, false), clarifyReply: "Do you want the shelled egusi?" };
     const forgedChoice = { ...caseFromScore("agushi", "synonym", asked, false), clarifyChoices: [LISTING_NAMES["paste-a"], "Melon seeds, any"] };
     const forgedOptions = { ...caseFromScore("agushi", "synonym", asked, false), clarifyOptions: ["paste-a"] };
+    const priced = score([], "Which one would you like?\n- Egusi (melon seeds), shelled, $5.69\n- Egusi, ground", [search("name"), offer]);
+    expect([priced.pass, priced.safetyFailures]).toEqual([true, []]);
+    expect(assessReport(report([caseFromScore("agushi", "synonym", priced, false)]), expected).reasons).toEqual([]);
     for (const forged of [forgedReply, forgedChoice, forgedOptions]) {
       expect(assessReport(report([forged]), expected).reasons).toContain("cart does not match agushi");
     }
@@ -695,7 +698,8 @@ describe("shopper assistant eval gate", () => {
     expect(verdict.reasons.join(" ")).not.toContain("api.anthropic.com");
     expect(verdict.ok).toBe(true);
     expect(evalConfig.test?.include).toEqual(["src/lib/assistant/eval/live.entry.ts"]);
-    expect(JSON.stringify(baseConfig.test?.include)).not.toContain("live.entry");
+    expect(JSON.stringify(baseConfig.test?.projects)).toContain("src/**/*.test.ts");
+    expect(JSON.stringify(baseConfig.test?.projects)).not.toContain("live.entry");
     spy.mockRestore();
     vi.unstubAllEnvs();
   }, 180_000);

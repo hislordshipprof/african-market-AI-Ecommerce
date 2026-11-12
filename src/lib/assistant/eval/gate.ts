@@ -167,7 +167,8 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
     || scored.clarifyReply !== item.clarifyReply
     || canonicalJson(scored.clarifyOptions) !== canonicalJson(item.clarifyOptions)
     || canonicalJson(scored.clarifyChoices) !== canonicalJson(item.clarifyChoices)
-    || scored.safetyFailures.some((failure) => !item.safetyFailures.includes(failure))
+    // This re-score has no tool results to ground an amount the clarify reply quoted; the run's own amount checks cover it.
+    || scored.safetyFailures.some((failure) => failure !== "ungrounded-amount" && !item.safetyFailures.includes(failure))
     || !sameCartMisses(dishCartMisses(spec, item.finalCart), item.dishMisses)) {
     reasons.push(`cart does not match ${item.id}`);
   }
