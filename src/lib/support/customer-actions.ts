@@ -1,6 +1,5 @@
 "use server";
 
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { headers } from "next/headers";
 import { revalidateTag } from "next/cache";
@@ -8,7 +7,7 @@ import { getStore } from "../get-store";
 import { clientIp } from "../assistant/client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { parseInput } from "../security/parse-input";
-import { announceCustomerMessage, messageBodySchema, orderMessagesTag, postCustomerMessage, SUPPORT_TOPICS } from "./thread";
+import { announceCustomerMessage, messageBodySchema, orderMessagesTag, postCustomerMessage, SUPPORT_TOPICS, trackingTokenKey } from "./thread";
 
 const HOUR_MS = 60 * 60 * 1000;
 const PER_TOKEN_PER_HOUR = 30;
@@ -32,9 +31,8 @@ export async function sendOrderMessageAction(input: unknown): Promise<SendResult
   const { token, body, topic } = parsed.data;
 
   const [store, reqHeaders] = await Promise.all([getStore(), headers()]);
-  const tokenKey = createHash("sha256").update(token).digest("hex").slice(0, 32);
   const byIp = await takeRateLimit(`support-message:ip:${clientIp(reqHeaders)}`, PER_IP_PER_HOUR, HOUR_MS);
-  const byToken = byIp.ok ? await takeRateLimit(`support-message:token:${tokenKey}`, PER_TOKEN_PER_HOUR, HOUR_MS) : byIp;
+  const byToken = byIp.ok ? await takeRateLimit(`support-message:token:${trackingTokenKey(token)}`, PER_TOKEN_PER_HOUR, HOUR_MS) : byIp;
   if (!byToken.ok) return { ok: false, error: "Too many messages. Please wait and try again." };
 
   const posted = await postCustomerMessage(store.id, token, body, topic);

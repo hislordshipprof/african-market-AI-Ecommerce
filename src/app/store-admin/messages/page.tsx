@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { Store } from "lucide-react";
 import { requireStoreMember } from "@/lib/store-admin/session";
+import { formatInZone } from "@/lib/format";
 import { getStoreThread, listStoreThreads } from "@/lib/support/thread";
 import { Badge } from "@/components/ui/badge";
 import { ThreadReply } from "./thread-reply";
 
 const when = (date: Date | string, timeZone: string) =>
-  new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone }).format(new Date(date));
+  formatInZone(date, timeZone, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export default async function MessagesPage({
   searchParams,

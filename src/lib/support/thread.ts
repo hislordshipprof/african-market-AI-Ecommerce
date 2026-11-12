@@ -28,9 +28,14 @@ export type StoreThreadSummary = {
   unread: number;
 };
 
-/** The customer poll's cache tag. Hashed so the tracking token is never a cache key in the clear. */
+/** A tracking token hashed, so it is never a cache or rate-limit key in the clear. */
+export function trackingTokenKey(token: string): string {
+  return createHash("sha256").update(token).digest("hex").slice(0, 32);
+}
+
+/** The customer poll's cache tag. */
 export function orderMessagesTag(token: string): string {
-  return `order-messages:${createHash("sha256").update(token).digest("hex").slice(0, 32)}`;
+  return `order-messages:${trackingTokenKey(token)}`;
 }
 
 function toMessage(row: { id: string; sender: string; body: string; createdAt: Date }): ThreadMessage {
@@ -148,26 +153,27 @@ export async function readCustomerMessages(storeId: string, token: string): Prom
   return (order.supportThreads[0]?.messages ?? []).map(toMessage);
 }
 
+// The Messages list and the dashboard badge read the same threads, so the badge never counts a thread the list hides.
+const LISTED_THREADS = Prisma.sql`
+  SELECT t.id, o.number AS "orderNumber", t.state, t.escalated_at AS "escalatedAt",
+         t.last_customer_at AS "lastCustomerAt", t.last_reply_at AS "lastReplyAt",
+         (SELECT count(*)::int FROM support_messages m
+           WHERE m.thread_id = t.id AND m.sender = 'customer'
+             AND m.created_at > COALESCE(t.last_reply_at, '-infinity'::timestamp)) AS unread
+    FROM support_threads t
+    JOIN orders o ON o.id = t.order_id
+   ORDER BY COALESCE(t.last_customer_at, t.created_at) DESC
+   LIMIT ${THREAD_LIST_LIMIT}`;
+
 /** Unread is the customer messages since the store's last reply. Newest customer message first. */
 export async function listStoreThreads(storeId: string): Promise<StoreThreadSummary[]> {
-  return storeScopedRawQuery<StoreThreadSummary>(storeId, Prisma.sql`
-    SELECT t.id, o.number AS "orderNumber", t.state, t.escalated_at AS "escalatedAt",
-           t.last_customer_at AS "lastCustomerAt", t.last_reply_at AS "lastReplyAt",
-           (SELECT count(*)::int FROM support_messages m
-             WHERE m.thread_id = t.id AND m.sender = 'customer'
-               AND m.created_at > COALESCE(t.last_reply_at, '-infinity'::timestamp)) AS unread
-      FROM support_threads t
-      JOIN orders o ON o.id = t.order_id
-     ORDER BY COALESCE(t.last_customer_at, t.created_at) DESC
-     LIMIT ${THREAD_LIST_LIMIT}`);
+  return storeScopedRawQuery<StoreThreadSummary>(storeId, LISTED_THREADS);
 }
 
+/** The unread total over the threads the Messages list shows. */
 export async function storeUnreadCount(storeId: string): Promise<number> {
   const rows = await storeScopedRawQuery<{ unread: number }>(storeId, Prisma.sql`
-    SELECT count(*)::int AS unread
-      FROM support_messages m
-      JOIN support_threads t ON t.id = m.thread_id
-     WHERE m.sender = 'customer' AND m.created_at > COALESCE(t.last_reply_at, '-infinity'::timestamp)`);
+    SELECT COALESCE(sum(listed.unread), 0)::int AS unread FROM (${LISTED_THREADS}) listed`);
   return rows[0]?.unread ?? 0;
 }
 

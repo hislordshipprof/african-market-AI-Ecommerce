@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatInZone } from "@/lib/format";
 import { listEscalatedThreads } from "@/lib/support/platform-actions";
 import { PlatformThreadActions } from "./thread-actions";
 
@@ -7,7 +8,7 @@ const REASON_LABEL: Record<string, string> = { topic: "Platform topic", sla: "No
 const SENDER_LABEL: Record<string, string> = { customer: "Customer", store: "Store", platform: "Platform team" };
 
 const when = (iso: string, timeZone: string) =>
-  new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone }).format(new Date(iso));
+  formatInZone(iso, timeZone, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 function age(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
