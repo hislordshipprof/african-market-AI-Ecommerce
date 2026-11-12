@@ -132,7 +132,7 @@
       "qty": null,
       "status": null,
       "confidence": 1,
-      "active": false,
+      "active": true,
       "maxPerOrder": null,
       "variants": [
         {
@@ -1643,6 +1643,26 @@
         }
       ],
       "store": "B"
+    },
+    {
+      "key": "bitter-kola",
+      "masterProductId": "bitter-kola",
+      "priceCents": 7599,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": false,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "bitter-kola-pack",
+          "label": "5 lb",
+          "priceCents": 7599,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
     }
   ]
 }

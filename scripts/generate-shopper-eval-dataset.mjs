@@ -5,6 +5,7 @@ const products = csv.map(parseCsvLine).map((fields) => ({
   id: fields[0],
   name: fields[1],
   synonyms: (fields[3] ?? "").split("|").map((term) => term.trim()).filter(Boolean),
+  subcategory: fields[5],
 })).filter((product) => product.id && product.name);
 
 const blocked = new Set(products.filter((product) => /onion|tomato/.test(product.id) && !product.id.includes("tomato-paste") && !product.id.includes("pepper-onion")).map((product) => product.id));
@@ -64,6 +65,7 @@ const pinned = wanted.filter((id) => byId.has(id)).map(take);
 while (pinned.length < 70) pinned.push(take(byId.keys().next().value));
 const decoys = [];
 while (decoys.length < 10) decoys.push(take(byId.keys().next().value));
+const retired = take(byId.keys().next().value);
 
 const days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const hours = Object.fromEntries(days.map((day) => [day, { open: "09:00", close: "21:00" }]));
@@ -96,9 +98,9 @@ listings[0] = listing(pinned[0], 0, "A", {
 Object.assign(listings[1], { confidence: 0.4 });
 Object.assign(listings[2], { stockMode: "counted", qty: 0 });
 Object.assign(listings[3], { stockMode: "status", status: "out_of_stock" });
-Object.assign(listings[4], { active: false });
 Object.assign(listings[5], { maxPerOrder: 2 });
 for (const [index, product] of decoys.entries()) listings.push(listing(product, 100 + index, "B"));
+listings.push(listing(retired, 200, "A", { active: false }));
 
 const fixture = {
   schemaVersion: 1,
@@ -113,12 +115,14 @@ const fixture = {
   listings,
 };
 
-const inStock = listings.filter((item) => item.store === "A" && item.active && item.confidence >= 0.6 && item.qty !== 0 && item.status !== "out_of_stock");
+// Tatashe was inactive when these pools were drawn (#343); keeping it out leaves the list cases unchanged.
+const inStock = listings.filter((item) => item.key !== "pepper-tatashe" && item.store === "A" && item.active && item.confidence >= 0.6 && item.qty !== 0 && item.status !== "out_of_stock");
 const low = listings.find((item) => item.store === "A" && item.confidence < 0.6);
 const countedOut = listings.find((item) => item.store === "A" && item.qty === 0);
 const statusOut = listings.find((item) => item.store === "A" && item.status === "out_of_stock");
 const inactive = listings.find((item) => item.store === "A" && !item.active);
 const nameOf = new Map(products.map((product) => [product.id, product.name]));
+const subcategoryOf = new Map(products.map((product) => [product.id, product.subcategory]));
 
 function chosenVariants(item, namedFive) {
   const variants = namedFive ? item.variants.filter((variant) => variant.label === "5 lb") : item.variants;
@@ -159,7 +163,7 @@ const dishes = {
   egusi: [
     { label: "egusi", options: sold(["egusi-seeds-whole", "egusi-ground"]) },
     { label: "palm oil", options: sold(["palm-oil-red", "palm-oil-bleached-ofada"]) },
-    { label: "leafy greens", options: sold(["ugu-leaves-fresh", "bitter-leaf-frozen"]) },
+    { label: "leafy greens", options: sold(listings.map((item) => item.key).filter((key) => ["leafy greens", "frozen leaves", "dried leaves"].includes(subcategoryOf.get(key)))) },
   ],
   breakfast: [
     { label: "teff", options: sold(["teff-flour-ivory", "teff-flour-brown"]) },

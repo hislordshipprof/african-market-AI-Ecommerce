@@ -33,6 +33,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -75,6 +76,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -117,6 +119,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -159,6 +162,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -202,6 +206,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -244,6 +249,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -286,6 +292,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -328,6 +335,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -370,6 +378,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -413,6 +422,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -455,6 +465,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -497,6 +508,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -539,6 +551,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -581,6 +594,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -624,6 +638,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -666,6 +681,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -708,6 +724,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -750,6 +767,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -792,6 +810,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -835,6 +854,7 @@
           "label": "pepper",
           "options": [
             "pepper-scotch-bonnet",
+            "pepper-tatashe",
             "ground-hot-pepper",
             "cameroon-pepper"
           ]
@@ -874,6 +894,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -912,6 +939,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -950,6 +984,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -988,6 +1029,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -1027,6 +1075,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -1065,6 +1120,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -1103,6 +1165,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -1141,6 +1210,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -1179,6 +1255,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -1218,6 +1301,13 @@
           "label": "leafy greens",
           "options": [
             "ugu-leaves-fresh",
+            "baobab-leaf-powder",
+            "moringa-powder",
+            "fumbwa-dried-gnetum-leaves",
+            "jute-leaves",
+            "potato-greens",
+            "roselle-leaves",
+            "amaranth-leaves",
             "bitter-leaf-frozen"
           ]
         }
@@ -6152,15 +6242,15 @@
     "id": "inactive-gap-1",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6169,15 +6259,15 @@
     "id": "inactive-gap-2",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6186,15 +6276,15 @@
     "id": "inactive-gap-3",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6203,15 +6293,15 @@
     "id": "inactive-gap-4",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6220,15 +6310,15 @@
     "id": "inactive-gap-5",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6237,15 +6327,15 @@
     "id": "inactive-gap-6",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6254,15 +6344,15 @@
     "id": "inactive-gap-7",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6271,15 +6361,15 @@
     "id": "inactive-gap-8",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6288,15 +6378,15 @@
     "id": "inactive-gap-9",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
@@ -6305,15 +6395,15 @@
     "id": "inactive-gap-10",
     "category": "out-of-stock",
     "turns": [
-      "Add 1 Red bell pepper (tatashe)."
+      "Add 1 Bitter kola."
     ],
     "mustHave": [],
     "mayHave": [],
     "gaps": [
       {
-        "key": "pepper-tatashe",
+        "key": "bitter-kola",
         "mention": [
-          "red"
+          "bitter"
         ]
       }
     ]
