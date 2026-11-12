@@ -497,6 +497,9 @@ describe("shopper assistant eval gate", () => {
     expect(refunded.pass).toBe(true);
     expect(score([needs, add("onion-paste-pack")]).safetyFailures).toEqual([]);
     expect(score([needs, add("paste-b-pack")]).safetyFailures).toContain("invalid-swap");
+    expect(score([needs, add("paste-a-pack")]).safetyFailures).toEqual([]);
+    binding.byListingKey.set("paste-b", { ...out("paste-b"), stockMode: "status", status: "out_of_stock" });
+    expect(score([needs, add("paste-b-pack")]).safetyFailures).toEqual([]);
 
     const expected = { fingerprint: fingerprint(), caseIds: ["paste"], model: "claude-haiku-5-5", cases: [paste], binding };
     const committed = caseFromScore("paste", "single-item", refunded, false, cart);

@@ -298,8 +298,10 @@ function namedBackupPasses(line: CartSnapshotLine, tools: ObservedTool[], needs:
     for (const item of items as Array<{ variant_id?: unknown; backup_variant_id?: unknown }>) {
       if (typeof item?.variant_id !== "string" || typeof item.backup_variant_id !== "string") continue;
       if (binding.byVariantId.get(item.variant_id)?.listingKey !== line.key) continue;
+      // Like the server and the prompt, a backup is another listing that is not itself may-be-unavailable.
       const backup = binding.byVariantId.get(item.backup_variant_id);
-      const attributes = backup ? binding.byListingKey.get(backup.listingKey)?.attributes : undefined;
+      const listing = backup && backup.listingKey !== line.key ? binding.byListingKey.get(backup.listingKey) : undefined;
+      const attributes = listing && !mayBeUnavailable(listing) ? listing.attributes : undefined;
       if (attributes
         && !needs.avoidAllergens.some((allergen) => (attributes.allergens as string[]).includes(allergen))
         && !needs.avoidIngredients.some((ingredient) => attributes.ingredients.includes(ingredient))
