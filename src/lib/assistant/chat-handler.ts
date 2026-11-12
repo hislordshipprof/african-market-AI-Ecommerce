@@ -41,7 +41,7 @@ import { acceptanceForTurn, shownProductIds } from "./shown";
 import { clientIp } from "./client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { requireSameOrigin } from "../security/same-origin";
-import { callCostMicros, type TokenUsage } from "./cost";
+import { callCostMicros, tokenUsageOf } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
 import { groundingTransform, keyedUnitPricesFromHistory } from "./grounding";
 import { assistantSpendState, claimCapAlert, utcDay } from "./spend";
@@ -227,7 +227,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       turnMessageId: parsed.id,
       acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
     };
-    const tools = assistantTools(turnCtx);
+    const tools = assistantTools(turnCtx, { lookupModel: model });
     const history = (await usableHistory(withUser, tools)).slice(-30);
     if (!history.some((message) => message.id === parsed.id)) {
       const current = withUser.find((message) => message.id === parsed.id);
@@ -418,7 +418,7 @@ async function persistTurn(args: {
   try {
     const steps = await args.result.steps;
     for (const step of steps) {
-      const usage = normalizeUsage(step.usage);
+      const usage = tokenUsageOf(step.usage);
       try {
         cost += callCostMicros(args.modelId, usage);
       } catch {
@@ -454,31 +454,6 @@ function configuredModelId(): ReturnType<typeof assistantModelId> {
   } catch {
     return "claude-haiku-5-5";
   }
-}
-
-function normalizeUsage(usage: unknown): TokenUsage {
-  const value = (usage ?? {}) as {
-    inputTokens?: number | TokenUsage["inputTokens"];
-    outputTokens?: number | TokenUsage["outputTokens"];
-    inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
-  };
-  if (value.inputTokens && typeof value.inputTokens === "object") {
-    const output = value.outputTokens;
-    return {
-      inputTokens: value.inputTokens,
-      outputTokens: output && typeof output === "object" ? output : { total: typeof output === "number" ? output : 0 },
-    };
-  }
-  const details = value.inputTokenDetails ?? {};
-  return {
-    inputTokens: {
-      total: typeof value.inputTokens === "number" ? value.inputTokens : 0,
-      noCache: details.noCacheTokens,
-      cacheRead: details.cacheReadTokens,
-      cacheWrite: details.cacheWriteTokens,
-    },
-    outputTokens: { total: typeof value.outputTokens === "number" ? value.outputTokens : 0 },
-  };
 }
 
 function retryVisible(messages: UIMessage[], clientId: string, alreadyThere: boolean): UIMessage[] {

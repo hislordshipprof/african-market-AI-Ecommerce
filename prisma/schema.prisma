@@ -349,6 +349,7 @@ model MasterProduct {
   synonyms ProductSynonym[]
   ingredients        MasterProductIngredient[]
   attributeProposals AttributeProposal[]
+  recipeIngredients  RecipeIngredient[]
 
   @@index([categoryId])
   @@index([status])
@@ -970,6 +971,43 @@ model AssistantSpendCall {
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("assistant_spend_calls")
+}
+
+/// Recipe base (#25). Platform-shared like master products: seeded dishes, plus dishes the
+/// shopper assistant looked up online, saved as ingredient names and a source link only.
+model Recipe {
+  id        String   @id @default(cuid())
+  /// Folded dish name; a request matches this or one of the aliases.
+  key       String   @unique
+  name      String
+  aliases   String[] @default([])
+  cuisine   String?
+  /// Servings the quantities are for. Null when the recipe has no quantities (looked up).
+  servings  Int?
+  sourceUrl String?  @map("source_url")
+  origin    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ingredients RecipeIngredient[]
+
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id              String   @id @default(cuid())
+  recipeId        String   @map("recipe_id")
+  position        Int
+  name            String
+  masterProductId String?  @map("master_product_id")
+  qty             Decimal? @db.Decimal(10, 3)
+  unit            String?
+
+  recipe        Recipe         @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  masterProduct MasterProduct? @relation(fields: [masterProductId], references: [id], onDelete: SetNull)
+
+  @@unique([recipeId, position])
+  @@index([masterProductId])
+  @@map("recipe_ingredients")
 }
 
 /// Committed retention batch. A replay of the same key returns this count.

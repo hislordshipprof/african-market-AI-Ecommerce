@@ -35,6 +35,18 @@ export interface TokenUsage {
     cacheWrite?: number;
   };
   outputTokens?: { total?: number };
+  /** The provider's own usage object; it carries the billed web searches. */
+  raw?: unknown;
+}
+
+/** Web search is billed per search: $10 per 1,000. */
+export const WEB_SEARCH_MICROS = BigInt(10_000);
+
+/** Searches Anthropic billed, from its usage object. */
+export function billedSearches(raw: unknown): number {
+  const count = (raw as { server_tool_use?: { web_search_requests?: unknown } } | null | undefined)?.server_tool_use
+    ?.web_search_requests;
+  return typeof count === "number" && Number.isInteger(count) && count > 0 ? count : 0;
 }
 
 const MILLION = BigInt(1_000_000);
@@ -57,10 +69,39 @@ export function callCostMicros(modelId: string, usage: TokenUsage): bigint {
     cacheWrite * tier.cacheWrite +
     cacheRead * tier.cacheHit +
     output * tier.output;
-  return (numerator + MILLION - BigInt(1)) / MILLION;
+  return (numerator + MILLION - BigInt(1)) / MILLION + WEB_SEARCH_MICROS * BigInt(billedSearches(usage.raw));
 }
 
 function count(value: number | undefined): bigint {
   if (value == null || !Number.isFinite(value) || value <= 0) return BigInt(0);
   return BigInt(Math.floor(value));
+}
+
+/** The AI SDK's step usage, or an already normalized one, as TokenUsage. Keeps raw for the search fee. */
+export function tokenUsageOf(usage: unknown): TokenUsage {
+  const value = (usage ?? {}) as {
+    inputTokens?: number | TokenUsage["inputTokens"];
+    outputTokens?: number | TokenUsage["outputTokens"];
+    inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
+    raw?: unknown;
+  };
+  if (value.inputTokens && typeof value.inputTokens === "object") {
+    const output = value.outputTokens;
+    return {
+      inputTokens: value.inputTokens,
+      outputTokens: output && typeof output === "object" ? output : { total: typeof output === "number" ? output : 0 },
+      raw: value.raw,
+    };
+  }
+  const details = value.inputTokenDetails ?? {};
+  return {
+    inputTokens: {
+      total: typeof value.inputTokens === "number" ? value.inputTokens : 0,
+      noCache: details.noCacheTokens,
+      cacheRead: details.cacheReadTokens,
+      cacheWrite: details.cacheWriteTokens,
+    },
+    outputTokens: { total: typeof value.outputTokens === "number" ? value.outputTokens : 0 },
+    raw: value.raw,
+  };
 }

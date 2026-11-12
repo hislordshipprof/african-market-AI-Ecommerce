@@ -16,6 +16,15 @@ describe("assistant call cost", () => {
     })).toBe(BigInt(1));
   });
 
+  it("adds $0.01 for each web search Anthropic billed", () => {
+    const cost = callCostMicros("claude-haiku-5-5", {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 0 },
+      raw: { input_tokens: 1, output_tokens: 0, server_tool_use: { web_search_requests: 2 } },
+    });
+    expect(cost).toBe(BigInt(20_001));
+  });
+
   it("switches Haiku to long-prompt prices above 100000 input tokens", () => {
     const usage = {
       inputTokens: { total: 100_001, noCache: 100_001, cacheRead: 0, cacheWrite: 0 },

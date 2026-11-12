@@ -27,6 +27,7 @@ import { createChatHandler } from "./chat-handler";
 import { E2E_FAKE_ANTHROPIC_KEY } from "./contract";
 import { scriptedAssistantFetch } from "./fake-model";
 import { createAssistantModel } from "./model";
+import { WEB_SEARCH_MICROS } from "./cost";
 import { createFakeAnthropicFetch, judgeMessagesRequest } from "./messages-api-double";
 import * as spend from "./spend";
 
@@ -107,7 +108,13 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
   let storeId = "";
   let slug = "";
   let variantId = "";
+  let storeB = "";
+  let storeBBefore: unknown;
   const host = "chat.test";
+
+  async function storeBCarts() {
+    return storeScoped(storeB).cart.findMany({ include: { lines: true }, orderBy: { id: "asc" } });
+  }
 
   beforeAll(async () => {
     raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
@@ -137,9 +144,26 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     variantId = (await storeScoped(storeId).listingVariant.create({
       data: { listingId: listing.id, label: "Each", price: 450, weightG: 100 },
     })).id;
+    storeB = (await raw.store.create({ data: { slug: `${slug}-b`, name: "Other Market", themePreset: "palm-and-shea" } })).id;
+    const listingB = await storeScoped(storeB).listing.create({
+      data: { storeId: storeB, customName: "Egusi", price: 450, stockMode: "unlimited", frozen: false, perishable: false },
+    });
+    const variantB = await storeScoped(storeB).listingVariant.create({
+      data: { listingId: listingB.id, label: "Each", price: 450, weightG: 100 },
+    });
+    const cartB = await storeScoped(storeB).cart.create({ data: { storeId: storeB, source: "manual" } });
+    await storeScoped(storeB).cartLine.create({
+      data: { storeId: storeB, cartId: cartB.id, variantId: variantB.id, qty: 3, swapRule: "exact_only", source: "manual" },
+    });
+    storeBBefore = await storeBCarts();
   });
 
   afterAll(async () => {
+    if (storeB) {
+      await storeScoped(storeB).cart.deleteMany({});
+      await storeScoped(storeB).listing.deleteMany({});
+      await raw.store.delete({ where: { id: storeB } });
+    }
     if (!storeId) return;
     await storeScoped(storeId).cart.deleteMany({});
     await storeScoped(storeId).customer.deleteMany({});
@@ -1672,6 +1696,128 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       where: { conversationId: conversation?.id, tool: { in: banned } },
     });
     expect(actions).toHaveLength(0);
+  });
+
+  it("offers get_recipe and its rule on every chat turn", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    const fake = createFakeAnthropicFetch({ steps: [{ kind: "text", text: "ok" }] });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const response = await handler(request("jollof for 10", { ip: "203.0.113.190" }));
+    expect(response.status).toBe(200);
+    await response.text();
+    const body = fake.requests[0]?.body as { tools?: Array<{ name: string }>; system?: Array<{ text: string }> };
+    expect((body.tools ?? []).map((tool) => tool.name)).toContain("get_recipe");
+    expect(body.system?.[0]?.text).toMatch(/names a dish, call get_recipe/);
+  });
+
+  it("runs a recipe lookup on the chat's own model and counts its cost on the conversation", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    const dish = `kelewele chat ${randomUUID().slice(0, 8)}`;
+    const fake = createFakeAnthropicFetch({
+      steps: [
+        { kind: "tool", toolName: "get_recipe", toolInput: { dish, servings: 2 } },
+        {
+          kind: "tool",
+          toolName: "report_ingredients",
+          toolInput: { dish_name: "Kelewele", ingredients: ["egusi"], source_url: "https://recipes.example/kelewele" },
+          webSearch: { query: "kelewele recipe", results: [{ url: "https://recipes.example/kelewele", title: "Kelewele" }] },
+        },
+        { kind: "text", text: "Here is the list." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const response = await handler(request(`${dish} for 2`, { ip: "203.0.113.191" }));
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(fake.requests).toHaveLength(3);
+    const cookie = response.headers.get("set-cookie") ?? "";
+    const cartId = decodeURIComponent(cookie.split(";")[0].slice("cart_id=".length));
+    await vi.waitFor(async () => {
+      const conversation = await storeScoped(storeId).aiConversation.findFirstOrThrow({ where: { cartId } });
+      expect(conversation.inFlightUntil).toBeNull();
+      expect(conversation.costMicros).toBeGreaterThan(WEB_SEARCH_MICROS);
+    });
+    await raw.recipe.deleteMany({ where: { key: dish } });
+  });
+
+  it("a photo list reports what was found and the gaps, and the next yes adds the found items", async () => {
+    const png = readFileSync(new URL("./fixtures/sample.png", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    const cookie = `cart_id=${encodeURIComponent(cart.id)}`;
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    const fake = createFakeAnthropicFetch({
+      steps: [
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "egusi" } },
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: "ugu leaves" } },
+        { kind: "text", text: "From your list I found Egusi. Ugu leaves is not carried here. Want me to add these?" },
+        { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: variantId, qty: 1 }] } },
+        { kind: "text", text: "Added 1 Egusi." },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const send = (id: string, parts: unknown[]) => handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.181",
+        cookie,
+      },
+      body: JSON.stringify({ message: { id, role: "user", parts } }),
+    }));
+    const photo = await send("photo-list-01", [
+      { type: "text", text: "here is my list" },
+      { type: "file", mediaType: "image/png", filename: "list.png", url: `data:image/png;base64,${png.toString("base64")}` },
+    ]);
+    const photoBody = await photo.text();
+    expect(photo.status, photoBody).toBe(200);
+    expect(photoBody).toContain("Ugu leaves is not carried here");
+    expect(await storeScoped(storeId).cartLine.count({ where: { cartId: cart.id } })).toBe(0);
+    const yes = await send("photo-list-02", [{ type: "text", text: "yes" }]);
+    expect(yes.status, await yes.text()).toBe(200);
+    const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId: cart.id } });
+    expect(lines.map((line) => [line.variantId, line.qty])).toEqual([[variantId, 1]]);
+    // The recipe and photo flows above ran in this store only.
+    expect(await storeBCarts()).toEqual(storeBBefore);
+  });
+
+  it("a photo with no readable list gets a plain answer asking for a clearer photo, and the cart is unchanged", async () => {
+    const png = readFileSync(new URL("./fixtures/sample.png", import.meta.url));
+    const cart = await storeScoped(storeId).cart.create({ data: { storeId, source: "manual" } });
+    await storeScoped(storeId).cartLine.create({
+      data: { storeId, cartId: cart.id, variantId, qty: 2, swapRule: "exact_only", source: "manual" },
+    });
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    const reply = "I couldn't read a list in this photo. Could you send a clearer photo of the list?";
+    const fake = createFakeAnthropicFetch({ steps: [{ kind: "text", text: reply }] });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    const response = await handler(new Request(`http://${host}/api/assistant/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host,
+        origin: `http://${host}`,
+        "x-store-slug": slug,
+        "x-forwarded-for": "203.0.113.182",
+        cookie: `cart_id=${encodeURIComponent(cart.id)}`,
+      },
+      body: JSON.stringify({
+        message: {
+          id: "photo-blur-01",
+          role: "user",
+          parts: [{ type: "file", mediaType: "image/png", filename: "dinner.png", url: `data:image/png;base64,${png.toString("base64")}` }],
+        },
+      }),
+    }));
+    const body = await response.text();
+    expect(response.status, body).toBe(200);
+    expect(body).toContain("clearer photo");
+    const system = (fake.requests[0]?.body as { system?: Array<{ text: string }> }).system?.[0]?.text ?? "";
+    expect(system).toMatch(/no readable list[^\n]*clearer photo/);
+    const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId: cart.id } });
+    expect(lines.map((line) => [line.variantId, line.qty])).toEqual([[variantId, 2]]);
   });
 
   it("files reach the model only on their own turn and are never saved", async () => {

@@ -119,6 +119,15 @@ export function judgeMessagesRequest(args: {
       message: "unknown model",
     };
   }
+  const tools = Array.isArray(body.tools) ? body.tools : [];
+  const dynamicSearch = tools.some((item) => isRecord(item) && typeof item.type === "string" && /^web_(search|fetch)_2026/.test(item.type));
+  if (dynamicSearch && body.model === "claude-haiku-5-5") {
+    return {
+      status: 400,
+      errorType: "invalid_request_error",
+      message: "this web tool version is not supported on claude-haiku-5-5; use web_search_20250305",
+    };
+  }
   if (
     body.temperature !== undefined ||
     body.top_p !== undefined ||
@@ -432,10 +441,13 @@ export function createMessagesApiDouble(expectedKey: string): MessagesApiDouble 
 }
 
 export interface FakeAnthropicStep {
-  kind: "text" | "tool" | "error";
+  /** pause: the web search blocks only, ending in pause_turn (non-streaming only). */
+  kind: "text" | "tool" | "error" | "pause";
   text?: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
+  /** Server-side web search blocks sent before the tool call (non-streaming only). */
+  webSearch?: { query: string; results: Array<{ url: string; title: string }> };
   inputTokens?: number;
   cacheWriteTokens?: number;
   cacheReadTokens?: number;
@@ -586,9 +598,47 @@ export function createFakeAnthropicFetch(options?: {
       );
     }
     const usage = usageOf(step);
-    if (step.kind === "tool") {
+    if (step.kind === "tool" || step.kind === "pause") {
       const content: Array<Record<string, unknown>> = [];
+      if (step.webSearch) {
+        const declared = (Array.isArray(body?.tools) ? body.tools : []).some(
+          (item) => isRecord(item) && item.name === "web_search",
+        );
+        if (!declared) {
+          return Response.json(
+            errorBody({ status: 400, errorType: "invalid_request_error", message: "web_search is not declared" }),
+            { status: 400 },
+          );
+        }
+        content.push(
+          { type: "server_tool_use", id: `srv${toolId}`, name: "web_search", input: { query: step.webSearch.query } },
+          {
+            type: "web_search_tool_result",
+            tool_use_id: `srv${toolId}`,
+            content: step.webSearch.results.map((result) => ({
+              type: "web_search_result",
+              url: result.url,
+              title: result.title,
+              encrypted_content: "fake",
+              page_age: null,
+            })),
+          },
+        );
+      }
       if (step.text) content.push({ type: "text", text: step.text });
+      const searchUsage = step.webSearch ? { ...usage, server_tool_use: { web_search_requests: 1 } } : usage;
+      if (step.kind === "pause") {
+        return Response.json({
+          id: "msg_fake",
+          type: "message",
+          role: "assistant",
+          model,
+          content,
+          stop_reason: "pause_turn",
+          stop_sequence: null,
+          usage: searchUsage,
+        });
+      }
       content.push({
         type: "tool_use",
         id: toolId,
@@ -603,7 +653,7 @@ export function createFakeAnthropicFetch(options?: {
         content,
         stop_reason: "tool_use",
         stop_sequence: null,
-        usage,
+        usage: searchUsage,
       });
     }
     return Response.json({

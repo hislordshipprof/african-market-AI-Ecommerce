@@ -13,6 +13,7 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
+import { getRecipe, type RecipeDeps } from "./recipe";
 import { checkDeliveryArea, forwardToStore, getOrderStatus, getStoreInfo } from "./store-questions";
 import {
   addToCartInput,
@@ -20,6 +21,7 @@ import {
   checkAvailabilityInput,
   checkDeliveryAreaInput,
   forwardToStoreInput,
+  getRecipeInput,
   getOrderStatusInput,
   getStoreInfoInput,
   removeFromCartInput,
@@ -34,7 +36,7 @@ import {
 export type { AssistantContext, ToolResult } from "./execute";
 export { toolInputSchemas } from "./schemas";
 
-export function assistantTools(ctx: AssistantContext) {
+export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {}) {
   return exactAssistantKeys({
     search_catalog: tool({
       description: "Search this store's catalog. query is the product words only, including a brand the customer named. pack is a size or pack the customer named, such as \"400 g tin\" or \"bag\". exclude is words the customer ruled out, such as onion. Match name or match synonym is a fit. Match near is not a fit on an explicit add. Search returns the cheapest variant. When pack does not appear on that variant's label, call show_products and add the variant whose label shows it.",
@@ -105,6 +107,11 @@ export function assistantTools(ctx: AssistantContext) {
       description: "Send a complaint or refund request about the customer's own order to the store's order messages.",
       inputSchema: forwardToStoreInput,
       execute: (input, options) => forwardToStore({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    get_recipe: tool({
+      description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, notCarried, and excluded for what the customer ruled out. Omit servings when the customer did not say how many people; it then returns askServings.",
+      inputSchema: getRecipeInput,
+      execute: (input, options) => getRecipe({ ...ctx, toolCallId: options.toolCallId }, input, recipeDeps),
     }),
   });
 }

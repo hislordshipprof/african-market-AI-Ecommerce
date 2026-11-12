@@ -129,7 +129,8 @@ function usageFromJson(value: unknown): TokenUsage | null {
   const cacheWrite = numberOrZero(usage.cache_creation_input_tokens);
   const cacheRead = numberOrZero(usage.cache_read_input_tokens);
   const output = numberOrZero(usage.output_tokens);
-  return anthropicUsage(input, cacheRead, cacheWrite, output);
+  const tokens = anthropicUsage(input, cacheRead, cacheWrite, output);
+  return tokens && { ...tokens, raw: usage };
 }
 
 function numberOrZero(value: unknown): number {

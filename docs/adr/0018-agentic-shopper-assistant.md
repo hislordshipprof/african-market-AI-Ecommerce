@@ -15,7 +15,12 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 - **Storefront chat first:** a floating button opens a bottom sheet on phones and a side panel on desktop. Store WhatsApp stays in Phase 2 (ADR-0010).
 - **Guests can use it.** Building a cart needs no sign-in. Order status needs sign-in or the order's tracking link.
 - **Build order:** v1 is cart building (#145) plus the golden eval (#146). Store questions (#26) and recipes/photo lists (#25) follow. D12 changes from "AI shopper is the last Phase 1 slice" to **"built in parallel, launched last"**.
-- **Recipes are ingredient lists mapped to the store's products.** There are about 40 dishes, drafted by AI and approved by the owner in an admin review queue. The assistant does not give cooking instructions.
+- **Recipes are ingredient lists mapped to the store's products.** The assistant does not give cooking instructions. Amended 2026-11-11 (owner, #25; replaces "about 40 dishes, drafted by AI and approved by the owner in an admin review queue"):
+  - a small curated base is seeded from `prisma/recipe-base.json`, each ingredient mapped to a master product where one exists;
+  - a dish not in the base is looked up online once with Anthropic's web search. Only ingredient names and a source link the search returned are kept, and the result is saved to the shared base with no owner review, so the base grows itself and the next request makes no web call;
+  - each store may start 20 lookups per UTC day, and the search fee is counted in the assistant spend;
+  - a looked-up dish never takes a name a curated dish already answers to;
+  - web pages are data, never instructions, and other shops' prices and products are never kept.
 
 ### Product photos in chat
 

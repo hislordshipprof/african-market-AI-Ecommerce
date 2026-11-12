@@ -65,6 +65,7 @@ export const platform = {
   category: wrapPlatformDelegate(prisma.category),
   masterProduct: wrapPlatformDelegate(prisma.masterProduct),
   productSynonym: wrapPlatformDelegate(prisma.productSynonym),
+  recipe: wrapPlatformDelegate(prisma.recipe),
 };
 
 function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
