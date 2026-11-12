@@ -32,6 +32,7 @@ const CUSTOMER_STATUS_LABELS: Record<OrderStatus, string> = {
   AUTHORIZED: "Order placed",
   ACCEPTED: "Store accepted",
   PICKING: "Shopping your order",
+  SUBSTITUTION_PENDING: "Waiting for your answer",
   CANCELLING: "Cancelling",
   CAPTURING: "Finalizing your total",
   READY: "Packed and ready",

@@ -43,6 +43,7 @@ import {
   acceptOrderAction,
   autoAcceptOrderAction,
   markLinePickedAction,
+  markLineShortAction,
   markReadyAction,
   completePickupAction,
   markOutForDeliveryAction,
@@ -65,6 +66,7 @@ const STATUS_CONFIG: Record<
   AUTHORIZED: { label: "New", variant: "destructive", icon: Bell },
   ACCEPTED: { label: "Accepted", variant: "default", icon: Check },
   PICKING: { label: "Picking", variant: "secondary", icon: Package },
+  SUBSTITUTION_PENDING: { label: "Waiting on customer", variant: "secondary", icon: Clock },
   CAPTURING: { label: "Capturing…", variant: "secondary", icon: RefreshCw },
   CANCELLING: { label: "Cancelling…", variant: "destructive", icon: RefreshCw },
   READY: { label: "Ready", variant: "default", icon: CheckCircle2 },
@@ -133,6 +135,8 @@ export function OrderInbox({
   const [prepMinutes, setPrepMinutes] = useState(String(defaultPrepMinutes));
   const [proofPhoto, setProofPhoto] = useState<{ orderId: string; file: File } | null>(null);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [shortLine, setShortLine] = useState<{ id: string; name: string; qtyOrdered: number } | null>(null);
+  const [qtyFound, setQtyFound] = useState("0");
   const [cancelReason, setCancelReason] = useState<StoreCancelReason | null>(null);
   const [cancelNote, setCancelNote] = useState("");
   const prevOrderIdsRef = useRef(new Set(initialOrders.map((o) => o.id)));
@@ -251,6 +255,25 @@ export function OrderInbox({
     });
   }
 
+  function handleShortConfirm() {
+    if (!shortLine) return;
+    const found = Number(qtyFound);
+    if (!Number.isInteger(found) || found < 0 || found >= shortLine.qtyOrdered) {
+      toast.error(`Enter a whole number from 0 to ${shortLine.qtyOrdered - 1}`);
+      return;
+    }
+    startTransition(async () => {
+      const result = await markLineShortAction(shortLine.id, found);
+      if (result.ok) {
+        toast.success("Customer asked to choose a swap or refund");
+        setShortLine(null);
+        pollOrders();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  }
+
   function handleMarkPicked(lineId: string) {
     startTransition(async () => {
       const result = await markLinePickedAction(lineId);
@@ -346,6 +369,27 @@ export function OrderInbox({
         toast.error(result.error);
       }
     });
+  }
+
+  /** What the customer's answer or the timer did with a short line; the 10 s poll keeps it current. */
+  function substitutionNote(line: StoreOrderRow["lines"][number]): string | null {
+    const request = line.substitutionRequest;
+    if (!request) return null;
+    const missing = line.qtyOrdered - line.qtyPicked;
+    if (request.status === "pending") {
+      const due = new Date(request.expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const offer = request.proposedVariant ? `swap offered: ${variantName(request.proposedVariant)}` : "refund only";
+      return `Found ${line.qtyPicked} of ${line.qtyOrdered} · waiting for customer (${offer}) · rule applies at ${due}`;
+    }
+    const by = request.status === "timed_out" ? " (timed out, rule applied)" : "";
+    if (line.status === "substituted" && line.substitutedVariant) {
+      return `Found ${line.qtyPicked} of ${line.qtyOrdered} · swap ${missing} for ${variantName(line.substitutedVariant)}${by}`;
+    }
+    return `Found ${line.qtyPicked} of ${line.qtyOrdered} · ${missing} refunded${by}`;
+  }
+
+  function variantName(variant: { label: string; listing: { customName: string | null; masterProduct: { name: string } | null } }) {
+    return variant.listing.customName ?? variant.listing.masterProduct?.name ?? variant.label;
   }
 
   function lineProductName(line: StoreOrderRow["lines"][number]) {
@@ -474,7 +518,8 @@ export function OrderInbox({
                 )}
 
                 {(selectedOrder.status === "ACCEPTED" ||
-                  selectedOrder.status === "PICKING") && (
+                  selectedOrder.status === "PICKING" ||
+                  selectedOrder.status === "SUBSTITUTION_PENDING") && (
                   <div className="mb-4">
                     <h3 className="mb-2 text-sm font-semibold text-foreground">
                       Pick list
@@ -484,7 +529,7 @@ export function OrderInbox({
                         <div
                           key={line.id}
                           className={`flex items-center justify-between rounded-xl border p-3 transition-colors ${
-                            line.status === "picked"
+                            line.status !== "pending" && line.status !== "short"
                               ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950"
                               : "border-border bg-card"
                           }`}
@@ -509,19 +554,40 @@ export function OrderInbox({
                               {line.listingVariant.label} &middot; Qty:{" "}
                               {line.qtyOrdered}
                             </div>
+                            {substitutionNote(line) && (
+                              <div className="mt-1 text-xs font-medium text-foreground" role="status">
+                                {substitutionNote(line)}
+                              </div>
+                            )}
                           </div>
-                          {line.status === "picked" ? (
-                            <CheckCircle2 className="size-5 shrink-0 text-green-600 dark:text-green-400" />
+                          {line.status === "pending" ? (
+                            <div className="flex shrink-0 gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="rounded-full"
+                                onClick={() => {
+                                  setQtyFound("0");
+                                  setShortLine({ id: line.id, name: lineProductName(line), qtyOrdered: line.qtyOrdered });
+                                }}
+                                disabled={isPending}
+                              >
+                                Short
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-full"
+                                onClick={() => handleMarkPicked(line.id)}
+                                disabled={isPending}
+                              >
+                                Pick
+                              </Button>
+                            </div>
+                          ) : line.status === "short" ? (
+                            <Clock className="size-5 shrink-0 text-muted-foreground" aria-label="Waiting for customer" />
                           ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="shrink-0 rounded-full"
-                              onClick={() => handleMarkPicked(line.id)}
-                              disabled={isPending}
-                            >
-                              Pick
-                            </Button>
+                            <CheckCircle2 className="size-5 shrink-0 text-green-600 dark:text-green-400" />
                           )}
                         </div>
                       ))}
@@ -710,6 +776,38 @@ export function OrderInbox({
           </div>
         )}
       </main>
+
+      <Dialog open={shortLine !== null} onOpenChange={(open) => !open && setShortLine(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Item short</DialogTitle>
+            <DialogDescription>
+              How many of {shortLine?.qtyOrdered} × {shortLine?.name} did you find? The customer gets 10 minutes to choose a swap or a refund for the rest.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="qty-found">Quantity found</Label>
+            <Input
+              id="qty-found"
+              type="number"
+              inputMode="numeric"
+              min="0"
+              max={shortLine ? shortLine.qtyOrdered - 1 : undefined}
+              value={qtyFound}
+              onChange={(e) => setQtyFound(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShortLine(null)} className="rounded-full">
+              Cancel
+            </Button>
+            <Button onClick={handleShortConfirm} disabled={isPending} className="rounded-full">
+              Ask customer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={acceptDialogOpen} onOpenChange={setAcceptDialogOpen}>
         <DialogContent>

@@ -61,6 +61,12 @@ export default async function OrderPage({
               </p>
             </FlowCard>
           )}
+          {realOrder.status === "SUBSTITUTION_PENDING" && realOrder.trackingToken === token && (
+            <FlowCard title="An item is short">
+              <p>The store couldn&rsquo;t find everything you ordered. Choose a swap or a refund.</p>
+              <Link className="sf-button" href={`/order/${encodeURIComponent(token)}/substitutions`}>Choose now</Link>
+            </FlowCard>
+          )}
           <FlowCard title="Order details">
             <p><strong>Status:</strong> {customerStatusLabel(realOrder.status)}</p>
             <p><strong>Fulfillment:</strong> {realOrder.fulfillment}</p>

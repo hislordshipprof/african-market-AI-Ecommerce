@@ -12,13 +12,14 @@ export function orderTrackingUrl(
   store: { slug: string },
   token: string,
   env: Record<string, string | undefined>,
+  subpath: "" | "/substitutions" = "",
 ): string | null {
   if (!token || !isSlugRoutable(store.slug)) return null;
   const root = env.PLATFORM_ROOT_DOMAIN?.trim();
   if (root) {
-    return `https://${store.slug}.${root}/order/${encodeURIComponent(token)}`;
+    return `https://${store.slug}.${root}/order/${encodeURIComponent(token)}${subpath}`;
   }
   if (!allowStoreOverride(env)) return null;
   const base = resolveAuthBaseUrl(env).replace(/\/$/, "");
-  return `${base}/order/${encodeURIComponent(token)}?store=${encodeURIComponent(store.slug)}`;
+  return `${base}/order/${encodeURIComponent(token)}${subpath}?store=${encodeURIComponent(store.slug)}`;
 }

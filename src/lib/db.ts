@@ -109,6 +109,7 @@ export function storeScoped(storeId: string) {
     orderLine: wrapDelegate(storeId, prisma.orderLine),
     refundRequest: wrapDelegate(storeId, prisma.refundRequest),
     issueReport: wrapDelegate(storeId, prisma.issueReport),
+    substitutionRequest: wrapDelegate(storeId, prisma.substitutionRequest),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
@@ -305,7 +306,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "notificationLog" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -329,6 +330,7 @@ export async function storeScopedTransaction<T>(
       paymentIntentRelease: tx.paymentIntentRelease,
       refundRequest: tx.refundRequest,
       issueReport: tx.issueReport,
+      substitutionRequest: tx.substitutionRequest,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
       assistantUndoReceipt: tx.assistantUndoReceipt,
@@ -806,6 +808,20 @@ export async function markOrphanHoldChecked(storeId: string, cartId: string, pay
 
 const NOTIFICATION_RESEND_MS = 5 * 60_000;
 const NOTIFICATION_EXPIRE_MS = 2 * 60 * 60_000;
+
+/** Substitution prompts past their 10 minutes whose order still waits: the timer's backstop (#13). */
+export async function findExpiredSubstitutionRequests(limit: number): Promise<Array<{ id: string; storeId: string }>> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+      SELECT sr.id, sr.store_id FROM substitution_requests sr
+      JOIN orders o ON o.id = sr.order_id
+      WHERE sr.status = 'pending' AND sr.expires_at <= now() AND o.status = 'SUBSTITUTION_PENDING'
+      ORDER BY sr.expires_at ASC
+      LIMIT ${limit}
+    `;
+    return rows.map((row) => ({ id: row.id, storeId: row.store_id }));
+  });
+}
 
 export async function findPendingOrderNotifications(opts?: {
   storeIds?: readonly string[];

@@ -12,6 +12,7 @@ export const ORDER_NOTIFY_EVENTS = [
   "cancelled",
   "store_replied",
   "refunded",
+  "substitution",
 ] as const;
 export type OrderNotifyEvent = (typeof ORDER_NOTIFY_EVENTS)[number];
 
@@ -30,6 +31,7 @@ type TokenTx = {
   };
   notificationLog: {
     createMany: (args: Prisma.NotificationLogCreateManyArgs) => Promise<{ count: number }>;
+    updateMany: (args: Prisma.NotificationLogUpdateManyArgs) => Promise<{ count: number }>;
   };
 };
 
@@ -59,4 +61,17 @@ export async function recordOrderNotification(
     skipDuplicates: true,
   });
   return inserted.count > 0;
+}
+
+/**
+ * A substitution prompt can come more than once on one order (#13). A new round re-opens a
+ * finished row so the customer hears about it; a row still pending or sending already will.
+ */
+export async function recordSubstitutionPrompt(tx: TokenTx, storeId: string, orderId: string): Promise<boolean> {
+  if (await recordOrderNotification(tx, storeId, orderId, "substitution")) return true;
+  const reopened = await tx.notificationLog.updateMany({
+    where: { orderId, event: "substitution", status: { notIn: ["pending", "sending"] } },
+    data: { status: "pending", reason: null, attempts: 0, createdAt: new Date() },
+  });
+  return reopened.count > 0;
 }

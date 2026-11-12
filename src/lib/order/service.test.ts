@@ -4328,12 +4328,12 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       }
       expect((await stockOf(storeId, listingId)).qty).toBe(5);
 
-      expect(await markLineShort(storeId, lineId, 2)).toEqual({ ok: true, orderStatus: "PICKING" });
+      expect(await markLineShort(storeId, lineId, 2)).toEqual({ ok: true, orderStatus: "SUBSTITUTION_PENDING" });
       const shorted = { qty: 5, events: [["reservation", -5], ["reservation_release", 3], ["short", -3]] };
       expect(await stockOf(storeId, listingId)).toEqual(shorted);
       const line = await storeScoped(storeId).orderLine.findUniqueOrThrow({ where: { id: lineId } });
       expect(line).toMatchObject({ status: "short", qtyPicked: 2 });
-      expect(await statusOf(placed.orderId)).toBe("PICKING");
+      expect(await statusOf(placed.orderId)).toBe("SUBSTITUTION_PENDING");
 
       expect((await markLineShort(storeId, lineId, 2)).ok).toBe(false);
       expect(await stockOf(storeId, listingId)).toEqual(shorted);

@@ -1,0 +1,38 @@
+import { describe, expect, it } from "vitest";
+import { canOfferSwap, captureAmountCents } from "./substitution-pricing";
+
+describe("canOfferSwap", () => {
+  it("offers a swap that stays within the card hold, and never one that exceeds it", () => {
+    expect(canOfferSwap(5500, 5000, 400)).toBe(true);
+    expect(canOfferSwap(5500, 5000, 0)).toBe(true);
+    expect(canOfferSwap(5500, 5400, 200)).toBe(false);
+  });
+});
+
+describe("captureAmountCents", () => {
+  const line = (status: string, qtyOrdered: number, qtyPicked: number, unitPriceCents: number, substitutedUnitPriceCents: number | null = null) =>
+    ({ status, qtyOrdered, qtyPicked, unitPriceCents, substitutedUnitPriceCents });
+  const fees = { tipCents: 0, deliveryFeeCents: 0 };
+
+  it("charges picked lines in full and adds tip and delivery fee", () => {
+    expect(captureAmountCents([line("picked", 2, 2, 1000)], { tipCents: 200, deliveryFeeCents: 500 })).toBe(2700);
+  });
+
+  it("AC4: a $50 order with an $8 line refunded and a line swapped up $4 captures $46", () => {
+    const lines = [
+      line("refunded", 1, 0, 800),
+      line("substituted", 1, 0, 1000, 1400),
+      line("picked", 2, 2, 1600),
+    ];
+    expect(captureAmountCents(lines, fees)).toBe(4600);
+  });
+
+  it("charges found units of a short line plus the swap for the rest, up or down", () => {
+    expect(captureAmountCents([line("substituted", 3, 1, 1000, 900)], fees)).toBe(1000 + 2 * 900);
+    expect(captureAmountCents([line("refunded", 3, 1, 1000)], fees)).toBe(1000);
+  });
+
+  it("captures nothing, not even tip or fee, when no line is charged", () => {
+    expect(captureAmountCents([line("refunded", 2, 0, 1000)], { tipCents: 300, deliveryFeeCents: 500 })).toBe(0);
+  });
+});

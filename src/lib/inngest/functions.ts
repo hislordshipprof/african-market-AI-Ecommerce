@@ -1,7 +1,8 @@
 import { inngest } from "./client";
-import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders, findPendingOrderNotifications, expireStaleOrderNotifications, findPickTimeoutCandidates, findOrphanHoldCarts } from "../db";
+import { storeScopedTransaction, lockStoreRow, findOrphanedAuthorizedOrders, findStuckTransitionalOrders, findPendingOrderNotifications, expireStaleOrderNotifications, findPickTimeoutCandidates, findOrphanHoldCarts, findExpiredSubstitutionRequests } from "../db";
 import { platform } from "../db";
 import { autoCancelOrder, cancelOrder, reconcileStuckOrder } from "../order/service";
+import { applySubstitutionTimeout } from "../order/substitution";
 import { releaseOrphanHolds } from "../checkout/service";
 import { isValidTimezone, openMinutesDeadline } from "../order/store-hours";
 import { sendOrderAuthorized } from "./send";
@@ -314,7 +315,36 @@ export const sweepOrphanedAuthorized = inngest.createFunction(
       });
     }
 
+    // Backstop for a substitution timer whose event never reached Inngest.
+    const expiredPrompts = await step.run("find-expired-substitutions", () => findExpiredSubstitutionRequests(PICK_TIMEOUT_BATCH));
+    for (const row of expiredPrompts) {
+      await step.run(`substitution-timeout-${row.id}`, async () => {
+        try {
+          await applySubstitutionTimeout(row.storeId, row.id);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          console.error(JSON.stringify({ event: "substitution_timeout_failed", requestId: row.id, error }));
+        }
+      });
+    }
+
     await step.run("release-orphan-holds", async () => releaseOrphanHolds(await findOrphanHoldCarts()));
+  },
+);
+
+/** One durable timer per substitution prompt (#13). An answered prompt makes the run a no-op. */
+export const substitutionTimeout = inngest.createFunction(
+  {
+    id: "order/substitution-timeout",
+    idempotency: "event.data.requestId",
+    triggers: [{ event: "order/substitution.requested" }],
+  },
+  async ({ event, step }) => {
+    const { storeId, requestId, expiresAt } = event.data as { storeId?: string; requestId?: string; expiresAt?: string };
+    if (!storeId || !requestId || !expiresAt) return;
+    const due = new Date(expiresAt);
+    if (due.getTime() > Date.now()) await step.sleepUntil("substitution-wait", due);
+    await step.run("substitution-apply-rule", () => applySubstitutionTimeout(storeId, requestId));
   },
 );
 
@@ -395,6 +425,7 @@ export const inngestFunctions = [
   assistantRetention,
   dailyConfidence,
   sendCustomerNotification,
+  substitutionTimeout,
   supportSlaEscalation,
   copilotOrderStockAlerts,
   copilotDailyDigest,

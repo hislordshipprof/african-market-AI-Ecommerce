@@ -8,9 +8,11 @@ import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
 import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
-import { recordOrderNotification } from "../notifications/record";
-import { scheduleOrderNotification } from "../inngest/notify";
+import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
+import { scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
+import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
+import { captureAmountCents } from "./substitution-pricing";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -18,6 +20,7 @@ export type OrderStatus =
   | "AUTHORIZED"
   | "ACCEPTED"
   | "PICKING"
+  | "SUBSTITUTION_PENDING"
   | "CANCELLING"
   | "CAPTURING"
   | "READY"
@@ -81,7 +84,7 @@ const CANCEL_CAUSE_ACTIONS: CancelCause["action"][] = ["store_cancel", "provider
 
 const CANCELLABLE_FROM: Record<CancelCause["action"], OrderStatus[]> = {
   auto_cancel: ["AUTHORIZED"],
-  pick_timeout: ["ACCEPTED", "PICKING"],
+  pick_timeout: ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"],
   store_cancel: [...CANCELLABLE_BEFORE_CAPTURE],
   provider_canceled: [...CANCELLABLE_BEFORE_CAPTURE],
 };
@@ -272,10 +275,14 @@ function isTerminalRefundStatus(status: string): boolean {
   return status === "failed" || status === "canceled";
 }
 
+/** Statuses a picker can tick or short lines in. */
+const PICKABLE_STATUSES: string[] = ["ACCEPTED", "PICKING", "SUBSTITUTION_PENDING"];
+
 const ACTIVE_STATUSES: OrderStatus[] = [
   "AUTHORIZED",
   "ACCEPTED",
   "PICKING",
+  "SUBSTITUTION_PENDING",
   "CAPTURING",
   "CANCELLING",
   "READY",
@@ -284,10 +291,18 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   "REFUND_FAILED",
 ];
 
+const NAMED_VARIANT = {
+  select: { label: true, listing: { select: { customName: true, masterProduct: { select: { name: true } } } } },
+} as const;
+
 const ORDER_WITH_LINES = {
   customer: { select: { name: true, phone: true, userId: true, claimedByCustomerId: true } },
   lines: {
     include: {
+      substitutedVariant: NAMED_VARIANT,
+      substitutionRequest: {
+        select: { status: true, qty: true, expiresAt: true, proposedUnitPriceCents: true, proposedVariant: NAMED_VARIANT },
+      },
       listingVariant: {
         include: {
           listing: {
@@ -382,7 +397,7 @@ export async function markLinePicked(
 
     const order = await tx.order.findUnique({ where: { id: line.orderId } });
     if (!order) return { ok: false, error: "Order not found" };
-    if (order.status !== "ACCEPTED" && order.status !== "PICKING") {
+    if (!PICKABLE_STATUSES.includes(order.status)) {
       return { ok: false, error: `Cannot pick lines for order in status ${order.status}` };
     }
 
@@ -398,20 +413,24 @@ export async function markLinePicked(
       });
     }
 
-    return { ok: true, orderStatus: "PICKING" };
+    // Picking goes on while a customer answers a substitution prompt.
+    return { ok: true, orderStatus: order.status === "SUBSTITUTION_PENDING" ? "SUBSTITUTION_PENDING" : "PICKING" };
   });
 }
 
 /**
- * A picker found fewer than ordered. Service only until #13 adds the staff action:
- * `short` is not a resolved line status, so nothing can capture such an order yet.
+ * A picker found fewer than ordered. The line waits as `short` while the customer is asked to
+ * approve a swap or take a refund (#13); the order waits in SUBSTITUTION_PENDING until every
+ * prompt is answered or timed out, and only then can it be captured.
  */
 export async function markLineShort(
   storeId: string,
   lineId: string,
   qtyFound: number,
 ): Promise<{ ok: true; orderStatus: OrderStatus } | { ok: false; error: string }> {
-  return storeScopedTransaction(storeId, async (tx) => {
+  const result = await storeScopedTransaction(storeId, async (tx): Promise<
+    { ok: true; orderStatus: OrderStatus; orderId: string; request: { id: string; expiresAt: Date }; notify: boolean } | { ok: false; error: string }
+  > => {
     await lockStoreRow(tx, storeId);
 
     const line = await tx.orderLine.findUnique({ where: { id: lineId } });
@@ -425,21 +444,25 @@ export async function markLineShort(
 
     const order = await tx.order.findUnique({ where: { id: line.orderId } });
     if (!order) return { ok: false, error: "Order not found" };
-    if (order.status !== "ACCEPTED" && order.status !== "PICKING") {
+    if (!PICKABLE_STATUSES.includes(order.status)) {
       return { ok: false, error: `Cannot mark lines short for order in status ${order.status}` };
     }
 
+    const request = await openSubstitutionRequest(tx, storeId, line, qtyFound, order);
     await tx.orderLine.update({
       where: { id: lineId },
       data: { status: "short", qtyPicked: qtyFound },
     });
-    if (order.status === "ACCEPTED") {
-      await tx.order.update({ where: { id: order.id }, data: { status: "PICKING" } });
-    }
+    await tx.order.update({ where: { id: order.id }, data: { status: "SUBSTITUTION_PENDING" } });
     await settleShortLine(tx, storeId, lineId, line.qtyOrdered - qtyFound);
+    const notify = await recordSubstitutionPrompt(tx, storeId, order.id);
 
-    return { ok: true, orderStatus: "PICKING" };
+    return { ok: true, orderStatus: "SUBSTITUTION_PENDING", orderId: order.id, request, notify };
   }, LEDGER_TRANSACTION);
+  if (!result.ok) return result;
+  scheduleSubstitutionTimer(storeId, result.orderId, result.request.id, result.request.expiresAt);
+  if (result.notify) scheduleOrderNotification(storeId, result.orderId, "substitution", result.request.id);
+  return { ok: true, orderStatus: result.orderStatus };
 }
 
 type CaptureRetryResult =
@@ -914,15 +937,8 @@ export async function markReady(
       return { ok: false as const, error: "Cannot mark ready: unresolved order lines remain" };
     }
 
-    const lineTotalCents = lines.reduce((sum: number, l: { status: string; qtyPicked: number; unitPriceCents: number }) => {
-      if (l.status === "refunded") return sum;
-      return sum + l.qtyPicked * l.unitPriceCents;
-    }, 0);
-
-    // Nothing picked: release the whole hold, including the delivery fee and tip.
-    const capturedAmountCents = lineTotalCents === 0
-      ? 0
-      : lineTotalCents + order.tipCents + order.deliveryFeeCents;
+    // Swaps and refunds of short lines (#13) are priced here, so the capture reflects them.
+    const capturedAmountCents = captureAmountCents(lines, order);
 
     if (!order.paymentIntentId) {
       return { ok: false as const, error: "Order has no payment intent" };
