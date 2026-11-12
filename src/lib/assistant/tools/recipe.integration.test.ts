@@ -328,6 +328,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     const narrower = await getRecipe(jollof, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
     expect([...narrower.inStock, ...narrower.lowOrOut].map((item) => item.ingredient)).not.toContain("onion");
     expect(narrower.excluded).toEqual(["onion"]);
+    expect(narrower.preferences).toEqual([`fresh tomato ${suffix}`]);
     expect(narrower.lowOrOut.map((item) => item.ingredient)).toContain("tomato paste");
   });
 

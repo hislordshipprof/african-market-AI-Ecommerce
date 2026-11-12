@@ -118,6 +118,8 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     await setShopperNeeds(all, { avoid_ingredients: [`fresh tomato ${suffix}`] });
     const saved = await setShopperNeeds(all, { avoid_ingredients: [`tomato ${suffix}`] });
     expect(saved).not.toHaveProperty("ask");
+    // The hard constraint replaces the preference it answered.
+    expect(saved).toMatchObject({ avoidIngredients: [`tomato ${suffix}`], preferences: [] });
     expect(await addToCart(all, { items: [{ variant_id: listing.plain.variantId, qty: 1 }] })).toMatchObject({ ok: false, code: "excluded" });
     expect(items(await searchCatalog(all, { query: `paste plain ${suffix}` })).map((item) => item.listingId)).not.toContain(listing.plain.listingId);
   });

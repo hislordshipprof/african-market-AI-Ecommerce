@@ -99,9 +99,9 @@ export async function updateConstraints(
  * Known ingredients whose name or synonym the term contains, or that contain the term, with the catalog
  * search's English text match: "fresh tomato" finds tomato. They are only offered in a question, never enforced.
  */
-async function closestIngredients(storeId: string, term: string): Promise<string[]> {
-  const rows = await storeScopedRawQuery<{ name: string }>(storeId, Prisma.sql`
-    SELECT i.name FROM ingredients i
+async function closestIngredients(storeId: string, term: string): Promise<Array<{ id: string; name: string }>> {
+  return storeScopedRawQuery<{ id: string; name: string }>(storeId, Prisma.sql`
+    SELECT i.id, i.name FROM ingredients i
     WHERE EXISTS (
       SELECT 1 FROM (SELECT i.name AS known UNION ALL SELECT s.term FROM ingredient_synonyms s WHERE s.ingredient_id = i.id) k
       WHERE to_tsvector('english', unaccent(${term})) @@ plainto_tsquery('english', unaccent(k.known))
@@ -110,7 +110,6 @@ async function closestIngredients(storeId: string, term: string): Promise<string
     ORDER BY similarity(i.name, ${term}) DESC, i.name
     LIMIT 3
   `);
-  return rows.map((row) => row.name);
 }
 
 export interface ConstraintChange {
@@ -141,8 +140,17 @@ export async function changeConstraints(
       continue;
     }
     const closest = await closestIngredients(storeId, term);
-    if (closest.length > 0) ask.push({ term, closest });
+    if (closest.length > 0) ask.push({ term, closest: closest.map((row) => row.name) });
     else unchecked.push(term);
+  }
+  // A preference is answered once its closest ingredient is saved as a hard constraint.
+  const answered = new Set<string>();
+  if (known.length > 0) {
+    const saved = await readConstraints(storeId, conversationId);
+    for (const term of saved.preferences) {
+      const closest = await closestIngredients(storeId, term);
+      if (closest.some((row) => known.some((item) => item.ingredientId === row.id))) answered.add(term);
+    }
   }
   const constraints = await updateConstraints(storeId, conversationId, (constraints) => {
     constraints.avoidAllergens = [...new Set([...constraints.avoidAllergens, ...input.avoidAllergens])];
@@ -157,7 +165,7 @@ export async function changeConstraints(
     constraints.avoidAllergens = constraints.avoidAllergens.filter((name) => !removed.has(name));
     constraints.requireClaims = constraints.requireClaims.filter((name) => !removed.has(name));
     constraints.avoidIngredients = constraints.avoidIngredients.filter((item) => !removed.has(item.term));
-    constraints.preferences = constraints.preferences.filter((term) => !removed.has(term));
+    constraints.preferences = constraints.preferences.filter((term) => !removed.has(term) && !answered.has(term));
   });
   return { constraints, ask, cannotCheck: unchecked };
 }
