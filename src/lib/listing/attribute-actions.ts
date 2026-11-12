@@ -7,7 +7,7 @@ import { parseInput } from "../security/parse-input";
 import { requireStoreOwner } from "../store-admin/session";
 import { toActor } from "./service";
 
-const ownerStatus = z.enum(["known", "unknown"]);
+const ownerStatus = z.enum(["known", "unknown", "catalog"]);
 const correctionSchema = z.strictObject({
   listingId: z.string().min(1).max(200),
   ingredients: z.strictObject({ status: ownerStatus, names: z.array(z.string().max(100)).max(60) }).optional(),

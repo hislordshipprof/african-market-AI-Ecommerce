@@ -97,9 +97,9 @@ describe.skipIf(!hasDb)("listing attribute actions (DB integration, real auth gu
     signIn(ownerA, storeA);
     expect(await getListingAttributesAction(listingId)).toEqual({
       attributes: {
-        ingredients: { status: "unknown", values: [], proposed: false },
-        allergens: { status: "reviewed", values: ["peanuts"], proposed: false },
-        dietary: { status: "unknown", values: [], proposed: true },
+        ingredients: { status: "unknown", values: [], proposed: false, ownerSet: false },
+        allergens: { status: "reviewed", values: ["peanuts"], proposed: false, ownerSet: false },
+        dietary: { status: "unknown", values: [], proposed: true, ownerSet: false },
       },
     });
   });
@@ -114,11 +114,20 @@ describe.skipIf(!hasDb)("listing attribute actions (DB integration, real auth gu
     const read = await getListingAttributesAction(listingId);
     expect(read.attributes).toMatchObject({
       ingredients: { status: "known", values: [`${RUN} groundnut`] },
-      allergens: { status: "known", values: ["peanuts", "sesame"] },
-      dietary: { status: "unknown" },
+      allergens: { status: "known", values: ["peanuts", "sesame"], ownerSet: true },
+      dietary: { status: "unknown", ownerSet: false },
     });
     const audits = await asAdmin((tx) => tx.auditLog.findMany({ where: { entityId: listingId, action: "listing.attributes_correct" } }));
     expect(audits).toHaveLength(1);
+  });
+
+  it("refuses known ingredients with an empty list, and accepts 'Use catalog value'", async () => {
+    signIn(ownerA, storeA);
+    expect(await correctListingAttributesAction({ listingId, ingredients: { status: "known", names: [] } })).toEqual({
+      error: "List at least one ingredient, or mark the ingredients as unknown",
+    });
+    expect((await getListingAttributesAction(listingId)).attributes?.ingredients.values).toEqual([`${RUN} groundnut`]);
+    expect(await correctListingAttributesAction({ listingId, dietary: { status: "catalog", values: [] } })).toEqual({ success: true });
   });
 
   it("refuses an off-enum allergen or an extra field (strict schema) and changes nothing", async () => {
