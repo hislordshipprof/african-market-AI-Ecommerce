@@ -421,6 +421,17 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(shown).toMatchObject({ cards: [{ mayBeUnavailable: true }] });
   });
 
+  it("set_swap_rule keeps a backup on a may-be-unavailable line and refuses exact_only", async () => {
+    const item = await makeListing(storeA, { name: "Low Stock Ofada", price: 236, confidence: 0.4 });
+    await addToCart(ctx(), { items: [{ variant_id: item.variantId, qty: 1 }] });
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const result = await setSwapRule(ctx(), { line_id: line!.id, rule: "exact_only" });
+    expect(result).toMatchObject({ ok: false, code: "backup_required" });
+    const still = await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } });
+    expect(still?.swapRule).toBe("store_suggests");
+    expect(await setSwapRule(ctx(), { line_id: line!.id, rule: "store_suggests" })).toMatchObject({ ok: true, swapRule: "store_suggests" });
+  });
+
   it("confidence 0.5 with a valid backup sets named_substitute", async () => {
     const item = await makeListing(storeA, { name: "Needs Backup", price: 260, confidence: 0.5 });
     const backup = await makeListing(storeA, { name: "Backup Yam Flour", price: 270, confidence: 1 });

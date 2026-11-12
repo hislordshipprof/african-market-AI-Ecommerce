@@ -59,6 +59,7 @@ const MESSAGES: Record<string, string> = {
   audit_failed: "Could not record this action.",
   not_enough_choices: "There are not enough choices to pick from.",
   not_shown: "Nothing was added. Tell me which items you want, and I'll add them.",
+  backup_required: "This item may be unavailable, so it keeps a backup: Let the store suggest or a named substitute.",
 };
 
 function fail(code: string): ToolFailure {
@@ -689,8 +690,13 @@ export async function removeFromCart(ctx: AssistantContext, input: unknown): Pro
 export async function setSwapRule(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(setSwapRuleInput, input);
   return recordWrite(ctx, "set_swap_rule", parsed, async (tx) => {
-    const line = await tx.cartLine.findUnique({ where: { id: parsed.line_id } });
+    const line = await tx.cartLine.findUnique({
+      where: { id: parsed.line_id },
+      include: { variant: { include: { listing: true } } },
+    });
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
+    // ADR-0018: a may-be-unavailable line always carries a backup.
+    if (parsed.rule === "exact_only" && mayBeUnavailable(line.variant.listing)) return fail("backup_required");
     if (parsed.rule === "named_substitute") {
       const substituteId = parsed.substitute_variant_id;
       const substitute = substituteId

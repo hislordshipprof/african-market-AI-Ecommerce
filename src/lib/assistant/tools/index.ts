@@ -72,7 +72,7 @@ export function assistantTools(ctx: AssistantContext) {
       execute: (input, options) => removeFromCart({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     set_swap_rule: tool({
-      description: "Set how the store should handle a line that is short.",
+      description: "Set how the store should handle a line that is short. A may-be-unavailable line keeps a backup: store_suggests or named_substitute, never exact_only.",
       inputSchema: setSwapRuleInput,
       execute: (input, options) => setSwapRule({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
