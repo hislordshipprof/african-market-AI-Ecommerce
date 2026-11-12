@@ -233,6 +233,26 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
   });
 }
 
+/** Saved constraints checked for listings a tool is about to return; null when there are none. */
+async function verdictsFor(ctx: AssistantContext, listingIds: string[]): Promise<Map<string, ListingVerdict> | null> {
+  const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  if (!hasConstraints(constraints)) return null;
+  return listingVerdicts(ctx.storeId, listingIds, constraints);
+}
+
+/** An excluded listing is never returned; any other carries its needs, and unknown is marked as not confirmed. */
+function needsOf(verdicts: Map<string, ListingVerdict> | null, listingId: string) {
+  const verdict = verdicts?.get(listingId);
+  if (!verdict) return {};
+  return { needs: verdict.needs, ...(verdict.status === "unknown" ? { cannotConfirm: true } : {}) };
+}
+
+/** With constraints, a listing the check did not return counts as excluded. */
+function isExcluded(verdicts: Map<string, ListingVerdict> | null, listingId: string): boolean {
+  const status = verdicts?.get(listingId)?.status;
+  return !!verdicts && status !== "ok" && status !== "unknown";
+}
+
 type Refusal = ToolFailure & { listingId: string; needs: Record<string, ConstraintStatus> };
 
 function refusal(verdict: ListingVerdict): Refusal {
@@ -294,12 +314,18 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
     },
   });
   const byId = new Map(listings.map((listing) => [listing.id, listing]));
+  const verdicts = await verdictsFor(ctx, listings.map((listing) => listing.id));
   const cards = [];
   const notFound: string[] = [];
+  const excluded: string[] = [];
   for (const id of parsed.listing_ids) {
     const listing = byId.get(id);
     if (!listing) {
       notFound.push(id);
+      continue;
+    }
+    if (isExcluded(verdicts, id)) {
+      excluded.push(id);
       continue;
     }
     const photo = listingImage({
@@ -319,9 +345,10 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
       })),
       badge: stockBadge(factsOf(listing)),
       mayBeUnavailable: mayBeUnavailable(listing),
+      ...needsOf(verdicts, listing.id),
     });
   }
-  return recordRead(ctx, "show_products", parsed, { ok: true, cards, notFound });
+  return recordRead(ctx, "show_products", parsed, { ok: true, cards, notFound, ...(excluded.length > 0 ? { excluded } : {}) });
 }
 
 export async function checkAvailability(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
@@ -373,13 +400,15 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
     where: { active: true, id: { not: listing.id }, masterProduct: { categoryId } },
     include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }] } },
     orderBy: [{ confidence: "desc" }, { price: "asc" }, { id: "asc" }],
-    take: 5,
+    take: 40,
   });
-  const items = candidates.map((candidate) => ({
+  const verdicts = await verdictsFor(ctx, candidates.map((candidate) => candidate.id));
+  const items = candidates.filter((candidate) => !isExcluded(verdicts, candidate.id)).slice(0, 5).map((candidate) => ({
     listingId: candidate.id,
     name: candidate.customName || candidate.masterProduct?.name || "Unnamed",
     priceCents: candidate.variants[0]?.price ?? candidate.price,
     mayBeUnavailable: mayBeUnavailable(candidate),
+    ...needsOf(verdicts, candidate.id),
   }));
   return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items });
 }
@@ -420,13 +449,19 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
     },
   });
   const byId = new Map(listings.map((listing) => [listing.id, listing]));
+  const verdicts = await verdictsFor(ctx, listings.map((listing) => listing.id));
   const notFound: string[] = [];
+  const excluded: string[] = [];
   const chosen: Array<Record<string, unknown>> = [];
   const seenVariants = new Set<string>();
   for (const option of parsed.options) {
     const listing = byId.get(option.listing_id);
     if (!listing || !listing.active) {
       notFound.push(option.listing_id);
+      continue;
+    }
+    if (isExcluded(verdicts, listing.id)) {
+      excluded.push(listing.id);
       continue;
     }
     const variant = option.variant_id
@@ -452,17 +487,20 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
       priceCents: variant.price,
       imageUrl: photo ?? null,
       mayBeUnavailable: mayBeUnavailable(listing),
+      ...needsOf(verdicts, listing.id),
     });
   }
+  const left = excluded.length > 0 ? { excluded } : {};
   if (chosen.length < 2) {
     return recordRead(ctx, "offer_choices", parsed, {
       ok: false,
       code: "not_enough_choices",
       message: NOT_ENOUGH,
       notFound,
+      ...left,
     });
   }
-  return recordRead(ctx, "offer_choices", parsed, { ok: true, options: chosen, notFound });
+  return recordRead(ctx, "offer_choices", parsed, { ok: true, options: chosen, notFound, ...left });
 }
 
 async function readCartMoney(tx: CartWriteTx, cartId: string) {

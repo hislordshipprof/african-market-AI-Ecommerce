@@ -4,7 +4,7 @@ import { platformAdmin, storeScoped, storeScopedTransaction } from "../../db";
 import { listingAttributes } from "../../catalog/listing-attributes";
 import { listingVerdicts, readConstraints } from "../constraints";
 import { acceptanceForTurn, type ShownMessage } from "../shown";
-import { addToCart, searchCatalog, setShopperNeeds, setSwapRule, type AssistantContext } from "./execute";
+import { addToCart, offerChoices, searchCatalog, setShopperNeeds, setSwapRule, type AssistantContext } from "./execute";
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => fn,
@@ -154,6 +154,8 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     const added = await addToCart(ctx, { items: [{ variant_id: listing.plain.variantId, qty: 1 }] });
     expect(added).toMatchObject({ ok: true });
     const lineId = (added as unknown as { lineId: string }).lineId;
+    const offered = await offerChoices(ctx, { options: [listing.plain, listing.peanut, listing.unknown].map((row) => ({ listing_id: row.listingId })) });
+    expect(offered).toMatchObject({ ok: true, excluded: [listing.peanut.listingId] });
     const swap = await setSwapRule(ctx, { line_id: lineId, rule: "named_substitute", substitute_variant_id: listing.peanut.variantId });
     expect(swap).toMatchObject({ ok: false, code: "excluded" });
   });
