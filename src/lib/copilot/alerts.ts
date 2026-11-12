@@ -1,4 +1,4 @@
-import { Prisma, findStoreIdsAfter, platform, storeScoped, storeScopedTransaction, txQuery } from "../db";
+import { Prisma, findStoreIdsAfter, lockCopilotPush, platform, storeScoped, storeScopedTransaction, txQuery } from "../db";
 import { pushToStoreMembers } from "../push/store-members";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
@@ -161,9 +161,8 @@ export async function pushCopilotAlerts(
   env: Record<string, string | undefined> = process.env,
   now = Date.now(),
 ): Promise<void> {
-  // One push at a time per store, so racing runs cannot spend a slot that claims nothing.
   const claimed = await storeScopedTransaction(storeId, async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('copilot-push'), hashtext(${storeId}))`;
+    await lockCopilotPush(tx, storeId);
     const waiting = await tx.copilotAlert.count({ where: { state: "open", pushedAt: null } });
     if (waiting === 0) return [];
     const allowed = await takeRateLimit(`copilot-push:${storeId}`, PUSH_CAP, PUSH_WINDOW_MS, now);
