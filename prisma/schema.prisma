@@ -885,6 +885,8 @@ model AiConversation {
   tokensOut     Int       @default(0) @map("tokens_out")
   costMicros    BigInt    @default(0) @map("cost_micros")
   messages      Json      @default("[]")
+  /// Shopper constraints (#485): what to avoid, what must hold, and unknown items the customer confirmed.
+  constraints   Json      @default("{}")
   inFlightUntil DateTime? @map("in_flight_until")
   createdAt     DateTime  @default(now()) @map("created_at")
   lastMessageAt DateTime  @default(now()) @map("last_message_at")

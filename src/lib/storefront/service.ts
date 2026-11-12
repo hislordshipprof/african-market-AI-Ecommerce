@@ -6,6 +6,8 @@ import { catalogFor, localNameFor } from "./catalog";
 import { E2E_LISTING_PREFIX } from "./e2e-listings";
 import { listingImage, storefrontPhoto } from "./images";
 import { effectiveMaxPerOrder } from "../cart/limits";
+import type { ShopperNeed } from "../catalog/attributes";
+import { effectiveAttributesSql, needExcludesSql } from "../catalog/attribute-sql";
 import type { FlowCatalogItem } from "../customer-flow/contracts";
 
 /** Prisma condition for storefront listing reads. NULL names (unnamed listings) must stay visible. */
@@ -15,11 +17,6 @@ const notE2eListing = {
 
 /** Same rule for the raw search SQL. LIKE is wrapped so NULL custom_name rows are kept. */
 const notE2eListingSql = Prisma.sql`(l.custom_name IS NULL OR LEFT(l.custom_name, ${E2E_LISTING_PREFIX.length}) <> ${E2E_LISTING_PREFIX})`;
-
-/** The search's exclude match: Postgres English text search of the excluded words in an unaccented name. */
-export function excludeMatchSql(name: Prisma.Sql, words: Prisma.Sql): Prisma.Sql {
-  return Prisma.sql`to_tsvector('english', ${name}) @@ plainto_tsquery('english', unaccent(${words}))`;
-}
 
 /** Cheapest pack first, then id. The projection sorts the same way with UTF-8 bytes. */
 const variantsCheapestFirst = {
@@ -309,10 +306,9 @@ interface RawSearchRow {
 async function readSearchListings(
   storeId: string,
   query: string,
-  exclude = "",
+  need: ShopperNeed | null = null,
 ): Promise<SearchHit[]> {
   const trimmed = query.trim();
-  const excluded = exclude.trim();
   if (!trimmed) return [];
 
   const results = await storeScopedRawQuery<RawSearchRow>(
@@ -334,6 +330,7 @@ async function readSearchListings(
     FROM listings l
     LEFT JOIN master_products mp ON l.master_product_id = mp.id
     LEFT JOIN categories c ON mp.category_id = c.id
+    ${need ? effectiveAttributesSql : Prisma.empty}
     LEFT JOIN LATERAL (
       SELECT lv.id, lv.label, lv.price, lv.weight_g FROM listing_variants lv
       WHERE lv.listing_id = l.id ORDER BY lv.price, lv.id COLLATE "C" LIMIT 1
@@ -376,7 +373,7 @@ async function readSearchListings(
     ) typo
     WHERE l.active = true AND ${notE2eListingSql}
       AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND typo.score > 0.3))
-      AND (${excluded} = '' OR NOT (${excludeMatchSql(Prisma.sql`name_doc.title`, Prisma.sql`${excluded}`)}))
+      AND NOT ${need ? needExcludesSql(need) : Prisma.sql`false`}
     ORDER BY
       CASE
         WHEN to_tsvector('english', name_doc.doc) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 0
@@ -610,11 +607,11 @@ export function getListingDetail(storeId: string, listingId: string) {
   return cachedStorefrontRead(storeId, JSON.stringify(["getListingDetail", listingId]), () => readGetListingDetail(storeId, listingId));
 }
 
-function loadSearch(storeId: string, query: string, exclude = "") {
+function loadSearch(storeId: string, query: string) {
   return cachedStorefrontRead(
     storeId,
-    JSON.stringify(["searchListings", query, exclude]),
-    () => readSearchListings(storeId, query, exclude),
+    JSON.stringify(["searchListings", query]),
+    () => readSearchListings(storeId, query),
   );
 }
 
@@ -629,8 +626,10 @@ export function searchListings(storeId: string, query: string) {
   return loadSearch(storeId, query).then((rows) => rows.map(withoutMatch));
 }
 
-export function searchCatalogHits(storeId: string, query: string, exclude = "") {
-  return loadSearch(storeId, query, exclude);
+/** The assistant's search. A need filters in SQL before ranking: an excluded listing never comes back. */
+export function searchCatalogHits(storeId: string, query: string, need: ShopperNeed | null = null) {
+  // Attribute reviews do not revalidate store caches, so a need always reads fresh.
+  return need ? readSearchListings(storeId, query, need) : loadSearch(storeId, query);
 }
 
 export function getActiveListings(storeId: string) {

@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { auth } from "../auth";
-import { authPrisma, storeScoped, storeScopedTransaction } from "../db";
+import { authPrisma, platformAdmin, storeScoped, storeScopedTransaction } from "../db";
 
 vi.mock("next/cache", () => ({
   unstable_cache: (fn: () => unknown) => fn,
@@ -3295,6 +3295,62 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
     });
     expect(reserved).toMatchObject({ status: 400, message: "tool_use id must match ^[a-zA-Z0-9_-]+$" });
   }, 60_000);
+
+  it("#485 a peanut allergy filters search, refuses the peanut item, and adds the unknown item once the customer confirms it", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    vi.stubEnv("ASSISTANT_MODEL", "claude-haiku-5-5");
+    const tag = randomUUID().slice(0, 8);
+    const sell = async (name: string, data: Record<string, unknown>) => {
+      const product = await platformAdmin.masterProduct.create({ data: { name: `${name} ${tag}`, ...data } });
+      const listing = await storeScoped(storeId).listing.create({
+        data: { storeId, masterProductId: product.id, price: 300, stockMode: "unlimited", frozen: false, perishable: false },
+      });
+      const variant = await storeScoped(storeId).listingVariant.create({ data: { listingId: listing.id, label: "Each", price: 300, weightG: 100 } });
+      return { productId: product.id, listingId: listing.id, variantId: variant.id };
+    };
+    const peanut = await sell("Groundnut paste", { allergensStatus: "reviewed", allergens: ["peanuts"] });
+    const mystery = await sell("Mystery paste", {});
+    const add = (variant: string) => ({ kind: "tool" as const, toolName: "add_to_cart", toolInput: { items: [{ variant_id: variant, qty: 1 }] } });
+    const fake = createFakeAnthropicFetch({
+      steps: [
+        { kind: "tool", toolName: "set_shopper_needs", toolInput: { avoid_allergens: ["peanuts"] } },
+        { kind: "tool", toolName: "search_catalog", toolInput: { query: `paste ${tag}` } },
+        add(peanut.variantId),
+        add(mystery.variantId),
+        { kind: "text", text: `I can't confirm Mystery paste ${tag} is peanut-free. Add it anyway?` },
+        add(mystery.variantId),
+        { kind: "text", text: `Added Mystery paste ${tag}.` },
+      ],
+    });
+    const handler = createChatHandler({ model: createAssistantModel({ fetch: fake.fetch }) });
+    try {
+      const first = await handler(request(`I have a peanut allergy. Add 1 groundnut paste ${tag} and 1 Mystery paste ${tag}.`, { ip: "198.51.100.85", id: `needs-1-${tag}` }));
+      const firstBody = await first.text();
+      const outputs = uiParts(firstBody).filter((part) => part.type === "tool-output-available").map((part) => part.output as Record<string, unknown>);
+      const found = (outputs[1]?.items as Array<{ listingId: string; match: string }>) ?? [];
+      expect(found.map((item) => item.listingId)).not.toContain(peanut.listingId);
+      expect(found.find((item) => item.listingId === mystery.listingId)?.match).toBe("cannot_confirm");
+      expect(outputs[2]).toMatchObject({ ok: false, code: "excluded" });
+      expect(outputs[3]).toMatchObject({ ok: false, code: "cannot_confirm" });
+      const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
+      const cartId = decodeURIComponent(cookie.slice("cart_id=".length));
+      expect(await storeScoped(storeId).cartLine.count({ where: { cartId } })).toBe(0);
+
+      const second = await handler(request(`Yes, add the Mystery paste ${tag}.`, { ip: "198.51.100.85", cookie, id: `needs-2-${tag}` }));
+      await second.text();
+      const lines = await storeScoped(storeId).cartLine.findMany({ where: { cartId } });
+      expect(lines.map((line) => line.variantId)).toEqual([mystery.variantId]);
+      const talk = await storeScoped(storeId).aiConversation.findUniqueOrThrow({ where: { storeId_cartId: { storeId, cartId } } });
+      expect(talk.constraints).toMatchObject({
+        avoidAllergens: ["peanuts"],
+        confirmed: [expect.objectContaining({ listingId: mystery.listingId, messageId: `needs-2-${tag}` })],
+      });
+    } finally {
+      await storeScoped(storeId).cart.deleteMany({});
+      await storeScoped(storeId).listing.deleteMany({ where: { id: { in: [peanut.listingId, mystery.listingId] } } });
+      await platformAdmin.masterProduct.deleteMany({ where: { id: { in: [peanut.productId, mystery.productId] } } });
+    }
+  }, 30_000);
 });
 
 function padJpeg(jpeg: Buffer, target: number): Buffer {

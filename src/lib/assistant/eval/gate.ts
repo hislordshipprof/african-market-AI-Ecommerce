@@ -159,6 +159,7 @@ function cartAgrees(item: CaseResult, cases: EvalCase[], binding: CatalogBinding
     cartLineIds: [],
     stepLimitHit: item.stepLimitHit,
     clarify: { options: item.clarifyOptions, choices: item.clarifyChoices },
+    savedNeeds: item.savedNeeds,
   }, binding ?? bareBinding(), []);
   if (scored.precisionNumerator !== item.precisionNumerator
     || scored.precisionDenominator !== item.precisionDenominator
@@ -227,6 +228,7 @@ function countsOk(item: CaseResult): boolean {
   if (item.dish && (item.precisionDenominator !== 0 || item.recallDenominator !== 0)) return false;
   if (item.clarifyReply !== null && typeof item.clarifyReply !== "string") return false;
   if (!stringArray(item.clarifyOptions) || !stringArray(item.clarifyChoices)) return false;
+  if (typeof item.savedNeeds !== "boolean") return false;
   if (!rejectedAttemptsOk(item)) return false;
   if (!nonNegativeInt(item.droppedAttempts) || item.droppedAttempts >= item.attempts) return false;
   return typeof item.gapRequired === "boolean" && typeof item.gapsReported === "boolean" && typeof item.pass === "boolean";

@@ -1031,8 +1031,9 @@ function CardView({
           <p className={styles.meta}>{card.packLabel}</p>
           <p className={styles.price}>{card.priceLabel}</p>
           {card.mayBeUnavailable ? <p className={styles.flag}>May be unavailable</p> : null}
+          {card.cannotConfirm ? <p className={styles.flag}>Can&apos;t confirm it meets your needs</p> : null}
         </div>
-        {card.listingId && card.variantId ? (
+        {card.listingId && card.variantId && !card.cannotConfirm ? (
           <div className={styles.cardAdd}>
             <QuickAddStepper
               item={{

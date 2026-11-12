@@ -1,3 +1,5 @@
+import type { Allergen, DietaryClaim } from "../../catalog/attributes";
+
 export const EVAL_CATEGORIES = [
   "recipe-to-cart",
   "single-item",
@@ -6,6 +8,7 @@ export const EVAL_CATEGORIES = [
   "out-of-stock",
   "ambiguous-quantity",
   "substitution",
+  "constraint",
 ] as const;
 
 export type EvalCategory = (typeof EVAL_CATEGORIES)[number];
@@ -18,6 +21,7 @@ export const CATEGORY_COUNTS: Record<EvalCategory, number> = {
   "out-of-stock": 25,
   "ambiguous-quantity": 20,
   substitution: 20,
+  constraint: 6,
 };
 
 export const SWAP_RULES = ["exact_only", "store_suggests", "named_substitute"] as const;
@@ -93,6 +97,8 @@ export interface FixtureListing {
   variants: FixtureVariant[];
   /** A listings are the eval store. B listings are the decoy store. */
   store: "A" | "B";
+  /** Stated by the store owner, so known. A listing without attributes is unknown. */
+  attributes?: { ingredients: string[]; allergens: Allergen[]; dietary: DietaryClaim[] };
 }
 
 export interface CatalogFixture {
@@ -105,6 +111,8 @@ export interface CatalogFixture {
     minimumOrderCents: number;
     pickupEnabled: boolean;
   };
+  /** Ingredient names and synonyms the listings' attributes use. */
+  ingredients?: Array<{ name: string; synonyms: string[] }>;
   listings: FixtureListing[];
 }
 
@@ -161,6 +169,8 @@ export interface CaseResult {
   /** Listing keys that accepted question offered, and the choice-card names it showed; the gate re-checks both. */
   clarifyOptions: string[];
   clarifyChoices: string[];
+  /** True when set_shopper_needs had saved needs; the gate re-scores with it. */
+  savedNeeds: boolean;
   /** Attempts ended by a request whose usage never arrived; their reserve stays spent. A completed case never ends on one. */
   droppedAttempts: number;
   costMicros: string;

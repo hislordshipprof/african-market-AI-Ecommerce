@@ -722,31 +722,6 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       const hit = searchItems(found).find((itemRow) => itemRow.listingId === item.listingId);
       expect(hit?.match, `${row.query} ${suffix}`).toBe(row.match);
     }
-    const plain = await makeListing(storeA, {
-      name: "ignored",
-      customName: null,
-      master: { name: `Plain tomato paste ${suffix}`, imageUrl: null },
-      price: 450,
-    });
-    const onion = await makeListing(storeA, {
-      name: "ignored",
-      customName: null,
-      master: { name: `Tomato paste with onion ${suffix}`, imageUrl: null },
-      price: 500,
-    });
-    const excluded = await searchCatalog(ctx(), { query: `tomato paste ${suffix}`, exclude: "onion" });
-    const excludedIds = searchItems(excluded).map((row) => row.listingId);
-    expect(excludedIds).toContain(plain.listingId);
-    expect(excludedIds).not.toContain(onion.listingId);
-    const sack = await makeListing(storeA, {
-      name: "ignored",
-      customName: null,
-      master: { name: `Plain rice ${suffix}`, imageUrl: null },
-      price: 450,
-      label: "onion sack",
-    });
-    const labelOnly = await searchCatalog(ctx(), { query: `rice ${suffix}`, exclude: "onion" });
-    expect(searchItems(labelOnly).map((row) => row.listingId)).toContain(sack.listingId);
     const berbere = await makeListing(storeA, {
       name: "ignored",
       customName: null,

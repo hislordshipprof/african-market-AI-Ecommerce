@@ -16,6 +16,21 @@ import {
 } from "../../cart/service";
 import { storeScoped } from "../../db";
 import { scrubKnownStrings } from "../card-scrub";
+import {
+  changeConstraints,
+  hasConstraints,
+  listingVerdicts,
+  readConstraints,
+  shopperNeed,
+  updateConstraints,
+  unknownNeeds,
+  verdictFields,
+  verdictReason,
+  type ConstraintStatus,
+  type ListingVerdict,
+  type NeedKey,
+  type ShopperConstraints,
+} from "../constraints";
 import { isAcceptanceLed, namesForListing, textNamesProduct, type AcceptanceTurn } from "../shown";
 import { listingImage } from "../../storefront/images";
 import { searchCatalogHits } from "../../storefront/service";
@@ -29,6 +44,7 @@ import {
   removeFromCartInput,
   searchCatalogInput,
   offerChoicesInput,
+  setShopperNeedsInput,
   setSwapRuleInput,
   showProductsInput,
   suggestSubstitutesInput,
@@ -60,6 +76,9 @@ const MESSAGES: Record<string, string> = {
   not_enough_choices: "There are not enough choices to pick from.",
   not_shown: "Nothing was added. Tell me which items you want, and I'll add them.",
   backup_required: "This item may be unavailable, so it keeps a backup: Let the store suggest or a named substitute.",
+  excluded: "That item does not meet the customer's needs.",
+  cannot_confirm: "I can't confirm that item meets the customer's needs.",
+  unchecked_swap: "The store's own swap does not check the customer's needs. Name a substitute that meets them, or Exact item only for a refund.",
 };
 
 function fail(code: string): ToolFailure {
@@ -138,7 +157,7 @@ function factsOf(listing: StockFacts): StockFacts {
   };
 }
 
-const MATCH_RANK = { name: 0, synonym: 1, near: 2 } as const;
+const MATCH_RANK = { name: 0, synonym: 1, cannot_confirm: 2, near: 3 } as const;
 
 type CatalogItem = {
   listingId: string;
@@ -149,15 +168,20 @@ type CatalogItem = {
   priceCents: number;
   imageUrl: string | null;
   mayBeUnavailable: boolean;
-  match: "name" | "synonym" | "near";
+  /** cannot_confirm: a saved constraint is unknown for this listing, so it is not a fit. */
+  match: "name" | "synonym" | "near" | "cannot_confirm";
   matchedTerm?: string;
+  needs?: Record<NeedKey, ConstraintStatus>;
+  cannotConfirm?: true;
 };
 
 export async function searchCatalog(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(searchCatalogInput, input);
   const query = parsed.query.trim();
   if (!query) return recordRead(ctx, "search_catalog", parsed, { ok: true, items: [] });
-  const found = await searchCatalogHits(ctx.storeId, query, parsed.exclude?.trim() ?? "");
+  const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  const constrained = hasConstraints(constraints);
+  const found = await searchCatalogHits(ctx.storeId, query, constrained ? shopperNeed(constraints) : null);
   const items: CatalogItem[] = found.map((item) => ({
     listingId: item.id,
     name: item.name,
@@ -178,11 +202,142 @@ export async function searchCatalog(ctx: AssistantContext, input: unknown): Prom
       delete item.matchedTerm;
     }
   }
-  const ordered = items
+  const verdicts = constrained ? await listingVerdicts(ctx.storeId, items.map((item) => item.listingId), constraints) : null;
+  const kept = verdicts ? items.filter((item) => {
+    const verdict = verdicts.get(item.listingId);
+    if (!verdict || verdict.status === "excluded") return false;
+    Object.assign(item, verdictFields(verdict));
+    if (verdict.status === "unknown") {
+      item.match = "cannot_confirm";
+      delete item.matchedTerm;
+    }
+    return true;
+  }) : items;
+  const ordered = kept
     .map((item, index) => ({ item, index }))
     .sort((left, right) => MATCH_RANK[left.item.match] - MATCH_RANK[right.item.match] || left.index - right.index)
     .map((row) => row.item);
-  return recordRead(ctx, "search_catalog", parsed, { ok: true, items: ordered.slice(0, parsed.limit) });
+  return recordRead(ctx, "search_catalog", parsed, {
+    ok: true,
+    items: ordered.slice(0, parsed.limit),
+    ...(constraints.preferences.length > 0 ? { preferences: constraints.preferences } : {}),
+  });
+}
+
+export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
+  const parsed = parseToolInput(setShopperNeedsInput, input);
+  const { constraints: saved, ask, cannotCheck } = await changeConstraints(ctx.storeId, ctx.conversationId, {
+    avoidAllergens: parsed.avoid_allergens,
+    requireClaims: parsed.require_claims,
+    avoidIngredients: parsed.avoid_ingredients,
+    remove: parsed.remove,
+  });
+  const output = {
+    ok: true as const,
+    avoidAllergens: saved.avoidAllergens,
+    requireClaims: saved.requireClaims,
+    avoidIngredients: saved.avoidIngredients.map((item) => item.term),
+    preferences: saved.preferences,
+    ...(ask.length > 0 ? { ask } : {}),
+    ...(cannotCheck.length > 0 ? { cannotCheck } : {}),
+  };
+  const refund = hasConstraints(saved) ? await uncheckedSwapLines(ctx) : [];
+  if (refund.length === 0) return recordRead(ctx, "set_shopper_needs", parsed, output);
+  // Lines already in the cart follow the needs too: the store's swap and a substitute that fails them become a refund.
+  return recordWrite(ctx, "set_shopper_needs", parsed, async (tx) => {
+    await tx.cartLine.updateMany({
+      where: { cartId: ctx.cartId, id: { in: refund.map((line) => line.lineId) } },
+      data: { swapRule: "exact_only", substituteVariantId: null },
+    });
+    return { ...output, exactOnly: refund };
+  });
+}
+
+/** This cart's lines whose swap the saved needs do not check: the store's own swap, or a named substitute the gate refuses. */
+async function uncheckedSwapLines(ctx: AssistantContext): Promise<Array<{ lineId: string; name: string }>> {
+  const lines = await storeScoped(ctx.storeId).cartLine.findMany({
+    where: { cartId: ctx.cartId, swapRule: { in: ["store_suggests", "named_substitute"] } },
+    include: {
+      variant: { include: { listing: { include: { masterProduct: true } } } },
+      substituteVariant: { select: { listingId: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  const substitutes = lines.flatMap((line) => (line.swapRule === "named_substitute" && line.substituteVariant ? [line.substituteVariant.listingId] : []));
+  const refused = await gateListings({ ...ctx, acceptance: undefined, turnMessageId: undefined }, [...new Set(substitutes)]);
+  return lines
+    .filter((line) => line.swapRule === "store_suggests" || !line.substituteVariant || refused.has(line.substituteVariant.listingId))
+    .map((line) => ({ lineId: line.id, name: line.variant.listing.customName || line.variant.listing.masterProduct?.name || "Unnamed" }));
+}
+
+/** Saved constraints checked for listings a tool is about to return; null when there are none. */
+async function verdictsFor(ctx: AssistantContext, listingIds: string[]): Promise<Map<string, ListingVerdict> | null> {
+  const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  if (!hasConstraints(constraints)) return null;
+  return listingVerdicts(ctx.storeId, listingIds, constraints);
+}
+
+/** An excluded listing is never returned; any other carries its verdict's needs, and unknown is marked as not confirmed. */
+function needsOf(verdicts: Map<string, ListingVerdict> | null, listingId: string) {
+  return verdictFields(verdicts?.get(listingId));
+}
+
+/** With constraints, a listing the check did not return counts as excluded. */
+function isExcluded(verdicts: Map<string, ListingVerdict> | null, listingId: string): boolean {
+  const status = verdicts?.get(listingId)?.status;
+  return !!verdicts && status !== "ok" && status !== "unknown";
+}
+
+type Refusal = ToolFailure & { listingId: string; needs: Record<NeedKey, ConstraintStatus> };
+
+function refusal(verdict: ListingVerdict, constraints: ShopperConstraints): Refusal {
+  const code = verdict.status === "excluded" ? "excluded" : "cannot_confirm";
+  return { ok: false, code, message: `${MESSAGES[code]} ${verdictReason(verdict, constraints)}`, listingId: verdict.listingId, needs: verdict.needs };
+}
+
+/**
+ * The saved constraints at the point of action. Excluded is refused. Unknown is refused and remembered,
+ * until the customer's next message confirms that one item: by naming it, or by a yes when it was the
+ * only item asked about. A confirmation is recorded and holds for the conversation.
+ */
+async function gateListings(ctx: AssistantContext, listingIds: string[]): Promise<Map<string, Refusal>> {
+  const refused = new Map<string, Refusal>();
+  const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  if (!hasConstraints(constraints) || listingIds.length === 0) return refused;
+  const verdicts = await listingVerdicts(ctx.storeId, listingIds, constraints);
+  // A confirmation covers only the constraints that were unknown when the customer gave it.
+  const confirmedBefore = (verdict: ListingVerdict) => constraints.confirmed.some((row) =>
+    row.listingId === verdict.listingId && unknownNeeds(verdict).every((name) => row.needs.includes(name)));
+  const unknown: string[] = [];
+  for (const verdict of verdicts.values()) {
+    if (verdict.status === "excluded") refused.set(verdict.listingId, refusal(verdict, constraints));
+    else if (verdict.status === "unknown" && !confirmedBefore(verdict)) unknown.push(verdict.listingId);
+  }
+  if (unknown.length === 0) return refused;
+  const confirming = new Set<string>();
+  const prior = ctx.acceptance ? await priorUserMessage(ctx) : null;
+  if (prior && ctx.acceptance) {
+    const askedBefore = Object.entries(constraints.asked).filter(([, messageId]) => messageId === prior.id).map(([id]) => id);
+    const listings = await storeScoped(ctx.storeId).listing.findMany({
+      where: { id: { in: unknown.filter((id) => askedBefore.includes(id)) } },
+      include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }] } },
+    });
+    for (const listing of listings) {
+      const named = textNamesProduct(ctx.acceptance.customerText, namesForListing(listing));
+      if (named || (ctx.acceptance.led && askedBefore.length === 1)) confirming.add(listing.id);
+    }
+  }
+  for (const id of unknown) {
+    if (!confirming.has(id)) refused.set(id, refusal(verdicts.get(id)!, constraints));
+  }
+  await updateConstraints(ctx.storeId, ctx.conversationId, (saved) => {
+    const at = new Date().toISOString();
+    for (const id of unknown) {
+      if (confirming.has(id)) saved.confirmed.push({ listingId: id, messageId: ctx.turnMessageId!, at, needs: unknownNeeds(verdicts.get(id)!) });
+      else if (ctx.turnMessageId) saved.asked[id] = ctx.turnMessageId;
+    }
+  });
+  return refused;
 }
 
 export async function showProducts(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
@@ -196,12 +351,18 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
     },
   });
   const byId = new Map(listings.map((listing) => [listing.id, listing]));
+  const verdicts = await verdictsFor(ctx, listings.map((listing) => listing.id));
   const cards = [];
   const notFound: string[] = [];
+  const excluded: string[] = [];
   for (const id of parsed.listing_ids) {
     const listing = byId.get(id);
     if (!listing) {
       notFound.push(id);
+      continue;
+    }
+    if (isExcluded(verdicts, id)) {
+      excluded.push(id);
       continue;
     }
     const photo = listingImage({
@@ -221,9 +382,10 @@ export async function showProducts(ctx: AssistantContext, input: unknown): Promi
       })),
       badge: stockBadge(factsOf(listing)),
       mayBeUnavailable: mayBeUnavailable(listing),
+      ...needsOf(verdicts, listing.id),
     });
   }
-  return recordRead(ctx, "show_products", parsed, { ok: true, cards, notFound });
+  return recordRead(ctx, "show_products", parsed, { ok: true, cards, notFound, ...(excluded.length > 0 ? { excluded } : {}) });
 }
 
 export async function checkAvailability(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
@@ -275,13 +437,15 @@ export async function suggestSubstitutes(ctx: AssistantContext, input: unknown):
     where: { active: true, id: { not: listing.id }, masterProduct: { categoryId } },
     include: { masterProduct: true, variants: { orderBy: [{ price: "asc" }, { id: "asc" }] } },
     orderBy: [{ confidence: "desc" }, { price: "asc" }, { id: "asc" }],
-    take: 5,
+    take: 40,
   });
-  const items = candidates.map((candidate) => ({
+  const verdicts = await verdictsFor(ctx, candidates.map((candidate) => candidate.id));
+  const items = candidates.filter((candidate) => !isExcluded(verdicts, candidate.id)).slice(0, 5).map((candidate) => ({
     listingId: candidate.id,
     name: candidate.customName || candidate.masterProduct?.name || "Unnamed",
     priceCents: candidate.variants[0]?.price ?? candidate.price,
     mayBeUnavailable: mayBeUnavailable(candidate),
+    ...needsOf(verdicts, candidate.id),
   }));
   return recordRead(ctx, "suggest_substitutes", parsed, { ok: true, items });
 }
@@ -322,13 +486,19 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
     },
   });
   const byId = new Map(listings.map((listing) => [listing.id, listing]));
+  const verdicts = await verdictsFor(ctx, listings.map((listing) => listing.id));
   const notFound: string[] = [];
+  const excluded: string[] = [];
   const chosen: Array<Record<string, unknown>> = [];
   const seenVariants = new Set<string>();
   for (const option of parsed.options) {
     const listing = byId.get(option.listing_id);
     if (!listing || !listing.active) {
       notFound.push(option.listing_id);
+      continue;
+    }
+    if (isExcluded(verdicts, listing.id)) {
+      excluded.push(listing.id);
       continue;
     }
     const variant = option.variant_id
@@ -354,17 +524,20 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
       priceCents: variant.price,
       imageUrl: photo ?? null,
       mayBeUnavailable: mayBeUnavailable(listing),
+      ...needsOf(verdicts, listing.id),
     });
   }
+  const left = excluded.length > 0 ? { excluded } : {};
   if (chosen.length < 2) {
     return recordRead(ctx, "offer_choices", parsed, {
       ok: false,
       code: "not_enough_choices",
       message: NOT_ENOUGH,
       notFound,
+      ...left,
     });
   }
-  return recordRead(ctx, "offer_choices", parsed, { ok: true, options: chosen, notFound });
+  return recordRead(ctx, "offer_choices", parsed, { ok: true, options: chosen, notFound, ...left });
 }
 
 async function readCartMoney(tx: CartWriteTx, cartId: string) {
@@ -595,9 +768,31 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       });
     }
   }
+  const variantRows = await storeScoped(ctx.storeId).listingVariant.findMany({
+    where: { id: { in: parsed.items.flatMap((item) => [item.variant_id, item.backup_variant_id ?? []].flat()) } },
+    select: { id: true, listingId: true },
+  });
+  const listingOf = new Map(variantRows.map((row) => [row.id, row.listingId]));
+  const refused = await gateListings(ctx, [...new Set(parsed.items.flatMap((item) => listingOf.get(item.variant_id) ?? []))]);
+  const refusedItems = parsed.items.flatMap((item) => {
+    const why = refused.get(listingOf.get(item.variant_id) ?? "");
+    return why ? [{ ...why, variantId: item.variant_id }] : [];
+  });
+  const allowed = parsed.items.filter((item) => !refused.has(listingOf.get(item.variant_id) ?? ""));
+  if (allowed.length === 0) {
+    const [first] = refusedItems;
+    return recordRead(ctx, "add_to_cart", raw, refusedItems.length === 1 ? first : { ...first, items: refusedItems });
+  }
+  // A backup is a swap: one the constraints refuse or cannot confirm is not kept.
+  const backups = await gateListings(
+    { ...ctx, acceptance: undefined, turnMessageId: undefined },
+    [...new Set(allowed.flatMap((item) => (item.backup_variant_id ? listingOf.get(item.backup_variant_id) ?? [] : [])))],
+  );
+  const backupRefused = (id: string | undefined) => !!id && backups.has(listingOf.get(id) ?? "");
+  const constrained = hasConstraints(await readConstraints(ctx.storeId, ctx.conversationId));
   return recordWrite(ctx, "add_to_cart", raw, async (tx) => {
     const items = [];
-    for (const item of parsed.items) {
+    for (const item of allowed) {
       const applied = await applyAddLine(tx, ctx.storeId, ctx.cartId, item.variant_id, item.qty, {
         source: "ai",
         clampToMax: true,
@@ -611,8 +806,11 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
       let swapRule = applied.swapRule;
       let substituteVariantId: string | null = null;
       if (applied.created && flagged) {
-        const backup = await chooseBackup(tx, ctx.storeId, item.variant_id, item.backup_variant_id);
-        swapRule = backup.swapRule;
+        const backupId = backupRefused(item.backup_variant_id) ? undefined : item.backup_variant_id;
+        const backup = await chooseBackup(tx, ctx.storeId, item.variant_id, backupId);
+        // The store's own swap checks no needs, so a constrained line with no checked backup is refunded.
+        const unchecked = constrained && backup.swapRule === "store_suggests";
+        swapRule = unchecked ? "exact_only" : backup.swapRule;
         substituteVariantId = backup.substituteVariantId;
         await tx.cartLine.update({
           where: { id: applied.lineId },
@@ -632,6 +830,7 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         ...(substituteVariantId ? { substituteVariantId } : {}),
       });
     }
+    items.push(...refusedItems);
     if (items.length === 1 && items[0].ok === false) return items[0];
     const money = await readCartMoney(tx, ctx.cartId);
     const priced = items.map((item) => (item.ok === true ? withLineMoney(item, money) : item));
@@ -691,14 +890,24 @@ export async function removeFromCart(ctx: AssistantContext, input: unknown): Pro
 
 export async function setSwapRule(ctx: AssistantContext, input: unknown): Promise<ToolResult> {
   const parsed = parseToolInput(setSwapRuleInput, input);
+  const constrained = hasConstraints(await readConstraints(ctx.storeId, ctx.conversationId));
+  if (constrained && parsed.rule === "store_suggests") return recordRead(ctx, "set_swap_rule", parsed, fail("unchecked_swap"));
+  if (parsed.rule === "named_substitute" && parsed.substitute_variant_id) {
+    const substitute = await storeScoped(ctx.storeId).listingVariant.findUnique({
+      where: { id: parsed.substitute_variant_id },
+      select: { listingId: true },
+    });
+    const why = substitute ? (await gateListings(ctx, [substitute.listingId])).get(substitute.listingId) : undefined;
+    if (why) return recordRead(ctx, "set_swap_rule", parsed, why);
+  }
   return recordWrite(ctx, "set_swap_rule", parsed, async (tx) => {
     const line = await tx.cartLine.findUnique({
       where: { id: parsed.line_id },
       include: { variant: { include: { listing: true } } },
     });
     if (!line || line.cartId !== ctx.cartId) return fail("line_not_found");
-    // ADR-0018: a may-be-unavailable line always carries a backup.
-    if (parsed.rule === "exact_only" && mayBeUnavailable(line.variant.listing)) return fail("backup_required");
+    // ADR-0018: a may-be-unavailable line always carries a backup, unless the customer's needs leave a refund.
+    if (parsed.rule === "exact_only" && !constrained && mayBeUnavailable(line.variant.listing)) return fail("backup_required");
     if (parsed.rule === "named_substitute") {
       const substituteId = parsed.substitute_variant_id;
       const substitute = substituteId

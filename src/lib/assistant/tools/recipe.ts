@@ -1,7 +1,8 @@
 import type { LanguageModel } from "ai";
-import { Prisma } from "@prisma/client";
-import { storeScoped, storeScopedRawQuery } from "../../db";
-import { excludeMatchSql, searchCatalogHits } from "../../storefront/service";
+import { storeScoped } from "../../db";
+import { searchCatalogHits } from "../../storefront/service";
+import { hasConstraints, listingVerdicts, readConstraints, shopperNeed, verdictFields, type ConstraintStatus, type NeedKey, type ShopperConstraints } from "../constraints";
+import type { ShopperNeed } from "../../catalog/attributes";
 import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
 import { stockBadge } from "../../storefront/stock-badge";
@@ -29,6 +30,8 @@ interface Placed extends StoreItem {
   covers?: string[];
   amount?: string;
   backupVariantId?: string;
+  needs?: Record<NeedKey, ConstraintStatus>;
+  cannotConfirm?: true;
 }
 
 /** Cheapest variant of this store's active listing for a master product. A listing without a variant cannot be added. */
@@ -50,9 +53,9 @@ async function listingForMaster(storeId: string, masterProductId: string): Promi
   };
 }
 
-/** Name and synonym fits from the storefront search; a near row is not a fit. */
-async function searchFits(storeId: string, name: string): Promise<StoreItem[]> {
-  const hits = await searchCatalogHits(storeId, name);
+/** Name and synonym fits from the storefront search; a near row is not a fit. The need filters in SQL, before the cap. */
+async function searchFits(storeId: string, name: string, need: ShopperNeed | null = null): Promise<StoreItem[]> {
+  const hits = await searchCatalogHits(storeId, name, need);
   const fits = hits.filter((hit) => hit.match === "name" || hit.match === "synonym");
   const ranked = fits.some((hit) => hit.match === "name") ? fits.filter((hit) => hit.match === "name") : fits;
   return ranked.flatMap((hit) => hit.variantId ? [{
@@ -65,52 +68,44 @@ async function searchFits(storeId: string, name: string): Promise<StoreItem[]> {
   }] : []);
 }
 
-/**
- * The names the customer ruled out, in one query, with the catalog search's exclude match.
- * An ingredient is also ruled out when its whole name is inside an exclusion: "yellow onion" rules out onion.
- */
-async function ruledOut(storeId: string, names: readonly string[], exclude: readonly string[], ingredient = false): Promise<Set<string>> {
-  if (exclude.length === 0 || names.length === 0) return new Set();
-  const rows = await storeScopedRawQuery<{ name: string }>(
-    storeId,
-    Prisma.sql`
-    SELECT n.name FROM unnest(${[...names]}::text[]) AS n(name)
-    WHERE EXISTS (
-      SELECT 1 FROM unnest(${[...exclude]}::text[]) AS e(word)
-      WHERE ${excludeMatchSql(Prisma.sql`unaccent(n.name)`, Prisma.sql`e.word`)}
-        OR (${ingredient} AND ${excludeMatchSql(Prisma.sql`unaccent(e.word)`, Prisma.sql`n.name`)})
-    )`,
-  );
-  return new Set(rows.map((row) => row.name));
-}
-
 function scaledAmount(qty: number | null, unit: string | null, base: number | null, servings: number): string | undefined {
   if (qty == null || !base) return undefined;
   const scaled = Math.round((qty * servings * 100) / base) / 100;
   return unit ? `${scaled} ${unit}` : String(scaled);
 }
 
-async function placeIngredients(storeId: string, recipe: RecipeRow, servings: number, exclude: readonly string[]) {
+/**
+ * Items are checked against the saved constraints, as in search: an excluded item is never offered, and an
+ * unknown one is marked cannotConfirm. An ingredient whose every item is excluded is listed as excluded.
+ */
+async function placeIngredients(storeId: string, recipe: RecipeRow, servings: number, constraints: ShopperConstraints) {
   const inStock: Placed[] = [];
   const lowOrOut: Placed[] = [];
   const notCarried: string[] = [];
-  const out = await ruledOut(storeId, recipe.ingredients.map((row) => row.name), exclude, true);
-  const excluded = recipe.ingredients.filter((row) => out.has(row.name)).map((row) => row.name);
-  const wanted = recipe.ingredients.filter((row) => !out.has(row.name));
-  const found = await Promise.all(wanted.map(async (ingredient) => ({
+  const excluded: string[] = [];
+  const need = hasConstraints(constraints) ? shopperNeed(constraints) : null;
+  const found = await Promise.all(recipe.ingredients.map(async (ingredient) => ({
     ingredient,
-    fits: await searchFits(storeId, ingredient.name),
+    fits: await searchFits(storeId, ingredient.name, need),
     master: ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null,
   })));
   const items = found.flatMap((row) => [...row.fits, ...(row.master ? [row.master] : [])]);
-  const outItems = await ruledOut(storeId, [...new Set(items.map((item) => item.name))], exclude);
+  const verdicts = hasConstraints(constraints)
+    ? await listingVerdicts(storeId, items.map((item) => item.listingId), constraints)
+    : null;
+  const status = (item: StoreItem): ConstraintStatus => (verdicts ? verdicts.get(item.listingId)?.status ?? "excluded" : "ok");
   const placedByListing = new Map<string, Placed>();
   for (const { ingredient, fits: hits, master } of found) {
-    const fits = hits.filter((item) => !outItems.has(item.name));
-    const mapped = master && !outItems.has(master.name) ? master : undefined;
-    const pick = mapped ?? fits.find((item) => !item.mayBeUnavailable) ?? fits[0];
+    // A confirmed-safe item is preferred over one the constraints cannot confirm.
+    const fits = hits.filter((item) => status(item) !== "excluded")
+      .sort((left, right) => Number(status(left) === "unknown") - Number(status(right) === "unknown"));
+    const mapped = master && status(master) === "ok" ? master : undefined;
+    const pick = mapped ?? fits.find((item) => !item.mayBeUnavailable) ?? fits[0]
+      ?? (master && status(master) === "unknown" ? master : undefined);
     if (!pick) {
-      notCarried.push(ingredient.name);
+      // Search left out excluded items, so only an unfiltered search tells excluded from not carried.
+      if (master || (need && (await searchFits(storeId, ingredient.name)).length > 0)) excluded.push(ingredient.name);
+      else notCarried.push(ingredient.name);
       continue;
     }
     const already = placedByListing.get(pick.listingId);
@@ -119,13 +114,19 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
       continue;
     }
     const amount = scaledAmount(ingredient.qty, ingredient.unit, recipe.servings, servings);
-    const placed: Placed = { ingredient: ingredient.name, ...(amount ? { amount } : {}), ...pick };
+    const verdict = verdicts?.get(pick.listingId);
+    const placed: Placed = {
+      ingredient: ingredient.name,
+      ...(amount ? { amount } : {}),
+      ...pick,
+      ...verdictFields(verdict),
+    };
     placedByListing.set(pick.listingId, placed);
     if (!pick.mayBeUnavailable) {
       inStock.push(placed);
       continue;
     }
-    const backup = fits.find((item) => item.listingId !== pick.listingId && !item.mayBeUnavailable);
+    const backup = fits.find((item) => item.listingId !== pick.listingId && !item.mayBeUnavailable && status(item) === "ok");
     if (backup) placed.backupVariantId = backup.variantId;
     lowOrOut.push(placed);
   }
@@ -177,7 +178,8 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
     if (!recipe) return notFound();
     lookedUp = true;
   }
-  const groups = await placeIngredients(ctx.storeId, recipe, parsed.servings, parsed.exclude ?? []);
+  const constraints = await readConstraints(ctx.storeId, ctx.conversationId);
+  const groups = await placeIngredients(ctx.storeId, recipe, parsed.servings, constraints);
   return recordRead(ctx, "get_recipe", parsed, {
     ok: true,
     askServings: false,
@@ -187,5 +189,6 @@ export async function getRecipe(ctx: AssistantContext, input: unknown, deps: Rec
     source: recipe.sourceUrl ?? "the store's recipe base",
     lookedUp,
     ...groups,
+    ...(constraints.preferences.length > 0 ? { preferences: constraints.preferences } : {}),
   });
 }
