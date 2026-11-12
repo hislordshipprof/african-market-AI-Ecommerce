@@ -1,0 +1,1648 @@
+{
+  "schemaVersion": 1,
+  "pinnedNow": "2026-06-15T16:00:00.000Z",
+  "store": {
+    "name": "Golden Eval Market",
+    "timezone": "America/Chicago",
+    "hours": {
+      "mon": {
+        "open": "09:00",
+        "close": "21:00"
+      },
+      "tue": {
+        "open": "09:00",
+        "close": "21:00"
+      },
+      "wed": {
+        "open": "09:00",
+        "close": "21:00"
+      },
+      "thu": {
+        "open": "09:00",
+        "close": "21:00"
+      },
+      "fri": {
+        "open": "09:00",
+        "close": "21:00"
+      },
+      "sat": {
+        "open": "09:00",
+        "close": "21:00"
+      },
+      "sun": {
+        "open": "09:00",
+        "close": "21:00"
+      }
+    },
+    "minimumOrderCents": 1500,
+    "pickupEnabled": true
+  },
+  "listings": [
+    {
+      "key": "rice-parboiled-long-grain",
+      "masterProductId": "rice-parboiled-long-grain",
+      "priceCents": 199,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "rice-parboiled-long-grain-5lb",
+          "label": "5 lb",
+          "priceCents": 199,
+          "weightG": 2268
+        },
+        {
+          "key": "rice-parboiled-long-grain-10lb",
+          "label": "10 lb",
+          "priceCents": 349,
+          "weightG": 4536
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "rice-ofada",
+      "masterProductId": "rice-ofada",
+      "priceCents": 236,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 0.4,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "rice-ofada-pack",
+          "label": "5 lb",
+          "priceCents": 236,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "tomato-paste-gino",
+      "masterProductId": "tomato-paste-gino",
+      "priceCents": 273,
+      "stockMode": "counted",
+      "qty": 0,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "tomato-paste-gino-pack",
+          "label": "5 lb",
+          "priceCents": 273,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "pepper-scotch-bonnet",
+      "masterProductId": "pepper-scotch-bonnet",
+      "priceCents": 310,
+      "stockMode": "status",
+      "qty": null,
+      "status": "out_of_stock",
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "pepper-scotch-bonnet-pack",
+          "label": "5 lb",
+          "priceCents": 310,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "pepper-tatashe",
+      "masterProductId": "pepper-tatashe",
+      "priceCents": 347,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": false,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "pepper-tatashe-pack",
+          "label": "5 lb",
+          "priceCents": 347,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "thyme-dried",
+      "masterProductId": "thyme-dried",
+      "priceCents": 384,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": 2,
+      "variants": [
+        {
+          "key": "thyme-dried-pack",
+          "label": "5 lb",
+          "priceCents": 384,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "curry-powder-nigerian",
+      "masterProductId": "curry-powder-nigerian",
+      "priceCents": 421,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "curry-powder-nigerian-pack",
+          "label": "5 lb",
+          "priceCents": 421,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "maggi-star-cubes",
+      "masterProductId": "maggi-star-cubes",
+      "priceCents": 458,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "maggi-star-cubes-pack",
+          "label": "5 lb",
+          "priceCents": 458,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "hard-chicken",
+      "masterProductId": "hard-chicken",
+      "priceCents": 495,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "hard-chicken-pack",
+          "label": "5 lb",
+          "priceCents": 495,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "palm-oil-red",
+      "masterProductId": "palm-oil-red",
+      "priceCents": 532,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "palm-oil-red-pack",
+          "label": "5 lb",
+          "priceCents": 532,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "egusi-seeds-whole",
+      "masterProductId": "egusi-seeds-whole",
+      "priceCents": 569,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "egusi-seeds-whole-pack",
+          "label": "5 lb",
+          "priceCents": 569,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "egusi-ground",
+      "masterProductId": "egusi-ground",
+      "priceCents": 606,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "egusi-ground-pack",
+          "label": "5 lb",
+          "priceCents": 606,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "ugu-leaves-fresh",
+      "masterProductId": "ugu-leaves-fresh",
+      "priceCents": 643,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "ugu-leaves-fresh-pack",
+          "label": "5 lb",
+          "priceCents": 643,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "crayfish-ground",
+      "masterProductId": "crayfish-ground",
+      "priceCents": 680,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "crayfish-ground-pack",
+          "label": "5 lb",
+          "priceCents": 680,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "stockfish-cut",
+      "masterProductId": "stockfish-cut",
+      "priceCents": 717,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "stockfish-cut-pack",
+          "label": "5 lb",
+          "priceCents": 717,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "teff-flour-ivory",
+      "masterProductId": "teff-flour-ivory",
+      "priceCents": 754,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "teff-flour-ivory-pack",
+          "label": "5 lb",
+          "priceCents": 754,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "teff-flour-brown",
+      "masterProductId": "teff-flour-brown",
+      "priceCents": 791,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "teff-flour-brown-pack",
+          "label": "5 lb",
+          "priceCents": 791,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "berbere",
+      "masterProductId": "berbere",
+      "priceCents": 828,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "berbere-pack",
+          "label": "5 lb",
+          "priceCents": 828,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "yam-white-puna",
+      "masterProductId": "yam-white-puna",
+      "priceCents": 865,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "yam-white-puna-pack",
+          "label": "5 lb",
+          "priceCents": 865,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "garri-white",
+      "masterProductId": "garri-white",
+      "priceCents": 902,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "garri-white-pack",
+          "label": "5 lb",
+          "priceCents": 902,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "garri-yellow",
+      "masterProductId": "garri-yellow",
+      "priceCents": 939,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "garri-yellow-pack",
+          "label": "5 lb",
+          "priceCents": 939,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "beans-honey-oloyin",
+      "masterProductId": "beans-honey-oloyin",
+      "priceCents": 976,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "beans-honey-oloyin-pack",
+          "label": "5 lb",
+          "priceCents": 976,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "beans-brown",
+      "masterProductId": "beans-brown",
+      "priceCents": 1013,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "beans-brown-pack",
+          "label": "5 lb",
+          "priceCents": 1013,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "plantain-ripe",
+      "masterProductId": "plantain-ripe",
+      "priceCents": 1050,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "plantain-ripe-pack",
+          "label": "5 lb",
+          "priceCents": 1050,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "plantain-green",
+      "masterProductId": "plantain-green",
+      "priceCents": 1087,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "plantain-green-pack",
+          "label": "5 lb",
+          "priceCents": 1087,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "goat-meat-frozen",
+      "masterProductId": "goat-meat-frozen",
+      "priceCents": 1124,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "goat-meat-frozen-pack",
+          "label": "5 lb",
+          "priceCents": 1124,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "ginger-dried-ground",
+      "masterProductId": "ginger-dried-ground",
+      "priceCents": 1161,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "ginger-dried-ground-pack",
+          "label": "5 lb",
+          "priceCents": 1161,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "palm-oil-bleached-ofada",
+      "masterProductId": "palm-oil-bleached-ofada",
+      "priceCents": 1198,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "palm-oil-bleached-ofada-pack",
+          "label": "5 lb",
+          "priceCents": 1198,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "tomato-paste-de-rica",
+      "masterProductId": "tomato-paste-de-rica",
+      "priceCents": 1235,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "tomato-paste-de-rica-pack",
+          "label": "5 lb",
+          "priceCents": 1235,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "maggi-crayfish-cubes",
+      "masterProductId": "maggi-crayfish-cubes",
+      "priceCents": 1272,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "maggi-crayfish-cubes-pack",
+          "label": "5 lb",
+          "priceCents": 1272,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "knorr-chicken-cubes",
+      "masterProductId": "knorr-chicken-cubes",
+      "priceCents": 1309,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "knorr-chicken-cubes-pack",
+          "label": "5 lb",
+          "priceCents": 1309,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "cassava-fufu-flour",
+      "masterProductId": "cassava-fufu-flour",
+      "priceCents": 1346,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "cassava-fufu-flour-pack",
+          "label": "5 lb",
+          "priceCents": 1346,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "semolina-honeywell",
+      "masterProductId": "semolina-honeywell",
+      "priceCents": 1383,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "semolina-honeywell-pack",
+          "label": "5 lb",
+          "priceCents": 1383,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "suya-spice-yaji",
+      "masterProductId": "suya-spice-yaji",
+      "priceCents": 1420,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "suya-spice-yaji-pack",
+          "label": "5 lb",
+          "priceCents": 1420,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "hibiscus-dried",
+      "masterProductId": "hibiscus-dried",
+      "priceCents": 1457,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "hibiscus-dried-pack",
+          "label": "5 lb",
+          "priceCents": 1457,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "cocoyam-taro",
+      "masterProductId": "cocoyam-taro",
+      "priceCents": 1494,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "cocoyam-taro-pack",
+          "label": "5 lb",
+          "priceCents": 1494,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "gino-pepper-onion-paste",
+      "masterProductId": "gino-pepper-onion-paste",
+      "priceCents": 1531,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "gino-pepper-onion-paste-pack",
+          "label": "5 lb",
+          "priceCents": 1531,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "salt-cod-makayabu-saltfish",
+      "masterProductId": "salt-cod-makayabu-saltfish",
+      "priceCents": 1568,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "salt-cod-makayabu-saltfish-pack",
+          "label": "5 lb",
+          "priceCents": 1568,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "crayfish-whole-dried",
+      "masterProductId": "crayfish-whole-dried",
+      "priceCents": 1605,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "crayfish-whole-dried-pack",
+          "label": "5 lb",
+          "priceCents": 1605,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "stockfish-whole",
+      "masterProductId": "stockfish-whole",
+      "priceCents": 1642,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "stockfish-whole-pack",
+          "label": "5 lb",
+          "priceCents": 1642,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "cocoyam-tannia",
+      "masterProductId": "cocoyam-tannia",
+      "priceCents": 1679,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "cocoyam-tannia-pack",
+          "label": "5 lb",
+          "priceCents": 1679,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "cocoyam-flour",
+      "masterProductId": "cocoyam-flour",
+      "priceCents": 1716,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "cocoyam-flour-pack",
+          "label": "5 lb",
+          "priceCents": 1716,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "akpu-wet-frozen",
+      "masterProductId": "akpu-wet-frozen",
+      "priceCents": 1753,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "akpu-wet-frozen-pack",
+          "label": "5 lb",
+          "priceCents": 1753,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "millet-flour",
+      "masterProductId": "millet-flour",
+      "priceCents": 1790,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "millet-flour-pack",
+          "label": "5 lb",
+          "priceCents": 1790,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "millet-pearl",
+      "masterProductId": "millet-pearl",
+      "priceCents": 1827,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "millet-pearl-pack",
+          "label": "5 lb",
+          "priceCents": 1827,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "fonio",
+      "masterProductId": "fonio",
+      "priceCents": 1864,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "fonio-pack",
+          "label": "5 lb",
+          "priceCents": 1864,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "white-maize-meal",
+      "masterProductId": "white-maize-meal",
+      "priceCents": 1901,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "white-maize-meal-pack",
+          "label": "5 lb",
+          "priceCents": 1901,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "baobab-fruit-powder",
+      "masterProductId": "baobab-fruit-powder",
+      "priceCents": 1938,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "baobab-fruit-powder-pack",
+          "label": "5 lb",
+          "priceCents": 1938,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "baobab-leaf-powder",
+      "masterProductId": "baobab-leaf-powder",
+      "priceCents": 1975,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "baobab-leaf-powder-pack",
+          "label": "5 lb",
+          "priceCents": 1975,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "moringa-powder",
+      "masterProductId": "moringa-powder",
+      "priceCents": 2012,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "moringa-powder-pack",
+          "label": "5 lb",
+          "priceCents": 2012,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "tamarind",
+      "masterProductId": "tamarind",
+      "priceCents": 2049,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "tamarind-pack",
+          "label": "5 lb",
+          "priceCents": 2049,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "dates",
+      "masterProductId": "dates",
+      "priceCents": 2086,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "dates-pack",
+          "label": "5 lb",
+          "priceCents": 2086,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "bambara-nut",
+      "masterProductId": "bambara-nut",
+      "priceCents": 2123,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "bambara-nut-pack",
+          "label": "5 lb",
+          "priceCents": 2123,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "pigeon-peas-dried",
+      "masterProductId": "pigeon-peas-dried",
+      "priceCents": 2160,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "pigeon-peas-dried-pack",
+          "label": "5 lb",
+          "priceCents": 2160,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "fumbwa-dried-gnetum-leaves",
+      "masterProductId": "fumbwa-dried-gnetum-leaves",
+      "priceCents": 2197,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "fumbwa-dried-gnetum-leaves-pack",
+          "label": "5 lb",
+          "priceCents": 2197,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "jute-leaves",
+      "masterProductId": "jute-leaves",
+      "priceCents": 2234,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "jute-leaves-pack",
+          "label": "5 lb",
+          "priceCents": 2234,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "potato-greens",
+      "masterProductId": "potato-greens",
+      "priceCents": 2271,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "potato-greens-pack",
+          "label": "5 lb",
+          "priceCents": 2271,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "roselle-leaves",
+      "masterProductId": "roselle-leaves",
+      "priceCents": 2308,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "roselle-leaves-pack",
+          "label": "5 lb",
+          "priceCents": 2308,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "garden-egg",
+      "masterProductId": "garden-egg",
+      "priceCents": 2345,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "garden-egg-pack",
+          "label": "5 lb",
+          "priceCents": 2345,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "okra-dried",
+      "masterProductId": "okra-dried",
+      "priceCents": 2382,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "okra-dried-pack",
+          "label": "5 lb",
+          "priceCents": 2382,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "ground-hot-pepper",
+      "masterProductId": "ground-hot-pepper",
+      "priceCents": 2419,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "ground-hot-pepper-pack",
+          "label": "5 lb",
+          "priceCents": 2419,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "cameroon-pepper",
+      "masterProductId": "cameroon-pepper",
+      "priceCents": 2456,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "cameroon-pepper-pack",
+          "label": "5 lb",
+          "priceCents": 2456,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "amaranth-leaves",
+      "masterProductId": "amaranth-leaves",
+      "priceCents": 2493,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "amaranth-leaves-pack",
+          "label": "5 lb",
+          "priceCents": 2493,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "bitter-leaf-frozen",
+      "masterProductId": "bitter-leaf-frozen",
+      "priceCents": 2530,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "bitter-leaf-frozen-pack",
+          "label": "5 lb",
+          "priceCents": 2530,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "ashanti-pepper",
+      "masterProductId": "ashanti-pepper",
+      "priceCents": 2567,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "ashanti-pepper-pack",
+          "label": "5 lb",
+          "priceCents": 2567,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "grains-of-selim",
+      "masterProductId": "grains-of-selim",
+      "priceCents": 2604,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "grains-of-selim-pack",
+          "label": "5 lb",
+          "priceCents": 2604,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "calabash-nutmeg",
+      "masterProductId": "calabash-nutmeg",
+      "priceCents": 2641,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "calabash-nutmeg-pack",
+          "label": "5 lb",
+          "priceCents": 2641,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "aidan-fruit",
+      "masterProductId": "aidan-fruit",
+      "priceCents": 2678,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "aidan-fruit-pack",
+          "label": "5 lb",
+          "priceCents": 2678,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "dawadawa-dried",
+      "masterProductId": "dawadawa-dried",
+      "priceCents": 2715,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "dawadawa-dried-pack",
+          "label": "5 lb",
+          "priceCents": 2715,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "palm-kernel-oil",
+      "masterProductId": "palm-kernel-oil",
+      "priceCents": 2752,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "palm-kernel-oil-pack",
+          "label": "5 lb",
+          "priceCents": 2752,
+          "weightG": 2268
+        }
+      ],
+      "store": "A"
+    },
+    {
+      "key": "groundnut-oil",
+      "masterProductId": "groundnut-oil",
+      "priceCents": 3899,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "groundnut-oil-pack",
+          "label": "5 lb",
+          "priceCents": 3899,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "palm-nut-cream",
+      "masterProductId": "palm-nut-cream",
+      "priceCents": 3936,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "palm-nut-cream-pack",
+          "label": "5 lb",
+          "priceCents": 3936,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "onga-seasoning",
+      "masterProductId": "onga-seasoning",
+      "priceCents": 3973,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "onga-seasoning-pack",
+          "label": "5 lb",
+          "priceCents": 3973,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "shea-butter-raw",
+      "masterProductId": "shea-butter-raw",
+      "priceCents": 4010,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "shea-butter-raw-pack",
+          "label": "5 lb",
+          "priceCents": 4010,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "african-black-soap",
+      "masterProductId": "african-black-soap",
+      "priceCents": 4047,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "african-black-soap-pack",
+          "label": "5 lb",
+          "priceCents": 4047,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "chewing-stick",
+      "masterProductId": "chewing-stick",
+      "priceCents": 4084,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "chewing-stick-pack",
+          "label": "5 lb",
+          "priceCents": 4084,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "african-net-sponge",
+      "masterProductId": "african-net-sponge",
+      "priceCents": 4121,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "african-net-sponge-pack",
+          "label": "5 lb",
+          "priceCents": 4121,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "mortar-pestle-wood",
+      "masterProductId": "mortar-pestle-wood",
+      "priceCents": 4158,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "mortar-pestle-wood-pack",
+          "label": "5 lb",
+          "priceCents": 4158,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "hibiscus-drink-bottled",
+      "masterProductId": "hibiscus-drink-bottled",
+      "priceCents": 4195,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "hibiscus-drink-bottled-pack",
+          "label": "5 lb",
+          "priceCents": 4195,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    },
+    {
+      "key": "velvet-tamarind",
+      "masterProductId": "velvet-tamarind",
+      "priceCents": 4232,
+      "stockMode": "unlimited",
+      "qty": null,
+      "status": null,
+      "confidence": 1,
+      "active": true,
+      "maxPerOrder": null,
+      "variants": [
+        {
+          "key": "velvet-tamarind-pack",
+          "label": "5 lb",
+          "priceCents": 4232,
+          "weightG": 2268
+        }
+      ],
+      "store": "B"
+    }
+  ]
+}

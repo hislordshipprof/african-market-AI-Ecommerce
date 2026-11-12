@@ -240,8 +240,8 @@ Later tools, not in v1: `list_orders`, `build_pick_list`, `mark_line_short`, `in
 - Built by platform team + store owner contributions; reviewed before publishing.
 
 ### 8.4 Evaluation
-- Golden test set (~200 requests: "jollof for 10", "Ethiopian breakfast", "ata rodo and tatashe", photo lists) scored on cart precision/recall, hallucinated items (must be 0), correct gap reporting.
-- Run on every prompt/model change; sample 1% of live conversations for review.
+- Golden test set of 200 English text requests, including "jollof for 10", "Ethiopian breakfast", and "ata rodo and tatashe". Scored on cart precision and recall. A hallucinated item or an amount the customer still sees fails the run. Correct gap reporting is recorded and does not by itself fail the build. Checkout paths wait for #247. Photo and PDF lists are deferred.
+- The committed report is checked in CI against the current prompt, tools, model, dataset and catalog. A live Anthropic run is opt-in (`ASSISTANT_EVAL_LIVE=1`), uses Haiku, and stops at $2 for the run and $4 for the ticket. `haiku-ok` also requires that the model stated no price the grounder had to remove. `sonnet-candidate` records that miss without hiding it behind the grounder. Sample review of live conversations comes later.
 
 ### 8.5 Later: agentic commerce
 Expose store catalogs and checkout via an MCP server and the Agentic Commerce Protocol (ACP) so ChatGPT/Gemini agents can shop tenants with user approval (phase 3).

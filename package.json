@@ -17,7 +17,8 @@
     "db:seed": "dotenv -e .env.local -- tsx prisma/seed.ts",
     "db:generate": "prisma generate",
     "admin:create": "tsx scripts/admin-create.ts",
-    "catalog:audit-photos": "dotenv -e .env.local -- tsx scripts/audit-catalog-photos.ts"
+    "catalog:audit-photos": "dotenv -e .env.local -- tsx scripts/audit-catalog-photos.ts",
+    "eval:shopper-assistant": "vitest run --config vitest.eval.config.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.96",

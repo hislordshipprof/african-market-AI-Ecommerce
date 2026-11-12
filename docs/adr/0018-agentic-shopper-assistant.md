@@ -69,7 +69,7 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 ### Model, library and cost
 
 - **Library:** Vercel AI SDK (`ai` + `@ai-sdk/anthropic`), installed as published at ai-sdk.dev. Not LangChain or LangGraph: the flow is a single agent with about 10 tools, and the SDK gives streaming to React, typed tools and step limits without an orchestration layer we don't need.
-- **Model:** **Claude Haiku 5.5** by default. If Haiku fails the #146 eval (any hallucinated price, product or total, or poor recall on item matching), switch to **Claude Sonnet 5.5**. The model id is a config setting, not code.
+- **Model:** **Claude Haiku 5.5** by default. The #146 eval separates the customer-visible CI gate from the model verdict. The gate fails on a hallucinated item, an ungrounded amount that the shopper still sees, a safety-rule miss, or micro precision below 0.90 or micro recall below 0.85. Amounts the grounder removes, and amounts the model stated before a tool had returned them, keep the verdict at `sonnet-candidate` even when the gate passes. `haiku-ok` requires the gate and a raw reply with none of those amount misses. Switching to **Claude Sonnet 5.5** is a later decision. The model id is a config setting, not code.
 - **Spend cap:**
   - **$10 total** for this build phase, covering all assistant and eval calls through the app's AI client, measured from token usage;
   - at the cap the assistant switches off with a "the helper is resting" message, the storefront keeps working, and the platform admin is alerted;
@@ -80,7 +80,9 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 ### Records and evaluation
 
 - Conversations and tool calls go in `AiConversation` and `AiAction`, with RLS, and are deleted after **90 days** by a scheduled job.
-- The golden eval (#146) has about 200 requests plus checkout paths in Stripe test mode. It runs only when the prompt, tools or model change. Deterministic tool tests run in every local-ci.
+- The golden eval (#146) is 200 English text requests. Checkout paths wait for #247. Photo and PDF lists are deferred. There is no multilingual set and no live hosted job.
+- Default `pnpm test` and local-ci never call Anthropic. They check a committed report against the current prompt, tools, step cap, model, dataset, catalog fixture and seeded master-product names, synonyms and categories. A mismatch names the part that changed. The rerun is `ASSISTANT_EVAL_LIVE=1 pnpm eval:shopper-assistant`.
+- A live run is opt-in, Haiku only, on the local `app_runtime` database, with a $2 stop for that run and a $4 stop for the ticket including earlier attempts. An incomplete run, a partial selection, or a failed teardown leaves the previous committed report in place. Gap misses are reported and do not by themselves fail the gate.
 
 ## Consequences
 

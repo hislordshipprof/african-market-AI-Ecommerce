@@ -53,6 +53,10 @@ const IP_LIMIT = 60;
 const CART_LIMIT = 30;
 const FILE_LIMIT = 10;
 const LEASE_MS = 90_000;
+/** Exported so the shopper-assistant eval can fingerprint the step cap. */
+export const ASSISTANT_STEP_CAP = 8;
+/** Exported so the shopper-assistant eval can fingerprint the output limit. */
+export const ASSISTANT_MAX_OUTPUT_TOKENS = 1024;
 const FIXED_ERROR = "Sorry, something went wrong. Please try again.";
 const STEP_LIMIT_TEXT = "I've done as much as I can in one go. Tell me what you'd like next.";
 const RESTING_MESSAGE = "The helper is resting right now. You can still shop and check out as usual.";
@@ -261,8 +265,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       tools,
       ...(fileTurn ? { activeTools: [...FILE_TURN_TOOLS] } : {}),
       toolCallConcurrency: 1,
-      stopWhen: stepCountIs(8),
-      maxOutputTokens: 1024,
+      stopWhen: stepCountIs(ASSISTANT_STEP_CAP),
+      maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
       maxRetries: 0,
       streamRetries: 0,
       timeout: { totalMs: fileTurn ? 45_000 : 55_000 },
@@ -347,7 +351,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         if (openReply) replyParts.push(openReply);
         const steps = await Promise.resolve(result.steps).catch(() => []);
         const last = steps.at(-1);
-        if (steps.length >= 8 && last?.finishReason === "tool-calls") {
+        if (steps.length >= ASSISTANT_STEP_CAP && last?.finishReason === "tool-calls") {
           writer.write({ type: "text-start", id: "step-limit" });
           writer.write({ type: "text-delta", id: "step-limit", delta: STEP_LIMIT_TEXT });
           writer.write({ type: "text-end", id: "step-limit" });
