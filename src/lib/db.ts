@@ -753,19 +753,20 @@ export async function findPickTimeoutCandidates(opts: {
   });
 }
 
+/** An unused card hold is released this long after authorization (owner decision, #422). */
+export const ORPHAN_HOLD_GRACE_MS = 60 * 60_000;
+
 /**
  * Carts holding a PaymentIntent with no order and no release tombstone, not
- * written in the last `untouchedFor` ms (a hold cannot be older than that and
- * still unused for longer). Never-checked carts first, then least recently
- * checked, oldest first, so carts that never paid cannot starve a real hold.
+ * written within the grace (a hold cannot be older than that and still unused
+ * for longer). Never-checked carts first, then least recently checked, oldest
+ * first, so carts that never paid cannot starve a real hold.
  */
 export async function findOrphanHoldCarts(opts?: {
-  untouchedFor?: number;
-  limit?: number;
   storeIds?: readonly string[];
 }): Promise<Array<{ storeId: string; cartId: string; paymentIntentId: string; updatedAt: Date }>> {
   if (opts?.storeIds && opts.storeIds.length === 0) return [];
-  const before = new Date(Date.now() - (opts?.untouchedFor ?? 60 * 60_000));
+  const before = new Date(Date.now() - ORPHAN_HOLD_GRACE_MS);
   const inStores = opts?.storeIds ? Prisma.sql`AND c.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   return platformAdminTransaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; payment_intent_id: string; updated_at: Date }>>`
@@ -776,7 +777,7 @@ export async function findOrphanHoldCarts(opts?: {
         AND NOT EXISTS (SELECT 1 FROM payment_intent_releases r WHERE r.payment_intent_id = c.payment_intent_id)
         ${inStores}
       ORDER BY c.orphan_checked_at ASC NULLS FIRST, c.updated_at ASC
-      LIMIT ${opts?.limit ?? 50}
+      LIMIT 50
     `;
     return rows.map((r) => ({
       storeId: r.store_id,

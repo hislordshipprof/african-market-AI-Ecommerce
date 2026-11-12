@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked } from "../db";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
@@ -762,6 +762,10 @@ function cartLinesToOrderLines(
   }));
 }
 
+function stripeIntentMissing(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "resource_missing";
+}
+
 function stripeAlreadyCanceled(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /status of canceled/i.test(message)
@@ -772,26 +776,29 @@ function stripeAlreadyCanceled(error: unknown): boolean {
 /**
  * Reserves this intent for release under the same locks placement takes, then
  * tells Stripe. An order that commits first is left capturable. A reservation
- * that commits first makes a later place refuse.
+ * that commits first makes a later place refuse. With `cartUpdatedAt`, a cart
+ * written since that read is left alone.
  */
 export async function releaseLosingHold(
   storeId: string,
   cartId: string,
   paymentIntentId: string,
   cancellationReason?: "abandoned",
+  cartUpdatedAt?: Date,
 ): Promise<void> {
   const reserved = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     await lockCart(tx, cartId);
     if (await orderExistsForPaymentIntent(tx, paymentIntentId)) return false;
+    const cart = await tx.cart.findUnique({
+      where: { id: cartId },
+      select: { paymentIntentId: true, updatedAt: true },
+    });
+    if (cartUpdatedAt && cart && cart.updatedAt.getTime() !== cartUpdatedAt.getTime()) return false;
     await tx.paymentIntentRelease.upsert({
       where: { paymentIntentId },
       create: { paymentIntentId, storeId },
       update: {},
-    });
-    const cart = await tx.cart.findUnique({
-      where: { id: cartId },
-      select: { paymentIntentId: true },
     });
     if (cart?.paymentIntentId === paymentIntentId) {
       await tx.cart.update({
@@ -817,7 +824,7 @@ export async function releaseLosingHold(
       { idempotencyKey: key },
     );
   } catch (error) {
-    if (stripeAlreadyCanceled(error)) return;
+    if (stripeAlreadyCanceled(error) || stripeIntentMissing(error)) return;
     console.error(JSON.stringify({
       event: "losing_hold_release_failed",
       paymentIntentId,
@@ -826,33 +833,44 @@ export async function releaseLosingHold(
   }
 }
 
-/** An unused card hold is released this long after authorization (owner decision, #422). */
-const ORPHAN_HOLD_GRACE_MS = 60 * 60_000;
 /** A cart whose intent never got a card is cancelled once untouched this long. */
 const DEAD_CART_MS = 24 * 60 * 60_000;
-const UNPAID_PAYMENT = new Set(["requires_payment_method", "requires_confirmation"]);
+const UNPAID_PAYMENT = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
+/** No hold left to release; the cart's intent is cleared so it leaves the sweep. */
+const FINISHED_PAYMENT = new Set(["canceled", "succeeded"]);
 
 /**
  * Releases card holds that never became an order: the intent is still
  * `requires_capture` and was authorized more than the grace ago. Also cancels
- * intents that never got a card within a day, so they leave the sweep; a returning
- * shopper gets a fresh intent. releaseLosingHold re-checks for an order under the
- * store and cart locks and writes the tombstone, so a placeOrder that wins the
- * race keeps its hold and a later one is refused.
+ * intents that never got a card within a day, and clears intents that are
+ * finished or that Stripe no longer has, so they leave the sweep; a returning
+ * shopper gets a fresh intent. A cart that fails its check is still moved to the
+ * back. releaseLosingHold re-checks for an order and a cart write since the find
+ * under the store and cart locks and writes the tombstone, so a placeOrder that
+ * wins the race keeps its hold and a later one is refused.
  */
 export async function releaseOrphanHolds(
   carts: ReadonlyArray<{ storeId: string; cartId: string; paymentIntentId: string; updatedAt: Date }>,
 ): Promise<void> {
   for (const cart of carts) {
+    const release = () => releaseLosingHold(cart.storeId, cart.cartId, cart.paymentIntentId, "abandoned", cart.updatedAt);
     try {
-      const pi = await retrieveCheckoutIntent(cart.paymentIntentId);
-      if (pi.status === "requires_capture" && pi.authorized_at != null) {
-        if (Date.now() - pi.authorized_at < ORPHAN_HOLD_GRACE_MS) continue;
-        await releaseLosingHold(cart.storeId, cart.cartId, cart.paymentIntentId, "abandoned");
+      let pi: NormalizedPaymentIntent;
+      try {
+        pi = await retrieveCheckoutIntent(cart.paymentIntentId);
+      } catch (error) {
+        if (!stripeIntentMissing(error)) throw error;
+        await release();
         continue;
       }
-      if (UNPAID_PAYMENT.has(pi.status) && Date.now() - cart.updatedAt.getTime() > DEAD_CART_MS) {
-        await releaseLosingHold(cart.storeId, cart.cartId, cart.paymentIntentId, "abandoned");
+      if (pi.status === "requires_capture" && pi.authorized_at != null) {
+        if (Date.now() - pi.authorized_at < ORPHAN_HOLD_GRACE_MS) continue;
+        await release();
+        continue;
+      }
+      if (FINISHED_PAYMENT.has(pi.status)
+        || (UNPAID_PAYMENT.has(pi.status) && Date.now() - cart.updatedAt.getTime() > DEAD_CART_MS)) {
+        await release();
         continue;
       }
       if (pi.status === "requires_capture") {
@@ -865,6 +883,7 @@ export async function releaseOrphanHolds(
         paymentIntentId: cart.paymentIntentId,
         message: error instanceof Error ? error.message : String(error),
       }));
+      await markOrphanHoldChecked(cart.storeId, cart.cartId, cart.paymentIntentId).catch(() => {});
     }
   }
 }
