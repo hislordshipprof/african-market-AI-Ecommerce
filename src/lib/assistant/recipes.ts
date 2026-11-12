@@ -110,10 +110,11 @@ const LOOKUP_SYSTEM = [
   "Leave out water and salt. If the dish is not a real dish or no recipe was found, call report_ingredients with no ingredients.",
 ].join("\n");
 
+// No length limits: the lookup is already paid, and cleanName and MAX_INGREDIENTS bound what is kept.
 const reportInput = z.object({
-  dish_name: z.string().min(1).max(80),
-  ingredients: z.array(z.string().min(1).max(80)).max(40),
-  source_url: z.string().max(500),
+  dish_name: z.string(),
+  ingredients: z.array(z.string()),
+  source_url: z.string(),
 });
 
 function cleanName(raw: string): string {

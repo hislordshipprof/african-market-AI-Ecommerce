@@ -247,6 +247,17 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect((await spentToday()) - before).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS);
   });
 
+  it("keeps a paid lookup whose report is too long, trimmed to the name length and ingredient cap", async () => {
+    const long = `${dish} long`;
+    const many = ["rice", "a".repeat(90), ...Array.from({ length: 40 }, (_, index) => `spice ${index}`)];
+    const fake = createFakeAnthropicFetch({ steps: [lookupStep("K".repeat(90), many)] });
+    const result = await getRecipe(ctxA, { dish: long, servings: 2 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
+    expect(result).toMatchObject({ ok: true, lookedUp: true });
+    const saved = await raw.recipe.findUniqueOrThrow({ where: { key: long }, include: { ingredients: true } });
+    expect(saved.ingredients).toHaveLength(25);
+    expect(Math.max(saved.name.length, ...saved.ingredients.map((row) => row.name.length))).toBe(60);
+  });
+
   it("records the searches Anthropic reports even when the response cannot be read", async () => {
     const before = await spentToday();
     const broken: typeof fetch = async () =>
