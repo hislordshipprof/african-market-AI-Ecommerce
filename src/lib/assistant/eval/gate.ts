@@ -269,9 +269,14 @@ function provenanceOk(item: CaseResult, seenIds: Set<string>): boolean {
   if (!Array.isArray(item.anthropicRequestIds) || item.anthropicRequestIds.length === 0) return false;
   const seenSteps = new Set<string>();
   const ids = new Set<string>();
+  // Only a dropped attempt may lack provenance: its connection can close before any request id. The last attempt never may.
+  let unproven = 0;
   for (let attempt = 1; attempt <= item.attempts; attempt += 1) {
-    if (!item.requestProvenance.some((step) => step.attempt === attempt)) return false;
+    if (item.requestProvenance.some((step) => step.attempt === attempt)) continue;
+    if (attempt === item.attempts) return false;
+    unproven += 1;
   }
+  if (unproven > (nonNegativeInt(item.droppedAttempts) ? item.droppedAttempts : 0)) return false;
   for (const step of item.requestProvenance) {
     if (!REQUEST_ID.test(step.requestId)) return false;
     if (!nonNegativeInt(step.attempt) || !nonNegativeInt(step.turn) || !nonNegativeInt(step.step)) return false;

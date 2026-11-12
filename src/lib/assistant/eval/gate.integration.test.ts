@@ -205,6 +205,16 @@ describe("shopper assistant eval gate", () => {
     expect(assessReport(report([recovered(-1)]), expectIds).reasons).toContain("invalid counts on one");
     expect(assessReport(report([recovered(undefined)]), expectIds).reasons).toContain("invalid counts on one");
 
+    // A connection closed before the response gives that attempt no request id.
+    const noResponse = (dropped: number, attempt: number): CaseResult => ({
+      ...recovered(dropped),
+      anthropicRequestIds: [`req_one_${attempt}`],
+      requestProvenance: [{ attempt, turn: 1, step: 1, requestId: `req_one_${attempt}` }],
+    });
+    expect(assessReport(report([noResponse(1, 2)]), expectIds)).toEqual({ ok: true, reasons: [] });
+    expect(assessReport(report([noResponse(0, 2)]), expectIds).reasons).toContain("missing request provenance for one");
+    expect(assessReport(report([noResponse(1, 1)]), expectIds).reasons).toContain("missing request provenance for one");
+
     const cut = { ...recovered(1), costMicros: "10" };
     const spend = (dropped: string, recorded: string) => ({ micros: "10", usd: formatUsdFromMicros(BigInt(10)), droppedMicros: dropped, ledgerDeltaMicros: recorded, conversationMicros: recorded, inputTokens: 1, outputTokens: 1 });
     expect(assessReport(report([cut], fingerprint(), { spend: spend("6", "4") }), expectIds)).toEqual({ ok: true, reasons: [] });
