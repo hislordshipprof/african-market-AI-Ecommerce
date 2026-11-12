@@ -21,7 +21,7 @@ export const CATEGORY_COUNTS: Record<EvalCategory, number> = {
   "out-of-stock": 25,
   "ambiguous-quantity": 20,
   substitution: 20,
-  constraint: 5,
+  constraint: 6,
 };
 
 export const SWAP_RULES = ["exact_only", "store_suggests", "named_substitute"] as const;

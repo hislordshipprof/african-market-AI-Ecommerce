@@ -7913,5 +7913,35 @@
     "excluded": [
       "calabash-nutmeg"
     ]
+  },
+  {
+    "id": "clarify-tomato-1",
+    "category": "constraint",
+    "turns": [
+      "Use tomato paste, not fresh tomato. Add 1 De Rica tomato paste.",
+      "Only skip fresh tomatoes."
+    ],
+    "mustHave": [
+      {
+        "options": [
+          {
+            "listingKey": "tomato-paste-de-rica",
+            "variantKeys": [
+              "tomato-paste-de-rica-pack"
+            ]
+          }
+        ]
+      }
+    ],
+    "mayHave": [],
+    "gaps": [],
+    "qty": [
+      {
+        "listingKey": "tomato-paste-de-rica",
+        "variantKey": "tomato-paste-de-rica-pack",
+        "min": 1,
+        "max": 1
+      }
+    ]
   }
 ]
