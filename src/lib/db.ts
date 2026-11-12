@@ -981,8 +981,10 @@ export type OrderRecoveryGroup = "authorized" | "uncaptured" | "captured";
 /**
  * Candidates for the admin "Orders to check" list, bounded in SQL; the caller applies the
  * per-state limits. Each group has its own cap, so old captured orders cannot crowd out
- * uncaptured ones; `capped` says which groups hit it. Within a group, rows SQL already knows are
- * stuck sort first, so orders not yet due (a later pickup slot, a store still closed) cannot fill it.
+ * uncaptured ones; `capped` says which groups had more rows than the cap. Within a group, rows SQL
+ * already knows are stuck or due sort first, so orders not yet due (a later pickup slot, a store
+ * still closed) cannot fill it. A pickup slot is free text, so it is compared as text, not cast:
+ * checkout writes `toISOString()`.
  */
 export async function findOrderRecoveryCandidates(opts: {
   authorizedBefore: Date;
@@ -1027,13 +1029,16 @@ export async function findOrderRecoveryCandidates(opts: {
     hours: unknown;
     timezone: string;
   };
+  // One row past the cap tells a full group from a capped one.
+  const fetchLimit = opts.limit + 1;
   const rows = await platformAdminTransaction(async (tx) => {
     const authorized = await tx.$queryRaw<Row[]>`
       SELECT ${columns}
       FROM orders o JOIN stores s ON s.id = o.store_id
       WHERE o.status = 'AUTHORIZED' AND o.created_at < ${opts.authorizedBefore} ${inStores}
-      ORDER BY (o.inngest_event_sent_at IS NULL) DESC, o.created_at ASC
-      LIMIT ${opts.limit}
+      ORDER BY (o.inngest_event_sent_at IS NULL OR o.created_at < ${opts.holdBefore}) DESC,
+        COALESCE(o.acceptance_clock_starts_at, o.created_at) ASC
+      LIMIT ${fetchLimit}
     `;
     const uncaptured = await tx.$queryRaw<Row[]>`
       SELECT * FROM (
@@ -1051,8 +1056,9 @@ export async function findOrderRecoveryCandidates(opts: {
       WHERE status NOT IN ('CAPTURING', 'CANCELLING')
         OR COALESCE(first_retry_at, updated_at) < ${opts.retryBefore}
         OR created_at < ${opts.holdBefore}
-      ORDER BY (status IN ('CAPTURING', 'CANCELLING') OR created_at < ${opts.holdBefore} OR pickup_slot IS NULL) DESC, created_at ASC
-      LIMIT ${opts.limit}
+      ORDER BY (status IN ('CAPTURING', 'CANCELLING') OR created_at < ${opts.holdBefore}
+          OR pickup_slot IS NULL OR pickup_slot < ${opts.pickingDueBy.toISOString()}) DESC, created_at ASC
+      LIMIT ${fetchLimit}
     `;
     const captured = await tx.$queryRaw<Row[]>`
       SELECT ${columns}
@@ -1065,7 +1071,7 @@ export async function findOrderRecoveryCandidates(opts: {
           OR (o.status = 'OUT_FOR_DELIVERY' AND o.out_for_delivery_at < ${opts.outForDeliveryBefore})
         )
       ORDER BY o.created_at ASC
-      LIMIT ${opts.limit}
+      LIMIT ${fetchLimit}
     `;
     return { authorized, uncaptured, captured };
   });
@@ -1087,19 +1093,20 @@ export async function findOrderRecoveryCandidates(opts: {
     hours: r.hours,
     timezone: r.timezone,
   });
+  const groups = [rows.authorized, rows.uncaptured, rows.captured];
   return {
-    candidates: [...rows.authorized, ...rows.uncaptured, ...rows.captured].map(toCandidate),
+    candidates: groups.flatMap((group) => group.slice(0, opts.limit)).map(toCandidate),
     capped: {
-      authorized: rows.authorized.length === opts.limit,
-      uncaptured: rows.uncaptured.length === opts.limit,
-      captured: rows.captured.length === opts.limit,
+      authorized: rows.authorized.length > opts.limit,
+      uncaptured: rows.uncaptured.length > opts.limit,
+      captured: rows.captured.length > opts.limit,
     },
   };
 }
 
 /**
  * The newest audit row per order and action, newest first. Rows older than `since` stay while
- * their order is not in `finalStatuses`. `capped` says the list hit `limit`.
+ * their order is not in `finalStatuses`. `capped` says more rows than `limit` exist.
  */
 export async function findOrderAlertRows(opts: {
   actions: readonly string[];
@@ -1134,10 +1141,10 @@ export async function findOrderAlertRows(opts: {
       ORDER BY a.entity_id, a.action, a.created_at DESC
     ) latest
     ORDER BY created_at DESC
-    LIMIT ${opts.limit}
+    LIMIT ${opts.limit + 1}
   `);
   return {
-    alerts: rows.map((r) => ({
+    alerts: rows.slice(0, opts.limit).map((r) => ({
       orderId: r.entity_id,
       action: r.action,
       createdAt: r.created_at,
@@ -1145,7 +1152,7 @@ export async function findOrderAlertRows(opts: {
       orderStatus: r.status,
       storeName: r.store_name,
     })),
-    capped: rows.length === opts.limit,
+    capped: rows.length > opts.limit,
   };
 }
 
