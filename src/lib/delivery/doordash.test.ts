@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DoorDashDriveProvider } from "./doordash";
 import { fakeDoorDash } from "./doordash-fake";
-import { DeliveryProviderError, type DeliveryRequest } from "./provider";
+import { DeliveryProviderError, type DeliveryProvider, type DeliveryRequest } from "./provider";
 
 const now = new Date("2026-11-12T15:00:00Z");
 const keys = {
@@ -18,7 +18,7 @@ function setup(env: Record<string, string | undefined> = keys, quoteFeeCents = 8
     now: () => now,
     quoteFeeCents,
   });
-  const provider = new DoorDashDriveProvider({ env, fetch: fake.fetch, now: () => now });
+  const provider: DeliveryProvider = new DoorDashDriveProvider({ env, fetch: fake.fetch, now: () => now });
   return { fake, provider };
 }
 
