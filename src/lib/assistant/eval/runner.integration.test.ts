@@ -846,6 +846,32 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(result.result.unresolvedSpend).toBe(true);
     expect(result.result.complete).toBe(false);
   }, 60_000);
+
+  it("records a truncated attempt's measured cost without also keeping the reserve", async () => {
+    const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
+    const dir = mkdtempSync(join(tmpdir(), "eval-ticket-"));
+    const ticket = join(dir, "ticket-spend.json");
+    writeFileSync(ticket, "{\"schemaVersion\":1,\"micros\":\"0\",\"usd\":\"0.000000\"}\n");
+    const result = await run([evalCase({
+      id: "truncated-bill",
+      category: "single-item",
+      turns: ["Add garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    })], listings, () => async () => new Response(`data: ${JSON.stringify({
+      type: "message_start",
+      message: { usage: { input_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+    })}\n\n`, { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_truncated_bill" } }), {
+      maxAttempts: 1,
+      ticketSpendPath: ticket,
+    });
+    const saved = JSON.parse(readFileSync(ticket, "utf8")) as { micros: string };
+    expect(result.result.unresolvedSpend).toBe(true);
+    expect(result.result.complete).toBe(false);
+    expect(result.result.spendMicros).toBe(BigInt(100));
+    expect(saved.micros).toBe("100");
+  }, 60_000);
 });
 
 function emptyBinding(): CatalogBinding {

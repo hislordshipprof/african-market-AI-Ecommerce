@@ -111,7 +111,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
           result.unresolvedSpend = true;
           unresolvedAttempt = true;
         } finally {
-          await budget.release(unresolvedAttempt);
+          await budget.release(unresolvedAttempt, caseMicros);
           result.spendMicros += caseMicros;
         }
       }
@@ -895,7 +895,7 @@ interface Budget {
   admit: () => Promise<boolean>;
   admitRetry: () => Promise<boolean>;
   settleAttempt: (actual: bigint) => Promise<void>;
-  release: (unresolved?: boolean) => Promise<void>;
+  release: (unresolved?: boolean, knownMicros?: bigint) => Promise<void>;
   ticketBlocked: boolean;
 }
 
@@ -942,10 +942,10 @@ function createBudget(options: RunEvalOptions): Budget {
       spent += safe;
       if (options.ticketSpendPath) adjustTicketSpend(safe, options.ticketSpendPath);
     }),
-    release: (unresolved = false) => run(() => {
+    release: (unresolved = false, knownMicros = BigInt(0)) => run(() => {
       if (inflight >= RESERVE_MICROS) inflight -= RESERVE_MICROS;
       else inflight = BigInt(0);
-      if (unresolved) {
+      if (unresolved && knownMicros <= BigInt(0)) {
         spent += RESERVE_MICROS;
         return;
       }
