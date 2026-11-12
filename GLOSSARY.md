@@ -115,6 +115,9 @@ The tappable product options the Shopper assistant shows when more than one item
 **Acceptance-led message**:
 A customer message that starts, as a whole word, with yes, ok, okay, sure, go ahead, add those, or add what you suggested. On that turn the Shopper assistant adds a product only when the previous reply or the customer's own message named it.
 
+**Recipe base**:
+The platform-shared dishes the Shopper assistant knows: seeded dishes mapped to master products with quantities for a number of servings, plus dishes it looked up online and saved as ingredient names and a source link, so the next request makes no web call. Not store data; the result is always matched against one store's catalog.
+
 **Confirm card**:
 The final card in the Shopper assistant's checkout, drawn by the server from a saved checkout snapshot: items, fulfillment, fees, hold amount and card. Tapping its Place order button is the only way an assistant order is placed.
 
