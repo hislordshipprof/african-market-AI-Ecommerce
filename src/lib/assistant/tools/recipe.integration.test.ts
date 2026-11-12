@@ -8,6 +8,7 @@ import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-ap
 import { createAssistantModel } from "../model";
 import { seedRecipeBase, type SeedRecipe } from "../recipe-base";
 import { RECIPE_LOOKUPS_PER_STORE_DAY, WEB_SEARCH_MICROS, takeLookupSlot } from "../recipes";
+import { failNextSpendWrites } from "../spend";
 import type { AssistantContext } from "./execute";
 import { getRecipe } from "./recipe";
 
@@ -62,6 +63,11 @@ describe.skipIf(!hasDb)("get_recipe", () => {
       data: { listingId: row.id, label: "Each", price: 500, weightG: 100 },
     });
     return { listingId: row.id, variantId: variant.id };
+  }
+
+  async function spentToday(): Promise<bigint> {
+    const row = await raw.assistantSpendDay.findUnique({ where: { day: new Date(new Date().toISOString().slice(0, 10)) } });
+    return row?.costMicros ?? BigInt(0);
   }
 
   beforeAll(async () => {
@@ -163,6 +169,34 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     const again = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
     const curated = await getRecipe(ctxA, { dish: "Egusi soup", servings: 6 }, { lookupModel: createAssistantModel({ fetch: again.fetch }) });
     expect(curated).toMatchObject({ ok: true, lookedUp: false, recipe: "Egusi soup", source: "the store's recipe base" });
+  });
+
+  it("keeps a paid lookup when the spend write fails once, and records the search on the retry", async () => {
+    const before = await spentToday();
+    // The token metering write fails twice (it retries once), then the search write fails once.
+    failNextSpendWrites(3);
+    const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["rice"])] });
+    const result = await getRecipe(ctxA, { dish: `${dish} spend`, servings: 2 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
+    failNextSpendWrites(0);
+    expect(result).toMatchObject({ ok: true, lookedUp: true });
+    expect((await spentToday()) - before).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS);
+  });
+
+  it("records the searches Anthropic reports even when the response cannot be read", async () => {
+    const before = await spentToday();
+    const broken: typeof fetch = async () =>
+      Response.json({
+        id: "msg_broken",
+        type: "message",
+        role: "assistant",
+        model: "claude-haiku-5-5",
+        content: "not a list",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 2, server_tool_use: { web_search_requests: 2 } },
+      });
+    const result = await getRecipe(ctxA, { dish: `${dish} broken`, servings: 2 }, { lookupModel: createAssistantModel({ fetch: broken }) });
+    expect(result).toMatchObject({ ok: false, code: "recipe_not_found" });
+    expect((await spentToday()) - before).toBeGreaterThanOrEqual(WEB_SEARCH_MICROS * BigInt(2));
   });
 
   it("caps web lookups per store per day and makes no call past the cap", async () => {

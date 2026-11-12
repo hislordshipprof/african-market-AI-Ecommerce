@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { anthropic } from "@ai-sdk/anthropic";
-import { generateText, stepCountIs, tool, type LanguageModel } from "ai";
+import { APICallError, generateText, stepCountIs, tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import { platform } from "../db";
 import { takeRateLimit } from "../rate-limit/app-limiter";
@@ -121,6 +122,38 @@ function resultUrls(output: unknown): string[] {
   );
 }
 
+/** Searches Anthropic billed, from the response usage. */
+function billedSearches(usage: unknown): number {
+  const count = (usage as { server_tool_use?: { web_search_requests?: unknown } } | null | undefined)?.server_tool_use
+    ?.web_search_requests;
+  return typeof count === "number" && count > 0 ? count : 0;
+}
+
+function billedSearchesInError(error: unknown): number {
+  if (!APICallError.isInstance(error) || !error.responseBody) return 0;
+  try {
+    return billedSearches((JSON.parse(error.responseBody) as { usage?: unknown }).usage);
+  } catch {
+    return 0;
+  }
+}
+
+/** Never throws: a paid lookup is kept even when the ledger write fails. Retries once like the spend middleware. */
+async function recordSearchSpend(searches: number): Promise<void> {
+  if (searches === 0) return;
+  const micros = WEB_SEARCH_MICROS * BigInt(searches);
+  const callId = randomUUID();
+  try {
+    await recordSpend(micros, undefined, callId);
+  } catch (first) {
+    try {
+      await recordSpend(micros, undefined, callId);
+    } catch {
+      console.error("[assistant] search spend not recorded", { micros: micros.toString(), error: first });
+    }
+  }
+}
+
 /**
  * One model call with Anthropic's web search. Haiku takes only the basic
  * web_search_20250305 tool; the dynamic-filtering version is Sonnet and Opus only.
@@ -131,32 +164,35 @@ export async function lookUpDishOnline(
   deps: { model?: LanguageModel } = {},
 ): Promise<LookedUpDish | null> {
   const model = deps.model ?? createAssistantModel();
-  const result = await generateText({
-    model,
-    system: LOOKUP_SYSTEM,
-    prompt: `Dish: ${dish.slice(0, 80)}`,
-    tools: {
-      web_search: anthropic.tools.webSearch_20250305({ maxUses: 3 }),
-      report_ingredients: tool({
-        description: "Report the dish's ingredient names and the source page.",
-        inputSchema: reportInput,
-      }),
-    },
-    stopWhen: stepCountIs(1),
-    maxOutputTokens: 2048,
-    maxRetries: 0,
-    providerOptions: assistantProviderOptions(assistantModelId()),
-  });
-  const parts = result.steps.flatMap((step) => step.content);
-  const urls: string[] = [];
-  let searches = 0;
-  for (const part of parts) {
-    if (part.type === "tool-result" && part.toolName === "web_search") {
-      searches += 1;
-      urls.push(...resultUrls(part.output));
-    }
+  let result;
+  try {
+    result = await generateText({
+      model,
+      system: LOOKUP_SYSTEM,
+      prompt: `Dish: ${dish.slice(0, 80)}`,
+      tools: {
+        web_search: anthropic.tools.webSearch_20250305({ maxUses: 3 }),
+        report_ingredients: tool({
+          description: "Report the dish's ingredient names and the source page.",
+          inputSchema: reportInput,
+        }),
+      },
+      stopWhen: stepCountIs(1),
+      maxOutputTokens: 2048,
+      maxRetries: 0,
+      providerOptions: assistantProviderOptions(assistantModelId()),
+    });
+  } catch (error) {
+    await recordSearchSpend(billedSearchesInError(error));
+    throw error;
   }
-  if (searches > 0) await recordSpend(WEB_SEARCH_MICROS * BigInt(searches));
+  await recordSearchSpend(
+    result.steps.reduce((sum, step) => sum + billedSearches(step.providerMetadata?.anthropic?.usage), 0),
+  );
+  const parts = result.steps.flatMap((step) => step.content);
+  const urls = parts.flatMap((part) =>
+    part.type === "tool-result" && part.toolName === "web_search" ? resultUrls(part.output) : [],
+  );
   const call = result.toolCalls.find((item) => item.toolName === "report_ingredients");
   const parsed = reportInput.safeParse(call?.input);
   if (!parsed.success || urls.length === 0) return null;
