@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFakeAnthropicFetch } from "../messages-api-double";
 import { canonicalJson } from "./canonical";
-import { assessReport, checkCommittedEval } from "./gate";
+import { assessOfficial, assessReport, checkCommittedEval } from "./gate";
 import { formatUsdFromMicros } from "./money";
-import { summarize } from "./report";
-import { scoreCase, type CatalogBinding, type ScoreOutput } from "./score";
+import { officialReport, summarize } from "./report";
+import { scoreCase, type CatalogBinding, type ObservedTool, type ScoreOutput } from "./score";
 import { fingerprintFromParts, type Fingerprint } from "./fingerprint";
 import type { EvalReport } from "./report";
 import type { CartSnapshotLine, CaseResult, EvalCase } from "./types";
@@ -67,6 +67,7 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
     recallNumerator: numerator,
     recallDenominator: denominator,
     hallucinated: [],
+    rejectedAttempts: [],
     strippedAmounts: [],
     ungroundedAmountsShown: [],
     temporalViolations: [],
@@ -162,6 +163,7 @@ function caseFromScore(id: string, category: CaseResult["category"], scored: Sco
     recallNumerator: scored.recallNumerator,
     recallDenominator: scored.recallDenominator,
     hallucinated: scored.hallucinated,
+    rejectedAttempts: scored.rejectedAttempts,
     strippedAmounts: [],
     ungroundedAmountsShown: scored.ungroundedAmountsShown,
     temporalViolations: scored.temporalViolations,
@@ -426,6 +428,104 @@ describe("shopper assistant eval gate", () => {
     expect(forgedVerdict.ok).toBe(false);
   });
 
+  it("fails a made-up id only when it reaches the cart or a reply, and counts a refused one as a rejected attempt", () => {
+    const binding = twoPackBinding();
+    const garri: EvalCase = {
+      id: "garri",
+      category: "single-item",
+      turns: ["Add 1 garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+    };
+    const line = (variantKey: string): CartSnapshotLine => ({ key: variantKey === "garri-pack" ? "garri" : variantKey, variantKey, qty: 1, swapRule: "exact_only", substituteVariantKey: null });
+    const refused = { tool: "add_to_cart", input: { items: [{ variant_id: "made-up", qty: 1 }] }, output: { ok: false, code: "variant_not_found" }, turn: 1 };
+    const added = { tool: "add_to_cart", input: { items: [{ variant_id: "garri-pack", qty: 1 }] }, output: { ok: true }, turn: 1 };
+    const score = (tools: ObservedTool[], cart: CartSnapshotLine[], reply: string) => scoreCase({
+      evalCase: garri,
+      cart,
+      tools,
+      savedTexts: [{ turn: 1, text: reply, priorOutputs: [], saved: true }],
+      observedTexts: [],
+      strippedAmounts: [],
+      successfulWriteTurns: [1],
+      returnedLineIds: [],
+      cartLineIds: [],
+      stepLimitHit: false,
+    }, binding, [reply]);
+
+    const recovered = score([refused, added], [line("garri-pack")], "Added garri.");
+    expect(recovered.pass).toBe(true);
+    expect(recovered.hallucinated).toEqual([]);
+    expect(recovered.rejectedAttempts).toEqual([{ tool: "add_to_cart", field: "variant_id", id: "made-up", crossStore: false }]);
+
+    const told = score([refused, added], [line("garri-pack")], "Added garri. I also tried made-up.");
+    expect([told.pass, told.hallucinated.map((item) => item.id), told.rejectedAttempts]).toEqual([false, ["made-up"], []]);
+
+    const inCart = score([{ ...refused, output: { ok: true } }], [line("made-up")], "Added.");
+    expect(inCart.pass).toBe(false);
+    expect(inCart.hallucinated.map((item) => item.id)).toContain("made-up");
+
+    const multi = { tool: "add_to_cart", input: { items: [{ variant_id: "made-up", qty: 1 }, { variant_id: "garri-pack", qty: 1 }] }, output: { ok: true, items: [{ ok: false, code: "variant_not_found" }, { ok: true }] }, turn: 1 };
+    expect(score([multi], [line("garri-pack")], "Added garri.").rejectedAttempts.map((item) => item.id)).toEqual(["made-up"]);
+    const silentBackup = { tool: "add_to_cart", input: { items: [{ variant_id: "garri-pack", qty: 1, backup_variant_id: "made-up" }] }, output: { ok: true, items: [{ ok: true }] }, turn: 1 };
+    expect(score([silentBackup], [line("garri-pack")], "Added garri.").hallucinated.map((item) => item.id)).toEqual(["made-up"]);
+    const auditFailed = score([{ ...refused, output: { ok: false, code: "audit_failed" } }, added], [line("garri-pack")], "Added garri.");
+    expect(auditFailed.hallucinated.map((item) => item.id)).toEqual(["made-up"]);
+
+    const expected = { fingerprint: fingerprint(), caseIds: ["garri"], model: "claude-haiku-5-5", cases: [garri], binding };
+    const good = caseFromScore("garri", "single-item", recovered, false, [line("garri-pack")]);
+    const verdict = assessReport(report([good]), expected);
+    expect(verdict.reasons).toEqual([]);
+    expect(report([good]).summary).toMatchObject({ hallucinatedItems: 0, rejectedAttempts: 1 });
+
+    const movedFromCart = { ...caseFromScore("garri", "single-item", inCart, false, [line("made-up")]), hallucinated: [], rejectedAttempts: [{ tool: "add_to_cart", field: "variant_id", id: "made-up", crossStore: false }] };
+    expect(assessReport(report([movedFromCart]), expected).ok).toBe(false);
+    const crossStore = { ...good, rejectedAttempts: [{ tool: "add_to_cart", field: "variant_id", id: "b-id", crossStore: true }] };
+    expect(assessReport(report([crossStore]), expected).reasons).toContain("invalid counts on garri");
+    const cartTool = { ...good, rejectedAttempts: [{ tool: "cart", field: "variant_id", id: "x", crossStore: false }] };
+    expect(assessReport(report([cartTool]), expected).reasons).toContain("invalid counts on garri");
+    const both = { ...good, hallucinated: [{ tool: "add_to_cart", field: "variant_id", id: "made-up", crossStore: false }], pass: false, reason: "hallucinated-item" };
+    expect(assessReport(report([both]), expected).reasons).toContain("invalid counts on garri");
+    const missing = { ...good } as Partial<CaseResult>;
+    delete missing.rejectedAttempts;
+    expect(assessReport(report([missing as CaseResult]), expected).ok).toBe(false);
+    const undercounted = { ...report([good]), summary: { ...summarize([good]), rejectedAttempts: 0 } };
+    expect(assessReport(undercounted, expected).reasons).toContain("summary does not match the case counts");
+  });
+
+  it("averages two runs for the floors, holds safety in each run, and rejects a reused or missing run", () => {
+    const expected = { fingerprint: fingerprint(), caseIds: ["one", "two"], model: "claude-haiku-5-5" };
+    const run = (tag: string, recall: number): EvalReport => {
+      const cases = [passing("one"), passing("two", recall, 10)].map((item) => ({
+        ...item,
+        anthropicRequestIds: [`req_${tag}_${item.id}`],
+        requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${tag}_${item.id}` }],
+      }));
+      return report(cases);
+    };
+    // Recall 11/11 with 8/11 averages to 0.864, which passes though 8/11 alone fails; with 7/11 it is 0.818.
+    expect(assessOfficial(officialReport([run("a", 10), run("b", 7)]), expected)).toEqual({ ok: true, reasons: [] });
+    expect(assessReport(run("b", 7), expected).reasons).toContain("micro recall below 0.85");
+    const low = assessOfficial(officialReport([run("a", 10), run("b", 6)]), expected);
+    expect(low.reasons).toEqual(["micro recall below 0.85"]);
+
+    const harmful = run("b", 10);
+    harmful.cases[0] = { ...harmful.cases[0]!, pass: false, hallucinated: [{ tool: "add_to_cart", field: "variant_id", id: "nope", crossStore: false }] };
+    harmful.summary = summarize(harmful.cases);
+    expect(assessOfficial(officialReport([run("a", 10), harmful]), expected).reasons).toContain("run 2: hallucinated items");
+    const excluded = run("a", 10);
+    excluded.cases[1] = { ...excluded.cases[1]!, pass: false, safetyFailures: ["excluded-item"] };
+    excluded.summary = summarize(excluded.cases);
+    expect(assessOfficial(officialReport([excluded, run("b", 10)]), expected).reasons).toContain("run 1: safety failures");
+
+    expect(assessOfficial(officialReport([run("a", 10)]), expected).reasons).toContain("two runs");
+    expect(assessOfficial(officialReport([run("a", 10), run("a", 10)]), expected).reasons).toContain("runs reuse request ids");
+    const forged = { ...officialReport([run("a", 10), run("b", 7)]), average: { microPrecision: 1, microRecall: 1, dishPassRate: 1 } };
+    expect(assessOfficial(forged, expected).reasons).toContain("average does not match the runs");
+    expect(assessOfficial(run("a", 10), expected).ok).toBe(false);
+  });
+
   it("passes a synonym case on either option or on one short question that names both", () => {
     const binding = twoPackBinding();
     const agushi: EvalCase = {
@@ -478,7 +578,7 @@ describe("shopper assistant eval gate", () => {
     });
     let probeModel = "";
     const verdict = await checkCommittedEval({
-      reportText: JSON.stringify({ model: "claude-sonnet-5-5", schemaVersion: 1 }),
+      reportText: JSON.stringify({ schemaVersion: 1, runs: [1, 2].map(() => ({ model: "claude-sonnet-5-5", schemaVersion: 1 })) }),
       fetch: async (input, init) => {
         const raw = typeof init?.body === "string"
           ? init.body
@@ -494,8 +594,8 @@ describe("shopper assistant eval gate", () => {
     });
     expect(probeModel).toBe("claude-haiku-5-5");
     expect(verdict.ok).toBe(false);
-    expect(verdict.reasons).toContain("model");
-    expect(verdict.reasons.join(" ")).toContain("fingerprint");
+    expect(verdict.reasons).toContain("run 1: model");
+    expect(verdict.reasons.join(" ")).toContain("run 2: fingerprint");
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
     vi.unstubAllEnvs();

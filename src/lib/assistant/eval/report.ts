@@ -33,6 +33,32 @@ export interface EvalReport {
   cases: CaseResult[];
 }
 
+/** The committed proof: two full runs, whose averaged rates meet the floors (owner, 2026-11-11). */
+export interface OfficialEvalReport {
+  schemaVersion: 1;
+  runs: EvalReport[];
+  average: AverageRates;
+}
+
+export interface AverageRates {
+  microPrecision: number;
+  microRecall: number;
+  dishPassRate: number;
+}
+
+export function averageRates(runs: EvalReport[]): AverageRates {
+  const mean = (pick: (summary: ReportSummary) => number) => runs.reduce((sum, run) => sum + pick(summarize(run.cases)), 0) / Math.max(runs.length, 1);
+  return {
+    microPrecision: mean((summary) => summary.microPrecision),
+    microRecall: mean((summary) => summary.microRecall),
+    dishPassRate: mean((summary) => summary.dishPassRate),
+  };
+}
+
+export function officialReport(runs: EvalReport[]): OfficialEvalReport {
+  return { schemaVersion: 1, runs, average: averageRates(runs) };
+}
+
 export interface CategoryBreakdown {
   cases: number;
   passed: number;
@@ -52,6 +78,8 @@ export interface ReportSummary {
   recallNumerator: number;
   recallDenominator: number;
   hallucinatedItems: number;
+  /** Made-up ids a tool refused before they reached the cart or a reply. Reported, not a floor. */
+  rejectedAttempts: number;
   ungroundedAmountsShown: number;
   strippedAmounts: number;
   temporalViolations: number;
@@ -113,6 +141,7 @@ export function summarize(cases: CaseResult[]): ReportSummary {
   let recallNumerator = 0;
   let recallDenominator = 0;
   let hallucinatedItems = 0;
+  let rejectedAttempts = 0;
   let ungroundedAmountsShown = 0;
   let strippedAmounts = 0;
   let temporalViolations = 0;
@@ -124,6 +153,7 @@ export function summarize(cases: CaseResult[]): ReportSummary {
     recallNumerator += item.recallNumerator;
     recallDenominator += item.recallDenominator;
     hallucinatedItems += item.hallucinated.length;
+    rejectedAttempts += Array.isArray(item.rejectedAttempts) ? item.rejectedAttempts.length : 0;
     ungroundedAmountsShown += item.ungroundedAmountsShown.length;
     strippedAmounts += item.strippedAmounts.length;
     temporalViolations += item.temporalViolations.length;
@@ -144,6 +174,7 @@ export function summarize(cases: CaseResult[]): ReportSummary {
     recallNumerator,
     recallDenominator,
     hallucinatedItems,
+    rejectedAttempts,
     ungroundedAmountsShown,
     strippedAmounts,
     temporalViolations,
@@ -218,14 +249,15 @@ export function writeJsonAtomic(path: string, value: unknown): void {
 
 /** A full complete run with a clean teardown replaces the committed report. Anything else leaves it untouched. */
 export function publishEvalReport(
-  report: EvalReport,
+  report: EvalReport | OfficialEvalReport,
   full: boolean,
   cleanupError: string | null,
   paths: { committed?: string; partial?: string } = {},
 ): { committed: boolean; path: string } {
   const committedPath = paths.committed ?? REPORT_PATH;
   const partialPath = paths.partial ?? PARTIAL_REPORT_PATH;
-  const publishable = full && report.complete && !cleanupError && report.incompleteReason == null;
+  const runs = "runs" in report ? report.runs : [report];
+  const publishable = full && runs.length > 0 && runs.every((run) => run.complete && run.incompleteReason == null) && !cleanupError;
   if (!publishable) {
     writeJsonAtomic(partialPath, report);
     return { committed: false, path: partialPath };

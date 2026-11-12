@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -109,7 +109,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     });
   }
 
-  it("a scripted model that invents an item, adds another store's item and states an unreturned price fails the case with two hallucinated items and one stripped amount", async () => {
+  it("a scripted model that invents an item, adds another store's item and states an unreturned price fails the case on the cross-store item, counts the refused one as a rejected attempt, and strips one amount", async () => {
     const listings = [
       listing("garri", "garri-white", "A", 499),
       listing("yam", "yam-white-puna", "B", 899),
@@ -131,6 +131,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       mayHave: [],
       gaps: [],
     });
+    const traceDir = mkdtempSync(join(tmpdir(), "eval-trace-"));
     const result = await run([expected, invented], listings, (ctx) => scripted(ctx, (current) => {
       if (current.caseId === "adds-garri") {
         const variantId = current.binding.byVariantKey.get("garri-pack")?.id ?? "";
@@ -144,14 +145,20 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
         { kind: "tool", toolName: "add_to_cart", toolInput: { items: [{ variant_id: "missing-variant", qty: 1 }, { variant_id: other, qty: 1 }] } },
         { kind: "text", text: "That one is $9.99." },
       ]);
-    }));
+    }), { traceDir });
     const added = result.result.cases.find((item) => item.id === "adds-garri");
     const failed = result.result.cases.find((item) => item.id === "invents-items");
+    expect(existsSync(join(traceDir, "trace-adds-garri.json"))).toBe(false);
+    const trace = readFileSync(join(traceDir, "trace-invents-items.json"), "utf8");
+    expect(trace).toContain("missing-variant");
+    expect(trace).toContain("That one is $9.99.");
+    expect(trace).not.toContain(KEY);
     expect(added?.precision).toBe(1);
     expect(added?.recall).toBe(1);
     expect(added?.pass).toBe(true);
-    expect(failed?.hallucinated).toHaveLength(2);
-    expect(failed?.hallucinated.filter((item) => item.crossStore)).toHaveLength(1);
+    expect(failed?.pass).toBe(false);
+    expect(failed?.hallucinated.map((item) => item.crossStore)).toEqual([true]);
+    expect(failed?.rejectedAttempts.map((item) => item.id)).toEqual(["missing-variant"]);
     expect(failed?.strippedAmounts).toHaveLength(1);
     expect(failed?.ungroundedAmountsShown).toEqual([]);
   }, 90_000);
@@ -225,15 +232,18 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       },
     });
     const scored = result.result.cases[0];
-    const fields = new Set(scored?.hallucinated.map((item) => item.field));
+    const fields = new Set([...scored?.hallucinated ?? [], ...scored?.rejectedAttempts ?? []].map((item) => item.field));
     expect(fields.has("listing_ids")).toBe(true);
     expect(fields.has("listing_id")).toBe(true);
     expect(fields.has("backup_variant_id")).toBe(true);
     expect(fields.has("variant_id")).toBe(true);
     expect(fields.has("line_id")).toBe(true);
     expect(fields.has("substitute_variant_id")).toBe(true);
-    expect(scored?.hallucinated.some((item) => item.id === "schema-invalid-id")).toBe(true);
-    expect(scored?.hallucinated.some((item) => item.crossStore)).toBe(true);
+    expect(scored?.rejectedAttempts.some((item) => item.id === "schema-invalid-id")).toBe(true);
+    // Refused ids are rejected attempts; another store's id and a backup the tool silently dropped are harm.
+    expect(scored?.hallucinated.map((item) => item.crossStore ? "cross-store" : item.id).sort()).toEqual(["cross-store", "missing-backup"]);
+    expect(scored?.rejectedAttempts.map((item) => item.id).sort()).toEqual(["missing-line", "missing-listing", "missing-named", "missing-option", "missing-option-variant", "missing-sub", "schema-invalid-id"]);
+    expect(scored?.pass).toBe(false);
     expect(invalidWasAudited).toBe(false);
   }, 90_000);
 
@@ -275,12 +285,14 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
       ]);
     }, { maxAttempts: 1 });
     const scored = result.result.cases[0];
-    expect(scored?.pass).toBe(false);
-    expect(scored?.hallucinated.some((item) => item.field === "variant_id" && item.id === riceListing && item.crossStore === false)).toBe(true);
+    // Both wrong ids were refused and the cart is right, so the case passes with two rejected attempts.
+    expect(scored?.pass).toBe(true);
+    expect(scored?.hallucinated).toEqual([]);
+    expect(scored?.rejectedAttempts.some((item) => item.field === "variant_id" && item.id === riceListing && item.crossStore === false)).toBe(true);
     // add_to_cart takes a listing id that has one variant, so it is not made up.
-    expect(scored?.hallucinated.some((item) => item.id === garriListing)).toBe(false);
+    expect(scored?.rejectedAttempts.some((item) => item.id === garriListing)).toBe(false);
     expect(scored?.finalCart.map((line) => line.variantKey)).toEqual(["garri-pack"]);
-    expect(scored?.hallucinated.some((item) => item.field === "line_id" && item.id === foreignLine)).toBe(true);
+    expect(scored?.rejectedAttempts.some((item) => item.field === "line_id" && item.id === foreignLine)).toBe(true);
   }, 90_000);
 
   it("an audit failure invalidates the attempt even if a later tool succeeds", async () => {

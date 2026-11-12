@@ -8,7 +8,7 @@ import { createEvalStores, deleteOwnedStores } from "./fixture-store";
 import { changedFingerprintParts, fingerprintFromRequest, type Fingerprint } from "./fingerprint";
 import { formatUsdFromMicros } from "./money";
 import { recordingFetch, type RecordedExchange } from "./recording-fetch";
-import { summarize, type EvalReport, type ReportSummary } from "./report";
+import { averageRates, summarize, type EvalReport, type OfficialEvalReport, type ReportSummary } from "./report";
 import { bindingFromFixture, dishCartMisses, scoreCase, type CatalogBinding } from "./score";
 import type { CaseResult, EvalCase } from "./types";
 
@@ -19,13 +19,40 @@ export interface GateResult {
   reasons: string[];
 }
 
-export function assessReport(report: unknown, expected: {
+interface Expected {
   fingerprint: Fingerprint;
   caseIds: string[];
   model: string;
   cases?: EvalCase[];
   binding?: CatalogBinding;
-}): GateResult {
+}
+
+const OFFICIAL_RUNS = 2;
+
+/** Each run must be sound and safe on its own; the rate floors apply to the average of the two runs. */
+export function assessOfficial(report: unknown, expected: Expected): GateResult {
+  if (!report || typeof report !== "object") return { ok: false, reasons: ["report is missing"] };
+  const body = report as Partial<OfficialEvalReport>;
+  const reasons: string[] = [];
+  if (body.schemaVersion !== 1) reasons.push("schema version");
+  if (!Array.isArray(body.runs) || body.runs.length !== OFFICIAL_RUNS) return { ok: false, reasons: [...reasons, "two runs"] };
+  const runs = body.runs;
+  runs.forEach((run, index) => {
+    for (const reason of assessReport(run, expected, { floors: false }).reasons) reasons.push(`run ${index + 1}: ${reason}`);
+  });
+  if (reasons.length > 0) return { ok: false, reasons };
+  const ids = runs.flatMap((run) => run.cases.flatMap((item) => item.anthropicRequestIds));
+  if (new Set(ids).size !== ids.length) reasons.push("runs reuse request ids");
+  const average = averageRates(runs);
+  if (canonicalJson(body.average) !== canonicalJson(average)) reasons.push("average does not match the runs");
+  const summaries = runs.map((run) => summarize(run.cases));
+  if (summaries.some((summary) => summary.precisionDenominator > 0) && average.microPrecision < 0.9) reasons.push("micro precision below 0.90");
+  if (summaries.some((summary) => summary.recallDenominator > 0) && average.microRecall < 0.85) reasons.push("micro recall below 0.85");
+  if (summaries.some((summary) => summary.dishCases > 0) && average.dishPassRate < 0.85) reasons.push("dish pass rate below 0.85");
+  return { ok: reasons.length === 0, reasons };
+}
+
+export function assessReport(report: unknown, expected: Expected, options: { floors?: boolean } = {}): GateResult {
   const reasons: string[] = [];
   if (!report || typeof report !== "object") return { ok: false, reasons: ["report is missing"] };
   const body = report as Partial<EvalReport>;
@@ -76,9 +103,11 @@ export function assessReport(report: unknown, expected: {
   if (summary.hallucinatedItems > 0) reasons.push("hallucinated items");
   if (summary.ungroundedAmountsShown > 0) reasons.push("ungrounded amounts shown");
   if (summary.safetyFailures > 0) reasons.push("safety failures");
-  if (summary.precisionDenominator > 0 && summary.precisionNumerator / summary.precisionDenominator < 0.9) reasons.push("micro precision below 0.90");
-  if (summary.recallDenominator > 0 && summary.recallNumerator / summary.recallDenominator < 0.85) reasons.push("micro recall below 0.85");
-  if (summary.dishCases > 0 && summary.dishPassed / summary.dishCases < 0.85) reasons.push("dish pass rate below 0.85");
+  if (options.floors !== false) {
+    if (summary.precisionDenominator > 0 && summary.precisionNumerator / summary.precisionDenominator < 0.9) reasons.push("micro precision below 0.90");
+    if (summary.recallDenominator > 0 && summary.recallNumerator / summary.recallDenominator < 0.85) reasons.push("micro recall below 0.85");
+    if (summary.dishCases > 0 && summary.dishPassed / summary.dishCases < 0.85) reasons.push("dish pass rate below 0.85");
+  }
   return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
 }
 
@@ -189,8 +218,24 @@ function countsOk(item: CaseResult): boolean {
   if (typeof item.dish !== "boolean" || !Array.isArray(item.dishMisses) || item.dishMisses.some((miss) => typeof miss !== "string")) return false;
   if (item.dish && (item.precisionDenominator !== 0 || item.recallDenominator !== 0)) return false;
   if (item.clarifyReply !== null && typeof item.clarifyReply !== "string") return false;
+  if (!rejectedAttemptsOk(item)) return false;
   if (!nonNegativeInt(item.droppedAttempts) || item.droppedAttempts >= item.attempts) return false;
   return typeof item.gapRequired === "boolean" && typeof item.gapsReported === "boolean" && typeof item.pass === "boolean";
+}
+
+const REJECTED_FIELDS = new Set(["listing_id", "listing_ids", "variant_id", "backup_variant_id", "substitute_variant_id", "line_id"]);
+
+/** A rejected attempt must be a refused tool input that is not cross-store and never reached the cart or the clarify reply. */
+function rejectedAttemptsOk(item: CaseResult): boolean {
+  if (!Array.isArray(item.rejectedAttempts) || !Array.isArray(item.hallucinated) || !Array.isArray(item.finalCart)) return false;
+  return item.rejectedAttempts.every((attempt) => !!attempt && typeof attempt === "object"
+    && typeof attempt.tool === "string" && attempt.tool !== "cart"
+    && typeof attempt.field === "string" && REJECTED_FIELDS.has(attempt.field)
+    && typeof attempt.id === "string" && attempt.id !== ""
+    && attempt.crossStore === false
+    && !item.finalCart.some((line) => line?.variantKey === attempt.id || line?.substituteVariantKey === attempt.id)
+    && !(typeof item.clarifyReply === "string" && item.clarifyReply.includes(attempt.id))
+    && !item.hallucinated.some((found) => found?.id === attempt.id));
 }
 
 function summaryMatches(claimed: ReportSummary | undefined, summary: ReportSummary): boolean {
@@ -200,6 +245,7 @@ function summaryMatches(claimed: ReportSummary | undefined, summary: ReportSumma
     && claimed.recallNumerator === summary.recallNumerator
     && claimed.recallDenominator === summary.recallDenominator
     && claimed.hallucinatedItems === summary.hallucinatedItems
+    && claimed.rejectedAttempts === summary.rejectedAttempts
     && claimed.ungroundedAmountsShown === summary.ungroundedAmountsShown
     && claimed.strippedAmounts === summary.strippedAmounts
     && claimed.temporalViolations === summary.temporalViolations
@@ -245,7 +291,7 @@ function caseLooksPassing(item: CaseResult): boolean {
   return item.safetyFailures.length === 0 && item.hallucinated.length === 0 && item.ungroundedAmountsShown.length === 0 && item.gapsReported && precision === 1 && recall === 1 && Array.isArray(item.dishMisses) && item.dishMisses.length === 0;
 }
 
-/** Drives store A once through the fake and compares the committed report to that fingerprint. */
+/** Drives store A once through the fake and compares both committed runs to that fingerprint. */
 export async function checkCommittedEval(options?: { fetch?: typeof fetch; reportText?: string }): Promise<GateResult> {
   const fixture = validateFixture(loadFixture());
   const cases = validateDataset(loadDataset(), fixture, { full: true });
@@ -300,7 +346,7 @@ export async function checkCommittedEval(options?: { fetch?: typeof fetch; repor
     } catch {
       return { ok: false, reasons: ["committed report is missing"] };
     }
-    return assessReport(report, {
+    return assessOfficial(report, {
       fingerprint,
       caseIds: cases.map((item) => item.id),
       model,

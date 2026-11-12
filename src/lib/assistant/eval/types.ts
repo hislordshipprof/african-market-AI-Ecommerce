@@ -140,6 +140,8 @@ export interface CaseResult {
   recallNumerator: number;
   recallDenominator: number;
   hallucinated: HallucinatedItem[];
+  /** Made-up ids a tool refused that never reached the cart or a reply; counted, not a failure (owner, 2026-11-11). */
+  rejectedAttempts: HallucinatedItem[];
   strippedAmounts: string[];
   ungroundedAmountsShown: number[];
   temporalViolations: number[];

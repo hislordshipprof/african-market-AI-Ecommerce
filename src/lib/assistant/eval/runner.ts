@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { callCostMicros } from "../cost";
 import { createChatHandler } from "../chat-handler";
@@ -15,6 +17,7 @@ import {
   type CreatedEvalStores,
 } from "./fixture-store";
 import { recordingFetch, type RecordedExchange } from "./recording-fetch";
+import { canonicalJson } from "./canonical";
 import { validateDataset, validateFixture } from "./dataset";
 import type { CartSnapshotLine, CaseResult, CatalogFixture, EvalCase, HallucinatedItem, RunResult } from "./types";
 
@@ -48,6 +51,8 @@ export interface RunEvalOptions {
   onTurnMs?: (ms: number) => void;
   cleanup?: (stores: CreatedEvalStores) => Promise<void>;
   ticketSpendPath?: string;
+  /** Writes each failing case's model requests, responses and saved conversation here. Never committed. */
+  traceDir?: string;
 }
 
 export interface EvalRun {
@@ -107,6 +112,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
           result.inputTokens += outcome.inputTokens;
           result.outputTokens += outcome.outputTokens;
           result.cases.push(outcome.caseResult);
+          if (options.traceDir && !outcome.caseResult.pass) writeTrace(options.traceDir, outcome.caseResult, outcome.traces);
         } catch (error) {
           threw = true;
           aborted = { reason: error instanceof Error ? error.message : "worker failed" };
@@ -167,6 +173,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
 
 interface CaseOutcome {
   caseResult: CaseResult;
+  traces: AttemptTrace[];
   costMicros: bigint;
   droppedMicros: bigint;
   abort: string | null;
@@ -199,15 +206,17 @@ async function runCase(
   let last: CaseResult | null = null;
   const provenance: CaseResult["requestProvenance"] = [];
   const carried = emptyCarry();
+  const traces: AttemptTrace[] = [];
   while (attempts < maxAttempts) {
     if (aborted()) break;
     if (attempts > 0) {
       const again = await budget.admitRetry(holds);
-      if (!again) return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, droppedMicros, "budget", true, inputTokens, outputTokens, unresolved);
+      if (!again) return finish(traces, last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, droppedMicros, "budget", true, inputTokens, outputTokens, unresolved);
     }
     attempts += 1;
     const attemptKey = `${evalCase.id}:${attempts}`;
     const outcome = await attemptStore.run(attemptKey, () => oneAttempt(evalCase, index, attempts, stores, binding, options, onRequest, stripWatches));
+    traces.push(outcome.trace);
     cost += outcome.costMicros;
     droppedMicros += outcome.droppedMicros;
     inputTokens += outcome.inputTokens;
@@ -219,7 +228,7 @@ async function runCase(
     outcome.caseResult.droppedAttempts = dropped;
     provenance.push(...outcome.caseResult.requestProvenance);
     if (outcome.abort) {
-      return finish(applyCarry(remember(outcome.caseResult, provenance), carried), evalCase, attempts, cost, droppedMicros, outcome.abort, sticky, inputTokens, outputTokens, unresolved);
+      return finish(traces, applyCarry(remember(outcome.caseResult, provenance), carried), evalCase, attempts, cost, droppedMicros, outcome.abort, sticky, inputTokens, outputTokens, unresolved);
     }
     if (!outcome.retry) {
       const saved = applyCarry(remember(outcome.caseResult, provenance), carried);
@@ -232,7 +241,7 @@ async function runCase(
         saved.reason = saved.reason === "ok" ? "earlier integrity failure" : saved.reason;
       }
       saved.costMicros = cost.toString();
-      return { caseResult: saved, costMicros: cost, droppedMicros, abort: null, unresolved: outcome.unresolved, inputTokens, outputTokens };
+      return { caseResult: saved, traces, costMicros: cost, droppedMicros, abort: null, unresolved: outcome.unresolved, inputTokens, outputTokens };
     }
     absorbCarry(carried, outcome.caseResult);
     if (outcome.sticky || outcome.caseResult.hallucinated.length > 0 || outcome.caseResult.safetyFailures.length > 0 || outcome.caseResult.ungroundedAmountsShown.length > 0) sticky = true;
@@ -242,7 +251,7 @@ async function runCase(
   }
   // A sibling's abort also ends the loop early. Only spent attempts stop the run: an unfinished case can never become proof.
   const exhausted = attempts >= maxAttempts ? `attempts exhausted: ${evalCase.id}` : null;
-  return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, droppedMicros, exhausted, sticky, inputTokens, outputTokens, unresolved);
+  return finish(traces, last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, droppedMicros, exhausted, sticky, inputTokens, outputTokens, unresolved);
 }
 
 function emptyCarry(): Pick<CaseResult, "hallucinated" | "safetyFailures" | "ungroundedAmountsShown" | "temporalViolations"> {
@@ -294,6 +303,7 @@ function remember(result: CaseResult, provenance: CaseResult["requestProvenance"
 }
 
 function finish(
+  traces: AttemptTrace[],
   last: CaseResult | null,
   evalCase: EvalCase,
   attempts: number,
@@ -312,7 +322,7 @@ function finish(
   caseResult.pass = false;
   caseResult.completed = false;
   if (abort) caseResult.reason = abort;
-  return { caseResult, costMicros: cost, droppedMicros, abort, unresolved, inputTokens, outputTokens };
+  return { caseResult, traces, costMicros: cost, droppedMicros, abort, unresolved, inputTokens, outputTokens };
 }
 
 async function oneAttempt(
@@ -326,6 +336,7 @@ async function oneAttempt(
   stripWatches: StripWatch[],
 ): Promise<{
   caseResult: CaseResult;
+  trace: AttemptTrace;
   costMicros: bigint;
   droppedMicros: bigint;
   abort: string | null;
@@ -434,6 +445,7 @@ async function oneAttempt(
       caseResult.requestProvenance = provenance;
       return {
         caseResult,
+        trace: traceOf(attempt, exchanges, settled.messages),
         costMicros: money.micros,
         droppedMicros: money.droppedMicros,
         abort,
@@ -457,6 +469,7 @@ async function oneAttempt(
   const logged = attemptLogs(attemptStore.getStore() ?? "").some((line) => /not saved|not recorded/.test(line));
   return {
     caseResult: blank,
+    trace: traceOf(attempt, exchanges, null),
     costMicros: money.micros,
     droppedMicros: money.droppedMicros,
     abort,
@@ -475,6 +488,7 @@ async function oneAttempt(
     await fillAbandonedIntegrity(blank, { evalCase, binding, exchanges, cartId, storeId: stores.storeAId, steps, provenance, observed });
     return {
       caseResult: blank,
+      trace: traceOf(attempt, exchanges, null),
       costMicros: money.micros,
       droppedMicros: money.droppedMicros,
       abort: null,
@@ -506,6 +520,7 @@ async function fillAbandonedIntegrity(blank: CaseResult, args: {
     if (!row) return;
     const scored = await scoreAttempt({ ...args, messages, strips: [] });
     blank.hallucinated = scored.caseResult.hallucinated;
+    blank.rejectedAttempts = scored.caseResult.rejectedAttempts;
     blank.safetyFailures = scored.caseResult.safetyFailures;
     blank.ungroundedAmountsShown = scored.caseResult.ungroundedAmountsShown;
     blank.temporalViolations = scored.caseResult.temporalViolations;
@@ -585,6 +600,7 @@ async function scoreAttempt(args: {
     recallNumerator: scored.recallNumerator,
     recallDenominator: scored.recallDenominator,
     hallucinated: scored.hallucinated,
+    rejectedAttempts: scored.rejectedAttempts,
     strippedAmounts: args.strips,
     ungroundedAmountsShown: scored.ungroundedAmountsShown,
     temporalViolations: scored.temporalViolations,
@@ -609,6 +625,54 @@ async function scoreAttempt(args: {
   return { caseResult, sticky: caseResult.stickyIntegrity };
 }
 
+interface AttemptTrace {
+  attempt: number;
+  exchanges: Array<{
+    turn: number | null;
+    requestId: string | null;
+    status: number;
+    errorType: string | null;
+    /** Present when the system prompt differs from the previous request's. */
+    system?: unknown;
+    /** Messages added since the previous request of this attempt; the first request carries all of them. */
+    newMessages: unknown[];
+    responseText: string;
+    toolUses: unknown[];
+  }>;
+  savedConversation: unknown[] | null;
+}
+
+function traceOf(attempt: number, exchanges: RecordedExchange[], messages: Array<Record<string, unknown>> | null): AttemptTrace {
+  let seen = 0;
+  let lastSystem = "";
+  const steps = exchanges.map((exchange) => {
+    const system = JSON.stringify(exchange.requestBody?.system ?? null);
+    const systemChanged = system !== lastSystem;
+    lastSystem = system;
+    const sent = Array.isArray(exchange.requestBody?.messages) ? exchange.requestBody.messages as unknown[] : [];
+    const fresh = sent.length >= seen ? sent.slice(seen) : sent;
+    seen = sent.length;
+    return {
+      turn: exchange.turn ?? null,
+      requestId: exchange.requestId,
+      status: exchange.status,
+      errorType: exchange.errorType,
+      ...(systemChanged ? { system: exchange.requestBody?.system ?? null } : {}),
+      newMessages: fresh,
+      responseText: exchange.text,
+      toolUses: exchange.toolUses,
+    };
+  });
+  return { attempt, exchanges: steps, savedConversation: messages };
+}
+
+// Request bodies carry no key: the SDK sends it as a header, which recordingFetch never reads.
+function writeTrace(dir: string, item: CaseResult, traces: AttemptTrace[]): void {
+  mkdirSync(dir, { recursive: true });
+  const body = { id: item.id, reason: item.reason, hallucinated: item.hallucinated, rejectedAttempts: item.rejectedAttempts, finalCart: item.finalCart, attempts: traces };
+  writeFileSync(join(dir, `trace-${item.id}.json`), `${JSON.stringify(body, null, 2)}\n`);
+}
+
 function toolsFromMessages(messages: Array<Record<string, unknown>>): ObservedTool[] {
   const tools: ObservedTool[] = [];
   let turn = 0;
@@ -620,10 +684,10 @@ function toolsFromMessages(messages: Array<Record<string, unknown>>): ObservedTo
     const parts = Array.isArray(message.parts) ? message.parts : [];
     for (const part of parts) {
       if (!part || typeof part !== "object") continue;
-      const record = part as { type?: string; toolName?: string; input?: unknown; output?: unknown };
+      const record = part as { type?: string; toolName?: string; input?: unknown; output?: unknown; state?: unknown };
       const name = record.type?.startsWith("tool-") ? record.type.slice(5) : record.toolName;
       if (!name || name === "grounding_strip") continue;
-      tools.push({ tool: name, input: record.input, output: record.output, turn });
+      tools.push({ tool: name, input: record.input, output: record.output, turn, ...(record.state === "output-error" ? { errored: true } : {}) });
     }
   }
   return tools;
@@ -632,7 +696,8 @@ function toolsFromMessages(messages: Array<Record<string, unknown>>): ObservedTo
 function mergeStreamTools(tools: ObservedTool[], exchanges: RecordedExchange[]): void {
   for (const exchange of exchanges) {
     for (const use of exchange.toolUses) {
-      const known = tools.some((tool) => tool.tool === use.name && JSON.stringify(tool.input) === JSON.stringify(use.input));
+      // Saved inputs are key-sorted, so compare canonical forms or every streamed call looks unsaved.
+      const known = tools.some((tool) => tool.tool === use.name && canonicalJson(tool.input) === canonicalJson(use.input));
       if (!known) tools.push({ tool: use.name, input: use.input, output: null, turn: exchange.turn ?? 1 });
     }
   }
@@ -860,6 +925,7 @@ function blankCase(evalCase: EvalCase): CaseResult {
     recallNumerator: 0,
     recallDenominator: evalCase.dish ? 0 : 1,
     hallucinated: [],
+    rejectedAttempts: [],
     strippedAmounts: [],
     ungroundedAmountsShown: [],
     temporalViolations: [],

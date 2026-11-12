@@ -34,6 +34,8 @@ export interface ObservedTool {
   input: unknown;
   output: unknown;
   turn: number;
+  /** The tool never ran: its input failed the schema or the call threw. */
+  errored?: boolean;
 }
 
 export interface TextBlock {
@@ -66,6 +68,7 @@ export interface ScoreOutput {
   recallNumerator: number;
   recallDenominator: number;
   hallucinated: HallucinatedItem[];
+  rejectedAttempts: HallucinatedItem[];
   ungroundedAmountsShown: number[];
   temporalViolations: number[];
   gapsReported: boolean;
@@ -90,7 +93,7 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
   const recallDenominator = input.evalCase.mustHave.length;
   const clarifyReply = acceptedClarifyReply(input);
   const recallNumerator = input.evalCase.mustHave.length === 0 ? 0 : clarifyReply != null ? recallDenominator : assignment.satisfied;
-  const hallucinated = collectHallucinations(input, binding);
+  const { hallucinated, rejectedAttempts } = collectHallucinations(input, binding);
   const ungroundedAmountsShown = input.savedTexts.flatMap((block) => disallowedAmounts(block, input, binding));
   const temporalViolations = input.observedTexts.flatMap((block) => disallowedAmounts(block, input, binding));
   const gapsReported = gapsAreReported(input.evalCase, input.cart, replies);
@@ -120,6 +123,7 @@ export function scoreCase(input: ScoreInput, binding: CatalogBinding, replies: s
     recallNumerator,
     recallDenominator,
     hallucinated,
+    rejectedAttempts,
     ungroundedAmountsShown,
     temporalViolations,
     gapsReported,
@@ -236,9 +240,17 @@ function gapsAreReported(evalCase: EvalCase, cart: CartSnapshotLine[], replies: 
   });
 }
 
-function collectHallucinations(input: ScoreInput, binding: CatalogBinding): HallucinatedItem[] {
+/**
+ * Owner rule (2026-11-11): a made-up id is harm only when it reaches the cart or a reply to the shopper.
+ * One a tool refused, never shown and never in the cart, is a rejected attempt. Cross-store ids are always harm.
+ */
+function collectHallucinations(input: ScoreInput, binding: CatalogBinding): { hallucinated: HallucinatedItem[]; rejectedAttempts: HallucinatedItem[] } {
   const found: HallucinatedItem[] = [];
+  const rejected: HallucinatedItem[] = [];
   const seen = new Set<string>();
+  const rejectedSeen = new Set<string>();
+  const shown = input.savedTexts.map((block) => block.text).join("\n");
+  const inCart = new Set(input.cart.map((line) => line.variantKey));
   const returned = new Set(input.returnedLineIds);
   const ownLines = new Set(input.cartLineIds);
   const packs = new Map<string, number>();
@@ -247,6 +259,10 @@ function collectHallucinations(input: ScoreInput, binding: CatalogBinding): Hall
   for (const tool of input.tools) {
     walkIds(tool.input, (field, id) => {
       const item = classifyId(field, id, binding, returned, ownLines, tool.tool, singlePack);
+      if (item && !item.crossStore && toolRefused(tool, id) && !inCart.has(id) && !shown.includes(id)) {
+        pushItem(rejected, rejectedSeen, item);
+        return;
+      }
       pushItem(found, seen, item);
     });
     walkIds(tool.output, (field, id) => {
@@ -266,7 +282,24 @@ function collectHallucinations(input: ScoreInput, binding: CatalogBinding): Hall
       pushItem(found, seen, { tool: "cart", field: "variant_id", id: line.variantKey, crossStore: variant?.store === "B" });
     }
   }
-  return found;
+  return { hallucinated: found, rejectedAttempts: rejected.filter((item) => !seen.has(`${item.id}:${item.crossStore}`)) };
+}
+
+/** True when the tool did not act on this id: the call failed, the id is in notFound, or its add_to_cart item failed. */
+function toolRefused(tool: ObservedTool, id: string): boolean {
+  if (tool.errored) return true;
+  const output = tool.output;
+  if (!output || typeof output !== "object") return false;
+  const record = output as { ok?: unknown; code?: unknown; error?: unknown; notFound?: unknown; items?: unknown };
+  if (record.code === "audit_failed") return false;
+  if (record.ok === false || (record.ok === undefined && record.error != null && record.error !== false)) return true;
+  if (Array.isArray(record.notFound) && record.notFound.includes(id)) return true;
+  if (tool.tool !== "add_to_cart" || !Array.isArray(record.items)) return false;
+  const inputs = (tool.input as { items?: unknown } | null)?.items;
+  if (!Array.isArray(inputs)) return false;
+  const results = record.items as Array<{ ok?: unknown } | null>;
+  const uses = inputs.map((item, index) => ({ hit: JSON.stringify(item).includes(JSON.stringify(id)), failed: results[index]?.ok === false }));
+  return uses.some((use) => use.hit) && uses.every((use) => !use.hit || use.failed);
 }
 
 function pushItem(found: HallucinatedItem[], seen: Set<string>, item: HallucinatedItem | null): void {
