@@ -35,6 +35,7 @@ import { generateTOTP } from "../../../e2e/totp";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/messages-api-double";
 import { setSpendClock } from "../assistant/spend";
 import { auth } from "../auth";
+import * as dbModule from "../db";
 import { authPrisma, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
 import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
 import { makeFakeStep } from "../inngest/fake-step";
@@ -416,8 +417,17 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
       data: { storeId: storeAId, kind: "running_low", listingId: crayfishId, dedupeKey: `running_low:${crayfishId}:t430` },
     });
     const step = makeFakeStep();
-    await runConfirmRequestSteps(step);
-    await runConfirmRequestSteps(makeFakeStep());
+    // Only this file's stores: a run over every store writes alerts for stores that parallel files are tearing down.
+    const ownStoreIds = [storeAId, storeBId].sort();
+    const spy = vi.spyOn(dbModule, "findStoreIdsAfter").mockImplementation(async (cursor) =>
+      ownStoreIds.filter((id) => !cursor || id > cursor),
+    );
+    try {
+      await runConfirmRequestSteps(step);
+      await runConfirmRequestSteps(makeFakeStep());
+    } finally {
+      spy.mockRestore();
+    }
     const requests = await storeScoped(storeAId).copilotAlert.findMany({
       where: { listingId: crayfishId, kind: "confirm_request" },
     });
