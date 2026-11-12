@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { CircleAlert } from "lucide-react";
 import {
   approveAttributeProposal,
   rejectAttributeProposal,
@@ -11,8 +12,8 @@ import {
 function Group({ label, values }: { label: string; values: string[] | null }) {
   return (
     <div className="text-xs">
-      <span className="font-medium text-[#15201A] dark:text-white">{label}: </span>
-      <span className="text-[#55625A] dark:text-[#a0a8a3]">
+      <span className="font-medium text-foreground">{label}: </span>
+      <span className="text-muted-foreground">
         {values === null ? "unknown (could not read)" : values.length === 0 ? "none" : values.join(", ").replaceAll("_", " ")}
       </span>
     </div>
@@ -35,7 +36,7 @@ export function AttributeProposals({ proposals }: { proposals: AttributeProposal
 
   if (proposals.length === 0) {
     return (
-      <p className="text-sm text-[#55625A] dark:text-[#a0a8a3]">
+      <p className="text-sm text-muted-foreground">
         No attributes waiting for review. Use Read attributes on a product to propose some.
       </p>
     );
@@ -44,21 +45,22 @@ export function AttributeProposals({ proposals }: { proposals: AttributeProposal
   return (
     <div className="space-y-3">
       {actionError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+        <div role="alert" className="flex gap-2 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           {actionError}
         </div>
       )}
       {proposals.map((proposal) => (
         <div
           key={proposal.id}
-          className="flex flex-col gap-3 rounded-xl border border-[#e2e4e9] bg-white p-4 sm:flex-row sm:items-start dark:border-[#333] dark:bg-[#1a1a1a]"
+          className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-start"
         >
           {proposal.imageUrl && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={proposal.imageUrl} alt="" className="h-20 w-20 rounded-lg object-cover" />
           )}
           <div className="flex-1 space-y-1">
-            <p className="text-sm font-semibold text-[#15201A] dark:text-white">{proposal.productName}</p>
+            <p className="text-sm font-semibold text-foreground">{proposal.productName}</p>
             <Group label="Ingredients" values={proposal.ingredients} />
             <Group label="Contains allergens" values={proposal.allergens} />
             <Group label="Dietary claims" values={proposal.dietaryClaims} />
@@ -68,7 +70,7 @@ export function AttributeProposals({ proposals }: { proposals: AttributeProposal
               type="button"
               onClick={() => decide(approveAttributeProposal, proposal.id)}
               disabled={isPending}
-              className="rounded-full bg-[#2E7D4F] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#246b40] disabled:opacity-50"
+              className="rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               Approve
             </button>
@@ -76,7 +78,7 @@ export function AttributeProposals({ proposals }: { proposals: AttributeProposal
               type="button"
               onClick={() => decide(rejectAttributeProposal, proposal.id)}
               disabled={isPending}
-              className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+              className="rounded-full border border-destructive/40 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
             >
               Reject
             </button>

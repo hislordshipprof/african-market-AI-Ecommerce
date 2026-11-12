@@ -23,6 +23,8 @@ type GroupKey = "ingredients" | "allergens" | "dietary";
 
 interface Draft {
   known: boolean;
+  /** Clear the owner's correction and show the catalog value. */
+  useCatalog: boolean;
   values: string[];
   ingredientsText: string;
   touched: boolean;
@@ -30,7 +32,13 @@ interface Draft {
 
 function draftOf(group: OwnerAttributeGroup<string>): Draft {
   const known = group.status !== "unknown";
-  return { known, values: known ? group.values : [], ingredientsText: known ? group.values.join("\n") : "", touched: false };
+  return {
+    known,
+    useCatalog: false,
+    values: known ? group.values : [],
+    ingredientsText: known ? group.values.join("\n") : "",
+    touched: false,
+  };
 }
 
 function label(value: string) {
@@ -78,6 +86,8 @@ function ValueChips({
   );
 }
 
+const catalogHint = "Your correction is cleared on save, and the listing shows the catalog's value.";
+
 const GROUPS: Array<{ key: GroupKey; title: string; unknownHint: string; knownHint: string }> = [
   {
     key: "allergens",
@@ -95,7 +105,7 @@ const GROUPS: Array<{ key: GroupKey; title: string; unknownHint: string; knownHi
     key: "ingredients",
     title: "Ingredients",
     unknownHint: "Unknown. Shoppers who avoid an ingredient are told we cannot confirm this product.",
-    knownHint: "One ingredient per line, as on the label. Local names work too.",
+    knownHint: "One ingredient per line, as on the label. Local names work too. If you cannot list any, turn this off.",
   },
 ];
 
@@ -145,18 +155,18 @@ export function AttributesDialog({
 
   function save() {
     if (!listingId || !drafts) return;
-    const status = (draft: Draft) => (draft.known ? "known" : "unknown") as "known" | "unknown";
+    const status = (draft: Draft) => (draft.useCatalog ? "catalog" : draft.known ? "known" : "unknown") as "known" | "unknown" | "catalog";
     const { ingredients, allergens, dietary } = drafts;
     const input: Parameters<typeof correctListingAttributesAction>[0] = { listingId };
     if (ingredients.touched) {
       const names = ingredients.ingredientsText.split(/[\n,]/).map((name) => name.trim()).filter(Boolean);
-      input.ingredients = { status: status(ingredients), names: ingredients.known ? names : [] };
+      input.ingredients = { status: status(ingredients), names: status(ingredients) === "known" ? names : [] };
     }
     if (allergens.touched) {
-      input.allergens = { status: status(allergens), values: allergens.known ? (allergens.values as Allergen[]) : [] };
+      input.allergens = { status: status(allergens), values: status(allergens) === "known" ? (allergens.values as Allergen[]) : [] };
     }
     if (dietary.touched) {
-      input.dietary = { status: status(dietary), values: dietary.known ? (dietary.values as DietaryClaim[]) : [] };
+      input.dietary = { status: status(dietary), values: status(dietary) === "known" ? (dietary.values as DietaryClaim[]) : [] };
     }
     startTransition(async () => {
       const result = await correctListingAttributesAction(input);
@@ -193,22 +203,37 @@ export function AttributesDialog({
                     <h3 id={`attr-title-${key}`} className="text-sm font-semibold text-foreground">{title}</h3>
                     <StatusBadge group={attributes[key] as OwnerAttributeGroup<string>} />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Switch
                       id={switchId}
-                      checked={draft.known}
+                      checked={draft.known && !draft.useCatalog}
+                      disabled={draft.useCatalog}
                       onCheckedChange={(known) => update(key, { known })}
                     />
                     <Label htmlFor={switchId} className="text-sm font-normal">I know the {title.toLowerCase()}</Label>
+                    {attributes[key].ownerSet && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="ml-auto"
+                        aria-pressed={draft.useCatalog}
+                        onClick={() => update(key, { useCatalog: !draft.useCatalog })}
+                      >
+                        Use catalog value
+                      </Button>
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground">{draft.known ? knownHint : unknownHint}</p>
-                  {draft.known && key === "allergens" && (
+                  <p className="text-xs text-muted-foreground">
+                    {draft.useCatalog ? catalogHint : draft.known ? knownHint : unknownHint}
+                  </p>
+                  {draft.known && !draft.useCatalog && key === "allergens" && (
                     <ValueChips options={ALLERGENS} selected={draft.values} onToggle={(v) => toggleValue(key, v)} groupLabel="Contains" />
                   )}
-                  {draft.known && key === "dietary" && (
+                  {draft.known && !draft.useCatalog && key === "dietary" && (
                     <ValueChips options={DIETARY_CLAIMS} selected={draft.values} onToggle={(v) => toggleValue(key, v)} groupLabel="Claims" />
                   )}
-                  {draft.known && key === "ingredients" && (
+                  {draft.known && !draft.useCatalog && key === "ingredients" && (
                     <Textarea
                       aria-label="Ingredients, one per line"
                       value={draft.ingredientsText}
