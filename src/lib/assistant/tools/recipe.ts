@@ -1,7 +1,8 @@
 import type { LanguageModel } from "ai";
 import { storeScoped } from "../../db";
 import { searchCatalogHits } from "../../storefront/service";
-import { hasConstraints, listingVerdicts, readConstraints, type ConstraintStatus, type ShopperConstraints } from "../constraints";
+import { hasConstraints, listingVerdicts, readConstraints, shopperNeed, type ConstraintStatus, type ShopperConstraints } from "../constraints";
+import type { ShopperNeed } from "../../catalog/attributes";
 import { dishKey } from "../recipe-base";
 import { findRecipe, lookUpDishOnline, saveLookedUpRecipe, takeLookupSlot, type RecipeRow } from "../recipes";
 import { stockBadge } from "../../storefront/stock-badge";
@@ -52,9 +53,9 @@ async function listingForMaster(storeId: string, masterProductId: string): Promi
   };
 }
 
-/** Name and synonym fits from the storefront search; a near row is not a fit. */
-async function searchFits(storeId: string, name: string): Promise<StoreItem[]> {
-  const hits = await searchCatalogHits(storeId, name);
+/** Name and synonym fits from the storefront search; a near row is not a fit. The need filters in SQL, before the cap. */
+async function searchFits(storeId: string, name: string, need: ShopperNeed | null = null): Promise<StoreItem[]> {
+  const hits = await searchCatalogHits(storeId, name, need);
   const fits = hits.filter((hit) => hit.match === "name" || hit.match === "synonym");
   const ranked = fits.some((hit) => hit.match === "name") ? fits.filter((hit) => hit.match === "name") : fits;
   return ranked.flatMap((hit) => hit.variantId ? [{
@@ -82,9 +83,10 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
   const lowOrOut: Placed[] = [];
   const notCarried: string[] = [];
   const excluded: string[] = [];
+  const need = hasConstraints(constraints) ? shopperNeed(constraints) : null;
   const found = await Promise.all(recipe.ingredients.map(async (ingredient) => ({
     ingredient,
-    fits: await searchFits(storeId, ingredient.name),
+    fits: await searchFits(storeId, ingredient.name, need),
     master: ingredient.masterProductId ? await listingForMaster(storeId, ingredient.masterProductId) : null,
   })));
   const items = found.flatMap((row) => [...row.fits, ...(row.master ? [row.master] : [])]);
@@ -101,7 +103,8 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
     const pick = mapped ?? fits.find((item) => !item.mayBeUnavailable) ?? fits[0]
       ?? (master && status(master) === "unknown" ? master : undefined);
     if (!pick) {
-      if (hits.length > 0 || master) excluded.push(ingredient.name);
+      // Search left out excluded items, so only an unfiltered search tells excluded from not carried.
+      if (master || (need && (await searchFits(storeId, ingredient.name)).length > 0)) excluded.push(ingredient.name);
       else notCarried.push(ingredient.name);
       continue;
     }

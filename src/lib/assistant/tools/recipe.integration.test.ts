@@ -8,7 +8,7 @@ import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../messages-ap
 import { createAssistantModel } from "../model";
 import { seedRecipeBase, type SeedRecipe } from "../recipe-base";
 import { WEB_SEARCH_MICROS } from "../cost";
-import { RECIPE_LOOKUPS_PER_STORE_DAY, takeLookupSlot } from "../recipes";
+import { RECIPE_LOOKUPS_PER_STORE_DAY, saveLookedUpRecipe, takeLookupSlot } from "../recipes";
 import { failNextSpendWrites } from "../spend";
 import type { AssistantContext } from "./execute";
 import { setShopperNeeds, type AssistantContext as Ctx } from "./execute";
@@ -338,5 +338,29 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     const result = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput;
     const curry = [...result.inStock, ...result.lowOrOut].find((item) => item.ingredient === "curry powder");
     expect(curry).toMatchObject({ cannotConfirm: true, needs: { peanuts: "unknown" } });
+  });
+
+  it("filters each ingredient's search before the result cap, so excluded items cannot crowd out an allowed one", async () => {
+    const store = (await raw.store.create({ data: { slug: `recipe-crowd-${suffix}`, name: "Recipe crowd", themePreset: "palm-and-shea" } })).id;
+    const allergens = async (listingId: string, found: string[]) => storeScopedTransaction(store, (tx) =>
+      tx.listingAttributes.create({ data: { listingId, storeId: store, allergensStatus: "known", allergens: found } }));
+    for (let i = 0; i < 55; i += 1) {
+      const row = await listing(store, "rice-parboiled-long-grain", `Crowdgrain ${suffix} a${String(i).padStart(2, "0")}`);
+      await allergens(row.listingId, ["peanuts"]);
+    }
+    const allowed = await listing(store, "rice-parboiled-long-grain", `Crowdgrain ${suffix} zz`);
+    await allergens(allowed.listingId, []);
+    await saveLookedUpRecipe(`kelewele crowd ${suffix}`, { name: `kelewele crowd ${suffix}`, ingredients: [`crowdgrain ${suffix}`], sourceUrl: "https://recipes.example/crowd" });
+    const ctx = await conversation(store);
+    await setShopperNeeds(ctx, { avoid_allergens: ["peanuts"] });
+    try {
+      const result = await getRecipe(ctx, { dish: `kelewele crowd ${suffix}`, servings: 2 }) as unknown as RecipeOutput;
+      expect([...result.inStock, ...result.lowOrOut].map((item) => item.listingId)).toEqual([allowed.listingId]);
+      expect(result.excluded ?? []).toEqual([]);
+    } finally {
+      await storeScoped(store).cart.deleteMany({});
+      await storeScoped(store).listing.deleteMany({});
+      await raw.store.delete({ where: { id: store } });
+    }
   });
 });
