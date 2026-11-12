@@ -1,3 +1,5 @@
+import { inngestDevOn } from "./inngest/event-key";
+
 export type QueryRawFn = (
   strings: TemplateStringsArray,
   ...values: unknown[]
@@ -47,8 +49,7 @@ let loggedInngestDev = false;
 
 /** Vercel ignores INNGEST_DEV (client.ts), so it is a config mistake to log once, not an outage. */
 function warnEnvFlags(env: Record<string, string | undefined>): void {
-  const dev = env.INNGEST_DEV?.trim().toLowerCase();
-  if (env.VERCEL_ENV === "production" && (dev === "1" || dev === "true") && !loggedInngestDev) {
+  if (env.VERCEL_ENV === "production" && inngestDevOn(env) && !loggedInngestDev) {
     loggedInngestDev = true;
     console.warn("Health check: INNGEST_DEV is set in production");
   }

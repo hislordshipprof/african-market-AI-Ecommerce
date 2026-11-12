@@ -80,6 +80,7 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
       await order("cancelling", { status: "CANCELLING", createdAt: ago(2 * HOUR), updatedAt: ago(1 * MIN) });
       await audit(ids.cancelling, "cancel_retry", ago(40 * MIN));
       await audit(ids.cancelling, "cancel_retry", ago(2 * MIN));
+      await order("noRetryRow", { status: "CAPTURING", createdAt: ago(2 * HOUR), updatedAt: ago(40 * MIN) });
       await order("picking", { status: "ACCEPTED", createdAt: ago(2 * HOUR + 5 * MIN), acceptedAt: ago(2 * HOUR), prepEstimateMinutes: 20 });
       await order("scheduled", {
         status: "ACCEPTED",
@@ -108,6 +109,7 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
 
       await order("released", { status: "CANCELLED", createdAt: ago(2 * DAY), cancelledAt: ago(DAY) });
       await audit(ids.released, "capture_released", ago(DAY));
+      await audit(ids.released, "capture_released", ago(2 * DAY));
       await order("unknownRefund", { status: "REFUND_FAILED", createdAt: ago(9 * DAY), capturedAmountCents: 1000 });
       await audit(ids.unknownRefund, "refund_request_unknown", ago(8 * DAY));
       await order("oldClosed", { status: "CANCELLED", createdAt: ago(9 * DAY), cancelledAt: ago(8 * DAY) });
@@ -122,6 +124,9 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
     expect(reasonOf("notStarted")).toEqual(["timer not started"]);
     expect(reasonOf("timerOverdue")).toEqual(["timer overdue"]);
     expect(reasonOf("cancelling")).toEqual(["retry stalled"]);
+    expect(stuck.filter((row) => row.orderId === ids.noRetryRow)).toEqual([
+      expect.objectContaining({ reason: "retry stalled", since: ago(40 * MIN) }),
+    ]);
     expect(reasonOf("picking")).toEqual(["picking overdue"]);
     expect(reasonOf("farSlot")).toEqual(["picking overdue"]);
     expect(reasonOf("hold")).toEqual(["card hold expiring"]);
@@ -134,8 +139,10 @@ describe.skipIf(!hasDb)("orders to check (lane DB)", () => {
     expect(cappedGroups).toEqual([]);
     expect(alertsCapped).toBe(false);
 
-    const released = alerts.find((row) => row.orderId === ids.released);
-    expect(released).toMatchObject({ action: "capture_released", storeName, orderNumber: expect.any(Number) });
+    const released = alerts.filter((row) => row.orderId === ids.released);
+    expect(released).toEqual([
+      expect.objectContaining({ action: "capture_released", storeName, orderNumber: expect.any(Number), createdAt: ago(DAY) }),
+    ]);
     expect(alerts.some((row) => row.orderId === ids.unknownRefund && row.action === "refund_request_unknown")).toBe(true);
     expect(alerts.some((row) => row.orderId === ids.oldClosed)).toBe(false);
   });
@@ -153,7 +160,7 @@ describe.skipIf(!hasDb)("orders to check: a full captured group does not hide un
       const customer = await tx.customer.create({ data: { storeId, name: "Backlog Customer" } });
       const base = { storeId, customerId: customer.id, subtotalCents: 1000, bufferCents: 0, totalAuthorizedCents: 1000, inngestEventSentAt: ago(20 * DAY) };
       await tx.order.createMany({
-        data: Array.from({ length: 200 }, (_, i) => ({
+        data: Array.from({ length: 201 }, (_, i) => ({
           ...base,
           number: 43000 + i,
           status: "AWAITING_PICKUP" as const,
@@ -183,6 +190,8 @@ describe.skipIf(!hasDb)("orders to check: orders not yet due do not fill a group
   const ago = (ms: number) => new Date(now.getTime() - ms);
   let capturingId = "";
   let notStartedId = "";
+  let overdueId = "";
+  let pastSlotId = "";
 
   beforeAll(async () => {
     await asPlatformAdmin(async (tx) => {
@@ -220,18 +229,37 @@ describe.skipIf(!hasDb)("orders to check: orders not yet due do not fill a group
       });
       const notStarted = await tx.order.create({ data: { ...base, number: 44601, status: "AUTHORIZED", createdAt: ago(20 * MIN), inngestEventSentAt: null } });
       notStartedId = notStarted.id;
+      const overdue = await tx.order.create({ data: { ...base, number: 44602, status: "AUTHORIZED", createdAt: ago(2 * HOUR), inngestEventSentAt: ago(2 * HOUR) } });
+      overdueId = overdue.id;
+      await tx.auditLog.create({
+        data: { storeId, actorId: SYSTEM_ACTOR_ID, actorEmail: SYSTEM_ACTOR_EMAIL, action: "acceptance_alert", entityType: "order", entityId: overdueId, createdAt: ago(HOUR) },
+      });
+      const pastSlot = await tx.order.create({
+        data: {
+          ...base,
+          number: 44603,
+          status: "ACCEPTED",
+          createdAt: ago(3 * HOUR + 5 * MIN),
+          acceptedAt: ago(3 * HOUR),
+          prepEstimateMinutes: 20,
+          pickupSlot: ago(2 * HOUR).toISOString(),
+        },
+      });
+      pastSlotId = pastSlot.id;
     });
   }, 30_000);
 
-  it("lists a stalled capture behind 200 scheduled orders and a timer not started behind 200 waiting orders", async () => {
+  it("lists due orders behind 200 scheduled orders and 200 orders waiting for the store to open", async () => {
     const { stuck, cappedGroups } = await findOrdersToCheck({ now, storeIds: [storeId] });
     expect(stuck.map((row) => [row.orderId, row.reason])).toEqual(
       expect.arrayContaining([
         [capturingId, "retry stalled"],
         [notStartedId, "timer not started"],
+        [overdueId, "timer overdue"],
+        [pastSlotId, "picking overdue"],
       ]),
     );
-    expect(stuck).toHaveLength(2);
+    expect(stuck).toHaveLength(4);
     expect(cappedGroups).toEqual(["authorized", "uncaptured"]);
   });
 
