@@ -495,6 +495,26 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(savedReply.ungroundedAmountsShown).not.toContain(1099);
   }, 90_000);
 
+  it("a subtotal from a cart tool in the same turn is not an early total after mid-turn text", async () => {
+    const listings = [listing("garri", "garri-white", "A", 1099), listing("yam", "yam-white-puna", "B", 899)];
+    const result = await run([evalCase({
+      id: "same-turn-total",
+      category: "single-item",
+      turns: ["Add two garri."],
+      mustHave: [{ options: [{ listingKey: "garri", variantKeys: ["garri-pack"] }] }],
+      mayHave: [],
+      gaps: [],
+      qty: [{ listingKey: "garri", variantKey: "garri-pack", min: 2, max: 2 }],
+    })], listings, (ctx) => scripted(ctx, (current) => [
+      { kind: "tool", text: "Adding it now.", toolName: "add_to_cart", toolInput: { items: [{ variant_id: current.binding.byVariantKey.get("garri-pack")?.id ?? "", qty: 2 }] } },
+      { kind: "tool", text: "Checking your cart.", toolName: "get_cart_summary", toolInput: {} },
+      { kind: "text", text: "Your subtotal is $21.98." },
+    ]), { maxAttempts: 1 });
+    const scored = result.result.cases[0];
+    expect(scored?.pass).toBe(true);
+    expect(scored?.temporalViolations).toEqual([]);
+  }, 90_000);
+
   it("concurrent attempts keep scripts request ids errors and spend separate", async () => {
     const listings = [listing("garri", "garri-white", "A", 499), listing("egusi", "egusi-seeds-whole", "A", 700), listing("yam", "yam-white-puna", "B", 899)];
     const one = evalCase({

@@ -17,6 +17,8 @@ export interface RecordedExchange {
   toolUses: RecordedToolUse[];
   requestBody: Record<string, unknown> | null;
   done: Promise<void>;
+  /** The case turn, set by the runner once the turn ends. */
+  turn?: number;
 }
 
 export function recordingFetch(inner: typeof fetch, sink: RecordedExchange[]): typeof fetch {

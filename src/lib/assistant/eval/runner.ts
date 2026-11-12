@@ -348,6 +348,7 @@ async function oneAttempt(
     const bodyText = await response.text();
     await Promise.all(exchanges.slice(started).map((exchange) => exchange.done));
     const turnExchanges = exchanges.slice(started);
+    for (const exchange of turnExchanges) exchange.turn = turn + 1;
     steps += turnExchanges.length;
     if (!cookie) {
       cookie = readCartCookie(response);
@@ -609,13 +610,11 @@ function toolsFromMessages(messages: Array<Record<string, unknown>>): ObservedTo
 }
 
 function mergeStreamTools(tools: ObservedTool[], exchanges: RecordedExchange[]): void {
-  let turn = 1;
   for (const exchange of exchanges) {
     for (const use of exchange.toolUses) {
       const known = tools.some((tool) => tool.tool === use.name && JSON.stringify(tool.input) === JSON.stringify(use.input));
-      if (!known) tools.push({ tool: use.name, input: use.input, output: null, turn });
+      if (!known) tools.push({ tool: use.name, input: use.input, output: null, turn: exchange.turn ?? 1 });
     }
-    if (exchange.text) turn += 0;
   }
 }
 
@@ -644,20 +643,17 @@ function textsFromMessages(messages: Array<Record<string, unknown>>): TextBlock[
 function textsFromExchanges(exchanges: RecordedExchange[], tools: ObservedTool[]): TextBlock[] {
   const blocks: TextBlock[] = [];
   const outputs: unknown[] = [];
-  let toolIndex = 0;
-  let turn = 1;
-  let seenText = false;
+  const used = new Map<number, number>();
   for (const exchange of exchanges) {
-    if (seenText && exchange.text) turn += 1;
-    if (exchange.text) {
-      blocks.push({ turn, text: exchange.text, priorOutputs: [...outputs], saved: false });
-      seenText = true;
-    }
-    exchange.toolUses.forEach(() => {
-      const output = tools[toolIndex]?.output;
+    const turn = exchange.turn ?? 1;
+    if (exchange.text) blocks.push({ turn, text: exchange.text, priorOutputs: [...outputs], saved: false });
+    const ofTurn = tools.filter((tool) => tool.turn === turn);
+    for (let call = 0; call < exchange.toolUses.length; call += 1) {
+      const index = used.get(turn) ?? 0;
+      const output = ofTurn[index]?.output;
       if (output !== undefined) outputs.push(output);
-      toolIndex += 1;
-    });
+      used.set(turn, index + 1);
+    }
   }
   return blocks;
 }
