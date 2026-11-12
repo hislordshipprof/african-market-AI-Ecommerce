@@ -11,8 +11,9 @@ export const copilotOrderStockAlerts = inngest.createFunction(
   async ({ event, step }) => {
     const { orderId, storeId } = event.data as { orderId?: string; storeId?: string };
     if (!orderId || !storeId) return;
-    const created = await step.run("create-alerts", () => createOrderStockAlerts(storeId, orderId));
-    if (created > 0) await step.run("push-alerts", () => pushCopilotAlerts(storeId));
+    await step.run("create-alerts", () => createOrderStockAlerts(storeId, orderId));
+    // Always: a retry after a committed write creates nothing, and its alerts still need the push.
+    await step.run("push-alerts", () => pushCopilotAlerts(storeId));
   },
 );
 

@@ -161,23 +161,26 @@ export async function pushCopilotAlerts(
   env: Record<string, string | undefined> = process.env,
   now = Date.now(),
 ): Promise<void> {
-  const waiting = await storeScoped(storeId).copilotAlert.count({ where: { state: "open", pushedAt: null } });
-  if (waiting === 0) return;
-  const allowed = await takeRateLimit(`copilot-push:${storeId}`, PUSH_CAP, PUSH_WINDOW_MS, now);
-  if (!allowed.ok) return;
-
-  const claimed = await storeScopedTransaction(storeId, (tx) => txQuery<Array<{
-    id: string;
-    kind: string;
-    listing_id: string;
-    order_id: string | null;
-    created_at: Date;
-  }>>(tx, Prisma.sql`
-    UPDATE copilot_alerts
-    SET pushed_at = ${new Date(now)}
-    WHERE store_id = ${storeId} AND state = 'open' AND pushed_at IS NULL
-    RETURNING id, kind, listing_id, order_id, created_at
-  `));
+  // One push at a time per store, so racing runs cannot spend a slot that claims nothing.
+  const claimed = await storeScopedTransaction(storeId, async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('copilot-push'), hashtext(${storeId}))`;
+    const waiting = await tx.copilotAlert.count({ where: { state: "open", pushedAt: null } });
+    if (waiting === 0) return [];
+    const allowed = await takeRateLimit(`copilot-push:${storeId}`, PUSH_CAP, PUSH_WINDOW_MS, now);
+    if (!allowed.ok) return [];
+    return txQuery<Array<{
+      id: string;
+      kind: string;
+      listing_id: string;
+      order_id: string | null;
+      created_at: Date;
+    }>>(tx, Prisma.sql`
+      UPDATE copilot_alerts
+      SET pushed_at = ${new Date(now)}
+      WHERE store_id = ${storeId} AND state = 'open' AND pushed_at IS NULL
+      RETURNING id, kind, listing_id, order_id, created_at
+    `);
+  });
   if (claimed.length === 0) return;
 
   const store = await platform.store.findUnique({ where: { id: storeId }, select: { slug: true } });

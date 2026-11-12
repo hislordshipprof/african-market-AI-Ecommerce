@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { lockListingRows, storeScoped, storeScopedTransaction } from "../db";
@@ -7,7 +7,7 @@ import { reserveOrderStock } from "../order/stock-ledger";
 import { makeFakeStep } from "../inngest/fake-step";
 import { PushTestSender, setPushSenderForTests } from "../push/sender";
 import { copilotOrderStockAlerts } from "./alert-functions";
-import { pushCopilotAlerts } from "./alerts";
+import { createOrderStockAlerts, pushCopilotAlerts } from "./alerts";
 
 type Handler = (ctx: { event: { data: Record<string, unknown> }; step: ReturnType<typeof makeFakeStep> }) => Promise<unknown>;
 const orderAlertsHandler = (copilotOrderStockAlerts as unknown as { fn: Handler }).fn;
@@ -46,19 +46,41 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
     })).id;
   });
 
+  /** A store whose owner and staff each have one push device. */
+  async function storeWithDevices(label: string) {
+    const storeId = (await raw.store.create({
+      data: { slug: `alerts-${label}-${RUN}`, name: `Alerts ${label}`, themePreset: "palm-and-shea" },
+    })).id;
+    const ownerId = `alerts-${label}-owner-${RUN}`;
+    const staffId = `alerts-${label}-staff-${RUN}`;
+    await raw.user.createMany({ data: [ownerId, staffId].map((id) => ({ id, name: id, email: `${id}@example.com` })) });
+    await storeScoped(storeId).storeMembership.createMany({
+      data: [{ storeId, userId: ownerId, role: "owner" }, { storeId, userId: staffId, role: "staff" }],
+    });
+    for (const userId of [ownerId, staffId]) {
+      await storeScoped(storeId).pushSubscription.create({
+        data: { storeId, userId, endpoint: `https://fcm.googleapis.com/fcm/send/${userId}`, ...PUSH_KEYS },
+      });
+    }
+    return { storeId, ownerId };
+  }
+
   /** An authorized order whose lines reserve stock the way checkout does. */
-  async function placeOrder(lines: Array<{ listingId: string; qty: number }>) {
+  async function placeOrder(lines: Array<{ listingId: string; qty: number }>, storeId = storeAId) {
+    const customerId = storeId === storeAId ? customerAId : (await storeScoped(storeId).customer.create({
+      data: { storeId, name: "Alerts Buyer", email: `alerts-${storeId}@example.com` },
+    })).id;
     const variants = await Promise.all(lines.map((line) =>
-      storeScoped(storeAId).listingVariant.create({
+      storeScoped(storeId).listingVariant.create({
         data: { listingId: line.listingId, label: "Each", price: 500, weightG: 500 },
       })));
-    return storeScopedTransaction(storeAId, async (tx) => {
+    return storeScopedTransaction(storeId, async (tx) => {
       const locked = await lockListingRows(tx, lines.map((line) => line.listingId));
       const order = await tx.order.create({
         data: {
-          storeId: storeAId,
+          storeId,
           number: ++orderNumber,
-          customerId: customerAId,
+          customerId,
           status: "AUTHORIZED",
           fulfillment: "pickup",
           subtotalCents: 1000,
@@ -69,9 +91,9 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
       });
       const created = await Promise.all(lines.map((line, i) =>
         tx.orderLine.create({
-          data: { storeId: storeAId, orderId: order.id, listingVariantId: variants[i]!.id, qtyOrdered: line.qty, unitPriceCents: 500 },
+          data: { storeId, orderId: order.id, listingVariantId: variants[i]!.id, qtyOrdered: line.qty, unitPriceCents: 500 },
         })));
-      await reserveOrderStock(tx, storeAId, created.map((row, i) => ({
+      await reserveOrderStock(tx, storeId, created.map((row, i) => ({
         id: row.id,
         listingId: lines[i]!.listingId,
         qtyOrdered: lines[i]!.qty,
@@ -94,6 +116,7 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
 
   afterEach(() => {
     setPushSenderForTests(null);
+    vi.unstubAllEnvs();
   });
 
   it("copilot_alerts: storeScoped(B) reads none of A's alerts, cannot insert one for A, and updates nothing", async () => {
@@ -149,20 +172,7 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
   });
 
   it("ten alerts in twenty minutes send at most two owner pushes in the hour; the rest wait for the next allowed push", async () => {
-    const storeId = (await raw.store.create({
-      data: { slug: `alerts-cap-${RUN}`, name: "Alerts Cap", themePreset: "palm-and-shea" },
-    })).id;
-    const ownerId = `alerts-owner-${RUN}`;
-    const staffId = `alerts-staff-${RUN}`;
-    await raw.user.createMany({ data: [ownerId, staffId].map((id) => ({ id, name: id, email: `${id}@example.com` })) });
-    await storeScoped(storeId).storeMembership.createMany({
-      data: [{ storeId, userId: ownerId, role: "owner" }, { storeId, userId: staffId, role: "staff" }],
-    });
-    for (const userId of [ownerId, staffId]) {
-      await storeScoped(storeId).pushSubscription.create({
-        data: { storeId, userId, endpoint: `https://fcm.googleapis.com/fcm/send/${userId}`, ...PUSH_KEYS },
-      });
-    }
+    const { storeId, ownerId } = await storeWithDevices("cap");
     const sender = new PushTestSender();
     setPushSenderForTests(sender);
 
@@ -186,5 +196,45 @@ describe.skipIf(!hasDb)("copilot alerts (lane database)", () => {
     expect(sender.sent).toHaveLength(3);
     expect(sender.sent[2]!.message.body).toMatch(/8/);
     expect((await storeScoped(storeId).copilotAlert.count({ where: { pushedAt: null } }))).toBe(0);
+  });
+
+  it("two racing pushes for one waiting alert use one of the hour's pushes, so a new alert minutes later still goes out", async () => {
+    const { storeId } = await storeWithDevices("race");
+    const sender = new PushTestSender();
+    setPushSenderForTests(sender);
+    const alert = async (name: string) => {
+      const listingId = await counted(storeId, name, 2);
+      await storeScoped(storeId).copilotAlert.create({
+        data: { storeId, kind: "running_low", listingId, dedupeKey: `running_low:${listingId}:race` },
+      });
+    };
+
+    const start = Date.now();
+    await alert("Yam");
+    await Promise.all([pushCopilotAlerts(storeId, VAPID_ENV, start), pushCopilotAlerts(storeId, VAPID_ENV, start)]);
+    expect(sender.sent).toHaveLength(1);
+
+    await alert("Plantain");
+    await pushCopilotAlerts(storeId, VAPID_ENV, start + 5 * 60_000);
+    expect(sender.sent).toHaveLength(2);
+    expect(await storeScoped(storeId).copilotAlert.count({ where: { pushedAt: null } })).toBe(0);
+  });
+
+  it("a retried run whose alerts were already written still pushes them", async () => {
+    const { storeId } = await storeWithDevices("retry");
+    const sender = new PushTestSender();
+    setPushSenderForTests(sender);
+    const listingId = await counted(storeId, "Fufu", 6);
+    const orderId = await placeOrder([{ listingId, qty: 2 }], storeId);
+    await createOrderStockAlerts(storeId, orderId);
+
+    const step = makeFakeStep();
+    vi.stubEnv("VAPID_PUBLIC_KEY", VAPID_ENV.VAPID_PUBLIC_KEY);
+    vi.stubEnv("VAPID_PRIVATE_KEY", VAPID_ENV.VAPID_PRIVATE_KEY);
+    await orderAlertsHandler({ event: { data: { storeId, orderId } }, step });
+
+    expect(step.runs).toEqual(["create-alerts", "push-alerts"]);
+    expect(sender.sent).toHaveLength(1);
+    expect(await storeScoped(storeId).copilotAlert.count({ where: { pushedAt: null } })).toBe(0);
   });
 });
