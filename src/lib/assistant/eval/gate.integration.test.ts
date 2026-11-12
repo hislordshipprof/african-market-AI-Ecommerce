@@ -83,6 +83,7 @@ function passing(id: string, numerator = 1, denominator = 1): CaseResult {
     dish: false,
     dishMisses: [],
     clarifyReply: null,
+    droppedAttempts: 0,
     costMicros: "1",
     anthropicRequestIds: [`req_${id}`],
     requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${id}` }],
@@ -105,7 +106,7 @@ function report(cases: CaseResult[], current = fingerprint(), extra: Partial<Eva
     summary: summarize(cases),
     verdict: "haiku-ok",
     verdictReasons: [],
-    spend: { micros: text, usd: formatUsdFromMicros(micros), ledgerDeltaMicros: text, conversationMicros: text, inputTokens: 1, outputTokens: 1 },
+    spend: { micros: text, usd: formatUsdFromMicros(micros), droppedMicros: "0", ledgerDeltaMicros: text, conversationMicros: text, inputTokens: 1, outputTokens: 1 },
     sessionUser: "app_runtime",
     cases,
     ...extra,
@@ -177,6 +178,7 @@ function caseFromScore(id: string, category: CaseResult["category"], scored: Sco
     dish: category === "recipe-to-cart",
     dishMisses: scored.dishMisses,
     clarifyReply: scored.clarifyReply,
+    droppedAttempts: 0,
     costMicros: "0",
     anthropicRequestIds: [`req_${id}`],
     requestProvenance: [{ attempt: 1, turn: 1, step: 1, requestId: `req_${id}` }],
@@ -184,6 +186,31 @@ function caseFromScore(id: string, category: CaseResult["category"], scored: Sco
 }
 
 describe("shopper assistant eval gate", () => {
+  it("accepts a case whose dropped attempt was retried to success, and rejects a forged drop count", () => {
+    const expectIds = { fingerprint: fingerprint(), caseIds: ["one"], model: "claude-haiku-5-5" };
+    const recovered = (dropped: unknown): CaseResult => ({
+      ...passing("one"),
+      attempts: 2,
+      droppedAttempts: dropped as number,
+      anthropicRequestIds: ["req_one_1", "req_one_2"],
+      requestProvenance: [
+        { attempt: 1, turn: 1, step: 1, requestId: "req_one_1" },
+        { attempt: 2, turn: 1, step: 1, requestId: "req_one_2" },
+      ],
+    });
+    expect(assessReport(report([recovered(1)]), expectIds)).toEqual({ ok: true, reasons: [] });
+    expect(assessReport(report([recovered(2)]), expectIds).reasons).toContain("invalid counts on one");
+    expect(assessReport(report([recovered(-1)]), expectIds).reasons).toContain("invalid counts on one");
+    expect(assessReport(report([recovered(undefined)]), expectIds).reasons).toContain("invalid counts on one");
+
+    const cut = { ...recovered(1), costMicros: "10" };
+    const spend = (dropped: string, recorded: string) => ({ micros: "10", usd: formatUsdFromMicros(BigInt(10)), droppedMicros: dropped, ledgerDeltaMicros: recorded, conversationMicros: recorded, inputTokens: 1, outputTokens: 1 });
+    expect(assessReport(report([cut], fingerprint(), { spend: spend("6", "4") }), expectIds)).toEqual({ ok: true, reasons: [] });
+    expect(assessReport(report([{ ...cut, droppedAttempts: 0, attempts: 2 }], fingerprint(), { spend: spend("6", "4") }), expectIds).reasons).toContain("spend");
+    expect(assessReport(report([cut], fingerprint(), { spend: spend("5", "4") }), expectIds).reasons).toContain("spend");
+    expect(assessReport(report([cut], fingerprint(), { spend: spend("-6", "16") }), expectIds).reasons).toContain("spend");
+  });
+
   it("rejects stale fingerprints malformed evidence and inconsistent summaries", () => {
     const current = fingerprint("current prompt");
     const ids = ["one", "two"];

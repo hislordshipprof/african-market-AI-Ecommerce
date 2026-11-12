@@ -89,9 +89,12 @@ function spendReconciles(spend: EvalReport["spend"] | undefined, cases: CaseResu
     if (typeof item?.costMicros !== "string" || !/^\d+$/.test(item.costMicros)) return false;
     sum += BigInt(item.costMicros);
   }
+  const dropped = BigInt(spend?.droppedMicros ?? "0");
+  if (dropped > BigInt(0) && !cases.some((item) => nonNegativeInt(item?.droppedAttempts) && item.droppedAttempts > 0)) return false;
+  const recorded = (sum - dropped).toString();
   return spend?.micros === sum.toString()
-    && spend.conversationMicros === spend.micros
-    && (spend.ledgerDeltaMicros == null || spend.ledgerDeltaMicros === spend.micros)
+    && spend.conversationMicros === recorded
+    && (spend.ledgerDeltaMicros == null || spend.ledgerDeltaMicros === recorded)
     && spend.usd === formatUsdFromMicros(sum);
 }
 
@@ -165,6 +168,7 @@ function spendOk(spend: EvalReport["spend"] | undefined): boolean {
   if (!spend) return false;
   return typeof spend.micros === "string" && /^\d+$/.test(spend.micros)
     && typeof spend.usd === "string"
+    && typeof spend.droppedMicros === "string" && /^\d+$/.test(spend.droppedMicros)
     && typeof spend.conversationMicros === "string" && /^\d+$/.test(spend.conversationMicros)
     && (spend.ledgerDeltaMicros == null || (typeof spend.ledgerDeltaMicros === "string" && /^-?\d+$/.test(spend.ledgerDeltaMicros)))
     && Number.isInteger(spend.inputTokens) && spend.inputTokens >= 0
@@ -185,6 +189,7 @@ function countsOk(item: CaseResult): boolean {
   if (typeof item.dish !== "boolean" || !Array.isArray(item.dishMisses) || item.dishMisses.some((miss) => typeof miss !== "string")) return false;
   if (item.dish && (item.precisionDenominator !== 0 || item.recallDenominator !== 0)) return false;
   if (item.clarifyReply !== null && typeof item.clarifyReply !== "string") return false;
+  if (!nonNegativeInt(item.droppedAttempts) || item.droppedAttempts >= item.attempts) return false;
   return typeof item.gapRequired === "boolean" && typeof item.gapsReported === "boolean" && typeof item.pass === "boolean";
 }
 

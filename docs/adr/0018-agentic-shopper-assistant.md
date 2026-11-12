@@ -82,7 +82,7 @@ Placing orders from an AI chat raises three risks: prompt injection, wrong price
 - Conversations and tool calls go in `AiConversation` and `AiAction`, with RLS, and are deleted after **90 days** by a scheduled job.
 - The golden eval (#146) is 200 English text requests. Checkout paths wait for #247. Photo and PDF lists are deferred. There is no multilingual set and no live hosted job.
 - Default `pnpm test` and local-ci never call Anthropic. They check a committed report against the current prompt, tools, step cap, model, dataset, catalog fixture and seeded master-product names, synonyms and categories. A mismatch names the part that changed. The rerun is `ASSISTANT_EVAL_LIVE=1 pnpm eval:shopper-assistant`.
-- A live run is opt-in, Haiku only, on the local `app_runtime` database, with a $2 stop for that run and a $20 stop for the ticket including earlier attempts (raised from $4 by the owner on 2026-11-11, issue #146). An incomplete run, a partial selection, or a failed teardown leaves the previous committed report in place. Gap misses are reported and do not by themselves fail the gate.
+- A live run is opt-in, Haiku only, on the local `app_runtime` database, with a $2 stop for that run and a $20 stop for the ticket including earlier attempts (raised from $4 by the owner on 2026-11-11, issue #146). An incomplete run, a partial selection, or a failed teardown leaves the previous committed report in place. A request whose connection drops before its usage arrives keeps its reserve in the ticket spend. Its case still counts as complete when a retry succeeds; a request that still fails after its retries leaves the run incomplete (owner, 2026-11-11). Gap misses are reported and do not by themselves fail the gate.
 
 ## Consequences
 

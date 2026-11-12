@@ -22,6 +22,8 @@ export interface EvalReport {
   spend: {
     micros: string;
     usd: string;
+    /** Part of micros from streams cut before their final usage, which the ledger and conversations never record. */
+    droppedMicros: string;
     ledgerDeltaMicros: string | null;
     conversationMicros: string;
     inputTokens: number;
@@ -196,6 +198,7 @@ export function buildReport(args: {
     spend: {
       micros: args.result.spendMicros.toString(),
       usd: formatUsdFromMicros(args.result.spendMicros),
+      droppedMicros: args.result.droppedMicros.toString(),
       ledgerDeltaMicros: args.result.ledgerDeltaMicros?.toString() ?? null,
       conversationMicros: args.result.conversationMicros.toString(),
       inputTokens: args.result.inputTokens,

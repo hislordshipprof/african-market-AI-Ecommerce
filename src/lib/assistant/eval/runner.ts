@@ -103,6 +103,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
           caseMicros = outcome.costMicros;
           if (outcome.abort) aborted = aborted ?? { reason: outcome.abort };
           if (outcome.unresolved) result.unresolvedSpend = true;
+          result.droppedMicros += outcome.droppedMicros;
           result.inputTokens += outcome.inputTokens;
           result.outputTokens += outcome.outputTokens;
           result.cases.push(outcome.caseResult);
@@ -135,7 +136,8 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
     if (result.incompleteReason === "budget" || result.incompleteReason === "ticket budget") {
       result.complete = false;
     }
-    const totalsDisagree = result.ledgerDeltaMicros !== result.spendMicros || result.conversationMicros !== result.spendMicros;
+    const reconciled = result.spendMicros - result.droppedMicros;
+    const totalsDisagree = result.ledgerDeltaMicros !== reconciled || result.conversationMicros !== reconciled;
     if (totalsDisagree) {
       result.unresolvedSpend = true;
       result.complete = false;
@@ -166,6 +168,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
 interface CaseOutcome {
   caseResult: CaseResult;
   costMicros: bigint;
+  droppedMicros: bigint;
   abort: string | null;
   unresolved: boolean;
   inputTokens: number;
@@ -188,9 +191,11 @@ async function runCase(
   let attempts = 0;
   let sticky = false;
   let cost = BigInt(0);
+  let droppedMicros = BigInt(0);
   let inputTokens = 0;
   let outputTokens = 0;
   let unresolved = false;
+  let dropped = 0;
   let last: CaseResult | null = null;
   const provenance: CaseResult["requestProvenance"] = [];
   const carried = emptyCarry();
@@ -198,32 +203,36 @@ async function runCase(
     if (aborted()) break;
     if (attempts > 0) {
       const again = await budget.admitRetry(holds);
-      if (!again) return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, "budget", true, inputTokens, outputTokens, unresolved);
+      if (!again) return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, droppedMicros, "budget", true, inputTokens, outputTokens, unresolved);
     }
     attempts += 1;
     const attemptKey = `${evalCase.id}:${attempts}`;
     const outcome = await attemptStore.run(attemptKey, () => oneAttempt(evalCase, index, attempts, stores, binding, options, onRequest, stripWatches));
     cost += outcome.costMicros;
+    droppedMicros += outcome.droppedMicros;
     inputTokens += outcome.inputTokens;
     outputTokens += outcome.outputTokens;
     await budget.finishAttempt(holds, outcome.unknownSends, outcome.costMicros);
     if (outcome.sticky) sticky = true;
     unresolved = unresolved || outcome.unresolved;
+    if (outcome.unresolved) dropped += 1;
+    outcome.caseResult.droppedAttempts = dropped;
     provenance.push(...outcome.caseResult.requestProvenance);
     if (outcome.abort) {
-      return finish(applyCarry(remember(outcome.caseResult, provenance), carried), evalCase, attempts, cost, outcome.abort, sticky, inputTokens, outputTokens, unresolved);
+      return finish(applyCarry(remember(outcome.caseResult, provenance), carried), evalCase, attempts, cost, droppedMicros, outcome.abort, sticky, inputTokens, outputTokens, unresolved);
     }
     if (!outcome.retry) {
       const saved = applyCarry(remember(outcome.caseResult, provenance), carried);
+      // A drop retried to success is complete: its reserve is already spent in finishAttempt.
       saved.attempts = attempts;
-      saved.completed = !unresolved;
+      saved.completed = !outcome.unresolved;
       saved.stickyIntegrity = sticky || saved.stickyIntegrity;
       if (saved.stickyIntegrity) {
         saved.pass = false;
         saved.reason = saved.reason === "ok" ? "earlier integrity failure" : saved.reason;
       }
       saved.costMicros = cost.toString();
-      return { caseResult: saved, costMicros: cost, abort: null, unresolved, inputTokens, outputTokens };
+      return { caseResult: saved, costMicros: cost, droppedMicros, abort: null, unresolved: outcome.unresolved, inputTokens, outputTokens };
     }
     absorbCarry(carried, outcome.caseResult);
     if (outcome.sticky || outcome.caseResult.hallucinated.length > 0 || outcome.caseResult.safetyFailures.length > 0 || outcome.caseResult.ungroundedAmountsShown.length > 0) sticky = true;
@@ -233,7 +242,7 @@ async function runCase(
   }
   // A sibling's abort also ends the loop early. Only spent attempts stop the run: an unfinished case can never become proof.
   const exhausted = attempts >= maxAttempts ? `attempts exhausted: ${evalCase.id}` : null;
-  return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, exhausted, sticky, inputTokens, outputTokens, unresolved);
+  return finish(last ? applyCarry(remember(last, provenance), carried) : null, evalCase, attempts, cost, droppedMicros, exhausted, sticky, inputTokens, outputTokens, unresolved);
 }
 
 function emptyCarry(): Pick<CaseResult, "hallucinated" | "safetyFailures" | "ungroundedAmountsShown" | "temporalViolations"> {
@@ -289,6 +298,7 @@ function finish(
   evalCase: EvalCase,
   attempts: number,
   cost: bigint,
+  droppedMicros: bigint,
   abort: string | null,
   sticky: boolean,
   inputTokens: number,
@@ -302,7 +312,7 @@ function finish(
   caseResult.pass = false;
   caseResult.completed = false;
   if (abort) caseResult.reason = abort;
-  return { caseResult, costMicros: cost, abort, unresolved, inputTokens, outputTokens };
+  return { caseResult, costMicros: cost, droppedMicros, abort, unresolved, inputTokens, outputTokens };
 }
 
 async function oneAttempt(
@@ -317,6 +327,7 @@ async function oneAttempt(
 ): Promise<{
   caseResult: CaseResult;
   costMicros: bigint;
+  droppedMicros: bigint;
   abort: string | null;
   retry: boolean;
   retryAfterSeconds: number | null;
@@ -424,6 +435,7 @@ async function oneAttempt(
       return {
         caseResult,
         costMicros: money.micros,
+        droppedMicros: money.droppedMicros,
         abort,
         retry,
         retryAfterSeconds,
@@ -446,6 +458,7 @@ async function oneAttempt(
   return {
     caseResult: blank,
     costMicros: money.micros,
+    droppedMicros: money.droppedMicros,
     abort,
     retry: abort ? false : true,
     retryAfterSeconds,
@@ -463,6 +476,7 @@ async function oneAttempt(
     return {
       caseResult: blank,
       costMicros: money.micros,
+      droppedMicros: money.droppedMicros,
       abort: null,
       retry: true,
       retryAfterSeconds: null,
@@ -587,6 +601,7 @@ async function scoreAttempt(args: {
     dish: args.evalCase.dish != null,
     dishMisses: scored.dishMisses,
     clarifyReply: scored.clarifyReply,
+    droppedAttempts: 0,
     costMicros: "0",
     anthropicRequestIds: [],
     requestProvenance: args.provenance,
@@ -725,8 +740,9 @@ function classifyProvider(exchange: RecordedExchange): { kind: "ok" | "retry" | 
   return { kind: "ok", reason: "", retryAfterSeconds };
 }
 
-function spendOf(exchanges: RecordedExchange[]): { micros: bigint; unresolved: boolean; unknownSends: number; inputTokens: number; outputTokens: number } {
+function spendOf(exchanges: RecordedExchange[]): { micros: bigint; droppedMicros: bigint; unresolved: boolean; unknownSends: number; inputTokens: number; outputTokens: number } {
   let micros = BigInt(0);
+  let droppedMicros = BigInt(0);
   let unresolved = false;
   let unknownSends = 0;
   let inputTokens = 0;
@@ -744,13 +760,15 @@ function spendOf(exchanges: RecordedExchange[]): { micros: bigint; unresolved: b
     inputTokens += exchange.usage.inputTokens?.total ?? 0;
     outputTokens += exchange.usage.outputTokens?.total ?? 0;
     try {
-      micros += callCostMicros(assistantModelId(), exchange.usage);
+      const cost = callCostMicros(assistantModelId(), exchange.usage);
+      micros += cost;
+      if (sentWithoutUsage) droppedMicros += cost;
     } catch {
       unresolved = true;
       unknownSends += 1;
     }
   }
-  return { micros, unresolved, unknownSends, inputTokens, outputTokens };
+  return { micros, droppedMicros, unresolved, unknownSends, inputTokens, outputTokens };
 }
 
 async function waitSettled(storeId: string, cartId: string, messageId: string, timeoutMs: number): Promise<{ status: string; messages: Array<Record<string, unknown>>; conversationId: string } | null> {
@@ -858,6 +876,7 @@ function blankCase(evalCase: EvalCase): CaseResult {
     dish: evalCase.dish != null,
     dishMisses: evalCase.dish ? ["incomplete"] : [],
     clarifyReply: null,
+    droppedAttempts: 0,
     costMicros: "0",
     anthropicRequestIds: [],
     requestProvenance: [],
@@ -871,6 +890,7 @@ function emptyResult(): RunResult {
     cases: [],
     sessionUser: "",
     spendMicros: BigInt(0),
+    droppedMicros: BigInt(0),
     unresolvedSpend: false,
     ledgerDeltaMicros: null,
     conversationMicros: BigInt(0),

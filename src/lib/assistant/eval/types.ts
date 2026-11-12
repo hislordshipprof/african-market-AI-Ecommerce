@@ -158,6 +158,8 @@ export interface CaseResult {
   dishMisses: string[];
   /** The final reply when it was an accepted clarifying question; the gate re-checks it. */
   clarifyReply: string | null;
+  /** Attempts ended by a request whose usage never arrived; their reserve stays spent. A completed case never ends on one. */
+  droppedAttempts: number;
   costMicros: string;
   anthropicRequestIds: string[];
   requestProvenance: Array<{ attempt: number; turn: number; step: number; requestId: string }>;
@@ -169,6 +171,8 @@ export interface RunResult {
   cases: CaseResult[];
   sessionUser: string;
   spendMicros: bigint;
+  /** Measured cost of streams cut before their final usage; the app's ledger never sees it. */
+  droppedMicros: bigint;
   unresolvedSpend: boolean;
   ledgerDeltaMicros: bigint | null;
   conversationMicros: bigint;

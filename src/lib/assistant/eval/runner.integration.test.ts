@@ -723,7 +723,7 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(result.result.incompleteReason).toBe("ticket budget");
   }, 60_000);
 
-  it("a later success keeps unresolved spend and provenance from the truncated attempt", async () => {
+  it("a dropped connection whose retry succeeds counts as complete and keeps the truncated attempt's provenance and cost", async () => {
     const listings = [listing("garri", "garri-white", "A", 499), listing("yam", "yam-white-puna", "B", 899)];
     let calls = 0;
     const result = await run([evalCase({
@@ -759,9 +759,13 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     expect(scored?.attempts).toBe(2);
     expect(scored?.requestProvenance.some((step) => step.attempt === 1 && step.requestId === "req_truncated_attempt")).toBe(true);
     expect(scored?.requestProvenance.some((step) => step.attempt === 2)).toBe(true);
-    expect(result.result.unresolvedSpend).toBe(true);
-    expect(result.result.complete).toBe(false);
+    expect(scored?.droppedAttempts).toBe(1);
+    expect(scored?.completed).toBe(true);
+    expect(result.result.unresolvedSpend).toBe(false);
+    expect(result.result.complete).toBe(true);
     expect(result.result.spendMicros > BigInt(100)).toBe(true);
+    expect(result.result.droppedMicros > BigInt(0)).toBe(true);
+    expect(result.result.ledgerDeltaMicros).toBe(result.result.spendMicros - result.result.droppedMicros);
   }, 90_000);
 
   it("a thrown worker waits for the sibling attempt before deleting its store", async () => {
@@ -909,7 +913,9 @@ describe.skipIf(!hasDb)("shopper assistant eval runner", () => {
     }, { maxAttempts: 2, ticketSpendPath: ticket });
     const saved = JSON.parse(readFileSync(ticket, "utf8")) as { micros: string };
     expect(result.result.spendMicros > BigInt(0)).toBe(true);
-    expect(result.result.unresolvedSpend).toBe(true);
+    expect(result.result.unresolvedSpend).toBe(false);
+    expect(result.result.complete).toBe(true);
+    expect(result.result.cases[0]?.droppedAttempts).toBe(1);
     expect(saved.micros).toBe((BigInt(150000) + result.result.spendMicros).toString());
   }, 90_000);
 
@@ -1058,6 +1064,7 @@ function sampleReport(cases: NonNullable<Awaited<ReturnType<typeof runEval>>["re
       cases,
       sessionUser: "app_runtime",
       spendMicros: BigInt(1),
+      droppedMicros: BigInt(0),
       unresolvedSpend: true,
       ledgerDeltaMicros: BigInt(1),
       conversationMicros: BigInt(1),
