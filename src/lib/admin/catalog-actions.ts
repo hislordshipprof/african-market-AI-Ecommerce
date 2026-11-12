@@ -8,7 +8,7 @@ import { parseInput } from "../security/parse-input";
 import { assistantModelId } from "../assistant/model";
 import { assistantSpendState } from "../assistant/spend";
 import { extractProductAttributes } from "../catalog/attribute-extract";
-import { normaliseIngredientName, resolveIngredients } from "../catalog/ingredients";
+import { resolveIngredients } from "../catalog/ingredients";
 
 const productIdSchema = z.string().min(1).max(200);
 
@@ -443,46 +443,6 @@ export async function rejectAttributeProposal(proposalId: string): Promise<Catal
         entityId: proposal.productId,
         before: { proposalId: proposal.id, status: "pending" },
         after: { proposalId: proposal.id, status: "rejected" },
-      },
-    });
-    return { success: true };
-  });
-}
-
-/** Records a local name (e.g. "ata rodo") for an ingredient, so it resolves to that ingredient. */
-export async function addIngredientSynonym(
-  ingredientId: string,
-  term: string,
-  language?: string,
-): Promise<CatalogActionResult> {
-  const session = await requirePlatformAdmin();
-  const parsed = parseInput(z.strictObject({
-    ingredientId: z.string().min(1).max(200),
-    term: z.string().max(100),
-    language: z.string().max(20).optional(),
-  }), { ingredientId, term, language });
-  if (!parsed.ok) return { error: "Ingredient not found" };
-  const normalised = normaliseIngredientName(parsed.data.term);
-  if (!normalised) return { error: "Local name is required" };
-
-  return platformAdminTransaction(async (tx): Promise<CatalogActionResult> => {
-    const ingredient = await tx.ingredient.findUnique({ where: { id: parsed.data.ingredientId } });
-    if (!ingredient) return { error: "Ingredient not found" };
-    const taken = await tx.ingredientSynonym.findUnique({ where: { term: normalised } });
-    if (taken) return taken.ingredientId === ingredient.id ? { success: true } : { error: "That name belongs to another ingredient" };
-    if (await tx.ingredient.findUnique({ where: { name: normalised } })) return { error: "That name belongs to another ingredient" };
-    await tx.ingredientSynonym.create({
-      data: { ingredientId: ingredient.id, term: normalised, language: parsed.data.language || null },
-    });
-    await tx.auditLog.create({
-      data: {
-        actorId: session.user.id,
-        actorEmail: session.user.email,
-        action: "catalog.ingredient_synonym_add",
-        entityType: "ingredient",
-        entityId: ingredient.id,
-        before: {},
-        after: { term: normalised, language: parsed.data.language || null },
       },
     });
     return { success: true };
