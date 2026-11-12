@@ -32,14 +32,14 @@ interface RecipeOutput {
   notCarried: string[];
 }
 
-function lookupStep(dish: string, ingredients: string[]): FakeAnthropicStep {
+function lookupStep(dish: string, ingredients: string[], sourceUrl = "https://recipes.example/kelewele"): FakeAnthropicStep {
   return {
     kind: "tool",
     toolName: "report_ingredients",
-    toolInput: { dish_name: dish, ingredients, source_url: "https://recipes.example/kelewele" },
+    toolInput: { dish_name: dish, ingredients, source_url: sourceUrl },
     webSearch: {
       query: `${dish} recipe`,
-      results: [{ url: "https://recipes.example/kelewele", title: dish }],
+      results: [{ url: sourceUrl, title: dish }],
     },
   };
 }
@@ -85,6 +85,7 @@ describe.skipIf(!hasDb)("get_recipe", () => {
   afterAll(async () => {
     vi.unstubAllEnvs();
     await platform.recipe.deleteMany({ where: { key: { startsWith: "kelewele " } } });
+    await platform.recipe.deleteMany({ where: { key: { startsWith: "egusi stew " } } });
     for (const id of [storeA, storeB].filter(Boolean)) {
       await storeScoped(id).cart.deleteMany({});
       await storeScoped(id).listing.deleteMany({});
@@ -150,6 +151,18 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(again.requests).toHaveLength(0);
     expect(second).toMatchObject({ ok: true, lookedUp: false, source: "https://recipes.example/kelewele" });
     expect(second.inStock.map((item) => item.listingId)).toEqual([rice.listingId]);
+  });
+
+  it("never lets a looked-up dish take over a curated dish's name", async () => {
+    const stew = `egusi stew ${suffix}`;
+    const fake = createFakeAnthropicFetch({ steps: [lookupStep("Egusi soup", ["egusi", "palm oil"], "https://recipes.example/egusi")] });
+    const looked = await getRecipe(ctxA, { dish: stew, servings: 4 }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });
+    expect(looked).toMatchObject({ ok: true, lookedUp: true });
+    const saved = await raw.recipe.findUniqueOrThrow({ where: { key: stew } });
+    expect(saved.aliases).not.toContain("egusi soup");
+    const again = createFakeAnthropicFetch({ steps: [{ kind: "error" }] });
+    const curated = await getRecipe(ctxA, { dish: "Egusi soup", servings: 6 }, { lookupModel: createAssistantModel({ fetch: again.fetch }) });
+    expect(curated).toMatchObject({ ok: true, lookedUp: false, recipe: "Egusi soup", source: "the store's recipe base" });
   });
 
   it("caps web lookups per store per day and makes no call past the cap", async () => {

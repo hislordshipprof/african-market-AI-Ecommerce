@@ -27,13 +27,16 @@ export interface LookedUpDish {
   sourceUrl: string;
 }
 
+/** Order when a name matches several rows: exact key, then curated, then the oldest. */
 export async function findRecipe(dish: string): Promise<RecipeRow | null> {
   const key = dishKey(dish);
   if (!key) return null;
-  const recipe = await platform.recipe.findFirst({
+  const rows = await platform.recipe.findMany({
     where: { OR: [{ key }, { aliases: { has: key } }] },
     include: { ingredients: { orderBy: { position: "asc" } } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
+  const recipe = rows.find((row) => row.key === key) ?? rows.find((row) => row.origin === "curated") ?? rows[0];
   if (!recipe) return null;
   return {
     name: recipe.name,
@@ -48,10 +51,17 @@ export async function findRecipe(dish: string): Promise<RecipeRow | null> {
   };
 }
 
-/** Saves names and the source link only. A concurrent save of the same dish keeps the first. */
+/**
+ * Saves names and the source link only. A concurrent save of the same dish keeps the first.
+ * The reported name becomes an alias only when no row already answers to it.
+ */
 export async function saveLookedUpRecipe(dish: string, found: LookedUpDish): Promise<RecipeRow> {
   const key = dishKey(dish);
-  const foundKey = dishKey(found.name);
+  const reported = dishKey(found.name);
+  const taken = reported
+    ? await platform.recipe.count({ where: { OR: [{ key: reported }, { aliases: { has: reported } }] } })
+    : 0;
+  const foundKey = taken === 0 ? reported : "";
   try {
     await platform.recipe.create({
       data: {
