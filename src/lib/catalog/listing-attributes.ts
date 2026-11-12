@@ -1,4 +1,4 @@
-import { lockListingRow, storeScopedTransaction } from "../db";
+import { lockListingRow, platformAdmin, storeScopedTransaction } from "../db";
 import type { Actor } from "../listing/service";
 import type { Allergen, AttributeStatus, DietaryClaim, ProductAttributes } from "./attributes";
 import { resolveIngredients } from "./ingredients";
@@ -61,6 +61,46 @@ export async function listingAttributes(storeId: string, listingId: string): Pro
     }
     return result;
   });
+}
+
+export interface OwnerAttributeGroup<T> {
+  status: AttributeStatus;
+  values: T[];
+  /** A model read of this group waits in the platform's review queue. */
+  proposed: boolean;
+}
+
+export interface OwnerListingAttributes {
+  ingredients: OwnerAttributeGroup<string>;
+  allergens: OwnerAttributeGroup<Allergen>;
+  dietary: OwnerAttributeGroup<DietaryClaim>;
+}
+
+/** What the store owner's attributes screen shows: ingredient names, and which groups an AI read is pending for. */
+export async function ownerListingAttributes(storeId: string, listingId: string): Promise<OwnerListingAttributes | null> {
+  const attributes = await listingAttributes(storeId, listingId);
+  if (!attributes) return null;
+  const { masterProductId, names } = await storeScopedTransaction(storeId, async (tx) => {
+    const listing = await tx.listing.findUniqueOrThrow({ where: { id: listingId }, select: { masterProductId: true } });
+    const ingredients = await tx.ingredient.findMany({
+      where: { id: { in: attributes.ingredients.ingredientIds } },
+      select: { name: true },
+      orderBy: { name: "asc" },
+    });
+    return { masterProductId: listing.masterProductId, names: ingredients.map((ingredient) => ingredient.name) };
+  });
+  // Proposals are platform-admin rows; the owner only learns which groups have a pending read.
+  const pending = masterProductId
+    ? await platformAdmin.attributeProposal.findMany({
+      where: { productId: masterProductId, status: "pending" },
+      select: { ingredientsRead: true, allergensRead: true, dietaryRead: true },
+    })
+    : [];
+  return {
+    ingredients: { status: attributes.ingredients.status, values: names, proposed: pending.some((p) => p.ingredientsRead) },
+    allergens: { ...attributes.allergens, proposed: pending.some((p) => p.allergensRead) },
+    dietary: { ...attributes.dietary, proposed: pending.some((p) => p.dietaryRead) },
+  };
 }
 
 /** A store owner corrects their own listing's attributes. Ingredients must already exist by name or local name. */

@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { ALLERGENS, DIETARY_CLAIMS } from "../catalog/attributes";
-import { correctListingAttributes, listingAttributes } from "../catalog/listing-attributes";
+import { correctListingAttributes, ownerListingAttributes } from "../catalog/listing-attributes";
 import { parseInput } from "../security/parse-input";
 import { requireStoreOwner } from "../store-admin/session";
 import { toActor } from "./service";
@@ -19,7 +19,7 @@ export async function getListingAttributesAction(listingId: string) {
   const session = await requireStoreOwner();
   const id = parseInput(z.string().min(1).max(200), listingId);
   if (!id.ok) return { error: "Listing not found" };
-  const attributes = await listingAttributes(session.store.id, id.data);
+  const attributes = await ownerListingAttributes(session.store.id, id.data);
   return attributes ? { attributes } : { error: "Listing not found" };
 }
 
