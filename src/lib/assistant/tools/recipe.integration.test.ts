@@ -266,5 +266,11 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(result.notCarried).not.toContain("onion");
     expect(result.excluded).toEqual(expect.arrayContaining(["onion", "rice"]));
     expect(offered.map((item) => item.ingredient)).toContain("tomato paste");
+
+    // A narrower name rules out the ingredient; another form of it does not.
+    const narrower = await getRecipe(ctxA, { dish: "Jollof", servings: 6, exclude: ["yellow onion", "fresh tomato"] }) as unknown as RecipeOutput;
+    expect([...narrower.inStock, ...narrower.lowOrOut].map((item) => item.ingredient)).not.toContain("onion");
+    expect(narrower.excluded).toEqual(["onion"]);
+    expect(narrower.lowOrOut.map((item) => item.ingredient)).toContain("tomato paste");
   });
 });

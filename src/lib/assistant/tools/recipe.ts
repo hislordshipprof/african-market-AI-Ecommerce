@@ -64,8 +64,11 @@ async function searchFits(storeId: string, name: string): Promise<StoreItem[]> {
   }] : []);
 }
 
-/** The catalog search's exclude match: Postgres English text search on the name. */
-async function ruledOut(storeId: string, name: string, exclude: readonly string[]): Promise<boolean> {
+/**
+ * The catalog search's exclude match: Postgres English text search on the name.
+ * An ingredient is also ruled out when its whole name is inside an exclusion: "yellow onion" rules out onion.
+ */
+async function ruledOut(storeId: string, name: string, exclude: readonly string[], ingredient = false): Promise<boolean> {
   if (exclude.length === 0) return false;
   const rows = await storeScopedRawQuery<{ hit: boolean }>(
     storeId,
@@ -73,6 +76,7 @@ async function ruledOut(storeId: string, name: string, exclude: readonly string[
     SELECT EXISTS (
       SELECT 1 FROM unnest(${[...exclude]}::text[]) AS word
       WHERE to_tsvector('english', unaccent(${name})) @@ plainto_tsquery('english', unaccent(word))
+        OR (${ingredient} AND to_tsvector('english', unaccent(word)) @@ plainto_tsquery('english', unaccent(${name})))
     ) AS hit`,
   );
   return rows[0]?.hit === true;
@@ -97,7 +101,7 @@ async function placeIngredients(storeId: string, recipe: RecipeRow, servings: nu
   const excluded: string[] = [];
   const placedByListing = new Map<string, Placed>();
   for (const ingredient of recipe.ingredients) {
-    if (await ruledOut(storeId, ingredient.name, exclude)) {
+    if (await ruledOut(storeId, ingredient.name, exclude, true)) {
       excluded.push(ingredient.name);
       continue;
     }
