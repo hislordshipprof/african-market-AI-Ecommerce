@@ -37,7 +37,8 @@ import { setSpendClock } from "../assistant/spend";
 import { auth } from "../auth";
 import { authPrisma, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
 import { answerCopilotAlert, chooseProposalListing, confirmStockProposal, rejectStockProposal, sendCopilotMessage } from "./actions";
-import { createConfirmRequests } from "./alerts";
+import { makeFakeStep } from "../inngest/fake-step";
+import { runConfirmRequestSteps } from "./alert-functions";
 import { FIXED_ERROR } from "./types";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -414,12 +415,16 @@ describe.skipIf(!hasDb)("copilot actions (real auth, lane database)", () => {
     const lowAlert = await storeScoped(storeAId).copilotAlert.create({
       data: { storeId: storeAId, kind: "running_low", listingId: crayfishId, dedupeKey: `running_low:${crayfishId}:t430` },
     });
-    await createConfirmRequests();
-    await createConfirmRequests();
+    const step = makeFakeStep();
+    await runConfirmRequestSteps(step);
+    await runConfirmRequestSteps(makeFakeStep());
     const requests = await storeScoped(storeAId).copilotAlert.findMany({
       where: { listingId: crayfishId, kind: "confirm_request" },
     });
     expect(requests).toHaveLength(1);
+    // The daily run is at night in US zones: requests wait for the next order push or the digest.
+    expect(step.runs.every((id) => id.startsWith("copilot-confirm-requests-"))).toBe(true);
+    expect(requests[0]!.pushedAt).toBeNull();
     const alertId = requests[0]!.id;
     const stockChanges = () => storeScoped(storeAId).auditLog.count({
       where: { action: "listing.stock_change", entityId: crayfishId },

@@ -1,9 +1,9 @@
-import { Prisma, platform, platformAdminTransaction, storeScoped, storeScopedTransaction, txQuery } from "../db";
+import { Prisma, findStoreIdsAfter, lockCopilotPush, platform, storeScoped, storeScopedTransaction, txQuery } from "../db";
 import { pushToStoreMembers } from "../push/store-members";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
 import { isValidTimezone } from "../order/store-hours";
-import { stockBadge } from "../storefront/stock-badge";
+import { ASK_STORE_BELOW, stockBadge } from "../storefront/stock-badge";
 
 /** Owner decision 2026-11-10: one store-wide threshold for counted listings. */
 export const LOW_STOCK_THRESHOLD = 5;
@@ -161,23 +161,25 @@ export async function pushCopilotAlerts(
   env: Record<string, string | undefined> = process.env,
   now = Date.now(),
 ): Promise<void> {
-  const waiting = await storeScoped(storeId).copilotAlert.count({ where: { state: "open", pushedAt: null } });
-  if (waiting === 0) return;
-  const allowed = await takeRateLimit(`copilot-push:${storeId}`, PUSH_CAP, PUSH_WINDOW_MS, now);
-  if (!allowed.ok) return;
-
-  const claimed = await storeScopedTransaction(storeId, (tx) => txQuery<Array<{
-    id: string;
-    kind: string;
-    listing_id: string;
-    order_id: string | null;
-    created_at: Date;
-  }>>(tx, Prisma.sql`
-    UPDATE copilot_alerts
-    SET pushed_at = ${new Date(now)}
-    WHERE store_id = ${storeId} AND state = 'open' AND pushed_at IS NULL
-    RETURNING id, kind, listing_id, order_id, created_at
-  `));
+  const claimed = await storeScopedTransaction(storeId, async (tx) => {
+    await lockCopilotPush(tx, storeId);
+    const waiting = await tx.copilotAlert.count({ where: { state: "open", pushedAt: null } });
+    if (waiting === 0) return [];
+    const allowed = await takeRateLimit(`copilot-push:${storeId}`, PUSH_CAP, PUSH_WINDOW_MS, now);
+    if (!allowed.ok) return [];
+    return txQuery<Array<{
+      id: string;
+      kind: string;
+      listing_id: string;
+      order_id: string | null;
+      created_at: Date;
+    }>>(tx, Prisma.sql`
+      UPDATE copilot_alerts
+      SET pushed_at = ${new Date(now)}
+      WHERE store_id = ${storeId} AND state = 'open' AND pushed_at IS NULL
+      RETURNING id, kind, listing_id, order_id, created_at
+    `);
+  });
   if (claimed.length === 0) return;
 
   const store = await platform.store.findUnique({ where: { id: storeId }, select: { slug: true } });
@@ -199,49 +201,72 @@ export async function pushCopilotAlerts(
   }, env, { roles: ["owner"] });
 }
 
-/** Where the storefront shows "ask store" (owner decision 2026-11-10). */
-const CONFIRM_REQUEST_BELOW = 0.3;
+const STORES_PER_BATCH = 100;
+/** Same bound as the confidence batch: a step past Vercel's limit restarts from the same cursor. */
+const BATCH_BUDGET_MS = 120_000;
 
-/**
- * After the daily confidence run: one confirm-request for each active listing below 0.3
- * that has no open one. A listing leaves that set only when an answer sets confidence 1,
- * so this is the listings that just crossed. The key is per listing per store day.
- * Returns the stores that got a new request.
- */
-export async function createConfirmRequests(): Promise<string[]> {
-  const rows = await platformAdminTransaction((tx) => txQuery<Array<{ id: string; store_id: string }>>(tx, Prisma.sql`
-    SELECT l.id, l.store_id
+/** One confirm-request for each active ask-store listing in the store that has no open one. */
+async function createStoreConfirmRequests(storeId: string): Promise<number> {
+  const rows = await storeScopedTransaction(storeId, (tx) => txQuery<Array<{ id: string }>>(tx, Prisma.sql`
+    SELECT l.id
     FROM listings l
-    WHERE l.active AND l.confidence < ${CONFIRM_REQUEST_BELOW}
+    WHERE l.store_id = ${storeId} AND l.active AND l.confidence < ${ASK_STORE_BELOW}
       AND NOT EXISTS (
         SELECT 1 FROM copilot_alerts a
         WHERE a.store_id = l.store_id AND a.listing_id = l.id
           AND a.kind = 'confirm_request' AND a.state = 'open'
       )
-    ORDER BY l.store_id, l.id
+    ORDER BY l.id
   `));
-  const byStore = new Map<string, string[]>();
-  for (const row of rows) byStore.set(row.store_id, [...(byStore.get(row.store_id) ?? []), row.id]);
+  if (rows.length === 0) return 0;
+  const day = await storeDay(storeId);
+  return writeAlerts(storeId, rows.map((row) => ({
+    kind: "confirm_request" as const,
+    listingId: row.id,
+    dedupeKey: `confirm_request:${row.id}:${day}`,
+  })));
+}
 
-  const stores: string[] = [];
-  for (const [storeId, listingIds] of byStore) {
+export interface ConfirmRequestBatchResult {
+  /** Null once every store has been visited. */
+  nextCursor: string | null;
+  created: number;
+}
+
+/**
+ * One step after the daily confidence run: up to 100 stores, stopping early on time. A listing
+ * leaves the ask-store set only when an answer sets confidence 1, so this is the listings that
+ * just crossed. The key is per listing per store day. Nothing is pushed: the run is at night in
+ * US zones, so requests wait for the next order push or the digest. A failed store is logged
+ * and waits for tomorrow; a batch where every store failed throws so Inngest retries it.
+ */
+export async function createConfirmRequestBatch(cursor: string | null): Promise<ConfirmRequestBatchResult> {
+  const storeIds = await findStoreIdsAfter(cursor, STORES_PER_BATCH);
+  const startedAt = Date.now();
+  let stores = 0;
+  let failed = 0;
+  let created = 0;
+  let lastVisited: string | null = null;
+  for (const storeId of storeIds) {
+    lastVisited = storeId;
+    stores += 1;
     try {
-      const day = await storeDay(storeId);
-      const created = await writeAlerts(storeId, listingIds.map((listingId) => ({
-        kind: "confirm_request" as const,
-        listingId,
-        dedupeKey: `confirm_request:${listingId}:${day}`,
-      })));
-      if (created > 0) stores.push(storeId);
+      created += await createStoreConfirmRequests(storeId);
     } catch (err) {
+      failed += 1;
       console.error(JSON.stringify({
         event: "confirm_requests_store_failed",
         storeId,
         message: err instanceof Error ? err.message : String(err),
       }));
     }
+    if (Date.now() - startedAt >= BATCH_BUDGET_MS) break;
   }
-  return stores;
+  if (stores > 0 && failed === stores) {
+    throw new Error(`Confirm-requests failed for all ${stores} stores in this batch`);
+  }
+  const finished = stores === storeIds.length && storeIds.length < STORES_PER_BATCH;
+  return { nextCursor: finished ? null : lastVisited, created };
 }
 
 const PAGE_ALERTS = 50;

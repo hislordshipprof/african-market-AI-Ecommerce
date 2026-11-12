@@ -199,6 +199,14 @@ export async function lockCustomerAccount(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('customer-account'), hashtext(${userId}))`;
 }
 
+/** Serializes copilot alert pushes for one store, so racing runs cannot spend the push cap. */
+export async function lockCopilotPush(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  storeId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('copilot-push'), hashtext(${storeId}))`;
+}
+
 /** Advisory lock, insert-if-missing, then row lock. Caller is already inside customerScopedTransaction. */
 export async function lockCustomerProfileRow(
   tx: Pick<PrismaClient, "$executeRaw" | "$queryRaw">,

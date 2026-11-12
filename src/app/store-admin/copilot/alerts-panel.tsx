@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { answerCopilotAlert } from "@/lib/copilot/actions";
 import type { AlertView } from "@/lib/copilot/alerts";
+import { QUANTITY_MAX } from "@/lib/copilot/types";
 
 type Answer = { answer: "still_have"; qty: number } | { answer: "sold_out" } | { answer: "in_stock" };
 
@@ -41,7 +42,7 @@ export function AlertsPanel({ alerts: initialAlerts }: { alerts: AlertView[] }) 
       ) : null}
       {alerts.map((alert) => {
         const raw = counts[alert.id] ?? "";
-        const qty = /^\d{1,6}$/.test(raw) ? Number(raw) : null;
+        const qty = /^\d{1,6}$/.test(raw) && Number(raw) <= QUANTITY_MAX ? Number(raw) : null;
         const busy = pending && busyId === alert.id;
         return (
           <article key={alert.id} className="rounded-xl border border-border bg-card px-4 py-4">
