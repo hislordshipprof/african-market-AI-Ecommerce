@@ -1,4 +1,10 @@
-import { platformAdmin, storeScoped, storeScopedTransaction } from "../db";
+import {
+  claimAssistantChatWarning,
+  incrementAssistantChatMonth,
+  platformAdmin,
+  storeScoped,
+  storeScopedTransaction,
+} from "../db";
 import { sendEmail } from "../email/send";
 import { assistantChatCap, assistantChatWarnAt, effectivePlan, type Plan } from "./plan";
 
@@ -20,26 +26,12 @@ export type ChatClaim = { ok: true; chats: number; cap: number; plan: Plan } | {
 export async function claimAssistantChat(storeId: string, at: Date): Promise<ChatClaim> {
   const month = chatMonth(at);
   const claim = await storeScopedTransaction(storeId, async (tx) => {
-    const sub = await tx.$queryRaw<{ plan: string; status: string }[]>`
-      SELECT plan, status FROM store_subscriptions WHERE store_id = ${storeId}`;
-    const plan = effectivePlan(sub[0]);
+    const sub = await tx.storeSubscription.findUnique({ where: { storeId }, select: { plan: true, status: true } });
+    const plan = effectivePlan(sub);
     const cap = assistantChatCap(plan);
-    const counted = await tx.$queryRaw<{ chats: number }[]>`
-      INSERT INTO assistant_chat_months (store_id, month, chats)
-      VALUES (${storeId}, ${month}::date, 1)
-      ON CONFLICT (store_id, month) DO UPDATE SET chats = assistant_chat_months.chats + 1
-      WHERE assistant_chat_months.chats < ${cap}
-      RETURNING chats`;
-    if (counted.length === 0) return { ok: false as const, cap, plan };
-    const chats = counted[0].chats;
-    let warn = false;
-    if (chats >= assistantChatWarnAt(plan)) {
-      const claimed = await tx.$queryRaw<{ chats: number }[]>`
-        UPDATE assistant_chat_months SET warned_at = now()
-        WHERE store_id = ${storeId} AND month = ${month}::date AND warned_at IS NULL
-        RETURNING chats`;
-      warn = claimed.length > 0;
-    }
+    const chats = await incrementAssistantChatMonth(tx, storeId, month, cap);
+    if (chats === null) return { ok: false as const, cap, plan };
+    const warn = chats >= assistantChatWarnAt(plan) && (await claimAssistantChatWarning(tx, storeId, month));
     return { ok: true as const, chats, cap, plan, warn };
   });
   if (!claim.ok) return claim;

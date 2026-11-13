@@ -12,6 +12,9 @@ import { createInvite } from "../invite/service";
 import { resolveAuthBaseUrl } from "../auth";
 import { parseInput, readFormField, readFormFields } from "../security/parse-input";
 import { getAddressProvider } from "../address/provider";
+import { setPilot } from "../billing/service";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
 import { VALID_US_TIMEZONES } from "./timezone";
 
@@ -675,7 +678,30 @@ export async function listStores() {
   await requirePlatformAdmin();
   return platformAdmin.store.findMany({
     orderBy: { createdAt: "desc" },
+    include: { subscription: { select: { plan: true, status: true, pilot: true, paymentFailedAt: true, trialEndsAt: true } } },
   });
+}
+
+export async function getStoreSubscription(storeId: string) {
+  await requirePlatformAdmin();
+  return platformAdmin.storeSubscription.findUnique({ where: { storeId } });
+}
+
+/** Platform admin grants or removes the pilot offer (3 free months, at most 5 stores). */
+export async function setPilotAction(formData: FormData): Promise<void> {
+  const session = await requirePlatformAdmin();
+  const fields = parseInput(z.strictObject({
+    storeId: z.string().min(1).max(200),
+    pilot: z.enum(["true", "false"]),
+  }), readFormFields(formData, ["storeId", "pilot"]));
+  if (!fields.ok) redirect("/admin/stores");
+  const result = await setPilot(fields.data.storeId, fields.data.pilot === "true", {
+    id: session.user.id,
+    email: session.user.email,
+  });
+  const query = result.ok ? "" : `?pilotError=${encodeURIComponent(result.error)}`;
+  revalidatePath(`/admin/stores/${fields.data.storeId}`);
+  redirect(`/admin/stores/${fields.data.storeId}${query}`);
 }
 
 export async function getStoreById(id: string) {

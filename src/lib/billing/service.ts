@@ -1,5 +1,13 @@
 import { Prisma } from "@prisma/client";
-import { authPrisma, platformAdmin, platformAdminTransaction, storeScoped } from "../db";
+import {
+  authPrisma,
+  claimStripeBillingEvent,
+  lockPilotOffer,
+  lockStoreSubscriptionRow,
+  platformAdmin,
+  platformAdminTransaction,
+  storeScoped,
+} from "../db";
 import { sendEmail } from "../email/send";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
 import type { WebhookEvent } from "../stripe/types";
@@ -42,8 +50,7 @@ export function pilotTrialEnd(from: Date): Date {
 type Tx = Parameters<Parameters<typeof platformAdminTransaction>[0]>[0];
 
 async function lockedRow(tx: Tx, storeId: string) {
-  await tx.$executeRaw`INSERT INTO store_subscriptions (store_id) VALUES (${storeId}) ON CONFLICT (store_id) DO NOTHING`;
-  await tx.$queryRaw`SELECT store_id FROM store_subscriptions WHERE store_id = ${storeId} FOR UPDATE`;
+  await lockStoreSubscriptionRow(tx, storeId);
   return tx.storeSubscription.findUniqueOrThrow({ where: { storeId } });
 }
 
@@ -96,7 +103,7 @@ export async function setPilot(
   now: Date = new Date(),
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const result = await platformAdminTransaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('store_subscriptions.pilot'))`;
+    await lockPilotOffer(tx);
     const row = await lockedRow(tx, storeId);
     if (row.pilot === pilot) return { ok: true as const, row, changed: false };
     if (pilot) {
@@ -157,12 +164,7 @@ export async function applyBillingEvent(event: WebhookEvent): Promise<BillingEve
 
   const outcome = await platformAdminTransaction(async (tx) => {
     const storeId = await resolveStore(tx, subscription, invoice);
-    const claimed = await tx.$queryRaw<{ id: string }[]>`
-      INSERT INTO stripe_billing_events (id, store_id, type)
-      VALUES (${eventId}, ${storeId}, ${event.type})
-      ON CONFLICT (id) DO NOTHING
-      RETURNING id`;
-    if (claimed.length === 0) return { result: "replayed" as const };
+    if (!(await claimStripeBillingEvent(tx, eventId, storeId, event.type))) return { result: "replayed" as const };
     if (!storeId) return { result: "unknown_store" as const };
 
     const row = await lockedRow(tx, storeId);

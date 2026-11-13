@@ -328,7 +328,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -372,6 +372,7 @@ export async function storeScopedTransaction<T>(
       supportMessage: tx.supportMessage,
       listingAttributes: tx.listingAttributes,
       listingIngredient: tx.listingIngredient,
+      storeSubscription: tx.storeSubscription,
       ingredient: tx.ingredient,
       ingredientSynonym: tx.ingredientSynonym,
       $queryRaw: tx.$queryRaw.bind(tx),
@@ -1580,4 +1581,59 @@ export async function claimAssistantCapDay(day: string): Promise<boolean> {
     `;
     return rows.length > 0;
   });
+}
+
+/** Creates the store's billing row if missing and locks it for this transaction (#494). */
+export async function lockStoreSubscriptionRow(tx: Pick<PrismaClient, "$executeRaw" | "$queryRaw">, storeId: string): Promise<void> {
+  await tx.$executeRaw`INSERT INTO store_subscriptions (store_id) VALUES (${storeId}) ON CONFLICT (store_id) DO NOTHING`;
+  await tx.$queryRaw`SELECT store_id FROM store_subscriptions WHERE store_id = ${storeId} FOR UPDATE`;
+}
+
+/** Serialises pilot-offer changes so the 5-store cap holds under concurrency. */
+export async function lockPilotOffer(tx: Pick<PrismaClient, "$executeRaw">): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('store_subscriptions.pilot'))`;
+}
+
+/** Records a Stripe billing event id. False means it was already applied. */
+export async function claimStripeBillingEvent(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  eventId: string,
+  storeId: string | null,
+  type: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO stripe_billing_events (id, store_id, type)
+    VALUES (${eventId}, ${storeId}, ${type})
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+/** Adds one assistant chat to the store's month unless it is at `cap`. Null when capped. */
+export async function incrementAssistantChatMonth(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  month: string,
+  cap: number,
+): Promise<number | null> {
+  const rows = await tx.$queryRaw<{ chats: number }[]>`
+    INSERT INTO assistant_chat_months (store_id, month, chats)
+    VALUES (${storeId}, ${month}::date, 1)
+    ON CONFLICT (store_id, month) DO UPDATE SET chats = assistant_chat_months.chats + 1
+    WHERE assistant_chat_months.chats < ${cap}
+    RETURNING chats`;
+  return rows[0]?.chats ?? null;
+}
+
+/** Marks the month's owner warning sent. False when it already was. */
+export async function claimAssistantChatWarning(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  month: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ store_id: string }[]>`
+    UPDATE assistant_chat_months SET warned_at = now()
+    WHERE store_id = ${storeId} AND month = ${month}::date AND warned_at IS NULL
+    RETURNING store_id`;
+  return rows.length > 0;
 }
