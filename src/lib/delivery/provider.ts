@@ -1,9 +1,9 @@
 /**
- * Courier provider seam. DoorDash Drive implements it now; Uber Direct (#139) slots in later,
- * and the platform picks the provider per order (#140). Fees are the provider's quote, no markup (ADR-0006, ADR-0021).
+ * Courier provider seam. DoorDash Drive (#135) and Uber Direct (#139) implement it;
+ * the platform picks the provider per order (#140). Fees are the provider's quote, no markup (ADR-0006, ADR-0021).
  */
 
-export type DeliveryProviderName = "doordash";
+export type DeliveryProviderName = "doordash" | "uber";
 
 /** Platform delivery event types a courier webhook maps to (delivery_events.type). */
 export type CourierEventType = "courier_assigned" | "picked_up" | "delivered" | "cancelled";

@@ -921,6 +921,23 @@ export async function findOrderByPaymentIntent(
   });
 }
 
+/** The courier delivery a provider webhook names, across stores (the webhook carries no store). */
+export async function findDeliveryByExternalId(
+  provider: string,
+  externalId: string,
+): Promise<{ id: string; storeId: string; orderId: string } | null> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; order_id: string }>>`
+      SELECT id, store_id, order_id
+      FROM deliveries
+      WHERE provider = ${provider} AND external_id = ${externalId}
+      LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? { id: row.id, storeId: row.store_id, orderId: row.order_id } : null;
+  });
+}
+
 export async function findStuckTransitionalOrders(opts?: {
   storeIds?: readonly string[];
 }): Promise<Array<{ id: string; storeId: string }>> {

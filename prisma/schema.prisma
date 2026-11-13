@@ -37,6 +37,10 @@ model Store {
   stripeOnboardingStatus String   @default("not_started") @map("stripe_onboarding_status")
   /// DoorDash Drive external_store_id, set once the platform registers the store (#135).
   doordashStoreId        String?  @unique @map("doordash_store_id")
+  /// Uber Direct organization id, set once the platform registers the store (#139).
+  uberLocationId         String?  @unique @map("uber_location_id")
+  /// Why the last Uber Direct registration failed; set means the store needs a retry (#139).
+  uberRegistrationError  String?  @map("uber_registration_error")
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
@@ -1162,7 +1166,7 @@ model NotificationLog {
 }
 
 /// One store-delivery step: out_for_delivery or delivered.
-/// One courier booking for an order (DoorDash Drive; Uber Direct later). Fees are the provider's quote, no markup (ADR-0006).
+/// One courier booking for an order (DoorDash Drive or Uber Direct). Fees are the provider's quote, no markup (ADR-0006).
 model Delivery {
   id             String   @id @default(cuid())
   storeId        String   @map("store_id")
