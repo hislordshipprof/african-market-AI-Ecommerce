@@ -261,10 +261,16 @@ export async function updateListing(input: UpdateListingInput) {
       data.confidenceUpdatedAt = now;
     }
 
-    const updated = await tx.listing.update({
+    const listing = await tx.listing.update({
       where: { id: input.listingId },
       data,
     });
+    // Orders moved the count after the form loaded it. The owner is told, whichever number won.
+    const stockMoved = resolvedStockMode === "counted" && !modeChanged && input.qtyLoaded !== undefined
+      && existing.qty !== null && existing.qty !== input.qtyLoaded
+      ? { from: input.qtyLoaded, to: existing.qty }
+      : null;
+    const updated = { ...listing, stockMoved };
 
     if (input.price !== undefined && input.price !== existing.price) {
       await tx.auditLog.create({
