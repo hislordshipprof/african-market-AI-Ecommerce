@@ -12,12 +12,12 @@ export function listingRelevanceJoin(trimmed: string): Prisma.Sql {
         WHEN STARTS_WITH(LOWER(term), LOWER(${trimmed})) THEN 1
         WHEN to_tsvector('english', term) @@ plainto_tsquery('english', ${trimmed}) THEN 2
         ELSE 3 END) AS rank,
-        MAX(similarity(LOWER(${trimmed}), LOWER(term))) AS fuzzy
+        MAX(search_similarity(LOWER(${trimmed}), LOWER(term))) AS fuzzy
       FROM (
         SELECT l.custom_name AS term UNION ALL SELECT mp.name
         UNION ALL SELECT ps.term FROM product_synonyms ps WHERE ps.product_id = mp.id
-        UNION ALL SELECT word FROM regexp_split_to_table(COALESCE(mp.name, '') || ' ' || COALESCE(l.custom_name, ''), '[^[:alnum:]]+') word
-        WHERE length(word) >= GREATEST(3, length(${trimmed}) - 1)
+        UNION ALL SELECT word.w FROM search_words(COALESCE(mp.name, '') || ' ' || COALESCE(l.custom_name, '')) word
+        WHERE length(word.w) >= GREATEST(3, length(${trimmed}) - 1)
       ) terms WHERE term IS NOT NULL
     ) relevance
   `;
