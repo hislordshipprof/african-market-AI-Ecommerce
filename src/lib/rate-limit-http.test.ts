@@ -8,14 +8,15 @@ vi.hoisted(() => {
   process.env.EMAIL_FROM ||= "Rate Limit Test <signin@test.example>";
 });
 // Production would pick the live Resend sender: record sends instead.
-const { sent } = vi.hoisted(() => ({ sent: [] as { to: string }[] }));
+const { sent } = vi.hoisted(() => ({ sent: [] as { to: string; html?: string }[] }));
 vi.mock("./email/send", () => ({
-  sendEmail: async (message: { to: string }) => {
+  sendEmail: async (message: { to: string; html?: string }) => {
     sent.push(message);
   },
 }));
 import { auth } from "./auth";
 import { authPrisma } from "./db";
+import { verifyUrlFromEmail } from "./test-magic-link";
 
 const stamp = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 const slug = `rl-${stamp}`;
@@ -64,5 +65,31 @@ describe("magic-link send caps (real auth config, production rate limits)", () =
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(sent.filter((message) => message.to === email)).toHaveLength(5);
+  });
+
+  it("blocked sends do not count, so a slow trickle never leaves the inbox without a live link", async () => {
+    const email = `rl-trickle-${stamp}@test.example`;
+    emails.push(email);
+    const start = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(start);
+      for (let i = 0; i < 6; i++) await sendLink(email, `10.183.${i}.1`);
+      for (let i = 1; i <= 18; i++) {
+        vi.setSystemTime(start + i * 100_000);
+        await sendLink(email, `10.184.${i}.1`);
+      }
+      vi.setSystemTime(start + 1_850_000);
+      expect((await sendLink(email, "10.185.0.1")).status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const latest = sent.filter((message) => message.to === email).at(-1);
+      const token = new URL(verifyUrlFromEmail(latest?.html)!).searchParams.get("token");
+      const row = await authPrisma.verification.findFirst({
+        where: { identifier: `magic-link:${token}` },
+      });
+      expect(row?.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

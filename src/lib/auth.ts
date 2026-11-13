@@ -125,6 +125,7 @@ if (emailFromIssue) {
 
 // Per-IP limits alone let someone rotating IPs flood one inbox. The row for this send already
 // exists when the sender runs; links live 15 minutes, so expiry after now+5m means created in 10.
+// A blocked send deletes its row, so only mailed links count and a trickle cannot hold the cap.
 const INBOX_CAP = 5;
 
 async function inboxCapReached(email: string): Promise<boolean> {
@@ -201,11 +202,14 @@ export const auth = betterAuth({
     }),
     magicLink({
       expiresIn: 900,
-      sendMagicLink: async ({ email, url }, ctx) => {
+      sendMagicLink: async ({ email, url, token }, ctx) => {
         const normalizedEmail = email.trim().toLowerCase();
         const privileged = await isPrivilegedEmail(normalizedEmail);
         if (privileged) return;
-        if (await inboxCapReached(normalizedEmail)) return;
+        if (await inboxCapReached(normalizedEmail)) {
+          await authPrisma.verification.deleteMany({ where: { identifier: `magic-link:${token}` } });
+          return;
+        }
         const storeName = await storeNameForMagicLink(ctx);
         const message = magicLinkMessage({
           to: normalizedEmail,
