@@ -19,6 +19,7 @@ import {
   AUTH_SUBMIT,
   AuthError,
   BackArrow,
+  BackupCodesNotice,
   CopyRow,
   NETWORK_ERROR,
   PasswordInput,
@@ -73,6 +74,7 @@ export default function Enroll2FA() {
   const [loading, setLoading] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
   const [verified, setVerified] = useState(false);
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
 
   async function startEnrollment(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -96,6 +98,7 @@ export default function Enroll2FA() {
       const data = result.data;
       if (data && "totpURI" in data) {
         setTotpUri(data.totpURI ?? null);
+        setBackupCodes(data.backupCodes ?? []);
       }
     } catch {
       setError(NETWORK_ERROR);
@@ -117,9 +120,11 @@ export default function Enroll2FA() {
         setError(authErrorMessage(result.error, ENROLL_CODE_ERRORS, "Invalid code"));
         setLoading(false);
         focusField(CODE_ID);
+      } else if (backupCodes.length === 0) {
+        router.push("/admin/stores");
       } else {
         setVerified(true);
-        router.push("/admin/stores");
+        setLoading(false);
       }
     } catch {
       setError(NETWORK_ERROR);
@@ -136,10 +141,12 @@ export default function Enroll2FA() {
     <StorySurface>
       <StoryCard className="gap-5 py-6">
         <CardHeader className="px-6 sm:px-8">
-          <Link id={BACK_ID} href="/admin/sign-in" className={AUTH_BACK}>
-            <BackArrow />
-            Back to sign in
-          </Link>
+          {!verified && (
+            <Link id={BACK_ID} href="/admin/sign-in" className={AUTH_BACK}>
+              <BackArrow />
+              Back to sign in
+            </Link>
+          )}
           <h1 className="font-display text-[1.75rem] leading-tight font-bold text-balance">
             Set up <span className="whitespace-nowrap">two-factor</span>
           </h1>
@@ -169,7 +176,19 @@ export default function Enroll2FA() {
             </form>
           )}
 
-          {totpUri && (
+          {verified && (
+            <div className="flex flex-col gap-4">
+              <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
+                Two-factor is on.
+              </p>
+              <BackupCodesNotice codes={backupCodes} />
+              <Button type="button" onClick={() => router.push("/admin/stores")} className={AUTH_SUBMIT}>
+                I&apos;ve saved them. Continue
+              </Button>
+            </div>
+          )}
+
+          {totpUri && !verified && (
             <div className="flex flex-col gap-5">
               <section className="flex flex-col gap-3">
                 <p ref={focusOnMount} tabIndex={-1} className="text-base font-medium outline-none">
@@ -235,11 +254,7 @@ export default function Enroll2FA() {
                   />
                 </div>
                 <Button type="submit" disabled={loading} className={AUTH_SUBMIT}>
-                  {verified
-                    ? "Two-factor is on"
-                    : loading
-                      ? "Verifying..."
-                      : "Verify and continue"}
+                  {loading ? "Verifying..." : "Verify and continue"}
                 </Button>
               </form>
             </div>

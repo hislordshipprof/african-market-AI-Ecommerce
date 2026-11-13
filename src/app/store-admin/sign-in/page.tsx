@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -12,66 +13,73 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Store, ShieldCheck } from "lucide-react";
+import { Store } from "lucide-react";
 import { StoryCard, StorySurface } from "@/components/story-surface/story-surface";
+import {
+  AUTH_INPUT,
+  AUTH_SUBMIT,
+  AuthError,
+  NETWORK_ERROR,
+  PasswordInput,
+  SecondStepForm,
+  authErrorMessage,
+  fieldValue,
+  focusField,
+  useHydrated,
+} from "@/app/admin/auth-form-parts";
 
 type Step = "credentials" | "totp";
+
+const ERROR_ID = "store-admin-sign-in-error";
+const DESCRIPTION_ID = "store-admin-sign-in-description";
+const EMAIL_ID = "email";
+const PASSWORD_ID = "password";
+const CREDENTIALS_ERRORS = {
+  INVALID_EMAIL_OR_PASSWORD: "That email and password don't match. Check both and try again.",
+};
 
 export default function StoreAdminSignIn() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeSlug = searchParams.get("store") ?? "";
+  const hydrated = useHydrated();
 
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleCredentials(e: React.FormEvent) {
+  const home = () => router.push(`/store-admin?store=${storeSlug}`);
+
+  // Fields are uncontrolled: text typed before hydration stays in them and is what gets sent.
+  async function handleCredentials(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const submittedEmail = fieldValue(e.currentTarget, EMAIL_ID);
+    const password = fieldValue(e.currentTarget, PASSWORD_ID);
+    setEmail(submittedEmail);
     setError("");
     setLoading(true);
 
     try {
-      const result = await authClient.signIn.email({ email, password });
-
+      const result = await authClient.signIn.email({ email: submittedEmail, password });
       if (result.error) {
-        setError(result.error.message ?? "Sign-in failed");
-      } else if (
-        (result.data as Record<string, unknown>)?.twoFactorRedirect
-      ) {
+        setError(authErrorMessage(result.error, CREDENTIALS_ERRORS, "Sign-in failed"));
+        setLoading(false);
+        focusField(PASSWORD_ID);
+      } else if ((result.data as Record<string, unknown>)?.twoFactorRedirect) {
         setStep("totp");
+        setLoading(false);
       } else {
-        router.push(`/store-admin?store=${storeSlug}`);
+        home();
       }
     } catch {
-      setError("Sign-in failed. Check your credentials.");
-    } finally {
+      setError(NETWORK_ERROR);
       setLoading(false);
+      focusField(PASSWORD_ID);
     }
   }
 
-  async function handleTotp(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      const result = await authClient.twoFactor.verifyTotp({ code: totpCode });
-
-      if (result.error) {
-        setError(result.error.message ?? "Invalid code");
-      } else {
-        router.push(`/store-admin?store=${storeSlug}`);
-      }
-    } catch {
-      setError("Verification failed. Try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const errorProps = error ? { "aria-invalid": true, "aria-describedby": ERROR_ID } : {};
 
   return (
     <StorySurface>
@@ -81,80 +89,52 @@ export default function StoreAdminSignIn() {
             <Store className="size-6 text-primary" />
           </div>
           <CardTitle className="text-xl font-display">Store Admin</CardTitle>
-          <CardDescription>
-            Sign in to manage your store
+          <CardDescription id={DESCRIPTION_ID} className="[overflow-wrap:anywhere]">
+            {step === "credentials"
+              ? "Sign in to manage your store"
+              : `Enter the 6-digit code from your authenticator app, or a backup code, to finish signing in as ${email}.`}
           </CardDescription>
         </CardHeader>
 
         <CardContent>
-          {error && (
-            <div className="mb-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-
           {step === "credentials" && (
             <form onSubmit={handleCredentials} className="flex flex-col gap-4">
+              {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor={EMAIL_ID}>Email</Label>
                 <Input
-                  id="email"
+                  id={EMAIL_ID}
                   type="email"
                   required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  defaultValue={email}
+                  className={AUTH_INPUT}
                   autoComplete="email"
                   placeholder="you@example.com"
+                  {...errorProps}
                 />
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
+                <div className="flex items-baseline justify-between gap-3">
+                  <Label htmlFor={PASSWORD_ID}>Password</Label>
+                  <Link
+                    href="/admin/reset-password?from=store-admin"
+                    className="text-sm font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+                <PasswordInput id={PASSWORD_ID} required autoComplete="current-password" {...errorProps} />
               </div>
 
-              <Button type="submit" disabled={loading} className="w-full">
+              <Button type="submit" disabled={loading || !hydrated} className={AUTH_SUBMIT}>
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
           )}
 
           {step === "totp" && (
-            <form onSubmit={handleTotp} className="flex flex-col gap-4">
-              <div className="flex items-center gap-2 rounded-md bg-muted p-3">
-                <ShieldCheck className="size-5 text-primary" />
-                <p className="text-sm text-muted-foreground">
-                  Enter the 6-digit code from your authenticator app.
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="totp">Verification code</Label>
-                <Input
-                  id="totp"
-                  type="text"
-                  required
-                  inputMode="numeric"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value)}
-                  className="text-center text-lg tracking-[0.3em]"
-                  autoComplete="one-time-code"
-                />
-              </div>
-
-              <Button type="submit" disabled={loading} className="w-full">
-                {loading ? "Verifying..." : "Verify"}
-              </Button>
-            </form>
+            <SecondStepForm idPrefix="store-admin" describedBy={DESCRIPTION_ID} onVerified={home} />
           )}
         </CardContent>
       </StoryCard>
