@@ -978,7 +978,6 @@ export async function placeOrder(
   const store = await getStripeStore(storeId);
 
   if (fulfillment === "courier") {
-    if (!(await storeMayUse(storeId, "courier-delivery"))) throw new Error(COURIER_NOT_OFFERED);
     throw new Error("Only pickup fulfillment is supported");
   }
 

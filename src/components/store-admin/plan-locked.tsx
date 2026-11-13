@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { Lock } from "lucide-react";
-import { upgradeHref } from "@/lib/billing/plan";
 
 /** A Pro feature shown locked on Starter, with the upgrade link ADR-0021 asks for. */
 export function PlanLocked({
@@ -27,7 +26,7 @@ export function PlanLocked({
           <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
           {canUpgrade ? (
             <Link
-              href={upgradeHref(storeSlug)}
+              href={`/store-admin/plan?store=${encodeURIComponent(storeSlug)}`}
               className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-4"
             >
               Upgrade to Pro

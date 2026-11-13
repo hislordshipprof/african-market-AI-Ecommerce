@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("../store-admin/session", () => ({
-  requireStoreMember: vi.fn().mockResolvedValue({
-    store: { id: "store-1" },
-    member: { id: "member-1" },
-  }),
-}));
+vi.mock("../store-admin/session", () => {
+  const session = { store: { id: "store-1" }, member: { id: "member-1" } };
+  return {
+    requireStoreMember: vi.fn().mockResolvedValue(session),
+    requireStoreWriter: vi.fn().mockResolvedValue(session),
+  };
+});
 
 vi.mock("./service", () => ({
   getStoreOrders: vi.fn(),

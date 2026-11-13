@@ -72,11 +72,6 @@ export function supportLevel(plan: Plan): string {
   return SUPPORT[plan];
 }
 
-/** Store-admin link a locked feature points to. */
-export function upgradeHref(storeSlug: string): string {
-  return `/store-admin/plan?store=${encodeURIComponent(storeSlug)}`;
-}
-
 export async function storePlan(storeId: string): Promise<Plan> {
   const row = await storeScoped(storeId).storeSubscription.findUnique({
     where: { storeId },
