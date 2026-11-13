@@ -137,6 +137,8 @@ export function storeScoped(storeId: string) {
     pushSubscription: wrapDelegate(storeId, prisma.pushSubscription),
     supportThread: wrapDelegate(storeId, prisma.supportThread),
     supportMessage: wrapDelegate(storeId, prisma.supportMessage),
+    storeSubscription: wrapDelegate(storeId, prisma.storeSubscription),
+    assistantChatMonth: wrapDelegate(storeId, prisma.assistantChatMonth),
   };
 }
 
@@ -267,6 +269,7 @@ export const platformAdmin = {
   listingImport: wrapPlatformAdminDelegate(prisma.listingImport),
   attributeProposal: wrapPlatformAdminDelegate(prisma.attributeProposal),
   ingredient: wrapPlatformAdminDelegate(prisma.ingredient),
+  storeSubscription: wrapPlatformAdminDelegate(prisma.storeSubscription),
 };
 
 /** A transaction as app_user, with the test session time zone applied when one is set. */
@@ -284,7 +287,7 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -311,6 +314,7 @@ export async function platformAdminTransaction<T>(
       aiAction: tx.aiAction,
       supportThread: tx.supportThread,
       supportMessage: tx.supportMessage,
+      storeSubscription: tx.storeSubscription,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });

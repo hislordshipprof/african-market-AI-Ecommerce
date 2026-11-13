@@ -85,6 +85,9 @@ model Store {
   pushSubscriptions PushSubscription[]
   supportThreads SupportThread[]
   supportMessages SupportMessage[]
+  subscription    StoreSubscription?
+  billingEvents   StripeBillingEvent[]
+  assistantChatMonths AssistantChatMonth[]
 
   @@map("stores")
 }
@@ -1419,4 +1422,53 @@ model PushSubscription {
   @@unique([storeId, endpoint])
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+/// Store subscription on Stripe Billing (#494, ADR-0021). Billing state comes from Stripe webhooks; the admin sets `pilot`.
+model StoreSubscription {
+  storeId              String    @id @map("store_id")
+  plan                 String    @default("starter")
+  /// Stripe's subscription status, or "none" before the owner subscribes.
+  status               String    @default("none")
+  stripeCustomerId     String?   @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  trialEndsAt          DateTime? @map("trial_ends_at") @db.Timestamptz(6)
+  currentPeriodEnd     DateTime? @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd    Boolean   @default(false) @map("cancel_at_period_end")
+  pilot                Boolean   @default(false)
+  paymentFailedAt      DateTime? @map("payment_failed_at") @db.Timestamptz(6)
+  /// Creation time of the last subscription event applied; an older event arriving late is skipped.
+  lastEventAt          DateTime? @map("last_event_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@map("store_subscriptions")
+}
+
+/// One row per Stripe billing event applied, so a replay changes nothing.
+model StripeBillingEvent {
+  id        String   @id
+  storeId   String?  @map("store_id")
+  type      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@map("stripe_billing_events")
+}
+
+/// Shopper assistant chats per store per calendar month (UTC), for the plan cap.
+model AssistantChatMonth {
+  storeId  String    @map("store_id")
+  month    DateTime  @db.Date
+  chats    Int       @default(0)
+  warnedAt DateTime? @map("warned_at") @db.Timestamptz(6)
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@id([storeId, month])
+  @@map("assistant_chat_months")
 }

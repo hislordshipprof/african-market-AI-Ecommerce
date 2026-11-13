@@ -29,13 +29,36 @@ export interface WebhookPaymentIntent {
   cancellationReason: string | null;
 }
 
+/** A store's platform subscription (#494). Times are Unix seconds. */
+export interface WebhookSubscription {
+  id: string;
+  customerId: string;
+  status: string;
+  lookupKey: string | null;
+  storeId: string | null;
+  trialEnd: number | null;
+  currentPeriodEnd: number | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+export interface WebhookInvoice {
+  id: string;
+  customerId: string;
+  subscriptionId: string | null;
+  storeId: string | null;
+}
+
 export interface WebhookEvent {
   type: string;
   accountId: string;
   /** Stripe's event id; a replay carries the same one. */
   eventId?: string;
+  /** Unix seconds when Stripe created the event. */
+  created?: number;
   refund?: WebhookRefund;
   paymentIntent?: WebhookPaymentIntent;
+  subscription?: WebhookSubscription;
+  invoice?: WebhookInvoice;
 }
 
 export interface CaptureResult {
