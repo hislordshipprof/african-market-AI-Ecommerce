@@ -545,7 +545,7 @@ export async function offerChoices(ctx: AssistantContext, input: unknown): Promi
 /** The subtotal with its service fee and total, so any total the model quotes is one a tool returned. */
 async function cartTotals(subtotalCents: number) {
   const fee = serviceFeeCents(subtotalCents, await readServiceFeeSettings());
-  return { subtotalCents, serviceFeeCents: fee, totalCents: subtotalCents + fee };
+  return { subtotalCents, serviceFeeCents: fee, totalBeforeDeliveryCents: subtotalCents + fee };
 }
 
 async function readCartMoney(tx: CartWriteTx, cartId: string) {
