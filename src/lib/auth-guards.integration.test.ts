@@ -34,6 +34,7 @@ import { requireStoreMember, requireStoreOwner } from "./store-admin/session";
 import { clearTestSentEmails, getTestSentEmails } from "./email/send";
 import { syncCustomerForRequest } from "./customer-sync";
 import { createInvite, setInviteePassword } from "./invite/service";
+import { sendSignInLinkAction } from "./customer-sign-in/actions";
 import { storeScoped } from "./db";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -246,6 +247,36 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       );
       expect(reused.status).not.toBe(200);
     } finally {
+      await removeAuthFixtures([email], []);
+    }
+  });
+
+  it("the no-JS sign-in form sends a store-host link through the auth handler, and refuses off a store host", async () => {
+    const email = `c1-form-${suffix}@test.example`;
+    const host = `${storeSlug}.localhost:3000`;
+    const form = new FormData();
+    form.set("email", ` ${email.toUpperCase()} `);
+    try {
+      clearTestSentEmails();
+      for (const key of [...headerState.keys()]) headerState.delete(key);
+      headerState.set("host", host);
+      headerState.set("x-forwarded-for", "10.181.0.9");
+      const offStore = await sendSignInLinkAction({ status: "idle", email: "" }, form);
+      expect(offStore.status).toBe("error");
+      expect(getTestSentEmails()).toHaveLength(0);
+
+      headerState.set("x-store-slug", storeSlug);
+      expect(await sendSignInLinkAction({ status: "idle", email: "" }, form)).toEqual({ status: "sent", email });
+      const mail = getTestSentEmails().at(-1);
+      expect(mail?.to).toBe(email);
+      expect(new URL(mail!.html.match(/href="([^"]+)"/)![1].replace(/&amp;/g, "&")).host).toBe(host);
+
+      clearTestSentEmails();
+      form.set("email", ownerEmail);
+      expect((await sendSignInLinkAction({ status: "idle", email: "" }, form)).status).toBe("sent");
+      expect(getTestSentEmails()).toHaveLength(0);
+    } finally {
+      for (const key of [...headerState.keys()]) headerState.delete(key);
       await removeAuthFixtures([email], []);
     }
   });
