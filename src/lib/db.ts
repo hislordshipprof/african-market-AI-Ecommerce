@@ -40,7 +40,7 @@ if (!globalForPrisma.prisma) {
       console.error(JSON.stringify({ event: "db_session_time_zone_failed", message: String(error) }));
     });
   });
-  const adapter = new PrismaPg(pool);
+  const adapter = new PrismaPg(pool, { disposeExternalPool: true });
   // Vitest-only. Production, next start and Vercel keep Prisma's default maxWait.
   const vitest = process.env.VITEST === "true";
   globalForPrisma.prisma = new PrismaClient(vitest ? { adapter, transactionOptions: { maxWait: VITEST_TRANSACTION_MAX_WAIT_MS } } : { adapter });
