@@ -14,3 +14,8 @@ export function isPushServiceEndpoint(endpoint: string): boolean {
   const host = url.hostname.toLowerCase();
   return PUSH_HOSTS.has(host) || PUSH_SUFFIXES.some((suffix) => host.endsWith(suffix));
 }
+
+/** web-push's own rule: p256dh decodes to a 65-byte P-256 point, auth to at least 16 bytes. */
+export function isUsablePushKeys(keys: { p256dh: string; auth: string }): boolean {
+  return Buffer.from(keys.p256dh, "base64url").length === 65 && Buffer.from(keys.auth, "base64url").length >= 16;
+}

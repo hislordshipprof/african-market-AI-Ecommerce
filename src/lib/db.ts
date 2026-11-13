@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
 import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
@@ -31,7 +32,15 @@ if (!globalForPrisma.prisma) {
   const connectionUrl = process.env.DATABASE_URL
     ? runtimeDatabaseUrl(process.env)
     : undefined;
-  const adapter = new PrismaPg(connectionUrl!);
+  // Prisma's pg adapter sends timestamptz values without an offset, so the session zone decides
+  // the stored instant. Pin it here, not in the URL: PgBouncer rejects `options` but tracks TimeZone.
+  const pool = new Pool({ connectionString: connectionUrl });
+  pool.on("connect", (client) => {
+    client.query("SET TIME ZONE 'UTC'").catch((error: unknown) => {
+      console.error(JSON.stringify({ event: "db_session_time_zone_failed", message: String(error) }));
+    });
+  });
+  const adapter = new PrismaPg(pool, { disposeExternalPool: true });
   // Vitest-only. Production, next start and Vercel keep Prisma's default maxWait.
   const vitest = process.env.VITEST === "true";
   globalForPrisma.prisma = new PrismaClient(vitest ? { adapter, transactionOptions: { maxWait: VITEST_TRANSACTION_MAX_WAIT_MS } } : { adapter });
@@ -918,6 +927,23 @@ export async function findOrderByPaymentIntent(
     const row = rows[0];
     if (!row) return null;
     return { id: row.id, storeId: row.store_id, status: row.status, refundId: row.refund_id };
+  });
+}
+
+/** The courier delivery a provider webhook names, across stores (the webhook carries no store). */
+export async function findDeliveryByExternalId(
+  provider: string,
+  externalId: string,
+): Promise<{ id: string; storeId: string; orderId: string } | null> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; order_id: string }>>`
+      SELECT id, store_id, order_id
+      FROM deliveries
+      WHERE provider = ${provider} AND external_id = ${externalId}
+      LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? { id: row.id, storeId: row.store_id, orderId: row.order_id } : null;
   });
 }
 

@@ -97,6 +97,7 @@ Store delivery and Pickup already cover stores with their own drivers and orders
 **Status of the provider accounts (2026-11-12):**
 - DoorDash: applied for **Drive** (not Marketplace or reporting), as a grocery and retail integration. The application is pending DoorDash's approval, so there are no keys yet. #135 is built against stubbed HTTP.
 - Uber Direct: account created; test (sandbox) keys are in each developer's `.env.local` under `UBER_DIRECT_CUSTOMER_ID`, `UBER_DIRECT_CLIENT_ID`, `UBER_DIRECT_CLIENT_SECRET`. Production keys are not issued yet.
+  Since #139 the platform registers each store as an Uber Direct sub-organization with centralized billing (Uber bills the platform), and saves its id as `uberLocationId`; the sandbox refuses decentralized billing under our account. Webhooks need `UBER_DIRECT_WEBHOOK_SIGNING_KEY` from the Uber Direct Dashboard; no webhook is set up there yet.
 - Stores do not choose a provider; the platform picks per order (#140).
 
 ## Decisions (accepted 2026-11-12: items 1–4 as recommended; 5 and 6 are open tasks before launch)

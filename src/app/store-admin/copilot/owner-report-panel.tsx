@@ -31,7 +31,7 @@ const ITEM_STATE: Record<OwnerReportItemCard["status"], string> = {
 
 function change(item: OwnerReportItemCard): string {
   if (item.kind === "set_status") return `${(item.stockStatus ?? "unknown").replaceAll("_", " ")} → in stock`;
-  return `${item.qty ?? 0} → ${(item.qty ?? 0) + (item.proposedDelta ?? 0)}`;
+  return `${item.qty ?? 0} → ${(item.qty ?? 0) + (item.proposedDelta ?? 0)} (+${item.proposedDelta ?? 0})`;
 }
 
 function reported(item: OwnerReportItemCard): string {
@@ -45,11 +45,11 @@ function reported(item: OwnerReportItemCard): string {
  * `embedded` drops the heading: the copilot page shows this panel as a tab of its Report stock card.
  */
 export function OwnerReportPanel({
-  pending: waiting = [],
+  reports: initialReports = [],
   submitOnly = false,
   embedded = false,
 }: {
-  pending?: OwnerReportCard[];
+  reports?: OwnerReportCard[];
   submitOnly?: boolean;
   embedded?: boolean;
 }) {
@@ -57,7 +57,7 @@ export function OwnerReportPanel({
   const [speech, setSpeech] = useState<SpeechState | null>(null);
   const [photoName, setPhotoName] = useState<string | null>(null);
   const [photoType, setPhotoType] = useState<"invoice_photo" | "shelf_photo">("invoice_photo");
-  const [reports, setReports] = useState<OwnerReportCard[]>(waiting);
+  const [reports, setReports] = useState<OwnerReportCard[]>(initialReports);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -261,12 +261,12 @@ export function OwnerReportPanel({
 }
 
 function ReportView({ report, onSettled }: { report: OwnerReportCard; onSettled: (report: OwnerReportCard) => void }) {
-  const [ticked, setTicked] = useState<Set<string>>(
-    () => new Set(report.items.filter((item) => item.status === "pending").map((item) => item.id)),
-  );
+  const pendingIds = (card: OwnerReportCard) => card.items.filter((item) => item.status === "pending").map((item) => item.id);
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set(pendingIds(report)));
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const matched = report.items.filter((item) => item.listingId);
+  const waiting = matched.filter((item) => item.status === "pending");
   const unmatched = report.items.filter((item) => !item.listingId);
   const open = report.status === "pending";
 
@@ -274,7 +274,13 @@ function ReportView({ report, onSettled }: { report: OwnerReportCard; onSettled:
     setError(null);
     startTransition(async () => {
       const result = await confirmOwnerReportItems({ reportId: report.id, itemIds });
-      if (result.ok) return onSettled(result.report);
+      if (result.ok) {
+        setTicked(new Set(pendingIds(result.report)));
+        if (result.notChanged > 0) {
+          setError(`${result.notChanged === 1 ? "One listing" : `${result.notChanged} listings`} changed since this report: inactive, another stock mode, or too much stock. Check it in Products, then confirm again.`);
+        }
+        return onSettled(result.report);
+      }
       setError(result.code === "failed" ? "That didn't go through. Try again." : "That report was already settled. Send a new one.");
     });
   }
@@ -310,7 +316,7 @@ function ReportView({ report, onSettled }: { report: OwnerReportCard; onSettled:
                 </span>
                 <span className="mt-2 text-sm text-muted-foreground">
                   Heard “{item.extractedName}” · {reported(item)} · {item.matchConfidence < 1 ? "Check this match" : "Clear match"}
-                  {open ? "" : ` · ${ITEM_STATE[item.status]}`}
+                  {open && item.status === "pending" ? "" : ` · ${ITEM_STATE[item.status]}`}
                 </span>
               </span>
             </label>
@@ -343,9 +349,9 @@ function ReportView({ report, onSettled }: { report: OwnerReportCard; onSettled:
       )}
       {open && (
         <div className="flex flex-wrap gap-2">
-          {matched.length > 0 && (
+          {waiting.length > 0 && (
             <Button type="button" onClick={() => decide([...ticked])} disabled={pending || ticked.size === 0} className="min-h-12 rounded-full px-6">
-              {ticked.size === matched.length ? "Confirm all" : `Confirm ${ticked.size}`}
+              {ticked.size === waiting.length ? "Confirm all" : `Confirm ${ticked.size}`}
             </Button>
           )}
           <Button type="button" variant="outline" onClick={() => decide([])} disabled={pending} className="min-h-12 rounded-full px-6">

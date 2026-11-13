@@ -42,7 +42,7 @@ export default async function CopilotPage() {
           conversationId={panel.conversationId}
           messages={panel.messages}
           proposals={panel.proposals}
-          voiceAndPhoto={<OwnerReportPanel pending={reports} embedded />}
+          voiceAndPhoto={<OwnerReportPanel reports={reports} embedded />}
           voiceAndPhotoWaiting={reports.length}
         />
         <DigestSetting hour={digestHour} />

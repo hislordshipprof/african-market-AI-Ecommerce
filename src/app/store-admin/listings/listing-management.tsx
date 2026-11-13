@@ -142,7 +142,6 @@ function emptyVariantRow(): VariantFormRow {
 
 interface ListingFormFields {
   name: string;
-  price: string;
   stockMode: string;
   qty: string;
   status: string;
@@ -163,7 +162,6 @@ function buildListingFormData(
   const fd = new FormData();
   if (listingId) fd.set("listingId", listingId);
   fd.set("customName", fields.name);
-  fd.set("price", String(Math.round(parseFloat(fields.price || "0") * 100)));
   fd.set("stockMode", fields.stockMode);
   if (fields.stockMode === "counted") fd.set("qty", fields.qty);
   // Orders move qty while this form is open. The loaded number tells the server the owner left it alone.
@@ -189,7 +187,6 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [attributesListing, setAttributesListing] = useState<Listing | null>(null);
 
   const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
   const [stockMode, setStockMode] = useState("counted");
   const [qty, setQty] = useState("0");
   const [status, setStatus] = useState("in_stock");
@@ -202,11 +199,11 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const searchSeq = useRef(0);
   const selectedMasterNameRef = useRef<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedQty = useRef<{ listings: Listing[]; id: string; qty: number | null } | null>(null);
   const [variants, setVariants] = useState<VariantFormRow[]>([emptyVariantRow()]);
 
   function resetForm() {
     setName("");
-    setPrice("");
     setStockMode("counted");
     setQty("0");
     setStatus("in_stock");
@@ -253,9 +250,11 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
 
   function openEdit(listing: Listing) {
     setName(listing.customName ?? listing.masterProductName ?? "");
-    setPrice((listing.price / 100).toFixed(2));
     setStockMode(listing.stockMode);
-    setQty(String(listing.qty ?? 0));
+    // Until the refresh lands, `listings` still holds the count from before this form's last save.
+    const saved = savedQty.current;
+    const loadedQty = saved && saved.listings === listings && saved.id === listing.id ? saved.qty : listing.qty;
+    setQty(String(loadedQty ?? 0));
     setStatus(listing.status ?? "in_stock");
     setFrozen(listing.frozen);
     setPerishable(listing.perishable);
@@ -269,7 +268,7 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
         : null;
     setSelectedMasterOption(currentMaster);
     selectedMasterNameRef.current = currentMaster?.name ?? null;
-    setEditListing(listing);
+    setEditListing({ ...listing, qty: loadedQty });
   }
 
   function addVariantRow() {
@@ -288,7 +287,6 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
 
   const formFields: ListingFormFields = {
     name,
-    price,
     stockMode,
     qty,
     status,
@@ -318,12 +316,21 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
     if (!editListing) return;
     const fd = buildListingFormData(formFields, variants, editListing);
 
+    const typedQty = Number(qty);
     startTransition(async () => {
       const result = await updateListingAction(fd);
       if ("error" in result && result.error) {
         toast.error(result.error);
       } else {
-        toast.success("Listing updated");
+        if ("qty" in result) savedQty.current = { listings, id: editListing.id, qty: result.qty ?? null };
+        const moved = "stockMoved" in result ? result.stockMoved : undefined;
+        if (moved && typedQty === moved.from) {
+          toast.warning(`Stock changed from ${moved.from} to ${moved.to} since you opened this, so it stays ${moved.to}. Edit again to set a new count.`);
+        } else if (moved) {
+          toast.warning(`Stock changed from ${moved.from} to ${moved.to} while you edited. Your count of ${typedQty} was saved.`);
+        } else {
+          toast.success("Listing updated");
+        }
         setEditListing(null);
         resetForm();
         router.refresh();
@@ -404,19 +411,6 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="listing-price">Price ($)</Label>
-          <Input
-            id="listing-price"
-            type="number"
-            min="0"
-            step="0.01"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="0.00"
-            required
-          />
-        </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor="listing-max">Max per order</Label>
           <Input

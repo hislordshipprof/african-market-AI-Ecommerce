@@ -237,6 +237,37 @@ function visibleReply(text: string, drafts: Draft[], choices: PendingChoice[], c
   return parts.join("\n\n");
 }
 
+export interface GateRefusal {
+  ok: false;
+  code: "copilot_unavailable" | "copilot_resting" | "rate_limited";
+  message: string;
+  retryAfter?: number;
+}
+
+/** Before any model call: the model is configured, the platform spend cap is not reached, and `rateKey` has sends left this hour. */
+export async function copilotGate(rateKey: string): Promise<GateRefusal | null> {
+  if (configMissing()) return { ok: false, code: "copilot_unavailable", message: UNAVAILABLE_MESSAGE };
+  try {
+    const spend = await assistantSpendState();
+    if (spend.resting) {
+      await claimCapAlert(utcDay(new Date()));
+      return { ok: false, code: "copilot_resting", message: RESTING_MESSAGE };
+    }
+  } catch {
+    return { ok: false, code: "copilot_resting", message: RESTING_MESSAGE };
+  }
+  const limit = await takeRateLimit(rateKey, SENDS_PER_HOUR, HOUR_MS);
+  if (!limit.ok) {
+    return {
+      ok: false,
+      code: "rate_limited",
+      message: `Wait ${limit.retryAfter} seconds, then send that again.`,
+      retryAfter: limit.retryAfter,
+    };
+  }
+  return null;
+}
+
 export async function sendCopilotTurn(input: {
   storeId: string;
   userId: string;
@@ -251,27 +282,8 @@ export async function sendCopilotTurn(input: {
   }
   const replay = await readReplay(input.storeId, input.userId, input.messageId);
   if (replay) return replay;
-  if (configMissing()) return { ok: false, code: "copilot_unavailable", message: UNAVAILABLE_MESSAGE };
-
-  try {
-    const spend = await assistantSpendState();
-    if (spend.resting) {
-      await claimCapAlert(utcDay(new Date()));
-      return { ok: false, code: "copilot_resting", message: RESTING_MESSAGE };
-    }
-  } catch {
-    return { ok: false, code: "copilot_resting", message: RESTING_MESSAGE };
-  }
-
-  const limit = await takeRateLimit(`copilot:${input.storeId}:${input.userId}`, SENDS_PER_HOUR, HOUR_MS);
-  if (!limit.ok) {
-    return {
-      ok: false,
-      code: "rate_limited",
-      message: `Wait ${limit.retryAfter} seconds, then send that again.`,
-      retryAfter: limit.retryAfter,
-    };
-  }
+  const refused = await copilotGate(`copilot:${input.storeId}:${input.userId}`);
+  if (refused) return refused;
 
   const claim = await claimMessage(input.storeId, input.userId, input.messageId);
   if (claim !== "claimed") {

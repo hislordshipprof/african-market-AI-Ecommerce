@@ -11,7 +11,7 @@ const keys = {
   auth: "tBHItJI5svbpez7KI4CCXg",
 };
 
-export function endpointFor(name: string): string {
+function endpointFor(name: string): string {
   return `https://fcm.googleapis.com/fcm/send/${name}-${suffix}`;
 }
 

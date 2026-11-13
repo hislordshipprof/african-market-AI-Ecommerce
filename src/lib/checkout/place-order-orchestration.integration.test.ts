@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { Prisma, PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { addLine } from "../cart/service";
-import { healthQueryRaw, storeScoped } from "../db";
+import { healthQueryRaw, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 
 const { retrieve, cancel, paymentIntents, getStripeClient } = vi.hoisted(() => {
@@ -1569,6 +1569,11 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       const row = await storeScoped(queued.store.id).order.findUnique({ where: { id: placed.token } });
       expect(row?.status).toBe("AUTHORIZED");
       expect(row?.acceptanceClockStartsAt?.toISOString()).toBe("2026-11-04T15:00:00.000Z");
+      // #383 item 9: the stored instant must not depend on the database's default zone.
+      const [stored] = await withSessionTimeZone("Europe/Berlin", () =>
+        storeScopedTransaction(queued.store.id, (tx) => tx.$queryRaw<Array<{ epoch: number }>>`
+          SELECT extract(epoch FROM acceptance_clock_starts_at)::float8 AS epoch FROM orders WHERE id = ${placed.token}`));
+      expect(new Date(stored.epoch * 1000).toISOString()).toBe("2026-11-04T15:00:00.000Z");
       expect(row?.totalAuthorizedCents).toBe(queued.amount);
 
       // AC5: no open day, and an opening more than 6 days out (Mon 17:00 CST, opens next Mon).
