@@ -53,7 +53,7 @@ describe.skipIf(!hasDb)("search for a Ge'ez-script name", () => {
     expect(storefront.map((hit) => hit.id)).toEqual([doroWat]);
 
     const assistant = await searchCatalog({ storeId, cartId, conversationId, actorUserId: null }, { query });
-    const items = (assistant as { items: Array<{ listingId: string }> }).items;
+    const items = (assistant as unknown as { items: Array<{ listingId: string }> }).items;
     expect(items.map((item) => item.listingId)).toEqual([doroWat]);
 
     const copilot = await searchListingMatches(storeId, query);
