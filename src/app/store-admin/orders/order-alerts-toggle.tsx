@@ -18,6 +18,12 @@ function applicationServerKey(base64url: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+function sameKey(current: ArrayBuffer | null, expected: Uint8Array): boolean {
+  if (!current || current.byteLength !== expected.length) return false;
+  const bytes = new Uint8Array(current);
+  return bytes.every((byte, i) => byte === expected[i]);
+}
+
 function pushSupported(): boolean {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
@@ -38,6 +44,12 @@ export function OrderAlertsToggle({ publicKey }: { publicKey: string | null }) {
         if (cancelled) return;
         setRegistration(reg);
         if (!existing) return;
+        if (!sameKey(existing.options.applicationServerKey, applicationServerKey(publicKey))) {
+          // Made with an old VAPID key: the push service refuses our sends, so drop it and show "off".
+          await unsubscribePushAction(existing.endpoint).catch(() => undefined);
+          await existing.unsubscribe().catch(() => false);
+          return;
+        }
         // The browser may hold a subscription from another account on this device: link it to this user, or show "off".
         const linked = await subscribePushAction(existing.toJSON()).then((result) => result.ok, () => false);
         if (!cancelled) setEnabled(linked);
