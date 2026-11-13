@@ -36,8 +36,9 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { auth } from "../auth";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { newTrackingToken } from "./record";
-import { createPaymentIntentAction, placeOrderAction } from "../checkout/actions";
+import { createPaymentIntentAction, placeOrderAction, quoteCheckoutAction } from "../checkout/actions";
 import * as checkoutService from "../checkout/service";
+import * as lookup from "./lookup";
 import OrderPage from "@/app/order/[token]/page";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -133,6 +134,11 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
     expect(headingDescriptions(page)).toContain(`Order #${order.number} · Track A`);
   });
 
+  it("a database error reaches the error page instead of a 404", async () => {
+    vi.spyOn(lookup, "findOrderForTracking").mockRejectedValue(new Error("db down"));
+    await expect(render(slugA, newTrackingToken())).rejects.toThrow("db down");
+  });
+
   it("an unknown token is a 404", async () => {
     await expect(render(slugA, newTrackingToken())).rejects.toThrow("NOT_FOUND");
   });
@@ -148,11 +154,11 @@ describe.skipIf(!hasDb)("order tracking by token", () => {
     headerState.set("x-store-slug", slugA);
     cookieJar.set("cart_id", cart.id);
 
-    const result = await createPaymentIntentAction(
-      { name: "Ada Buyer", email: "ada@example.com", phone: "2025550100" },
-      "pickup",
-    );
+    const contact = { name: "Ada Buyer", email: "ada@example.com", phone: "2025550100" };
+    const result = await createPaymentIntentAction(contact, "pickup");
     expect(result).toEqual({ ok: true, orderedToken: order.trackingToken });
+    const quoted = await quoteCheckoutAction(contact, "pickup");
+    expect(quoted).toMatchObject({ ok: true, orderedToken: order.trackingToken });
   });
 
   it("a resumed order reports the tracking token, never the order id", async () => {
