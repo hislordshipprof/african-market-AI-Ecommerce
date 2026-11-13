@@ -10,6 +10,7 @@ import { stripeProvider } from "../stripe/provider";
 import { fakeStripeProvider } from "../stripe/fake";
 import { setEmailSenderForTests, type EmailMessage } from "../email/send";
 import { storePlan } from "./plan";
+import { COURIER_NOT_OFFERED, quoteCheckout } from "../checkout/service";
 import { createFakeBillingProvider, PLAN_LOOKUP_KEYS, setBillingProvider } from "./provider";
 import { PILOT_STORE_CAP, setPilot, startSubscription } from "./service";
 
@@ -148,6 +149,18 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
 
     await deliver(subscriptionEvent("customer.subscription.updated", { ...sub, plan: "pro" }, { created: now + 1 }));
     expect(await storePlan(storeA)).toBe("starter");
+  });
+
+  it("courier at checkout: Pro passes the plan gate, Starter is refused, pickup works on Starter", async () => {
+    const contact = { name: "Ada", email: "ada@example.test", phone: "+12025550123" };
+    const problems = async (storeId: string, fulfillment: "courier" | "pickup") =>
+      (await quoteCheckout(storeId, 0, "no-cart", contact, fulfillment)).problems.map((p) => p.message);
+    await platformAdmin.storeSubscription.update({ where: { storeId: storeA }, data: { plan: "pro" } });
+    expect(await problems(storeA, "courier")).not.toContain(COURIER_NOT_OFFERED);
+    expect(await problems(storeB, "courier")).toContain(COURIER_NOT_OFFERED);
+    expect(await problems(storeB, "pickup")).not.toContain(COURIER_NOT_OFFERED);
+    await platformAdmin.storeSubscription.update({ where: { storeId: storeA }, data: { plan: "starter" } });
+    expect(await problems(storeA, "courier")).toContain(COURIER_NOT_OFFERED);
   });
 
   it("a failed invoice shows the owner banner state and alerts admins; the storefront stays up", async () => {

@@ -64,8 +64,10 @@ import { generateTOTP } from "../../../e2e/totp";
 import { createFakeAnthropicFetch, type FakeAnthropicStep } from "../assistant/messages-api-double";
 import { setSpendClock } from "../assistant/spend";
 import { auth } from "../auth";
-import { authPrisma, storeScoped } from "../db";
-import { listPendingOwnerReports, matchReportItem } from "./owner-report";
+import { authPrisma, platformAdmin, storeScoped } from "../db";
+import { replyToThreadAction } from "../support/store-actions";
+import { READ_ONLY_MESSAGE } from "../store-admin/session";
+import { listPendingOwnerReports, matchReportItem, REPORTS_LOCKED_MESSAGE } from "./owner-report";
 import { confirmOwnerReportItems, submitPhotoReport, submitVoiceReport } from "./report-actions";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -159,6 +161,8 @@ describe.skipIf(!hasDb)("owner reports (real auth, lane database)", () => {
       ] as const) {
         await tx.$executeRaw`INSERT INTO store_memberships (id, store_id, user_id, role, updated_at) VALUES (${crypto.randomUUID()}, ${store}, ${user}, ${role}, now())`;
       }
+      // Voice and photo reports are Pro (ADR-0021); store B stays on Starter.
+      await tx.$executeRaw`INSERT INTO store_subscriptions (store_id, plan, status) VALUES (${storeAId}, 'pro', 'active')`;
       const pepper = await tx.masterProduct.create({ data: { name: `Scotch Bonnet ${RUN}` } });
       await tx.productSynonym.create({ data: { productId: pepper.id, term: "ata rodo" } });
       await tx.$executeRaw`SELECT set_config('app.store_id', ${storeAId}, true)`;
@@ -190,6 +194,38 @@ describe.skipIf(!hasDb)("owner reports (real auth, lane database)", () => {
   });
 
   beforeEach(() => asStore(slugA, cookies.owner));
+
+  it("plan gate: a Starter store's voice report is refused before any model call", async () => {
+    asStore(slugB, cookies.outsider);
+    expect(await submitVoiceReport({ transcript: "got one gari" })).toEqual({
+      ok: false,
+      code: "plan_locked",
+      message: REPORTS_LOCKED_MESSAGE,
+    });
+    expect(await storeScoped(storeBId).ownerReport.count()).toBe(0);
+  });
+
+  it("downgrade: staff over the Starter limit keep read-only access; the earliest staff and the owner still write", async () => {
+    const outsiderId = (await authPrisma.user.findFirstOrThrow({ where: { email: emails.outsider } })).id;
+    await platformAdmin.storeMembership.create({ data: { storeId: storeAId, userId: outsiderId, role: "staff" } });
+    await platformAdmin.storeSubscription.update({ where: { storeId: storeAId }, data: { plan: "starter" } });
+    try {
+      const reply = { threadId: "no-such-thread", body: "On our way" };
+      asStore(slugA, cookies.outsider);
+      await expect(replyToThreadAction(reply)).rejects.toThrow(READ_ONLY_MESSAGE);
+      asStore(slugA, cookies.staff);
+      expect(await replyToThreadAction(reply)).toEqual({ ok: false, error: "Thread not found" });
+      asStore(slugA, cookies.owner);
+      expect(await replyToThreadAction(reply)).toEqual({ ok: false, error: "Thread not found" });
+
+      await platformAdmin.storeSubscription.update({ where: { storeId: storeAId }, data: { plan: "pro" } });
+      asStore(slugA, cookies.outsider);
+      expect(await replyToThreadAction(reply)).toEqual({ ok: false, error: "Thread not found" });
+    } finally {
+      await platformAdmin.storeSubscription.update({ where: { storeId: storeAId }, data: { plan: "pro" } });
+      await platformAdmin.storeMembership.deleteMany({ where: { storeId: storeAId, userId: outsiderId } });
+    }
+  });
 
   it("matcher: a listing name, a synonym, and no match", async () => {
     const egusi = await matchReportItem(storeAId, { name: "egusi", quantity: 20, unit: null });
