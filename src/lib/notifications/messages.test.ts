@@ -12,6 +12,7 @@ function order(status: string, capturedAmountCents: number | null = 2500): Notif
     subtotalCents: 2000,
     tipCents: 0,
     deliveryFeeCents: 500,
+    serviceFeeCents: 0,
     totalAuthorizedCents: 2750,
     capturedAmountCents,
     refundId: null,

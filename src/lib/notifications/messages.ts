@@ -25,6 +25,7 @@ export type NotifyOrder = {
   subtotalCents: number;
   tipCents: number;
   deliveryFeeCents: number;
+  serviceFeeCents: number;
   totalAuthorizedCents: number;
   capturedAmountCents: number | null;
   refundId: string | null;
@@ -245,7 +246,8 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
   if (around) parts.push(`<p>Ready around ${escapeHtml(around)}.</p>`);
   if (event !== "cancelled" && event !== "store_replied" && event !== "refunded" && event !== "substitution") parts.push(`<ul>${lineRows(order, event)}</ul>`);
   if (event === "placed" || event === "accepted") {
-    const estimate = order.subtotalCents + order.tipCents + order.deliveryFeeCents;
+    const estimate = order.subtotalCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents;
+    if (order.serviceFeeCents > 0) parts.push(`<p>Service fee ${escapeHtml(money(order.serviceFeeCents))}.</p>`);
     parts.push(`<p>Estimated total ${escapeHtml(money(estimate))}.</p>`);
     parts.push(`<p>Card hold ${escapeHtml(money(order.totalAuthorizedCents))}. You'll be charged the final amount after picking.</p>`);
   } else if (CHARGED_EVENTS.has(event)) {

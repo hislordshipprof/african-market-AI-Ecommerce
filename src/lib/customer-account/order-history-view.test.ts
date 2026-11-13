@@ -9,6 +9,7 @@ const order = (over: Partial<AccountOrderRecord>): AccountOrderRecord => ({
   subtotalCents: 2500,
   tipCents: 300,
   deliveryFeeCents: 0,
+  serviceFeeCents: 0,
   capturedAmountCents: null,
   refundId: null,
   trackingToken: null,

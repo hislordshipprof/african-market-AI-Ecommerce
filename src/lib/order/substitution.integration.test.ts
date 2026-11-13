@@ -4,7 +4,7 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { isRlsRejection } from "../listing/cross-store-write";
 import { setStripeProvider } from "../stripe";
-import { capturedPayments, fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
+import { capturedFees, capturedPayments, fakeStripeProvider, setAuthorizedAmount } from "../stripe/fake";
 import { clearTestSentSms, getTestSentSms } from "../notifications/sms";
 import { makeFakeStep } from "../inngest/fake-step";
 import { sendCustomerNotification, substitutionTimeout } from "../inngest/functions";
@@ -57,7 +57,7 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
 
   type LineSpec = { variantId: string; qty: number; price: number; swapRule?: string; substituteVariantId?: string };
 
-  async function order(lines: LineSpec[], holdCents?: number) {
+  async function order(lines: LineSpec[], holdCents?: number, serviceFeeCents = 0) {
     const subtotal = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
     const hold = holdCents ?? Math.round(subtotal * 1.1);
     const paymentIntentId = `pi_${RUN}_${++orderSeq}`;
@@ -71,7 +71,10 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
           subtotalCents: subtotal,
           bufferCents: hold - subtotal,
           totalAuthorizedCents: hold,
-          totalCents: subtotal,
+          totalCents: subtotal + serviceFeeCents,
+          ...(serviceFeeCents > 0
+            ? { serviceFeeCents, serviceFeeBps: 300, serviceFeeMinCents: 99, serviceFeeMaxCents: 299 }
+            : {}),
           paymentIntentId,
           trackingToken: `tok_${RUN}_${orderSeq}_${"x".repeat(20)}`,
           acceptedAt: new Date(),
@@ -288,6 +291,41 @@ describe.skipIf(!hasDb)("substitution prompts (#13, lane DB)", () => {
     // The swapped unit sells from the substitute's stock.
     const palmOil = await storeScoped(storeId).listingVariant.findUniqueOrThrow({ where: { id: v.palmOil }, include: { listing: true } });
     expect(palmOil.listing.qty).toBe(19);
+  });
+
+  it("#495: a swap up is offered only when the hold also covers the higher service fee", async () => {
+    // $50 of goods with a $1.50 fee. The $4 swap costs $54 + $1.62 fee = $55.62, over a $55.50 hold.
+    const lines = [
+      { variantId: v.egusi, qty: 1, price: 1000, swapRule: "named_substitute", substituteVariantId: v.palmOil },
+      { variantId: v.yam, qty: 2, price: 1600 },
+      { variantId: v.crayfish, qty: 1, price: 800 },
+    ];
+    const tight = await order(lines, 5550, 150);
+    await markLineShort(storeId, tight.lineIds[0], 0);
+    expect((await requestFor(tight.lineIds[0])).proposedVariantId).toBeNull();
+  });
+
+  it("#495: a swap up and a short line change the service fee at capture, within the hold", async () => {
+    // $50 of goods + $1.50 fee + $5 buffer = $56.50 hold.
+    const placed = await order([
+      { variantId: v.egusi, qty: 1, price: 1000, swapRule: "named_substitute", substituteVariantId: v.palmOil },
+      { variantId: v.yam, qty: 2, price: 1600 },
+      { variantId: v.crayfish, qty: 1, price: 800 },
+    ], 5650, 150);
+    await markLineShort(storeId, placed.lineIds[0], 0);
+    await markLineShort(storeId, placed.lineIds[2], 0);
+    const [swap, refund] = await Promise.all([requestFor(placed.lineIds[0]), requestFor(placed.lineIds[2])]);
+    expect(swap.proposedUnitPriceCents).toBe(1400);
+    await resolveSubstitutionByToken(storeId, placed.token, swap.id, "swap");
+    await resolveSubstitutionByToken(storeId, placed.token, refund.id, "refund");
+    await markLinePicked(storeId, placed.lineIds[1]);
+
+    // Goods picked: $14 + $32 = $46; fee 3% = $1.38.
+    expect(await markReady(storeId, placed.id)).toEqual({ ok: true, capturedAmountCents: 4738 });
+    const row = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.id } });
+    expect(row.serviceFeeCents).toBe(138);
+    // The store's card fee on $46: $1.33 + 30¢.
+    expect(capturedFees.get(placed.paymentIntentId)).toBe(138 + 163);
   });
 
   it("AC5: after answers and timeouts, no order has an unapproved substitution", async () => {

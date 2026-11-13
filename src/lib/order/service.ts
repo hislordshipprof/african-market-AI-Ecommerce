@@ -6,13 +6,13 @@ import { applyProviderRefund, coveredRefundCents, evaluateOrderRefundState, find
 import { ProviderStateError, type RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { CANCELLABLE_BEFORE_CAPTURE, RESOLVED_LINE_STATUSES, type OrderLineStatus, type StoreCancelReason } from "./constants";
-import { applicationFeeForCapture, platformFeeCentsForCapture } from "./platform-fee";
+import { captureSplit, courierFeeCents, orderServiceFeeSettings } from "./platform-fee";
 import { releaseOrderStock, settleCapturedStock, settleShortLine } from "./stock-ledger";
 import { recordOrderNotification, recordSubstitutionPrompt } from "../notifications/record";
 import { scheduleOrderNotification, scheduleSubstitutionTimer } from "../inngest/notify";
 import { openSubstitutionRequest } from "./substitution";
 import { deleteDeliveryProof, deliveryProofBucket, deliveryProofKey, uploadDeliveryProof } from "../r2";
-import { captureAmountCents } from "./substitution-pricing";
+import { captureCharge } from "./substitution-pricing";
 import { prepareProofPhoto, PROOF_STORAGE_NOT_SET_UP, STORE_DELIVERY_ONLY } from "./delivery-proof";
 export type { OrderLineStatus } from "./constants";
 
@@ -898,6 +898,18 @@ export async function markTerminalRefundFailure(input: {
   return { ok: true, action: covered ? "covered" : "refund_failed" };
 }
 
+/** The application fee for a stored capture amount; the service fee was stored with it. */
+function applicationFeeFor(
+  order: { fulfillment: string; deliveryFeeCents: number; serviceFeeCents: number },
+  capturedCents: number,
+): number {
+  return captureSplit({
+    capturedCents,
+    serviceFeeCents: order.serviceFeeCents,
+    courierFeeCents: courierFeeCents(order),
+  }).applicationFeeCents;
+}
+
 export async function markReady(
   storeId: string,
   orderId: string,
@@ -911,10 +923,7 @@ export async function markReady(
       const stored = storedCaptureAmount(order.capturedAmountCents);
       if (!stored.ok) return stored;
       const amount = stored.capturedAmountCents;
-      const fee = applicationFeeForCapture(amount, {
-        fulfillment: order.fulfillment,
-        deliveryFeeCents: order.deliveryFeeCents,
-      });
+      const fee = applicationFeeFor(order, amount);
       return {
         ok: true as const,
         capturedAmountCents: amount,
@@ -938,7 +947,8 @@ export async function markReady(
     }
 
     // Swaps and refunds of short lines (#13) are priced here, so the capture reflects them.
-    const capturedAmountCents = captureAmountCents(lines, order);
+    const charge = captureCharge(lines, { ...order, serviceFee: orderServiceFeeSettings(order) });
+    const capturedAmountCents = charge.amountCents;
 
     if (!order.paymentIntentId) {
       return { ok: false as const, error: "Order has no payment intent" };
@@ -972,17 +982,20 @@ export async function markReady(
 
     const newStatus: OrderStatus = fulfilledStatus(order.fulfillment);
 
-    const fee = applicationFeeForCapture(capturedAmountCents, {
-      fulfillment: order.fulfillment,
-      deliveryFeeCents: order.deliveryFeeCents,
+    const split = captureSplit({
+      capturedCents: capturedAmountCents,
+      serviceFeeCents: charge.serviceFeeCents,
+      courierFeeCents: courierFeeCents(order),
     });
+    const fee = split.applicationFeeCents;
 
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: "CAPTURING",
         capturedAmountCents,
-        platformFeeCents: platformFeeCentsForCapture(capturedAmountCents),
+        serviceFeeCents: charge.serviceFeeCents,
+        platformFeeCents: split.platformFeeCents,
       },
     });
 
@@ -1422,10 +1435,7 @@ export async function reconcileStuckOrder(
         return { ok: false, error: "capture_backoff", waiting: true };
       }
       const attempt = reservedCapture.attempt;
-      const sweepFee = applicationFeeForCapture(amount, {
-        fulfillment: order.fulfillment,
-        deliveryFeeCents: order.deliveryFeeCents,
-      });
+      const sweepFee = applicationFeeFor(order, amount);
       try {
         await registerE2EPayment(order.paymentIntentId, order.totalAuthorizedCents);
         const retryCap = await stripe.capturePaymentIntent(

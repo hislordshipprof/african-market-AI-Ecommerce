@@ -16,6 +16,7 @@ vi.mock("../inngest/client", () => ({
 }));
 
 import { computeQuote, placeOrder } from "./service";
+import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "orphan@t236.test" };
@@ -80,7 +81,7 @@ describe.skipIf(!hasDb)("placeOrder event failure (real send, mocked transport)"
     await storeScoped(store.id).cartLine.create({
       data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    const hold = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup").holdCents;
+    const hold = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE).holdCents;
     retrieve.mockResolvedValue({
       status: "requires_capture",
       amount: hold,

@@ -14,7 +14,8 @@ import { checkoutTestHooks } from "./test-hooks";
 import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
-import { platformFeeCentsForCapture } from "../order/platform-fee";
+import { captureSplit, orderServiceFeeSettings, serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
+import { readServiceFeeSettings } from "../order/service-fee-settings";
 import { reserveOrderStock } from "../order/stock-ledger";
 import { validPhone } from "../customer-account/phone";
 import { assertLiveModeAllowed } from "./live-mode";
@@ -133,6 +134,7 @@ export function computeQuote(
   cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null; frozen?: boolean }>,
   contact: Contact,
   fulfillment: Fulfillment,
+  serviceFee: ServiceFeeSettings,
   delivery?: StoreDeliveryQuote | null,
 ): CheckoutQuote {
   const problems: FlowProblem[] = [];
@@ -208,7 +210,8 @@ export function computeQuote(
   }
 
   const tipCents = 0;
-  const totalCents = subtotalCents + tipCents + deliveryFeeCents;
+  const serviceFeeCentsQuoted = serviceFeeCents(subtotalCents, serviceFee);
+  const totalCents = subtotalCents + serviceFeeCentsQuoted + tipCents + deliveryFeeCents;
   const bufferCents = Math.min(Math.round(subtotalCents * 0.1), 2000);
   const holdCents = totalCents + bufferCents;
 
@@ -217,6 +220,7 @@ export function computeQuote(
     subtotalCents,
     deliveryFeeCents,
     courierFeeCents: 0,
+    serviceFeeCents: serviceFeeCentsQuoted,
     taxCents: 0,
     tipCents,
     discountCents: 0,
@@ -273,9 +277,10 @@ export async function quoteCheckout(
   fulfillment: Fulfillment,
   request?: DeliveryRequest | null,
 ): Promise<CheckoutQuote> {
-  const [cart, store] = await Promise.all([
+  const [cart, store, serviceFee] = await Promise.all([
     getCartWithLines(storeId, cartId),
     platform.store.findUnique({ where: { id: storeId } }),
+    readServiceFeeSettings(),
   ]);
   if (!store) throw new Error("Store not found");
   const serverLines = (cart?.lines ?? []).map((line) => ({
@@ -289,7 +294,7 @@ export async function quoteCheckout(
     return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
   }
   if (fulfillment !== "store-delivery") {
-    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee);
   }
   let point: { lat: number; lng: number } | null = null;
   if (request && store.lat != null && store.lng != null) {
@@ -304,6 +309,7 @@ export async function quoteCheckout(
     serverLines,
     contact,
     fulfillment,
+    serviceFee,
     deliveryQuoteInput(store, point, request?.leaveAtDoor === true),
   );
 }
@@ -607,11 +613,13 @@ export async function recordAuthorizedOrder(
       const delivery = input.fulfillment === "store-delivery"
         ? deliveryQuoteInput(lockedStore, point, cart.leaveAtDoor || input.leaveAtDoor === true)
         : null;
+      const serviceFee = await readServiceFeeSettings(tx);
       const currentQuote = computeQuote(
         input.minimumOrderCents ?? 0,
         current,
         input.contact,
         input.fulfillment,
+        serviceFee,
         delivery,
       );
       if (
@@ -687,7 +695,15 @@ export async function recordAuthorizedOrder(
           totalCents: currentQuote.totalCents,
           paymentIntentId: input.paymentIntentId,
           sourceCartId: input.cartId,
-          platformFeeCents: platformFeeCentsForCapture(currentQuote.totalCents),
+          serviceFeeCents: currentQuote.serviceFeeCents,
+          serviceFeeBps: serviceFee.rateBps,
+          serviceFeeMinCents: serviceFee.minCents,
+          serviceFeeMaxCents: serviceFee.maxCents,
+          platformFeeCents: captureSplit({
+            capturedCents: currentQuote.totalCents,
+            serviceFeeCents: currentQuote.serviceFeeCents,
+            courierFeeCents: 0,
+          }).platformFeeCents,
           notes: input.notes || null,
           deliveryLine1: delivering ? cart.deliveryLine1 : null,
           deliveryLine2: delivering ? cart.deliveryLine2 : null,
@@ -933,6 +949,7 @@ async function settleConsumedBasket(input: {
     })),
     input.contact,
     input.fulfillment,
+    orderServiceFeeSettings(order),
   );
   return { kind: "order", result: { token: order.id, trackingToken: order.trackingToken, quote } };
 }
@@ -1079,7 +1096,10 @@ export async function placeOrder(
     maxPerOrder: l.maxPerOrder,
     frozen: l.frozen,
   }));
-  const storeRow = await platform.store.findUnique({ where: { id: storeId } });
+  const [storeRow, serviceFee] = await Promise.all([
+    platform.store.findUnique({ where: { id: storeId } }),
+    readServiceFeeSettings(),
+  ]);
   if (!storeRow) throw new Error("Store not found");
   const point = cart.delivery.lat != null && cart.delivery.lng != null
     ? { lat: cart.delivery.lat, lng: cart.delivery.lng }
@@ -1087,7 +1107,7 @@ export async function placeOrder(
   const delivery = fulfillment === "store-delivery"
     ? deliveryQuoteInput(storeRow, point, cart.delivery.leaveAtDoor || leaveAtDoor)
     : null;
-  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, delivery);
+  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery);
 
   const contactOnly = quote.problems.length > 0
     && quote.problems.every((problem) => problem.code === "invalid-contact");
@@ -1200,7 +1220,7 @@ async function quoteFromCart(
   contact: Contact,
   fulfillment: Fulfillment,
 ): Promise<CheckoutQuote> {
-  const cart = await getCartWithLines(storeId, cartId);
+  const [cart, serviceFee] = await Promise.all([getCartWithLines(storeId, cartId), readServiceFeeSettings()]);
   const serverLines = cart
     ? cart.lines.map((line) => ({
         price: line.variant.price,
@@ -1208,5 +1228,5 @@ async function quoteFromCart(
         maxPerOrder: line.variant.listing.maxPerOrder,
       }))
     : [];
-  return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+  return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee);
 }

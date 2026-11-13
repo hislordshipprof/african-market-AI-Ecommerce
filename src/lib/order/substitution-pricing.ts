@@ -1,4 +1,5 @@
 /** Money rules for short lines (#13). Pure, so the hold check and the capture share one formula. */
+import { serviceFeeCents, type ServiceFeeSettings } from "./platform-fee";
 
 export type ChargeLine = {
   status: string;
@@ -31,11 +32,19 @@ export function lineChargeCents(line: ChargeLine): number {
   }
 }
 
-/** The amount to capture at Ready. Nothing charged releases the whole hold, tip and fee included. */
-export function captureAmountCents(
-  lines: ChargeLine[],
-  fees: { tipCents: number; deliveryFeeCents: number },
-): number {
-  const lineTotal = lines.reduce((sum, line) => sum + lineChargeCents(line), 0);
-  return lineTotal === 0 ? 0 : lineTotal + fees.tipCents + fees.deliveryFeeCents;
+export type OrderFees = { tipCents: number; deliveryFeeCents: number; serviceFee: ServiceFeeSettings };
+
+/**
+ * The amount to capture at Ready and its service fee, which is charged on the goods actually
+ * picked (ADR-0021). Nothing charged releases the whole hold, tip and fees included.
+ */
+export function captureCharge(lines: ChargeLine[], fees: OrderFees): { amountCents: number; serviceFeeCents: number } {
+  const goods = lines.reduce((sum, line) => sum + lineChargeCents(line), 0);
+  if (goods === 0) return { amountCents: 0, serviceFeeCents: 0 };
+  const fee = serviceFeeCents(goods, fees.serviceFee);
+  return { amountCents: goods + fee + fees.tipCents + fees.deliveryFeeCents, serviceFeeCents: fee };
+}
+
+export function captureAmountCents(lines: ChargeLine[], fees: OrderFees): number {
+  return captureCharge(lines, fees).amountCents;
 }

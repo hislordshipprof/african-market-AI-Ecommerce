@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
+import { maxGoodsWithin, orderServiceFeeSettings, serviceFeeCents } from "./platform-fee";
 import { canOfferSwap, lineChargeCents, type ChargeLine } from "./substitution-pricing";
 
 /** How long the customer has to answer before the line's swap rule applies. */
@@ -69,7 +70,14 @@ export async function openSubstitutionRequest(
   storeId: string,
   line: ShortLine,
   qtyFound: number,
-  order: { totalAuthorizedCents: number; tipCents: number; deliveryFeeCents: number },
+  order: {
+    totalAuthorizedCents: number;
+    tipCents: number;
+    deliveryFeeCents: number;
+    serviceFeeBps: number;
+    serviceFeeMinCents: number;
+    serviceFeeMaxCents: number;
+  },
 ): Promise<{ id: string; expiresAt: Date }> {
   const units = line.qtyOrdered - qtyFound;
   const [lines, pending] = await Promise.all([
@@ -82,12 +90,17 @@ export async function openSubstitutionRequest(
     const request = pendingByLine.get(row.id);
     return request ? { ...row, status: "substituted", substitutedUnitPriceCents: request.proposedUnitPriceCents } : row;
   });
-  const currentTotalCents = estimate.reduce((sum, row) => sum + lineChargeCents(row), 0) + order.tipCents + order.deliveryFeeCents;
-  // The largest unit price whose delta still fits: canOfferSwap(hold, current, units × (price − original)).
-  const headroom = order.totalAuthorizedCents - currentTotalCents;
-  const maxUnitCents = line.unitPriceCents + Math.floor(headroom / units);
+  const serviceFee = orderServiceFeeSettings(order);
+  const goodsCents = estimate.reduce((sum, row) => sum + lineChargeCents(row), 0);
+  const extrasCents = order.tipCents + order.deliveryFeeCents;
+  const totalWith = (goods: number) => goods + serviceFeeCents(goods, serviceFee) + extrasCents;
+  // The largest unit price whose goods, with their service fee, still fit the hold.
+  const goodsHeadroom = maxGoodsWithin(order.totalAuthorizedCents - extrasCents, serviceFee) - goodsCents;
+  const maxUnitCents = line.unitPriceCents + Math.floor(goodsHeadroom / units);
   const proposal = await proposeSwap(tx, line, units, maxUnitCents);
-  const offered = proposal && canOfferSwap(order.totalAuthorizedCents, currentTotalCents, units * (proposal.price - line.unitPriceCents))
+  const currentTotalCents = totalWith(goodsCents);
+  const swappedTotalCents = proposal ? totalWith(goodsCents + units * (proposal.price - line.unitPriceCents)) : 0;
+  const offered = proposal && canOfferSwap(order.totalAuthorizedCents, currentTotalCents, swappedTotalCents - currentTotalCents)
     ? proposal
     : null;
 

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { platformAdmin, platformAdminTransaction, storeScoped } from "../db";
 import { placeOrder, computeQuote } from "../checkout/service";
 import { getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
+import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
 
 const enabled = process.env.INNGEST_DEV_SMOKE === "1";
 const devUrl = process.env.INNGEST_DEV_URL ?? "http://127.0.0.1:8288";
@@ -69,7 +70,7 @@ describe.skipIf(!enabled)("Inngest Dev Server smoke", () => {
     await storeScoped(storeId).cartLine.create({
       data: { storeId, cartId: cart.id, variantId, qty: 1, swapRule: "exact_only" },
     });
-    const hold = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], contact, "pickup").holdCents;
+    const hold = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], contact, "pickup", SEEDED_SERVICE_FEE).holdCents;
     const pi = await getCheckoutPayments().createPaymentIntent({
       amount: hold,
       currency: "usd",

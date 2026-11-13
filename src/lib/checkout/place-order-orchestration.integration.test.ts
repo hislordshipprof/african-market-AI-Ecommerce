@@ -53,6 +53,7 @@ import {
   recordAuthorizedOrder,
 } from "./service";
 import { fakeCheckoutCallCount, getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
+import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "ada@t236-orch.test" };
@@ -151,7 +152,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   }
 
   function holdFor(price: number, qty: number) {
-    return computeQuote(0, [{ price, qty, maxPerOrder: null }], CONTACT, "pickup").holdCents;
+    return computeQuote(0, [{ price, qty, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE).holdCents;
   }
 
   function paymentIntent(opts: {
@@ -419,7 +420,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     await storeScoped(other.id).cartLine.create({
       data: { storeId: other.id, cartId: ownerCart.id, variantId: ownerVariant.id, qty: 1, swapRule: "exact_only" },
     });
-    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup");
+    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE);
     const recorded = await recordAuthorizedOrder(other.id, {
       cartId: ownerCart.id,
       contact: CONTACT,
@@ -486,7 +487,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     const primaryCart = await storeScoped(store.id).cart.create({
       data: { storeId: store.id, paymentIntentId: `pi_primary_${crypto.randomUUID()}` },
     });
-    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup");
+    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE);
     await expect(recordAuthorizedOrder(store.id, {
       cartId: primaryCart.id,
       contact: { ...CONTACT, email: "primary@t236-orch.test" },
@@ -592,7 +593,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       vi.mocked(sendOrderAuthorized).mockClear();
       retrieve.mockClear();
       const seeded = await seedPricedCart(row.label.replace(/\s+/g, "-"), 500, 1);
-      expect(seeded.amount).toBe(550);
+      expect(seeded.amount).toBe(649);
       const pause = pauseOn("afterMissedOrderLookup");
       const loser = watch(
         placeOrder(
@@ -735,11 +736,11 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   it("a new order still checks the PaymentIntent amount against the hold", async () => {
     const store = await makeStore("amount");
     const variant = await makeVariant(store.id, 555);
-    const quote = computeQuote(0, [{ price: 555, qty: 1, maxPerOrder: null }], CONTACT, "pickup");
+    const quote = computeQuote(0, [{ price: 555, qty: 1, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE);
     expect(quote.bufferCents).toBe(56);
-    expect(quote.holdCents).toBe(611);
+    expect(quote.holdCents).toBe(710);
 
-    for (const amount of [610, 612]) {
+    for (const amount of [709, 711]) {
       const paymentIntentId = `pi_${amount}_${crypto.randomUUID()}`;
       const cart = await storeScoped(store.id).cart.create({
         data: { storeId: store.id, paymentIntentId },
@@ -765,7 +766,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
 
-    const paymentIntentId = `pi_611_${crypto.randomUUID()}`;
+    const paymentIntentId = `pi_710_${crypto.randomUUID()}`;
     const cart = await storeScoped(store.id).cart.create({
       data: { storeId: store.id, paymentIntentId },
     });
@@ -775,7 +776,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     paymentIntents.set(
       paymentIntentId,
       paymentIntent({
-        amount: 611,
+        amount: 710,
         destination: store.stripeAccountId!,
         onBehalfOf: store.stripeAccountId!,
         storeId: store.id,
@@ -783,7 +784,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     );
     const placed = await placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId);
     const order = await storeScoped(store.id).order.findUnique({ where: { id: placed.token } });
-    expect(order?.totalAuthorizedCents).toBe(611);
+    expect(order?.totalAuthorizedCents).toBe(710);
     expect(order?.paymentIntentId).toBe(paymentIntentId);
     expect(order?.status).toBe("AUTHORIZED");
     expect(await counts(store.id)).toEqual({ orders: 1, customers: 1 });
@@ -954,7 +955,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     await storeScoped(store.id).cartLine.create({
       data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], CONTACT, "store-delivery", {
+    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], CONTACT, "store-delivery", SEEDED_SERVICE_FEE, {
       enabled: true,
       feeCents: 500,
       radiusMi: 8,
@@ -987,8 +988,8 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     expect(order?.deliveryLat).toBeCloseTo(MAIN_ST.lat, 4);
     expect(order?.deliveryLng).toBeCloseTo(MAIN_ST.lng, 4);
     expect(order?.deliveryDistanceMi).toBeGreaterThan(0);
-    expect(order?.totalCents).toBe(4500);
-    expect(order?.totalAuthorizedCents).toBe(4900);
+    expect(order?.totalCents).toBe(4620);
+    expect(order?.totalAuthorizedCents).toBe(5020);
   });
 
   it("placement refuses leave at door when the cart has a frozen item", async () => {

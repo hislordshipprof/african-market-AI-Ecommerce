@@ -1054,6 +1054,12 @@ model Order {
   refundId             String?   @map("refund_id")
   platformFeeCents     Int?      @map("platform_fee_cents")
   deliveryFeeCents     Int       @default(0) @map("delivery_fee_cents")
+  /// Customer service fee (ADR-0021), on the quote and then on the goods picked at capture.
+  serviceFeeCents      Int       @default(0) @map("service_fee_cents")
+  /// The fee settings the order was quoted with; 0 on orders placed before the fee.
+  serviceFeeBps        Int       @default(0) @map("service_fee_bps")
+  serviceFeeMinCents   Int       @default(0) @map("service_fee_min_cents")
+  serviceFeeMaxCents   Int       @default(0) @map("service_fee_max_cents")
   deliveryLine1        String?   @map("delivery_line1")
   deliveryLine2        String?   @map("delivery_line2")
   deliveryCity         String?   @map("delivery_city")
@@ -1227,6 +1233,10 @@ model DeliveryEvent {
 model PlatformSettings {
   id                   String   @id @default("platform")
   courierWeightLimitLb Int      @default(50) @map("courier_weight_limit_lb")
+  /// Customer service fee (ADR-0021): rate in basis points, held between min and max cents.
+  serviceFeeBps        Int      @default(300) @map("service_fee_bps")
+  serviceFeeMinCents   Int      @default(99) @map("service_fee_min_cents")
+  serviceFeeMaxCents   Int      @default(299) @map("service_fee_max_cents")
   updatedAt            DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("platform_settings")

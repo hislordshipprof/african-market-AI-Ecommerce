@@ -1,4 +1,5 @@
 import { cartItemKey } from "../storefront/cart-store";
+import { serviceFeeCents } from "../order/platform-fee";
 import type {
   CheckoutInput,
   CheckoutQuote,
@@ -12,6 +13,7 @@ import type {
 } from "./contracts";
 import {
   effectiveOrderLines,
+  DEMO_SERVICE_FEE,
   finalOrderAmounts,
   getOrderSwapRule,
   orderIssueRefundCents,
@@ -308,7 +310,8 @@ export function createDemoServices(
         0,
         Number.isSafeInteger(input.tipCents) ? input.tipCents : 0,
       ),
-      total = subtotal - discount + delivery + courier + tax + tip,
+      serviceFee = serviceFeeCents(subtotal - discount, DEMO_SERVICE_FEE),
+      total = subtotal - discount + serviceFee + delivery + courier + tax + tip,
       buffer = Math.min(2000, Math.round(total * 0.1));
     const q: CheckoutQuote = {
       id: uuid(),
@@ -317,6 +320,7 @@ export function createDemoServices(
       courierFeeCents: courier,
       courierProvider:
         input.fulfillment === "courier" ? "Uber Direct" : undefined,
+      serviceFeeCents: serviceFee,
       taxCents: tax,
       tipCents: tip,
       discountCents: discount,

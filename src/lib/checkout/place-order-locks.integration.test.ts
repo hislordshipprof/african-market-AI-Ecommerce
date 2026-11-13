@@ -13,6 +13,7 @@ import {
   type RecordAuthorizedOrderInput,
 } from "./service";
 import type { Contact } from "../customer-flow/contracts";
+import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -337,7 +338,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       0,
       lines.map((line) => ({ price: line.price, qty: line.qty, maxPerOrder: null })),
       { ...CONTACT, email },
-      "pickup",
+      "pickup", SEEDED_SERVICE_FEE,
     );
     return {
       cartId,
@@ -453,7 +454,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       expect(await storeScoped(storeId).customer.count()).toBe(8);
       for (const order of orders) {
         expect(order.lines).toHaveLength(20);
-        expect(order.totalAuthorizedCents).toBe(11_000);
+        expect(order.totalAuthorizedCents).toBe(11_299);
         for (const line of order.lines) expect(line.unitPriceCents).toBe(500);
       }
       for (const cart of carts) {

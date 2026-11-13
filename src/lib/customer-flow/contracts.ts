@@ -93,6 +93,8 @@ export interface CheckoutQuote {
   deliveryFeeCents: number;
   courierFeeCents: number;
   courierProvider?: "Uber Direct" | "DoorDash Drive";
+  /** Customer service fee (ADR-0021), included in totalCents. */
+  serviceFeeCents: number;
   taxCents: number;
   tipCents: number;
   discountCents: number;

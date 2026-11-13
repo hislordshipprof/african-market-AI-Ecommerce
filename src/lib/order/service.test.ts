@@ -433,9 +433,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.capturedAmountCents).toBe(6000);
 
     expect(capturedPayments.get(order.paymentIntentId!)).toBe(6000);
-    // 2.9% + 30¢ of 6000 = 204, plus the $3 courier delivery fee.
-    expect(capturedFees.get(order.paymentIntentId!)).toBe(504);
-    expect(updated!.platformFeeCents).toBe(204);
+    // ADR-0021: the store's card fee is on its $57 part only (2.9% + 30¢ = 195), plus the $3 courier fee.
+    expect(capturedFees.get(order.paymentIntentId!)).toBe(495);
+    expect(updated!.platformFeeCents).toBe(195);
   });
 
   it("markReady rejects when capture would exceed authorized amount", async () => {

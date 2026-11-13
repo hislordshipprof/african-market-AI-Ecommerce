@@ -17,6 +17,7 @@ import { makeFakeStep } from "../inngest/fake-step";
 import { inngest } from "../inngest/client";
 import type { Contact } from "../customer-flow/contracts";
 import { postCustomerMessage, replyAsStore } from "../support/thread";
+import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada", phone: "(301) 448-2210", email: "ada@example.com" };
@@ -142,7 +143,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     const quote = computeQuote(0, [
       { price: PRICE, qty: 1, maxPerOrder: null },
       { price: RICE, qty: 1, maxPerOrder: null },
-    ], CONTACT, fulfillment, delivering
+    ], CONTACT, fulfillment, SEEDED_SERVICE_FEE, delivering
       ? { enabled: true, feeCents: 500, radiusMi: 8, hasCoordinates: true, confirmed: { withinRadius: true }, leaveAtDoor: false }
       : null);
     setAuthorizedAmount(paymentIntentId, quote.holdCents);
@@ -194,8 +195,9 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(placedMail.html).toContain(`Order #${order.number}.`);
     expect(placedMail.html).toContain("$20.00");
     expect(placedMail.html).toContain("$5.00");
-    expect(placedMail.html).toContain("Estimated total $25.00");
-    expect(placedMail.html).toContain("Card hold $27.50");
+    expect(placedMail.html).toContain("Service fee $0.99");
+    expect(placedMail.html).toContain("Estimated total $25.99");
+    expect(placedMail.html).toContain("Card hold $28.49");
     expect(notificationChannels.map((channel) => channel.kind)).toEqual([...NOTIFICATION_CHANNEL_KINDS]);
     expect(placedMail.html).toContain(order.trackingToken!);
     expect(placedSms.to).toBe("+13014482210");
@@ -229,7 +231,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(getTestSentEmails().at(-1)!.html).toContain(`Order #${order.number}.`);
     expect(getTestSentSms()).toHaveLength(1);
     expect(getTestSentSms().at(-1)!.text).toContain(`Ada's Market: order #${order.number} `);
-    expect(getTestSentEmails().at(-1)!.html).toContain("Charged $25.00");
+    expect(getTestSentEmails().at(-1)!.html).toContain("Charged $25.99");
 
     expect((await completePickup(storeId, orderId)).ok).toBe(true);
     clearTestSentEmails();

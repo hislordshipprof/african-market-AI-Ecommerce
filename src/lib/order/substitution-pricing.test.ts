@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { NO_SERVICE_FEE } from "./platform-fee";
 import { canOfferSwap, captureAmountCents } from "./substitution-pricing";
 
 describe("canOfferSwap", () => {
@@ -12,10 +13,10 @@ describe("canOfferSwap", () => {
 describe("captureAmountCents", () => {
   const line = (status: string, qtyOrdered: number, qtyPicked: number, unitPriceCents: number, substitutedUnitPriceCents: number | null = null) =>
     ({ status, qtyOrdered, qtyPicked, unitPriceCents, substitutedUnitPriceCents });
-  const fees = { tipCents: 0, deliveryFeeCents: 0 };
+  const fees = { tipCents: 0, deliveryFeeCents: 0, serviceFee: NO_SERVICE_FEE };
 
   it("charges picked lines in full and adds tip and delivery fee", () => {
-    expect(captureAmountCents([line("picked", 2, 2, 1000)], { tipCents: 200, deliveryFeeCents: 500 })).toBe(2700);
+    expect(captureAmountCents([line("picked", 2, 2, 1000)], { tipCents: 200, deliveryFeeCents: 500, serviceFee: NO_SERVICE_FEE })).toBe(2700);
   });
 
   it("AC4: a $50 order with an $8 line refunded and a line swapped up $4 captures $46", () => {
@@ -33,6 +34,6 @@ describe("captureAmountCents", () => {
   });
 
   it("captures nothing, not even tip or fee, when no line is charged", () => {
-    expect(captureAmountCents([line("refunded", 2, 0, 1000)], { tipCents: 300, deliveryFeeCents: 500 })).toBe(0);
+    expect(captureAmountCents([line("refunded", 2, 0, 1000)], { tipCents: 300, deliveryFeeCents: 500, serviceFee: NO_SERVICE_FEE })).toBe(0);
   });
 });
