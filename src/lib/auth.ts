@@ -166,7 +166,7 @@ export const auth = betterAuth({
           storeName,
           fromAddress: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
         });
-        scheduleAfterResponse(() => sendEmail(message));
+        scheduleAfterResponse(() => sendEmail(message), "magic_link_delivery_failed");
       },
       disableSignUp: false,
     }),

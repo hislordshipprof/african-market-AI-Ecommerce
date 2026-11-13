@@ -7,6 +7,8 @@ import { generateTOTP } from "../../e2e/totp";
 
 const { headerState } = vi.hoisted(() => ({ headerState: new Headers() }));
 
+vi.mock("server-only", () => ({}));
+
 vi.mock("next/headers", () => ({
   headers: async () => headerState,
 }));
@@ -30,6 +32,8 @@ import { authPrisma } from "./db";
 import { requirePlatformAdmin } from "./admin/session";
 import { requireStoreMember, requireStoreOwner } from "./store-admin/session";
 import { clearTestSentEmails, getTestSentEmails } from "./email/send";
+import { syncCustomerForRequest } from "./customer-sync";
+import { storeScoped } from "./db";
 
 const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-c1`;
@@ -241,6 +245,27 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       );
       expect(reused.status).not.toBe(200);
     } finally {
+      await removeAuthFixtures([email], []);
+    }
+  });
+
+  it("a staff member opening the storefront account page is not synced into its customers", async () => {
+    const email = `c1-staff-shopper-${suffix}@test.example`;
+    try {
+      const res = await authPost("/sign-up/email", { email, password, name: "C1 Staff Shopper" });
+      expect(res.status).toBe(200);
+      const userId = (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
+      await insertOwnerMembership(storeId, userId);
+      asStore(cookiePairs(res));
+      expect(await syncCustomerForRequest()).toBeNull();
+      expect(await storeScoped(storeId).customer.count({ where: { userId } })).toBe(0);
+    } finally {
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRaw`DELETE FROM store_memberships WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+        await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+      });
       await removeAuthFixtures([email], []);
     }
   });

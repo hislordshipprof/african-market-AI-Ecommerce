@@ -8,6 +8,7 @@ import { authPrisma, storeScoped } from "./db";
 import { Client } from "pg";
 import { findOrCreateCustomer } from "./customer-auth";
 import { resolveDirectUrl } from "./env";
+import { customerRlsErrorText, isCustomerRlsRejection } from "./customer-rls-error";
 import { syncCustomerForStore } from "./customer-claim";
 import { listAccountOrders } from "./customer-account/order-history";
 import {
@@ -386,6 +387,46 @@ describe("auth integration (real DB, app_runtime)", () => {
     expect(await authPrisma.session.findUnique({ where: { id: sessionId } })).toBeNull();
   });
 
+  it("a first-time magic-link sign-in creates the account, syncs a nameless Customer, and the name fills in", async () => {
+    const email = `integ-new-${suffix}@test.example`;
+    const host = `${storeSlug}.localhost:3000`;
+    try {
+      const sent = await authPost(
+        "/sign-in/magic-link",
+        { email, callbackURL: "/account" },
+        undefined,
+        { "x-store-slug": storeSlug, host },
+      );
+      expect(sent.status).toBe(200);
+      expect(await authPrisma.user.count({ where: { email } })).toBe(0);
+      const verifyUrl = extractVerifyUrl();
+      expect(new URL(verifyUrl).host).toBe(host);
+      const verified = await authGet(verifyUrl, undefined, { host, "x-store-slug": storeSlug });
+      const cookies = collectCookies(verified);
+      expect(cookies).toContain("session_token");
+
+      const user = await sessionUserFrom(cookies);
+      expect(user).toMatchObject({ email, name: "", emailVerified: true });
+      expect((await syncCustomerForStore(storeId, user)).name).toBe("");
+
+      await auth.api.updateUser({ headers: new Headers({ cookie: cookies }), body: { name: "Ngozi Okafor" } });
+      const renamed = await syncCustomerForStore(storeId, await sessionUserFrom(cookies));
+      expect(renamed.name).toBe("Ngozi Okafor");
+      const rows = await storeScoped(storeId).customer.findMany({ where: { userId: user.id } });
+      expect(rows.map((row) => row.name)).toEqual(["Ngozi Okafor"]);
+    } finally {
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+        await tx.$executeRaw`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+        await tx.$executeRaw`DELETE FROM accounts WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+        await tx.$executeRaw`DELETE FROM verifications WHERE value LIKE ${"%" + email + "%"}`;
+        await tx.$executeRaw`DELETE FROM users WHERE email = ${email}`;
+      });
+    }
+  });
+
   it("E6/AC4: two store-host sign-ins sync one user, two sessions, and two isolated customers", async () => {
     const store2Id = crypto.randomUUID();
     const store2Slug = `integ-store2-${suffix}`;
@@ -413,6 +454,7 @@ describe("auth integration (real DB, app_runtime)", () => {
           { "x-store-slug": slug, host: `${slug}.localhost:3000` },
         );
         expect(sent.status).toBe(200);
+        expect(new URL(extractVerifyUrl()).host).toBe(`${slug}.localhost:3000`);
         const verifyRes = await authGet(extractVerifyUrl(), undefined, {
           host: `${slug}.localhost:3000`,
           "x-store-slug": slug,
@@ -463,16 +505,14 @@ describe("auth integration (real DB, app_runtime)", () => {
       });
       expect(untouched?.name).not.toBe("cross-store write");
 
-      await expect(
-        storeScoped(storeId).customer.create({
-          data: {
-            storeId: store2Id,
-            userId: user!.id,
-            name: "illegal",
-            email: customerEmail,
-          },
-        }),
-      ).rejects.toThrow();
+      // A user with no store-2 row, so only RLS (not the unique index) can reject it.
+      const stranger = await authPrisma.user.findFirstOrThrow({ where: { email: adminEmail } });
+      const illegal = await storeScoped(storeId)
+        .customer.create({
+          data: { storeId: store2Id, userId: stranger.id, name: "illegal", email: adminEmail },
+        })
+        .then(() => null, (error: unknown) => error);
+      expect(isCustomerRlsRejection(illegal), customerRlsErrorText(illegal)).toBe(true);
     } finally {
       await authPrisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL ROLE app_user`;

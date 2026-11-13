@@ -8,6 +8,10 @@ export interface StoreCustomer {
   phone: string | null;
 }
 
+function toStoreCustomer(row: StoreCustomer): StoreCustomer {
+  return { id: row.id, name: row.name, email: row.email, phone: row.phone };
+}
+
 // The re-read after a unique violation needs its own transaction: Postgres aborts the failed one (25P02).
 export async function findOrCreateCustomer(
   storeId: string,
@@ -20,12 +24,15 @@ export async function findOrCreateCustomer(
   });
 
   if (existing) {
-    return {
-      id: existing.id,
-      name: existing.name,
-      email: existing.email,
-      phone: existing.phone,
-    };
+    // A magic-link sign-up starts with an empty name; fill it once the account has one.
+    if (!existing.name.trim() && user.name.trim()) {
+      const named = await db.customer.update({
+        where: { id: existing.id },
+        data: { name: user.name.trim() },
+      });
+      return toStoreCustomer(named);
+    }
+    return toStoreCustomer(existing);
   }
 
   try {
@@ -38,13 +45,7 @@ export async function findOrCreateCustomer(
         phone: null,
       },
     });
-
-    return {
-      id: created.id,
-      name: created.name,
-      email: created.email,
-      phone: created.phone,
-    };
+    return toStoreCustomer(created);
   } catch (e) {
     if (
       e instanceof Prisma.PrismaClientKnownRequestError &&
@@ -53,14 +54,7 @@ export async function findOrCreateCustomer(
       const raced = await db.customer.findFirst({
         where: { userId: user.id },
       });
-      if (raced) {
-        return {
-          id: raced.id,
-          name: raced.name,
-          email: raced.email,
-          phone: raced.phone,
-        };
-      }
+      if (raced) return toStoreCustomer(raced);
     }
     throw e;
   }

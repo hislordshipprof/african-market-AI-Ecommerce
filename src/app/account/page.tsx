@@ -1,8 +1,6 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { getFlowContext } from "@/lib/customer-flow/server";
-import { syncCustomerForRequest } from "@/lib/customer-sync";
-import { auth } from "@/lib/auth";
+import { getRequestSession, syncCustomerForRequest } from "@/lib/customer-sync";
 import { loadAccountBook } from "@/lib/customer-account/checkout-profile";
 import { listAccountOrders } from "@/lib/customer-account/order-history";
 import { accountOrderRow } from "@/lib/customer-account/order-history-view";
@@ -15,11 +13,10 @@ export default async function AccountPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const params = await searchParams;
-  const headerList = await headers();
   const [{ store, settings, catalog, enabled }, customer, session] = await Promise.all([
     getFlowContext(),
     syncCustomerForRequest(),
-    auth.api.getSession({ headers: headerList, query: { disableCookieCache: true } }),
+    getRequestSession(),
   ]);
   // After the sync: the history must include orders the sync just claimed.
   const [accountBook, accountOrders] = customer

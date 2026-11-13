@@ -59,6 +59,19 @@ function readId(value: unknown): { ok: true; id: string } | { ok: false; error: 
   return { ok: true, id: parsed.data };
 }
 
+/** The account name. A magic-link sign-up starts without one. */
+export async function saveNameAction(name: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  try {
+    await requireUserId();
+    const parsed = parseInput(z.string().trim().min(1).max(80), name);
+    if (!parsed.ok) return { ok: false, error: "Enter your name, up to 80 characters." };
+    await auth.api.updateUser({ headers: await headers(), body: { name: parsed.data } });
+    return { ok: true, name: parsed.data };
+  } catch (error) {
+    return failed(error);
+  }
+}
+
 export async function savePhoneAction(phone: string): Promise<{ ok: true; phone: string | null } | { ok: false; error: string }> {
   try {
     const userId = await requireUserId();
