@@ -26,7 +26,11 @@ const confirmSchema = z.strictObject({
 export async function submitVoiceReport(input: unknown): Promise<CreateReportResult> {
   const session = await requireStoreMember();
   const parsed = parseInput(voiceSchema, input);
-  if (!parsed.ok) return { ok: false, code: "invalid_request", message: REPORT_TOO_LONG };
+  if (!parsed.ok) {
+    const transcript = (input as { transcript?: unknown } | null)?.transcript;
+    const tooLong = typeof transcript === "string" && transcript.length > MESSAGE_MAX;
+    return { ok: false, code: "invalid_request", message: tooLong ? REPORT_TOO_LONG : FIXED_ERROR };
+  }
   try {
     return await createOwnerReport(session.store.id, { id: session.user.id, email: session.user.email }, {
       type: "voice",

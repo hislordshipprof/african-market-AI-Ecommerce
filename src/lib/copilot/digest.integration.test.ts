@@ -2,9 +2,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
-import { clearTestSentEmails, getTestSentEmails } from "../email/send";
+import { clearTestSentEmails, getTestSentEmails, setEmailSenderForTests, TestSender } from "../email/send";
 import { makeFakeStep } from "../inngest/fake-step";
-import { copilotDailyDigest } from "./digest";
+import { isRlsRejection } from "../listing/cross-store-write";
+import { copilotDailyDigest, localClock } from "./digest";
 
 type Handler = (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<unknown>;
 const digestHandler = (copilotDailyDigest as unknown as { fn: Handler }).fn;
@@ -87,6 +88,7 @@ describe.skipIf(!hasDb)("copilot daily digest (lane database)", () => {
   });
 
   afterEach(() => {
+    setEmailSenderForTests(null);
     vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -99,13 +101,15 @@ describe.skipIf(!hasDb)("copilot daily digest (lane database)", () => {
   const digestRows = (storeId: string) => storeScopedTransaction(storeId, (tx) => tx.copilotDigest.count());
   const sentTo = (userId: string) => getTestSentEmails().filter((email) => email.to === `${userId}@example.com`);
 
-  it("at 20:00 Chicago one email goes to each owner of the 20:00 store with only its data; the 21:00 store gets nothing", async () => {
+  it("at 20:00 Chicago one email goes to each owner of the 20:00 store with only its data, once across two runs; the 21:00 store gets nothing", async () => {
     vi.stubEnv("RESEND_API_KEY", "re_test");
+    await digestHandler({ step: makeFakeStep() });
     await digestHandler({ step: makeFakeStep() });
 
     for (const owner of owners) expect(sentTo(owner)).toHaveLength(1);
     expect(sentTo(staffA)).toHaveLength(0);
     expect(sentTo(ownerB)).toHaveLength(0);
+    expect(await digestRows(storeAId)).toBe(1);
 
     const html = sentTo(owners[0]!)[0]!.html;
     expect(html).toContain("Puna Yam is running low");
@@ -118,12 +122,52 @@ describe.skipIf(!hasDb)("copilot daily digest (lane database)", () => {
     expect(html).not.toContain("Store B Plantain");
   });
 
-  it("running the same hour again sends no second email", async () => {
+  it("a store whose second owner's send fails is retried in the same run, and the data changing in between causes no 409", async () => {
     vi.stubEnv("RESEND_API_KEY", "re_test");
-    await digestHandler({ step: makeFakeStep() });
+    const storeCId = (await raw.store.create({
+      data: { slug: `digest-c-${RUN}`, name: "Digest C", timezone: "America/Chicago", digestHour: 20 },
+    })).id;
+    const ownersC = [`digest-ownerc1-${RUN}`, `digest-ownerc2-${RUN}`];
+    await raw.user.createMany({ data: ownersC.map((id) => ({ id, name: id, email: `${id}@example.com` })) });
+    await storeScoped(storeCId).storeMembership.createMany({
+      data: ownersC.map((userId) => ({ storeId: storeCId, userId, role: "owner" })),
+    });
+    const fufu = (await storeScoped(storeCId).listing.create({
+      data: { storeId: storeCId, customName: "Fufu Flour", price: 600, stockMode: "counted", qty: 0, confidence: 1 },
+    })).id;
+    const real = new TestSender();
+    let failedOnce = false;
+    setEmailSenderForTests({
+      async send(message) {
+        if (message.to === `${ownersC[1]}@example.com` && !failedOnce) {
+          failedOnce = true;
+          await storeScoped(storeCId).copilotAlert.create({
+            data: { storeId: storeCId, kind: "sold_out", listingId: fufu, dedupeKey: `sold_out:${fufu}` },
+          });
+          throw new Error("Resend API error 503");
+        }
+        return real.send(message);
+      },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
     await digestHandler({ step: makeFakeStep() });
 
-    for (const owner of owners) expect(sentTo(owner)).toHaveLength(0);
+    expect(failedOnce).toBe(true);
+    for (const owner of ownersC) expect(sentTo(owner)).toHaveLength(1);
+    expect(sentTo(ownersC[1]!)[0]!.html).toBe(sentTo(ownersC[0]!)[0]!.html);
+  });
+
+  it("copilot_digests: storeScoped(B) reads none of A's digest rows, cannot insert one for A, and updates nothing", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    await digestHandler({ step: makeFakeStep() });
+
+    expect(await storeScopedTransaction(storeBId, (tx) => tx.copilotDigest.findMany())).toEqual([]);
+    await expect(storeScopedTransaction(storeBId, (tx) =>
+      tx.copilotDigest.create({ data: { storeId: storeAId, localDate: "2026-11-12", html: "x" } }),
+    )).rejects.toSatisfy(isRlsRejection);
+    expect((await storeScopedTransaction(storeBId, (tx) =>
+      tx.copilotDigest.updateMany({ where: { storeId: storeAId }, data: { html: "tampered" } }))).count).toBe(0);
     expect(await digestRows(storeAId)).toBe(1);
   });
 
@@ -137,5 +181,12 @@ describe.skipIf(!hasDb)("copilot daily digest (lane database)", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(getTestSentEmails()).toHaveLength(0);
     expect(await digestRows(storeBId)).toBe(0);
+  });
+});
+
+describe("localClock", () => {
+  it("starts the day at local midnight on DST-change days", () => {
+    expect(localClock("America/Chicago", new Date("2026-03-09T01:00:00Z")).dayStart.toISOString()).toBe("2026-03-08T06:00:00.000Z");
+    expect(localClock("America/Chicago", new Date("2026-11-02T02:00:00Z")).dayStart.toISOString()).toBe("2026-11-01T05:00:00.000Z");
   });
 });

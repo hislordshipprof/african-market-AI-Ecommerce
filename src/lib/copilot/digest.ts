@@ -2,6 +2,7 @@ import { resolveAuthBaseUrl } from "../auth";
 import { platform, platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { sendEmail } from "../email/send";
 import { inngest } from "../inngest/client";
+import { escapeHtml } from "../notifications/messages";
 import { isValidTimezone } from "../order/store-hours";
 import { stockBadge, type StockBadge } from "../storefront/stock-badge";
 import { describeAlerts, type AlertKind, type AlertView } from "./alerts";
@@ -22,7 +23,7 @@ interface LocalClock {
 
 /** The store's wall clock at `now`, and the instant its local day began. */
 export function localClock(timeZone: string, now: Date): LocalClock {
-  const parts = new Intl.DateTimeFormat("en-US", {
+  const format = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
     month: "numeric",
@@ -31,20 +32,31 @@ export function localClock(timeZone: string, now: Date): LocalClock {
     minute: "numeric",
     second: "numeric",
     hourCycle: "h23",
-  }).formatToParts(now);
-  const get = (type: Intl.DateTimeFormatPartTypes) => parseInt(parts.find((p) => p.type === type)?.value ?? "0", 10);
-  const [year, month, day, hour] = [get("year"), get("month"), get("day"), get("hour") % 24];
-  const offset = Date.UTC(year, month - 1, day, hour, get("minute"), get("second")) - Math.floor(now.getTime() / 1000) * 1000;
+  });
+  const wall = (at: Date) => {
+    const parts = format.formatToParts(at);
+    const get = (type: Intl.DateTimeFormatPartTypes) => parseInt(parts.find((p) => p.type === type)?.value ?? "0", 10);
+    return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour") % 24, minute: get("minute"), second: get("second") };
+  };
+  const offsetAt = (at: Date) => {
+    const w = wall(at);
+    return Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second) - Math.floor(at.getTime() / 1000) * 1000;
+  };
+  const { year, month, day, hour } = wall(now);
+  const midnight = Date.UTC(year, month - 1, day);
+  // The offset at local midnight, not at `now`, so a DST change earlier today does not shift the day by an hour.
+  const dayStart = new Date(midnight - offsetAt(new Date(midnight - offsetAt(now))));
   return {
     hour,
     date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-    dayStart: new Date(Date.UTC(year, month - 1, day) - offset),
+    dayStart,
   };
 }
 
 interface DigestData {
   alertsByKind: Map<AlertKind, AlertView[]>;
   confirmRequests: AlertView[];
+  openConfirmRequests: number;
   bands: Record<StockBadge, number>;
   ordersToday: number;
   bestSellers: Array<{ name: string; units: number }>;
@@ -53,7 +65,7 @@ interface DigestData {
 async function readDigest(storeId: string, since: Date): Promise<DigestData> {
   const scoped = storeScoped(storeId);
   const alertSelect = { id: true, kind: true, listingId: true, orderId: true, createdAt: true } as const;
-  const [todayAlerts, confirms, listings, ordersToday, sales] = await Promise.all([
+  const [todayAlerts, confirms, openConfirmRequests, listings, ordersToday, sales] = await Promise.all([
     scoped.copilotAlert.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: "asc" }, select: alertSelect }),
     scoped.copilotAlert.findMany({
       where: { kind: "confirm_request", state: "open" },
@@ -61,6 +73,7 @@ async function readDigest(storeId: string, since: Date): Promise<DigestData> {
       take: CONFIRM_REQUESTS_SHOWN,
       select: alertSelect,
     }),
+    scoped.copilotAlert.count({ where: { kind: "confirm_request", state: "open" } }),
     scoped.listing.findMany({ where: { active: true }, select: { confidence: true, stockMode: true, qty: true, status: true } }),
     scoped.order.count({ where: { createdAt: { gte: since } } }),
     scoped.stockEvent.groupBy({
@@ -87,6 +100,7 @@ async function readDigest(storeId: string, since: Date): Promise<DigestData> {
   return {
     alertsByKind,
     confirmRequests: await describeAlerts(storeId, confirms),
+    openConfirmRequests,
     bands,
     ordersToday,
     bestSellers: sales
@@ -102,10 +116,6 @@ const KIND_HEADINGS: Record<AlertKind, string> = {
   confirm_request: "Stock checks asked",
 };
 
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-}
-
 function list(items: string[], empty: string): string {
   if (items.length === 0) return `<p>${empty}</p>`;
   return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
@@ -120,6 +130,9 @@ function renderDigest(storeName: string, date: string, data: DigestData, copilot
     alerts || "<p>No alerts today.</p>",
     `<h2>Stock checks waiting for you</h2>`,
     list(data.confirmRequests.map((v) => v.text), "None."),
+    data.openConfirmRequests > data.confirmRequests.length
+      ? `<p>And ${data.openConfirmRequests - data.confirmRequests.length} more in the stock copilot.</p>`
+      : "",
     `<h2>Listings</h2>`,
     `<p>In stock: ${data.bands["in-stock"]}. Limited: ${data.bands.limited}. Ask store: ${data.bands["ask-store"]}.</p>`,
     `<h2>Sales</h2>`,
@@ -130,8 +143,9 @@ function renderDigest(storeName: string, date: string, data: DigestData, copilot
 }
 
 /**
- * Claims the store's day, then emails each owner. A failure releases the claim so a
- * retry sends; a claim already held means the day went out. Returns whether it sent.
+ * Claims the store's day with the rendered email, then emails each owner and marks it sent.
+ * A failure or a crash leaves the claim unsent, so a retry resends the same body under the
+ * same idempotency keys: owners already sent are replayed by Resend, not emailed twice.
  */
 async function sendStoreDigest(
   store: { id: string; name: string; slug: string },
@@ -144,27 +158,29 @@ async function sendStoreDigest(
   });
   if (owners.length === 0) return false;
 
-  const data = await readDigest(store.id, clock.dayStart);
-  const claimed = await storeScopedTransaction(store.id, (tx) =>
-    tx.copilotDigest.createMany({ data: [{ storeId: store.id, localDate: clock.date }], skipDuplicates: true }));
-  if (claimed.count === 0) return false;
-
-  const base = resolveAuthBaseUrl(env).replace(/\/$/, "");
-  const html = renderDigest(store.name, clock.date, data, `${base}/store-admin/copilot?store=${encodeURIComponent(store.slug)}`);
-  try {
-    for (const owner of owners) {
-      await sendEmail({
-        to: owner.user.email,
-        subject: `${store.name}: daily stock digest`,
-        html,
-        idempotencyKey: `copilot-digest:${store.id}:${clock.date}:${owner.user.email}`,
-      });
-    }
-  } catch (err) {
+  const day = { storeId_localDate: { storeId: store.id, localDate: clock.date } };
+  const readClaim = () => storeScopedTransaction(store.id, (tx) =>
+    tx.copilotDigest.findUnique({ where: day, select: { html: true, sentAt: true } }));
+  let claim = await readClaim();
+  if (!claim) {
+    const data = await readDigest(store.id, clock.dayStart);
+    const base = resolveAuthBaseUrl(env).replace(/\/$/, "");
+    const html = renderDigest(store.name, clock.date, data, `${base}/store-admin/copilot?store=${encodeURIComponent(store.slug)}`);
     await storeScopedTransaction(store.id, (tx) =>
-      tx.copilotDigest.deleteMany({ where: { storeId: store.id, localDate: clock.date } }));
-    throw err;
+      tx.copilotDigest.createMany({ data: [{ storeId: store.id, localDate: clock.date, html }], skipDuplicates: true }));
+    claim = await readClaim();
   }
+  if (!claim || claim.sentAt) return false;
+
+  for (const owner of owners) {
+    await sendEmail({
+      to: owner.user.email,
+      subject: `${store.name}: daily stock digest`,
+      html: claim.html,
+      idempotencyKey: `copilot-digest:${store.id}:${clock.date}:${owner.user.email}`,
+    });
+  }
+  await storeScopedTransaction(store.id, (tx) => tx.copilotDigest.update({ where: day, data: { sentAt: new Date() } }));
   return true;
 }
 
@@ -173,29 +189,18 @@ export interface DigestPageResult {
   nextCursor: string | null;
   due: number;
   sent: number;
-  failed: number;
+  /** Retried in the run's last step, so one failing store never blocks the pages after it. */
+  failedStoreIds: string[];
 }
 
-/**
- * One step of the hourly run: up to 100 stores, sending to those whose local hour is
- * their digest hour. A failed store is logged; a page where every due store failed
- * throws so Inngest retries it.
- */
-export async function runDigestPage(
-  cursor: string | null,
-  nowIso: string,
-  env: Record<string, string | undefined> = process.env,
-): Promise<DigestPageResult> {
-  const now = new Date(nowIso);
-  const stores = await platform.store.findMany({
-    where: { ...(cursor ? { id: { gt: cursor } } : {}), status: { not: "suspended" } },
-    orderBy: { id: "asc" },
-    select: { id: true, name: true, slug: true, timezone: true, digestHour: true },
-    take: STORES_PER_PAGE,
-  });
+type DigestStore = { id: string; name: string; slug: string; timezone: string; digestHour: number };
+const STORE_SELECT = { id: true, name: true, slug: true, timezone: true, digestHour: true } as const;
+
+/** Sends to the stores whose local hour is their digest hour. A failed store is logged and returned. */
+async function sendDueDigests(stores: DigestStore[], now: Date, env: Record<string, string | undefined>) {
   let due = 0;
   let sent = 0;
-  let failed = 0;
+  const failedStoreIds: string[] = [];
   for (const store of stores) {
     const clock = localClock(isValidTimezone(store.timezone) ? store.timezone : "UTC", now);
     if (clock.hour !== store.digestHour) continue;
@@ -203,7 +208,7 @@ export async function runDigestPage(
     try {
       if (await sendStoreDigest(store, clock, env)) sent += 1;
     } catch (err) {
-      failed += 1;
+      failedStoreIds.push(store.id);
       console.error(JSON.stringify({
         event: "copilot_digest_store_failed",
         storeId: store.id,
@@ -211,9 +216,35 @@ export async function runDigestPage(
       }));
     }
   }
-  if (due > 0 && failed === due) throw new Error(`Copilot digest failed for all ${due} due stores in this page`);
+  return { due, sent, failedStoreIds };
+}
+
+/** One step of the hourly run: up to 100 stores. */
+export async function runDigestPage(
+  cursor: string | null,
+  nowIso: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<DigestPageResult> {
+  const stores = await platform.store.findMany({
+    where: { ...(cursor ? { id: { gt: cursor } } : {}), status: { not: "suspended" } },
+    orderBy: { id: "asc" },
+    select: STORE_SELECT,
+    take: STORES_PER_PAGE,
+  });
+  const result = await sendDueDigests(stores, new Date(nowIso), env);
   const last = stores.at(-1)?.id ?? null;
-  return { nextCursor: stores.length < STORES_PER_PAGE ? null : last, due, sent, failed };
+  return { nextCursor: stores.length < STORES_PER_PAGE ? null : last, ...result };
+}
+
+/** The run's last step: sends again to the stores that failed, and throws while any still fails so Inngest retries it. */
+export async function retryFailedDigests(
+  storeIds: string[],
+  nowIso: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<void> {
+  const stores = await platform.store.findMany({ where: { id: { in: storeIds } }, select: STORE_SELECT });
+  const { failedStoreIds } = await sendDueDigests(stores, new Date(nowIso), env);
+  if (failedStoreIds.length > 0) throw new Error(`Copilot digest still failing for ${failedStoreIds.length} stores`);
 }
 
 export async function loadDigestHour(storeId: string): Promise<number> {
@@ -259,12 +290,17 @@ export const copilotDailyDigest = inngest.createFunction(
     const nowIso = await step.run("clock", async () => new Date().toISOString());
     let cursor: string | null = null;
     let page = 0;
+    const failedStoreIds: string[] = [];
     while (true) {
       const previous: string | null = cursor;
       const result: DigestPageResult = await step.run(`digest-page-${page}`, () => runDigestPage(previous, nowIso));
+      failedStoreIds.push(...result.failedStoreIds);
       if (result.nextCursor === null) break;
       cursor = result.nextCursor;
       page += 1;
+    }
+    if (failedStoreIds.length > 0) {
+      await step.run("digest-retry-failed", () => retryFailedDigests(failedStoreIds, nowIso));
     }
   },
 );

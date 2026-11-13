@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authPrisma, storeScoped } from "../db";
 import { setSpendClock } from "../assistant/spend";
+import sharp from "sharp";
+import { extractReportItems } from "./owner-report";
 import { sendCopilotTurn } from "./turn";
 
 const DAY = "2099-11-08";
@@ -111,4 +113,16 @@ describe.skipIf(!live)("copilot live sandbox", () => {
     const after = await dayCost();
     expect(after - before).toBeLessThan(BigInt(50_000));
   }, 120_000);
+
+  it("live vision reads an invoice photo into named lines with whole quantities", async () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240"><rect width="100%" height="100%" fill="white"/>
+      <text x="24" y="60" font-family="Arial" font-size="32">INVOICE - Lagos Foods Supply</text>
+      <text x="24" y="130" font-family="Arial" font-size="30">Egusi 5kg x 4</text>
+      <text x="24" y="190" font-family="Arial" font-size="30">Palm Oil 1L x 6</text></svg>`;
+    const image = await sharp(Buffer.from(svg)).jpeg().toBuffer();
+    const { items } = await extractReportItems({ type: "invoice_photo", image });
+    const byName = (word: string) => items.find((item) => item.name.toLowerCase().includes(word));
+    expect(byName("egusi")?.quantity, JSON.stringify(items)).toBe(4);
+    expect(byName("palm")?.quantity, JSON.stringify(items)).toBe(6);
+  }, 60_000);
 });

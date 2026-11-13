@@ -6,7 +6,10 @@ vi.hoisted(() => {
 
 const { headerState, fakeState, bucket } = vi.hoisted(() => ({
   headerState: new Headers(),
-  fakeState: { fetch: (async () => new Response("unscripted", { status: 500 })) as typeof fetch },
+  fakeState: {
+    fetch: (async () => new Response("unscripted", { status: 500 })) as typeof fetch,
+    onPut: null as null | (() => Promise<void>),
+  },
   bucket: new Map<string, { bucket: string; contentType: string }>(),
 }));
 
@@ -35,16 +38,25 @@ vi.mock("@aws-sdk/client-s3", () => {
   class GetObjectCommand {
     constructor(readonly input: { Key: string }) {}
   }
+  class DeleteObjectCommand {
+    constructor(readonly input: { Bucket: string; Key: string }) {}
+  }
   class S3Client {
-    async send(command: PutObjectCommand | GetObjectCommand) {
+    async send(command: PutObjectCommand | GetObjectCommand | DeleteObjectCommand) {
       if (command instanceof PutObjectCommand) {
         bucket.set(command.input.Key, { bucket: command.input.Bucket, contentType: command.input.ContentType });
+        await fakeState.onPut?.();
+        return {};
+      }
+      if (command instanceof DeleteObjectCommand) {
+        if (bucket.get(command.input.Key)?.bucket !== command.input.Bucket) throw new Error("NoSuchKey");
+        bucket.delete(command.input.Key);
         return {};
       }
       throw new Error("NoSuchKey");
     }
   }
-  return { S3Client, PutObjectCommand, GetObjectCommand };
+  return { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand };
 });
 
 import sharp from "sharp";
@@ -249,6 +261,67 @@ describe.skipIf(!hasDb)("owner reports (real auth, lane database)", () => {
     expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: ids.gari } })).qty).toBe(15);
     expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: ids.egusi } })).qty).toBe(egusiBefore);
     expect(await storeScoped(storeAId).stockEvent.count()).toBe(events + 1);
+    const rejected = await storeScoped(storeAId).auditLog.findMany({ where: { action: "owner_report.reject", entityId: sent.report.id } });
+    expect(rejected.map((row) => (row.after as { itemIds: string[] }).itemIds)).toEqual([[egusi!.id]]);
+  });
+
+  it("a photo whose report cannot be stored after the upload leaves no object in storage", async () => {
+    extraction([{ name: "Gone Yam", quantity: 3 }]);
+    const gone = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Gone Yam", price: 500, stockMode: "counted", qty: 1 },
+    })).id;
+    fakeState.onPut = async () => {
+      await storeScoped(storeAId).listing.delete({ where: { id: gone } });
+    };
+    const jpeg = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#ddd" } }).jpeg().toBuffer();
+    const form = new FormData();
+    form.set("type", "shelf_photo");
+    form.set("photo", new File([new Uint8Array(jpeg)], "shelf.jpg", { type: "image/jpeg" }));
+    const keysBefore = bucket.size;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await submitPhotoReport(form)).toMatchObject({ ok: false, code: "copilot_unavailable" });
+    } finally {
+      fakeState.onPut = null;
+      vi.restoreAllMocks();
+    }
+    expect(bucket.size).toBe(keysBefore);
+  });
+
+  it("a ticked line that no longer fits stays pending with a notice, and can be confirmed once it fits", async () => {
+    const yam = (await storeScoped(storeAId).listing.create({
+      data: { storeId: storeAId, customName: "Water Yam", price: 500, stockMode: "counted", qty: 1 },
+    })).id;
+    extraction([{ name: "egusi", quantity: 1 }, { name: "water yam", quantity: 2 }, { name: "gari", quantity: 1 }]);
+    const sent = await submitVoiceReport({ transcript: "one egusi, two water yam and one gari" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    const [egusi, waterYam, gari] = sent.report.items;
+    expect(waterYam!.listingId).toBe(yam);
+    await storeScoped(storeAId).listing.update({ where: { id: yam }, data: { active: false } });
+
+    const first = await confirmOwnerReportItems({ reportId: sent.report.id, itemIds: [egusi!.id, waterYam!.id] });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.notChanged).toBe(1);
+    expect(first.report.status).toBe("pending");
+    expect(first.report.items.map((item) => item.status)).toEqual(["confirmed", "pending", "rejected"]);
+    expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: yam } })).qty).toBe(1);
+
+    await storeScoped(storeAId).listing.update({ where: { id: yam }, data: { active: true } });
+    const second = await confirmOwnerReportItems({ reportId: sent.report.id, itemIds: [waterYam!.id] });
+    expect(second.ok && [second.report.status, second.notChanged]).toEqual(["partial", 0]);
+    expect((await storeScoped(storeAId).listing.findUniqueOrThrow({ where: { id: yam } })).qty).toBe(3);
+    expect(await storeScoped(storeAId).auditLog.count({ where: { action: "owner_report.confirm", entityId: sent.report.id } })).toBe(2);
+    expect(gari!.listingId).toBe(ids.gari);
+  });
+
+  it("the same report sent twice at once makes one pending report", async () => {
+    extraction([{ name: "palm oil", quantity: 4 }]);
+    const transcript = `four palm oil ${RUN}`;
+    const [a, b] = await Promise.all([submitVoiceReport({ transcript }), submitVoiceReport({ transcript })]);
+    expect(a.ok && b.ok && a.report.id === b.report.id).toBe(true);
+    expect(await storeScoped(storeAId).ownerReport.count({ where: { rawTranscript: transcript } })).toBe(1);
   });
 
   it("a report not settled in the same page view comes back as pending, newest first, until dismissed", async () => {

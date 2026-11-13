@@ -646,11 +646,14 @@ model CopilotAlert {
   @@map("copilot_alerts")
 }
 
-/// One per store per local day, claimed before the digest email goes out.
+/// One per store per local day, claimed before the digest email goes out; sent_at is set once every owner has it.
 model CopilotDigest {
   id        String   @id @default(cuid())
   storeId   String   @map("store_id")
   localDate String   @map("local_date")
+  /// Rendered once at claim time, so a retry resends the same body under the same Resend idempotency key.
+  html      String
+  sentAt    DateTime? @map("sent_at")
   createdAt DateTime @default(now()) @map("created_at")
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
@@ -670,6 +673,8 @@ model OwnerReport {
   status        String    @default("pending")
   rawTranscript String?   @map("raw_transcript")
   imageKey      String?   @map("image_key")
+  /// sha256 of the type and the transcript or photo bytes; one pending report per store per hash (partial unique index in SQL).
+  sourceHash    String?   @map("source_hash")
   aiExtraction  Json      @map("ai_extraction")
   decidedById   String?   @map("decided_by_id")
   decidedAt     DateTime? @map("decided_at")
