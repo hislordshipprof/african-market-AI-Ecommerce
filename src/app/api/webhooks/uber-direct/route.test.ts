@@ -74,12 +74,18 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/uber-direct", () 
     await raw.$disconnect();
   });
 
+  it("a courier assignment moves the delivery to courier_assigned, so the failover timer cannot claim it", async () => {
+    const body = event("pickup");
+    expect((await post(body, sign(body))).status).toBe(200);
+    expect((await storeScoped(storeId).delivery.findUniqueOrThrow({ where: { id: deliveryId } })).status).toBe("courier_assigned");
+  });
+
   it("records a signed delivery status event once, however often Uber retries it", async () => {
     const body = event("pickup_complete");
     expect((await post(body, sign(body))).status).toBe(200);
     expect((await post(body, sign(body))).status).toBe(200);
 
-    const rows = await storeScoped(storeId).deliveryEvent.findMany({ where: { deliveryId } });
+    const rows = await storeScoped(storeId).deliveryEvent.findMany({ where: { deliveryId, type: "picked_up" } });
     expect(rows).toMatchObject([{ storeId, deliveryId, type: "picked_up", externalEventId: `evt_pickup_complete_${externalId}` }]);
   });
 
