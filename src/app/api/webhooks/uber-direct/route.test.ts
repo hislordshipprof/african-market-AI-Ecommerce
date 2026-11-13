@@ -89,6 +89,12 @@ describe.skipIf(!process.env.DATABASE_URL)("POST /api/webhooks/uber-direct", () 
     expect(rows).toMatchObject([{ storeId, deliveryId, type: "picked_up", externalEventId: `evt_pickup_complete_${externalId}` }]);
   });
 
+  it("an older status that arrives late does not move the delivery back", async () => {
+    const late = event("pickup", `evt_late_pickup_${externalId}`);
+    expect((await post(late, sign(late))).status).toBe(200);
+    expect((await storeScoped(storeId).delivery.findUniqueOrThrow({ where: { id: deliveryId } })).status).toBe("picked_up");
+  });
+
   it("rejects a missing or wrong signature with 401 and a malformed signed body with 400, recording nothing", async () => {
     const body = event("delivered");
     expect((await post(body)).status).toBe(401);

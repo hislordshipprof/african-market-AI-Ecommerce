@@ -5,7 +5,7 @@ import type { OrderNotifyEvent } from "../notifications/record";
 
 const SEND_TIMEOUT_MS = 10_000;
 
-function sendWithTimeout(payload: Parameters<typeof inngest.send>[0]): Promise<void> {
+export function sendWithTimeout(payload: Parameters<typeof inngest.send>[0]): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error("inngest send timed out")), SEND_TIMEOUT_MS);
@@ -27,7 +27,7 @@ function sendWithTimeout(payload: Parameters<typeof inngest.send>[0]): Promise<v
  * Schedules nothing when the event key is missing. In tests, without a key,
  * it returns before any network call. A failure never throws to the caller.
  */
-function sendSkipped(): boolean {
+export function sendSkipped(): boolean {
   if (blockInngestSend()) return true;
   const env = process.env;
   return !env.INNGEST_EVENT_KEY && !devServerWithoutKey(env) && (env.NODE_ENV === "test" || env.CI === "true");
