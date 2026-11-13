@@ -89,9 +89,27 @@ export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps
       return { ok: true, deliveryId: delivery.id, provider: provider.name, courierProvider: courierBrand(provider.name), quoteFeeCents: fresh.feeCents };
     } catch (err) {
       logUnavailable(input.orderId, provider.name, "create", err);
+      await deps.emit({
+        name: COURIER_FAILOVER_TRIGGERED,
+        data: { storeId: input.storeId, orderId: input.orderId, fromProvider: provider.name, reason: "create_failed" },
+      });
     }
   }
+  await emitBothFailed(input.storeId, input.orderId, deps.emit);
   return { ok: false, reason: "both_failed" };
+}
+
+/** Asks the store to deliver itself or convert to pickup, and offers the customer what this store can do. */
+async function emitBothFailed(storeId: string, orderId: string, emit: DispatchDeps["emit"]): Promise<void> {
+  const order = await storeScoped(storeId).order.findUniqueOrThrow({
+    where: { id: orderId },
+    select: { number: true, store: { select: { storeDeliveryEnabled: true, pickupEnabled: true } } },
+  });
+  const options: Array<"store-delivery" | "pickup" | "cancel"> = [];
+  if (order.store.storeDeliveryEnabled) options.push("store-delivery");
+  if (order.store.pickupEnabled) options.push("pickup");
+  options.push("cancel");
+  await emit({ name: COURIER_BOTH_FAILED, data: { storeId, orderId, orderNumber: order.number, options } });
 }
 
 function logUnavailable(orderId: string, provider: DeliveryProviderName, stage: "quote" | "create", err: unknown) {
