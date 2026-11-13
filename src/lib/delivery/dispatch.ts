@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { storeScoped } from "../db";
-import type { DeliveryProvider, DeliveryProviderName, DeliveryQuote, DeliveryRequest } from "./provider";
+import type { CreatedDelivery, DeliveryProvider, DeliveryProviderName, DeliveryQuote, DeliveryRequest } from "./provider";
 
 /** Spec §9, §11.2: no courier assigned this long after the delivery was created → switch provider. */
 export const COURIER_ASSIGNMENT_TIMEOUT_MS = 600_000;
@@ -33,15 +34,17 @@ export interface DispatchInput {
   storeId: string;
   orderId: string;
   request: Omit<DeliveryRequest, "externalDeliveryId">;
+  /** The store's registration with each provider. One provider's ids never go to the other. */
+  registrations?: Partial<Record<DeliveryProviderName, Pick<DeliveryRequest["pickup"], "providerBusinessId" | "providerStoreId">>>;
 }
 
 export type DispatchResult =
   | { ok: true; deliveryId: string; provider: DeliveryProviderName; courierProvider: CourierBrand; quoteFeeCents: number }
   | { ok: false; reason: "both_failed" };
 
-/** One id per order and provider: failover never returns to a provider the order already used. */
+/** A new id for every quote: DoorDash refuses a delivery id it has quoted before (409). */
 function externalDeliveryId(orderId: string, provider: DeliveryProviderName): string {
-  return `${orderId}-${provider}`;
+  return `${orderId}-${provider}-${randomUUID().slice(0, 8)}`;
 }
 
 /**
@@ -50,15 +53,19 @@ function externalDeliveryId(orderId: string, provider: DeliveryProviderName): st
  */
 export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps): Promise<DispatchResult> {
   const now = deps.now ?? (() => new Date());
-  const requestFor = (provider: DeliveryProvider): DeliveryRequest => ({
-    ...input.request,
-    externalDeliveryId: externalDeliveryId(input.orderId, provider.name),
-  });
+  const quoteWith = async (provider: DeliveryProvider) => {
+    const req: DeliveryRequest = {
+      ...input.request,
+      pickup: { ...input.request.pickup, ...input.registrations?.[provider.name] },
+      externalDeliveryId: externalDeliveryId(input.orderId, provider.name),
+    };
+    return { provider, req, quote: await provider.quote(req) };
+  };
 
   const settled = await Promise.all(
     deps.providers.map(async (provider) => {
       try {
-        return { provider, quote: await provider.quote(requestFor(provider)) };
+        return await quoteWith(provider);
       } catch (err) {
         logUnavailable(input.orderId, provider.name, "quote", err);
         return null;
@@ -66,37 +73,55 @@ export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps
     }),
   );
   const candidates = settled
-    .filter((c): c is { provider: DeliveryProvider; quote: DeliveryQuote } => c !== null && c.quote.expiresAt > now())
+    .filter((c): c is { provider: DeliveryProvider; req: DeliveryRequest; quote: DeliveryQuote } => c !== null && c.quote.expiresAt > now())
     .sort((a, b) => a.quote.feeCents - b.quote.feeCents);
 
-  for (const { provider, quote } of candidates) {
-    const req = requestFor(provider);
+  for (const [i, candidate] of candidates.entries()) {
+    const { provider } = candidate;
+    let booked: { quote: DeliveryQuote; created: CreatedDelivery };
     try {
-      const fresh = quote.expiresAt > now() ? quote : await provider.quote(req);
-      const created = await provider.create(fresh.quoteId, req);
-      const delivery = await storeScoped(input.storeId).delivery.create({
-        data: {
-          storeId: input.storeId,
-          orderId: input.orderId,
-          provider: provider.name,
-          externalId: created.externalId,
-          status: "requested",
-          quoteFeeCents: fresh.feeCents,
-          trackingUrl: created.trackingUrl,
-        },
-      });
-      await deps.emit({ name: COURIER_DELIVERY_CREATED, data: { storeId: input.storeId, deliveryId: delivery.id } });
-      return { ok: true, deliveryId: delivery.id, provider: provider.name, courierProvider: courierBrand(provider.name), quoteFeeCents: fresh.feeCents };
+      const { req, quote } = candidate.quote.expiresAt > now() ? candidate : await quoteWith(provider);
+      booked = { quote, created: await provider.create(quote.quoteId, req) };
     } catch (err) {
       logUnavailable(input.orderId, provider.name, "create", err);
-      await deps.emit({
-        name: COURIER_FAILOVER_TRIGGERED,
-        data: { storeId: input.storeId, orderId: input.orderId, fromProvider: provider.name, reason: "create_failed" },
-      });
+      if (i < candidates.length - 1) {
+        await deps.emit({
+          name: COURIER_FAILOVER_TRIGGERED,
+          data: { storeId: input.storeId, orderId: input.orderId, fromProvider: provider.name, reason: "create_failed" },
+        });
+      }
+      continue;
     }
+    const delivery = await recordDelivery(input, provider, booked);
+    await deps.emit({ name: COURIER_DELIVERY_CREATED, data: { storeId: input.storeId, deliveryId: delivery.id } });
+    return { ok: true, deliveryId: delivery.id, provider: provider.name, courierProvider: courierBrand(provider.name), quoteFeeCents: booked.quote.feeCents };
   }
   await emitBothFailed(input.storeId, input.orderId, deps.emit);
   return { ok: false, reason: "both_failed" };
+}
+
+/** A booked courier whose row cannot be written is cancelled with the same provider; no other provider is tried. */
+async function recordDelivery(input: DispatchInput, provider: DeliveryProvider, booked: { quote: DeliveryQuote; created: CreatedDelivery }) {
+  try {
+    return await storeScoped(input.storeId).delivery.create({
+      data: {
+        storeId: input.storeId,
+        orderId: input.orderId,
+        provider: provider.name,
+        externalId: booked.created.externalId,
+        status: "requested",
+        quoteFeeCents: booked.quote.feeCents,
+        trackingUrl: booked.created.trackingUrl,
+      },
+    });
+  } catch (err) {
+    try {
+      await provider.cancel(booked.created.externalId);
+    } catch (cancelErr) {
+      console.error(JSON.stringify({ event: "courier_unrecorded_cancel_failed", orderId: input.orderId, provider: provider.name, externalId: booked.created.externalId, message: cancelErr instanceof Error ? cancelErr.message : "unknown" }));
+    }
+    throw err;
+  }
 }
 
 /** Asks the store to deliver itself or convert to pickup, and offers the customer what this store can do. */
@@ -118,7 +143,7 @@ function logUnavailable(orderId: string, provider: DeliveryProviderName, stage: 
 }
 
 /** The courier request for an order, from the store's address and the order's delivery snapshot. */
-export async function courierRequest(storeId: string, orderId: string): Promise<DispatchInput["request"]> {
+export async function courierRequest(storeId: string, orderId: string): Promise<Pick<DispatchInput, "request" | "registrations">> {
   const order = await storeScoped(storeId).order.findUniqueOrThrow({
     where: { id: orderId },
     select: {
@@ -131,7 +156,7 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
       deliveryState: true,
       deliveryZip: true,
       customer: { select: { name: true, phone: true } },
-      store: { select: { name: true, addressLine1: true, addressLine2: true, city: true, state: true, zip: true, doordashStoreId: true, uberLocationId: true } },
+      store: { select: { name: true, addressLine1: true, addressLine2: true, city: true, state: true, zip: true, doordashStoreId: true } },
     },
   });
   const { store, customer } = order;
@@ -139,11 +164,13 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
   if (!order.deliveryLine1 || !order.deliveryCity || !order.deliveryState || !order.deliveryZip) throw new Error("Order has no delivery address");
   if (!customer.phone) throw new Error("Customer has no phone");
   const [givenName, ...rest] = customer.name.trim().split(/\s+/);
-  return {
+  // DoorDash registers the store with our store id as both business and store id (doordash-registration.ts).
+  // Uber's organization id is not an external_store_id, so Uber gets none.
+  const registrations = store.doordashStoreId ? { doordash: { providerBusinessId: storeId, providerStoreId: store.doordashStoreId } } : {};
+  const request = {
     pickup: {
       businessName: store.name,
       address: { line1: store.addressLine1, line2: store.addressLine2, city: store.city, state: store.state, zip: store.zip },
-      providerStoreId: store.uberLocationId ?? store.doordashStoreId ?? undefined,
     },
     dropoff: {
       address: { line1: order.deliveryLine1, line2: order.deliveryLine2, city: order.deliveryCity, state: order.deliveryState, zip: order.deliveryZip },
@@ -155,6 +182,7 @@ export async function courierRequest(storeId: string, orderId: string): Promise<
     orderValueCents: order.subtotalCents,
     tipCents: order.tipCents,
   };
+  return { request, registrations };
 }
 
 type FailoverStep = {
@@ -209,11 +237,14 @@ export async function runCourierFailover(
   if (!cancelled) return;
 
   await step.run("courier-redispatch", async () => {
-    const fromProvider = delivery.provider as DeliveryProviderName;
-    await deps.emit({ name: COURIER_FAILOVER_TRIGGERED, data: { storeId, orderId: delivery.orderId, fromProvider, reason: "assignment_timeout" } });
-    const used = await storeScoped(storeId).delivery.findMany({ where: { orderId: delivery.orderId }, select: { provider: true } });
+    const used = await storeScoped(storeId).delivery.findMany({ where: { orderId: delivery.orderId }, select: { provider: true, status: true } });
+    // A replay of this step after it booked the alternate must not book again or report a failure.
+    if (used.some((u) => u.status !== "cancelled")) return;
     const alternates = deps.providers.filter((p) => !used.some((u) => u.provider === p.name));
-    const request = await courierRequest(storeId, delivery.orderId);
-    await selectAndDispatch({ storeId, orderId: delivery.orderId, request }, { ...deps, providers: alternates });
+    if (alternates.length > 0) {
+      const fromProvider = delivery.provider as DeliveryProviderName;
+      await deps.emit({ name: COURIER_FAILOVER_TRIGGERED, data: { storeId, orderId: delivery.orderId, fromProvider, reason: "assignment_timeout" } });
+    }
+    await selectAndDispatch({ storeId, orderId: delivery.orderId, ...(await courierRequest(storeId, delivery.orderId)) }, { ...deps, providers: alternates });
   });
 }

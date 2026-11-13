@@ -1,5 +1,5 @@
 import { inngest } from "../inngest/client";
-import { blockInngestSend, devServerWithoutKey } from "../inngest/event-key";
+import { sendSkipped, sendWithTimeout } from "../inngest/notify";
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
 import {
@@ -27,11 +27,9 @@ function eventId(event: CourierEvent): string {
 
 /** A failed send is logged, never thrown: the delivery is already booked or the failover already ran. */
 export async function emitCourierEvent(event: CourierEvent): Promise<void> {
-  if (blockInngestSend()) return;
-  const env = process.env;
-  if (!env.INNGEST_EVENT_KEY && !devServerWithoutKey(env) && (env.NODE_ENV === "test" || env.CI === "true")) return;
+  if (sendSkipped()) return;
   try {
-    await inngest.send({ id: eventId(event), name: event.name, data: event.data });
+    await sendWithTimeout({ id: eventId(event), name: event.name, data: event.data });
   } catch (err) {
     console.error(JSON.stringify({ event: "inngest_send_failed", name: event.name, message: err instanceof Error ? err.message : "send failed" }));
   }
@@ -40,8 +38,7 @@ export async function emitCourierEvent(event: CourierEvent): Promise<void> {
 /** Books a courier for a Ready courier order with the platform's providers. */
 export async function dispatchCourier(storeId: string, orderId: string): Promise<DispatchResult> {
   // Plan gate (#494): courier delivery is Pro only. The check goes here, before any quote; failover does not re-check.
-  const request = await courierRequest(storeId, orderId);
-  return selectAndDispatch({ storeId, orderId, request }, productionDeps());
+  return selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId)) }, productionDeps());
 }
 
 export const courierAssignmentTimeout = inngest.createFunction(
