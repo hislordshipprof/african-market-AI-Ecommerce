@@ -1,4 +1,5 @@
 import { customerStatusLabel } from "../customer-account/order-history-view";
+import { quotedFrom, stripHeaderChars } from "../email/from";
 import { presetPrimary } from "../theme";
 import type { OrderNotifyEvent } from "./record";
 
@@ -56,19 +57,6 @@ export function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function stripHeaderChars(value: string): string {
-  return value.replace(/["\\]/g, "").replace(/[\u0000-\u001F\u007F]/g, "").trim();
-}
-
-/** RFC 5322 quoted display name so a comma or parenthesis is not a second address. */
-export function quotedFrom(storeName: string, fromAddress: string): string {
-  const wrapped = fromAddress.match(/<([^>]+)>/);
-  const address = (wrapped?.[1] ?? fromAddress).trim();
-  const name = stripHeaderChars(storeName);
-  if (!name) return address;
-  return `"${name}" <${address}>`;
 }
 
 export function smsStoreName(name: string): string {

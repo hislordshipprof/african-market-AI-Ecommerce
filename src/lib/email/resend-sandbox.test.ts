@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { magicLinkMessage } from "../magic-link-mail";
-import { quotedFrom } from "../notifications/messages";
+import { quotedFrom } from "./from";
 import { ResendSender } from "./send";
 
 const apiKey = process.env.RESEND_API_KEY;

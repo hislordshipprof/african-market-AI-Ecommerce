@@ -1,5 +1,5 @@
+import { quotedFrom } from "./email/from";
 import type { EmailMessage } from "./email/send";
-import { quotedFrom } from "./notifications/messages";
 
 function escapeHtml(value: string): string {
   return value
