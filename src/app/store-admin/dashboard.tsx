@@ -116,7 +116,7 @@ export function StoreAdminDashboard({
           <div role="status" className="mb-4 flex items-start gap-3 rounded-xl border border-border bg-card p-4">
             <Info className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
             <p className="text-sm text-foreground">
-              You have read-only access. The store&apos;s plan includes 2 staff; ask the owner to upgrade or free a seat.
+              You have read-only access. The store&apos;s plan has no seat left for you; ask the owner to upgrade or free a seat.
             </p>
           </div>
         )}

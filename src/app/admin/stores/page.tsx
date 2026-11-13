@@ -1,21 +1,7 @@
 import Link from "next/link";
 import { listStores } from "@/lib/admin/actions";
 import { SuspendButton } from "./suspend-button";
-import { effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
-
-const BILLING_STATUS: Record<string, string> = {
-  none: "not subscribed",
-  trialing: "trial",
-  active: "active",
-  past_due: "past due",
-  unpaid: "unpaid",
-  canceled: "cancelled",
-  incomplete: "waiting for card",
-};
-
-function billingStatusLabel(status: string): string {
-  return BILLING_STATUS[status] ?? status;
-}
+import { billingStatusLabel, effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
 
 export default async function StoreListPage() {
   const stores = await listStores();

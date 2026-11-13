@@ -272,9 +272,13 @@ export function createFakeBillingProvider() {
       trialEnds.set(subscriptionId, trialEnd);
     },
     async getSubscription(id) {
-      const state = states.get(id);
-      if (!state) throw missing("subscription", id);
-      return state;
+      if (!subscriptions.has(id)) throw missing("subscription", id);
+      const trialEnd = trialEnds.get(id);
+      const state = states.get(id) ?? {
+        id, customerId: "", status: "active", lookupKey: null, storeId: null, trialEnd: null, currentPeriodEnd: null, cancelAtPeriodEnd: false,
+      };
+      if (trialEnd === undefined) return state;
+      return trialEnd === "now" ? { ...state, status: "active", trialEnd: null } : { ...state, status: "trialing", trialEnd };
     },
     async cancelSubscription(id) {
       provider.canceled.add(id);

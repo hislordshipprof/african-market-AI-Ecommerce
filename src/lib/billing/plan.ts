@@ -33,6 +33,23 @@ export const PLAN_PRICES_USD: Record<Plan, number> = { starter: 49, pro: 99 };
 
 export const PLAN_NAMES: Record<Plan, string> = { starter: "Starter", pro: "Pro" };
 
+/** Stripe subscription status as owners and admins read it; "none" is a store that never subscribed. */
+const BILLING_STATUS_LABELS: Record<string, string> = {
+  none: "Not subscribed",
+  trialing: "Free trial",
+  active: "Active",
+  past_due: "Payment failed",
+  unpaid: "Unpaid",
+  canceled: "Cancelled",
+  incomplete: "Waiting for card",
+  incomplete_expired: "Not started",
+  paused: "Paused",
+};
+
+export function billingStatusLabel(status: string): string {
+  return BILLING_STATUS_LABELS[status] ?? status;
+}
+
 /** The plan the plan picker highlights. */
 export const RECOMMENDED_PLAN: Plan = "pro";
 

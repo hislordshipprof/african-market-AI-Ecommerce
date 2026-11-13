@@ -63,7 +63,7 @@ async function warnOwners(storeId: string, chats: number, cap: number, month: st
       sendEmail({
         to: user.email,
         subject: `${store?.name ?? "Your store"}: ${chats.toLocaleString("en-US")} of ${cap.toLocaleString("en-US")} assistant chats used`,
-        html: `<p>Your shoppers have used ${chats.toLocaleString("en-US")} of this month's ${cap.toLocaleString("en-US")} shopping-assistant chats. Past the limit the assistant pauses until next month and shoppers keep buying by browsing. The Pro plan includes 5,000 chats a month.</p>`,
+        html: `<p>Your shoppers have used ${chats.toLocaleString("en-US")} of this month's ${cap.toLocaleString("en-US")} shopping-assistant chats. Past the limit the assistant pauses until next month and shoppers keep buying by browsing. The Pro plan includes ${assistantChatCap("pro").toLocaleString("en-US")} chats a month.</p>`,
         idempotencyKey: `assistant-cap-warning-${storeId}-${month}-${user.email}`,
       }),
     ),

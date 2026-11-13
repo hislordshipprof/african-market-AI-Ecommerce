@@ -203,12 +203,15 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
   it("a pilot store's checkout carries 3 free months, and the offer stops at 5 stores", async () => {
     const fake = createFakeBillingProvider();
     setBillingProvider(fake);
-    const already = await platformAdmin.storeSubscription.count({ where: { pilot: true } });
-    const room = PILOT_STORE_CAP - already;
+    // Pilot places left over in the shared lane DB would make the cap arrive early.
+    await platformAdmin.storeSubscription.updateMany({ where: { pilot: true }, data: { pilot: false } });
+    const room = PILOT_STORE_CAP;
     expect(await setPilot(storeB, true, admin)).toEqual({ ok: true });
-    const now = new Date("2026-11-13T12:00:00Z");
+    const now = new Date();
+    const expected = new Date(now);
+    expected.setUTCMonth(expected.getUTCMonth() + 3);
     await startSubscription({ storeId: storeB, storeName: "Sub B", plan: "starter", owner: admin, returnUrl: "http://localhost/x", now });
-    expect(fake.checkouts.at(-1)?.trialEnd).toBe(Math.floor(Date.parse("2027-02-13T12:00:00Z") / 1000));
+    expect(fake.checkouts.at(-1)?.trialEnd).toBe(Math.floor(expected.getTime() / 1000));
     expect(await platformAdmin.auditLog.count({ where: { storeId: storeB, action: "subscription.pilot_granted" } })).toBe(1);
 
     for (let i = 1; i < room; i++) {
@@ -319,6 +322,44 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     });
     expect((await row(used)).pilot).toBe(true);
     for (const id of [refused, used]) await platformAdmin.storeSubscription.update({ where: { storeId: id }, data: { pilot: false } });
+  });
+
+  it("R2-B1: a created event arriving after a newer update still lets the owner subscribe again after cancelling", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const id = await newStore("reorder");
+    const start = () => startSubscription({ storeId: id, storeName: "Sub reorder", plan: "pro", owner: admin, returnUrl: "http://localhost/x" });
+    expect(await start()).toHaveProperty("url");
+    fake.completeCheckout(fake.checkouts[0].id);
+    const customer = (await row(id)).stripeCustomerId!;
+    const sub = { id: `sub_${run}_reorder`, customer, plan: "pro" as const, storeId: id };
+    const t = Math.floor(Date.now() / 1000);
+    await deliver(subscriptionEvent("customer.subscription.updated", { ...sub, status: "active" }, { created: t + 1 }));
+    await deliver(subscriptionEvent("customer.subscription.created", { ...sub, status: "incomplete" }, { created: t }));
+    await deliver(subscriptionEvent("customer.subscription.deleted", { ...sub, status: "canceled" }, { created: t + 2 }));
+    expect(await start()).toHaveProperty("url");
+  });
+
+  it("R2-B2: removing the pilot before Stripe's trialing webhook lands still ends the free months", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const id = await newStore("race", { status: "active", stripeSubscriptionId: `sub_${run}_race`, stripeCustomerId: `cus_${run}_race` });
+    fake.addSubscription(`sub_${run}_race`);
+    expect(await setPilot(id, true, admin)).toEqual({ ok: true });
+    expect(await setPilot(id, false, admin)).toEqual({ ok: true });
+    expect(fake.trialEndOf(`sub_${run}_race`)).toBe("now");
+  });
+
+  it("R2-N19: an older created event for a second subscription is still cancelled as a duplicate", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const id = await newStore("olddup");
+    const base = { customer: `cus_${run}_olddup`, status: "active", storeId: id };
+    const t = Math.floor(Date.now() / 1000);
+    await deliver(subscriptionEvent("customer.subscription.created", { ...base, id: `sub_${run}_d1`, plan: "starter" }, { created: t }));
+    await deliver(subscriptionEvent("customer.subscription.created", { ...base, id: `sub_${run}_d2`, plan: "pro" }, { created: t - 5 }));
+    expect([...fake.canceled]).toEqual([`sub_${run}_d2`]);
+    expect(await row(id)).toMatchObject({ stripeSubscriptionId: `sub_${run}_d1`, plan: "starter" });
   });
 
   it("N4: the free months show only when Checkout will give them; a grant expires an open Checkout", async () => {

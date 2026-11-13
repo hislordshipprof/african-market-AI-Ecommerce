@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AlertCircle, Check, Lock, MessageCircle, Store } from "lucide-react";
 import { requireStoreOwner } from "@/lib/store-admin/session";
-import { getStoreBilling } from "@/lib/billing/service";
+import { getStoreBilling, PILOT_FREE_MONTHS } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
 import {
   FEATURE_LABELS,
@@ -13,23 +13,12 @@ import {
   planAllows,
   staffLimit,
   supportLevel,
+  billingStatusLabel,
   type Plan,
 } from "@/lib/billing/plan";
 import { choosePlanAction, manageBillingAction } from "@/lib/billing/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-
-const STATUS_LABELS: Record<string, string> = {
-  none: "Not subscribed",
-  trialing: "Free trial",
-  active: "Active",
-  past_due: "Payment failed",
-  unpaid: "Unpaid",
-  canceled: "Cancelled",
-  incomplete: "Waiting for card",
-  incomplete_expired: "Not started",
-  paused: "Paused",
-};
 
 const dateFormat = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" });
 
@@ -97,7 +86,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
               </h2>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 <Badge variant={billing.status === "past_due" ? "destructive" : "secondary"}>
-                  {STATUS_LABELS[billing.status] ?? billing.status}
+                  {billingStatusLabel(billing.status)}
                 </Badge>
                 {billing.pilot && <Badge variant="outline">Pilot store</Badge>}
                 {billing.status === "trialing" && billing.trialEndsAt && (
@@ -110,7 +99,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
                 )}
               </div>
               {billing.pilotTrialAvailable && (
-                <p className="mt-2 text-sm text-foreground">Your first 3 months are free. Choose a plan to start.</p>
+                <p className="mt-2 text-sm text-foreground">Your first {PILOT_FREE_MONTHS} months are free. Choose a plan to start.</p>
               )}
             </div>
             {billing.hasCustomer && billing.subscribed && (
@@ -184,7 +173,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
                     ))}
                   </ul>
                   <Button type="submit" className="mt-5 min-h-11" variant={plan === RECOMMENDED_PLAN ? "default" : "outline"}>
-                    {billing.pilotTrialAvailable ? `Start ${PLAN_NAMES[plan]}, 3 months free` : `Choose ${PLAN_NAMES[plan]}`}
+                    {billing.pilotTrialAvailable ? `Start ${PLAN_NAMES[plan]}, ${PILOT_FREE_MONTHS} months free` : `Choose ${PLAN_NAMES[plan]}`}
                   </Button>
                 </form>
               ))}

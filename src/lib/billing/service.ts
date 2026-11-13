@@ -166,7 +166,13 @@ export async function setPilot(
     if (hasLiveSubscription(row)) {
       // Granted after subscribing: move the first charge past the free months. Removed mid-trial: charge now.
       if (pilot) await provider.setTrialEnd(row.stripeSubscriptionId!, Math.floor(pilotTrialEnd(now).getTime() / 1000));
-      else if (row.status === "trialing") await provider.setTrialEnd(row.stripeSubscriptionId!, "now");
+      else {
+        // Stripe, not the row: the trialing webhook from the grant may not have landed yet.
+        const sub = await provider.getSubscription(row.stripeSubscriptionId!);
+        if (sub.status === "trialing" || (sub.trialEnd && sub.trialEnd * 1000 > now.getTime())) {
+          await provider.setTrialEnd(row.stripeSubscriptionId!, "now");
+        }
+      }
     }
   } catch (err) {
     console.error(JSON.stringify({ event: "pilot_trial_not_set", storeId, pilot, error: err instanceof Error ? err.message : "unknown" }));
@@ -230,12 +236,8 @@ export async function applyBillingEvent(event: WebhookEvent): Promise<BillingEve
     const before = { plan: row.plan, status: row.status, paymentFailedAt: row.paymentFailedAt?.toISOString() ?? null };
 
     if (subscription) {
-      if (row.lastEventAt && created < row.lastEventAt) return { result: "stale" as const };
       let sub = subscription;
-      if (row.lastEventAt && created.getTime() === row.lastEventAt.getTime() && sub.id === row.stripeSubscriptionId) {
-        // Stripe's `created` is whole seconds, so on a tie this payload may be the older snapshot.
-        sub = await getBillingProvider().getSubscription(sub.id);
-      }
+      // Before the stale check: a second subscription is cancelled whatever its event's timestamp.
       if (row.stripeSubscriptionId && row.stripeSubscriptionId !== sub.id && hasLiveSubscription(row)) {
         if (event.type !== "customer.subscription.created" || ENDED_STATUSES.has(sub.status)) {
           // An event for a subscription the store has since replaced, or a duplicate already cancelled.
@@ -252,6 +254,11 @@ export async function applyBillingEvent(event: WebhookEvent): Promise<BillingEve
         });
         return { result: "duplicate_canceled" as const, duplicate: { storeId, subscriptionId: sub.id } };
       }
+      if (row.lastEventAt && created < row.lastEventAt) return { result: "stale" as const };
+      if (row.lastEventAt && created.getTime() === row.lastEventAt.getTime() && sub.id === row.stripeSubscriptionId) {
+        // Stripe's `created` is whole seconds, so on a tie this payload may be the older snapshot.
+        sub = await getBillingProvider().getSubscription(sub.id);
+      }
       const plan = planForLookupKey(sub.lookupKey) ?? (row.plan as Plan);
       const deleted = event.type === "customer.subscription.deleted";
       const status = deleted ? "canceled" : sub.status;
@@ -266,7 +273,8 @@ export async function applyBillingEvent(event: WebhookEvent): Promise<BillingEve
           currentPeriodEnd: sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd * 1000) : null,
           cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
           lastEventAt: created,
-          ...(event.type === "customer.subscription.created" ? { checkoutSessionId: null } : {}),
+          // Any first event of a new subscription means its Checkout is done; `created` may arrive late or stale.
+          ...(event.type === "customer.subscription.created" || sub.id !== row.stripeSubscriptionId ? { checkoutSessionId: null } : {}),
           ...(deleted ? { paymentFailedAt: null } : {}),
         },
       });
