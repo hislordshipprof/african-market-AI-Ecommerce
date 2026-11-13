@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getStoreById, getStoreSubscription, setPilotAction } from "@/lib/admin/actions";
-import { effectivePlan } from "@/lib/billing/plan";
+import { effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
+import { PILOT_FREE_MONTHS, PILOT_STORE_CAP } from "@/lib/billing/service";
 import { requirePlatformAdmin } from "@/lib/admin/session";
 import { StoreForm } from "../store-form";
 import { InviteOwnerForm } from "./invite-owner-form";
@@ -18,7 +19,7 @@ export default async function EditStorePage({
   const store = await getStoreById(id);
   if (!store) notFound();
   const subscription = await getStoreSubscription(store.id);
-  const plan = effectivePlan(subscription) === "pro" ? "Pro" : "Starter";
+  const plan = PLAN_NAMES[effectivePlan(subscription)];
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-8">
@@ -39,10 +40,12 @@ export default async function EditStorePage({
             type="submit"
             className="min-h-11 rounded-full border border-[#1F5A43] px-5 text-sm font-medium text-[#1F5A43] hover:bg-[#EBF3EC]"
           >
-            {subscription?.pilot ? "Remove pilot offer" : "Make a pilot store (3 months free)"}
+            {subscription?.pilot ? "Remove pilot offer" : `Make a pilot store (${PILOT_FREE_MONTHS} months free)`}
           </button>
           <span className="text-sm text-[#55625A]">
-            {subscription?.pilot ? "This store is a pilot store." : "Up to 5 pilot stores."}
+            {subscription?.pilot
+              ? "This store is a pilot store. Removing the offer during the free months charges the store now."
+              : `Up to ${PILOT_STORE_CAP} pilot stores.`}
           </span>
         </form>
         {pilotError && (

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { listStores } from "@/lib/admin/actions";
 import { SuspendButton } from "./suspend-button";
-import { effectivePlan } from "@/lib/billing/plan";
+import { effectivePlan, PLAN_NAMES } from "@/lib/billing/plan";
 
 const BILLING_STATUS: Record<string, string> = {
   none: "not subscribed",
@@ -96,7 +96,7 @@ export default async function StoreListPage() {
                   <td className="px-4 py-3 text-[#55625A]">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-medium text-[#15201A]">
-                        {effectivePlan(store.subscription) === "pro" ? "Pro" : "Starter"}
+                        {PLAN_NAMES[effectivePlan(store.subscription)]}
                       </span>
                       <span>· {billingStatusLabel(store.subscription?.status ?? "none")}</span>
                       {store.subscription?.pilot && (

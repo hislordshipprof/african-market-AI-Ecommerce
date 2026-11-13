@@ -5,7 +5,9 @@ import { getStoreBilling } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
 import {
   FEATURE_LABELS,
+  PLAN_NAMES,
   PLAN_PRICES_USD,
+  RECOMMENDED_PLAN,
   PRO_FEATURES,
   assistantChatCap,
   planAllows,
@@ -16,8 +18,6 @@ import {
 import { choosePlanAction, manageBillingAction } from "@/lib/billing/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-
-const PLAN_NAMES: Record<Plan, string> = { starter: "Starter", pro: "Pro" };
 
 const STATUS_LABELS: Record<string, string> = {
   none: "Not subscribed",
@@ -41,7 +41,8 @@ function planLines(plan: Plan): string[] {
     `${assistantChatCap(plan).toLocaleString("en-US")} shopping-assistant chats a month`,
     staff === null ? "Unlimited staff" : `Owner + ${staff} staff`,
     `Support: ${supportLevel(plan).toLowerCase()}`,
-    ...(plan === "pro" ? PRO_FEATURES.map((f) => FEATURE_LABELS[f]) : ["Pickup and your own delivery"]),
+    ...(planAllows(plan, "courier-delivery") ? [] : ["Pickup and your own delivery"]),
+    ...PRO_FEATURES.filter((f) => planAllows(plan, f)).map((f) => FEATURE_LABELS[f]),
   ];
 }
 
@@ -166,7 +167,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
                 <form
                   key={plan}
                   action={choosePlanAction}
-                  className={`flex flex-col rounded-xl border bg-card p-5 ${plan === "pro" ? "border-primary" : "border-border"}`}
+                  className={`flex flex-col rounded-xl border bg-card p-5 ${plan === RECOMMENDED_PLAN ? "border-primary" : "border-border"}`}
                 >
                   <input type="hidden" name="plan" value={plan} />
                   <h3 className="text-base font-semibold text-foreground">{PLAN_NAMES[plan]}</h3>
@@ -182,7 +183,7 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
                       </li>
                     ))}
                   </ul>
-                  <Button type="submit" className="mt-5 min-h-11" variant={plan === "pro" ? "default" : "outline"}>
+                  <Button type="submit" className="mt-5 min-h-11" variant={plan === RECOMMENDED_PLAN ? "default" : "outline"}>
                     {billing.pilotTrialAvailable ? `Start ${PLAN_NAMES[plan]}, 3 months free` : `Choose ${PLAN_NAMES[plan]}`}
                   </Button>
                 </form>

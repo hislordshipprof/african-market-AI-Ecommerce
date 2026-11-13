@@ -31,6 +31,11 @@ export const FEATURE_LABELS: Record<PlanFeature, string> = {
 
 export const PLAN_PRICES_USD: Record<Plan, number> = { starter: 49, pro: 99 };
 
+export const PLAN_NAMES: Record<Plan, string> = { starter: "Starter", pro: "Pro" };
+
+/** The plan the plan picker highlights. */
+export const RECOMMENDED_PLAN: Plan = "pro";
+
 const ASSISTANT_CHATS: Record<Plan, number> = { starter: 1_000, pro: 5_000 };
 /** Staff besides the owner. Null is unlimited. */
 const STAFF_LIMIT: Record<Plan, number | null> = { starter: 2, pro: null };

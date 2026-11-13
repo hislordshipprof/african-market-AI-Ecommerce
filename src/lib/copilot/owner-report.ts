@@ -165,6 +165,7 @@ export interface OwnerReportCard {
 
 export type CreateReportCode =
   | "plan_locked"
+  | "read_only"
   | "invalid_request"
   | "photo_invalid"
   | "storage_not_set_up"

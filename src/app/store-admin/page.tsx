@@ -2,7 +2,7 @@ import { requireStoreMember } from "@/lib/store-admin/session";
 import { storeUnreadCount } from "@/lib/support/thread";
 import { getStoreBilling } from "@/lib/billing/service";
 import { assistantChatUsage } from "@/lib/billing/assistant-chats";
-import { planAllows } from "@/lib/billing/plan";
+import { PLAN_NAMES, planAllows } from "@/lib/billing/plan";
 import { StoreAdminDashboard } from "./dashboard";
 
 export default async function StoreAdminPage() {
@@ -22,7 +22,7 @@ export default async function StoreAdminPage() {
       stripeOnboardingStatus={session.store.stripeOnboardingStatus}
       unreadMessages={unreadMessages}
       plan={{
-        name: billing.plan === "pro" ? "Pro" : "Starter",
+        name: PLAN_NAMES[billing.plan],
         status: billing.status,
         paymentFailed: billing.paymentFailedAt !== null,
         chats: usage && usage.warning ? { used: usage.chats, cap: usage.cap, capped: usage.capped } : null,

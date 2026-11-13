@@ -212,7 +212,8 @@ describe.skipIf(!hasDb)("owner reports (real auth, lane database)", () => {
     try {
       const reply = { threadId: "no-such-thread", body: "On our way" };
       asStore(slugA, cookies.outsider);
-      await expect(replyToThreadAction(reply)).rejects.toThrow(READ_ONLY_MESSAGE);
+      expect(await replyToThreadAction(reply)).toEqual({ ok: false, error: READ_ONLY_MESSAGE });
+      expect(await submitVoiceReport({ transcript: "got one gari" })).toEqual({ ok: false, code: "read_only", message: READ_ONLY_MESSAGE });
       asStore(slugA, cookies.staff);
       expect(await replyToThreadAction(reply)).toEqual({ ok: false, error: "Thread not found" });
       asStore(slugA, cookies.owner);

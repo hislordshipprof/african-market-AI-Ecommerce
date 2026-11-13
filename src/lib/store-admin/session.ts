@@ -15,13 +15,6 @@ export interface StoreSession {
 
 export const READ_ONLY_MESSAGE = "Your access is read-only on this store's plan. Ask the owner to upgrade or free a staff seat.";
 
-export class ReadOnlyStaffError extends Error {
-  constructor() {
-    super(READ_ONLY_MESSAGE);
-    this.name = "ReadOnlyStaffError";
-  }
-}
-
 async function getAuthSession(): Promise<Session | null> {
   const reqHeaders = await headers();
   return auth.api.getSession({
@@ -62,11 +55,10 @@ export async function requireStoreMember(): Promise<StoreSession> {
   return { user: session.user, session: session.session, store, membership: { role: membership.role, readOnly } };
 }
 
-/** A member allowed to change things: read-only staff are refused. */
-export async function requireStoreWriter(): Promise<StoreSession> {
+/** A member allowed to change things. Null for read-only staff: the caller returns READ_ONLY_MESSAGE. */
+export async function requireStoreWriter(): Promise<StoreSession | null> {
   const storeSession = await requireStoreMember();
-  if (storeSession.membership.readOnly) throw new ReadOnlyStaffError();
-  return storeSession;
+  return storeSession.membership.readOnly ? null : storeSession;
 }
 
 export async function requireStoreOwner(): Promise<StoreSession> {
