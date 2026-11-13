@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { findDeliveryByExternalId, storeScoped } from "@/lib/db";
 import { UberDirectProvider, UberWebhookSignatureError } from "@/lib/delivery/uber-direct";
 import type { DeliveryWebhookEvent } from "@/lib/delivery/provider";
+import { parseInput } from "@/lib/security/parse-input";
+
+const eventIdsSchema = z.looseObject({
+  externalDeliveryId: z.string().min(1).max(200),
+  externalEventId: z.string().min(1).max(200),
+});
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +30,9 @@ export async function POST(req: NextRequest) {
     if (error instanceof UberWebhookSignatureError) {
       return NextResponse.json({ error: error.message }, { status: 401 });
     }
+    return NextResponse.json({ error: "Malformed webhook body" }, { status: 400 });
+  }
+  if (!parseInput(eventIdsSchema, event).ok) {
     return NextResponse.json({ error: "Malformed webhook body" }, { status: 400 });
   }
 
