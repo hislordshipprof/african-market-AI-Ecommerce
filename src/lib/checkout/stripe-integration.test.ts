@@ -354,6 +354,47 @@ describe.skipIf(!hasKey || !hasDb)(
     );
 
     it(
+      "#495 courier issue refund: the store funds the goods only, the platform funds the service fee share",
+      { timeout: 30_000 },
+      async () => {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+        const goods = 6000;
+        const fee = serviceFeeCents(goods, SEEDED_SERVICE_FEE);
+        const captured = goods + fee + 899;
+        const split = captureSplit({ capturedCents: captured, serviceFeeCents: fee, courierFeeCents: 899 });
+        const pi = await stripe.paymentIntents.create({
+          amount: captured,
+          currency: "usd",
+          capture_method: "manual",
+          payment_method: "pm_card_visa",
+          confirm: true,
+          return_url: "https://example.com/return",
+          on_behalf_of: stripeAccountAId,
+          transfer_data: { destination: stripeAccountAId },
+          metadata: { test: "ticket-495-courier-refund" },
+        });
+        await stripeProvider.capturePaymentIntent(pi.id, captured, `capture:t495c:${pi.id}`, split.applicationFeeCents);
+        // $21 of goods reported plus its 63¢ share of the $1.80 fee, as submitRefund sends it on a courier order.
+        const key = `refund:t495c:${pi.id}`;
+        const refund = await stripeProvider.refundPayment(pi.id, 2163, key, { reservationKey: key });
+        expect(refund.status).toBe("succeeded");
+        const first = await stripeProvider.refundApplicationFeePart(pi.id, 63, key);
+        const replay = await stripeProvider.refundApplicationFeePart(pi.id, 63, key);
+        expect(replay.feeRefundId).toBe(first.feeRefundId);
+        const stripeRefund = await stripe.refunds.retrieve(refund.refundId, { expand: ["transfer_reversal"] });
+        const charge = await stripe.charges.retrieve(String(
+          (await stripe.paymentIntents.retrieve(pi.id)).latest_charge,
+        ), { expand: ["application_fee"] });
+        const reversed = (stripeRefund.transfer_reversal as Stripe.TransferReversal).amount;
+        const feeReturned = (charge.application_fee as Stripe.ApplicationFee).amount_refunded;
+        expect(reversed).toBe(2163);
+        expect(feeReturned).toBe(63);
+        expect(reversed - feeReturned).toBe(2100);
+        await stripe.refunds.create({ payment_intent: pi.id, reverse_transfer: true, refund_application_fee: true });
+      },
+    );
+
+    it(
       "end-to-end: confirm with pm_card_visa and place order",
       { timeout: 30_000 },
       async () => {

@@ -10,6 +10,7 @@ import {
 import type { RefundResult } from "../stripe/types";
 import { systemAuditData } from "../system-actor";
 import { releaseOrderStock } from "./stock-ledger";
+import { serviceFeeShareOfRefund } from "./platform-fee";
 import { recordOrderNotification } from "../notifications/record";
 import { scheduleOrderNotification } from "../inngest/notify";
 
@@ -364,6 +365,7 @@ export async function submitRefund(
     if (again) return { open: again, row: null };
     const count = await tx.refundRequest.count({ where: { orderId } });
     const key = `refund:${orderId}:${count + 1}`;
+    const refundApplicationFee = refundsApplicationFee(cause, current.fulfillment);
     const row = await tx.refundRequest.create({
       data: {
         storeId,
@@ -371,7 +373,9 @@ export async function submitRefund(
         paymentIntentId,
         key,
         amountCents: amount,
-        refundApplicationFee: refundsApplicationFee(cause, current.fulfillment),
+        refundApplicationFee,
+        // The store never received the service fee, so its share of a courier issue refund comes from the platform fee.
+        serviceFeeShareCents: cause.cause === "issue" && !refundApplicationFee ? serviceFeeShareOfRefund(amount, current) : 0,
         state: "RESERVED",
       },
     });
@@ -640,6 +644,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
     }
     return fresh;
   }, { timeout: 20_000 });
+  await returnServiceFeeShares(located.storeId, orderId);
   if (notifyCancel) scheduleOrderNotification(located.storeId, orderId, "cancelled");
   if (notifyRefunded) scheduleOrderNotification(located.storeId, orderId, "refunded");
   if (issueFailure) {
@@ -649,6 +654,30 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
     console.error(
       `Refund failed for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,
     );
+  }
+}
+
+/**
+ * Once a courier issue refund has succeeded, return its service fee share from the platform's
+ * application fee. A failure is logged and retried by the next evaluation of the order.
+ */
+async function returnServiceFeeShares(storeId: string, orderId: string): Promise<void> {
+  const due = await storeScoped(storeId).refundRequest.findMany({
+    where: { orderId, serviceFeeShareCents: { gt: 0 }, feeRefundId: null, providerStatus: "succeeded" },
+  });
+  for (const row of due) {
+    try {
+      const { feeRefundId } = await getStripeProvider().refundApplicationFeePart(row.paymentIntentId, row.serviceFeeShareCents, row.key);
+      await saveRequest(storeId, row.id, { feeRefundId });
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      console.error(JSON.stringify({
+        event: "service_fee_share_refund_failed",
+        orderId,
+        key: row.key,
+        code: typeof code === "string" ? code : "unknown",
+      }));
+    }
   }
 }
 

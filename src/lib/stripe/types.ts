@@ -134,6 +134,16 @@ export interface StripeProvider {
     options?: { refundApplicationFee?: boolean; reservationKey?: string; orderId?: string },
   ): Promise<RefundResult>;
 
+  /**
+   * Returns `amountCents` of the charge's application fee to the connected account, once per
+   * `reservationKey` (the refund it goes with). The platform funds that part of the refund.
+   */
+  refundApplicationFeePart(
+    paymentIntentId: string,
+    amountCents: number,
+    reservationKey: string,
+  ): Promise<{ feeRefundId: string }>;
+
   /** Refunds on this PaymentIntent. Pending refunds stay pending. */
   listRefunds(paymentIntentId: string): Promise<RefundResult[]>;
 

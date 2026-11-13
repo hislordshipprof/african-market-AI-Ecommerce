@@ -1119,6 +1119,9 @@ model RefundRequest {
   state                String
   providerRefundId     String?  @map("provider_refund_id")
   providerStatus       String?  @map("provider_status")
+  /// #495: on a courier issue refund, the service fee part the platform returns from its application fee.
+  serviceFeeShareCents Int      @default(0) @map("service_fee_share_cents")
+  feeRefundId          String?  @map("fee_refund_id")
   createdAt            DateTime @default(now()) @map("created_at")
   lastCheckedAt        DateTime @default(now()) @map("last_checked_at")
 

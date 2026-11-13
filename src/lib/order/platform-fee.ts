@@ -47,7 +47,21 @@ export function serviceFeeRefundCents(
 ): number {
   const goodsCharged = (order.capturedAmountCents ?? 0) - order.serviceFeeCents - order.tipCents - order.deliveryFeeCents;
   if (order.serviceFeeCents <= 0 || goodsCharged <= 0) return 0;
-  return Math.min(order.serviceFeeCents, percentOf(order.serviceFeeCents, (goodsRefundedCents * 10_000) / goodsCharged));
+  return Math.min(order.serviceFeeCents, Math.round((order.serviceFeeCents * goodsRefundedCents) / goodsCharged));
+}
+
+type FeeRefundOrder = Parameters<typeof serviceFeeRefundCents>[1];
+
+/** The service fee part of an issue refund of `refundCents` (goods plus their fee share): the share of the most goods it covers. */
+export function serviceFeeShareOfRefund(refundCents: number, order: FeeRefundOrder): number {
+  let low = 0;
+  let high = Math.max(0, refundCents);
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (mid + serviceFeeRefundCents(mid, order) <= refundCents) low = mid;
+    else high = mid - 1;
+  }
+  return serviceFeeRefundCents(low, order);
 }
 
 export type CaptureSplit = {

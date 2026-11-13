@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captureSplit, maxGoodsWithin, serviceFeeCents } from "./platform-fee";
+import { captureSplit, maxGoodsWithin, NO_SERVICE_FEE, serviceFeeCents, serviceFeeRefundCents, serviceFeeShareOfRefund } from "./platform-fee";
 
 const ADR_0021 = { rateBps: 300, minCents: 99, maxCents: 299 };
 
@@ -8,16 +8,24 @@ describe("service fee (ADR-0021)", () => {
     expect(serviceFeeCents(6000, ADR_0021)).toBe(180);
     expect(serviceFeeCents(2000, ADR_0021)).toBe(99);
     expect(serviceFeeCents(15000, ADR_0021)).toBe(299);
-  });
-
-  it("rounds half a cent up", () => {
-    // 3% of $41.50 is 124.5¢.
+    // 3% of $41.50 is 124.5¢, rounded half up.
     expect(serviceFeeCents(4150, ADR_0021)).toBe(125);
-  });
-
-  it("is zero when no goods are charged or the order predates the fee", () => {
     expect(serviceFeeCents(0, ADR_0021)).toBe(0);
-    expect(serviceFeeCents(6000, { rateBps: 0, minCents: 0, maxCents: 0 })).toBe(0);
+    expect(serviceFeeCents(6000, NO_SERVICE_FEE)).toBe(0);
+  });
+});
+
+describe("service fee part of an issue refund", () => {
+  // $66 of goods with a $1.98 fee and $8.99 courier.
+  const order = { serviceFeeCents: 198, capturedAmountCents: 6600 + 198 + 899, tipCents: 0, deliveryFeeCents: 899 };
+
+  it("is the fee share of the goods the refund covers, also for an amount the store lowered", () => {
+    expect(serviceFeeRefundCents(2100, order)).toBe(63);
+    expect(serviceFeeShareOfRefund(2163, order)).toBe(63);
+    // $10 approved by the store: $9.71 of goods plus their 29¢ share.
+    expect(serviceFeeShareOfRefund(1000, order)).toBe(29);
+    expect(serviceFeeShareOfRefund(6600 + 198, order)).toBe(198);
+    expect(serviceFeeShareOfRefund(2163, { ...order, serviceFeeCents: 0, capturedAmountCents: 7499 })).toBe(0);
   });
 });
 

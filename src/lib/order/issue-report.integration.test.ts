@@ -25,11 +25,12 @@ import sharp from "sharp";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { setStripeProvider } from "../stripe";
-import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { feeRefundParts, fakeStripeProvider, refundRequests, reset, storeFundedRefundCents, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { systemAuditData } from "../system-actor";
 import { countedListing } from "./stock-ledger-test-helpers";
 import { ISSUE_ALREADY_REPORTED, submitIssueReport } from "./issue-report";
 import { evaluateOrderRefundState } from "./refund-requests";
+import { captureSplit } from "./platform-fee";
 
 const hasDb = !!process.env.DATABASE_URL;
 const HOUR = 60 * 60 * 1000;
@@ -84,22 +85,24 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     await raw.$disconnect();
   });
 
-  /** A completed pickup order: three lines, captured at the picked total. */
-  async function completedOrder(lines: Array<{ qtyPicked: number; unitPriceCents: number }>, hoursAgo: number, serviceFeeCents = 0) {
+  /** A completed order (pickup unless a courier fee is given): three lines, captured at the picked total. */
+  async function completedOrder(lines: Array<{ qtyPicked: number; unitPriceCents: number }>, hoursAgo: number, serviceFeeCents = 0, courierFeeCents = 0) {
     number += 1;
     const customer = await storeScoped(store.id).customer.create({ data: { storeId: store.id, name: `Issue ${number}` } });
     const goods = lines.reduce((sum, line) => sum + line.qtyPicked * line.unitPriceCents, 0);
-    const captured = goods + serviceFeeCents;
+    const captured = goods + serviceFeeCents + courierFeeCents;
     const pi = `pi_issue_${number}_${run}`;
     setAuthorizedAmount(pi, captured);
-    await fakeStripeProvider.capturePaymentIntent(pi, captured, `cap-issue-${number}`);
+    const fee = courierFeeCents > 0 ? captureSplit({ capturedCents: captured, serviceFeeCents, courierFeeCents }).applicationFeeCents : undefined;
+    await fakeStripeProvider.capturePaymentIntent(pi, captured, `cap-issue-${number}`, fee);
     const order = await storeScoped(store.id).order.create({
       data: {
         storeId: store.id,
         number,
         customerId: customer.id,
         status: "COMPLETED",
-        fulfillment: "pickup",
+        fulfillment: courierFeeCents > 0 ? "courier" : "pickup",
+        deliveryFeeCents: courierFeeCents,
         subtotalCents: goods,
         bufferCents: 0,
         totalAuthorizedCents: captured,
@@ -181,6 +184,40 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     });
     expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 2163 });
     expect((await written(order.id)).requests[0]).toMatchObject({ amountCents: 2163 });
+  });
+
+  it("#495: a courier issue refund returns the service fee share from the platform fee, so the store funds the goods only", async () => {
+    const { order, token } = await completedOrder([
+      { qtyPicked: 2, unitPriceCents: 450 },
+      { qtyPicked: 1, unitPriceCents: 1200 },
+      { qtyPicked: 3, unitPriceCents: 1500 },
+    ], 1, 198, 899);
+    const [cheap, middle] = order.lines;
+    const result = await submitIssueReport(store, token, {
+      type: "damaged",
+      lines: [{ lineId: cheap.id, qty: 2 }, { lineId: middle.id, qty: 1 }],
+      note: "",
+      photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 2163 });
+    const [request] = (await written(order.id)).requests;
+    // Courier recovery stays with the platform; only the 63¢ fee share comes back from it.
+    expect(request).toMatchObject({ amountCents: 2163, refundApplicationFee: false, serviceFeeShareCents: 63 });
+    expect(feeRefundParts.get(request.key)).toMatchObject({ amountCents: 63 });
+    expect(request.feeRefundId).toBe(feeRefundParts.get(request.key)!.feeRefundId);
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2100);
+  });
+
+  it("#495: a courier fee share refund that errors is retried by the next evaluation", async () => {
+    const { order, token } = await completedOrder([{ qtyPicked: 2, unitPriceCents: 1000 }], 1, 99, 899);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(fakeStripeProvider, "refundApplicationFeePart").mockRejectedValueOnce(new Error("Stripe down"));
+    const result = await submitIssueReport(store, token, { type: "missing", lines: [{ lineId: order.lines[0].id, qty: 1 }], note: "", photo: JPEG });
+    expect(result).toMatchObject({ state: "auto_refunded", amountCents: 1050 });
+    expect((await written(order.id)).requests[0]).toMatchObject({ serviceFeeShareCents: 50, feeRefundId: null });
+    await evaluateOrderRefundState(order.id);
+    expect((await written(order.id)).requests[0].feeRefundId).toMatch(/^fr_fake_/);
+    expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(1000);
   });
 
   it("the same order 49 h after completion is refused and nothing is written", async () => {
