@@ -30,7 +30,7 @@ import { sendOrderMessageAction } from "./customer-actions";
 import { replyToThreadAction } from "./store-actions";
 import { listStoreThreads, orderMessagesTag, storeUnreadCount, postCustomerMessage, readCustomerMessages, replyAsStore } from "./thread";
 import { makeFakeStep } from "../inngest/fake-step";
-import { supportSlaEscalation } from "./escalation";
+import { escalateIfUnanswered, supportSlaEscalation } from "./escalation";
 import { listEscalatedThreads, replyAsPlatformAction, resolveThreadAction } from "./platform-actions";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -293,6 +293,14 @@ describe.skipIf(!hasDb)("support thread", () => {
       expect((await listStoreThreads(storeB)).find((t) => t.id === sent.threadId)?.state).toBe("escalated");
     });
 
+    it("an SLA event naming store A with store B's message escalates nothing", async () => {
+      const sent = await messageAt(OPEN_AT, 13);
+      vi.setSystemTime(OPEN_AT.getTime() + 45 * 60_000);
+      await slaHandler({ event: { data: { storeId: storeA, messageId: sent.messageId } }, step: makeFakeStep() });
+      expect(await escalateIfUnanswered(storeA, sent.messageId)).toBe(false);
+      expect(await thread(sent.threadId)).toMatchObject({ state: "open", escalatedAt: null });
+    });
+
     it("a staff reply at minute 10 leaves the thread open when the timer wakes", async () => {
       const sent = await messageAt(OPEN_AT, 11);
       const step = makeFakeStep({
@@ -353,7 +361,7 @@ describe.skipIf(!hasDb)("support thread", () => {
       expect(reopened.state).toBe("open");
       expect(reopened.escalatedAt).not.toBeNull();
 
-      const seenAt = (await listEscalatedThreads()).threads.find((t) => t.id === posted.threadId)!.seenAt;
+      const seenAt = reopened.lastCustomerAt!.toISOString();
       expect(await resolveThreadAction({ threadId: posted.threadId, seenAt })).toEqual({ ok: true });
       expect((await listEscalatedThreads()).threads.some((t) => t.id === posted.threadId)).toBe(false);
       expect((await readCustomerMessages(storeA, placed.token))?.map((m) => m.sender)).toEqual(["customer", "platform"]);
