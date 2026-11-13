@@ -19,13 +19,23 @@ async function setBilling(row: { plan: string; status: string; paymentFailed: bo
   try {
     const store = await prisma.store.findUniqueOrThrow({ where: { slug: SLUG } });
     const month = new Date(`${new Date().toISOString().slice(0, 7)}-01T00:00:00Z`);
+    const subscribed = row.status !== "none";
+    const fields = {
+      plan: row.plan,
+      status: row.status,
+      pilot: row.pilot ?? false,
+      paymentFailedAt: row.paymentFailed ? new Date() : null,
+      stripeSubscriptionId: subscribed ? "sub_e2e_494" : null,
+      stripeCustomerId: subscribed ? "cus_e2e_494" : null,
+      currentPeriodEnd: subscribed ? new Date(Date.now() + 20 * 86_400_000) : null,
+    };
     await prisma.$transaction([
       prisma.$executeRaw`SET LOCAL ROLE app_user`,
       prisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       prisma.storeSubscription.upsert({
         where: { storeId: store.id },
-        create: { storeId: store.id, plan: row.plan, status: row.status, pilot: row.pilot ?? false, paymentFailedAt: row.paymentFailed ? new Date() : null },
-        update: { plan: row.plan, status: row.status, pilot: row.pilot ?? false, paymentFailedAt: row.paymentFailed ? new Date() : null },
+        create: { storeId: store.id, ...fields },
+        update: fields,
       }),
       prisma.assistantChatMonth.upsert({
         where: { storeId_month: { storeId: store.id, month } },
@@ -107,7 +117,7 @@ test.describe("store subscriptions (#494)", () => {
     await storeOwnerSignIn(page);
     await page.goto(`/store-admin/plan?store=${SLUG}`);
     await expect(page.getByRole("heading", { name: "Pro plan" })).toBeVisible();
-    await expect(page.getByText("Priority, same day")).toBeVisible();
+    await expect(page.getByText("Priority, same day", { exact: true })).toBeVisible();
     await shoot(page, "494-plan-pro");
     await page.goto(`/store-admin?store=${SLUG}`);
     await expect(page.getByRole("link", { name: "Upgrade to Pro" })).toHaveCount(0);
@@ -127,6 +137,7 @@ test.describe("store subscriptions (#494)", () => {
     await expect(page.getByRole("alert").filter({ hasText: "Subscription payment failed" })).toBeVisible();
     await shoot(page, "494-admin-stores");
 
+    await setBilling({ plan: "starter", status: "none", paymentFailed: false });
     await page.getByRole("row", { name: /Mama Ngozi/ }).getByRole("link", { name: "Edit" }).click();
     await page.getByRole("button", { name: "Make a pilot store (3 months free)" }).click();
     await expect(page.getByText("This store is a pilot store.")).toBeVisible();

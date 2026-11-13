@@ -209,6 +209,21 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     for (const id of [storeB, ...extraStores]) await setPilot(id, false, admin);
   });
 
+  it("a pilot granted after subscribing moves the trial; if Stripe refuses, the pilot is not kept", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    fake.addSubscription(`sub_${run}_a`);
+    await platformAdmin.storeSubscription.update({ where: { storeId: storeA }, data: { status: "active", stripeSubscriptionId: `sub_${run}_a` } });
+    expect(await setPilot(storeA, true, admin)).toEqual({ ok: true });
+    expect(fake.trialEndOf(`sub_${run}_a`)).toBeGreaterThan(Date.now() / 1000 + 80 * 86400);
+    await setPilot(storeA, false, admin);
+
+    await platformAdmin.storeSubscription.update({ where: { storeId: storeA }, data: { stripeSubscriptionId: `sub_${run}_unknown` } });
+    expect(await setPilot(storeA, true, admin)).toMatchObject({ ok: false });
+    expect((await platformAdmin.storeSubscription.findUniqueOrThrow({ where: { storeId: storeA } })).pilot).toBe(false);
+    await platformAdmin.storeSubscription.update({ where: { storeId: storeA }, data: { stripeSubscriptionId: `sub_${run}_a` } });
+  });
+
   it("RLS: a store reads only its own billing and cannot write it; chat counts stay per store", async () => {
     await expect(storeScoped(storeB).storeSubscription.findUnique({ where: { storeId: storeA } })).resolves.toBeNull();
     await expect(

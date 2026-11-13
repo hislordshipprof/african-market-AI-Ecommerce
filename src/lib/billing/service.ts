@@ -131,7 +131,27 @@ export async function setPilot(
   const { row, changed } = result;
   // Granted after subscribing: move the live subscription's first charge past the free months.
   if (changed && pilot && row.stripeSubscriptionId && row.status !== "canceled") {
-    await getBillingProvider().setTrialEnd(row.stripeSubscriptionId, Math.floor(pilotTrialEnd(now).getTime() / 1000));
+    try {
+      await getBillingProvider().setTrialEnd(row.stripeSubscriptionId, Math.floor(pilotTrialEnd(now).getTime() / 1000));
+    } catch (err) {
+      console.error(JSON.stringify({ event: "pilot_trial_not_set", storeId, error: err instanceof Error ? err.message : "unknown" }));
+      await platformAdminTransaction(async (tx) => {
+        await tx.storeSubscription.update({ where: { storeId }, data: { pilot: false } });
+        await tx.auditLog.create({
+          data: {
+            storeId,
+            actorId: actor.id,
+            actorEmail: actor.email,
+            action: "subscription.pilot_reverted",
+            entityType: "store_subscription",
+            entityId: storeId,
+            before: { pilot: true },
+            after: { pilot: false },
+          },
+        });
+      });
+      return { ok: false, error: "Stripe did not accept the free months. Nothing changed; try again." };
+    }
   }
   return { ok: true };
 }
