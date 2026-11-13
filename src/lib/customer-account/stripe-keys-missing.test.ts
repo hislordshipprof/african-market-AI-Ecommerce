@@ -7,8 +7,25 @@ import { promisify } from "node:util";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { authPrisma } from "../db";
 import { addAddress } from "./address-book";
-import { listAccountCards } from "./saved-cards";
+import { listAccountCards, removeAccountCard } from "./saved-cards";
+import { CARDS_UNAVAILABLE } from "./consent";
 import { checkoutPaymentsUseFake } from "../stripe/checkout-payments";
+
+const stripeCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock("./stripe-customer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./stripe-customer")>()),
+  readStripeCustomerId: async () => "cus_live_account",
+}));
+vi.mock("../stripe/checkout-payments", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../stripe/checkout-payments")>();
+  return {
+    ...actual,
+    getCheckoutPayments: () => {
+      stripeCalls.count += 1;
+      throw new Error("Stripe must not be reached");
+    },
+  };
+});
 
 const execFileAsync = promisify(execFile);
 const hasDb = Boolean(process.env.DATABASE_URL);
@@ -31,6 +48,17 @@ describe("saved cards when Stripe is not configured", () => {
       unavailable: true,
       cards: [],
     });
+  });
+
+  it("a live key without CHECKOUT_LIVE_MODE never reaches Stripe from the account page", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_account_gate");
+    vi.stubEnv("STRIPE_PUBLISHABLE_KEY", "pk_live_account_gate");
+    vi.stubEnv("CHECKOUT_LIVE_MODE", "");
+    vi.stubEnv("E2E_FAKE_STRIPE", "");
+    stripeCalls.count = 0;
+    await expect(listAccountCards("user-live-no-flag")).resolves.toEqual({ unavailable: true, cards: [] });
+    await expect(removeAccountCard("user-live-no-flag", "pm_live")).rejects.toThrow(CARDS_UNAVAILABLE);
+    expect(stripeCalls.count).toBe(0);
   });
 
   it("the checkout fake stays off on Vercel and in production without CI", () => {
