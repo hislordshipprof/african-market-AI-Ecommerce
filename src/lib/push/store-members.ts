@@ -1,5 +1,5 @@
 import { storeScoped } from "../db";
-import { isPushServiceEndpoint } from "./endpoint";
+import { isPushServiceEndpoint, isUsablePushKeys } from "./endpoint";
 import { pushSender, PushSendError, type PushMessage } from "./sender";
 
 const GONE = new Set([404, 410]);
@@ -51,7 +51,7 @@ export async function pushToStoreMembers(
     subscriptions
       .filter((subscription) => memberIds.has(subscription.userId))
       .map(async (subscription) => {
-        if (!isPushServiceEndpoint(subscription.endpoint)) {
+        if (!isPushServiceEndpoint(subscription.endpoint) || !isUsablePushKeys(subscription)) {
           await dropSubscription(subscription.id);
           return;
         }

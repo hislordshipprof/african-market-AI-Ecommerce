@@ -1,5 +1,6 @@
 import { sendNotification, WebPushError } from "web-push";
 import { resolveAuthBaseUrl } from "../auth";
+import { isUsablePushKeys } from "./endpoint";
 
 export interface PushTarget {
   endpoint: string;
@@ -63,7 +64,7 @@ export class PushTestSender implements PushSender {
 
   async send(target: PushTarget, message: PushMessage): Promise<void> {
     if (!target.endpoint.startsWith("https://")) throw new PushSendError(400);
-    if (!target.p256dh || !target.auth) throw new PushSendError(400);
+    if (!isUsablePushKeys(target)) throw new PushSendError(400);
     if (Buffer.byteLength(JSON.stringify(message)) > MAX_PAYLOAD_BYTES) throw new PushSendError(413);
     const status = this.failures.get(target.endpoint);
     if (status) throw new PushSendError(status);

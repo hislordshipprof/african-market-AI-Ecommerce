@@ -157,16 +157,18 @@ describe.skipIf(!hasDb)("new-order web push", () => {
     expect(logged).not.toContain(keys.auth);
   });
 
-  it("a stored endpoint that is not a push service is deleted and never sent to", async () => {
-    await storeScoped(storeA).pushSubscription.create({
-      data: { storeId: storeA, userId: memberA1, endpoint: "https://127.0.0.1:9/x", ...keys },
+  it("a stored row web-push would refuse (not a push host, or bad keys) is deleted and never sent to", async () => {
+    await storeScoped(storeA).pushSubscription.createMany({
+      data: [
+        { storeId: storeA, userId: memberA1, endpoint: "https://127.0.0.1:9/x", ...keys },
+        { storeId: storeA, userId: memberA1, endpoint: endpoint("short-key"), p256dh: "AAAA", auth: keys.auth },
+      ],
     });
     const order = await createOrder();
     await sendNewOrderPush(storeA, order.id, VAPID_ENV);
-    expect(sender.sent.map((s) => s.endpoint)).not.toContain("https://127.0.0.1:9/x");
-    expect(sender.sent).toHaveLength(2);
+    expect(sender.sent.map((s) => s.endpoint).sort()).toEqual([endpoint("a1"), endpoint("a2")].sort());
     const left = await storeScoped(storeA).pushSubscription.findMany();
-    expect(left.map((r) => r.endpoint)).not.toContain("https://127.0.0.1:9/x");
+    expect(left.map((r) => r.endpoint).sort()).toEqual([endpoint("a1"), endpoint("a2")].sort());
   });
 
   it("sends to all devices at once, so one slow endpoint cannot hold up the others", async () => {

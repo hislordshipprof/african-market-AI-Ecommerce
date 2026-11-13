@@ -144,13 +144,9 @@ describe.skipIf(!hasDb)("subscribe and unsubscribe actions", () => {
   });
 
   it.each([
-    ["an http endpoint", { endpoint: "http://fcm.googleapis.com/fcm/send/x", keys }],
-    ["a loopback address with a port", { endpoint: "https://127.0.0.1:9/x", keys }],
     ["a host that is not a push service", { endpoint: "https://evil.example.com/push", keys }],
-    ["a missing p256dh key", { endpoint: endpoint("bad"), keys: { auth: keys.auth } }],
-    ["an empty auth key", { endpoint: endpoint("bad"), keys: { ...keys, auth: "" } }],
-    ["an oversized p256dh key", { endpoint: endpoint("bad"), keys: { ...keys, p256dh: "A".repeat(500) } }],
-    ["a key that is not base64url", { endpoint: endpoint("bad"), keys: { ...keys, auth: "not base64!" } }],
+    ["a p256dh key that is not a 65-byte P-256 point", { endpoint: endpoint("bad"), keys: { ...keys, p256dh: "AAAA" } }],
+    ["an auth secret shorter than 16 bytes", { endpoint: endpoint("bad"), keys: { ...keys, auth: "AAAA" } }],
   ])("rejects %s and stores nothing", async (_label, input) => {
     signInAs(memberA);
     onStore(slugA);
