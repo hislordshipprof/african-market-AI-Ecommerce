@@ -48,7 +48,7 @@ import {
 } from "@/lib/listing/actions";
 import { AttributesDialog } from "./attributes-dialog";
 import { listingNeedsWeight } from "./needs-weight";
-import { dollarsToCents, loadedVariantRow, serializeVariants } from "./variant-form";
+import { loadedVariantRow, serializeVariants } from "./variant-form";
 import {
   ArrowLeft,
   Plus,
@@ -142,7 +142,6 @@ function emptyVariantRow(): VariantFormRow {
 
 interface ListingFormFields {
   name: string;
-  price: string;
   stockMode: string;
   qty: string;
   status: string;
@@ -163,7 +162,6 @@ function buildListingFormData(
   const fd = new FormData();
   if (listingId) fd.set("listingId", listingId);
   fd.set("customName", fields.name);
-  fd.set("price", String(dollarsToCents(fields.price) ?? ""));
   fd.set("stockMode", fields.stockMode);
   if (fields.stockMode === "counted") fd.set("qty", fields.qty);
   // Orders move qty while this form is open. The loaded number tells the server the owner left it alone.
@@ -189,7 +187,6 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
   const [attributesListing, setAttributesListing] = useState<Listing | null>(null);
 
   const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
   const [stockMode, setStockMode] = useState("counted");
   const [qty, setQty] = useState("0");
   const [status, setStatus] = useState("in_stock");
@@ -207,7 +204,6 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
 
   function resetForm() {
     setName("");
-    setPrice("");
     setStockMode("counted");
     setQty("0");
     setStatus("in_stock");
@@ -254,7 +250,6 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
 
   function openEdit(listing: Listing) {
     setName(listing.customName ?? listing.masterProductName ?? "");
-    setPrice((listing.price / 100).toFixed(2));
     setStockMode(listing.stockMode);
     // Until the refresh lands, `listings` still holds the count from before this form's last save.
     const saved = savedQty.current;
@@ -292,7 +287,6 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
 
   const formFields: ListingFormFields = {
     name,
-    price,
     stockMode,
     qty,
     status,
@@ -417,19 +411,6 @@ export function ListingManagement({ storeName, storeSlug, listings }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="listing-price">Price ($)</Label>
-          <Input
-            id="listing-price"
-            type="number"
-            min="0"
-            step="0.01"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="0.00"
-            required
-          />
-        </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor="listing-max">Max per order</Label>
           <Input

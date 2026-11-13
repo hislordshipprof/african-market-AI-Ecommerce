@@ -228,6 +228,21 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
       expect(fresh).not.toHaveProperty("stockMoved");
     });
 
+    // #392 item 6: customers pay the variant price, so the listing price follows the cheapest variant.
+    it("the listing price follows the cheapest variant, whatever the form sends", async () => {
+      asSession(userA, emailA);
+      const savedId = (await getListing(storeA.id, listingId))!.variants[0].id;
+      const variants = JSON.stringify([
+        { id: savedId, label: "Standard", price: 650, weightG: 900 },
+        { label: "Small", price: 450, weightG: 400 },
+      ]);
+      expect(await updateListingAction(formData({ listingId, price: "999", variants }))).toMatchObject({ success: true });
+      expect((await getListing(storeA.id, listingId))!.price).toBe(450);
+      const one = JSON.stringify([{ id: savedId, label: "Standard", price: 650, weightG: 900 }]);
+      expect(await updateListingAction(formData({ listingId, variants: one }))).toMatchObject({ success: true });
+      expect((await getListing(storeA.id, listingId))!.price).toBe(650);
+    });
+
     it("another store's owner cannot update the listing", async () => {
       asSession(userB, emailB);
       state.store = storeB;

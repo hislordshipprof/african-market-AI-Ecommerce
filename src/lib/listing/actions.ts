@@ -62,6 +62,11 @@ function quantityError(raw: string | null): string | null {
   return null;
 }
 
+/** The storefront and cart charge the variant price, so the listing price is the cheapest variant's. */
+function cheapestPrice(variants: { price: number }[]): number {
+  return Math.min(...variants.map((variant) => variant.price));
+}
+
 export async function createListingAction(formData: FormData) {
   const session = await requireStoreOwner();
   const fields = readListingForm(formData);
@@ -81,9 +86,11 @@ export async function createListingAction(formData: FormData) {
   if (!customName && !masterProductId) {
     return { error: "Product name or master product is required" };
   }
-  const price = Number(priceRaw);
-  if (!priceRaw || !isFinite(price) || price < 0 || !Number.isInteger(price)) {
-    return { error: "Valid non-negative price is required" };
+  if (priceRaw !== null) {
+    const p = Number(priceRaw);
+    if (!priceRaw.trim() || !isFinite(p) || p < 0 || !Number.isInteger(p)) {
+      return { error: "Valid non-negative price is required" };
+    }
   }
   if (!VALID_STOCK_MODES.has(stockMode)) {
     return { error: "Stock mode must be 'counted' or 'status'" };
@@ -105,7 +112,7 @@ export async function createListingAction(formData: FormData) {
       storeId: session.store.id,
       customName: customName || null,
       masterProductId: masterProductId || null,
-      price,
+      price: cheapestPrice(variants),
       stockMode: stockMode as StockMode,
       qty,
       status: stockMode === "status" ? ((status as StockStatus) ?? "in_stock") : null,
@@ -183,7 +190,7 @@ export async function updateListingAction(formData: FormData) {
       listingId,
       ...(customName !== null && { customName: customName.trim() || null }),
       ...(masterProductId !== null && { masterProductId: masterProductId || null }),
-      ...(priceRaw !== null && { price: Number(priceRaw) }),
+      ...(parsedVariants ? { price: cheapestPrice(parsedVariants) } : priceRaw !== null && { price: Number(priceRaw) }),
       ...(stockMode !== null && { stockMode: stockMode as StockMode }),
       ...(qtyRaw !== null && { qty: Number(qtyRaw) }),
       ...(qtyLoadedRaw !== null && { qtyLoaded: Number(qtyLoadedRaw) }),
