@@ -17,7 +17,7 @@ function age(minutes: number): string {
 }
 
 export default async function SupportQueuePage() {
-  const threads = await listEscalatedThreads();
+  const { threads, hidden } = await listEscalatedThreads();
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -46,8 +46,8 @@ export default async function SupportQueuePage() {
                 <span className="text-muted-foreground">{TOPIC_LABEL[thread.topic] ?? thread.topic}</span>
                 <span className="text-muted-foreground">{REASON_LABEL[thread.escalationReason ?? ""] ?? "Escalated"}</span>
                 <span className="text-muted-foreground tabular-nums">{age(thread.ageMinutes)} ago</span>
-                <span className={thread.state === "escalated" ? "font-medium text-destructive" : "text-muted-foreground"}>
-                  {thread.state === "escalated" ? "Waiting" : "Answered"}
+                <span className={thread.waiting ? "font-medium text-destructive" : "text-muted-foreground"}>
+                  {thread.waiting ? "Waiting" : "Answered"}
                 </span>
               </div>
               <ol className="mb-4 grid gap-2">
@@ -62,10 +62,15 @@ export default async function SupportQueuePage() {
                   </li>
                 ))}
               </ol>
-              <PlatformThreadActions threadId={thread.id} />
+              <PlatformThreadActions threadId={thread.id} seenAt={thread.seenAt} />
             </li>
           ))}
         </ul>
+      )}
+      {hidden > 0 && (
+        <p className="mt-4 text-sm text-muted-foreground">
+          {hidden} more {hidden === 1 ? "thread is" : "threads are"} not shown. Resolve threads above to see them.
+        </p>
       )}
     </div>
   );
