@@ -25,6 +25,7 @@ import {
   SecondStepForm,
   missingField,
   useHydrated,
+  CREDENTIALS_ERRORS,
 } from "../auth-form-parts";
 
 type Step = "credentials" | "totp";
@@ -33,11 +34,6 @@ const ERROR_ID = "admin-sign-in-error";
 const DESCRIPTION_ID = "admin-sign-in-description";
 const EMAIL_ID = "admin-email";
 const PASSWORD_ID = "admin-password";
-const CREDENTIALS_ERRORS = {
-  INVALID_EMAIL_OR_PASSWORD: "That email and password don't match. Check both and try again.",
-  INVALID_EMAIL: "Enter a valid email address.",
-};
-
 // Mouse and trackpad only: on a phone this would open the keyboard over the page.
 const focusEmailOnDesktop = (input: HTMLInputElement | null) => {
   if (input && document.activeElement === document.body && window.matchMedia("(pointer: fine)").matches) {

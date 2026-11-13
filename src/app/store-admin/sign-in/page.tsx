@@ -28,6 +28,7 @@ import {
   fieldValue,
   focusField,
   useHydrated,
+  CREDENTIALS_ERRORS,
 } from "@/app/admin/auth-form-parts";
 
 type Step = "credentials" | "totp";
@@ -36,11 +37,6 @@ const ERROR_ID = "store-admin-sign-in-error";
 const DESCRIPTION_ID = "store-admin-sign-in-description";
 const EMAIL_ID = "email";
 const PASSWORD_ID = "password";
-const CREDENTIALS_ERRORS = {
-  INVALID_EMAIL_OR_PASSWORD: "That email and password don't match. Check both and try again.",
-  INVALID_EMAIL: "Enter a valid email address.",
-};
-
 export default function StoreAdminSignIn() {
   const router = useRouter();
   const searchParams = useSearchParams();

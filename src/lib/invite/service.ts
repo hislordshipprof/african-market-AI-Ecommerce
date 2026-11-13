@@ -1,10 +1,15 @@
 import { randomBytes, createHash } from "crypto";
-import { platformAdmin, platformAdminTransaction, storeScoped, lockStoreRow } from "../db";
+import {
+  authPrisma,
+  platformAdmin,
+  platformAdminTransaction,
+  storeScoped,
+  lockStoreRow,
+} from "../db";
 import { sendEmail } from "../email/send";
 import { normalizeEmail } from "../email";
 import { effectivePlan, staffLimit } from "../billing/plan";
 import { auth } from "../auth";
-import { authPrisma } from "../db";
 
 const INVITE_EXPIRY_HOURS = 72;
 const TOKEN_BYTES = 32;
