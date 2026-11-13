@@ -59,4 +59,14 @@ describe.skipIf(!hasDb)("search for a Ge'ez-script name", () => {
     const copilot = await searchListingMatches(storeId, query);
     expect(copilot.listings.map((listing) => listing.id)).toEqual([doroWat]);
   });
+
+  // A long listing name must not make a non-ASCII search scan every run of words (review finding 1).
+  it("scores a 2,000-word name within a second", async () => {
+    const [{ score }] = await raw.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL statement_timeout = '1s'`;
+      return tx.$queryRaw<Array<{ score: number }>>`
+        SELECT search_word_similarity('ዶሮ ወፕ', 'ዶሮ ወጥ ' || repeat('ዶሮ ', 2000)) AS score`;
+    });
+    expect(score).toBe(0.5);
+  });
 });

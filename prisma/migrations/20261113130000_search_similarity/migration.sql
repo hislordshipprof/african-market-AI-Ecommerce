@@ -40,21 +40,24 @@ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
 $$;
 
 -- Same meaning as pg_trgm strict_word_similarity(q, doc): the best match of q against a run of whole words of doc.
+-- Bounded so the cost stays linear (review of #493): only the first 64 words of doc count, a run starts
+-- and ends on a word that shares a trigram with q (an unmatched edge word can only lower the score), and
+-- a run spans at most one word more than q has, with q's word count capped at 8.
 CREATE OR REPLACE FUNCTION search_word_similarity(q text, doc text) RETURNS real
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
   SELECT CASE WHEN q || doc ~ '^[\x01-\x7f]*$' THEN strict_word_similarity(q, doc) ELSE (
-    WITH qt AS (SELECT search_trigrams(q) AS t),
-      dw AS (SELECT n, tri FROM search_word_trigrams(doc)),
+    WITH qt AS (SELECT search_trigrams(q) AS t, least((SELECT count(*) FROM search_words(q)), 8) AS words),
+      dw AS (SELECT n, tri FROM search_word_trigrams(doc) WHERE n <= 64),
+      hit AS (SELECT DISTINCT dw.n FROM dw, qt WHERE dw.tri = ANY (qt.t)),
       spans AS (
-        SELECT a.n AS i, b.n AS j, count(DISTINCT dw.tri) AS total,
-          count(DISTINCT dw.tri) FILTER (WHERE dw.tri = ANY (qt.t)) AS common
-        FROM (SELECT DISTINCT n FROM dw) a
-        JOIN (SELECT DISTINCT n FROM dw) b ON b.n >= a.n
+        SELECT count(DISTINCT dw.tri) AS total, count(DISTINCT dw.tri) FILTER (WHERE dw.tri = ANY (qt.t)) AS common
+        FROM qt
+        JOIN hit a ON true
+        JOIN hit b ON b.n BETWEEN a.n AND a.n + qt.words
         JOIN dw ON dw.n BETWEEN a.n AND b.n
-        CROSS JOIN qt
         GROUP BY a.n, b.n
       )
-    SELECT coalesce(max(spans.common::real / (cardinality(qt.t) + spans.total - spans.common)) FILTER (WHERE spans.common > 0), 0)
+    SELECT coalesce(max(spans.common::real / (cardinality(qt.t) + spans.total - spans.common)), 0)
     FROM spans, qt
   ) END
 $$;
