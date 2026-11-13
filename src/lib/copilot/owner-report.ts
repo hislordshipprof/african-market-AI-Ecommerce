@@ -4,24 +4,19 @@ import { ToolChoiceViolationError, generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { assistantModelId, assistantProviderOptions, createAssistantModel } from "../assistant/model";
 import { AssistantConfigError } from "../assistant/errors";
-import { assistantSpendState, claimCapAlert, utcDay } from "../assistant/spend";
 import { lockListingRow, lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { prepareProofPhoto } from "../order/delivery-proof";
 import { deleteOwnerReportPhoto, deliveryProofBucket, ownerReportPhotoKey, uploadOwnerReportPhoto } from "../r2";
-import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
 import { writeStockChange } from "./confirm";
 import { searchListingMatches } from "./search";
-import { configMissing } from "./turn";
+import { copilotGate } from "./turn";
 import {
   FIXED_ERROR,
-  HOUR_MS,
   MESSAGE_MAX,
   MODEL_TIMEOUT_MS,
   QTY_COLUMN_MAX,
   QUANTITY_MAX,
-  RESTING_MESSAGE,
-  SENDS_PER_HOUR,
   UNAVAILABLE_MESSAGE,
   WRITE_TRANSACTION,
   type CopilotActor,
@@ -232,24 +227,6 @@ export async function listPendingOwnerReports(storeId: string): Promise<OwnerRep
   return reports.filter((report): report is OwnerReportCard => report !== null);
 }
 
-async function gate(storeId: string, userId: string): Promise<CreateReportResult | null> {
-  if (configMissing()) return { ok: false, code: "copilot_unavailable", message: UNAVAILABLE_MESSAGE };
-  try {
-    const spend = await assistantSpendState();
-    if (spend.resting) {
-      await claimCapAlert(utcDay(new Date()));
-      return { ok: false, code: "copilot_resting", message: RESTING_MESSAGE };
-    }
-  } catch {
-    return { ok: false, code: "copilot_resting", message: RESTING_MESSAGE };
-  }
-  const limit = await takeRateLimit(`owner-report:${storeId}:${userId}`, SENDS_PER_HOUR, HOUR_MS);
-  if (!limit.ok) {
-    return { ok: false, code: "rate_limited", message: `Wait ${limit.retryAfter} seconds, then send that again.` };
-  }
-  return null;
-}
-
 export type ReportInput =
   | { type: "voice"; transcript: string }
   | { type: PhotoReportType; photo: Uint8Array | null };
@@ -284,8 +261,8 @@ export async function createOwnerReport(storeId: string, actor: CopilotActor, in
   const existing = await pendingSame();
   if (existing) return { ok: true, report: (await loadOwnerReport(storeId, existing.id))! };
 
-  const refused = await gate(storeId, actor.id);
-  if (refused) return refused;
+  const refused = await copilotGate(`owner-report:${storeId}:${actor.id}`);
+  if (refused) return { ok: false, code: refused.code, message: refused.message };
 
   let extracted: { items: ExtractedItem[]; raw: unknown };
   try {
