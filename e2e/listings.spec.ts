@@ -254,7 +254,8 @@ test.describe("Listing management (authenticated)", () => {
     const after = await findListingVariants("mama-ngozi", uniqueName);
     expect(after.variants.map((variant) => variant.id)).toEqual([variantId]);
     expect(after.variants[0]).toMatchObject({ price: 950, weightG: 1000 });
-    expect(after.price).toBe(800);
+    // The listing price follows the cheapest variant (#392 item 6).
+    expect(after.price).toBe(950);
 
     await page.goto(detail);
     await expect(product.getByLabel("$9.50").filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });
