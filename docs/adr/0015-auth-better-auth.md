@@ -22,7 +22,7 @@ Not chosen: Clerk (per-user pricing gets expensive at 1M customers, and user dat
 Staff and platform admins sign in with a password and an authenticator code. Recovery uses the account email, because email is already every account's sign-in channel and phone codes wait for #190:
 - **Lost phone:** ten single-use **backup codes**, shown once right after 2FA setup. The second sign-in step takes one in place of the 6-digit code.
 - **Forgotten password:** an emailed reset link (1 hour). A reset ends every session and never skips the authenticator step.
-- **Lost both:** another platform admin (or `pnpm admin:create`) resets the account out of band. There is no self-service path around both factors.
+- **Lost both:** no self-service path around both factors. An operator resets the account out of band; there is no tool for that yet (`pnpm admin:create` refuses an existing email).
 - Trusted-device cookies are never issued: they skipped the second step without marking the session verified.
 - Magic-link sends are capped per IP (5 a minute) and per inbox (5 in 10 minutes), so rotating IPs cannot flood one inbox.
 - A shopper who only ever used a magic link has no password; a staff invite (mailed to that address) adds one, and never replaces an existing one.
