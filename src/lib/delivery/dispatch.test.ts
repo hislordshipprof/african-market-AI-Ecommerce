@@ -96,11 +96,20 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     raw ??= testPrismaClient();
     const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const store = await raw.store.create({
-      data: { slug: `dispatch-${stamp}`, name: "Dispatch Test Market", themePreset: "palm-and-shea", ...flags },
+      data: {
+        slug: `dispatch-${stamp}`,
+        name: "Dispatch Test Market",
+        themePreset: "palm-and-shea",
+        addressLine1: "8121 Georgia Ave",
+        city: "Silver Spring",
+        state: "MD",
+        zip: "20910",
+        ...flags,
+      },
     });
     storeIds.push(store.id);
     const customer = await storeScoped(store.id).customer.create({
-      data: { storeId: store.id, name: "Dispatch Buyer", email: `dispatch-${stamp}@example.com` },
+      data: { storeId: store.id, name: "Dispatch Buyer", email: `dispatch-${stamp}@example.com`, phone: "+13015550199" },
     });
     const order = await storeScoped(store.id).order.create({
       data: {
@@ -113,6 +122,10 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
         totalCents: 6000,
         totalAuthorizedCents: 6000,
         number: 7,
+        deliveryLine1: "1100 Wayne Ave",
+        deliveryCity: "Silver Spring",
+        deliveryState: "MD",
+        deliveryZip: "20910",
       },
     });
     return { storeId: store.id, orderId: order.id };
@@ -204,5 +217,92 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     await selectAndDispatch({ ...neither, request }, { providers: failing(), emit });
     expect(events.at(-1)?.data).toMatchObject({ options: ["cancel"] });
     expect(await storeScoped(neither.storeId).delivery.count({ where: { orderId: neither.orderId } })).toBe(0);
+  });
+
+  async function dispatched(cheaper: StubProvider, other: StubProvider) {
+    const ids = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+    const result = await selectAndDispatch({ ...ids, request }, { providers: [cheaper, other], emit });
+    if (!result.ok) throw new Error("dispatch failed");
+    events = [];
+    return { ...ids, deliveryId: result.deliveryId };
+  }
+
+  it("AC3: no courier 10 minutes after creation cancels with the first provider and books the other", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, orderId, deliveryId } = await dispatched(uber, doordash);
+    const step = makeFakeStep();
+
+    await runCourierFailover(step, { storeId, deliveryId }, { providers: [uber, doordash], emit });
+
+    const created = (await storeScoped(storeId).delivery.findUniqueOrThrow({ where: { id: deliveryId } })).createdAt;
+    expect(step.sleepUntils).toEqual([{ name: "courier-assignment-timeout", until: new Date(created.getTime() + 600_000).toISOString() }]);
+    expect([...uber.created.values()]).toEqual(["cancelled"]);
+    expect(doordash.created.size).toBe(1);
+    const rows = await storeScoped(storeId).delivery.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
+    expect(rows.map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"], ["doordash", "requested"]]);
+    expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_DELIVERY_CREATED]);
+    expect(events[0].data).toMatchObject({ fromProvider: "uber", reason: "assignment_timeout" });
+  });
+
+  it("a courier assigned before the timeout leaves the delivery alone", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, deliveryId } = await dispatched(uber, doordash);
+    await storeScoped(storeId).delivery.update({ where: { id: deliveryId }, data: { status: "courier_assigned" } });
+
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit });
+
+    expect([...uber.created.values()]).toEqual(["active"]);
+    expect(doordash.quoteCalls).toBe(1);
+    expect(events).toEqual([]);
+  });
+
+  it("the alternate failing after the cancel fires both-failed; the second delivery's timeout does too", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const first = await dispatched(uber, doordash);
+    doordash.failCreate = true;
+    await runCourierFailover(makeFakeStep(), { storeId: first.storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit });
+    expect([...uber.created.values()]).toEqual(["cancelled"]);
+    expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_FAILOVER_TRIGGERED, COURIER_BOTH_FAILED]);
+
+    const u2 = new StubProvider("uber", 749);
+    const d2 = new StubProvider("doordash", 899);
+    const second = await dispatched(u2, d2);
+    await runCourierFailover(makeFakeStep(), { storeId: second.storeId, deliveryId: second.deliveryId }, { providers: [u2, d2], emit });
+    const next = await storeScoped(second.storeId).delivery.findFirstOrThrow({ where: { orderId: second.orderId, provider: "doordash" } });
+    events = [];
+    await runCourierFailover(makeFakeStep(), { storeId: second.storeId, deliveryId: next.id }, { providers: [u2, d2], emit });
+    expect([...d2.created.values()]).toEqual(["cancelled"]);
+    expect(u2.quoteCalls).toBe(1);
+    expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_BOTH_FAILED]);
+  });
+
+  it("a cancel the provider refuses keeps the delivery and books no second courier", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, deliveryId } = await dispatched(uber, doordash);
+    uber.created.set([...uber.created.keys()][0], "cancelled");
+
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit });
+
+    expect((await storeScoped(storeId).delivery.findUniqueOrThrow({ where: { id: deliveryId } })).status).toBe("requested");
+    expect(doordash.created.size).toBe(0);
+    expect(events).toEqual([]);
+  });
+
+  it("RLS: the timer for store A's delivery run as store B finds nothing and changes nothing", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const a = await dispatched(uber, doordash);
+    const b = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+
+    await runCourierFailover(makeFakeStep(), { storeId: b.storeId, deliveryId: a.deliveryId }, { providers: [uber, doordash], emit });
+
+    expect([...uber.created.values()]).toEqual(["active"]);
+    expect((await storeScoped(a.storeId).delivery.findUniqueOrThrow({ where: { id: a.deliveryId } })).status).toBe("requested");
+    expect(await storeScoped(b.storeId).delivery.findMany()).toEqual([]);
+    expect(events).toEqual([]);
   });
 });
