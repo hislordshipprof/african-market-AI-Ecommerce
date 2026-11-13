@@ -20,7 +20,7 @@ describe.skipIf(!apiKey)("Resend magic-link sandbox", () => {
       storeName: "Mama Ngozi African Market",
       fromAddress,
     });
-    expect(message.from).toMatch(/^Mama Ngozi African Market </);
+    expect(message.from).toMatch(/^"Mama Ngozi African Market" </);
 
     let serializedFrom = "";
     globalThis.fetch = async (input, init) => {

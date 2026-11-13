@@ -100,7 +100,43 @@ export function validateAuthSecret(
   }
 }
 
+export const RESEND_SANDBOX_FROM = "onboarding@resend.dev";
+
+/**
+ * Resend's sandbox sender only delivers to the account owner, so magic links never arrive.
+ * Logged, not thrown: production has no EMAIL_FROM yet, and a throw would end every sign-in.
+ */
+export function emailFromProblem(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  if (env.NEXT_PHASE === "phase-production-build") return null;
+  if (env.NODE_ENV !== "production") return null;
+  const from = env.EMAIL_FROM?.trim();
+  if (!from) return "EMAIL_FROM is not set";
+  if (from.includes(RESEND_SANDBOX_FROM)) return "EMAIL_FROM is Resend's sandbox sender";
+  return null;
+}
+
 validateAuthSecret();
+const emailFromIssue = emailFromProblem();
+if (emailFromIssue) {
+  console.error(JSON.stringify({ event: "email_from_misconfigured", message: emailFromIssue }));
+}
+
+// Per-IP limits alone let someone rotating IPs flood one inbox. The row for this send already
+// exists when the sender runs; links live 15 minutes, so expiry after now+5m means created in 10.
+const INBOX_CAP = 5;
+
+async function inboxCapReached(email: string): Promise<boolean> {
+  const recent = await authPrisma.verification.count({
+    where: {
+      identifier: { startsWith: "magic-link:" },
+      expiresAt: { gt: new Date(Date.now() + 5 * 60_000) },
+      value: { contains: JSON.stringify(email), mode: "insensitive" },
+    },
+  });
+  return recent > INBOX_CAP;
+}
 
 const baseUrl = resolveAuthBaseUrl();
 
@@ -159,12 +195,13 @@ export const auth = betterAuth({
         const normalizedEmail = email.trim().toLowerCase();
         const privileged = await isPrivilegedEmail(normalizedEmail);
         if (privileged) return;
+        if (await inboxCapReached(normalizedEmail)) return;
         const storeName = await storeNameForMagicLink(ctx);
         const message = magicLinkMessage({
           to: normalizedEmail,
           url,
           storeName,
-          fromAddress: process.env.EMAIL_FROM ?? "onboarding@resend.dev",
+          fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
         });
         scheduleAfterResponse(() => sendEmail(message), "magic_link_delivery_failed");
       },
