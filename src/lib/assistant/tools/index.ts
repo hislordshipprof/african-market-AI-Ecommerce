@@ -86,7 +86,7 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       execute: (input, options) => setSwapRule({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
     get_cart_summary: tool({
-      description: "Read the current cart, prices, and minimum order.",
+      description: "Read the current cart, prices, service fee, total, and minimum order.",
       inputSchema: cartSummaryInput,
       execute: (input, options) => getCartSummary({ ...ctx, toolCallId: options.toolCallId }, input),
     }),

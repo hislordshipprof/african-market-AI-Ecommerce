@@ -50,6 +50,8 @@ import {
   suggestSubstitutesInput,
   updateCartInput,
 } from "./schemas";
+import { serviceFeeCents } from "../../order/platform-fee";
+import { readServiceFeeSettings } from "../../order/service-fee-settings";
 
 export interface AssistantContext {
   storeId: string;
@@ -989,12 +991,18 @@ export async function getCartSummary(ctx: AssistantContext, input: unknown): Pro
   const subtotalCents = cartLineSubtotalCents(
     lines.map((line) => ({ priceCents: line.unitPriceCents, qty: line.qty })),
   );
-  const minimum = await checkMinimumOrder(ctx.storeId, ctx.cartId);
+  const [minimum, serviceFee] = await Promise.all([
+    checkMinimumOrder(ctx.storeId, ctx.cartId),
+    readServiceFeeSettings(),
+  ]);
   const missingCents = Math.max(0, minimum.minimumCents - subtotalCents);
+  const fee = serviceFeeCents(subtotalCents, serviceFee);
   return recordRead(ctx, "get_cart_summary", parsed, {
     ok: true,
     lines,
     subtotalCents,
+    serviceFeeCents: fee,
+    totalCents: subtotalCents + fee,
     minimumOrderCents: minimum.minimumCents,
     minimumMet: subtotalCents >= minimum.minimumCents,
     missingCents,

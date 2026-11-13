@@ -535,6 +535,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       lineTotalCents: 1200,
     })]);
     expect(summary.subtotalCents).toBe(1200);
+    // #495: the total the assistant may quote includes the service fee ($0.99 minimum).
+    expect(summary.serviceFeeCents).toBe(99);
+    expect(summary.totalCents).toBe(1299);
     expect(summary.minimumOrderCents).toBe(2000);
     expect(summary.minimumMet).toBe(false);
     expect(summary.missingCents).toBe(800);
