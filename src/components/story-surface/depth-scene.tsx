@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { MathUtils, TextureLoader, Vector2, type ShaderMaterial } from "three";
 import type { StoryScene } from "./scenes";
@@ -147,6 +147,24 @@ function DepthPlane({
   );
 }
 
+// Inside the canvas, so a missing or corrupt photo or depth map is caught in the scene's own
+// renderer, not reported as uncaught; the gate then keeps the poster.
+class PlaneBoundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError();
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 export default function DepthScene(props: {
   scene: StoryScene;
   onReady: () => void;
@@ -169,9 +187,11 @@ export default function DepthScene(props: {
         failIfMajorPerformanceCaveat: true,
       }}
     >
-      <Suspense fallback={null}>
-        <DepthPlane {...props} />
-      </Suspense>
+      <PlaneBoundary onError={props.onContextLost}>
+        <Suspense fallback={null}>
+          <DepthPlane {...props} />
+        </Suspense>
+      </PlaneBoundary>
     </Canvas>
   );
 }

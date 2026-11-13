@@ -56,9 +56,10 @@ function canRenderDepthScene(): boolean {
       .getContext("webgl2", { failIfMajorPerformanceCaveat: true });
     if (!gl) return false;
     const info = gl.getExtension("WEBGL_debug_renderer_info");
-    const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+    const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : null;
     gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return !SOFTWARE_RENDERER.test(renderer);
+    // A browser that hides the renderer could be a software one: keep the poster.
+    return renderer !== null && !SOFTWARE_RENDERER.test(renderer);
   } catch {
     return false;
   }
