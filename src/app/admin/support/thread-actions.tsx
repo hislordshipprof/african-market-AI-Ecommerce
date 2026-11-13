@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { replyAsPlatformAction, resolveThreadAction } from "@/lib/support/platform-actions";
 
-export function PlatformThreadActions({ threadId }: { threadId: string }) {
+export function PlatformThreadActions({ threadId, seenAt }: { threadId: string; seenAt: string | null }) {
   const router = useRouter();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +61,7 @@ export function PlatformThreadActions({ threadId }: { threadId: string }) {
         <button
           type="button"
           disabled={pending}
-          onClick={() => run(() => resolveThreadAction({ threadId }), false)}
+          onClick={() => run(() => resolveThreadAction({ threadId, seenAt }), false)}
           className="w-fit rounded-full border border-input px-4 py-2 text-sm font-medium text-foreground disabled:opacity-50"
         >
           Mark resolved

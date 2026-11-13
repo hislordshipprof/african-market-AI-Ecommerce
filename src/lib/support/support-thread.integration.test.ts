@@ -329,7 +329,7 @@ describe.skipIf(!hasDb)("support thread", () => {
       await postCustomerMessage(storeB, delivery.token, "Courier lost", "delivery");
 
       signInAs(admin, "platform_admin");
-      const queue = await listEscalatedThreads();
+      const { threads: queue } = await listEscalatedThreads();
       const ours = queue.filter((t) => ["Chat A", "Chat B"].includes(t.storeName));
       expect(ours.map((t) => [t.storeName, t.orderNumber, t.topic, t.escalationReason])).toEqual(
         expect.arrayContaining([
@@ -353,9 +353,75 @@ describe.skipIf(!hasDb)("support thread", () => {
       expect(reopened.state).toBe("open");
       expect(reopened.escalatedAt).not.toBeNull();
 
-      expect(await resolveThreadAction({ threadId: posted.threadId })).toEqual({ ok: true });
-      expect((await listEscalatedThreads()).some((t) => t.id === posted.threadId)).toBe(false);
+      const seenAt = (await listEscalatedThreads()).threads.find((t) => t.id === posted.threadId)!.seenAt;
+      expect(await resolveThreadAction({ threadId: posted.threadId, seenAt })).toEqual({ ok: true });
+      expect((await listEscalatedThreads()).threads.some((t) => t.id === posted.threadId)).toBe(false);
       expect((await readCustomerMessages(storeA, placed.token))?.map((m) => m.sender)).toEqual(["customer", "platform"]);
+    });
+
+    it("resolve from a page older than the customer's newest message is refused, and a racing message is never hidden", async () => {
+      const placed = await order(storeA, 25);
+      const posted = (await postCustomerMessage(storeA, placed.token, "Charged twice", "payment"))!;
+      signInAs(admin, "platform_admin");
+      const stale = (await listEscalatedThreads()).threads.find((t) => t.id === posted.threadId)!;
+      await postCustomerMessage(storeA, placed.token, "Still charged twice");
+
+      expect(await resolveThreadAction({ threadId: posted.threadId, seenAt: stale.seenAt })).toEqual({
+        ok: false,
+        error: "A new customer message came in. Reload the page to read it.",
+      });
+      const fresh = (await listEscalatedThreads()).threads.find((t) => t.id === posted.threadId)!;
+      expect(fresh.messages.map((m) => m.body)).toEqual(["Charged twice", "Still charged twice"]);
+
+      // A customer message racing the resolve must leave the thread on the queue, whichever commits first.
+      for (let i = 0; i < 20; i++) {
+        const { lastCustomerAt } = await storeScoped(storeA).supportThread.findUniqueOrThrow({ where: { id: posted.threadId } });
+        await Promise.all([
+          postCustomerMessage(storeA, placed.token, `Race ${i}`),
+          resolveThreadAction({ threadId: posted.threadId, seenAt: lastCustomerAt!.toISOString() }),
+        ]);
+        const thread = await storeScoped(storeA).supportThread.findUniqueOrThrow({ where: { id: posted.threadId } });
+        expect(thread.state, `round ${i}`).toBe("escalated");
+      }
+    });
+
+    it("the cap never hides a waiting thread, says how many rows it cut, and labels a follow-up after a reply as waiting", async () => {
+      const storeD = (await raw.store.create({ data: { slug: `chat-d-${suffix}`, name: "Chat D", themePreset: "palm-and-shea" } })).id;
+      const scoped = storeScoped(storeD);
+      try {
+        const customer = await scoped.customer.create({ data: { storeId: storeD, name: "Bo", email: `chat-d-${suffix}@example.com` } });
+        const numbers = Array.from({ length: 102 }, (_, i) => i + 1);
+        await scoped.order.createMany({
+          data: numbers.map((number) => ({
+            storeId: storeD, number, customerId: customer.id, status: "ACCEPTED", fulfillment: "pickup",
+            subtotalCents: 1000, bufferCents: 100, totalAuthorizedCents: 1100, totalCents: 1000,
+          })),
+        });
+        const orders = await scoped.order.findMany({ select: { id: true, number: true } });
+        const at = (minute: number) => new Date(Date.UTC(2020, 0, 1, 0, minute));
+        // Orders 1-100: answered long ago. 101: answered, then a customer follow-up. 102: escalated, never answered.
+        await scoped.supportThread.createMany({
+          data: orders.map((o) => ({
+            id: `chat-d-${o.number}-${suffix}`, storeId: storeD, orderId: o.id, topic: o.number === 102 ? "payment" : "order",
+            state: o.number === 102 ? "escalated" : "open", escalatedAt: at(o.number), escalationReason: o.number === 102 ? "topic" : "sla",
+            lastCustomerAt: o.number === 101 ? at(500) : at(o.number), lastReplyAt: o.number === 102 ? null : at(400),
+          })),
+        });
+
+        signInAs(admin, "platform_admin");
+        const { threads, hidden } = await listEscalatedThreads();
+        const ours = new Map(threads.filter((t) => t.storeName === "Chat D").map((t) => [t.orderNumber, t]));
+        expect(ours.get(101)?.waiting).toBe(true);
+        expect(ours.get(102)?.waiting).toBe(true);
+        expect(ours.get(1)?.waiting).toBe(false);
+        expect(threads).toHaveLength(100);
+        expect(hidden).toBeGreaterThan(0);
+      } finally {
+        await scoped.supportThread.deleteMany({});
+        await scoped.order.deleteMany({});
+        await scoped.customer.deleteMany({});
+        await raw.store.delete({ where: { id: storeD } });
+      }
     });
 
     it("a store session or no session is refused the queue, the reply and resolve", async () => {
@@ -365,7 +431,7 @@ describe.skipIf(!hasDb)("support thread", () => {
         signInAs(user);
         await expect(listEscalatedThreads()).rejects.toThrow("REDIRECT:/admin/sign-in");
         await expect(replyAsPlatformAction({ threadId: posted.threadId, body: "x" })).rejects.toThrow("REDIRECT:/admin/sign-in");
-        await expect(resolveThreadAction({ threadId: posted.threadId })).rejects.toThrow("REDIRECT:/admin/sign-in");
+        await expect(resolveThreadAction({ threadId: posted.threadId, seenAt: posted.sentAt })).rejects.toThrow("REDIRECT:/admin/sign-in");
       }
       expect(await storeScoped(storeA).supportMessage.count({ where: { threadId: posted.threadId } })).toBe(1);
       expect((await storeScoped(storeA).supportThread.findUniqueOrThrow({ where: { id: posted.threadId } })).state).toBe("escalated");

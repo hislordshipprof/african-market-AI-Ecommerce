@@ -85,32 +85,28 @@ async function postToOrderThread(
     if (!order) return null;
     await tx.supportThread.createMany({ data: [{ storeId, orderId: order.id, topic }], skipDuplicates: true });
     const now = new Date();
-    const current = await tx.supportThread.findUniqueOrThrow({
+    // Updating first locks the row, so the state read here cannot go stale before a racing resolve commits.
+    const current = await tx.supportThread.update({
       where: { orderId: order.id },
+      data: { lastCustomerAt: now },
       select: { id: true, topic: true, state: true },
     });
     const platformTopic = current.topic !== "order";
-    const thread = await tx.supportThread.update({
-      where: { id: current.id },
-      data: {
-        lastCustomerAt: now,
-        ...(platformTopic && current.state !== "escalated"
-          ? { state: "escalated", escalatedAt: now, escalationReason: "topic" }
-          : current.state === "resolved"
-            ? { state: "open" }
-            : {}),
-      },
-      select: { id: true, topic: true },
-    });
+    const reopen = platformTopic && current.state !== "escalated"
+      ? { state: "escalated", escalatedAt: now, escalationReason: "topic" }
+      : current.state === "resolved"
+        ? { state: "open" }
+        : null;
+    if (reopen) await tx.supportThread.update({ where: { id: current.id }, data: reopen });
     const message = await tx.supportMessage.create({
-      data: { storeId, threadId: thread.id, sender: "customer", body, createdAt: now },
+      data: { storeId, threadId: current.id, sender: "customer", body, createdAt: now },
       select: { id: true },
     });
     return {
-      threadId: thread.id,
+      threadId: current.id,
       orderNumber: order.number,
       messageId: message.id,
-      topic: thread.topic as SupportTopic,
+      topic: current.topic as SupportTopic,
       sentAt: now.toISOString(),
     };
   });
