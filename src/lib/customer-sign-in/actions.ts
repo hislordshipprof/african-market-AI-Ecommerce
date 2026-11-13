@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "../auth";
+import { parseInput, readFormField } from "../security/parse-input";
 
 export type SignInLinkState =
   | { status: "idle"; email: string }
@@ -20,10 +21,10 @@ export async function sendSignInLinkAction(
   _previous: SignInLinkState,
   form: FormData,
 ): Promise<SignInLinkState> {
-  const email = String(form.get("email") ?? "").trim().toLowerCase();
-  if (!z.email().max(254).safeParse(email).success) {
-    return { status: "error", email, message: "Enter a valid email address." };
-  }
+  const raw = readFormField(form, "email");
+  const email = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  const parsed = parseInput(z.email().max(254), email);
+  if (!parsed.ok) return { status: "error", email, message: "Enter a valid email address." };
   const incoming = await headers();
   const host = incoming.get("host");
   if (!incoming.get("x-store-slug") || !host) {
@@ -42,7 +43,7 @@ export async function sendSignInLinkAction(
       new Request(`${proto}://${host}/api/auth/sign-in/magic-link`, {
         method: "POST",
         headers: forwarded,
-        body: JSON.stringify({ email, callbackURL: "/account" }),
+        body: JSON.stringify({ email: parsed.data, callbackURL: "/account" }),
       }),
     );
     if (res.status === 429) {
