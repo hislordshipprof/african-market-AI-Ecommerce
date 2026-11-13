@@ -80,7 +80,7 @@ CREATE TABLE "assistant_chat_months" (
 
 ALTER TABLE "assistant_chat_months"
     ADD CONSTRAINT "assistant_chat_months_store_id_fkey"
-    FOREIGN KEY ("store_id") REFERENCES "stores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    FOREIGN KEY ("store_id") REFERENCES "stores"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE "assistant_chat_months" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "assistant_chat_months" FORCE ROW LEVEL SECURITY;

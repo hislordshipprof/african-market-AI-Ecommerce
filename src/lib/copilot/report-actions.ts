@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { requireStoreMember, requireStoreOwner } from "../store-admin/session";
+import { requireStoreWriter, requireStoreOwner } from "../store-admin/session";
 import { DELIVERY_PROOF_MAX_BYTES } from "../order/delivery-proof";
 import { parseInput } from "../security/parse-input";
 import { revalidateStorefront } from "../storefront/cache";
@@ -24,7 +24,7 @@ const confirmSchema = z.strictObject({
 
 /** Any store member: a voice note transcribed in the browser, or typed. */
 export async function submitVoiceReport(input: unknown): Promise<CreateReportResult> {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
   const parsed = parseInput(voiceSchema, input);
   if (!parsed.ok) {
     const transcript = (input as { transcript?: unknown } | null)?.transcript;
@@ -44,7 +44,7 @@ export async function submitVoiceReport(input: unknown): Promise<CreateReportRes
 
 /** Any store member: one invoice or shelf photo (`type`, `photo`). */
 export async function submitPhotoReport(form: FormData): Promise<CreateReportResult> {
-  const session = await requireStoreMember();
+  const session = await requireStoreWriter();
   const parsed = parseInput(photoSchema, { type: form.get("type") });
   const photo = form.get("photo");
   const file = photo instanceof File && photo.size > 0 ? photo : null;

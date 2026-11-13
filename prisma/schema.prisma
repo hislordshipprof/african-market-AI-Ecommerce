@@ -1467,7 +1467,7 @@ model AssistantChatMonth {
   chats    Int       @default(0)
   warnedAt DateTime? @map("warned_at") @db.Timestamptz(6)
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@id([storeId, month])
   @@map("assistant_chat_months")

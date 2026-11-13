@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { storeMayUse } from "../billing/plan";
 import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS } from "../db";
 import { assessRadius } from "../address/geo";
 import { lookupConfirmed } from "../address/confirm";
@@ -123,6 +124,9 @@ export interface StoreDeliveryQuote {
   confirmed: { withinRadius: boolean } | null;
   leaveAtDoor: boolean;
 }
+
+/** A Starter store does not offer courier delivery (ADR-0021). */
+export const COURIER_NOT_OFFERED = "This store does not offer courier delivery.";
 
 export function computeQuote(
   minimumOrderCents: number,
@@ -280,6 +284,10 @@ export async function quoteCheckout(
     maxPerOrder: line.variant.listing.maxPerOrder,
     frozen: line.variant.listing.frozen,
   }));
+  if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
+    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup");
+    return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
+  }
   if (fulfillment !== "store-delivery") {
     return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
   }
@@ -970,6 +978,7 @@ export async function placeOrder(
   const store = await getStripeStore(storeId);
 
   if (fulfillment === "courier") {
+    if (!(await storeMayUse(storeId, "courier-delivery"))) throw new Error(COURIER_NOT_OFFERED);
     throw new Error("Only pickup fulfillment is supported");
   }
 

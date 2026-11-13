@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { ToolChoiceViolationError, generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
+import { storeMayUse } from "../billing/plan";
 import { assistantModelId, assistantProviderOptions, createAssistantModel } from "../assistant/model";
 import { AssistantConfigError } from "../assistant/errors";
 import { lockListingRow, lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
@@ -163,6 +164,7 @@ export interface OwnerReportCard {
 }
 
 export type CreateReportCode =
+  | "plan_locked"
   | "invalid_request"
   | "photo_invalid"
   | "storage_not_set_up"
@@ -227,6 +229,9 @@ export async function listPendingOwnerReports(storeId: string): Promise<OwnerRep
   return reports.filter((report): report is OwnerReportCard => report !== null);
 }
 
+/** Voice and photo reports are a Pro feature (ADR-0021); stock alerts and the digest are on both plans. */
+export const REPORTS_LOCKED_MESSAGE = "Voice and photo stock reports come with the Pro plan.";
+
 export type ReportInput =
   | { type: "voice"; transcript: string }
   | { type: PhotoReportType; photo: Uint8Array | null };
@@ -247,6 +252,10 @@ export async function createOwnerReport(storeId: string, actor: CopilotActor, in
     const prepared = await prepareProofPhoto(input.photo);
     if (!prepared.ok) return { ok: false, code: "photo_invalid", message: REPORT_PHOTO_INVALID };
     source = { type: input.type, image: prepared.jpeg };
+  }
+
+  if (!(await storeMayUse(storeId, "copilot-reports"))) {
+    return { ok: false, code: "plan_locked", message: REPORTS_LOCKED_MESSAGE };
   }
 
   // A double submit of the same note or photo returns the pending report instead of making a second one.
