@@ -28,7 +28,6 @@ async function createListingViaUI(page: Page, opts: CreateListingOptions) {
 
   await page.click("text=Add listing");
   await page.getByLabel("Product name").fill(opts.name);
-  await page.getByLabel("Price ($)").fill(opts.price);
   if (opts.qty !== undefined) await page.getByLabel("Quantity in stock").fill(opts.qty);
 
   await page
@@ -125,7 +124,8 @@ test.describe("Listing management (authenticated)", () => {
 
     await page.locator(`[aria-label="Edit ${uniqueName}"]`).click();
     await expect(page.locator("text=Edit listing")).toBeVisible({ timeout: 5000 });
-    await page.getByLabel("Price ($)").fill("7.00");
+    // The listing price follows the cheapest variant (#392 item 6).
+    await page.getByLabel("Variant price in dollars").first().fill("7.00");
     await page.click("text=Save changes");
     await expect(page.locator("text=Listing updated")).toBeVisible({ timeout: 10000 });
 
@@ -254,7 +254,8 @@ test.describe("Listing management (authenticated)", () => {
     const after = await findListingVariants("mama-ngozi", uniqueName);
     expect(after.variants.map((variant) => variant.id)).toEqual([variantId]);
     expect(after.variants[0]).toMatchObject({ price: 950, weightG: 1000 });
-    expect(after.price).toBe(800);
+    // The listing price follows the cheapest variant (#392 item 6).
+    expect(after.price).toBe(950);
 
     await page.goto(detail);
     await expect(product.getByLabel("$9.50").filter({ visible: true }).first()).toBeVisible({ timeout: 10000 });

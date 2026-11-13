@@ -1,4 +1,5 @@
 import { customerScoped } from "../db";
+import { liveModeCheck } from "../checkout/live-mode";
 import { isCardExpired } from "./card-expiry";
 import { CARD_NOT_FOUND, CARDS_UNAVAILABLE } from "./consent";
 import { readStripeCustomerId } from "./stripe-customer";
@@ -24,8 +25,10 @@ export interface AccountCardList {
   cards: AccountCard[];
 }
 
+// The account page reads and detaches cards, so it obeys the same live-mode gate as checkout.
 function configured(): boolean {
-  return checkoutPaymentsUseFake() || Boolean(process.env.STRIPE_SECRET_KEY);
+  if (checkoutPaymentsUseFake()) return true;
+  return Boolean(process.env.STRIPE_SECRET_KEY) && liveModeCheck().ok;
 }
 
 function missingCustomer(error: unknown): boolean {

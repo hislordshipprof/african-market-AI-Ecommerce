@@ -38,22 +38,30 @@ export function loadedVariantRow(variant: {
   };
 }
 
-/** Serialises variant rows for the listing form. Blank labels are omitted. */
+/** Dollars as typed to cents. Blank is null, so the server refuses it instead of saving $0. */
+export function dollarsToCents(value: string): number | null {
+  return value.trim() ? Math.round(parseFloat(value) * 100) : null;
+}
+
+/**
+ * Serialises variant rows for the listing form. A new row with a blank label is omitted;
+ * a saved row is always sent, so clearing its label is refused rather than deleting it.
+ */
 export function serializeVariants(variants: VariantFormSnapshot[]): string {
   return JSON.stringify(
     variants
-      .filter((variant) => variant.label.trim())
+      .filter((variant) => variant.id || variant.label.trim())
       .map((variant) => {
         const row: {
           id?: string;
           label: string;
-          price: number;
+          price: number | null;
           weightG: number;
           sku: string | null;
           barcode: string | null;
         } = {
           label: variant.label.trim(),
-          price: Math.round(parseFloat(variant.price || "0") * 100),
+          price: dollarsToCents(variant.price),
           weightG: parseInt(variant.weightG || "0", 10),
           sku: variant.sku ?? null,
           barcode: variant.barcode ?? null,

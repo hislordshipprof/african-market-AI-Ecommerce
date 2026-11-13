@@ -167,7 +167,7 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
           variants: JSON.stringify([{ label: "Standard", price: 650, weightG: 900 }]),
         }),
       );
-      expect(result).toEqual({ success: true, id: listingId });
+      expect(result).toMatchObject({ success: true, id: listingId });
 
       const after = await getListing(storeA.id, listingId);
       expect(after!.price).toBe(650);
@@ -191,6 +191,56 @@ describe.skipIf(!hasDb)("listing actions (DB integration, real auth guard)", () 
       await expect(
         asAdmin(raw, (tx) => tx.$executeRaw`UPDATE listing_variants SET weight_g = 0 WHERE listing_id = ${listingId}`),
       ).rejects.toThrow(/listing_variants_weight_g_positive|violates check constraint/);
+    });
+
+    // #392 items 2 and 3: a blank or bad number never saves as 0, and a cleared label never deletes a variant.
+    it("refuses blank, non-numeric or fractional quantities, a blank price and a cleared variant label", async () => {
+      asSession(userA, emailA);
+      const before = await getListing(storeA.id, listingId);
+      const savedId = before!.variants[0].id;
+      const variants = JSON.stringify([{ id: savedId, label: "Standard", price: 650, weightG: 900 }]);
+      for (const qty of ["", "abc", "2.5"]) {
+        const result = await updateListingAction(formData({ listingId, stockMode: "counted", qty, variants }));
+        expect(result.error, `qty ${JSON.stringify(qty)}`).toMatch(/quantity/i);
+      }
+      expect((await updateListingAction(formData({ listingId, price: "", variants }))).error).toMatch(/price/i);
+      const cleared = JSON.stringify([{ id: savedId, label: " ", price: 650, weightG: 900 }]);
+      expect((await updateListingAction(formData({ listingId, variants: cleared }))).error).toMatch(/label/i);
+      const after = await getListing(storeA.id, listingId);
+      expect({ qty: after!.qty, price: after!.price, confidence: after!.confidence, variants: after!.variants.map((v) => v.id) })
+        .toEqual({ qty: before!.qty, price: before!.price, confidence: before!.confidence, variants: [savedId] });
+    });
+
+    // #392 items 1 and 4: stock that moved after the form loaded is reported, never silently kept or overwritten.
+    it("reports stock that moved since the form loaded", async () => {
+      asSession(userA, emailA);
+      const savedId = (await getListing(storeA.id, listingId))!.variants[0].id;
+      const variants = JSON.stringify([{ id: savedId, label: "Standard", price: 650, weightG: 900 }]);
+      await asAdmin(raw, (tx) => tx.listing.update({ where: { id: listingId }, data: { qty: 27 } }));
+      const typed = await updateListingAction(formData({ listingId, stockMode: "counted", qty: "29", qtyLoaded: "30", variants }));
+      expect(typed).toMatchObject({ success: true, qty: 29, stockMoved: { from: 30, to: 27 } });
+
+      await asAdmin(raw, (tx) => tx.listing.update({ where: { id: listingId }, data: { qty: 12 } }));
+      const untouched = await updateListingAction(formData({ listingId, stockMode: "counted", qty: "10", qtyLoaded: "10", variants }));
+      expect(untouched).toMatchObject({ success: true, qty: 12, stockMoved: { from: 10, to: 12 } });
+
+      const fresh = await updateListingAction(formData({ listingId, stockMode: "counted", qty: "12", qtyLoaded: "12", variants }));
+      expect(fresh).not.toHaveProperty("stockMoved");
+    });
+
+    // #392 item 6: customers pay the variant price, so the listing price follows the cheapest variant.
+    it("the listing price follows the cheapest variant, whatever the form sends", async () => {
+      asSession(userA, emailA);
+      const savedId = (await getListing(storeA.id, listingId))!.variants[0].id;
+      const variants = JSON.stringify([
+        { id: savedId, label: "Standard", price: 650, weightG: 900 },
+        { label: "Small", price: 450, weightG: 400 },
+      ]);
+      expect(await updateListingAction(formData({ listingId, price: "999", variants }))).toMatchObject({ success: true });
+      expect((await getListing(storeA.id, listingId))!.price).toBe(450);
+      const one = JSON.stringify([{ id: savedId, label: "Standard", price: 650, weightG: 900 }]);
+      expect(await updateListingAction(formData({ listingId, variants: one }))).toMatchObject({ success: true });
+      expect((await getListing(storeA.id, listingId))!.price).toBe(650);
     });
 
     it("another store's owner cannot update the listing", async () => {
