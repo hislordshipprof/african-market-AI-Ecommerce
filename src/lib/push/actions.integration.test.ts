@@ -55,6 +55,7 @@ describe.skipIf(!hasDb)("subscribe and unsubscribe actions", () => {
   let storeB: string;
   const memberA = `push-member-a-${suffix}`;
   const memberB = `push-member-b-${suffix}`;
+  const memberA2 = `push-member-a2-${suffix}`;
 
   beforeAll(async () => {
     raw = testPrismaClient();
@@ -64,9 +65,12 @@ describe.skipIf(!hasDb)("subscribe and unsubscribe actions", () => {
       data: [
         { id: memberA, name: "A", email: `${memberA}@example.com`, twoFactorEnabled: true },
         { id: memberB, name: "B", email: `${memberB}@example.com`, twoFactorEnabled: true },
+        { id: memberA2, name: "A2", email: `${memberA2}@example.com`, twoFactorEnabled: true },
       ],
     });
-    await storeScoped(storeA).storeMembership.create({ data: { storeId: storeA, userId: memberA, role: "staff" } });
+    await storeScoped(storeA).storeMembership.createMany({
+      data: [memberA, memberA2].map((userId) => ({ storeId: storeA, userId, role: "staff" })),
+    });
     await storeScoped(storeB).storeMembership.create({ data: { storeId: storeB, userId: memberB, role: "staff" } });
   });
 
@@ -81,7 +85,7 @@ describe.skipIf(!hasDb)("subscribe and unsubscribe actions", () => {
       await storeScoped(id).pushSubscription.deleteMany({});
       await storeScoped(id).storeMembership.deleteMany({});
     }
-    await raw.user.deleteMany({ where: { id: { in: [memberA, memberB] } } });
+    await raw.user.deleteMany({ where: { id: { in: [memberA, memberB, memberA2] } } });
     await raw.store.deleteMany({ where: { id: { in: [storeA, storeB] } } });
     await raw.$disconnect();
   });
@@ -107,6 +111,16 @@ describe.skipIf(!hasDb)("subscribe and unsubscribe actions", () => {
     expect(await subscribePushAction({ endpoint: endpoint("twice"), keys })).toEqual({ ok: true });
     const rows = await storeScoped(storeA).pushSubscription.findMany();
     expect(rows.map((r) => [r.endpoint, r.userId])).toEqual([[endpoint("twice"), memberA]]);
+  });
+
+  it("a device subscribed again by another member of the store moves to that member", async () => {
+    onStore(slugA);
+    signInAs(memberA);
+    await subscribePushAction({ endpoint: endpoint("shared"), keys });
+    signInAs(memberA2);
+    expect(await subscribePushAction({ endpoint: endpoint("shared"), keys })).toEqual({ ok: true });
+    const rows = await storeScoped(storeA).pushSubscription.findMany();
+    expect(rows.map((r) => [r.endpoint, r.userId])).toEqual([[endpoint("shared"), memberA2]]);
   });
 
   it("a member keeps at most 10 devices: the 11th replaces the oldest", async () => {
