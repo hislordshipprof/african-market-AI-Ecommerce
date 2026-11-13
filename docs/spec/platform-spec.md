@@ -360,6 +360,8 @@ Adapters: `UberDirectProvider` (primary), `DoorDashDriveProvider` (fallback). Ea
 5. Webhooks drive state; courier lat/lng streamed to customer map (our map; provider tracking URL as backup).
 6. Proof of delivery: photo for standard; **PIN** for frozen and orders > $150.
 
+Built in #140 (`src/lib/delivery/dispatch.ts`): both providers are quoted at once and the cheapest live quote is booked; a provider that cannot quote (no keys, HTTP error) or quotes an expired price is skipped. A create error books the next provider at once. The `courier/assignment-timeout` Inngest function wakes `COURIER_ASSIGNMENT_TIMEOUT_MS` (10 min) after the delivery was created and claims it with one conditional update (`requested` → `cancelled`); a courier webhook moves the delivery forward first (`courier_assigned`, `picked_up`, `delivered`), so a late timer does nothing. A provider that refuses the cancel keeps its delivery and no second courier is booked. Failover never returns to a provider the order already used. Both failing emits `courier.both_failed` with the order number and the customer's options: store delivery if enabled, pickup if enabled, and always cancel with refund (the "wait" option in step 4 is not offered). `courier.failover_triggered` is emitted on each switch. Notifications consume both (#12). The brand shown is "Uber Direct" or "DoorDash Drive", derived from `deliveries.provider` (`uber`, `doordash`). Not yet wired: dispatch on Ready (courier checkout is still off), and the Pro plan gate (#494), which goes in `dispatchCourier`.
+
 ### 11.3 Eligibility rules
 - Distance ≤ tenant radius (default 8 mi, max 15 mi DoorDash limit).
 - Total weight ≤ 50 lb and no single item > 50 lb.
