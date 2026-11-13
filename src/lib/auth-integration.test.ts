@@ -8,6 +8,7 @@ import { authPrisma, storeScoped } from "./db";
 import { Client } from "pg";
 import { findOrCreateCustomer } from "./customer-auth";
 import { resolveDirectUrl } from "./env";
+import { verifyUrlFromEmail } from "./test-magic-link";
 import { customerRlsErrorText, isCustomerRlsRejection } from "./customer-rls-error";
 import { syncCustomerForStore } from "./customer-claim";
 import { listAccountOrders } from "./customer-account/order-history";
@@ -56,10 +57,9 @@ function collectCookies(res: Response): string {
 }
 
 function extractVerifyUrl(html = getTestSentEmails().at(-1)?.html): string {
-  if (!html) throw new Error("No email sent");
-  const match = html.match(/href="([^"]+)"/);
-  if (!match) throw new Error("No href in email HTML");
-  return match[1].replace(/&amp;/g, "&");
+  const url = verifyUrlFromEmail(html);
+  if (!url) throw new Error("No sign-in link in the email");
+  return url;
 }
 
 async function latestMagicLink(email: string): Promise<{ token: string; id: string } | null> {

@@ -5,7 +5,7 @@ import { twoFactor, magicLink } from "better-auth/plugins";
 import { authPrisma, platform } from "./db";
 import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
 import { sendEmail } from "./email/send";
-import { magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
+import { confirmLinkUrl, magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
 import { isSlugRoutable, slugFromHost } from "./slug";
 
@@ -209,7 +209,7 @@ export const auth = betterAuth({
         const storeName = await storeNameForMagicLink(ctx);
         const message = magicLinkMessage({
           to: normalizedEmail,
-          url,
+          url: confirmLinkUrl(url),
           storeName,
           fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
         });

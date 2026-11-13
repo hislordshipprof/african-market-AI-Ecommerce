@@ -35,6 +35,7 @@ import { clearTestSentEmails, getTestSentEmails } from "./email/send";
 import { syncCustomerForRequest } from "./customer-sync";
 import { createInvite, setInviteePassword } from "./invite/service";
 import { sendSignInLinkAction } from "./customer-sign-in/actions";
+import { verifyUrlFromEmail } from "./test-magic-link";
 import { storeScoped } from "./db";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -269,7 +270,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       expect(await sendSignInLinkAction({ status: "idle", email: "" }, form)).toEqual({ status: "sent", email });
       const mail = getTestSentEmails().at(-1);
       expect(mail?.to).toBe(email);
-      expect(new URL(mail!.html.match(/href="([^"]+)"/)![1].replace(/&amp;/g, "&")).host).toBe(host);
+      expect(new URL(verifyUrlFromEmail(mail!.html)!).host).toBe(host);
 
       clearTestSentEmails();
       form.set("email", ownerEmail);
@@ -419,7 +420,7 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     });
     expect(sent.status).toBe(200);
     const html = getTestSentEmails().at(-1)?.html ?? "";
-    const href = html.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+    const href = (verifyUrlFromEmail(html) ?? undefined);
     expect(href).toBeTruthy();
     const verifyRes = await authGet(href!);
     const cookies = collectCookies(verifyRes);
@@ -538,7 +539,7 @@ async function customerMagicSession(email: string, slug: string): Promise<LiveSe
   );
   expect(sent.status, await sent.clone().text()).toBe(200);
   const html = getTestSentEmails().at(-1)?.html ?? "";
-  const href = html.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+  const href = (verifyUrlFromEmail(html) ?? undefined);
   expect(href).toBeTruthy();
   const verifyRes = await authGet(href!);
   const cookies = collectCookies(verifyRes);

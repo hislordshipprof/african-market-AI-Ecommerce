@@ -10,6 +10,22 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+const LINK_PARAMS = ["token", "callbackURL", "errorCallbackURL", "newUserCallbackURL"];
+
+/**
+ * Mail gateways that prefetch links would use up a one-time token, so the email links to a
+ * page on the same host with a Continue button, and only that button opens the verify URL.
+ */
+export function confirmLinkUrl(verifyUrl: string): string {
+  const verify = new URL(verifyUrl);
+  const confirm = new URL("/account/sign-in/confirm", verify.origin);
+  for (const key of LINK_PARAMS) {
+    const value = verify.searchParams.get(key);
+    if (value) confirm.searchParams.set(key, value);
+  }
+  return confirm.toString();
+}
+
 export function magicLinkMessage(input: {
   to: string;
   url: string;
