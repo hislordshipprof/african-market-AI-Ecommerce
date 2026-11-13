@@ -107,7 +107,7 @@ async function closestIngredients(storeId: string, term: string): Promise<Array<
       WHERE to_tsvector('english', unaccent(${term})) @@ plainto_tsquery('english', unaccent(k.known))
          OR to_tsvector('english', unaccent(k.known)) @@ plainto_tsquery('english', unaccent(${term}))
     )
-    ORDER BY similarity(i.name, ${term}) DESC, i.name
+    ORDER BY search_similarity(i.name, ${term}) DESC, i.name
     LIMIT 3
   `);
 }

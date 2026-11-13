@@ -361,15 +361,15 @@ async function readSearchListings(
         WHEN starts_with(lower(unaccent(term)), lower(unaccent(${trimmed}))) THEN 1
         WHEN to_tsvector('english', unaccent(term)) @@ plainto_tsquery('english', unaccent(${trimmed})) THEN 2
         ELSE 3 END) AS rank,
-        MAX(similarity(lower(unaccent(${trimmed})), lower(unaccent(term)))) AS fuzzy
+        MAX(search_similarity(lower(unaccent(${trimmed})), lower(unaccent(term)))) AS fuzzy
       FROM (
         SELECT l.custom_name AS term UNION ALL SELECT mp.name
         UNION ALL SELECT ps.term FROM product_synonyms ps WHERE ps.product_id = mp.id
       ) terms WHERE term IS NOT NULL AND term <> ''
     ) relevance
     CROSS JOIN LATERAL (
-      SELECT strict_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.doc)) AS score,
-             strict_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.title)) AS title_score
+      SELECT search_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.doc)) AS score,
+             search_word_similarity(lower(unaccent(${trimmed})), lower(name_doc.title)) AS title_score
     ) typo
     WHERE l.active = true AND ${notE2eListingSql}
       AND (relevance.rank < 3 OR (length(${trimmed}) >= 3 AND typo.score > 0.3))

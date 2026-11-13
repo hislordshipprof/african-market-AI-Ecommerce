@@ -61,9 +61,9 @@ export async function searchListingMatches(storeId: string, rawQuery: string): P
           OR STARTS_WITH(LOWER(m.name), LOWER(${query}))
           OR to_tsvector('english', m.name) @@ plainto_tsquery('english', ${query})
           OR EXISTS (
-            SELECT 1 FROM regexp_split_to_table(m.name, '[^[:alnum:]]+') word
-            WHERE length(word) >= GREATEST(3, length(${query}) - 1)
-              AND STARTS_WITH(LOWER(word), LOWER(${query}))
+            SELECT 1 FROM search_words(m.name) word
+            WHERE length(word.w) >= GREATEST(3, length(${query}) - 1)
+              AND STARTS_WITH(LOWER(word.w), LOWER(${query}))
           )
         ) AS by_name
         FROM matches m
