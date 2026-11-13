@@ -81,6 +81,9 @@ export default async function OrderPage({
               ))}
             </ul>
             <p><strong>Subtotal:</strong> {money(realOrder.subtotalCents)}</p>
+            {realOrder.serviceFeeCents > 0 && (
+              <p><strong>Service fee:</strong> {money(realOrder.serviceFeeCents)}</p>
+            )}
             <p><strong>Authorization hold:</strong> {money(realOrder.totalAuthorizedCents)}</p>
           </FlowCard>
           {proofToken && (
