@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { streamFromR2 } from "@/lib/r2";
 import { parseInput } from "@/lib/security/parse-input";
-import { isSvgPath, SVG_CSP } from "@/lib/security/headers";
+import { isSvgPath } from "@/lib/security/headers";
 
 const keySchema = z.array(z.string().min(1).max(512)).min(1).max(8);
 
@@ -25,8 +25,6 @@ export async function GET(
   const headers: Record<string, string> = {
     "Content-Type": result.contentType,
     "Cache-Control": "public, max-age=31536000, immutable",
-    "X-Content-Type-Options": "nosniff",
-    "Content-Security-Policy": SVG_CSP,
   };
   const contentType = result.contentType.toLowerCase();
   if (isSvgPath(key) || !contentType.startsWith("image/") || contentType.includes("svg")) {

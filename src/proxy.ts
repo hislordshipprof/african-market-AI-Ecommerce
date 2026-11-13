@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BROWSER_COOKIE } from "@/lib/cart/browser";
 import { slugFromHost, isSlugRoutable } from "@/lib/slug";
-import { isSvgPath, newCspNonce, reportOnlyPolicy, staticSecurityHeaders, SVG_CSP } from "@/lib/security/headers";
+import { needsNoScriptCsp, newCspNonce, NO_SCRIPT_CSP, reportOnlyPolicy, staticSecurityHeaders } from "@/lib/security/headers";
 
 const COOKIE_NAME = "store_override";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -65,8 +65,8 @@ export function proxy(request: NextRequest) {
   for (const header of staticSecurityHeaders()) {
     response.headers.set(header.key, header.value);
   }
-  if (isSvgPath(request.nextUrl.pathname)) {
-    response.headers.set("Content-Security-Policy", SVG_CSP);
+  if (needsNoScriptCsp(request.nextUrl.pathname)) {
+    response.headers.set("Content-Security-Policy", NO_SCRIPT_CSP);
   }
   rememberBrowser(request, response, browserId);
   return response;

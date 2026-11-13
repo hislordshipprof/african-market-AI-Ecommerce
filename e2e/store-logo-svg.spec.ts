@@ -34,11 +34,12 @@ test.describe("Store logo SVG safety (#60)", () => {
   });
 
   // The proxy's real headers for each SVG path, with a script-bearing body in place of the file (#124).
-  // The catalog key has no R2 object, so that case covers the proxy's headers, not the route's.
+  // The catalog keys have no R2 object, so those cases cover the proxy's headers, which the route cannot override.
   for (const [path, glob] of [
     ["/logos/mama-ngozi-logo.svg", "**/logos/**"],
     ["/logos/mama-ngozi-logo%2Esvg", "**/logos/**"],
     ["/api/catalog-image/catalog/xss-probe.svg", "**/api/catalog-image/**"],
+    ["/api/catalog-image/catalog/xss-probe.jpg", "**/api/catalog-image/**"],
   ]) {
     test(`the proxy's headers on ${path} keep an embedded script from running`, async ({ page }) => {
       await page.route(glob, async (route) => {
@@ -49,8 +50,8 @@ test.describe("Store logo SVG safety (#60)", () => {
           body: `<svg xmlns="http://www.w3.org/2000/svg"><script>document.documentElement.setAttribute("data-xss","ran")</script></svg>`,
         });
       });
+      // goto resolves on load, after the inline script would have run.
       await page.goto(`${BASE}${path}`);
-      await page.waitForTimeout(300);
       expect(await page.evaluate(() => document.documentElement.getAttribute("data-xss"))).toBeNull();
     });
   }

@@ -312,6 +312,14 @@ describe("security headers on the proxy", () => {
     }
   });
 
+  it("every catalog-image path gets the no-script policy, whatever its extension (#124)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const path of ["/api/catalog-image/catalog/x.jpg", "/api/catalog%2Dimage/catalog/x.jpg"]) {
+      const res = proxy(makeRequest(`http://localhost:3000${path}`));
+      expect(res.headers.get("content-security-policy")).toMatch(/script-src 'none'.*sandbox/);
+    }
+  });
+
   it("nonce request equals response and differs per request", () => {
     vi.stubEnv("NODE_ENV", "production");
     const first = proxy(makeRequest("http://localhost:3000/shop"));
