@@ -1,5 +1,6 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { UberDirectProvider } from "./uber-direct";
+import { UberDirectProvider, UberWebhookSignatureError } from "./uber-direct";
 import { fakeUberDirect } from "./uber-direct-fake";
 import type { DeliveryProvider, DeliveryRequest } from "./provider";
 
@@ -146,5 +147,55 @@ describe("UberDirectProvider", () => {
       },
     });
     await expect(slow.provider.quote(request)).rejects.toMatchObject({ provider: "uber", status: 504, code: "timeout" });
+  });
+
+  it("verifies x-uber-signature and maps delivery status events to platform delivery events", () => {
+    const signingKey = "whsec-test-key";
+    const { keys } = setup();
+    const provider = new UberDirectProvider({ env: { ...keys, UBER_DIRECT_WEBHOOK_SIGNING_KEY: signingKey } });
+    const body = (status: string, extra: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        kind: "event.delivery_status",
+        id: `evt_${status}`,
+        delivery_id: "del_abc",
+        status,
+        created: "2026-11-13T15:10:00Z",
+        live_mode: false,
+        data: {
+          id: "del_abc",
+          status,
+          fee: 799,
+          tracking_url: "https://www.ubereats.com/orders/del_abc",
+          dropoff_eta: "2026-11-13T15:40:00Z",
+          courier: { name: "Sam", vehicle_type: "car", vehicle_make: "Toyota", vehicle_model: "Prius" },
+          ...extra,
+        },
+      });
+    const signed = (raw: string, key = signingKey) =>
+      new Headers({ "x-uber-signature": createHmac("sha256", key).update(raw).digest("hex") });
+    const event = (raw: string) => provider.handleWebhook(raw, signed(raw));
+
+    expect(event(body("pickup"))).toMatchObject({
+      provider: "uber",
+      externalDeliveryId: "del_abc",
+      externalEventId: "evt_pickup",
+      type: "courier_assigned",
+      occurredAt: new Date("2026-11-13T15:10:00Z"),
+      trackingUrl: "https://www.ubereats.com/orders/del_abc",
+      actualFeeCents: null,
+      courier: { name: "Sam", vehicle: "Toyota Prius", dropoffEta: new Date("2026-11-13T15:40:00Z") },
+    });
+    expect(event(body("pickup_complete")).type).toBe("picked_up");
+    expect(event(body("delivered"))).toMatchObject({ type: "delivered", actualFeeCents: 799 });
+    expect(event(body("canceled")).type).toBe("cancelled");
+    expect(event(body("dropoff")).type).toBeNull();
+
+    const raw = body("delivered");
+    expect(() => provider.handleWebhook(raw, new Headers())).toThrow(UberWebhookSignatureError);
+    expect(() => provider.handleWebhook(raw, signed(raw, "another-key"))).toThrow(UberWebhookSignatureError);
+    expect(() => provider.handleWebhook(raw.replace("799", "1"), signed(raw))).toThrow(UberWebhookSignatureError);
+    expect(() => provider.handleWebhook(raw, new Headers({ "x-uber-signature": "not-hex" }))).toThrow(UberWebhookSignatureError);
+    expect(() => new UberDirectProvider({ env: keys }).handleWebhook(raw, signed(raw))).toThrow(/UBER_DIRECT_WEBHOOK_SIGNING_KEY/);
+    expect(() => event("{not json")).toThrow(SyntaxError);
   });
 });

@@ -1,10 +1,13 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   DeliveryProviderError,
+  type CourierEventType,
   type CreatedDelivery,
   type DeliveryAddress,
   type DeliveryProvider,
   type DeliveryQuote,
   type DeliveryRequest,
+  type DeliveryWebhookEvent,
 } from "./provider";
 
 const AUTH_URL = "https://auth.uber.com/oauth/v2/token";
@@ -149,12 +152,31 @@ function feeCents(value: unknown): number {
   return value as number;
 }
 
+/** The webhook's x-uber-signature is missing or does not match the body. */
+export class UberWebhookSignatureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UberWebhookSignatureError";
+  }
+}
+
+// Delivery status values: https://developer.uber.com/docs/deliveries/daas/references/api/webhooks/delivery-status-webhook
+// pending, dropoff and returned carry no platform step; returned follows a failed dropoff and is handled with the order flow (#136).
+const EVENT_TYPES: Record<string, CourierEventType> = {
+  pickup: "courier_assigned",
+  pickup_complete: "picked_up",
+  delivered: "delivered",
+  canceled: "cancelled",
+};
+
 export class UberDirectProvider implements DeliveryProvider {
   readonly name = "uber" as const;
   private readonly client: UberDirectClient;
+  private readonly env: Record<string, string | undefined>;
 
   constructor(opts: UberDirectOptions = {}) {
     this.client = createUberDirectClient(opts);
+    this.env = opts.env ?? process.env;
   }
 
   private path(suffix: string): string {
@@ -213,7 +235,40 @@ export class UberDirectProvider implements DeliveryProvider {
     await this.client.request("eats.deliveries", "POST", this.path(`/deliveries/${encodeURIComponent(externalId)}/cancel`));
   }
 
-  handleWebhook(): never {
-    throw new Error("not implemented");
+  /**
+   * Verifies and parses one webhook. x-uber-signature is the lowercase hex HMAC-SHA256 of the raw body with the
+   * webhook's signing key: https://developer.uber.com/docs/deliveries/guides/webhooks
+   */
+  handleWebhook(raw: string, headers: Headers): DeliveryWebhookEvent {
+    const key = this.env.UBER_DIRECT_WEBHOOK_SIGNING_KEY;
+    if (!key) throw new Error("Uber Direct webhooks are not configured: missing UBER_DIRECT_WEBHOOK_SIGNING_KEY");
+    const given = headers.get("x-uber-signature") ?? "";
+    if (!/^[0-9a-f]{64}$/i.test(given)) throw new UberWebhookSignatureError("Missing or malformed x-uber-signature");
+    const expected = createHmac("sha256", key).update(raw).digest();
+    if (!timingSafeEqual(Buffer.from(given, "hex"), expected)) throw new UberWebhookSignatureError("x-uber-signature does not match the body");
+
+    const body = JSON.parse(raw) as Json;
+    const data = (typeof body.data === "object" && body.data !== null ? body.data : {}) as Json;
+    const eventId = body.id;
+    const externalDeliveryId = body.delivery_id;
+    const occurredAt = optionalDate(body.created);
+    if (typeof eventId !== "string" || typeof externalDeliveryId !== "string" || !occurredAt) {
+      throw new Error("Uber Direct webhook is missing id, delivery_id or created");
+    }
+    const type = body.kind === "event.delivery_status" && typeof body.status === "string" ? EVENT_TYPES[body.status] ?? null : null;
+    const courier = (typeof data.courier === "object" && data.courier !== null ? data.courier : null) as Json | null;
+    const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+    const vehicle = courier ? [courier.vehicle_make, courier.vehicle_model].map(text).filter(Boolean).join(" ") || text(courier.vehicle_type) : null;
+    return {
+      provider: "uber",
+      externalDeliveryId,
+      externalEventId: eventId,
+      type,
+      occurredAt,
+      trackingUrl: text(data.tracking_url),
+      actualFeeCents: type === "delivered" && data.fee !== undefined ? feeCents(data.fee) : null,
+      courier: courier ? { name: text(courier.name), vehicle, dropoffEta: optionalDate(data.dropoff_eta) } : null,
+      payload: body,
+    };
   }
 }
