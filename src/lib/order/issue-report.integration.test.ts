@@ -85,10 +85,11 @@ describe.skipIf(!hasDb)("customer issue report", () => {
   });
 
   /** A completed pickup order: three lines, captured at the picked total. */
-  async function completedOrder(lines: Array<{ qtyPicked: number; unitPriceCents: number }>, hoursAgo: number) {
+  async function completedOrder(lines: Array<{ qtyPicked: number; unitPriceCents: number }>, hoursAgo: number, serviceFeeCents = 0) {
     number += 1;
     const customer = await storeScoped(store.id).customer.create({ data: { storeId: store.id, name: `Issue ${number}` } });
-    const captured = lines.reduce((sum, line) => sum + line.qtyPicked * line.unitPriceCents, 0);
+    const goods = lines.reduce((sum, line) => sum + line.qtyPicked * line.unitPriceCents, 0);
+    const captured = goods + serviceFeeCents;
     const pi = `pi_issue_${number}_${run}`;
     setAuthorizedAmount(pi, captured);
     await fakeStripeProvider.capturePaymentIntent(pi, captured, `cap-issue-${number}`);
@@ -99,11 +100,12 @@ describe.skipIf(!hasDb)("customer issue report", () => {
         customerId: customer.id,
         status: "COMPLETED",
         fulfillment: "pickup",
-        subtotalCents: captured,
+        subtotalCents: goods,
         bufferCents: 0,
         totalAuthorizedCents: captured,
         totalCents: captured,
         capturedAmountCents: captured,
+        serviceFeeCents,
         paymentIntentId: pi,
         trackingToken: `tok_${number}_${run}`,
         completedAt: new Date(Date.now() - hoursAgo * HOUR),
@@ -161,6 +163,24 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     const photoKey = `issue-photo/${order.id}/${after.issues[0].id}.jpg`;
     expect(after.issues[0].photoKey).toBe(photoKey);
     expect(bucket.get(photoKey)).toMatchObject({ bucket: "proof-bucket", contentType: "image/jpeg" });
+  });
+
+  it("#495: an issue refund refunds the service fee in proportion to the goods refunded", async () => {
+    // $66 of goods with a $1.98 fee; $21 of goods reported is 21/66 of the fee, 63¢.
+    const { order, token } = await completedOrder([
+      { qtyPicked: 2, unitPriceCents: 450 },
+      { qtyPicked: 1, unitPriceCents: 1200 },
+      { qtyPicked: 3, unitPriceCents: 1500 },
+    ], 1, 198);
+    const [cheap, middle] = order.lines;
+    const result = await submitIssueReport(store, token, {
+      type: "damaged",
+      lines: [{ lineId: cheap.id, qty: 2 }, { lineId: middle.id, qty: 1 }],
+      note: "",
+      photo: JPEG,
+    });
+    expect(result).toEqual({ ok: true, state: "auto_refunded", amountCents: 2163 });
+    expect((await written(order.id)).requests[0]).toMatchObject({ amountCents: 2163 });
   });
 
   it("the same order 49 h after completion is refused and nothing is written", async () => {

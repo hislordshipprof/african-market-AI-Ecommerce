@@ -40,6 +40,16 @@ export function maxGoodsWithin(budgetCents: number, settings: ServiceFeeSettings
   return low;
 }
 
+/** An issue refund returns the service fee in proportion to the goods it refunds. */
+export function serviceFeeRefundCents(
+  goodsRefundedCents: number,
+  order: { serviceFeeCents: number; capturedAmountCents: number | null; tipCents: number; deliveryFeeCents: number },
+): number {
+  const goodsCharged = (order.capturedAmountCents ?? 0) - order.serviceFeeCents - order.tipCents - order.deliveryFeeCents;
+  if (order.serviceFeeCents <= 0 || goodsCharged <= 0) return 0;
+  return Math.min(order.serviceFeeCents, percentOf(order.serviceFeeCents, (goodsRefundedCents * 10_000) / goodsCharged));
+}
+
 export type CaptureSplit = {
   /** Sent as Stripe `application_fee_amount`. */
   applicationFeeCents: number;

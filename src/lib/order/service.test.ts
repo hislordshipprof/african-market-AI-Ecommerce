@@ -2328,16 +2328,17 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
   });
 
-  it("full cancellation refunds the application fee", async () => {
+  it("full cancellation refunds the application fee and the service fee in it", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
-    capturedPayments.set(order.paymentIntentId!, 5500);
-    capturedFees.set(order.paymentIntentId!, 190);
+    // $55 of goods + a $1.65 service fee; application fee = $1.65 + the store's card fee ($1.90).
+    capturedPayments.set(order.paymentIntentId!, 5665);
+    capturedFees.set(order.paymentIntentId!, 355);
 
     const result = await autoCancelOrder(storeId, order.id);
     expect(result.ok).toBe(true);
-    expect(refundRequests.at(-1)?.refundApplicationFee).toBe(true);
-    expect(feeRefunded.get(order.paymentIntentId!)).toBe(190);
+    expect(refundRequests.at(-1)).toMatchObject({ amountCents: 5665, refundApplicationFee: true });
+    expect(feeRefunded.get(order.paymentIntentId!)).toBe(355);
   });
 
   it("markReady for a delivery order captures and lands on READY", async () => {
