@@ -1439,6 +1439,10 @@ model StoreSubscription {
   paymentFailedAt      DateTime? @map("payment_failed_at") @db.Timestamptz(6)
   /// Creation time of the last subscription event applied; an older event arriving late is skipped.
   lastEventAt          DateTime? @map("last_event_at") @db.Timestamptz(6)
+  /// The owner's open Stripe Checkout; expired before another opens, cleared when the subscription arrives.
+  checkoutSessionId    String?   @map("checkout_session_id")
+  /// Creation time of the newest paid invoice event; an older payment failure arriving late is skipped.
+  lastInvoicePaidAt    DateTime? @map("last_invoice_paid_at") @db.Timestamptz(6)
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
 

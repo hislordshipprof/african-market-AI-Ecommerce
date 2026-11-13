@@ -1,6 +1,8 @@
 import { getStripeClient } from "../stripe/provider";
 import { stripeProviderKind } from "../stripe";
+import type { WebhookSubscription } from "../stripe/types";
 import type { Plan } from "./plan";
+import { billingObjects } from "./webhook-objects";
 
 /** Prices are found by lookup key, never by a hard-coded price id. */
 export const PLAN_LOOKUP_KEYS: Record<Plan, string> = {
@@ -19,6 +21,9 @@ export function planForLookupKey(key: string | null): Plan | null {
   return null;
 }
 
+/** The Portal configuration that allows switching between the two plans; found by this metadata key. */
+const PORTAL_CONFIG_KEY = "store_plans_v1";
+
 export interface BillingProvider {
   /** Finds both monthly prices, creating the products and prices once if missing. */
   planPrices(): Promise<Record<Plan, string>>;
@@ -31,49 +36,99 @@ export interface BillingProvider {
     trialEnd: number | null;
     successUrl: string;
     cancelUrl: string;
-  }): Promise<{ url: string }>;
-  /** Customer Portal: change plan, card, or cancel. */
+  }): Promise<{ id: string; url: string }>;
+  /** Expires a Checkout that is still open. "complete" means the owner already paid in it. */
+  closeCheckoutSession(sessionId: string): Promise<"closed" | "complete">;
+  /** Customer Portal: switch between Starter and Pro (prorated), change card, or cancel. */
   createPortalSession(input: { customerId: string; returnUrl: string }): Promise<{ url: string }>;
-  /** Moves an existing subscription's trial end (pilot granted after subscribing). */
-  setTrialEnd(subscriptionId: string, trialEnd: number): Promise<void>;
+  /** Moves a subscription's trial end: a date (pilot granted after subscribing) or "now" (pilot removed). */
+  setTrialEnd(subscriptionId: string, trialEnd: number | "now"): Promise<void>;
+  /** Stripe's current state of a subscription. */
+  getSubscription(subscriptionId: string): Promise<WebhookSubscription>;
+  /** Cancels a subscription at once (a duplicate the store must not pay twice for). */
+  cancelSubscription(subscriptionId: string): Promise<void>;
 }
 
-let cachedPrices: Record<Plan, string> | null = null;
+let cachedPlans: Record<Plan, { price: string; product: string }> | null = null;
+let cachedPortalConfig: string | null = null;
 
-export const stripeBillingProvider: BillingProvider = {
-  async planPrices() {
-    if (cachedPrices) return cachedPrices;
-    const stripe = getStripeClient();
-    const found = await stripe.prices.list({
-      lookup_keys: Object.values(PLAN_LOOKUP_KEYS),
-      active: true,
-      limit: 10,
-    });
-    const prices = {} as Record<Plan, string>;
-    for (const plan of ["starter", "pro"] as const) {
-      const existing = found.data.find((p) => p.lookup_key === PLAN_LOOKUP_KEYS[plan]);
-      if (existing) {
-        prices[plan] = existing.id;
-        continue;
-      }
-      const product = await stripe.products.create(
-        { name: PLAN_PRODUCTS[plan].name, metadata: { platform_plan: plan } },
-        { idempotencyKey: `plan-product-${plan}-v1` },
-      );
-      const price = await stripe.prices.create(
-        {
-          product: product.id,
-          currency: "usd",
-          unit_amount: PLAN_PRODUCTS[plan].cents,
-          recurring: { interval: "month" },
-          lookup_key: PLAN_LOOKUP_KEYS[plan],
-        },
-        { idempotencyKey: `plan-price-${plan}-v1` },
-      );
-      prices[plan] = price.id;
+async function planCatalog(): Promise<Record<Plan, { price: string; product: string }>> {
+  if (cachedPlans) return cachedPlans;
+  const stripe = getStripeClient();
+  const found = await stripe.prices.list({
+    lookup_keys: Object.values(PLAN_LOOKUP_KEYS),
+    active: true,
+    limit: 10,
+  });
+  const plans = {} as Record<Plan, { price: string; product: string }>;
+  for (const plan of ["starter", "pro"] as const) {
+    const existing = found.data.find((p) => p.lookup_key === PLAN_LOOKUP_KEYS[plan]);
+    if (existing) {
+      plans[plan] = { price: existing.id, product: typeof existing.product === "string" ? existing.product : existing.product.id };
+      continue;
     }
-    cachedPrices = prices;
-    return prices;
+    const product = await stripe.products.create(
+      { name: PLAN_PRODUCTS[plan].name, metadata: { platform_plan: plan } },
+      { idempotencyKey: `plan-product-${plan}-v1` },
+    );
+    const price = await stripe.prices.create(
+      {
+        product: product.id,
+        currency: "usd",
+        unit_amount: PLAN_PRODUCTS[plan].cents,
+        recurring: { interval: "month" },
+        lookup_key: PLAN_LOOKUP_KEYS[plan],
+      },
+      { idempotencyKey: `plan-price-${plan}-v1` },
+    );
+    plans[plan] = { price: price.id, product: product.id };
+  }
+  cachedPlans = plans;
+  return plans;
+}
+
+export const stripeBillingProvider: BillingProvider & { portalConfiguration(): Promise<string> } = {
+  async planPrices() {
+    const plans = await planCatalog();
+    return { starter: plans.starter.price, pro: plans.pro.price };
+  },
+
+  /**
+   * Finds or creates the Portal configuration that lists both plans (the account default allows no plan change),
+   * and brings it in line with these features once per process.
+   */
+  async portalConfiguration() {
+    if (cachedPortalConfig) return cachedPortalConfig;
+    const stripe = getStripeClient();
+    const plans = await planCatalog();
+    const features = {
+      invoice_history: { enabled: true },
+      payment_method_update: { enabled: true },
+      subscription_cancel: { enabled: true, mode: "at_period_end" as const },
+      subscription_update: {
+        enabled: true,
+        default_allowed_updates: ["price" as const],
+        proration_behavior: "create_prorations" as const,
+        // A pilot store switching plans keeps its free months.
+        trial_update_behavior: "continue_trial" as const,
+        products: (["starter", "pro"] as const).map((plan) => ({
+          product: plans[plan].product,
+          prices: [plans[plan].price],
+          adjustable_quantity: { enabled: false },
+        })),
+      },
+    };
+    for await (const config of stripe.billingPortal.configurations.list({ active: true, limit: 100 })) {
+      if (config.metadata?.platform_key === PORTAL_CONFIG_KEY) {
+        await stripe.billingPortal.configurations.update(config.id, { features });
+        return (cachedPortalConfig = config.id);
+      }
+    }
+    const config = await stripe.billingPortal.configurations.create(
+      { metadata: { platform_key: PORTAL_CONFIG_KEY }, features },
+      { idempotencyKey: `portal-config-${PORTAL_CONFIG_KEY}` },
+    );
+    return (cachedPortalConfig = config.id);
   },
 
   async createCustomer({ storeId, name, email }) {
@@ -101,12 +156,31 @@ export const stripeBillingProvider: BillingProvider = {
       cancel_url: cancelUrl,
     });
     if (!session.url) throw new Error("Stripe Checkout returned no URL");
-    return { url: session.url };
+    return { id: session.id, url: session.url };
+  },
+
+  async closeCheckoutSession(sessionId) {
+    const stripe = getStripeClient();
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.status === "complete") return "complete";
+    if (session.status === "open") {
+      const expired = await stripe.checkout.sessions.expire(sessionId).catch(async (err) => {
+        // Completed between the read and the expire.
+        if ((await stripe.checkout.sessions.retrieve(sessionId)).status === "complete") return null;
+        throw err;
+      });
+      if (!expired) return "complete";
+    }
+    return "closed";
   },
 
   async createPortalSession({ customerId, returnUrl }) {
     const stripe = getStripeClient();
-    const session = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: returnUrl });
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: returnUrl,
+      configuration: await this.portalConfiguration(),
+    });
     return { url: session.url };
   },
 
@@ -114,24 +188,48 @@ export const stripeBillingProvider: BillingProvider = {
     const stripe = getStripeClient();
     await stripe.subscriptions.update(subscriptionId, { trial_end: trialEnd, proration_behavior: "none" });
   },
+
+  async getSubscription(subscriptionId) {
+    const sub = await getStripeClient().subscriptions.retrieve(subscriptionId);
+    const parsed = billingObjects(sub).subscription;
+    if (!parsed) throw new Error(`Stripe returned no subscription for ${subscriptionId}`);
+    return parsed;
+  },
+
+  async cancelSubscription(subscriptionId) {
+    await getStripeClient().subscriptions.cancel(subscriptionId);
+  },
 };
 
 /** In-memory double with Stripe's rules: unknown customers and subscriptions are refused, trials must be in the future. */
 export function createFakeBillingProvider() {
   const customers = new Map<string, string>();
   const subscriptions = new Set<string>();
-  const trialEnds = new Map<string, number>();
+  const states = new Map<string, WebhookSubscription>();
+  const trialEnds = new Map<string, number | "now">();
   let seq = 0;
   const missing = (kind: string, id: string) =>
     Object.assign(new Error(`No such ${kind}: '${id}'`), { code: "resource_missing", statusCode: 404 });
   const provider: BillingProvider & {
     addSubscription(id: string): void;
-    trialEndOf(id: string): number | undefined;
-    checkouts: { customerId: string; plan: Plan; storeId: string; trialEnd: number | null }[];
+    setSubscription(sub: WebhookSubscription): void;
+    trialEndOf(id: string): number | "now" | undefined;
+    completeCheckout(id: string): void;
+    checkouts: { id: string; status: "open" | "complete" | "expired"; customerId: string; plan: Plan; storeId: string; trialEnd: number | null }[];
+    canceled: Set<string>;
   } = {
     checkouts: [],
+    canceled: new Set(),
     addSubscription(id) {
       subscriptions.add(id);
+    },
+    setSubscription(sub) {
+      subscriptions.add(sub.id);
+      states.set(sub.id, sub);
+    },
+    completeCheckout(id) {
+      const checkout = provider.checkouts.find((c) => c.id === id);
+      if (checkout) checkout.status = "complete";
     },
     trialEndOf(id) {
       return trialEnds.get(id);
@@ -142,7 +240,7 @@ export function createFakeBillingProvider() {
     async createCustomer({ storeId }) {
       const existing = customers.get(storeId);
       if (existing) return existing;
-      const id = `cus_fake_${++seq}`;
+      const id = `cus_fake_${storeId}`;
       customers.set(storeId, id);
       return id;
     },
@@ -151,8 +249,16 @@ export function createFakeBillingProvider() {
       if (input.trialEnd !== null && input.trialEnd * 1000 <= Date.now()) {
         throw Object.assign(new Error("trial_end must be in the future"), { code: "parameter_invalid_integer" });
       }
-      provider.checkouts.push({ customerId: input.customerId, plan: input.plan, storeId: input.storeId, trialEnd: input.trialEnd });
-      return { url: `https://checkout.stripe.test/c/${++seq}` };
+      const id = `cs_fake_${++seq}`;
+      provider.checkouts.push({ id, status: "open", customerId: input.customerId, plan: input.plan, storeId: input.storeId, trialEnd: input.trialEnd });
+      return { id, url: `https://checkout.stripe.test/c/${seq}` };
+    },
+    async closeCheckoutSession(id) {
+      const checkout = provider.checkouts.find((c) => c.id === id);
+      if (!checkout) throw missing("checkout session", id);
+      if (checkout.status === "complete") return "complete";
+      checkout.status = "expired";
+      return "closed";
     },
     async createPortalSession({ customerId }) {
       if (![...customers.values()].includes(customerId)) throw missing("customer", customerId);
@@ -160,10 +266,18 @@ export function createFakeBillingProvider() {
     },
     async setTrialEnd(subscriptionId, trialEnd) {
       if (!subscriptions.has(subscriptionId)) throw missing("subscription", subscriptionId);
-      if (trialEnd * 1000 <= Date.now()) {
+      if (trialEnd !== "now" && trialEnd * 1000 <= Date.now()) {
         throw Object.assign(new Error("trial_end must be in the future"), { code: "parameter_invalid_integer" });
       }
       trialEnds.set(subscriptionId, trialEnd);
+    },
+    async getSubscription(id) {
+      const state = states.get(id);
+      if (!state) throw missing("subscription", id);
+      return state;
+    },
+    async cancelSubscription(id) {
+      provider.canceled.add(id);
     },
   };
   return provider;

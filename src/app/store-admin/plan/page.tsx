@@ -45,7 +45,8 @@ function planLines(plan: Plan): string[] {
   ];
 }
 
-export default async function PlanPage() {
+export default async function PlanPage({ searchParams }: { searchParams: Promise<{ pending?: string }> }) {
+  const { pending } = await searchParams;
   const session = await requireStoreOwner();
   const billing = await getStoreBilling(session.store.id);
   const usage = await assistantChatUsage(session.store.id, billing.plan);
@@ -81,6 +82,12 @@ export default async function PlanPage() {
           </div>
         )}
 
+        {pending === "1" && !billing.subscribed && (
+          <div role="status" className="rounded-xl border border-border bg-card p-4 text-sm text-foreground">
+            Your payment went through. Your plan shows here within a minute; refresh to see it.
+          </div>
+        )}
+
         <section aria-labelledby="current-plan" className="rounded-xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -101,7 +108,7 @@ export default async function PlanPage() {
                   </span>
                 )}
               </div>
-              {billing.pilot && billing.status === "none" && (
+              {billing.pilotTrialAvailable && (
                 <p className="mt-2 text-sm text-foreground">Your first 3 months are free. Choose a plan to start.</p>
               )}
             </div>
@@ -176,7 +183,7 @@ export default async function PlanPage() {
                     ))}
                   </ul>
                   <Button type="submit" className="mt-5 min-h-11" variant={plan === "pro" ? "default" : "outline"}>
-                    {billing.pilot ? `Start ${PLAN_NAMES[plan]}, 3 months free` : `Choose ${PLAN_NAMES[plan]}`}
+                    {billing.pilotTrialAvailable ? `Start ${PLAN_NAMES[plan]}, 3 months free` : `Choose ${PLAN_NAMES[plan]}`}
                   </Button>
                 </form>
               ))}

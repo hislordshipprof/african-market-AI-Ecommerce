@@ -12,7 +12,7 @@ import { setEmailSenderForTests, type EmailMessage } from "../email/send";
 import { storePlan } from "./plan";
 import { COURIER_NOT_OFFERED, quoteCheckout } from "../checkout/service";
 import { createFakeBillingProvider, PLAN_LOOKUP_KEYS, setBillingProvider } from "./provider";
-import { PILOT_STORE_CAP, setPilot, startSubscription } from "./service";
+import { getStoreBilling, PILOT_STORE_CAP, setPilot, startSubscription } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -57,11 +57,11 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     };
   }
 
-  function invoiceEvent(type: string, inv: { customer: string; subscription: string }) {
+  function invoiceEvent(type: string, inv: { customer: string; subscription: string }, opts: { created?: number } = {}) {
     return {
       id: `evt_${run}_${++seq}`,
       object: "event",
-      created: Math.floor(Date.now() / 1000),
+      created: opts.created ?? Math.floor(Date.now() / 1000),
       type,
       livemode: false,
       pending_webhooks: 1,
@@ -88,6 +88,19 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
       }),
     );
   }
+
+  async function newStore(tag: string, data: Record<string, unknown> = {}) {
+    const id = (await raw.store.create({ data: { slug: `sub-${tag}-${run}`, name: `Sub ${tag}` } })).id;
+    extraStores.push(id);
+    await raw.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL ROLE app_user`;
+      await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+      await tx.storeSubscription.create({ data: { storeId: id, ...data } });
+    });
+    return id;
+  }
+
+  const row = (storeId: string) => platformAdmin.storeSubscription.findUniqueOrThrow({ where: { storeId } });
 
   beforeAll(async () => {
     secret = process.env.STRIPE_WEBHOOK_SECRET?.split(",")[0]?.trim() || "whsec_test_ticket_494";
@@ -243,5 +256,115 @@ describe.skipIf(!hasDb)("store subscriptions (lane DB)", () => {
     ).rejects.toThrow();
     const updated = await storeScoped(storeB).assistantChatMonth.updateMany({ where: { storeId: storeA }, data: { chats: 0 } });
     expect(updated.count).toBe(0);
+  });
+
+  it("B1: a second Checkout expires the first; a paid Checkout whose webhook has not landed opens nothing", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const id = await newStore("co");
+    const start = () => startSubscription({ storeId: id, storeName: "Sub co", plan: "pro", owner: admin, returnUrl: "http://localhost/x" });
+    expect(await start()).toHaveProperty("url");
+    expect(await start()).toHaveProperty("url");
+    expect(fake.checkouts.map((c) => c.status)).toEqual(["expired", "open"]);
+
+    fake.completeCheckout(fake.checkouts[1].id);
+    expect(await start()).toEqual({ pending: true });
+    expect(fake.checkouts).toHaveLength(2);
+  });
+
+  it("B1: a second subscription on one store is cancelled; the first keeps receiving its events", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const id = await newStore("dup");
+    sent.length = 0;
+    const base = { customer: `cus_${run}_dup`, status: "active", storeId: id };
+    await deliver(subscriptionEvent("customer.subscription.created", { ...base, id: `sub_${run}_c1`, plan: "starter" }));
+    expect((await deliver(subscriptionEvent("customer.subscription.created", { ...base, id: `sub_${run}_c2`, plan: "pro" }))).status).toBe(200);
+    expect([...fake.canceled]).toEqual([`sub_${run}_c2`]);
+    expect(await row(id)).toMatchObject({ stripeSubscriptionId: `sub_${run}_c1`, plan: "starter" });
+    expect(await platformAdmin.auditLog.count({ where: { storeId: id, action: "subscription.duplicate_canceled" } })).toBe(1);
+    expect(sent.some((m) => m.subject.includes("Duplicate subscription cancelled"))).toBe(true);
+
+    const later = Math.floor(Date.now() / 1000) + 2;
+    await deliver(subscriptionEvent("customer.subscription.updated", { ...base, id: `sub_${run}_c1`, plan: "starter", status: "past_due" }, { created: later }));
+    expect((await row(id)).status).toBe("past_due");
+    await deliver(subscriptionEvent("customer.subscription.deleted", { ...base, id: `sub_${run}_c2`, plan: "pro", status: "canceled" }, { created: later + 1 }));
+    await deliver(invoiceEvent("invoice.payment_failed", { customer: base.customer, subscription: `sub_${run}_c2` }, { created: later + 1 }));
+    expect(await row(id)).toMatchObject({ stripeSubscriptionId: `sub_${run}_c1`, status: "past_due", paymentFailedAt: null });
+  });
+
+  it("B3: removing the pilot ends a running trial in Stripe; once the free months are used, removal is refused", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const trialing = await newStore("rm", { status: "trialing", stripeSubscriptionId: `sub_${run}_rm`, stripeCustomerId: `cus_${run}_rm` });
+    fake.addSubscription(`sub_${run}_rm`);
+    expect(await setPilot(trialing, true, admin)).toEqual({ ok: true });
+    expect(await setPilot(trialing, false, admin)).toEqual({ ok: true });
+    expect(fake.trialEndOf(`sub_${run}_rm`)).toBe("now");
+    expect((await row(trialing)).pilot).toBe(false);
+
+    const refused = await newStore("rm2", { status: "trialing", pilot: true, stripeSubscriptionId: `sub_${run}_rm2` });
+    expect(await setPilot(refused, false, admin)).toMatchObject({ ok: false });
+    expect((await row(refused)).pilot).toBe(true);
+
+    const used = await newStore("rm3", {
+      status: "active",
+      pilot: true,
+      stripeSubscriptionId: `sub_${run}_rm3`,
+      trialEndsAt: new Date(Date.now() - 86400_000),
+    });
+    expect(await setPilot(used, false, admin)).toEqual({
+      ok: false,
+      error: "This store has already had its free months, so it keeps its pilot place.",
+    });
+    expect((await row(used)).pilot).toBe(true);
+    for (const id of [refused, used]) await platformAdmin.storeSubscription.update({ where: { storeId: id }, data: { pilot: false } });
+  });
+
+  it("N4: the free months show only when Checkout will give them; a grant expires an open Checkout", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const returning = await newStore("ret", { pilot: true, status: "canceled", stripeSubscriptionId: `sub_${run}_ret` });
+    expect((await getStoreBilling(returning)).pilotTrialAvailable).toBe(false);
+
+    const fresh = await newStore("fresh");
+    await startSubscription({ storeId: fresh, storeName: "Sub fresh", plan: "starter", owner: admin, returnUrl: "http://localhost/x" });
+    expect(await setPilot(fresh, true, admin)).toEqual({ ok: true });
+    expect(fake.checkouts.map((c) => c.status)).toEqual(["expired"]);
+    expect((await getStoreBilling(fresh)).pilotTrialAvailable).toBe(true);
+    await startSubscription({ storeId: fresh, storeName: "Sub fresh", plan: "starter", owner: admin, returnUrl: "http://localhost/x" });
+    expect(fake.checkouts.at(-1)?.trialEnd).not.toBeNull();
+    for (const id of [returning, fresh]) await platformAdmin.storeSubscription.update({ where: { storeId: id }, data: { pilot: false } });
+  });
+
+  it("N1: a failed invoice re-delivered after a newer paid one leaves no banner; a cancellation clears it", async () => {
+    const id = await newStore("inv", { status: "active", stripeSubscriptionId: `sub_${run}_inv`, stripeCustomerId: `cus_${run}_inv` });
+    const inv = { customer: `cus_${run}_inv`, subscription: `sub_${run}_inv` };
+    const now = Math.floor(Date.now() / 1000);
+    await deliver(invoiceEvent("invoice.paid", inv, { created: now }));
+    await deliver(invoiceEvent("invoice.payment_failed", inv, { created: now - 60 }));
+    expect((await row(id)).paymentFailedAt).toBeNull();
+
+    await deliver(invoiceEvent("invoice.payment_failed", inv, { created: now + 60 }));
+    expect((await row(id)).paymentFailedAt).not.toBeNull();
+    await deliver(subscriptionEvent("customer.subscription.deleted", {
+      id: inv.subscription, customer: inv.customer, status: "canceled", plan: "starter", storeId: id,
+    }, { created: now + 120 }));
+    expect(await row(id)).toMatchObject({ status: "canceled", paymentFailedAt: null });
+  });
+
+  it("N2: two events in the same second apply Stripe's current subscription, whatever their order", async () => {
+    const fake = createFakeBillingProvider();
+    setBillingProvider(fake);
+    const id = await newStore("tie", { stripeCustomerId: `cus_${run}_tie` });
+    const sub = { id: `sub_${run}_tie`, customer: `cus_${run}_tie`, storeId: id };
+    fake.setSubscription({
+      id: sub.id, customerId: sub.customer, status: "active", lookupKey: PLAN_LOOKUP_KEYS.pro,
+      storeId: id, trialEnd: null, currentPeriodEnd: null, cancelAtPeriodEnd: false,
+    });
+    const t = Math.floor(Date.now() / 1000);
+    await deliver(subscriptionEvent("customer.subscription.updated", { ...sub, status: "active", plan: "pro" }, { created: t }));
+    await deliver(subscriptionEvent("customer.subscription.created", { ...sub, status: "incomplete", plan: "starter" }, { created: t }));
+    expect(await row(id)).toMatchObject({ status: "active", plan: "pro" });
   });
 });

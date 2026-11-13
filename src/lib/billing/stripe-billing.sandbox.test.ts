@@ -83,4 +83,68 @@ describe.skipIf(!hasKey)("Stripe Billing sandbox (#494)", () => {
     const portal = await stripeBillingProvider.createPortalSession({ customerId, returnUrl: "https://example.test/back" });
     expect(portal.url).toMatch(/^https:\/\/billing\.stripe\.com\//);
   }, 30_000);
+
+  it("the Customer Portal lets the owner switch between Starter and Pro (B2)", async () => {
+    const stripe = getStripeClient();
+    const prices = await stripeBillingProvider.planPrices();
+    const config = await stripe.billingPortal.configurations.retrieve(await stripeBillingProvider.portalConfiguration(), {
+      expand: ["features.subscription_update.products"],
+    });
+    expect(config.active).toBe(true);
+    const update = config.features.subscription_update;
+    expect(update.enabled).toBe(true);
+    expect(update.default_allowed_updates).toEqual(["price"]);
+    expect(update.trial_update_behavior).toBe("continue_trial");
+    expect(update.products?.flatMap((p) => p.prices).sort()).toEqual([prices.starter, prices.pro].sort());
+    expect(update.products?.every((p) => !p.adjustable_quantity.enabled)).toBe(true);
+    expect(config.features.payment_method_update.enabled).toBe(true);
+    expect(config.features.subscription_cancel.enabled).toBe(true);
+  }, 30_000);
+
+  it("an open Checkout is expired before another opens; a completed one is reported (B1)", async () => {
+    const customerId = await stripeBillingProvider.createCustomer({
+      storeId: `sandbox-co-${Date.now()}`,
+      name: "Sandbox checkout store",
+      email: "owner@example.test",
+    });
+    customers.push(customerId);
+    const checkout = await stripeBillingProvider.createCheckoutSession({
+      customerId,
+      plan: "starter",
+      storeId: "sandbox-store",
+      trialEnd: null,
+      successUrl: "https://example.test/ok",
+      cancelUrl: "https://example.test/cancel",
+    });
+    expect(checkout.id).toMatch(/^cs_test_/);
+    expect(await stripeBillingProvider.closeCheckoutSession(checkout.id)).toBe("closed");
+    expect((await getStripeClient().checkout.sessions.retrieve(checkout.id)).status).toBe("expired");
+    expect(await stripeBillingProvider.closeCheckoutSession(checkout.id)).toBe("closed");
+  }, 30_000);
+
+  it("ending a pilot trial charges now, and a duplicate subscription can be cancelled (B1, B3)", async () => {
+    const stripe = getStripeClient();
+    const prices = await stripeBillingProvider.planPrices();
+    const customer = await stripe.customers.create({
+      name: "Sandbox removed pilot",
+      payment_method: "pm_card_visa",
+      invoice_settings: { default_payment_method: "pm_card_visa" },
+    });
+    customers.push(customer.id);
+    const sub = await stripe.subscriptions.create({
+      customer: customer.id,
+      items: [{ price: prices.starter }],
+      trial_end: Math.floor(pilotTrialEnd(new Date()).getTime() / 1000),
+    });
+    expect(sub.status).toBe("trialing");
+    await stripeBillingProvider.setTrialEnd(sub.id, "now");
+    const ended = await stripe.subscriptions.retrieve(sub.id, { expand: ["latest_invoice"] });
+    expect(ended.status).toBe("active");
+    expect(ended.trial_end).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    expect((ended.latest_invoice as { amount_due: number }).amount_due).toBe(4900);
+    expect((await stripeBillingProvider.getSubscription(sub.id)).status).toBe("active");
+
+    await stripeBillingProvider.cancelSubscription(sub.id);
+    expect((await stripe.subscriptions.retrieve(sub.id)).status).toBe("canceled");
+  }, 30_000);
 });

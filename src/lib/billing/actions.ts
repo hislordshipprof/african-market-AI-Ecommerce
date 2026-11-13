@@ -16,14 +16,14 @@ export async function choosePlanAction(formData: FormData): Promise<void> {
   const session = await requireStoreOwner();
   const fields = parseInput(z.strictObject({ plan: z.enum(["starter", "pro"]) }), readFormFields(formData, ["plan"]));
   if (!fields.ok) redirect(`/store-admin/plan?store=${encodeURIComponent(session.store.slug)}`);
-  const { url } = await startSubscription({
+  const started = await startSubscription({
     storeId: session.store.id,
     storeName: session.store.name,
     plan: fields.data.plan,
     owner: { id: session.user.id, email: session.user.email },
     returnUrl: planReturnUrl(session.store.slug),
   });
-  redirect(url);
+  redirect("url" in started ? started.url : `/store-admin/plan?store=${encodeURIComponent(session.store.slug)}&pending=1`);
 }
 
 /** Change plan, card, or cancel in Stripe's Customer Portal. */
