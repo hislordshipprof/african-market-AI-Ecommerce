@@ -215,6 +215,8 @@ body {
   --muted-foreground: var(--store-muted, #55625A);
   --card: var(--store-surface, #FFFFFF);
   --card-foreground: var(--store-ink, #15201A);
+  --popover: var(--store-surface, #FFFFFF);
+  --popover-foreground: var(--store-ink, #15201A);
   --border: var(--store-line, #DCDFD6);
   --input: var(--store-line-strong, var(--store-line, #DCDFD6));
   --ring: var(--store-primary, #1F5A43);
