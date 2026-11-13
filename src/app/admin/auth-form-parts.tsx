@@ -46,6 +46,24 @@ export function useHydrated(): boolean {
   return useSyncExternalStore(subscribeToNothing, () => true, () => false);
 }
 
+/** The disabled submit's label until hydration, so an early press has visible feedback. */
+export const NOT_READY_LABEL = "Loading...";
+
+/**
+ * Forms use noValidate so every problem shows as the inline error, not the browser bubble.
+ * Returns the message for the first empty field, after focusing it.
+ */
+export function missingField(fields: [id: string, message: string][]): string | null {
+  for (const [id, message] of fields) {
+    const field = document.getElementById(id);
+    if (field instanceof HTMLInputElement && !field.value.trim()) {
+      field.focus();
+      return message;
+    }
+  }
+  return null;
+}
+
 /** Says what to do next, in place of the server's raw wording. */
 export function authErrorMessage(
   error: { status?: number; code?: string; message?: string },
@@ -191,6 +209,11 @@ export function SecondStepForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (mode === "totp" ? code.length !== 6 : !code.trim()) {
+      setError(mode === "totp" ? `${AUTH_CODE_HINT}.` : "Enter one of your backup codes.");
+      focusField(fieldId);
+      return;
+    }
     setError("");
     setLoading(true);
     try {
@@ -219,7 +242,7 @@ export function SecondStepForm({
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
+    <form onSubmit={submit} noValidate className="flex flex-col gap-4">
       {error && <AuthError id={errorId}>{error}</AuthError>}
       <div className="flex flex-col gap-2">
         <Label htmlFor={fieldId}>{mode === "totp" ? "Verification code" : "Backup code"}</Label>

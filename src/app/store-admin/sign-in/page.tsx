@@ -21,8 +21,10 @@ import {
   AuthError,
   NETWORK_ERROR,
   PasswordInput,
+  NOT_READY_LABEL,
   SecondStepForm,
   authErrorMessage,
+  missingField,
   fieldValue,
   focusField,
   useHydrated,
@@ -36,6 +38,7 @@ const EMAIL_ID = "email";
 const PASSWORD_ID = "password";
 const CREDENTIALS_ERRORS = {
   INVALID_EMAIL_OR_PASSWORD: "That email and password don't match. Check both and try again.",
+  INVALID_EMAIL: "Enter a valid email address.",
 };
 
 export default function StoreAdminSignIn() {
@@ -54,6 +57,11 @@ export default function StoreAdminSignIn() {
   // Fields are uncontrolled: text typed before hydration stays in them and is what gets sent.
   async function handleCredentials(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const missing = missingField([[EMAIL_ID, "Enter your email."], [PASSWORD_ID, "Enter your password."]]);
+    if (missing) {
+      setError(missing);
+      return;
+    }
     const submittedEmail = fieldValue(e.currentTarget, EMAIL_ID);
     const password = fieldValue(e.currentTarget, PASSWORD_ID);
     setEmail(submittedEmail);
@@ -98,7 +106,7 @@ export default function StoreAdminSignIn() {
 
         <CardContent>
           {step === "credentials" && (
-            <form onSubmit={handleCredentials} className="flex flex-col gap-4">
+            <form onSubmit={handleCredentials} noValidate className="flex flex-col gap-4">
               {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={EMAIL_ID}>Email</Label>
@@ -128,7 +136,7 @@ export default function StoreAdminSignIn() {
               </div>
 
               <Button type="submit" disabled={loading || !hydrated} className={AUTH_SUBMIT}>
-                {loading ? "Signing in..." : "Sign in"}
+                {!hydrated ? NOT_READY_LABEL : loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
           )}

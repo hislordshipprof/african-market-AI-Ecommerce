@@ -26,7 +26,9 @@ import {
   TOTP_ERRORS,
   authErrorMessage,
   fieldValue,
+  NOT_READY_LABEL,
   focusField,
+  missingField,
   totpDigits,
   useHydrated,
 } from "../auth-form-parts";
@@ -78,6 +80,11 @@ export default function Enroll2FA() {
 
   async function startEnrollment(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const missing = missingField([[PASSWORD_ID, "Enter your current password."]]);
+    if (missing) {
+      setError(missing);
+      return;
+    }
     const password = fieldValue(e.currentTarget, PASSWORD_ID);
     setEnrolling(true);
     setError("");
@@ -110,6 +117,11 @@ export default function Enroll2FA() {
 
   async function verifyCode(e: React.FormEvent) {
     e.preventDefault();
+    if (code.length !== 6) {
+      setError(`${AUTH_CODE_HINT}.`);
+      focusField(CODE_ID);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -159,7 +171,7 @@ export default function Enroll2FA() {
 
         <CardContent className="px-6 sm:px-8">
           {!totpUri && (
-            <form onSubmit={startEnrollment} className="flex flex-col gap-4">
+            <form onSubmit={startEnrollment} noValidate className="flex flex-col gap-4">
               {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={PASSWORD_ID}>Current password</Label>
@@ -171,7 +183,7 @@ export default function Enroll2FA() {
                 />
               </div>
               <Button type="submit" disabled={enrolling || !hydrated} className={AUTH_SUBMIT}>
-                {enrolling ? "Setting up..." : "Begin setup"}
+                {!hydrated ? NOT_READY_LABEL : enrolling ? "Setting up..." : "Begin setup"}
               </Button>
             </form>
           )}
@@ -230,7 +242,7 @@ export default function Enroll2FA() {
                 )}
               </section>
 
-              <form onSubmit={verifyCode} className="flex flex-col gap-3">
+              <form onSubmit={verifyCode} noValidate className="flex flex-col gap-3">
                 <p className="text-base font-medium">
                   2. Enter the 6-digit code the app shows for {AUTHENTICATOR_ENTRY}. You&apos;ll use a new one
                   each time you sign in.

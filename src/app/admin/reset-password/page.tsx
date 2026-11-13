@@ -19,7 +19,9 @@ import {
   PasswordInput,
   authErrorMessage,
   fieldValue,
+  NOT_READY_LABEL,
   focusField,
+  missingField,
   useHydrated,
 } from "../auth-form-parts";
 
@@ -47,6 +49,11 @@ function ResetPassword() {
 
   async function requestLink(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const missing = missingField([[EMAIL_ID, "Enter your email."]]);
+    if (missing) {
+      setError(missing);
+      return;
+    }
     const submitted = fieldValue(e.currentTarget, EMAIL_ID).trim().toLowerCase();
     setError("");
     setLoading(true);
@@ -73,6 +80,11 @@ function ResetPassword() {
   async function choosePassword(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const newPassword = fieldValue(e.currentTarget, PASSWORD_ID);
+    if (newPassword.length < 8) {
+      setError(RESET_ERRORS.PASSWORD_TOO_SHORT);
+      focusField(PASSWORD_ID);
+      return;
+    }
     setError("");
     setLoading(true);
     try {
@@ -117,27 +129,27 @@ function ResetPassword() {
 
         <CardContent className="px-6 sm:px-8">
           {step === "request" && (
-            <form onSubmit={requestLink} className="flex flex-col gap-4">
+            <form onSubmit={requestLink} noValidate className="flex flex-col gap-4">
               {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={EMAIL_ID}>Email</Label>
                 <Input id={EMAIL_ID} type="email" required autoComplete="email" className={AUTH_INPUT} {...errorProps} />
               </div>
               <Button type="submit" disabled={loading || !hydrated} className={AUTH_SUBMIT}>
-                {loading ? "Sending..." : "Send reset link"}
+                {!hydrated ? NOT_READY_LABEL : loading ? "Sending..." : "Send reset link"}
               </Button>
             </form>
           )}
 
           {step === "choose" && (
-            <form onSubmit={choosePassword} className="flex flex-col gap-4">
+            <form onSubmit={choosePassword} noValidate className="flex flex-col gap-4">
               {error && <AuthError id={ERROR_ID}>{error}</AuthError>}
               <div className="flex flex-col gap-2">
                 <Label htmlFor={PASSWORD_ID}>New password</Label>
                 <PasswordInput id={PASSWORD_ID} required minLength={8} autoComplete="new-password" {...errorProps} />
               </div>
               <Button type="submit" disabled={loading || !hydrated} className={AUTH_SUBMIT}>
-                {loading ? "Saving..." : "Change password"}
+                {!hydrated ? NOT_READY_LABEL : loading ? "Saving..." : "Change password"}
               </Button>
             </form>
           )}
