@@ -33,10 +33,15 @@ test.describe("Store logo SVG safety (#60)", () => {
     expect(res.status()).toBe(400);
   });
 
-  // The server's real headers for each SVG path, with a script-bearing body in place of the file (#124).
-  for (const path of ["/logos/mama-ngozi-logo.svg", "/api/catalog-image/catalog/xss-probe.svg"]) {
-    test(`opening ${path} directly does not run an embedded script`, async ({ page }) => {
-      await page.route(`**${path}`, async (route) => {
+  // The proxy's real headers for each SVG path, with a script-bearing body in place of the file (#124).
+  // The catalog key has no R2 object, so that case covers the proxy's headers, not the route's.
+  for (const [path, glob] of [
+    ["/logos/mama-ngozi-logo.svg", "**/logos/**"],
+    ["/logos/mama-ngozi-logo%2Esvg", "**/logos/**"],
+    ["/api/catalog-image/catalog/xss-probe.svg", "**/api/catalog-image/**"],
+  ]) {
+    test(`the proxy's headers on ${path} keep an embedded script from running`, async ({ page }) => {
+      await page.route(glob, async (route) => {
         const real = await route.fetch();
         await route.fulfill({
           status: 200,

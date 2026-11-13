@@ -3,8 +3,13 @@ export const ENFORCED_CSP = "frame-ancestors 'none'; object-src 'none'; base-uri
 /** An SVG opened directly is a document; this keeps any script in it from running (#124). */
 export const SVG_CSP = `${ENFORCED_CSP}; script-src 'none'; sandbox`;
 
+/** Matches the decoded path, as the static server does; an undecodable path counts as SVG. */
 export function isSvgPath(pathname: string): boolean {
-  return pathname.toLowerCase().endsWith(".svg");
+  try {
+    return decodeURIComponent(pathname).toLowerCase().endsWith(".svg");
+  } catch {
+    return true;
+  }
 }
 
 const STATIC_HEADERS: Array<{ key: string; value: string }> = [

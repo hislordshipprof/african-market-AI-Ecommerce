@@ -298,7 +298,14 @@ describe("security headers on the proxy", () => {
 
   it("an SVG path gets a no-script, sandboxed policy (#124)", () => {
     vi.stubEnv("NODE_ENV", "production");
-    for (const path of ["/logos/mama-ngozi-logo.svg", "/api/catalog-image/catalog/logo.svg"]) {
+    for (const path of [
+      "/logos/mama-ngozi-logo.svg",
+      "/api/catalog-image/catalog/logo.svg",
+      "/logos/mama-ngozi-logo%2Esvg",
+      "/logos/mama-ngozi-logo%2esvg",
+      "/logos/mama-ngozi-logo.sv%67",
+      "/logos/bad%E0%A4%A.png",
+    ]) {
       const res = proxy(makeRequest(`http://localhost:3000${path}`));
       expect(res.headers.get("content-security-policy")).toMatch(/script-src 'none'.*sandbox/);
       expect(res.headers.get("x-content-type-options")).toBe("nosniff");

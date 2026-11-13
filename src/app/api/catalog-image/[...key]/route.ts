@@ -26,10 +26,11 @@ export async function GET(
     "Content-Type": result.contentType,
     "Cache-Control": "public, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": SVG_CSP,
   };
-  if (isSvgPath(key) || result.contentType.toLowerCase().includes("svg")) {
-    headers["Content-Security-Policy"] = SVG_CSP;
-    // <img> ignores this; a directly opened SVG downloads instead of rendering.
+  const contentType = result.contentType.toLowerCase();
+  if (isSvgPath(key) || !contentType.startsWith("image/") || contentType.includes("svg")) {
+    // <img> ignores this; a directly opened SVG or non-image downloads instead of rendering.
     headers["Content-Disposition"] = "attachment";
   }
   return new NextResponse(result.body, { headers });
