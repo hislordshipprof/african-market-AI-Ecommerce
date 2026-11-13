@@ -97,12 +97,16 @@ export async function uploadDeliveryProof(key: string, body: Buffer | Uint8Array
   );
 }
 
-/** Removes a proof photo no order references, after its transition was rejected. */
-export async function deleteDeliveryProof(key: string): Promise<void> {
+async function deleteFromProofBucket(key: string): Promise<void> {
   const bucket = deliveryProofBucket();
   if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
-  if (!isDeliveryProofKey(key)) throw new Error("not a delivery-proof key");
   await getR2Client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+/** Removes a proof photo no order references, after its transition was rejected. */
+export async function deleteDeliveryProof(key: string): Promise<void> {
+  if (!isDeliveryProofKey(key)) throw new Error("not a delivery-proof key");
+  await deleteFromProofBucket(key);
 }
 
 const ISSUE_PHOTO_KEY_RE = /^issue-photo\/[a-z0-9]+\/[a-z0-9]+\.jpg$/;
@@ -147,10 +151,8 @@ export async function uploadOwnerReportPhoto(key: string, body: Buffer | Uint8Ar
 
 /** Removes a report photo no report row points at, after its insert failed. */
 export async function deleteOwnerReportPhoto(key: string): Promise<void> {
-  const bucket = deliveryProofBucket();
-  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
   if (!isOwnerReportPhotoKey(key)) throw new Error("not an owner-report key");
-  await getR2Client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  await deleteFromProofBucket(key);
 }
 
 export async function streamFromR2(
