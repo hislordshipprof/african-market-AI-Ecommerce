@@ -5,7 +5,7 @@ import { twoFactor, magicLink } from "better-auth/plugins";
 import { authPrisma, platform } from "./db";
 import { isPrivilegedEmail, isPrivilegedUser } from "./privileged-user";
 import { sendEmail } from "./email/send";
-import { magicLinkMessage } from "./magic-link-mail";
+import { magicLinkMessage, passwordResetMessage } from "./magic-link-mail";
 import { scheduleAfterResponse } from "./schedule-after-response";
 import { isSlugRoutable, slugFromHost } from "./slug";
 
@@ -184,6 +184,16 @@ export const auth = betterAuth({
   database: prismaAdapter(authPrisma, { provider: "postgresql" }),
   emailAndPassword: {
     enabled: true,
+    // Account recovery (ADR-0015): a reset never skips the second step, and ends every session.
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }) => {
+      const message = passwordResetMessage({
+        to: user.email,
+        url,
+        fromAddress: process.env.EMAIL_FROM ?? RESEND_SANDBOX_FROM,
+      });
+      scheduleAfterResponse(() => sendEmail(message), "password_reset_delivery_failed");
+    },
   },
   plugins: [
     twoFactor({
@@ -217,6 +227,8 @@ export const auth = betterAuth({
       "/sign-in/email": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 100 : 5 },
+      "/request-password-reset": { window: 60, max: relaxedAuth ? 100 : 3 },
+      "/two-factor/verify-backup-code": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
   },
   hooks: {

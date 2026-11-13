@@ -28,3 +28,8 @@ export function magicLinkMessage(input: {
   const html = `<p>${lead}</p><p><a href="${safeUrl}">Sign in</a></p><p style="font-size:12px">Powered by the Platform</p>`;
   return { to: input.to, subject, html, from: quotedFrom(storeName ?? "", input.fromAddress) };
 }
+
+export function passwordResetMessage(input: { to: string; url: string; fromAddress: string }): EmailMessage {
+  const html = `<p>Someone asked to reset the password for this account. This link expires in 1 hour.</p><p><a href="${escapeHtml(input.url)}">Choose a new password</a></p><p>If it wasn't you, ignore this email. Your password stays the same.</p>`;
+  return { to: input.to, subject: "Reset your password", html, from: quotedFrom("", input.fromAddress) };
+}

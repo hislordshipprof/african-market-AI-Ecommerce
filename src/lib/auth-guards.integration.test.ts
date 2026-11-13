@@ -250,6 +250,41 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     }
   });
 
+  it("a forgotten password resets by email, ends old sessions, and still needs the second step", async () => {
+    const email = `c1-reset-${suffix}@test.example`;
+    try {
+      await signUp(email, "C1 Reset");
+      const userId = (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
+      await authPrisma.user.update({ where: { id: userId }, data: { role: "platform_admin" } });
+      const first = collectCookies(await passwordSignIn(email));
+      await enableTotp(first);
+      await authPrisma.user.update({ where: { id: userId }, data: { twoFactorEnabled: true } });
+      const before = await authPrisma.session.count({ where: { userId } });
+      expect(before).toBeGreaterThan(0);
+
+      clearTestSentEmails();
+      const requested = await authPost("/request-password-reset", { email, redirectTo: "/admin/reset-password" });
+      expect(requested.status, await requested.clone().text()).toBe(200);
+      const mail = getTestSentEmails().at(-1);
+      expect(mail?.to).toBe(email);
+      const link = mail!.html.match(/href="([^"]+)"/)![1].replace(/&amp;/g, "&");
+      const landed = await authGet(link);
+      const location = new URL(landed.headers.get("location")!, BASE);
+      expect(location.pathname).toBe("/admin/reset-password");
+      const token = location.searchParams.get("token")!;
+
+      const reset = await authPost("/reset-password", { token, newPassword: "Reset-Pass-789!" });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+      expect(await authPrisma.session.count({ where: { userId } })).toBe(0);
+      expect((await passwordSignIn(email)).status).not.toBe(200);
+      const fresh = await authPost("/sign-in/email", { email, password: "Reset-Pass-789!" });
+      expect((await fresh.json()).twoFactorRedirect).toBe(true);
+      expect((await authPost("/reset-password", { token, newPassword: "Again-Pass-000!" })).status).not.toBe(200);
+    } finally {
+      await removeAuthFixtures([email], []);
+    }
+  });
+
   it("a shopper who only ever used a magic link can set a password from a staff invite, once", async () => {
     const email = `c1-shopper-invitee-${suffix}@test.example`;
     try {
