@@ -19,6 +19,9 @@ export type ServiceFeeSettings = { rateBps: number; minCents: number; maxCents: 
 /** Orders placed before the fee existed carry this snapshot, so they keep a $0 fee. */
 export const NO_SERVICE_FEE: ServiceFeeSettings = { rateBps: 0, minCents: 0, maxCents: 0 };
 
+/** The ADR-0021 defaults: 3% of goods, at least $0.99, at most $2.99. The migration seeds the same row. */
+export const ADR_0021_SERVICE_FEE: ServiceFeeSettings = { rateBps: 300, minCents: 99, maxCents: 299 };
+
 function percentOf(cents: number, bps: number): number {
   return Math.round((cents * bps) / 10_000);
 }
@@ -101,6 +104,32 @@ export function captureSplit(input: {
 export function courierFeeCents(order: { fulfillment: string; deliveryFeeCents: number }): number {
   return order.fulfillment === "courier" ? Math.max(0, order.deliveryFeeCents) : 0;
 }
+
+/**
+ * The store's card fee and payout on a captured order, from the platform fee stored at capture
+ * (service fee + the store's card fee under every formula), so older orders show what Stripe paid.
+ */
+export function capturedPayout(order: {
+  capturedAmountCents: number;
+  platformFeeCents: number | null;
+  serviceFeeCents: number;
+  fulfillment: string;
+  deliveryFeeCents: number;
+}): { storeCardFeeCents: number; storeReceivesCents: number } {
+  const captured = Math.max(0, order.capturedAmountCents);
+  const courierFee = courierFeeCents(order);
+  if (order.platformFeeCents == null) {
+    const split = captureSplit({ capturedCents: captured, serviceFeeCents: order.serviceFeeCents, courierFeeCents: courierFee });
+    return { storeCardFeeCents: split.storeCardFeeCents, storeReceivesCents: split.storeReceivesCents };
+  }
+  return {
+    storeCardFeeCents: Math.max(0, order.platformFeeCents - order.serviceFeeCents),
+    storeReceivesCents: captured - Math.min(order.platformFeeCents + courierFee, captured),
+  };
+}
+
+/** The card fee rate as the store sees it, e.g. "2.9% + 30¢". */
+export const CARD_FEE_LABEL = `${CARD_FEE_BPS / 100}% + ${CARD_FEE_FIXED_CENTS}¢`;
 
 /** The settings snapshot an order was quoted with. */
 export function orderServiceFeeSettings(order: {

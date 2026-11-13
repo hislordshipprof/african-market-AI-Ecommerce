@@ -5,7 +5,7 @@ import { sendOrderAuthorized } from "../inngest/send";
 import { BasketChangedError, computeQuote, createPaymentIntent, placeOrder, releaseLosingHold, resumeOrderedCart } from "./service";
 import { prepareSignedInPaymentIntent } from "./saved-card-payment";
 import { checkoutTestHooks } from "./test-hooks";
-import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 vi.mock("../inngest/send", () => ({
   sendOrderAuthorized: vi.fn().mockResolvedValue(undefined),
@@ -75,7 +75,7 @@ describe.skipIf(!hasDb)("one basket purchase", () => {
   });
 
   function holdFor(qty: number) {
-    return computeQuote(0, [{ price: 500, qty, maxPerOrder: null }], contact, "pickup", SEEDED_SERVICE_FEE).holdCents;
+    return computeQuote(0, [{ price: 500, qty, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE).holdCents;
   }
 
   async function cartWith(qty: number, owner: string | null) {
@@ -405,7 +405,7 @@ describe.skipIf(!hasDb)("one basket purchase", () => {
 
   it("releases a hold edited below the minimum and keeps one with a bad contact", async () => {
     const low = await cartWith(2, null);
-    const two = computeQuote(800, [{ price: 500, qty: 2, maxPerOrder: null }], contact, "pickup", SEEDED_SERVICE_FEE);
+    const two = computeQuote(800, [{ price: 500, qty: 2, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE);
     const pi = await authorize(low.id, two.holdCents);
     await storeScoped(storeId).cartLine.updateMany({ where: { cartId: low.id }, data: { qty: 1 } });
     await expect(

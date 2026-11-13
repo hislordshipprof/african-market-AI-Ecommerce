@@ -17,7 +17,7 @@ import { makeFakeStep } from "../inngest/fake-step";
 import { inngest } from "../inngest/client";
 import type { Contact } from "../customer-flow/contracts";
 import { postCustomerMessage, replyAsStore } from "../support/thread";
-import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada", phone: "(301) 448-2210", email: "ada@example.com" };
@@ -143,7 +143,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     const quote = computeQuote(0, [
       { price: PRICE, qty: 1, maxPerOrder: null },
       { price: RICE, qty: 1, maxPerOrder: null },
-    ], CONTACT, fulfillment, SEEDED_SERVICE_FEE, delivering
+    ], CONTACT, fulfillment, ADR_0021_SERVICE_FEE, delivering
       ? { enabled: true, feeCents: 500, radiusMi: 8, hasCoordinates: true, confirmed: { withinRadius: true }, leaveAtDoor: false }
       : null);
     setAuthorizedAmount(paymentIntentId, quote.holdCents);

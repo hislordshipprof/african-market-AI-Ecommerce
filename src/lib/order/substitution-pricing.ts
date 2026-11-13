@@ -44,7 +44,3 @@ export function captureCharge(lines: ChargeLine[], fees: OrderFees): { amountCen
   const fee = serviceFeeCents(goods, fees.serviceFee);
   return { amountCents: goods + fee + fees.tipCents + fees.deliveryFeeCents, serviceFeeCents: fee };
 }
-
-export function captureAmountCents(lines: ChargeLine[], fees: OrderFees): number {
-  return captureCharge(lines, fees).amountCents;
-}

@@ -4,6 +4,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { resolveDirectUrl } from "../src/lib/env";
+import { money } from "../src/lib/format";
+import { serviceFeeCents } from "../src/lib/order/platform-fee";
 
 const base = storeUrl("mama-ngozi");
 
@@ -173,6 +175,10 @@ test("store delivery payment with a confirmed address leads to tracking", async 
         data: { listingId: listing.id, label: "Each", price: 4000, weightG: 200 },
       });
     });
+    const settings = await prisma.platformSettings.findUniqueOrThrow({ where: { id: "platform" } });
+    // $40 goods + $4 swap buffer + $5 store delivery, plus the service fee on the goods.
+    const hold = 4900 + serviceFeeCents(4000, { rateBps: settings.serviceFeeBps, minCents: settings.serviceFeeMinCents, maxCents: settings.serviceFeeMaxCents });
+    const placeOrder = `Place order · ${money(hold)} hold`;
     await prisma.$disconnect();
     await page.context().addCookies([{
       name: "e2e_stripe_harness",
@@ -203,7 +209,7 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     await expect(page.getByRole("status").filter({ hasText: /7\.5 mi/ })).toBeVisible();
     await page.reload();
     await page.getByRole("button", { name: /Store delivery/ }).click();
-    const estimating = page.getByRole("button", { name: /Place order · \$49\.00 hold/ });
+    const estimating = page.getByRole("button", { name: placeOrder });
     await expect(estimating).toBeEnabled({ timeout: 10_000 });
     await estimating.click();
     await expect(page.getByText("Confirm your delivery address.")).toBeVisible();
@@ -216,7 +222,7 @@ test("store delivery payment with a confirmed address leads to tracking", async 
     await page.getByLabel("Full name").fill("Ada Buyer");
     await page.getByLabel("Phone number (required)").fill("2025550100");
     await page.getByLabel("Email (required)").fill("ada-delivery@example.com");
-    const pay = page.getByRole("button", { name: /Place order · \$49\.00 hold/ });
+    const pay = page.getByRole("button", { name: placeOrder });
     await expect(pay).toBeVisible();
     await pay.click();
     await expect(page).toHaveURL(/\/order\/.+placed=1/, { timeout: 20_000 });

@@ -1,16 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { captureSplit, maxGoodsWithin, NO_SERVICE_FEE, serviceFeeCents, serviceFeeRefundCents, serviceFeeShareOfRefund } from "./platform-fee";
-
-const ADR_0021 = { rateBps: 300, minCents: 99, maxCents: 299 };
+import { ADR_0021_SERVICE_FEE, capturedPayout, captureSplit, maxGoodsWithin, NO_SERVICE_FEE, serviceFeeCents, serviceFeeRefundCents, serviceFeeShareOfRefund } from "./platform-fee";
 
 describe("service fee (ADR-0021)", () => {
   it("is 3% of goods, held to the $0.99 minimum and the $2.99 maximum", () => {
-    expect(serviceFeeCents(6000, ADR_0021)).toBe(180);
-    expect(serviceFeeCents(2000, ADR_0021)).toBe(99);
-    expect(serviceFeeCents(15000, ADR_0021)).toBe(299);
+    expect(serviceFeeCents(6000, ADR_0021_SERVICE_FEE)).toBe(180);
+    expect(serviceFeeCents(2000, ADR_0021_SERVICE_FEE)).toBe(99);
+    expect(serviceFeeCents(15000, ADR_0021_SERVICE_FEE)).toBe(299);
     // 3% of $41.50 is 124.5¢, rounded half up.
-    expect(serviceFeeCents(4150, ADR_0021)).toBe(125);
-    expect(serviceFeeCents(0, ADR_0021)).toBe(0);
+    expect(serviceFeeCents(4150, ADR_0021_SERVICE_FEE)).toBe(125);
+    expect(serviceFeeCents(0, ADR_0021_SERVICE_FEE)).toBe(0);
     expect(serviceFeeCents(6000, NO_SERVICE_FEE)).toBe(0);
   });
 });
@@ -53,11 +51,21 @@ describe("capture split (ADR-0021 example order)", () => {
   });
 });
 
+describe("store payout shown in the inbox", () => {
+  it("comes from the fee stored at capture, so a courier order captured before the service fee shows what Stripe paid", () => {
+    const order = { capturedAmountCents: 7079, fulfillment: "courier", deliveryFeeCents: 899 };
+    // Before #495 the stored fee was 2.9% + 30¢ of the whole capture: 235.
+    expect(capturedPayout({ ...order, platformFeeCents: 235, serviceFeeCents: 0 })).toEqual({ storeCardFeeCents: 235, storeReceivesCents: 7079 - 235 - 899 });
+    expect(capturedPayout({ ...order, platformFeeCents: 180 + 204, serviceFeeCents: 180 })).toEqual({ storeCardFeeCents: 204, storeReceivesCents: 5796 });
+    expect(capturedPayout({ ...order, platformFeeCents: null, serviceFeeCents: 180 })).toEqual({ storeCardFeeCents: 204, storeReceivesCents: 5796 });
+  });
+});
+
 describe("goods that fit a hold", () => {
   it("is the most goods whose total with the fee stays within the budget", () => {
     // 5000 + 150 = 5150 fits; 5001 + 150 = 5151 does not.
-    expect(maxGoodsWithin(5150, ADR_0021)).toBe(5000);
-    expect(maxGoodsWithin(5149, ADR_0021)).toBe(4999);
-    expect(maxGoodsWithin(0, ADR_0021)).toBe(0);
+    expect(maxGoodsWithin(5150, ADR_0021_SERVICE_FEE)).toBe(5000);
+    expect(maxGoodsWithin(5149, ADR_0021_SERVICE_FEE)).toBe(4999);
+    expect(maxGoodsWithin(0, ADR_0021_SERVICE_FEE)).toBe(0);
   });
 });

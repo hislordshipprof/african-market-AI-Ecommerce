@@ -72,7 +72,7 @@ export function getOrderSwapRule(
 import type { FlowOrder } from "./contracts";
 import type { CartLine } from "../storefront/cart-store";
 import { cartItemKey } from "../storefront/cart-store";
-import { serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
+import { ADR_0021_SERVICE_FEE, serviceFeeCents, type ServiceFeeSettings } from "../order/platform-fee";
 /** Keep original line identity so issue keys remain stable after a swap. */
 export function effectiveOrderLines(order: FlowOrder): CartLine[] {
   return order.lines.flatMap((line) => {
@@ -94,7 +94,7 @@ export function effectiveOrderLines(order: FlowOrder): CartLine[] {
   });
 }
 /** Demo quotes use the ADR-0021 defaults; real quotes read the platform settings. */
-export const DEMO_SERVICE_FEE: ServiceFeeSettings = { rateBps: 300, minCents: 99, maxCents: 299 };
+export const DEMO_SERVICE_FEE: ServiceFeeSettings = ADR_0021_SERVICE_FEE;
 
 export function finalOrderAmounts(order: FlowOrder) {
   const lines = effectiveOrderLines(order);

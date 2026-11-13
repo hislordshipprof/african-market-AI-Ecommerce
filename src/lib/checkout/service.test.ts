@@ -16,9 +16,8 @@ vi.mock("../inngest/client", () => ({
 import { computeQuote, placeOrder } from "./service";
 import { storeScoped, storeScopedTransaction } from "../db";
 import type { Contact } from "../customer-flow/contracts";
-import { NO_SERVICE_FEE } from "../order/platform-fee";
+import { ADR_0021_SERVICE_FEE, NO_SERVICE_FEE } from "../order/platform-fee";
 
-const ADR_0021_FEE = { rateBps: 300, minCents: 99, maxCents: 299 };
 
 const validContact: Contact = {
   name: "Jane Doe",
@@ -214,7 +213,7 @@ describe("computeQuote", () => {
   });
 
   it("adds the service fee to the total and sizes the hold buffer on goods", () => {
-    const q = computeQuote(0, [{ price: 6000, qty: 1, maxPerOrder: null }], validContact, "pickup", ADR_0021_FEE);
+    const q = computeQuote(0, [{ price: 6000, qty: 1, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE);
     expect(q.serviceFeeCents).toBe(180);
     expect(q.totalCents).toBe(6180);
     expect(q.bufferCents).toBe(600);
@@ -295,7 +294,7 @@ describe.skipIf(!hasDb)("placeOrder Inngest and platform fee (lane DB)", () => {
     await storeScoped(store.id).cartLine.create({
       data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], FEE_CONTACT, "pickup", ADR_0021_FEE);
+    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], FEE_CONTACT, "pickup", ADR_0021_SERVICE_FEE);
     retrieve.mockResolvedValue({
       status: "requires_capture",
       amount: quote.holdCents,

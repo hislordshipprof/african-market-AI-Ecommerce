@@ -57,7 +57,7 @@ import { money } from "@/lib/format";
 import { jpegBlob } from "@/lib/image/client-jpeg";
 import { PHOTO_UPLOAD_MAX_BYTES } from "@/lib/listing/csv-file-cap";
 import { REFUND_FAILED_STAFF_COPY, STAFF_GENERIC_ERROR, showCapturedLine } from "@/lib/order/staff-copy";
-import { captureSplit, courierFeeCents } from "@/lib/order/platform-fee";
+import { capturedPayout, CARD_FEE_LABEL } from "@/lib/order/platform-fee";
 import { OrderAlertsToggle } from "./order-alerts-toggle";
 
 const STATUS_CONFIG: Record<
@@ -700,11 +700,7 @@ export function OrderInbox({
                   {(() => {
                     const captured = selectedOrder.capturedAmountCents;
                     if (captured == null || !showCapturedLine(selectedOrder.status, captured)) return null;
-                    const split = captureSplit({
-                      capturedCents: captured,
-                      serviceFeeCents: selectedOrder.serviceFeeCents,
-                      courierFeeCents: courierFeeCents(selectedOrder),
-                    });
+                    const split = capturedPayout({ ...selectedOrder, capturedAmountCents: captured });
                     return (
                       <>
                         <div className="flex justify-between text-sm">
@@ -714,7 +710,7 @@ export function OrderInbox({
                           </span>
                         </div>
                         <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Card fee on your part (2.9% + 30¢)</span>
+                          <span className="text-muted-foreground">Card fee on your part ({CARD_FEE_LABEL})</span>
                           <span className="tabular-nums">−{money(split.storeCardFeeCents)}</span>
                         </div>
                         <div className="flex justify-between text-sm font-medium">

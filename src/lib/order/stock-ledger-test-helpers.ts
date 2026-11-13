@@ -2,7 +2,7 @@ import { storeScoped } from "../db";
 import { computeQuote, recordAuthorizedOrder } from "../checkout/service";
 import { setAuthorizedAmount } from "../stripe/fake";
 import type { Contact } from "../customer-flow/contracts";
-import { SEEDED_SERVICE_FEE } from "./service-fee-test-settings";
+import { ADR_0021_SERVICE_FEE } from "./platform-fee";
 
 const CONTACT: Contact = { name: "Ledger Buyer", phone: "+15551234567", email: "ledger@t141.test" };
 const PRICE = 1000;
@@ -53,7 +53,7 @@ export async function placeOrder(
     pickupSlot: null,
     notes: null,
     paymentIntentId,
-    quote: computeQuote(0, orderLines.map((line) => ({ ...line, maxPerOrder: null })), CONTACT, fulfillment, SEEDED_SERVICE_FEE),
+    quote: computeQuote(0, orderLines.map((line) => ({ ...line, maxPerOrder: null })), CONTACT, fulfillment, ADR_0021_SERVICE_FEE),
     lines: orderLines,
   };
   const { orderId } = await recordAuthorizedOrder(storeId, input);

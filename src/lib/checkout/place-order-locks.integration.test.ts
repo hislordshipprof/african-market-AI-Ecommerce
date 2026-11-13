@@ -13,7 +13,7 @@ import {
   type RecordAuthorizedOrderInput,
 } from "./service";
 import type { Contact } from "../customer-flow/contracts";
-import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -338,7 +338,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       0,
       lines.map((line) => ({ price: line.price, qty: line.qty, maxPerOrder: null })),
       { ...CONTACT, email },
-      "pickup", SEEDED_SERVICE_FEE,
+      "pickup", ADR_0021_SERVICE_FEE,
     );
     return {
       cartId,

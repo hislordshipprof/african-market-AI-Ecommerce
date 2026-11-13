@@ -5,8 +5,7 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { checkoutTestHooks, createPaymentIntent, placeOrder, computeQuote, releaseOrphanHolds } from "./service";
 import { holdAuthorizedAt } from "../stripe/checkout-payments";
-import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
-import { captureSplit, serviceFeeCents } from "../order/platform-fee";
+import { ADR_0021_SERVICE_FEE, captureSplit, serviceFeeCents } from "../order/platform-fee";
 import { stripeProvider } from "../stripe/provider";
 
 type ConnectedAccountCaps = {
@@ -302,7 +301,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           { name: "Test", phone: "+15551234567", email: "t@t.com" },
-          "pickup", SEEDED_SERVICE_FEE,
+          "pickup", ADR_0021_SERVICE_FEE,
         );
         const result = await createPaymentIntent(storeAId, cartAId, quote.holdCents);
         piToCleanup.push(result.paymentIntentId);
@@ -326,7 +325,7 @@ describe.skipIf(!hasKey || !hasDb)(
       async () => {
         const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
         const goods = 6000;
-        const fee = serviceFeeCents(goods, SEEDED_SERVICE_FEE);
+        const fee = serviceFeeCents(goods, ADR_0021_SERVICE_FEE);
         const captured = goods + fee + 899;
         const split = captureSplit({ capturedCents: captured, serviceFeeCents: fee, courierFeeCents: 899 });
         const pi = await stripe.paymentIntents.create({
@@ -359,7 +358,7 @@ describe.skipIf(!hasKey || !hasDb)(
       async () => {
         const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
         const goods = 6000;
-        const fee = serviceFeeCents(goods, SEEDED_SERVICE_FEE);
+        const fee = serviceFeeCents(goods, ADR_0021_SERVICE_FEE);
         const captured = goods + fee + 899;
         const split = captureSplit({ capturedCents: captured, serviceFeeCents: fee, courierFeeCents: 899 });
         const pi = await stripe.paymentIntents.create({
@@ -403,7 +402,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           contact,
-          "pickup", SEEDED_SERVICE_FEE,
+          "pickup", ADR_0021_SERVICE_FEE,
         );
 
         const freshCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
@@ -465,7 +464,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           contact,
-          "pickup", SEEDED_SERVICE_FEE,
+          "pickup", ADR_0021_SERVICE_FEE,
         );
 
         const declineCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
@@ -517,7 +516,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           contact,
-          "pickup", SEEDED_SERVICE_FEE,
+          "pickup", ADR_0021_SERVICE_FEE,
         );
 
         const xCart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
@@ -575,7 +574,7 @@ describe.skipIf(!hasKey || !hasDb)(
               0,
               [{ price: 1500, qty: 2, maxPerOrder: null }],
               contact,
-              "pickup", SEEDED_SERVICE_FEE,
+              "pickup", ADR_0021_SERVICE_FEE,
             );
             const cart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
             cartsCreated.push(cart.id);
@@ -676,7 +675,7 @@ describe.skipIf(!hasKey || !hasDb)(
           0,
           [{ price: 1500, qty: 2, maxPerOrder: null }],
           contact,
-          "pickup", SEEDED_SERVICE_FEE,
+          "pickup", ADR_0021_SERVICE_FEE,
         );
         const cart = await storeScoped(storeAId).cart.create({ data: { storeId: storeAId } });
         cartsCreated.push(cart.id);
@@ -755,7 +754,7 @@ describe.skipIf(!hasKey || !hasDb)(
         { subtotal: 50000, expected: 2000 },
       ];
       for (const { subtotal, expected } of cases) {
-        const q = computeQuote(0, [{ price: subtotal, qty: 1, maxPerOrder: null }], validContact, "pickup", SEEDED_SERVICE_FEE);
+        const q = computeQuote(0, [{ price: subtotal, qty: 1, maxPerOrder: null }], validContact, "pickup", ADR_0021_SERVICE_FEE);
         expect(q.bufferCents).toBe(expected);
       }
     });

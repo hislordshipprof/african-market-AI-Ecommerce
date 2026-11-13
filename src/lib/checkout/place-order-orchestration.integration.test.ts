@@ -53,7 +53,7 @@ import {
   recordAuthorizedOrder,
 } from "./service";
 import { fakeCheckoutCallCount, getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
-import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "ada@t236-orch.test" };
@@ -152,7 +152,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   }
 
   function holdFor(price: number, qty: number) {
-    return computeQuote(0, [{ price, qty, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE).holdCents;
+    return computeQuote(0, [{ price, qty, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE).holdCents;
   }
 
   function paymentIntent(opts: {
@@ -420,7 +420,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     await storeScoped(other.id).cartLine.create({
       data: { storeId: other.id, cartId: ownerCart.id, variantId: ownerVariant.id, qty: 1, swapRule: "exact_only" },
     });
-    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE);
+    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE);
     const recorded = await recordAuthorizedOrder(other.id, {
       cartId: ownerCart.id,
       contact: CONTACT,
@@ -487,7 +487,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     const primaryCart = await storeScoped(store.id).cart.create({
       data: { storeId: store.id, paymentIntentId: `pi_primary_${crypto.randomUUID()}` },
     });
-    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE);
+    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE);
     await expect(recordAuthorizedOrder(store.id, {
       cartId: primaryCart.id,
       contact: { ...CONTACT, email: "primary@t236-orch.test" },
@@ -736,7 +736,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   it("a new order still checks the PaymentIntent amount against the hold", async () => {
     const store = await makeStore("amount");
     const variant = await makeVariant(store.id, 555);
-    const quote = computeQuote(0, [{ price: 555, qty: 1, maxPerOrder: null }], CONTACT, "pickup", SEEDED_SERVICE_FEE);
+    const quote = computeQuote(0, [{ price: 555, qty: 1, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE);
     expect(quote.bufferCents).toBe(56);
     expect(quote.holdCents).toBe(710);
 
@@ -955,7 +955,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     await storeScoped(store.id).cartLine.create({
       data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], CONTACT, "store-delivery", SEEDED_SERVICE_FEE, {
+    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], CONTACT, "store-delivery", ADR_0021_SERVICE_FEE, {
       enabled: true,
       feeCents: 500,
       radiusMi: 8,

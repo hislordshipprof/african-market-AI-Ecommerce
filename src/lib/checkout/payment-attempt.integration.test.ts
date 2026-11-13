@@ -8,7 +8,7 @@ import { ensureStripeCustomer } from "../customer-account/stripe-customer";
 import { SAVED_CARD_PURPOSE, SAVED_CARD_TERMS_VERSION } from "../customer-account/consent";
 import { sendOrderAuthorized } from "../inngest/send";
 import { checkoutTestHooks } from "./test-hooks";
-import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 vi.mock("../inngest/send", () => ({
   sendOrderAuthorized: vi.fn().mockResolvedValue(undefined),
@@ -187,7 +187,7 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
       data: { storeId, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
     const contact = { name: "Ada", phone: "+15551234567", email: "ada@example.test" };
-    const holdCents = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], contact, "pickup", SEEDED_SERVICE_FEE).holdCents;
+    const holdCents = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE).holdCents;
     const pi = await getCheckoutPayments().createPaymentIntent({
       amount: holdCents,
       currency: "usd",
@@ -374,7 +374,7 @@ describe.skipIf(!hasDb)("signed-in payment attempts", () => {
       data: { storeId, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
     const contact = { name: "Ada", phone: "+15551234567", email: "ada@example.test" };
-    const holdCents = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], contact, "pickup", SEEDED_SERVICE_FEE).holdCents;
+    const holdCents = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], contact, "pickup", ADR_0021_SERVICE_FEE).holdCents;
     const pi = await getCheckoutPayments().createPaymentIntent({
       amount: holdCents,
       currency: "usd",
