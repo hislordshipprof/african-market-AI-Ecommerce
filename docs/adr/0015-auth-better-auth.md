@@ -17,3 +17,14 @@ Not chosen: Clerk (per-user pricing gets expensive at 1M customers, and user dat
 - No per-user fee as customers grow. We own security patching, so track Better Auth releases.
 - Sessions are cookies scoped to each store's domain. A customer's account works across stores, but each store's site needs its own sign-in hop.
 - Every SMS code costs money, so cap sends per phone number and per IP, and block premium-rate number ranges.
+
+## Account recovery (#395, 2026-11-13)
+Staff and platform admins sign in with a password and an authenticator code. Recovery uses the account email, because email is already every account's sign-in channel and phone codes wait for #190:
+- **Lost phone:** ten single-use **backup codes**, shown once right after 2FA setup. The second sign-in step takes one in place of the 6-digit code.
+- **Forgotten password:** an emailed reset link (1 hour). A reset ends every session and never skips the authenticator step.
+- **Lost both:** another platform admin (or `pnpm admin:create`) resets the account out of band. There is no self-service path around both factors.
+- Trusted-device cookies are never issued: they skipped the second step without marking the session verified.
+- Magic-link sends are capped per IP (5 a minute) and per inbox (5 in 10 minutes), so rotating IPs cannot flood one inbox.
+- A shopper who only ever used a magic link has no password; a staff invite (mailed to that address) adds one, and never replaces an existing one.
+
+Admins who set up 2FA before this change never saw their backup codes. They regenerate them with their password (`/two-factor/generate-backup-codes`) until a settings screen exists.
