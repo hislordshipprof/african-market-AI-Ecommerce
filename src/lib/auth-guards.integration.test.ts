@@ -33,6 +33,7 @@ import { requirePlatformAdmin } from "./admin/session";
 import { requireStoreMember, requireStoreOwner } from "./store-admin/session";
 import { clearTestSentEmails, getTestSentEmails } from "./email/send";
 import { syncCustomerForRequest } from "./customer-sync";
+import { createInvite, setInviteePassword } from "./invite/service";
 import { storeScoped } from "./db";
 
 const BASE = "http://localhost:3000/api/auth";
@@ -245,6 +246,44 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
       );
       expect(reused.status).not.toBe(200);
     } finally {
+      await removeAuthFixtures([email], []);
+    }
+  });
+
+  it("a shopper who only ever used a magic link can set a password from a staff invite, once", async () => {
+    const email = `c1-shopper-invitee-${suffix}@test.example`;
+    try {
+      await customerMagicSession(email, storeSlug);
+      clearTestSentEmails();
+      await createInvite({
+        storeId,
+        email,
+        role: "staff",
+        invitedById: ownerId,
+        actorEmail: ownerEmail,
+        baseUrl: "http://localhost:3000",
+        storeSlug,
+        storeName: "C1 Store",
+      });
+      const token = getTestSentEmails().at(-1)!.html.match(/\/invite\/([^?"]+)/)![1];
+      expect((await passwordSignIn(email)).status).not.toBe(200);
+
+      expect(await setInviteePassword(token, password)).toEqual({ ok: true });
+      const signedIn = await passwordSignIn(email);
+      expect(signedIn.status, await signedIn.clone().text()).toBe(200);
+
+      // An account that has a password keeps it: the invite link cannot replace it.
+      expect(await setInviteePassword(token, "Other-Pass-456!")).toEqual({ ok: true });
+      expect((await authPost("/sign-in/email", { email, password: "Other-Pass-456!" })).status).not.toBe(200);
+      expect(await setInviteePassword("not-a-token", password)).toEqual({ ok: false, error: "Invalid invitation link" });
+    } finally {
+      await authPrisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL ROLE app_user`;
+        await tx.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`;
+        await tx.$executeRaw`DELETE FROM store_invites WHERE email = ${email}`;
+        await tx.$executeRaw`DELETE FROM audit_logs WHERE store_id = ${storeId}`;
+        await tx.$executeRaw`DELETE FROM customers WHERE user_id IN (SELECT id FROM users WHERE email = ${email})`;
+      });
       await removeAuthFixtures([email], []);
     }
   });

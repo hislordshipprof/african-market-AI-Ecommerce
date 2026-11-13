@@ -3,6 +3,8 @@ import { platformAdmin, platformAdminTransaction, storeScoped, lockStoreRow } fr
 import { sendEmail } from "../email/send";
 import { normalizeEmail } from "../email";
 import { effectivePlan, staffLimit } from "../billing/plan";
+import { auth } from "../auth";
+import { authPrisma } from "../db";
 
 const INVITE_EXPIRY_HOURS = 72;
 const TOKEN_BYTES = 32;
@@ -178,6 +180,36 @@ export async function validateInviteToken(rawToken: string): Promise<ValidatedIn
     storeName: invite.store.name,
     storeSlug: invite.store.slug,
   };
+}
+
+/**
+ * A shopper who only signed in by magic link has no password, so the invite's password
+ * sign-in can never succeed. The invite token was mailed to that address, which proves the
+ * mailbox as a magic link does: add a password to an account that has none. Never replaces one.
+ */
+export async function setInviteePassword(
+  rawToken: string,
+  password: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const invite = await validateInviteToken(rawToken);
+  if ("error" in invite) return { ok: false, error: invite.error };
+  const ctx = await auth.$context;
+  const { minPasswordLength, maxPasswordLength } = ctx.password.config;
+  if (password.length < minPasswordLength || password.length > maxPasswordLength) {
+    return { ok: false, error: `Use a password of ${minPasswordLength} to ${maxPasswordLength} characters.` };
+  }
+  const user = await authPrisma.user.findFirst({
+    where: { email: normalizeEmail(invite.email) },
+    select: { id: true, accounts: { where: { providerId: "credential" }, select: { id: true } } },
+  });
+  if (!user || user.accounts.length > 0) return { ok: true };
+  await ctx.internalAdapter.linkAccount({
+    userId: user.id,
+    providerId: "credential",
+    accountId: user.id,
+    password: await ctx.password.hash(password),
+  });
+  return { ok: true };
 }
 
 export async function acceptInvite(
