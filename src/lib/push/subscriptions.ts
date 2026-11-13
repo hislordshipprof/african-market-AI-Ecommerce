@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { storeScoped } from "../db";
-import { isPushServiceEndpoint } from "./endpoint";
+import { isPushServiceEndpoint, isUsablePushKeys } from "./endpoint";
 
 /** Devices one member can have on one store. The newest 10 stay. */
 const MAX_DEVICES_PER_USER = 10;
@@ -15,10 +15,12 @@ export const pushSubscriptionSchema = z.object({
     .max(2048)
     .url()
     .refine(isPushServiceEndpoint),
-  keys: z.object({
-    p256dh: base64url(128),
-    auth: base64url(64),
-  }),
+  keys: z
+    .object({
+      p256dh: base64url(128),
+      auth: base64url(64),
+    })
+    .refine(isUsablePushKeys),
 });
 
 export type PushSubscriptionInput = z.infer<typeof pushSubscriptionSchema>;

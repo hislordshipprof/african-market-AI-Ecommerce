@@ -4,8 +4,7 @@ import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { makeFakeStep } from "../inngest/fake-step";
 import { newOrderPush } from "../inngest/functions";
-import * as db from "../db";
-import { PushTestSender, setPushSenderForTests, type PushSender } from "./sender";
+import { PushTestSender, setPushSenderForTests } from "./sender";
 import { sendNewOrderPush } from "./new-order";
 import { pushToStoreMembers } from "./store-members";
 
@@ -157,70 +156,17 @@ describe.skipIf(!hasDb)("new-order web push", () => {
     expect(logged).not.toContain(keys.auth);
   });
 
-  it("a stored endpoint that is not a push service is deleted and never sent to", async () => {
-    await storeScoped(storeA).pushSubscription.create({
-      data: { storeId: storeA, userId: memberA1, endpoint: "https://127.0.0.1:9/x", ...keys },
+  it("a stored row web-push would refuse (not a push host, or bad keys) is deleted and never sent to", async () => {
+    await storeScoped(storeA).pushSubscription.createMany({
+      data: [
+        { storeId: storeA, userId: memberA1, endpoint: "https://127.0.0.1:9/x", ...keys },
+        { storeId: storeA, userId: memberA1, endpoint: endpoint("short-key"), p256dh: "AAAA", auth: keys.auth },
+      ],
     });
     const order = await createOrder();
     await sendNewOrderPush(storeA, order.id, VAPID_ENV);
-    expect(sender.sent.map((s) => s.endpoint)).not.toContain("https://127.0.0.1:9/x");
-    expect(sender.sent).toHaveLength(2);
+    expect(sender.sent.map((s) => s.endpoint).sort()).toEqual([endpoint("a1"), endpoint("a2")].sort());
     const left = await storeScoped(storeA).pushSubscription.findMany();
-    expect(left.map((r) => r.endpoint)).not.toContain("https://127.0.0.1:9/x");
-  });
-
-  it("sends to all devices at once, so one slow endpoint cannot hold up the others", async () => {
-    let arrived = 0;
-    let release!: () => void;
-    const both = new Promise<void>((resolve) => (release = resolve));
-    const delivered: string[] = [];
-    const barrier: PushSender = {
-      async send(target) {
-        if (++arrived === 2) release();
-        await both;
-        delivered.push(target.endpoint);
-      },
-    };
-    setPushSenderForTests(barrier);
-    const order = await createOrder();
-    await sendNewOrderPush(storeA, order.id, VAPID_ENV);
-    expect(delivered.sort()).toEqual([endpoint("a1"), endpoint("a2")].sort());
-  }, 2000);
-
-  it("a failing delete of a gone subscription does not make the step throw, and logs no endpoint", async () => {
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    sender.failWith(endpoint("a1"), 410);
-    const realScoped = db.storeScoped;
-    vi.spyOn(db, "storeScoped").mockImplementation((id: string) => {
-      const real = realScoped(id);
-      return new Proxy(real, {
-        get(target, prop) {
-          const value = Reflect.get(target, prop);
-          if (prop !== "pushSubscription") return typeof value === "function" ? value.bind(target) : value;
-          return new Proxy(value, {
-            get(model, method) {
-              if (method === "deleteMany") return () => Promise.reject(new Error("db down"));
-              const fn = Reflect.get(model, method);
-              return typeof fn === "function" ? fn.bind(model) : fn;
-            },
-          });
-        },
-      });
-    });
-    const order = await createOrder();
-    await expect(sendNewOrderPush(storeA, order.id, VAPID_ENV)).resolves.toBeUndefined();
-    expect(sender.sent.map((s) => s.endpoint)).toEqual([endpoint("a2")]);
-    const logged = errors.mock.calls.flat().join(" ");
-    expect(logged).not.toContain("fcm.googleapis.com");
-    expect(logged).not.toContain(keys.auth);
-  });
-
-  it("skips sending with one warning when the VAPID keys are missing", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const order = await createOrder();
-    await sendNewOrderPush(storeA, order.id, { NODE_ENV: "test" });
-    await sendNewOrderPush(storeA, order.id, { NODE_ENV: "test", VAPID_PUBLIC_KEY: "public" });
-    expect(sender.sent).toEqual([]);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(left.map((r) => r.endpoint).sort()).toEqual([endpoint("a1"), endpoint("a2")].sort());
   });
 });

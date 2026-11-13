@@ -29,9 +29,8 @@ export default async function OrderPage({
     getFlowContext(),
   ]);
 
-  const realOrder = await findOrderForTracking(context.store.id, token).catch(
-    () => null,
-  );
+  // No catch: a database error goes to error.tsx, so a customer never reads it as "order not found".
+  const realOrder = await findOrderForTracking(context.store.id, token);
 
   if (realOrder) {
     const proofToken = deliveryProofTokenFor(realOrder, token);
