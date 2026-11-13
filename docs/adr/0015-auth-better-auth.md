@@ -24,7 +24,7 @@ Staff and platform admins sign in with a password and an authenticator code. Rec
 - **Forgotten password:** an emailed reset link (1 hour). A reset ends every session and never skips the authenticator step.
 - **Lost both:** no self-service path around both factors. An operator resets the account out of band; there is no tool for that yet (`pnpm admin:create` refuses an existing email).
 - Trusted-device cookies are never issued: they skipped the second step without marking the session verified.
-- Magic-link sends are capped per IP (5 a minute) and per inbox (5 in 10 minutes), so rotating IPs cannot flood one inbox.
+- Magic-link sends are capped per IP (5 a minute) and per inbox (5 mailed links in 10 minutes; a blocked send leaves no row), so rotating IPs cannot flood one inbox or keep it without a live link.
 - A shopper who only ever used a magic link has no password; a staff invite (mailed to that address) adds one, and never replaces an existing one.
 
 Admins who set up 2FA before this change never saw their backup codes. They regenerate them with their password (`/two-factor/generate-backup-codes`) until a settings screen exists.
