@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { streamFromR2 } from "@/lib/r2";
 import { parseInput } from "@/lib/security/parse-input";
+import { isSvgPath, SVG_CSP } from "@/lib/security/headers";
 
 const keySchema = z.array(z.string().min(1).max(512)).min(1).max(8);
 
@@ -21,10 +22,15 @@ export async function GET(
     return new NextResponse(null, { status: 404 });
   }
 
-  return new NextResponse(result.body, {
-    headers: {
-      "Content-Type": result.contentType,
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": result.contentType,
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (isSvgPath(key) || result.contentType.toLowerCase().includes("svg")) {
+    headers["Content-Security-Policy"] = SVG_CSP;
+    // <img> ignores this; a directly opened SVG downloads instead of rendering.
+    headers["Content-Disposition"] = "attachment";
+  }
+  return new NextResponse(result.body, { headers });
 }

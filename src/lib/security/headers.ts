@@ -1,5 +1,12 @@
 export const ENFORCED_CSP = "frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
 
+/** An SVG opened directly is a document; this keeps any script in it from running (#124). */
+export const SVG_CSP = `${ENFORCED_CSP}; script-src 'none'; sandbox`;
+
+export function isSvgPath(pathname: string): boolean {
+  return pathname.toLowerCase().endsWith(".svg");
+}
+
 const STATIC_HEADERS: Array<{ key: string; value: string }> = [
   { key: "Strict-Transport-Security", value: "max-age=63072000" },
   { key: "X-Content-Type-Options", value: "nosniff" },

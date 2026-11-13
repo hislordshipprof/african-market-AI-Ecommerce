@@ -32,4 +32,21 @@ test.describe("Store logo SVG safety (#60)", () => {
     const res = await request.get(`http://localhost:${process.env.E2E_PORT ?? "3000"}/_next/image?url=%2Flogos%2Fmama-ngozi-logo.svg&w=48&q=75`);
     expect(res.status()).toBe(400);
   });
+
+  // The server's real headers for each SVG path, with a script-bearing body in place of the file (#124).
+  for (const path of ["/logos/mama-ngozi-logo.svg", "/api/catalog-image/catalog/xss-probe.svg"]) {
+    test(`opening ${path} directly does not run an embedded script`, async ({ page }) => {
+      await page.route(`**${path}`, async (route) => {
+        const real = await route.fetch();
+        await route.fulfill({
+          status: 200,
+          headers: { ...real.headers(), "content-type": "image/svg+xml", "content-disposition": "inline" },
+          body: `<svg xmlns="http://www.w3.org/2000/svg"><script>document.documentElement.setAttribute("data-xss","ran")</script></svg>`,
+        });
+      });
+      await page.goto(`${BASE}${path}`);
+      await page.waitForTimeout(300);
+      expect(await page.evaluate(() => document.documentElement.getAttribute("data-xss"))).toBeNull();
+    });
+  }
 });

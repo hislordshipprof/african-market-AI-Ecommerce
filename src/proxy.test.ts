@@ -296,6 +296,15 @@ describe("security headers on the proxy", () => {
     expect(configured.map((entry: { source: string }) => entry.source)).toContain("/_next/static/:path*");
   });
 
+  it("an SVG path gets a no-script, sandboxed policy (#124)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const path of ["/logos/mama-ngozi-logo.svg", "/api/catalog-image/catalog/logo.svg"]) {
+      const res = proxy(makeRequest(`http://localhost:3000${path}`));
+      expect(res.headers.get("content-security-policy")).toMatch(/script-src 'none'.*sandbox/);
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+  });
+
   it("nonce request equals response and differs per request", () => {
     vi.stubEnv("NODE_ENV", "production");
     const first = proxy(makeRequest("http://localhost:3000/shop"));

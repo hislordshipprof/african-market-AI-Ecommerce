@@ -64,4 +64,21 @@ describe("GET /api/catalog-image/[...key]", () => {
     );
     expect(res.headers.get("Content-Type")).toBe("image/png");
   });
+
+  it("serves an SVG as inert, downloaded content (#124)", async () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`;
+    const body = new ReadableStream({
+      start(c) { c.enqueue(new TextEncoder().encode(svg)); c.close(); },
+    });
+    mockStreamFromR2.mockResolvedValue({ body, contentType: "image/svg+xml" });
+    const GET = await importGET();
+    const res = await GET(
+      fakeRequest("/api/catalog-image/catalog/logo.svg") as never,
+      { params: Promise.resolve({ key: ["catalog", "logo.svg"] }) },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Security-Policy")).toMatch(/script-src 'none'.*sandbox/);
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Disposition")).toBe("attachment");
+  });
 });
