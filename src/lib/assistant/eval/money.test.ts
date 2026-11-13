@@ -9,6 +9,12 @@ describe("shopper assistant eval money", () => {
     expect(usdAmountsInText("99¢")).toEqual([99]);
     expect(usdAmountsInText("It is $99.")).toEqual([9900]);
 
+    expect(usdAmountsInText("Your cart total is 1,362 cents, including a service fee of 99 cents.")).toEqual([1362, 99]);
+    expect(usdAmountsInText("1362 cents")).toEqual([1362]);
+    expect(usdAmountsInText("$13.62")).toEqual([1362]);
+    // The dollar forms do not read thousands separators; this pins that they are unchanged.
+    expect(usdAmountsInText("$1,362.00")).toEqual([100]);
+
     const usage = anthropicUsage(1000, 3000, 0, 10);
     expect(callCostMicros("claude-haiku-5-5", usage ?? {})).toBe(BigInt(135));
 

@@ -3,7 +3,7 @@ const USD_FORMS: Array<{ re: RegExp; kind: "dollar" | "cent" }> = [
   { re: /\bUSD\s*(\d{1,7})(?:\.(\d{1,2}))?/gi, kind: "dollar" },
   { re: /\b(\d{1,7})(?:\.(\d{1,2}))?\s*USD\b/gi, kind: "dollar" },
   { re: /\b(\d{1,7})(?:\.(\d{1,2}))?\s+dollars?\b/gi, kind: "dollar" },
-  { re: /\b(\d{1,7})\s*cents?\b/gi, kind: "cent" },
+  { re: /\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*cents?\b/gi, kind: "cent" },
   { re: /\b(\d{1,7})\s*¢(?!\w)/gi, kind: "cent" },
 ];
 
@@ -20,8 +20,9 @@ export function centsFromParts(whole: string, frac: string): number | null {
 }
 
 function centAmount(raw: string): number | null {
-  if (!/^\d+$/.test(raw)) return null;
-  const cents = Number(raw);
+  const digits = raw.replace(/,/g, "");
+  if (!/^\d+$/.test(digits)) return null;
+  const cents = Number(digits);
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
