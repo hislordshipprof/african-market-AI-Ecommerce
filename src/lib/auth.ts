@@ -1,4 +1,5 @@
 import { betterAuth, APIError } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { twoFactor, magicLink } from "better-auth/plugins";
 import { authPrisma, platform } from "./db";
@@ -180,6 +181,15 @@ export const auth = betterAuth({
       "/two-factor/verify-totp": { window: 60, max: relaxedAuth ? 100 : 5 },
       "/sign-in/magic-link": { window: 60, max: relaxedAuth ? 100 : 5 },
     },
+  },
+  hooks: {
+    // A trusted-device cookie skips the second step but leaves twoFactorVerified false, so guards
+    // would reject that session anyway: never issue one.
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path.startsWith("/two-factor/") && ctx.body?.trustDevice) {
+        return { context: { body: { ...ctx.body, trustDevice: false } } };
+      }
+    }),
   },
   databaseHooks: {
     session: {

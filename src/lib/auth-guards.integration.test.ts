@@ -62,6 +62,10 @@ function collectCookies(res: Response): string {
   return (res.headers.getSetCookie?.() ?? []).join("; ");
 }
 
+function cookiePairs(res: Response): string {
+  return (res.headers.getSetCookie?.() ?? []).map((line) => line.split(";")[0]).join("; ");
+}
+
 async function signUp(email: string, name: string): Promise<void> {
   const res = await authPost("/sign-up/email", { email, password, name });
   expect(res.status, await res.clone().text()).toBe(200);
@@ -191,6 +195,54 @@ describe("C1 real guards (lane DB, app_runtime)", () => {
     const session = await requirePlatformAdmin();
     expect(session.user.id).toBe(adminId);
     expect(session.session.twoFactorVerified).toBe(true);
+  });
+
+  it("trustDevice never skips the second step, and a backup code yields a verified session", async () => {
+    const email = `c1-recover-${suffix}@test.example`;
+    try {
+      await signUp(email, "C1 Recover");
+      const recoverId = (await authPrisma.user.findFirstOrThrow({ where: { email } })).id;
+      await authPrisma.user.update({ where: { id: recoverId }, data: { role: "platform_admin" } });
+      const first = collectCookies(await passwordSignIn(email));
+      const enabled = await authPost("/two-factor/enable", { password }, first);
+      const { totpURI, backupCodes } = (await enabled.json()) as { totpURI: string; backupCodes: string[] };
+      expect(backupCodes.length).toBeGreaterThan(0);
+      const secret = secretFromUri(totpURI);
+      const enrolled = await verifyTotp(generateTOTP(secret), first);
+      expect(enrolled.status, await enrolled.clone().text()).toBe(200);
+      const challenged = await passwordSignIn(email);
+      expect((await challenged.clone().json()).twoFactorRedirect).toBe(true);
+      const trusted = await authPost(
+        "/two-factor/verify-totp",
+        { code: generateTOTP(secret), trustDevice: true },
+        cookiePairs(challenged),
+      );
+      expect(trusted.status, await trusted.clone().text()).toBe(200);
+      const trustCookie = cookiePairs(trusted);
+      const next = await authPost("/sign-in/email", { email, password }, trustCookie);
+      const nextBody = await next.json();
+      expect(nextBody.twoFactorRedirect).toBe(true);
+
+      const recovered = await authPost(
+        "/two-factor/verify-backup-code",
+        { code: backupCodes[0] },
+        cookiePairs(next),
+      );
+      expect(recovered.status, await recovered.clone().text()).toBe(200);
+      headerState.set("cookie", collectCookies(recovered));
+      const session = await requirePlatformAdmin();
+      expect(session.user.id).toBe(recoverId);
+      expect(session.session.twoFactorVerified).toBe(true);
+
+      const reused = await authPost(
+        "/two-factor/verify-backup-code",
+        { code: backupCodes[0] },
+        cookiePairs(await passwordSignIn(email)),
+      );
+      expect(reused.status).not.toBe(200);
+    } finally {
+      await removeAuthFixtures([email], []);
+    }
   });
 
   it("magic link does not admit a 2FA store owner or platform admin", async () => {
