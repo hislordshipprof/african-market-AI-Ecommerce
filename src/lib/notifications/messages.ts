@@ -261,6 +261,7 @@ export function renderEmail(order: NotifyOrder, event: OrderNotifyEvent, url: st
         }));
       }
     } else {
+      if (order.serviceFeeCents > 0) parts.push(`<p>Service fee ${escapeHtml(money(order.serviceFeeCents))}.</p>`);
       parts.push(`<p>Charged ${escapeHtml(money(order.capturedAmountCents))}.</p>`);
     }
   } else if (event === "cancelled") {

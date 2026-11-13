@@ -51,4 +51,10 @@ describe("store delivery messages", () => {
     }
     expect(renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com").html).toContain("Charged $25.00.");
   });
+
+  it("#495: the charged email shows the service fee inside the charged amount", () => {
+    const html = renderEmail({ ...order("DELIVERED", 2560), serviceFeeCents: 60 }, "delivered", URL, "orders@example.com").html;
+    expect(html).toContain("<p>Service fee $0.60.</p><p>Charged $25.60.</p>");
+    expect(renderEmail(order("DELIVERED"), "delivered", URL, "orders@example.com").html).not.toContain("Service fee");
+  });
 });
