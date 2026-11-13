@@ -646,11 +646,14 @@ model CopilotAlert {
   @@map("copilot_alerts")
 }
 
-/// One per store per local day, claimed before the digest email goes out.
+/// One per store per local day, claimed before the digest email goes out; sent_at is set once every owner has it.
 model CopilotDigest {
   id        String   @id @default(cuid())
   storeId   String   @map("store_id")
   localDate String   @map("local_date")
+  /// Rendered once at claim time, so a retry resends the same body under the same Resend idempotency key.
+  html      String
+  sentAt    DateTime? @map("sent_at")
   createdAt DateTime @default(now()) @map("created_at")
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
