@@ -1,4 +1,5 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { ToolChoiceViolationError, generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { assistantModelId, assistantProviderOptions, createAssistantModel } from "../assistant/model";
@@ -6,7 +7,7 @@ import { AssistantConfigError } from "../assistant/errors";
 import { assistantSpendState, claimCapAlert, utcDay } from "../assistant/spend";
 import { lockListingRow, lockStoreRow, storeScoped, storeScopedTransaction } from "../db";
 import { prepareProofPhoto } from "../order/delivery-proof";
-import { deliveryProofBucket, ownerReportPhotoKey, uploadOwnerReportPhoto } from "../r2";
+import { deleteOwnerReportPhoto, deliveryProofBucket, ownerReportPhotoKey, uploadOwnerReportPhoto } from "../r2";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { listingLabel } from "./cards";
 import { writeStockChange } from "./confirm";
@@ -179,7 +180,8 @@ export type CreateReportResult =
   | { ok: false; code: CreateReportCode; message: string };
 
 export type ConfirmReportResult =
-  | { ok: true; report: OwnerReportCard }
+  /** `notChanged`: ticked lines whose listing no longer fits the change; they stay pending to confirm again. */
+  | { ok: true; report: OwnerReportCard; notChanged: number }
   | { ok: false; code: "not_found" | "already_decided" | "failed" };
 
 export async function loadOwnerReport(storeId: string, reportId: string): Promise<OwnerReportCard | null> {
@@ -270,6 +272,18 @@ export async function createOwnerReport(storeId: string, actor: CopilotActor, in
     source = { type: input.type, image: prepared.jpeg };
   }
 
+  // A double submit of the same note or photo returns the pending report instead of making a second one.
+  const sourceHash = createHash("sha256")
+    .update(input.type)
+    .update(input.type === "voice" ? (source as { transcript: string }).transcript : (input.photo ?? new Uint8Array()))
+    .digest("hex");
+  const pendingSame = () => storeScoped(storeId).ownerReport.findFirst({
+    where: { sourceHash, status: "pending" },
+    select: { id: true },
+  });
+  const existing = await pendingSame();
+  if (existing) return { ok: true, report: (await loadOwnerReport(storeId, existing.id))! };
+
   const refused = await gate(storeId, actor.id);
   if (refused) return refused;
 
@@ -283,63 +297,75 @@ export async function createOwnerReport(storeId: string, actor: CopilotActor, in
   }
 
   const reportId = randomBytes(12).toString("hex");
+  const kept = extracted.items.slice(0, REPORT_ITEMS_MAX);
+  const matches: Array<ItemMatch | null> = [];
+  for (const item of kept) matches.push(await matchReportItem(storeId, item));
+
   let imageKey: string | null = null;
   if (source.type !== "voice") {
     imageKey = ownerReportPhotoKey(storeId, reportId);
     await uploadOwnerReportPhoto(imageKey, source.image);
   }
 
-  const kept = extracted.items.slice(0, REPORT_ITEMS_MAX);
-  const matches: Array<ItemMatch | null> = [];
-  for (const item of kept) matches.push(await matchReportItem(storeId, item));
-
-  await storeScopedTransaction(storeId, async (tx) => {
-    await tx.ownerReport.create({
-      data: {
-        id: reportId,
-        storeId,
-        actorId: actor.id,
-        type: source.type,
-        rawTranscript: source.type === "voice" ? source.transcript : null,
-        imageKey,
-        aiExtraction: { model: extracted.raw ?? null, overflow: extracted.items.length > kept.length } as object,
-      },
-    });
-    await tx.ownerReportItem.createMany({
-      data: kept.map((item, index) => {
-        const match = matches[index];
-        return {
-          reportId,
+  try {
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.ownerReport.create({
+        data: {
+          id: reportId,
           storeId,
-          extractedName: item.name,
-          extractedQty: item.quantity,
-          unit: item.unit,
-          listingId: match?.listingId ?? null,
-          matchConfidence: match?.confidence ?? 0,
-          kind: match?.kind ?? null,
-          proposedDelta: match ? item.quantity : null,
-          status: match ? "pending" : "unmatched",
-          createdAt: new Date(Date.now() + index),
-        };
-      }),
-    });
-    await tx.auditLog.create({
-      data: {
-        storeId,
-        actorId: actor.id,
-        actorEmail: actor.email,
-        action: "owner_report.propose",
-        entityType: "owner_report",
-        entityId: reportId,
-        after: {
+          actorId: actor.id,
           type: source.type,
-          source: "copilot",
-          matched: matches.filter(Boolean).length,
-          unmatched: matches.filter((match) => !match).length,
+          rawTranscript: source.type === "voice" ? source.transcript : null,
+          imageKey,
+          sourceHash,
+          aiExtraction: { model: extracted.raw ?? null, overflow: extracted.items.length > kept.length } as object,
         },
-      },
-    });
-  }, WRITE_TRANSACTION);
+      });
+      await tx.ownerReportItem.createMany({
+        data: kept.map((item, index) => {
+          const match = matches[index];
+          return {
+            reportId,
+            storeId,
+            extractedName: item.name,
+            extractedQty: item.quantity,
+            unit: item.unit,
+            listingId: match?.listingId ?? null,
+            matchConfidence: match?.confidence ?? 0,
+            kind: match?.kind ?? null,
+            proposedDelta: match ? item.quantity : null,
+            status: match ? "pending" : "unmatched",
+            createdAt: new Date(Date.now() + index),
+          };
+        }),
+      });
+      await tx.auditLog.create({
+        data: {
+          storeId,
+          actorId: actor.id,
+          actorEmail: actor.email,
+          action: "owner_report.propose",
+          entityType: "owner_report",
+          entityId: reportId,
+          after: {
+            type: source.type,
+            source: "copilot",
+            matched: matches.filter(Boolean).length,
+            unmatched: matches.filter((match) => !match).length,
+          },
+        },
+      });
+    }, WRITE_TRANSACTION);
+  } catch (error) {
+    if (imageKey) {
+      await deleteOwnerReportPhoto(imageKey).catch(() => {
+        console.error("[copilot] orphaned report photo not deleted", { storeId, reportId });
+      });
+    }
+    const duplicate = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" ? await pendingSame() : null;
+    if (!duplicate) throw error;
+    return { ok: true, report: (await loadOwnerReport(storeId, duplicate.id))! };
+  }
 
   const report = await loadOwnerReport(storeId, reportId);
   return { ok: true, report: report! };
@@ -347,7 +373,9 @@ export async function createOwnerReport(storeId: string, actor: CopilotActor, in
 
 /**
  * The owner's one tap. Listed pending lines are written through the copilot's stock write; other
- * pending lines are rejected. Unmatched lines are never written. Callers authenticate the owner.
+ * pending lines are rejected. A listed line whose listing no longer fits (inactive, another stock
+ * mode, or over the qty column) stays pending, and so does the report. Unmatched lines are never
+ * written. Callers authenticate the owner.
  */
 export async function confirmOwnerReport(
   storeId: string,
@@ -370,20 +398,23 @@ export async function confirmOwnerReport(
     const report = await tx.ownerReport.findUnique({ where: { id: reportId }, include: { items: true } });
     if (!report || report.status !== "pending") return false;
     const now = new Date();
-    let pending = 0;
-    let confirmed = 0;
+    let confirmed = report.items.filter((item) => item.status === "confirmed").length;
+    let notChanged = 0;
+    const rejectedIds: string[] = [];
 
     for (const item of report.items) {
       if (item.status !== "pending" || !item.listingId || !item.kind || !item.proposedDelta) continue;
-      pending += 1;
-      const listing = chosen.has(item.id)
-        ? await tx.listing.findUnique({ where: { id: item.listingId }, include: { masterProduct: { select: { name: true } } } })
-        : null;
+      if (!chosen.has(item.id)) {
+        await tx.ownerReportItem.update({ where: { id: item.id }, data: { status: "rejected" } });
+        rejectedIds.push(item.id);
+        continue;
+      }
+      const listing = await tx.listing.findUnique({ where: { id: item.listingId }, include: { masterProduct: { select: { name: true } } } });
       const fits = !!listing && listing.active
         && (item.kind === "set_status" ? listing.stockMode === "status" : listing.stockMode === "counted")
         && (item.kind !== "restock" || (listing.qty ?? 0) + item.proposedDelta <= QTY_COLUMN_MAX);
       if (!listing || !fits) {
-        await tx.ownerReportItem.update({ where: { id: item.id }, data: { status: "rejected" } });
+        notChanged += 1;
         continue;
       }
       await writeStockChange(tx, storeId, listing, {
@@ -413,12 +444,7 @@ export async function confirmOwnerReport(
       confirmed += 1;
     }
 
-    const status = confirmed === 0 ? "rejected" : confirmed === pending ? "confirmed" : "partial";
-    await tx.ownerReport.update({
-      where: { id: reportId },
-      data: { status, decidedById: actor.id, decidedAt: now },
-    });
-    if (confirmed === 0) {
+    if (rejectedIds.length > 0) {
       await tx.auditLog.create({
         data: {
           storeId,
@@ -427,13 +453,21 @@ export async function confirmOwnerReport(
           action: "owner_report.reject",
           entityType: "owner_report",
           entityId: reportId,
-          after: { proposedBy: "copilot", reportedBy: report.actorId },
+          after: { itemIds: rejectedIds, proposedBy: "copilot", reportedBy: report.actorId },
         },
       });
     }
-    return true;
+    if (notChanged === 0) {
+      const everRejected = report.items.some((item) => item.status === "rejected") || rejectedIds.length > 0;
+      const status = confirmed === 0 ? "rejected" : everRejected ? "partial" : "confirmed";
+      await tx.ownerReport.update({
+        where: { id: reportId },
+        data: { status, decidedById: actor.id, decidedAt: now },
+      });
+    }
+    return { notChanged };
   }, WRITE_TRANSACTION);
   if (!decided) return { ok: false, code: "already_decided" };
   const report = await loadOwnerReport(storeId, reportId);
-  return report ? { ok: true, report } : { ok: false, code: "not_found" };
+  return report ? { ok: true, report, notChanged: decided.notChanged } : { ok: false, code: "not_found" };
 }

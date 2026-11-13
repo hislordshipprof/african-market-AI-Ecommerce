@@ -145,6 +145,14 @@ export async function uploadOwnerReportPhoto(key: string, body: Buffer | Uint8Ar
   );
 }
 
+/** Removes a report photo no report row points at, after its insert failed. */
+export async function deleteOwnerReportPhoto(key: string): Promise<void> {
+  const bucket = deliveryProofBucket();
+  if (!bucket) throw new Error("R2_PROOF_BUCKET is required");
+  if (!isOwnerReportPhotoKey(key)) throw new Error("not an owner-report key");
+  await getR2Client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
 export async function streamFromR2(
   key: string,
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
