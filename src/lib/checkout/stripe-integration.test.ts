@@ -6,6 +6,8 @@ import { storeScoped } from "../db";
 import { checkoutTestHooks, createPaymentIntent, placeOrder, computeQuote, releaseOrphanHolds } from "./service";
 import { holdAuthorizedAt } from "../stripe/checkout-payments";
 import { SEEDED_SERVICE_FEE } from "../order/service-fee-test-settings";
+import { captureSplit, serviceFeeCents } from "../order/platform-fee";
+import { stripeProvider } from "../stripe/provider";
 
 type ConnectedAccountCaps = {
   id: string;
@@ -315,6 +317,39 @@ describe.skipIf(!hasKey || !hasDb)(
         expect(pi.metadata.cart_id).toBe(cartAId);
         expect(pi.transfer_data?.destination).toBe(stripeAccountAId);
         expect(pi.on_behalf_of).toBe(stripeAccountAId);
+      },
+    );
+
+    it(
+      "#495 ADR-0021 example: $60 goods + $8.99 courier captures $70.79, the store receives $57.96",
+      { timeout: 30_000 },
+      async () => {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+        const goods = 6000;
+        const fee = serviceFeeCents(goods, SEEDED_SERVICE_FEE);
+        const captured = goods + fee + 899;
+        const split = captureSplit({ capturedCents: captured, serviceFeeCents: fee, courierFeeCents: 899 });
+        const pi = await stripe.paymentIntents.create({
+          amount: captured + 600,
+          currency: "usd",
+          capture_method: "manual",
+          payment_method: "pm_card_visa",
+          confirm: true,
+          return_url: "https://example.com/return",
+          on_behalf_of: stripeAccountAId,
+          transfer_data: { destination: stripeAccountAId },
+          metadata: { test: "ticket-495" },
+        });
+        const result = await stripeProvider.capturePaymentIntent(pi.id, captured, `capture:t495:${pi.id}`, split.applicationFeeCents);
+        expect(result.amountCaptured).toBe(7079);
+        const charge = await stripe.charges.retrieve(String(
+          (await stripe.paymentIntents.retrieve(pi.id)).latest_charge,
+        ), { expand: ["transfer"] });
+        expect(charge.application_fee_amount).toBe(1283);
+        // Destination charges transfer the whole capture and collect the application fee back from it.
+        expect((charge.transfer as Stripe.Transfer).amount - charge.application_fee_amount!).toBe(5796);
+        expect(split.platformKeepsCents).toBe(149);
+        await stripe.refunds.create({ payment_intent: pi.id, reverse_transfer: true, refund_application_fee: true });
       },
     );
 
