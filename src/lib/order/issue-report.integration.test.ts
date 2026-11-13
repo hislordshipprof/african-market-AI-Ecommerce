@@ -23,7 +23,7 @@ vi.mock("@aws-sdk/client-s3", () => {
 
 import sharp from "sharp";
 import { testPrismaClient } from "@/lib/test-prisma";
-import { storeScoped } from "../db";
+import { findStuckTransitionalOrders, storeScoped } from "../db";
 import { setStripeProvider } from "../stripe";
 import { feeRefundParts, fakeStripeProvider, refundRequests, reset, storeFundedRefundCents, setAuthorizedAmount, setNextRefundFailure, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { systemAuditData } from "../system-actor";
@@ -31,6 +31,7 @@ import { countedListing } from "./stock-ledger-test-helpers";
 import { ISSUE_ALREADY_REPORTED, submitIssueReport } from "./issue-report";
 import { evaluateOrderRefundState } from "./refund-requests";
 import { captureSplit } from "./platform-fee";
+import { reconcileStuckOrder } from "./service";
 
 const hasDb = !!process.env.DATABASE_URL;
 const HOUR = 60 * 60 * 1000;
@@ -208,16 +209,19 @@ describe.skipIf(!hasDb)("customer issue report", () => {
     expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(2100);
   });
 
-  it("#495: a courier fee share refund that errors is retried by the next evaluation", async () => {
+  it("#495: a courier fee share refund that errors is retried by the stuck-order sweep", async () => {
     const { order, token } = await completedOrder([{ qtyPicked: 2, unitPriceCents: 1000 }], 1, 99, 899);
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(fakeStripeProvider, "refundApplicationFeePart").mockRejectedValueOnce(new Error("Stripe down"));
     const result = await submitIssueReport(store, token, { type: "missing", lines: [{ lineId: order.lines[0].id, qty: 1 }], note: "", photo: JPEG });
     expect(result).toMatchObject({ state: "auto_refunded", amountCents: 1050 });
     expect((await written(order.id)).requests[0]).toMatchObject({ serviceFeeShareCents: 50, feeRefundId: null });
-    await evaluateOrderRefundState(order.id);
+    const swept = async () => (await findStuckTransitionalOrders({ storeIds: [store.id] })).map((row) => row.id);
+    expect(await swept()).toContain(order.id);
+    await reconcileStuckOrder(store.id, order.id);
     expect((await written(order.id)).requests[0].feeRefundId).toMatch(/^fr_fake_/);
     expect(storeFundedRefundCents(order.paymentIntentId!)).toBe(1000);
+    expect(await swept()).not.toContain(order.id);
   });
 
   it("the same order 49 h after completion is refused and nothing is written", async () => {
