@@ -69,6 +69,13 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
     listing.shaky = await sell(storeA, await master("Paste shaky", { ...known, dietaryClaims: ["halal", "vegan"] }, [tomato.id]), 300, 0.3);
     const unknownMaster = await master("Paste mystery", {});
     listing.unknown = await sell(storeA, unknownMaster);
+    // Owner corrections on top of reviewed master values: the safer value wins, contains-lists by union, claims by intersection.
+    listing.allergenCorrected = await sell(storeA, await master("Sauce allergen corrected", { ...known, allergens: ["peanuts"], dietaryClaims: ["halal"] }));
+    listing.claimCorrected = await sell(storeA, await master("Sauce claim corrected", { ...known, dietaryClaims: ["vegan"] }));
+    await storeScopedTransaction(storeA, async (tx) => {
+      await tx.listingAttributes.create({ data: { listingId: listing.allergenCorrected.listingId, storeId: storeA, allergensStatus: "known", allergens: [] } });
+      await tx.listingAttributes.create({ data: { listingId: listing.claimCorrected.listingId, storeId: storeA, dietaryStatus: "known", dietaryClaims: ["halal"] } });
+    });
     // Store B states the same product is peanut-free; store A must never see that.
     listing.otherStore = await sell(storeB, unknownMaster);
     await storeScopedTransaction(storeB, (tx) => tx.listingAttributes.create({
@@ -160,6 +167,9 @@ describe.skipIf(!hasDb)("shopper constraints (#485)", () => {
       const expected = checkNeed(attributes!, { avoidAllergens: ["peanuts"], requireClaims: ["halal"], avoidIngredientIds: [onionId] });
       expect(verdicts.get(row.listingId)?.status, name).toBe(expected === "cannot_confirm" ? "unknown" : expected);
     }
+    // Both corrections lose to the safer master value (#503 N7).
+    expect(verdicts.get(listing.allergenCorrected.listingId)?.needs).toMatchObject({ "allergen:peanuts": "excluded" });
+    expect(verdicts.get(listing.claimCorrected.listingId)?.needs).toMatchObject({ "claim:halal": "excluded" });
   });
 
   it("keeps store B's attribute correction out of store A", async () => {
