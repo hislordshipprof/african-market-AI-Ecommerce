@@ -74,7 +74,7 @@ Don't run the code review on your own code. After you push, `scripts/build-ticke
 ## Finish
 1. Commit in small, meaningful commits. Add no AI attribution: no `Co-Authored-By:` trailer for any AI tool, no `Claude-Session:` link, no "Generated with" line (owner rule; `.githooks/commit-msg` strips them).
 2. Push the branch and open a PR: title = issue title; body = what changed, how each acceptance criterion is verified, anything deferred, `Closes #<n>`. No "Generated with" line or session link.
-3. Never push to `main` (a pre-push hook blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), and never close issues by hand. No agent stage merges, ship included. Only `scripts/merge-ticket.sh` merges, after the review gate and local-ci pass on the PR head.
+3. Never push to `main` (`.githooks/pre-push` blocks it; never set `ALLOW_MAIN_PUSH` or use `--no-verify`), and never close issues by hand. No agent stage merges, ship included. Only `scripts/merge-ticket.sh` merges, after the review gate and local-ci pass on the PR head.
 4. Write `.builder/report-<n>.md` in the main checkout (the script tells you its path), and update it as you go so a killed run still leaves a record. It names the commit SHA checked, the QA and code-review verdict lines, every finding code with how it ended (fix commit, or follow-up issue), the PR URL, and open questions. Keep it under 50 lines.
 
 ### Migrations
