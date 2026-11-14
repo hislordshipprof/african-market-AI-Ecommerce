@@ -14,6 +14,7 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
+import { getFulfillmentOptions, prepareCheckout, setFulfillment } from "./checkout";
 import { getRecipe, type RecipeDeps } from "./recipe";
 import { checkDeliveryArea, forwardToStore, getOrderStatus, getStoreInfo } from "./store-questions";
 import {
@@ -22,6 +23,9 @@ import {
   checkAvailabilityInput,
   checkDeliveryAreaInput,
   forwardToStoreInput,
+  getFulfillmentOptionsInput,
+  prepareCheckoutInput,
+  setFulfillmentInput,
   getRecipeInput,
   getOrderStatusInput,
   getStoreInfoInput,
@@ -119,6 +123,21 @@ export function assistantTools(ctx: AssistantContext, recipeDeps: RecipeDeps = {
       description: "Ingredients for a dish the customer named, matched to this store: inStock, lowOrOut with a backup, notCarried, and excluded for ingredients whose every item fails the customer's saved needs. Omit servings when the customer did not say how many people; it then returns askServings.",
       inputSchema: getRecipeInput,
       execute: (input, options) => getRecipe({ ...ctx, toolCallId: options.toolCallId }, input, recipeDeps),
+    }),
+    get_fulfillment_options: tool({
+      description: "Today's pickup times at this store, in store time. Delivery is chosen on the checkout page.",
+      inputSchema: getFulfillmentOptionsInput,
+      execute: (input, options) => getFulfillmentOptions({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    set_fulfillment: tool({
+      description: "Save the pickup time the customer chose, by a slotId from get_fulfillment_options. Checkout pre-selects it.",
+      inputSchema: setFulfillmentInput,
+      execute: (input, options) => setFulfillment({ ...ctx, toolCallId: options.toolCallId }, input),
+    }),
+    prepare_checkout: tool({
+      description: "Show the customer a Review card for the current cart: lines, pickup time, fees, total and card hold, with a Review and pay button to the checkout page. It places no order and takes no payment; only the customer can pay, on the checkout page.",
+      inputSchema: prepareCheckoutInput,
+      execute: (input, options) => prepareCheckout({ ...ctx, toolCallId: options.toolCallId }, input),
     }),
   });
 }

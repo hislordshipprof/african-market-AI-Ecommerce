@@ -23,6 +23,8 @@ import { takeRateLimit } from "../rate-limit/app-limiter";
 import { clientIp } from "../assistant/client-ip";
 import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
 import { platform } from "../db";
+import { loadCheckoutDraft } from "../assistant/checkout-draft";
+import type { PickupSlot } from "../order/pickup-slots";
 
 const contactSchema = z.strictObject({
   name: z.string().max(200),
@@ -335,5 +337,17 @@ export async function confirmAddressAction(delivery: unknown): Promise<
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "We couldn't check that address right now. Try again." };
+  }
+}
+
+/** The pickup slot the assistant saved for this cart (#247), if the store still offers it today. */
+export async function assistantCheckoutDraftAction(): Promise<{ slot: PickupSlot } | null> {
+  try {
+    const resolved = await resolveShopperCart();
+    if (!resolved) return null;
+    const draft = await loadCheckoutDraft(resolved.storeId, resolved.cartId);
+    return draft ? { slot: draft.slot } : null;
+  } catch {
+    return null;
   }
 }

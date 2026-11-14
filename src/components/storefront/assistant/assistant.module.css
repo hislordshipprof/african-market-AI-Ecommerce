@@ -339,6 +339,15 @@
   flex-shrink: 0;
 }
 
+.reviewTotals {
+  padding-top: 8px;
+  border-top: 1px solid var(--color-line);
+}
+
+.reviewTotals li:last-child {
+  font-weight: 600;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -372,6 +381,13 @@
   padding: 0 16px;
   background: var(--color-primary);
   color: var(--color-on-primary);
+}
+
+a.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .chip,

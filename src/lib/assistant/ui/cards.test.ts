@@ -122,7 +122,7 @@ describe("assistant cards", () => {
         state: "output-error",
         errorText: "provider exploded <script>",
       },
-      { type: "tool-prepare_checkout", toolCallId: "u1", state: "output-available", output: { ok: true } },
+      { type: "tool-place_order", toolCallId: "u1", state: "output-available", output: { ok: true } },
       { type: "data-step-limit", data: { text: "I've done as much as I can in one go. Tell me what you'd like next." } },
     ]);
 
@@ -167,7 +167,7 @@ describe("assistant cards", () => {
     for (const state of states) {
       for (const turnFailed of [false, true]) {
         expect(cardsFromParts([
-          { type: "tool-prepare_checkout", toolCallId: "unknown-static", state, output: { ok: true }, errorText: "no" },
+          { type: "tool-place_order", toolCallId: "unknown-static", state, output: { ok: true }, errorText: "no" },
         ], { turnFailed })).toEqual([]);
         expect(cardsFromParts([
           { type: "dynamic-tool", toolName: "not_a_tool", toolCallId: "unknown-dynamic", state, output: { ok: true } },
@@ -348,7 +348,7 @@ describe("assistant cards", () => {
   });
 
   it("unknown tools add no completion summary and preserve the empty-message fallback", () => {
-    const unknown = { type: "tool-prepare_checkout", toolCallId: "gone", state: "input-available" };
+    const unknown = { type: "tool-place_order", toolCallId: "gone", state: "input-available" };
     expect(cardsFromParts([unknown], { turnFailed: true })).toEqual([]);
     expect(completionAnnouncement({ parts: [unknown] })).toBe("Reply ready");
     expect(completionAnnouncement({
@@ -409,4 +409,46 @@ describe("product cards can be added to the basket", () => {
     }]);
     expect(card).toMatchObject({ kind: "product", listingId: null, variantId: null });
   });
+
+  it("prepare_checkout draws a Review card from the server's numbers, linking to the normal checkout (#247)", () => {
+    const [card] = cardsFromParts([{
+      type: "tool-prepare_checkout",
+      toolCallId: "rc1",
+      state: "output-available",
+      output: {
+        ok: true,
+        lines: [{ lineId: "l1", name: "Egusi", packLabel: "1 lb", qty: 2, lineTotalCents: 1800, mayBeUnavailable: true }],
+        fulfillment: { kind: "pickup", slotId: "2026-11-14T20:00:00.000Z", slotLabel: "2:00 PM CST" },
+        subtotalCents: 1800,
+        serviceFeeCents: 90,
+        taxCents: 0,
+        totalCents: 1890,
+        bufferCents: 180,
+        holdCents: 2070,
+        problems: ["Minimum order is $35.00."],
+        checkoutPath: "https://evil.example/pay",
+      },
+    }]);
+    expect(card).toEqual({
+      kind: "review",
+      key: "rc1:review",
+      lines: [{ lineId: "l1", name: "Egusi", packLabel: "1 lb", qty: 2, lineTotalCents: 1800, lineTotalLabel: "$18.00", mayBeUnavailable: true }],
+      fulfillmentLabel: "Pickup · 2:00 PM CST",
+      rows: [
+        { label: "Subtotal", value: "$18.00" },
+        { label: "Service fee", value: "$0.90" },
+        { label: "Tax", value: "$0.00" },
+        { label: "Total", value: "$18.90" },
+      ],
+      holdLabel: "$20.70",
+      bufferLabel: "$1.80",
+      problems: ["Minimum order is $35.00."],
+      href: "/checkout",
+    });
+    expect(cardsFromParts([{ type: "tool-prepare_checkout", toolCallId: "rc2", state: "output-available", output: { ok: true, fulfillment: null, lines: [], subtotalCents: 0 } }]))
+      .toMatchObject([{ kind: "review", fulfillmentLabel: "Pickup or delivery: choose at checkout" }]);
+    expect(cardsFromParts([{ type: "tool-prepare_checkout", toolCallId: "rc3", state: "output-available", output: { ok: false, code: "cart_empty", message: "The cart is empty." } }]))
+      .toEqual([{ kind: "missing", key: "rc3:missing", message: "The cart is empty." }]);
+  });
 });
+
