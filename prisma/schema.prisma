@@ -110,6 +110,7 @@ model Store {
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
   driverRoutes          DriverRoute[]
+  pickBatches           PickBatch[]
 
   @@map("stores")
 }
@@ -1264,6 +1265,8 @@ model Order {
   deliveryProofUploadedAt DateTime? @map("delivery_proof_uploaded_at")
   /// The store's own driver route this order is on (#566).
   driverRouteId           String?   @map("driver_route_id")
+  /// The open pick batch this order is in (#564); cleared when staff leave the batch.
+  pickBatchId             String?   @map("pick_batch_id")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1278,10 +1281,12 @@ model Order {
   supportThreads       SupportThread[]
   substitutionRequests SubstitutionRequest[]
   driverRoute          DriverRoute?          @relation(fields: [driverRouteId, storeId], references: [id, storeId], onDelete: Restrict)
+  pickBatch            PickBatch?            @relation(fields: [pickBatchId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
   @@index([storeId, driverRouteId])
+  @@index([storeId, pickBatchId])
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, fulfillment, pickupSlot])
@@ -1738,4 +1743,19 @@ model AssistantChatMonth {
 
   @@id([storeId, month])
   @@map("assistant_chat_months")
+}
+
+/// Staff picking 2-4 Accepted orders together (#564). Orders point at it while it is open; closedAt is set when staff leave.
+model PickBatch {
+  id        String    @id @default(cuid())
+  storeId   String    @map("store_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+  closedAt  DateTime? @map("closed_at")
+
+  store  Store   @relation(fields: [storeId], references: [id])
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, closedAt])
+  @@map("pick_batches")
 }

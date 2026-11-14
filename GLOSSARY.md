@@ -225,6 +225,10 @@ The message asking a customer to approve a swap or a refund for a short line bef
 **Pick list**:
 The ordered list of lines staff collect for one or more orders, with frozen items last.
 
+**Batch**:
+2 to 4 Accepted orders of one store that staff pick together from one combined Pick list (#564). Each shared item is one line with its total and its split per order; each order has a tote letter (one bag per order), A for the oldest. Units found fill the oldest order first, so a Short lands on the newest. While an order is in a batch it is picked only from the batch; leaving the batch keeps what is picked. "Start packing" on the batch's packing screen starts packing every order and books the courier for courier orders (Ready time).
+_Avoid_: Wave (a warehouse term for many batches)
+
 **Ready**:
 The moment staff confirm every line is resolved and the order can be handed off. Marking it ready captures the final amount (goods picked, plus tip, plus delivery fee). Pickup orders then show Awaiting pickup. Delivery orders show Ready.
 
@@ -291,7 +295,7 @@ A driver from a courier company. Not a user of the platform.
 _Avoid_: Driver (reserve for the store's own driver)
 
 **Ready time**:
-When a courier order's bag will be packed. Set when packing starts (the first line picked or marked short) from the item count and the store's recent packing pace, at least 10 and at most 45 minutes out; the courier is booked for it then. The store can push it once by 5 minutes ("5 more minutes").
+When a courier order's bag will be packed. Set when packing starts (the first line picked or marked short, or "Start packing" on a Batch) from the item count and the store's recent packing pace, at least 10 and at most 45 minutes out; the courier is booked for it then. The store can push it once by 5 minutes ("5 more minutes").
 
 ## Relationships
 
