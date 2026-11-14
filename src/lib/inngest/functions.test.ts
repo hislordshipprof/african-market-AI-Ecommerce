@@ -842,6 +842,28 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
   });
 
   describe("reconcileStuckTransitional", () => {
+    it("the unscoped finder the cron uses returns stale CAPTURING and REFUND_FAILED orders, not a fresh one", async () => {
+      const stale = await createTestOrder();
+      const fresh = await createTestOrder();
+      const failedRefund = await createTestOrder();
+      // Older than any other lane's rows, so LIMIT 50 across all stores keeps them.
+      const longAgo = new Date("2001-01-01T00:00:00.000Z");
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: stale.id }, data: { status: "CAPTURING", updatedAt: longAgo } });
+        await tx.order.update({ where: { id: fresh.id }, data: { status: "CAPTURING" } });
+        await tx.order.update({ where: { id: failedRefund.id }, data: { status: "REFUND_FAILED", updatedAt: longAgo } });
+      });
+      try {
+        const ids = (await realFindStuck()).map((row) => row.id);
+        expect(ids).toEqual(expect.arrayContaining([stale.id, failedRefund.id]));
+        expect(ids).not.toContain(fresh.id);
+      } finally {
+        await storeScopedTransaction(storeId, (tx) =>
+          tx.order.updateMany({ where: { id: { in: [stale.id, fresh.id, failedRefund.id] } }, data: { status: "CANCELLED" } }),
+        );
+      }
+    });
+
     it("M4: bad order does not block healthy order from reconciliation", async () => {
       const { reconcileStuckTransitional } = await import("./functions");
       const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
