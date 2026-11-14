@@ -712,7 +712,7 @@ function rememberSearchLabels(
 async function itemsNotShown(
   ctx: AssistantContext,
   items: Array<{ variant_id: string; qty: number }>,
-): Promise<Array<{ variantId: string; name: string }>> {
+): Promise<Array<{ variantId: string; name: string } | { variantId: string; notInStore: true }>> {
   const acceptance = ctx.acceptance;
   if (!acceptance) return [];
   const explicitAdd = isExplicitProductAdd(acceptance.customerText);
@@ -743,12 +743,13 @@ async function itemsNotShown(
     },
   });
   const byId = new Map(rows.map((row) => [row.id, row]));
-  const refused = new Map<string, string>();
+  const refused = new Map<string, string | null>();
   for (const item of items) {
     const row = byId.get(item.variant_id);
     const listing = row?.listing;
+    // Usually one character miscopied from a near-identical id: naming it by the id got that id quoted in the reply.
     if (!listing || listing.storeId !== ctx.storeId) {
-      refused.set(item.variant_id, item.variant_id);
+      refused.set(item.variant_id, null);
       continue;
     }
     const names = namesForListing({
@@ -778,7 +779,7 @@ async function itemsNotShown(
       refused.set(item.variant_id, names[0] ?? item.variant_id);
     }
   }
-  return [...refused].map(([variantId, name]) => ({ variantId, name }));
+  return [...refused].map(([variantId, name]) => (name == null ? { variantId, notInStore: true as const } : { variantId, name }));
 }
 
 function describedAdd(applied: AppliedAddLine) {
@@ -825,6 +826,9 @@ export async function addToCart(ctx: AssistantContext, input: unknown): Promise<
         code: "not_shown",
         message: MESSAGES.not_shown,
         notShown,
+        ...(notShown.some((item) => "notInStore" in item)
+          ? { hint: "A notInStore variant_id is no product in this store. Copy it again, character by character, from the tool result that listed it, and do not write ids in the reply." }
+          : {}),
       });
     }
   }

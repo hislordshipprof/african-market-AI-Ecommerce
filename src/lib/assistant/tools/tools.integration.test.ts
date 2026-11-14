@@ -322,6 +322,19 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(await storeScoped(storeB).cartLine.findFirst({ where: { variantId: variantB } })).toBeNull();
   });
 
+  it("a miscopied variant id is refused as no product here, never named by the id itself", async () => {
+    const talk = await freshCart();
+    const miscopied = `${variantA.slice(0, -1)}${variantA.endsWith("x") ? "y" : "x"}`;
+    const result = await addToCart(ctx({
+      cartId: talk.cartId,
+      conversationId: talk.conversationId,
+      acceptance: { led: true, customerText: "yes", lastReplyText: "Egusi", lastReplyEmpty: false, lastReplyListingIds: [] },
+    }), { items: [{ variant_id: miscopied, qty: 1 }] });
+    expect(result).toMatchObject({ ok: false, code: "not_shown", notShown: [{ variantId: miscopied, notInStore: true }] });
+    expect((result as unknown as { notShown: Array<Record<string, unknown>> }).notShown[0]).not.toHaveProperty("name");
+    expect((result as unknown as { hint?: string }).hint).toMatch(/copy/i);
+  });
+
   it("add_to_cart returns the line total, the added total and the cart subtotal after the write", async () => {
     const cart = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
     const decoy = (await storeScoped(storeA).cart.create({ data: { storeId: storeA, source: "manual" } })).id;
