@@ -50,6 +50,9 @@ model Store {
   ownerPhotoUrl String? @map("owner_photo_url")
   neighborhood  String?
   deliveryInfo  String? @map("delivery_info")
+  /// Shown in the Store directory only when true (ADR-0007, #449). The store owner turns it on.
+  listed        Boolean @default(false)
+  listingBlurb  String? @map("listing_blurb") @db.VarChar(160)
 
   rlsFixtures           RlsTestFixture[]
   auditLogs             AuditLog[]

@@ -19,6 +19,7 @@ export function proxy(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.delete("x-store-slug");
   headers.delete("x-custom-domain");
+  headers.delete("x-platform-root");
 
   const host = request.headers.get("host");
   const overrideAllowed = allowStoreOverride(process.env);
@@ -55,6 +56,8 @@ export function proxy(request: NextRequest) {
       slug = resolution.slug;
     } else if (resolution.kind === "custom-domain") {
       headers.set("x-custom-domain", resolution.hostname);
+    } else if (resolution.kind === "root") {
+      headers.set("x-platform-root", "1");
     }
   }
 
