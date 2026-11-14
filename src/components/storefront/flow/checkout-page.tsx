@@ -21,6 +21,7 @@ import {
   createPaymentIntentAction,
   placeOrderAction,
   confirmAddressAction,
+  assistantCheckoutDraftAction,
 } from "@/lib/checkout/actions";
 import type {
   CheckoutInput,
@@ -377,7 +378,7 @@ function RealCheckoutForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentKey]);
 
-  const [slots] = useState(() => {
+  const [slots, setSlots] = useState(() => {
     const first = new Date();
     first.setHours(10, 0, 0, 0);
     if (first.getTime() <= Date.now()) first.setDate(first.getDate() + 1);
@@ -392,6 +393,28 @@ function RealCheckoutForm({
       };
     });
   });
+
+  // The pickup time chosen with the assistant, in store time (#247). It never
+  // overrides a choice the shopper made on this page before it loaded.
+  const shopperChose = useRef(false);
+  function chosenByShopper<T>(set: (value: T) => void) {
+    return (value: T) => { shopperChose.current = true; set(value); };
+  }
+  useEffect(() => {
+    let active = true;
+    assistantCheckoutDraftAction().then((draft) => {
+      if (!active || !draft || !settings.pickupEnabled || shopperChose.current) return;
+      setFulfillment("pickup");
+      if (draft.slot.id === "asap") return;
+      setSlots((current) => [
+        { value: draft.slot.id, label: `Today ${draft.slot.label}` },
+        ...current.filter((option) => option.value !== draft.slot.id),
+      ]);
+      setSchedule(true);
+      setSlot(draft.slot.id);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [settings.pickupEnabled]);
 
   async function pay(event: FormEvent) {
     event.preventDefault();
@@ -546,7 +569,7 @@ function RealCheckoutForm({
       lines={lines}
       subtotal={subtotal}
       fulfillment={fulfillment}
-      setFulfillment={setFulfillment}
+      setFulfillment={chosenByShopper(setFulfillment)}
       deliveryEditor={
         <StoreDeliveryFields
           line1={line1}
@@ -627,9 +650,9 @@ function RealCheckoutForm({
       leaveAtDoor={false}
       setLeaveAtDoor={() => {}}
       schedule={schedule}
-      setSchedule={setSchedule}
+      setSchedule={chosenByShopper(setSchedule)}
       slot={slot}
-      setSlot={setSlot}
+      setSlot={chosenByShopper(setSlot)}
       slots={slots}
       promo=""
       setPromo={() => {}}
