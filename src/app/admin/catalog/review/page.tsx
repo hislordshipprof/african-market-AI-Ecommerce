@@ -31,36 +31,36 @@ export default async function CatalogReviewPage(props: {
         <div>
           <Link
             href="/admin"
-            className="mb-1 inline-block text-xs font-medium text-[#55625A] hover:text-[#1F5A43] dark:text-[#a0a8a3]"
+            className="mb-1 inline-block text-xs font-medium text-[#55625A] hover:text-[#1F5A43] dark:text-[#A3B1A7]"
           >
             &larr; Admin
           </Link>
-          <h1 className="text-2xl font-bold text-[#15201A] dark:text-white">
+          <h1 className="text-2xl font-bold text-[#15201A] dark:text-[#EEF2EC]">
             Catalog review
           </h1>
-          <p className="mt-1 text-sm text-[#55625A] dark:text-[#a0a8a3]">
+          <p className="mt-1 text-sm text-[#55625A] dark:text-[#A3B1A7]">
             {stats.total} products total &middot; {stats.needsReview} awaiting review
           </p>
         </div>
       </div>
 
       {/* Status tabs */}
-      <div className="mb-6 flex gap-1 rounded-xl border border-[#e2e4e9] bg-[#f8f9fa] p-1 dark:border-[#333] dark:bg-[#111]">
+      <div className="mb-6 flex gap-1 rounded-xl border border-[#DCDFD6] bg-[#F3F4EF] p-1 dark:border-[#35463B] dark:bg-[#0D1410]">
         {tabs.map((tab) => (
           <Link
             key={tab.key}
             href={`/admin/catalog/review?status=${tab.key}`}
             className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
               status === tab.key
-                ? "bg-white text-[#15201A] shadow-sm dark:bg-[#1a1a1a] dark:text-white"
-                : "text-[#55625A] hover:text-[#15201A] dark:text-[#a0a8a3] dark:hover:text-white"
+                ? "bg-white text-[#15201A] shadow-sm dark:bg-[#1E2C23] dark:text-[#EEF2EC]"
+                : "text-[#55625A] hover:text-[#15201A] dark:text-[#A3B1A7] dark:hover:text-[#EEF2EC]"
             }`}
           >
             {tab.label}
             <span className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-xs font-semibold ${
               status === tab.key
                 ? "bg-[#1F5A43] text-white"
-                : "bg-[#e2e4e9] text-[#55625A] dark:bg-[#333] dark:text-[#a0a8a3]"
+                : "bg-[#DCDFD6] text-[#55625A] dark:bg-[#35463B] dark:text-[#A3B1A7]"
             }`}>
               {tab.count}
             </span>

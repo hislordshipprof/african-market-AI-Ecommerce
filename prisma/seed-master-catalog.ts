@@ -352,7 +352,7 @@ export async function seedMasterCatalog(prisma: PrismaClient, deps: SeedMasterCa
     log(`Image failures (${failures.length}):`);
     for (const failure of failures) log(`  ${failure.id}: ${failure.reason}`);
   }
-  log(`Seeded ${reviewRows.length} review-queue products (status='needs_review')`);
+  log(`Upserted ${reviewRows.length} review-queue products (new rows get status='needs_review'; existing rows keep their status)`);
 
   if (mode === "off") return;
 

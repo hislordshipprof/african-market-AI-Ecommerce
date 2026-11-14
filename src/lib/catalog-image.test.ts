@@ -62,6 +62,32 @@ describe("downloadAndUploadImage", () => {
     expect(await downloadAndUploadImage("https://x.test/a", "p1")).toEqual({ ok: false, reason: "download" });
   });
 
+  it("stops reading a body with no content-length once it passes the size cap (#89)", async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let pulled = 0;
+    let cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    fetchMock.mockResolvedValueOnce(new Response(endless, { status: 200, headers: { "content-type": "image/png" } }));
+    expect(await downloadAndUploadImage("https://x.test/a", "p1")).toEqual({ ok: false, reason: "download" });
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThanOrEqual(12);
+    expect(uploadToR2).not.toHaveBeenCalled();
+  });
+
+  it("every fetch carries a timeout signal by default (#89)", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    await downloadAndUploadImage("https://x.test/a", "p1");
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("seed path: sharp -> webp key, retries a 429 then succeeds, rewrites Wikimedia to a thumbnail", async () => {
     fetchMock
       .mockResolvedValueOnce(new Response("", { status: 429, headers: { "Retry-After": "1" } }))
