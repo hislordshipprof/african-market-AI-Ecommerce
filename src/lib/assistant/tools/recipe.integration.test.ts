@@ -153,6 +153,24 @@ describe.skipIf(!hasDb)("get_recipe", () => {
     expect(result.notCarried).toContain("onion");
   });
 
+  it("leaves out what the customer already has at home for the rest of the conversation, until taken back", async () => {
+    const ctx = await conversation(storeA);
+    expect(await setShopperNeeds(ctx, { have_at_home: ["Rice", "tomatoes"] })).toMatchObject({ ok: true, haveAtHome: ["rice", "tomatoes"] });
+    const first = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(first.haveAtHome).toEqual(["rice"]);
+    expect(first.inStock.map((item) => item.ingredient)).not.toContain("rice");
+    // Tomatoes at home are not tomato paste.
+    expect(first.lowOrOut.map((item) => item.ingredient)).toContain("tomato paste");
+    // Kept for the conversation: a later recipe still leaves it out.
+    const again = await getRecipe(ctx, { dish: "Jollof", servings: 10 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(again.haveAtHome).toEqual(["rice"]);
+    // A have-at-home item is not a need: it never filters search or swaps.
+    expect(await setShopperNeeds(ctx, { remove: ["rice"] })).toMatchObject({ haveAtHome: ["tomatoes"] });
+    const back = await getRecipe(ctx, { dish: "Jollof", servings: 6 }) as unknown as RecipeOutput & { haveAtHome?: string[] };
+    expect(back.inStock.map((item) => item.ingredient)).toContain("rice");
+    expect(back).not.toHaveProperty("haveAtHome");
+  });
+
   it("asks for servings when they are unclear, without searching or looking up", async () => {
     const fake = createFakeAnthropicFetch({ steps: [lookupStep("Kelewele", ["ripe plantain"])] });
     const result = await getRecipe(ctxA, { dish }, { lookupModel: createAssistantModel({ fetch: fake.fetch }) });

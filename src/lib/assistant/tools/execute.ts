@@ -235,6 +235,7 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     avoidIngredients: parsed.avoid_ingredients,
     remove: parsed.remove,
     budgetCents: parsed.budget_cents,
+    haveAtHome: parsed.have_at_home,
   });
   const output = {
     ok: true as const,
@@ -242,6 +243,7 @@ export async function setShopperNeeds(ctx: AssistantContext, input: unknown): Pr
     requireClaims: saved.requireClaims,
     avoidIngredients: saved.avoidIngredients.map((item) => item.term),
     preferences: saved.preferences,
+    ...(saved.haveAtHome.length > 0 ? { haveAtHome: saved.haveAtHome } : {}),
     ...(saved.budgetCents != null ? { budgetCents: saved.budgetCents } : {}),
     ...(ask.length > 0 ? { ask } : {}),
     ...(cannotCheck.length > 0 ? { cannotCheck } : {}),

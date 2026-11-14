@@ -26,6 +26,9 @@ export const setShopperNeedsInput = z.object({
   remove: z.array(z.string().trim().min(1).max(60)).max(10).default([]).describe(
     "Constraints the customer takes back, by the name this tool returned. budget removes the budget.",
   ),
+  have_at_home: z.array(z.string().trim().min(1).max(60)).max(10).default([]).describe(
+    "Items the customer says they already have at home, in their words, such as rice.",
+  ),
   budget_cents: z.number().int().min(1).max(10_000_000).optional().describe(
     "The most the customer wants the cart's items to cost, in cents, such as 3000 for under $30.",
   ),
