@@ -1,10 +1,9 @@
-import { storeScoped, storeScopedTransaction } from "../db";
+import { NOTIFICATION_EXPIRE_MS, NOTIFICATION_REPLAY_MS, storeScoped, storeScopedTransaction } from "../db";
 import { orderTrackingUrl } from "./tracking-url";
 import { notificationChannels, type NotificationChannel } from "./channels";
 import type { NotifyOrder } from "./messages";
 import { isOrderNotifyEvent, type OrderNotifyEvent } from "./record";
 
-const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const RANK: Record<OrderNotifyEvent, number> = {
   placed: 0,
   accepted: 1,
@@ -64,7 +63,8 @@ async function loadOrder(storeId: string, orderId: string): Promise<NotifyOrder 
             timezone: true,
           },
         },
-        lines: { include: lineInclude },
+        // A fixed order keeps a re-rendered body identical, so a retry replays its idempotency key.
+        lines: { include: lineInclude, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       },
     });
     if (!order) return null;
@@ -105,7 +105,9 @@ async function claim(
       where: { orderId_event_channel: { orderId, event, channel } },
     });
     if (!row || (row.status !== "pending" && row.status !== "sending")) return null;
-    if (row.createdAt.getTime() <= Date.now() - TWO_HOURS_MS) {
+    // A `sending` row may have reached the provider: replay its key rather than expire it.
+    const expireMs = row.status === "pending" ? NOTIFICATION_EXPIRE_MS : NOTIFICATION_REPLAY_MS;
+    if (row.createdAt.getTime() <= Date.now() - expireMs) {
       await tx.notificationLog.update({
         where: { id: row.id },
         data: { status: "failed", reason: "expired" },
