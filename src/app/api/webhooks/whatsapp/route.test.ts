@@ -152,7 +152,7 @@ describe("WhatsApp webhook route", () => {
     });
   });
 
-  it("a store message is still checked against the signature first, and a handler failure answers 500 so Meta redelivers", async () => {
+  it("a store message is still checked against the signature first, and a handler failure answers 500", async () => {
     const raw = JSON.stringify({
       object: "whatsapp_business_account",
       entry: [{ id: "1", changes: [{ field: "messages", value: {
