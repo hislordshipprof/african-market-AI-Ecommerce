@@ -109,9 +109,9 @@ function bearer(token: string, json?: unknown): RequestInit {
  * Embedded Signup v4, Tech Provider steps: exchange the code for the store's
  * business token, subscribe our app to its WABA's webhooks, register the
  * number (skipped under coexistence: the Business app already registered it),
- * then read the display number. The register PIN is random and not kept; Meta
- * lets a Tech Provider set a new one. Subscribe and register are idempotent on
- * Meta's side, so a retried link repeats them safely.
+ * then read the display number. Register must carry the number's two-step PIN,
+ * so a fresh random PIN is set first and registered with; it is not kept. A
+ * retried link or relink sets a new one the same way.
  */
 async function connectStoreNumber(input: ConnectStoreNumberInput): Promise<ConnectedStoreNumber> {
   const { appId, appSecret } = readWhatsAppConfig();
@@ -128,6 +128,7 @@ async function connectStoreNumber(input: ConnectStoreNumberInput): Promise<Conne
   await graph(`${GRAPH}/${encodeURIComponent(input.wabaId)}/subscribed_apps`, bearer(token, {}));
   if (!input.coexistence) {
     const pin = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    await graph(`${GRAPH}/${phone}`, bearer(token, { pin }));
     await graph(`${GRAPH}/${phone}/register`, bearer(token, { messaging_product: "whatsapp", pin }));
   }
   const number = await graph(`${GRAPH}/${phone}?fields=display_phone_number`, bearer(token));
