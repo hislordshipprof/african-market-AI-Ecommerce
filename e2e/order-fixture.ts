@@ -147,3 +147,28 @@ export async function deleteInboxOrder(number: number): Promise<void> {
     await tx.order.deleteMany({ where: { storeId, number } });
   });
 }
+
+/** A courier order packing (#562): ready time set, courier assigned with a pickup ETA. Deliveries go with the order. */
+export async function insertCourierPackingOrder(number: number, readyAt: Date): Promise<void> {
+  await withMama(async (tx, storeId) => {
+    await tx.order.deleteMany({ where: { storeId, number } });
+    const customer = await tx.customer.findFirstOrThrow({ where: { storeId } });
+    const listing = await tx.listing.findFirstOrThrow({ where: { storeId, variants: { some: {} } }, include: { variants: { take: 1 } } });
+    const order = await tx.order.create({
+      data: {
+        storeId, number, customerId: customer.id, status: "PICKING", fulfillment: "courier",
+        subtotalCents: 1000, bufferCents: 100, deliveryFeeCents: 799, totalAuthorizedCents: 1899, totalCents: 1799,
+        paymentIntentId: `pi_e2e_${number}_${Date.now()}`,
+        pickingStartedAt: new Date(readyAt.getTime() - 18 * 60_000), readyEstimateAt: readyAt,
+        lines: { create: { listingVariantId: listing.variants[0].id, qtyOrdered: 1, unitPriceCents: 1000 } },
+      },
+    });
+    await tx.delivery.create({
+      data: {
+        storeId, orderId: order.id, provider: "doordash", externalId: `e2e-${number}-${Date.now()}`, status: "courier_assigned",
+        quoteFeeCents: 799, pickupReadyAt: readyAt,
+        courierJson: { name: "Sam", vehicle: "Toyota Corolla", pickupEta: new Date(readyAt.getTime() - 2 * 60_000).toISOString(), dropoffEta: null },
+      },
+    });
+  });
+}

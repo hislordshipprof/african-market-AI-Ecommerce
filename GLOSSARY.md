@@ -56,6 +56,10 @@ _Avoid_: Wallet, payment profile
 The public site listing stores by state and location, linking each to its storefront.
 _Avoid_: Marketplace, combined app
 
+**Directory listing**:
+A store's entry in the Store directory: the owner's "Listed in the directory" switch (off by default; a platform admin can override it), a blurb of at most 160 characters, and up to 3 cuisine tags from a fixed list. The street address is never part of it.
+_Avoid_: Profile, store page
+
 ## Catalog
 
 **Master product**:
@@ -271,6 +275,9 @@ Delivery by an on-demand courier company (Uber Direct or DoorDash Drive), chosen
 **Courier**:
 A driver from a courier company. Not a user of the platform.
 _Avoid_: Driver (reserve for the store's own driver)
+
+**Ready time**:
+When a courier order's bag will be packed. Set when packing starts (the first line picked or marked short) from the item count and the store's recent packing pace, at least 10 and at most 45 minutes out; the courier is booked for it then. The store can push it once by 5 minutes ("5 more minutes").
 
 ## Relationships
 

@@ -5,6 +5,8 @@ import { platformAdminTransaction, storeScoped } from "../db";
 import { makeFakeStep } from "../inngest/fake-step";
 import { DoorDashDriveProvider } from "./doordash";
 import { fakeDoorDash } from "./doordash-fake";
+import { UberDirectProvider } from "./uber-direct";
+import { fakeUberDirect } from "./uber-direct-fake";
 import {
   COURIER_BOTH_FAILED,
   COURIER_DELIVERY_CREATED,
@@ -12,6 +14,7 @@ import {
   courierFailoverFailed,
   courierRequest,
   dispatchReadyOrder,
+  quoteCheapestCourier,
   runCourierFailover,
   selectAndDispatch,
   type CourierEvent,
@@ -85,6 +88,15 @@ class StubProvider implements DeliveryProvider {
     this.created.set(externalId, "cancelled");
   }
 
+  /** Ready times this stub moved, by delivery; set rescheduleError to refuse. */
+  readonly rescheduled = new Map<string, Date>();
+  rescheduleError?: Error;
+  async reschedule(externalId: string, pickupReadyAt: Date): Promise<void> {
+    if (this.rescheduleError) throw this.rescheduleError;
+    if (this.created.get(externalId) !== "active") throw new DeliveryProviderError(this.name, 404, "not_found", "unknown delivery");
+    this.rescheduled.set(externalId, pickupReadyAt);
+  }
+
   handleWebhook(): DeliveryWebhookEvent {
     throw new Error("not used");
   }
@@ -100,6 +112,31 @@ const request = {
   orderValueCents: 6000,
   tipCents: 0,
 };
+
+describe("checkout courier quote (#527)", () => {
+  it("returns the cheapest live quote with its brand and books nothing", async () => {
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+    const expired = new StubProvider("uber", 500);
+    expired.expiresInMs = -1;
+
+    const quote = await quoteCheapestCourier({ referenceId: "cart-1", request }, [doordash, uber]);
+
+    expect(quote).toMatchObject({ provider: "uber", feeCents: 749, courierProvider: "Uber Direct" });
+    expect(doordash.created.size + uber.created.size).toBe(0);
+    expect(await quoteCheapestCourier({ referenceId: "cart-1", request }, [expired, doordash])).toMatchObject({ feeCents: 899 });
+  });
+
+  it("skips a provider that cannot quote, and returns null when none can", async () => {
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+    uber.failQuote = true;
+
+    expect(await quoteCheapestCourier({ referenceId: "cart-2", request }, [doordash, uber])).toMatchObject({ provider: "doordash", feeCents: 899 });
+    doordash.failQuote = true;
+    expect(await quoteCheapestCourier({ referenceId: "cart-2", request }, [doordash, uber])).toBeNull();
+  });
+});
 
 describe.skipIf(!hasDb)("courier selection and failover", () => {
   let raw: PrismaClient;
@@ -567,7 +604,7 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     raw ??= testPrismaClient();
     const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const store = await raw.store.create({
-      data: { slug: `flow-${stamp}`, name: "Flow Market", themePreset: "palm-and-shea", addressLine1: "8121 Georgia Ave", city: "Silver Spring", state: "MD", zip: "20910" },
+      data: { slug: `flow-${stamp}`, name: "Flow Market", themePreset: "palm-and-shea", addressLine1: "8121 Georgia Ave", city: "Silver Spring", state: "MD", zip: "20910", phone: "+13015550100" },
     });
     storeIds.push(store.id);
     await platformAdminTransaction((tx) => tx.storeSubscription.create({ data: { storeId: store.id, plan: opts.plan ?? "pro", status: "active" } }));
@@ -639,6 +676,18 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     expect(again).toMatchObject({ ok: true, existing: true });
     expect(fake.calls.filter((c) => c.path === "/drive/v2/quotes")).toHaveLength(1);
     expect(events.map((e) => e.name)).toEqual([COURIER_DELIVERY_CREATED]);
+  });
+
+  it("#527: Uber gets the store's phone as the pickup phone, which it requires to book", async () => {
+    const { storeId, orderId } = await readyOrder();
+    const keys = { UBER_DIRECT_CLIENT_ID: `client-527-${Date.now()}`, UBER_DIRECT_CLIENT_SECRET: "test-client-secret", UBER_DIRECT_CUSTOMER_ID: "a418e2aa-0000-4000-8000-000000000527" };
+    const fake = fakeUberDirect({ clientId: keys.UBER_DIRECT_CLIENT_ID, clientSecret: keys.UBER_DIRECT_CLIENT_SECRET, customerId: keys.UBER_DIRECT_CUSTOMER_ID, now: () => new Date() });
+    const uber = new UberDirectProvider({ env: keys, fetch: (input, init) => fake.fetch(input as string, init) });
+
+    const result = await dispatchReadyOrder(storeId, orderId, { providers: [uber], emit });
+
+    expect(result).toMatchObject({ ok: true, provider: "uber" });
+    expect(fake.calls.find((c) => c.path.endsWith("/deliveries"))?.body).toMatchObject({ pickup_phone_number: "+13015550100" });
   });
 
   it("plan gate: a Starter store's Ready courier order is never quoted", async () => {
