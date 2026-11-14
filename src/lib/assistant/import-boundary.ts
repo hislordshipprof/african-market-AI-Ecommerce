@@ -36,21 +36,24 @@ const ACCOUNT_LOADERS = [
   "customer-account/address-book",
 ];
 
+/** Modules that create a PaymentIntent, pay with a saved card, or call placeOrder (#247). */
+const PAYMENT_MODULES = [
+  "stripe/provider",
+  "stripe/checkout-payments",
+  "checkout/service",
+  "checkout/actions",
+  "checkout/saved-card-payment",
+];
+
 function forbiddenResolved(normalized: string): boolean {
-  return normalized.endsWith("/lib/stripe/provider.ts")
-    || normalized.endsWith("/lib/checkout/service.ts")
-    || ACCOUNT_LOADERS.some((loader) => normalized.endsWith(`/lib/${loader}.ts`));
+  return [...PAYMENT_MODULES, ...ACCOUNT_LOADERS].some((module) => normalized.endsWith(`/lib/${module}.ts`));
 }
 
 function forbiddenSpecifier(spec: string): boolean {
   return spec === "stripe"
     || spec.startsWith("@stripe/")
     || FORBIDDEN_PACKAGES.has(spec)
-    || spec === "@/lib/checkout/service"
-    || spec === "@/lib/stripe/provider"
-    || spec.endsWith("/lib/checkout/service")
-    || spec.endsWith("/lib/stripe/provider")
-    || ACCOUNT_LOADERS.some((loader) => spec === `@/lib/${loader}` || spec.endsWith(`/lib/${loader}`));
+    || [...PAYMENT_MODULES, ...ACCOUNT_LOADERS].some((module) => spec === `@/lib/${module}` || spec.endsWith(`/lib/${module}`));
 }
 
 /** Import, re-export, import(), and require() specifiers, including side-effect imports. */
