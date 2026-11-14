@@ -28,8 +28,8 @@ cd "$ROOT" || exit 1
 
 # ci_main <ci-local exit> <ci-local output>: ci-main.sh with ci-local.sh replaced by a stand-in.
 ci_main() {
-  rm -f "$T/issues"
-  printf 'echo "%s"; exit %s\n' "$2" "$1" > "$P/scripts/ci-local.sh"
+  rm -f "$T/issues" "$T/ran-in"
+  printf 'pwd > "%s/ran-in"; echo "%s"; exit %s\n' "$T" "$2" "$1" > "$P/scripts/ci-local.sh"
   (cd "$P" && PATH="$T/bin:$PATH" FAKE_DIR="$T" bash scripts/ci-main.sh) 2>&1
 }
 out=$(ci_main 0 "local-ci PASSED"); rc=$?
@@ -41,7 +41,9 @@ out=$(ci_main 3 "local-ci SUPERSEDED: a newer full run on main is queued"); rc=$
 out=$(ci_main 1 "FAIL e2e: shows local-ci SUPERSEDED on the status page"); rc=$?
 [ "$rc" = 1 ] && [[ "$out" == *"ci-main FAILED"* ]] && [ -f "$T/issues" ] && ok "a failure whose log mentions SUPERSEDED is a failure" \
   || bad "a failure whose log mentions SUPERSEDED is a failure (rc=$rc: $out)"
-[ -z "$(ls "$T/E-commerce-worktrees" 2>/dev/null | grep main-ci-)" ] && ok "ci-main removes its worktree" || bad "ci-main left a worktree"
+wt=$(cat "$T/ran-in" 2>/dev/null)
+[[ "$wt" == */E-commerce-worktrees/main-ci-* ]] && [ ! -e "$wt" ] && ok "ci-main runs in its own worktree and removes it" \
+  || bad "ci-main runs in its own worktree and removes it (ran in '$wt')"
 
 # ci-local.sh on main, with a newer commit already in CI_MAIN_LAST_FILE: it stops once it holds the lock, before
 # any suite, and reports itself superseded.
