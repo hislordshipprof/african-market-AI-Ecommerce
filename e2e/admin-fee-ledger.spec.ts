@@ -40,6 +40,9 @@ async function adminSignIn(page: Page) {
 }
 
 test.describe("platform fee ledger", () => {
+  // One worker owns the fixture: parallel workers would each run beforeAll and collide on the order numbers.
+  test.describe.configure({ mode: "serial" });
+
   test.beforeAll(async () => {
     await removeFixture();
     await withMama(async (tx, storeId) => {
