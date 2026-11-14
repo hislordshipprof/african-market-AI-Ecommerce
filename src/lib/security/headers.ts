@@ -1,5 +1,23 @@
 export const ENFORCED_CSP = "frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
 
+/** An SVG opened directly is a document; this keeps any script in it from running (#124). */
+export const NO_SCRIPT_CSP = `${ENFORCED_CSP}; script-src 'none'; sandbox`;
+
+/** Matches the decoded path, as the static server does; an undecodable path counts as SVG. */
+export function isSvgPath(pathname: string): boolean {
+  try {
+    return decodeURIComponent(pathname).toLowerCase().endsWith(".svg");
+  } catch {
+    return true;
+  }
+}
+
+/** SVG paths, and every catalog image: a stored body under any key may be SVG or HTML. */
+export function needsNoScriptCsp(pathname: string): boolean {
+  if (isSvgPath(pathname)) return true;
+  return decodeURIComponent(pathname).startsWith("/api/catalog-image/");
+}
+
 const STATIC_HEADERS: Array<{ key: string; value: string }> = [
   { key: "Strict-Transport-Security", value: "max-age=63072000" },
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -65,12 +83,12 @@ export function reportOnlyPolicy(
     // runtime does not read the request CSP. A nonce in script-src disables
     // 'unsafe-inline', and 'strict-dynamic' ignores 'self', so either one reports
     // every framework script. The rotating nonce lives on script-src-attr instead.
-    `script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com https://maps.googleapis.com${devEval}`,
+    `script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com${devEval}`,
     `script-src-attr 'nonce-${nonce}'`,
     "style-src 'self' 'unsafe-inline'",
     `img-src ${imgSrc}`,
     "font-src 'self'",
-    "connect-src 'self' https://api.stripe.com https://maps.googleapis.com",
+    "connect-src 'self' https://api.stripe.com",
     "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
     "form-action 'self'",
     "frame-ancestors 'none'",

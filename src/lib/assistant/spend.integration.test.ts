@@ -43,14 +43,29 @@ describe.skipIf(!hasDb)("assistant spend ledger", () => {
   });
 
   it("sums every day's spend for the cap", async () => {
-    const before = await assistantSpendState({ ASSISTANT_SPEND_CAP_USD: "1000000" });
     const first = freshDay();
     const second = freshDay();
+    const firstBefore = await dayTotal(first);
+    const secondBefore = await dayTotal(second);
     await recordSpend(BigInt(4), atNoon(first));
     await recordSpend(BigInt(6), atNoon(second));
-    const after = await assistantSpendState({ ASSISTANT_SPEND_CAP_USD: "1000000" });
-    expect(after.spentMicros - before.spentMicros).toBe(BigInt(10));
-    expect(after.resting).toBe(false);
+    expect(await dayTotal(first)).toBe(firstBefore + BigInt(4));
+    expect(await dayTotal(second)).toBe(secondBefore + BigInt(6));
+    const raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    try {
+      await raw.$transaction(async (tx) => {
+        // Other test files record spend in parallel; the lock holds their writes until both sums are read.
+        await tx.$executeRaw`LOCK TABLE assistant_spend_days IN SHARE MODE`;
+        const rows = await tx.$queryRaw<Array<{ spent: bigint }>>`
+          SELECT COALESCE(SUM(cost_micros), 0) AS spent FROM assistant_spend_days
+        `;
+        const state = await assistantSpendState({ ASSISTANT_SPEND_CAP_USD: "1000000" });
+        expect(state.spentMicros).toBe(BigInt(rows[0]?.spent ?? 0));
+        expect(state.resting).toBe(false);
+      });
+    } finally {
+      await raw.$disconnect();
+    }
   });
 
   it("deleting conversations does not lower spend", async () => {

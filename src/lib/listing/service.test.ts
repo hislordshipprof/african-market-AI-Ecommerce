@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
 import {
   createListing,
@@ -26,8 +26,7 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
   let actor: Actor;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const store = await rawPrisma.store.upsert({
@@ -51,6 +50,8 @@ describe.skipIf(!hasDb)("Listing service (DB integration)", () => {
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
       rawPrisma.auditLog.deleteMany({ where: { storeId } }),
+      // A parallel platform-wide confirm-request run can alert on the decayed listing.
+      rawPrisma.copilotAlert.deleteMany({ where: { storeId } }),
       rawPrisma.stockEvent.deleteMany({ where: { storeId } }),
       rawPrisma.stockEvent.deleteMany({ where: { actorId: userId } }),
       rawPrisma.listingVariant.deleteMany({ where: { listing: { storeId } } }),

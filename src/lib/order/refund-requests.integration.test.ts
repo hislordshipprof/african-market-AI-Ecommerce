@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { setStripeProvider } from "../stripe";
 import { OverRefundError } from "../stripe/errors";
-import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setRefundStatus } from "../stripe/fake";
+import { fakeStripeProvider, refundRequests, reset, setAuthorizedAmount, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { autoCancelOrder, reconcileStuckOrder } from "./service";
 import { evaluateOrderRefundState, reconcileRefundRequest, REPLAY_LEASE_MS, submitRefund } from "./refund-requests";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
@@ -59,7 +59,7 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
   let number = 27000;
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     const store = await raw.store.create({
       data: { slug: `rr-${run}`, name: "Refund requests", themePreset: "palm-and-shea", prepTimeMinutes: 20 },
@@ -144,6 +144,9 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     await fakeStripeProvider.refundPayment(pi, 3000, `covered-${placed.orderId}`);
     await evaluateOrderRefundState(placed.orderId);
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } })).status).toBe("CANCELLED");
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: placed.orderId, event: "cancelled" } })).toBe(2);
+    await evaluateOrderRefundState(placed.orderId);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: placed.orderId, event: "cancelled" } })).toBe(2);
     const released = { qty: 10, events: [["reservation", -3], ["reservation_release", 3]] };
     expect(await stockOf(storeId, listingId)).toEqual(released);
 
@@ -205,6 +208,45 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
       spy.mockRestore();
       setStripeProvider(fakeStripeProvider);
     }
+  });
+
+  it("an issue refund that read the balance before another refund landed sends only the remainder", async () => {
+    const { order, pi } = await cancellingOrder();
+    await storeScoped(storeId).order.update({ where: { id: order.id }, data: { status: "DELIVERED" } });
+    const original = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    let releaseStale!: () => void;
+    const staleGate = new Promise<void>((resolve) => {
+      releaseStale = resolve;
+    });
+    let enteredStale!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enteredStale = resolve;
+    });
+    let calls = 0;
+    const spy = vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementation(async (id: string) => {
+      calls += 1;
+      if (id !== pi || calls !== 1) return original(id);
+      const stale = await original(id);
+      enteredStale();
+      await staleGate;
+      return stale;
+    });
+    try {
+      const late = submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 700 });
+      await entered;
+      const first = await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 700 });
+      expect(first).toMatchObject({ status: "succeeded", amountRefunded: 700 });
+      releaseStale();
+      expect(await late).toMatchObject({ status: "succeeded", amountRefunded: 300 });
+    } finally {
+      releaseStale();
+      spy.mockRestore();
+      setStripeProvider(fakeStripeProvider);
+    }
+    const listed = await fakeStripeProvider.listRefunds(pi);
+    expect(listed.filter((refund) => refund.status === "succeeded").map((refund) => refund.amountRefunded).sort()).toEqual([300, 700]);
+    const rows = await storeScoped(storeId).refundRequest.findMany({ where: { orderId: order.id }, orderBy: { createdAt: "asc" } });
+    expect(rows.map((row) => [row.state, row.amountCents])).toEqual([["CREATED", 700], ["NOT_CREATED", 700], ["CREATED", 300]]);
   });
 
   it("a 409 keeps the same key and amount", async () => {
@@ -353,6 +395,56 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     });
     expect(alerts).toHaveLength(1);
     expect(alerts[0]?.after).toMatchObject({ key, alert: "platform" });
+  });
+
+  it("another store cannot read, change or insert a refund request", async () => {
+    const { order, pi } = await cancellingOrder();
+    const row = await storeScoped(storeId).refundRequest.create({
+      data: {
+        storeId,
+        orderId: order.id,
+        paymentIntentId: pi,
+        key: `refund:${order.id}:rls`,
+        amountCents: 1000,
+        refundApplicationFee: false,
+        state: "CREATED",
+      },
+    });
+    const other = await raw.store.create({
+      data: { slug: `rr-other-${run}`, name: "Refund requests other", themePreset: "palm-and-shea", prepTimeMinutes: 20 },
+    });
+    try {
+      expect(await storeScoped(other.id).refundRequest.findUnique({ where: { id: row.id } })).toBeNull();
+      await expect(
+        storeScopedTransaction(other.id, (tx) =>
+          tx.refundRequest.update({ where: { id: row.id }, data: { amountCents: 1 } }),
+        ),
+      ).rejects.toMatchObject({ code: "P2025" });
+      expect(
+        (await storeScopedTransaction(other.id, (tx) =>
+          tx.refundRequest.updateMany({ where: { id: row.id }, data: { amountCents: 1 } }),
+        )).count,
+      ).toBe(0);
+      await expect(
+        storeScopedTransaction(other.id, (tx) =>
+          tx.refundRequest.create({
+            data: {
+              storeId,
+              orderId: order.id,
+              paymentIntentId: pi,
+              key: `refund:${order.id}:foreign`,
+              amountCents: 1,
+              refundApplicationFee: false,
+              state: "RESERVED",
+            },
+          }),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      const after = await storeScoped(storeId).refundRequest.findMany({ where: { orderId: order.id } });
+      expect(after.map((item) => [item.id, item.amountCents])).toEqual([[row.id, 1000]]);
+    } finally {
+      await raw.store.delete({ where: { id: other.id } });
+    }
   });
 
   it("two replays of one request send one refund", async () => {
@@ -561,5 +653,56 @@ describe.skipIf(!hasDb)("refund request ledger", () => {
     expect(await storeScoped(storeId).auditLog.count({
       where: { entityId: order.id, action: "refund_request_unknown" },
     })).toBe(1);
+  });
+
+  async function finishedOrder(cents: number, fulfillment: string, status = "COMPLETED") {
+    const { order, pi } = await cancellingOrder(cents);
+    await storeScoped(storeId).order.update({
+      where: { id: order.id },
+      data: { status, fulfillment, completedAt: new Date() },
+    });
+    return { order, pi };
+  }
+
+  it("an issue refund sends the asked amount with the fee on pickup, and a second one to the full capture makes the order Refunded", async () => {
+    const { order, pi } = await finishedOrder(1000, "pickup");
+    const first = await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 400 });
+    expect("refundId" in first && first.amountRefunded).toBe(400);
+    expect(refundRequests.at(-1)).toMatchObject({ amountCents: 400, refundApplicationFee: true, idempotencyKey: `refund:${order.id}:1` });
+    const listed = await fakeStripeProvider.listRefunds(pi);
+    expect(listed[0]?.reservationKey).toBe(`refund:${order.id}:1`);
+    await evaluateOrderRefundState(order.id);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("PARTIALLY_REFUNDED");
+
+    await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 600 });
+    await evaluateOrderRefundState(order.id);
+    expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("REFUNDED");
+    const issued = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: order.id, event: "refunded" } });
+    expect(issued.map((row) => row.channel).sort()).toEqual(["email", "sms"]);
+  });
+
+  it("an issue refund on a courier order keeps the application fee", async () => {
+    const { order, pi } = await finishedOrder(1000, "courier", "DELIVERED");
+    await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 300 });
+    expect(refundRequests.at(-1)).toMatchObject({ amountCents: 300, refundApplicationFee: false });
+    const row = await storeScoped(storeId).refundRequest.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(row.refundApplicationFee).toBe(false);
+  });
+
+  it("an issue refund is capped at captured minus succeeded minus pending refunds", async () => {
+    const { order, pi } = await finishedOrder(1000, "pickup");
+    await fakeStripeProvider.refundPayment(pi, 200, `dash-ok-${order.id}`);
+    setNextRefundStatus(pi, "pending");
+    await fakeStripeProvider.refundPayment(pi, 300, `dash-pending-${order.id}`);
+    setNextRefundStatus(pi, "succeeded");
+    await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 800 });
+    expect(refundRequests.at(-1)).toMatchObject({ amountCents: 500 });
+  });
+
+  it("an issue refund is refused on an order that is not delivered or completed", async () => {
+    const { order, pi } = await cancellingOrder(1000);
+    const calls = refundRequests.length;
+    expect(await submitRefund(storeId, order.id, pi, { cause: "issue", amountCents: 100 })).toEqual({ blocked: true });
+    expect(refundRequests.length).toBe(calls);
   });
 });

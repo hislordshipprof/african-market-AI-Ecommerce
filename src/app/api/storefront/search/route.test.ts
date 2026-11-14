@@ -4,7 +4,7 @@ vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { GET } from "./route";
 
 let currentSlug = "";
@@ -29,7 +29,7 @@ describe.skipIf(!hasDb)("GET /api/storefront/search (DB integration)", () => {
   ];
 
   beforeAll(async () => {
-    prisma = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    prisma = testPrismaClient();
     await prisma.$connect();
     const a = await prisma.store.upsert({ where: { slug: slugA }, update: {}, create: { slug: slugA, name: "SR A", themePreset: "palm-and-shea" } });
     const b = await prisma.store.upsert({ where: { slug: slugB }, update: {}, create: { slug: slugB, name: "SR B", themePreset: "palm-and-shea" } });

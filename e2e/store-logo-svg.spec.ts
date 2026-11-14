@@ -32,4 +32,27 @@ test.describe("Store logo SVG safety (#60)", () => {
     const res = await request.get(`http://localhost:${process.env.E2E_PORT ?? "3000"}/_next/image?url=%2Flogos%2Fmama-ngozi-logo.svg&w=48&q=75`);
     expect(res.status()).toBe(400);
   });
+
+  // The proxy's real headers for each SVG path, with a script-bearing body in place of the file (#124).
+  // The catalog keys have no R2 object, so those cases cover the proxy's headers, which the route cannot override.
+  for (const [path, glob] of [
+    ["/logos/mama-ngozi-logo.svg", "**/logos/**"],
+    ["/logos/mama-ngozi-logo%2Esvg", "**/logos/**"],
+    ["/api/catalog-image/catalog/xss-probe.svg", "**/api/catalog-image/**"],
+    ["/api/catalog-image/catalog/xss-probe.jpg", "**/api/catalog-image/**"],
+  ]) {
+    test(`the proxy's headers on ${path} keep an embedded script from running`, async ({ page }) => {
+      await page.route(glob, async (route) => {
+        const real = await route.fetch();
+        await route.fulfill({
+          status: 200,
+          headers: { ...real.headers(), "content-type": "image/svg+xml", "content-disposition": "inline" },
+          body: `<svg xmlns="http://www.w3.org/2000/svg"><script>document.documentElement.setAttribute("data-xss","ran")</script></svg>`,
+        });
+      });
+      // goto resolves on load, after the inline script would have run.
+      await page.goto(`${BASE}${path}`);
+      expect(await page.evaluate(() => document.documentElement.getAttribute("data-xss"))).toBeNull();
+    });
+  }
 });

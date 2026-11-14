@@ -37,6 +37,9 @@ export function parseVariantsJson(raw: string | null): ParsedVariant[] {
       }
       id = v.id;
     }
+    if (typeof v.label !== "string" || !v.label.trim()) {
+      throw new Error(`Variant ${n}: label is required`);
+    }
     const price = v.price;
     const weightG = v.weightG;
     if (typeof price !== "number" || !isFinite(price) || price < 0) {
@@ -51,9 +54,6 @@ export function parseVariantsJson(raw: string | null): ParsedVariant[] {
     if (!Number.isInteger(weightG) || weightG > INT4_MAX) {
       throw new Error(`Variant ${n}: weight must be a whole number of grams`);
     }
-    if (v.label != null && typeof v.label !== "string") {
-      throw new Error(`Variant ${n}: label must be text`);
-    }
     if (v.sku != null && typeof v.sku !== "string") {
       throw new Error(`Variant ${n}: sku must be text`);
     }
@@ -62,7 +62,7 @@ export function parseVariantsJson(raw: string | null): ParsedVariant[] {
     }
     return {
       ...(id !== undefined ? { id } : {}),
-      label: typeof v.label === "string" ? v.label : "",
+      label: v.label,
       price,
       weightG,
       sku: typeof v.sku === "string" && v.sku ? v.sku : null,

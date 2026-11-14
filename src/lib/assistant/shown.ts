@@ -23,6 +23,8 @@ export interface AcceptanceTurn {
   customerText: string;
   lastReplyText: string;
   lastReplyEmpty: boolean;
+  /** Listings a search or recommendation tool returned to the model in the last reply. */
+  lastReplyListingIds: string[];
 }
 
 export interface ShownPart {
@@ -117,7 +119,24 @@ export function acceptanceForTurn(
     customerText,
     lastReplyText: previous ? textOf(previous) : "",
     lastReplyEmpty: !previous || replyCountsAsEmpty(previous),
+    lastReplyListingIds: previous ? returnedListingIds(previous) : [],
   };
+}
+
+const RETURNED_LISTING_TOOLS = new Set(["search_catalog", "show_products", "suggest_substitutes"]);
+
+function returnedListingIds(message: ShownMessage): string[] {
+  const ids = new Set<string>();
+  for (const part of message.parts) {
+    const name = toolNameOf(part);
+    if (!name || !RETURNED_LISTING_TOOLS.has(name) || !outputOk(part.output)) continue;
+    const body = part.output as { items?: unknown; cards?: unknown };
+    for (const row of [...arrayOf(body.items), ...arrayOf(body.cards)]) {
+      const listingId = (row as { listingId?: unknown }).listingId;
+      if (typeof listingId === "string") ids.add(listingId);
+    }
+  }
+  return [...ids];
 }
 
 export function replyCountsAsEmpty(message: ShownMessage): boolean {
@@ -128,6 +147,43 @@ export function replyCountsAsEmpty(message: ShownMessage): boolean {
     if (name === "offer_choices") return true;
     return name === "add_to_cart" && addOutputAdded(part.output);
   });
+}
+
+const SHOWN_ID_TOOLS = new Set(["search_catalog", "show_products"]);
+const SHOWN_ID_LIMIT = 60;
+
+/**
+ * One line per product variant a read tool showed in this chat, newest last.
+ * The model miscopies long ids from deep in the history; this short table is
+ * a clean place to copy them from.
+ */
+export function shownProductIds(messages: readonly ShownMessage[]): string[] {
+  const rows = new Map<string, string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      const name = toolNameOf(part);
+      if (!name || !SHOWN_ID_TOOLS.has(name) || !outputOk(part.output)) continue;
+      const body = part.output as { items?: unknown; cards?: unknown };
+      for (const row of [...arrayOf(body.items), ...arrayOf(body.cards)]) {
+        const product = row as { name?: unknown; packLabel?: unknown; variantId?: unknown; variants?: unknown };
+        if (typeof product.name !== "string") continue;
+        const variants = Array.isArray(product.variants)
+          ? product.variants as Array<{ variantId?: unknown; label?: unknown }>
+          : [{ variantId: product.variantId, label: product.packLabel }];
+        for (const variant of variants) {
+          if (typeof variant.variantId !== "string") continue;
+          const label = typeof variant.label === "string" ? `, ${variant.label}` : "";
+          rows.delete(variant.variantId);
+          rows.set(variant.variantId, `${product.name}${label}: ${variant.variantId}`);
+        }
+      }
+    }
+  }
+  return [...rows.values()].slice(-SHOWN_ID_LIMIT);
+}
+
+function arrayOf(value: unknown): object[] {
+  return Array.isArray(value) ? value.filter((item): item is object => !!item && typeof item === "object") : [];
 }
 
 function textOf(message: ShownMessage): string {

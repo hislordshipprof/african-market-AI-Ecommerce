@@ -1,10 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import { runtimeDatabaseUrl } from "./env";
 import type { QueryRawFn } from "./health";
 import { linkCodeMatches, MAX_LINK_CODE_ATTEMPTS } from "./whatsapp/code";
 import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "./system-actor";
+import { VITEST_TRANSACTION_MAX_WAIT_MS } from "./test-prisma";
 
 /** One TTL for preview cleanup and the import-token claim. */
 export const IMPORT_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -32,10 +34,18 @@ if (!globalForPrisma.prisma) {
   const connectionUrl = process.env.DATABASE_URL
     ? runtimeDatabaseUrl(process.env)
     : undefined;
-  const adapter = new PrismaPg(connectionUrl!);
+  // Prisma's pg adapter sends timestamptz values without an offset, so the session zone decides
+  // the stored instant. Pin it here, not in the URL: PgBouncer rejects `options` but tracks TimeZone.
+  const pool = new Pool({ connectionString: connectionUrl });
+  pool.on("connect", (client) => {
+    client.query("SET TIME ZONE 'UTC'").catch((error: unknown) => {
+      console.error(JSON.stringify({ event: "db_session_time_zone_failed", message: String(error) }));
+    });
+  });
+  const adapter = new PrismaPg(pool, { disposeExternalPool: true });
   // Vitest-only. Production, next start and Vercel keep Prisma's default maxWait.
   const vitest = process.env.VITEST === "true";
-  globalForPrisma.prisma = new PrismaClient(vitest ? { adapter, transactionOptions: { maxWait: 15_000 } } : { adapter });
+  globalForPrisma.prisma = new PrismaClient(vitest ? { adapter, transactionOptions: { maxWait: VITEST_TRANSACTION_MAX_WAIT_MS } } : { adapter });
 }
 
 const prisma = globalForPrisma.prisma;
@@ -66,6 +76,8 @@ export const platform = {
   category: wrapPlatformDelegate(prisma.category),
   masterProduct: wrapPlatformDelegate(prisma.masterProduct),
   productSynonym: wrapPlatformDelegate(prisma.productSynonym),
+  recipe: wrapPlatformDelegate(prisma.recipe),
+  platformSettings: wrapPlatformDelegate(prisma.platformSettings),
 };
 
 function wrapDelegate<D extends object>(storeId: string, delegate: D): D {
@@ -109,11 +121,28 @@ export function storeScoped(storeId: string) {
     order: wrapDelegate(storeId, prisma.order),
     orderLine: wrapDelegate(storeId, prisma.orderLine),
     refundRequest: wrapDelegate(storeId, prisma.refundRequest),
+    issueReport: wrapDelegate(storeId, prisma.issueReport),
+    substitutionRequest: wrapDelegate(storeId, prisma.substitutionRequest),
     aiConversation: wrapDelegate(storeId, prisma.aiConversation),
     aiAction: wrapDelegate(storeId, prisma.aiAction),
     assistantUndoReceipt: wrapDelegate(storeId, prisma.assistantUndoReceipt),
     guestBrowserCart: wrapDelegate(storeId, prisma.guestBrowserCart),
     ownerWhatsAppLink: wrapDelegate(storeId, prisma.ownerWhatsAppLink),
+    copilotConversation: wrapDelegate(storeId, prisma.copilotConversation),
+    copilotClientMessage: wrapDelegate(storeId, prisma.copilotClientMessage),
+    stockProposal: wrapDelegate(storeId, prisma.stockProposal),
+    copilotAlert: wrapDelegate(storeId, prisma.copilotAlert),
+    ownerReport: wrapDelegate(storeId, prisma.ownerReport),
+    ownerReportItem: wrapDelegate(storeId, prisma.ownerReportItem),
+    listingDraft: wrapDelegate(storeId, prisma.listingDraft),
+    notificationLog: wrapDelegate(storeId, prisma.notificationLog),
+    delivery: wrapDelegate(storeId, prisma.delivery),
+    deliveryEvent: wrapDelegate(storeId, prisma.deliveryEvent),
+    pushSubscription: wrapDelegate(storeId, prisma.pushSubscription),
+    supportThread: wrapDelegate(storeId, prisma.supportThread),
+    supportMessage: wrapDelegate(storeId, prisma.supportMessage),
+    storeSubscription: wrapDelegate(storeId, prisma.storeSubscription),
+    assistantChatMonth: wrapDelegate(storeId, prisma.assistantChatMonth),
   };
 }
 
@@ -189,6 +218,14 @@ export async function lockCustomerAccount(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('customer-account'), hashtext(${userId}))`;
 }
 
+/** Serializes copilot alert pushes for one store, so racing runs cannot spend the push cap. */
+export async function lockCopilotPush(
+  tx: Pick<PrismaClient, "$executeRaw">,
+  storeId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('copilot-push'), hashtext(${storeId}))`;
+}
+
 /** Advisory lock, insert-if-missing, then row lock. Caller is already inside customerScopedTransaction. */
 export async function lockCustomerProfileRow(
   tx: Pick<PrismaClient, "$executeRaw" | "$queryRaw">,
@@ -234,6 +271,9 @@ export const platformAdmin = {
   category: wrapPlatformAdminDelegate(prisma.category),
   productSynonym: wrapPlatformAdminDelegate(prisma.productSynonym),
   listingImport: wrapPlatformAdminDelegate(prisma.listingImport),
+  attributeProposal: wrapPlatformAdminDelegate(prisma.attributeProposal),
+  ingredient: wrapPlatformAdminDelegate(prisma.ingredient),
+  storeSubscription: wrapPlatformAdminDelegate(prisma.storeSubscription),
 };
 
 /** A transaction as app_user, with the test session time zone applied when one is set. */
@@ -251,7 +291,8 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "aiConversation" | "aiAction" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -264,17 +305,25 @@ export async function platformAdminTransaction<T>(
       store: tx.store,
       order: tx.order,
       auditLog: tx.auditLog,
+      refundRequest: tx.refundRequest,
       storeMembership: tx.storeMembership,
       storeInvite: tx.storeInvite,
       masterProduct: tx.masterProduct,
       category: tx.category,
       productSynonym: tx.productSynonym,
+      ingredient: tx.ingredient,
+      ingredientSynonym: tx.ingredientSynonym,
+      masterProductIngredient: tx.masterProductIngredient,
+      attributeProposal: tx.attributeProposal,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
+      supportThread: tx.supportThread,
+      supportMessage: tx.supportMessage,
+      storeSubscription: tx.storeSubscription,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
-  });
+  }, opts);
 }
 
 export interface TransactionOptions {
@@ -284,7 +333,7 @@ export interface TransactionOptions {
 
 export async function storeScopedTransaction<T>(
   storeId: string,
-  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "listing" | "listingVariant" | "listingImport" | "stockEvent" | "auditLog" | "cart" | "cartLine" | "customer" | "order" | "orderLine" | "paymentIntentRelease" | "refundRequest" | "issueReport" | "substitutionRequest" | "aiConversation" | "aiAction" | "assistantUndoReceipt" | "guestBrowserCart" | "copilotConversation" | "copilotClientMessage" | "stockProposal" | "copilotAlert" | "copilotDigest" | "ownerReport" | "ownerReportItem" | "listingDraft" | "notificationLog" | "delivery" | "deliveryEvent" | "pushSubscription" | "supportThread" | "supportMessage" | "listingAttributes" | "listingIngredient" | "ingredient" | "ingredientSynonym" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -307,10 +356,32 @@ export async function storeScopedTransaction<T>(
       orderLine: tx.orderLine,
       paymentIntentRelease: tx.paymentIntentRelease,
       refundRequest: tx.refundRequest,
+      issueReport: tx.issueReport,
+      substitutionRequest: tx.substitutionRequest,
       aiConversation: tx.aiConversation,
       aiAction: tx.aiAction,
       assistantUndoReceipt: tx.assistantUndoReceipt,
       guestBrowserCart: tx.guestBrowserCart,
+      copilotConversation: tx.copilotConversation,
+      copilotClientMessage: tx.copilotClientMessage,
+      stockProposal: tx.stockProposal,
+      copilotAlert: tx.copilotAlert,
+      copilotDigest: tx.copilotDigest,
+      ownerReport: tx.ownerReport,
+      ownerReportItem: tx.ownerReportItem,
+      listingDraft: tx.listingDraft,
+      notificationLog: tx.notificationLog,
+      delivery: tx.delivery,
+      deliveryEvent: tx.deliveryEvent,
+      pushSubscription: tx.pushSubscription,
+      supportThread: tx.supportThread,
+      supportMessage: tx.supportMessage,
+      listingAttributes: tx.listingAttributes,
+      listingIngredient: tx.listingIngredient,
+      storeSubscription: tx.storeSubscription,
+      ingredient: tx.ingredient,
+      ingredientSynonym: tx.ingredientSynonym,
+      platformSettings: tx.platformSettings,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -348,13 +419,171 @@ export async function storeScopedTransaction<T>(
  *
  * A background job that rewrites many listings holds no store lock, so it must
  * never wait: it locks with SKIP LOCKED and picks up a skipped row on its next run.
+ *
+ * Copilot confirm and the copilot turn commit take the store lock before any
+ * proposal, audit or stock row. A proposal insert takes FOR KEY SHARE on its
+ * listing and on the store. Confirm then locks the listing and claims the
+ * proposal. The turn commit locks the conversation row only after the store.
  */
 export async function lockConversationRow(tx: Pick<PrismaClient, "$queryRaw">, conversationId: string) {
   await tx.$queryRaw`SELECT id FROM ai_conversations WHERE id = ${conversationId} FOR UPDATE`;
 }
 
-export async function lockStoreRow(tx: Pick<PrismaClient, "$queryRaw">, storeId: string) {
-  await tx.$queryRaw`SELECT 1 FROM stores WHERE id = ${storeId} FOR UPDATE`;
+export interface LockedStoreRow {
+  storeDeliveryEnabled: boolean;
+  storeDeliveryFeeCents: number;
+  deliveryRadiusMi: number;
+  lat: number | null;
+  lng: number | null;
+}
+
+export interface GeocodeCacheRow {
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+  formattedAddress: string;
+  lat: number;
+  lng: number;
+}
+
+export async function readAddressGeocode(key: string, cutoff: Date): Promise<GeocodeCacheRow | null> {
+  const rows = await prisma.$queryRaw<Array<{
+    line1: string;
+    city: string;
+    state: string;
+    zip: string;
+    formatted_address: string;
+    lat: number;
+    lng: number;
+  }>>`
+    SELECT line1, city, state, zip, formatted_address, lat, lng
+    FROM address_geocodes
+    WHERE key = ${key} AND cached_at > ${cutoff}
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    line1: row.line1,
+    city: row.city,
+    state: row.state,
+    zip: row.zip,
+    formattedAddress: row.formatted_address,
+    lat: row.lat,
+    lng: row.lng,
+  };
+}
+
+export async function upsertAddressGeocode(
+  key: string,
+  match: GeocodeCacheRow,
+  now: Date,
+): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO address_geocodes (key, line1, city, state, zip, formatted_address, lat, lng, cached_at)
+    VALUES (
+      ${key},
+      ${match.line1},
+      ${match.city},
+      ${match.state},
+      ${match.zip},
+      ${match.formattedAddress},
+      ${match.lat},
+      ${match.lng},
+      ${now}
+    )
+    ON CONFLICT (key) DO UPDATE SET
+      line1 = EXCLUDED.line1,
+      city = EXCLUDED.city,
+      state = EXCLUDED.state,
+      zip = EXCLUDED.zip,
+      formatted_address = EXCLUDED.formatted_address,
+      lat = EXCLUDED.lat,
+      lng = EXCLUDED.lng,
+      cached_at = EXCLUDED.cached_at
+  `;
+}
+
+export interface LockedStoreAddress {
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}
+
+export async function lockStoreAddress(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+): Promise<LockedStoreAddress | null> {
+  const rows = await tx.$queryRaw<Array<{
+    address_line1: string | null;
+    address_line2: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+  }>>`
+    SELECT address_line1, address_line2, city, state, zip
+    FROM stores
+    WHERE id = ${storeId}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    addressLine1: row.address_line1,
+    addressLine2: row.address_line2,
+    city: row.city,
+    state: row.state,
+    zip: row.zip,
+  };
+}
+
+/** Locks the store and returns the delivery settings read under that lock. */
+export async function lockStoreRow(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+): Promise<LockedStoreRow> {
+  const rows = await tx.$queryRaw<Array<{
+    store_delivery_enabled: boolean;
+    store_delivery_fee_cents: number;
+    delivery_radius_mi: unknown;
+    lat: number | null;
+    lng: number | null;
+  }>>`
+    SELECT store_delivery_enabled, store_delivery_fee_cents, delivery_radius_mi, lat, lng
+    FROM stores
+    WHERE id = ${storeId}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+  if (!row) throw new Error("Store not found");
+  return {
+    storeDeliveryEnabled: row.store_delivery_enabled,
+    storeDeliveryFeeCents: row.store_delivery_fee_cents,
+    deliveryRadiusMi: Number(row.delivery_radius_mi),
+    lat: row.lat,
+    lng: row.lng,
+  };
+}
+
+/** Tagged SQL on an open transaction. Callers outside this file cannot call $queryRaw. */
+export function txQuery<T>(tx: Pick<PrismaClient, "$queryRaw">, query: Prisma.Sql): Promise<T> {
+  return tx.$queryRaw<T>(query);
+}
+
+export function txExecute(tx: Pick<PrismaClient, "$executeRaw">, query: Prisma.Sql): Promise<number> {
+  return tx.$executeRaw(query);
+}
+
+/** The store's hours and zone, read inside the caller's transaction (after lockStoreRow, so they cannot change under it). */
+export async function readStoreHours(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+): Promise<{ hours: unknown; timezone: string } | null> {
+  const rows = await tx.$queryRaw<Array<{ hours: unknown; timezone: string }>>`
+    SELECT hours, timezone FROM stores WHERE id = ${storeId}`;
+  return rows[0] ?? null;
 }
 
 /** Sees an order in any store. The caller is inside a store-scoped transaction and must not insert while this is on. */
@@ -512,27 +741,154 @@ export async function findOrphanedAuthorizedOrders(opts?: {
 }): Promise<Array<{ id: string; storeId: string }>> {
   if (opts?.storeIds && opts.storeIds.length === 0) return [];
   const cutoff = new Date(Date.now() - 60_000);
-  const storeIds = opts?.storeIds;
+  const inStores = opts?.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
   return platformAdminTransaction(async (tx) => {
-    const rows = storeIds
-      ? await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-          SELECT id, store_id FROM orders
-          WHERE status = 'AUTHORIZED'
-            AND inngest_event_sent_at IS NULL
-            AND created_at < ${cutoff}
-            AND store_id IN (${Prisma.join(storeIds)})
-          ORDER BY created_at ASC
-          LIMIT 50
-        `
-      : await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
-          SELECT id, store_id FROM orders
-          WHERE status = 'AUTHORIZED'
-            AND inngest_event_sent_at IS NULL
-            AND created_at < ${cutoff}
-          ORDER BY created_at ASC
-          LIMIT 50
-        `;
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+      SELECT id, store_id FROM orders
+      WHERE status = 'AUTHORIZED'
+        AND inngest_event_sent_at IS NULL
+        AND created_at < ${cutoff}
+        ${inStores}
+      ORDER BY created_at ASC
+      LIMIT 50
+    `;
     return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
+  });
+}
+
+/**
+ * ACCEPTED/PICKING orders that may be past the pick timeout: accepted before
+ * `acceptedBefore` or created before `createdBefore`. The caller applies the
+ * pickup slot, which is free text.
+ */
+export async function findPickTimeoutCandidates(opts: {
+  acceptedBefore: Date;
+  createdBefore: Date;
+  limit: number;
+  storeIds?: readonly string[];
+}): Promise<Array<{ id: string; storeId: string; createdAt: Date; acceptedAt: Date; pickupSlot: string | null }>> {
+  if (opts.storeIds && opts.storeIds.length === 0) return [];
+  const inStores = opts.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; created_at: Date; accepted_at: Date; pickup_slot: string | null }>>`
+      SELECT id, store_id, created_at, accepted_at, pickup_slot FROM orders
+      WHERE status IN ('ACCEPTED', 'PICKING')
+        AND accepted_at IS NOT NULL
+        AND (accepted_at < ${opts.acceptedBefore} OR created_at < ${opts.createdBefore})
+        ${inStores}
+      ORDER BY (pickup_slot IS NULL OR created_at < ${opts.createdBefore}) DESC, created_at ASC
+      LIMIT ${opts.limit}
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      storeId: r.store_id,
+      createdAt: r.created_at,
+      acceptedAt: r.accepted_at,
+      pickupSlot: r.pickup_slot,
+    }));
+  });
+}
+
+/** An unused card hold is released this long after authorization (owner decision, #422). */
+export const ORPHAN_HOLD_GRACE_MS = 60 * 60_000;
+
+/**
+ * Carts holding a PaymentIntent with no order and no release tombstone, not
+ * written within the grace (a hold cannot be older than that and still unused
+ * for longer). Never-checked carts first, then least recently checked, oldest
+ * first, so carts that never paid cannot starve a real hold.
+ */
+export async function findOrphanHoldCarts(opts?: {
+  storeIds?: readonly string[];
+}): Promise<Array<{ storeId: string; cartId: string; paymentIntentId: string; updatedAt: Date }>> {
+  if (opts?.storeIds && opts.storeIds.length === 0) return [];
+  const before = new Date(Date.now() - ORPHAN_HOLD_GRACE_MS);
+  const inStores = opts?.storeIds ? Prisma.sql`AND c.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; payment_intent_id: string; updated_at: Date }>>`
+      SELECT c.id, c.store_id, c.payment_intent_id, c.updated_at FROM carts c
+      WHERE c.payment_intent_id IS NOT NULL
+        AND c.updated_at < ${before}
+        AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.payment_intent_id = c.payment_intent_id)
+        AND NOT EXISTS (SELECT 1 FROM payment_intent_releases r WHERE r.payment_intent_id = c.payment_intent_id)
+        ${inStores}
+      ORDER BY c.orphan_checked_at ASC NULLS FIRST, c.updated_at ASC
+      LIMIT 50
+    `;
+    return rows.map((r) => ({
+      storeId: r.store_id,
+      cartId: r.id,
+      paymentIntentId: r.payment_intent_id,
+      updatedAt: r.updated_at,
+    }));
+  });
+}
+
+/** Moves a checked cart to the back of the orphan-hold sweep. Raw SQL so `updated_at` is kept. */
+export async function markOrphanHoldChecked(storeId: string, cartId: string, paymentIntentId: string): Promise<void> {
+  await storeScopedTransaction(storeId, (tx) => tx.$executeRaw`
+    UPDATE carts SET orphan_checked_at = now()
+    WHERE id = ${cartId} AND store_id = ${storeId} AND payment_intent_id = ${paymentIntentId}
+  `);
+}
+
+const NOTIFICATION_RESEND_MS = 5 * 60_000;
+const NOTIFICATION_EXPIRE_MS = 2 * 60 * 60_000;
+
+/** Substitution prompts past their 10 minutes whose order still waits: the timer's backstop (#13). */
+export async function findExpiredSubstitutionRequests(limit: number): Promise<Array<{ id: string; storeId: string }>> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string }>>`
+      SELECT sr.id, sr.store_id FROM substitution_requests sr
+      JOIN orders o ON o.id = sr.order_id
+      WHERE sr.status = 'pending' AND sr.expires_at <= now() AND o.status = 'SUBSTITUTION_PENDING'
+      ORDER BY sr.expires_at ASC
+      LIMIT ${limit}
+    `;
+    return rows.map((row) => ({ id: row.id, storeId: row.store_id }));
+  });
+}
+
+export async function findPendingOrderNotifications(opts?: {
+  storeIds?: readonly string[];
+}): Promise<Array<{ storeId: string; orderId: string; event: string }>> {
+  if (opts?.storeIds && opts.storeIds.length === 0) return [];
+  const newest = new Date(Date.now() - NOTIFICATION_RESEND_MS);
+  const oldest = new Date(Date.now() - NOTIFICATION_EXPIRE_MS);
+  const inStores = opts?.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ store_id: string; order_id: string; event: string }>>`
+      SELECT store_id, order_id, event FROM (
+        SELECT store_id, order_id, event, MIN(created_at) AS first_at
+        FROM notification_logs
+        WHERE status IN ('pending', 'sending')
+          AND created_at <= ${newest}
+          AND created_at > ${oldest}
+          ${inStores}
+        GROUP BY store_id, order_id, event
+      ) pending
+      ORDER BY first_at ASC
+      LIMIT 50
+    `;
+    return rows.map((row) => ({ storeId: row.store_id, orderId: row.order_id, event: row.event }));
+  });
+}
+
+export async function expireStaleOrderNotifications(opts?: {
+  storeIds?: readonly string[];
+}): Promise<number> {
+  if (opts?.storeIds && opts.storeIds.length === 0) return 0;
+  const cutoff = new Date(Date.now() - NOTIFICATION_EXPIRE_MS);
+  const inStores = opts?.storeIds ? Prisma.sql`AND store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  return platformAdminTransaction(async (tx) => {
+    const count = await tx.$executeRaw`
+      UPDATE notification_logs
+      SET status = 'failed', reason = 'expired', updated_at = CURRENT_TIMESTAMP
+      WHERE status IN ('pending', 'sending')
+        AND created_at <= ${cutoff}
+        ${inStores}
+    `;
+    return typeof count === "number" ? count : 0;
   });
 }
 
@@ -554,6 +910,23 @@ export async function findOrderByPaymentIntent(
     const row = rows[0];
     if (!row) return null;
     return { id: row.id, storeId: row.store_id, status: row.status, refundId: row.refund_id };
+  });
+}
+
+/** The courier delivery a provider webhook names, across stores (the webhook carries no store). */
+export async function findDeliveryByExternalId(
+  provider: string,
+  externalId: string,
+): Promise<{ id: string; storeId: string; orderId: string } | null> {
+  return platformAdminTransaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string; store_id: string; order_id: string }>>`
+      SELECT id, store_id, order_id
+      FROM deliveries
+      WHERE provider = ${provider} AND external_id = ${externalId}
+      LIMIT 1
+    `;
+    const row = rows[0];
+    return row ? { id: row.id, storeId: row.store_id, orderId: row.order_id } : null;
   });
 }
 
@@ -579,6 +952,7 @@ export async function findStuckTransitionalOrders(opts?: {
                     state = 'CREATED'
                     AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
                   )
+                  OR (provider_status = 'succeeded' AND service_fee_share_cents > 0 AND fee_refund_id IS NULL)
               ))
               AND store_id IN (${Prisma.join(storeIds)})
             ORDER BY updated_at ASC
@@ -610,6 +984,7 @@ export async function findStuckTransitionalOrders(opts?: {
                     state = 'CREATED'
                     AND (provider_status IS NULL OR provider_status IN ('pending', 'requires_action'))
                   )
+                  OR (provider_status = 'succeeded' AND service_fee_share_cents > 0 AND fee_refund_id IS NULL)
               )
             ORDER BY updated_at ASC
             LIMIT 50
@@ -627,6 +1002,207 @@ export async function findStuckTransitionalOrders(opts?: {
         `;
     return rows.map((r) => ({ id: r.id, storeId: r.store_id }));
   });
+}
+
+export interface OrderRecoveryCandidate {
+  id: string;
+  storeName: string;
+  number: number;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  acceptanceClockStartsAt: Date | null;
+  inngestEventSentAt: Date | null;
+  acceptedAt: Date | null;
+  prepEstimateMinutes: number | null;
+  pickupSlot: string | null;
+  readyAt: Date | null;
+  outForDeliveryAt: Date | null;
+  /** First capture_retry/cancel_retry audit row, for CAPTURING/CANCELLING only. */
+  firstRetryAt: Date | null;
+  hours: unknown;
+  timezone: string;
+}
+
+/** AUTHORIZED; accepted but not charged (ACCEPTED to CANCELLING); charged (READY onwards). */
+export type OrderRecoveryGroup = "authorized" | "uncaptured" | "captured";
+
+/**
+ * Candidates for the admin "Orders to check" list, bounded in SQL; the caller applies the
+ * per-state limits. Each group has its own cap, so old captured orders cannot crowd out
+ * uncaptured ones; `capped` says which groups had more rows than the cap. Within a group, rows SQL
+ * already knows are stuck or due sort first, so orders not yet due (a later pickup slot, a store
+ * still closed) cannot fill it. A pickup slot is free text, so it is compared as text, not cast:
+ * checkout writes `toISOString()`.
+ */
+export async function findOrderRecoveryCandidates(opts: {
+  authorizedBefore: Date;
+  holdBefore: Date;
+  retryBefore: Date;
+  pickingDueBy: Date;
+  pickingGraceMinutes: number;
+  readyBefore: Date;
+  awaitingPickupBefore: Date;
+  outForDeliveryBefore: Date;
+  limit: number;
+  storeIds?: readonly string[];
+}): Promise<{ candidates: OrderRecoveryCandidate[]; capped: Record<OrderRecoveryGroup, boolean> }> {
+  if (opts.storeIds && opts.storeIds.length === 0) {
+    return { candidates: [], capped: { authorized: false, uncaptured: false, captured: false } };
+  }
+  const inStores = opts.storeIds ? Prisma.sql`AND o.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  const columns = Prisma.sql`
+    o.id, s.name AS store_name, o.number, o.status, o.created_at, o.updated_at,
+    o.acceptance_clock_starts_at, o.inngest_event_sent_at, o.accepted_at, o.prep_estimate_minutes,
+    o.pickup_slot, o.ready_at, o.out_for_delivery_at, s.hours, s.timezone,
+    CASE WHEN o.status IN ('CAPTURING', 'CANCELLING') THEN (
+      SELECT MIN(a.created_at) FROM audit_logs a
+      WHERE a.entity_type = 'order' AND a.entity_id = o.id
+        AND a.action = CASE o.status WHEN 'CAPTURING' THEN 'capture_retry' ELSE 'cancel_retry' END
+    ) END AS first_retry_at`;
+  type Row = {
+    id: string;
+    store_name: string;
+    number: number;
+    status: string;
+    created_at: Date;
+    updated_at: Date;
+    acceptance_clock_starts_at: Date | null;
+    inngest_event_sent_at: Date | null;
+    accepted_at: Date | null;
+    prep_estimate_minutes: number | null;
+    pickup_slot: string | null;
+    ready_at: Date | null;
+    out_for_delivery_at: Date | null;
+    first_retry_at: Date | null;
+    hours: unknown;
+    timezone: string;
+  };
+  // One row past the cap tells a full group from a capped one.
+  const fetchLimit = opts.limit + 1;
+  const rows = await platformAdminTransaction(async (tx) => {
+    const authorized = await tx.$queryRaw<Row[]>`
+      SELECT ${columns}
+      FROM orders o JOIN stores s ON s.id = o.store_id
+      WHERE o.status = 'AUTHORIZED' AND o.created_at < ${opts.authorizedBefore} ${inStores}
+      ORDER BY (o.inngest_event_sent_at IS NULL OR o.created_at < ${opts.holdBefore}) DESC,
+        COALESCE(o.acceptance_clock_starts_at, o.created_at) ASC
+      LIMIT ${fetchLimit}
+    `;
+    const uncaptured = await tx.$queryRaw<Row[]>`
+      SELECT * FROM (
+        SELECT ${columns}
+        FROM orders o JOIN stores s ON s.id = o.store_id
+        WHERE o.status IN ('ACCEPTED', 'PICKING', 'CAPTURING', 'CANCELLING')
+          ${inStores}
+          AND (
+            o.created_at < ${opts.holdBefore}
+            OR (o.status IN ('ACCEPTED', 'PICKING')
+              AND o.accepted_at + make_interval(mins => COALESCE(o.prep_estimate_minutes, 0) + ${opts.pickingGraceMinutes}) < ${opts.pickingDueBy})
+            OR o.status IN ('CAPTURING', 'CANCELLING')
+          )
+      ) candidates
+      WHERE status NOT IN ('CAPTURING', 'CANCELLING')
+        OR COALESCE(first_retry_at, updated_at) < ${opts.retryBefore}
+        OR created_at < ${opts.holdBefore}
+      ORDER BY (status IN ('CAPTURING', 'CANCELLING') OR created_at < ${opts.holdBefore}
+          OR pickup_slot IS NULL OR pickup_slot < ${opts.pickingDueBy.toISOString()}) DESC, created_at ASC
+      LIMIT ${fetchLimit}
+    `;
+    const captured = await tx.$queryRaw<Row[]>`
+      SELECT ${columns}
+      FROM orders o JOIN stores s ON s.id = o.store_id
+      WHERE o.status IN ('READY', 'AWAITING_PICKUP', 'OUT_FOR_DELIVERY')
+        ${inStores}
+        AND (
+          (o.status = 'READY' AND o.ready_at < ${opts.readyBefore})
+          OR (o.status = 'AWAITING_PICKUP' AND o.ready_at < ${opts.awaitingPickupBefore})
+          OR (o.status = 'OUT_FOR_DELIVERY' AND o.out_for_delivery_at < ${opts.outForDeliveryBefore})
+        )
+      ORDER BY o.created_at ASC
+      LIMIT ${fetchLimit}
+    `;
+    return { authorized, uncaptured, captured };
+  });
+  const toCandidate = (r: Row): OrderRecoveryCandidate => ({
+    id: r.id,
+    storeName: r.store_name,
+    number: r.number,
+    status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    acceptanceClockStartsAt: r.acceptance_clock_starts_at,
+    inngestEventSentAt: r.inngest_event_sent_at,
+    acceptedAt: r.accepted_at,
+    prepEstimateMinutes: r.prep_estimate_minutes,
+    pickupSlot: r.pickup_slot,
+    readyAt: r.ready_at,
+    outForDeliveryAt: r.out_for_delivery_at,
+    firstRetryAt: r.first_retry_at,
+    hours: r.hours,
+    timezone: r.timezone,
+  });
+  const groups = [rows.authorized, rows.uncaptured, rows.captured];
+  return {
+    candidates: groups.flatMap((group) => group.slice(0, opts.limit)).map(toCandidate),
+    capped: {
+      authorized: rows.authorized.length > opts.limit,
+      uncaptured: rows.uncaptured.length > opts.limit,
+      captured: rows.captured.length > opts.limit,
+    },
+  };
+}
+
+/**
+ * The newest audit row per order and action, newest first. Rows older than `since` stay while
+ * their order is not in `finalStatuses`. `capped` says more rows than `limit` exist.
+ */
+export async function findOrderAlertRows(opts: {
+  actions: readonly string[];
+  since: Date;
+  finalStatuses: readonly string[];
+  limit: number;
+  storeIds?: readonly string[];
+}): Promise<{
+  alerts: Array<{ orderId: string; action: string; createdAt: Date; orderNumber: number; orderStatus: string; storeName: string }>;
+  capped: boolean;
+}> {
+  if (opts.storeIds && opts.storeIds.length === 0) return { alerts: [], capped: false };
+  const inStores = opts.storeIds ? Prisma.sql`AND a.store_id IN (${Prisma.join(opts.storeIds)})` : Prisma.empty;
+  const rows = await platformAdminTransaction((tx) => tx.$queryRaw<Array<{
+    entity_id: string;
+    action: string;
+    created_at: Date;
+    number: number;
+    status: string;
+    store_name: string;
+  }>>`
+    SELECT * FROM (
+      SELECT DISTINCT ON (a.entity_id, a.action)
+        a.entity_id, a.action, a.created_at, o.number, o.status, s.name AS store_name
+      FROM audit_logs a
+      JOIN orders o ON o.id = a.entity_id AND o.store_id = a.store_id
+      JOIN stores s ON s.id = o.store_id
+      WHERE a.entity_type = 'order'
+        AND a.action IN (${Prisma.join(opts.actions)})
+        AND (a.created_at >= ${opts.since} OR o.status NOT IN (${Prisma.join(opts.finalStatuses)}))
+        ${inStores}
+      ORDER BY a.entity_id, a.action, a.created_at DESC
+    ) latest
+    ORDER BY created_at DESC
+    LIMIT ${opts.limit + 1}
+  `);
+  return {
+    alerts: rows.slice(0, opts.limit).map((r) => ({
+      orderId: r.entity_id,
+      action: r.action,
+      createdAt: r.created_at,
+      orderNumber: r.number,
+      orderStatus: r.status,
+      storeName: r.store_name,
+    })),
+    capped: rows.length > opts.limit,
+  };
 }
 
 /** Row-lock a master product for the rest of the transaction; callers re-read it afterwards. */
@@ -707,6 +1283,22 @@ export async function platformSessionUser(): Promise<string> {
   });
 }
 
+/** Refuses a login that is not app_runtime, or one that bypasses RLS. */
+export async function assertAppRuntimeLogin(): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL ROLE app_user`;
+    const rows = await tx.$queryRaw<Array<{ session_user: string; rolsuper: boolean; rolbypassrls: boolean }>>`
+      SELECT session_user::text AS session_user, rolsuper, rolbypassrls
+      FROM pg_roles
+      WHERE rolname = session_user::text
+    `;
+    const role = rows[0];
+    if (!role || role.session_user !== "app_runtime" || role.rolsuper || role.rolbypassrls) {
+      throw new Error("The eval refuses evidence unless the database login is app_runtime.");
+    }
+  });
+}
+
 export async function disconnectPlatformClient(): Promise<void> {
   await prisma.$disconnect();
 }
@@ -730,30 +1322,6 @@ export interface TransactionalClient {
     }) => Promise<T>,
     options?: { timeout?: number; maxWait?: number },
   ): Promise<T>;
-}
-
-export async function rateLimitUpsert(
-  key: string,
-  now: bigint,
-  windowStart: bigint,
-): Promise<{ count: number; lastRequest: bigint }> {
-  const rows = await prisma.$queryRaw<Array<{ count: number; last_request: bigint }>>`
-    INSERT INTO rate_limits (id, key, count, last_request)
-    VALUES (gen_random_uuid()::text, ${key}, 1, ${now})
-    ON CONFLICT (key) DO UPDATE SET
-      count = CASE
-        WHEN rate_limits.last_request < ${windowStart}
-        THEN 1
-        ELSE rate_limits.count + 1
-      END,
-      last_request = CASE
-        WHEN rate_limits.last_request < ${windowStart}
-        THEN ${now}
-        ELSE rate_limits.last_request
-      END
-    RETURNING count, last_request
-  `;
-  return { count: Number(rows[0].count), lastRequest: BigInt(rows[0].last_request) };
 }
 
 /** One counted file turn inside a rolling hour. The lock makes concurrent requests agree. */
@@ -1286,4 +1854,59 @@ export async function readOwnerLink(storeId: string, userId: string): Promise<{
     verifiedAt: row.verified_at,
     codeLive: row.code_live === true,
   };
+}
+
+/** Creates the store's billing row if missing and locks it for this transaction (#494). */
+export async function lockStoreSubscriptionRow(tx: Pick<PrismaClient, "$executeRaw" | "$queryRaw">, storeId: string): Promise<void> {
+  await tx.$executeRaw`INSERT INTO store_subscriptions (store_id) VALUES (${storeId}) ON CONFLICT (store_id) DO NOTHING`;
+  await tx.$queryRaw`SELECT store_id FROM store_subscriptions WHERE store_id = ${storeId} FOR UPDATE`;
+}
+
+/** Serialises pilot-offer changes so the 5-store cap holds under concurrency. */
+export async function lockPilotOffer(tx: Pick<PrismaClient, "$executeRaw">): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('store_subscriptions.pilot'))`;
+}
+
+/** Records a Stripe billing event id. False means it was already applied. */
+export async function claimStripeBillingEvent(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  eventId: string,
+  storeId: string | null,
+  type: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    INSERT INTO stripe_billing_events (id, store_id, type)
+    VALUES (${eventId}, ${storeId}, ${type})
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+/** Adds one assistant chat to the store's month unless it is at `cap`. Null when capped. */
+export async function incrementAssistantChatMonth(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  month: string,
+  cap: number,
+): Promise<number | null> {
+  const rows = await tx.$queryRaw<{ chats: number }[]>`
+    INSERT INTO assistant_chat_months (store_id, month, chats)
+    VALUES (${storeId}, ${month}::date, 1)
+    ON CONFLICT (store_id, month) DO UPDATE SET chats = assistant_chat_months.chats + 1
+    WHERE assistant_chat_months.chats < ${cap}
+    RETURNING chats`;
+  return rows[0]?.chats ?? null;
+}
+
+/** Marks the month's owner warning sent. False when it already was. */
+export async function claimAssistantChatWarning(
+  tx: Pick<PrismaClient, "$queryRaw">,
+  storeId: string,
+  month: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ store_id: string }[]>`
+    UPDATE assistant_chat_months SET warned_at = now()
+    WHERE store_id = ${storeId} AND month = ${month}::date AND warned_at IS NULL
+    RETURNING store_id`;
+  return rows.length > 0;
 }

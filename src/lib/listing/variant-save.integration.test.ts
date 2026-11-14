@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import { healthQueryRaw, storeScoped, storeScopedTransaction } from "../db";
 import {
@@ -26,7 +26,7 @@ describe.skipIf(!hasDb)("variant save in place (lane DB, app_runtime)", () => {
   let orderNo = 1000;
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     locks = new Client({ connectionString: process.env.DATABASE_URL });
     await locks.connect();

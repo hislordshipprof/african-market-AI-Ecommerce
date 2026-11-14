@@ -30,11 +30,19 @@ test("storefront, admin sign-in, checkout, api and static carry headers with zer
     expect(headers["content-security-policy-report-only"], path).toContain("default-src 'self'");
     expect(headers["x-content-type-options"], path).toBe("nosniff");
     expect(headers["strict-transport-security"], path).toBe("max-age=63072000");
+    expect(headers["referrer-policy"], path).toBe("strict-origin-when-cross-origin");
+    expect(headers["x-frame-options"], path).toBe("DENY");
     expect(headers["content-security-policy-report-only"], path).not.toContain("unsafe-eval");
     if (!path.startsWith("/api/")) {
       expect(await violationsOf(page), path).toEqual([]);
     }
   }
+
+  const redirect = await request.get("/?store=mama-ngozi", { maxRedirects: 0 });
+  expect(redirect.status()).toBe(307);
+  expect(redirect.headers()["content-security-policy"]).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+  expect(redirect.headers()["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+  expect(redirect.headers()["x-frame-options"]).toBe("DENY");
 
   const home = await request.get("/?store=mama-ngozi");
   const html = await home.text();

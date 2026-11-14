@@ -1,21 +1,28 @@
 import { Prisma } from "@prisma/client";
-import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent } from "../db";
+import { storeMayUse } from "../billing/plan";
+import { storeScopedTransaction, lockStoreRow, lockCart, lockListingRows, getNextOrderNumber, storeScoped, orderExistsForPaymentIntent, platform, readStoreHours, markOrphanHoldChecked, ORPHAN_HOLD_GRACE_MS } from "../db";
+import { assessRadius } from "../address/geo";
+import { lookupConfirmed } from "../address/confirm";
 import { getCartWithLines, type CartLineView } from "../cart/service";
 import { getStripeClient } from "../stripe/provider";
-import { checkoutPaymentsUseFake, getCheckoutPayments, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
+import { checkoutPaymentsUseFake, getCheckoutPayments, holdAuthorizedAt, type NormalizedPaymentIntent } from "../stripe/checkout-payments";
 import { sendOrderAuthorized } from "../inngest/send";
+import { scheduleOrderNotification } from "../inngest/notify";
+import { newTrackingToken, recordOrderNotification } from "../notifications/record";
 import { scheduleAfterResponse } from "../schedule-after-response";
 import { checkoutTestHooks } from "./test-hooks";
 import { cartPaymentIdempotencyKey } from "../customer-account/consent";
 import { guestPaymentIntentParams, nextAttemptToken, paymentIntentProvenanceOk } from "./payment-intent-params";
 import { bindSavedCardConsent, prepareSignedInPaymentIntent } from "./saved-card-payment";
-import { platformFeeCentsForCapture } from "../order/platform-fee";
+import { captureSplit, orderServiceFeeSettings } from "../order/platform-fee";
+import { readServiceFeeSettings } from "../order/service-fee-settings";
 import { reserveOrderStock } from "../order/stock-ledger";
-import { validPhone } from "../customer-account/phone";
+import { assertLiveModeAllowed } from "./live-mode";
+import { StoreNotTakingOrdersError, storeAvailability } from "../order/store-queue";
+import { COURIER_NOT_OFFERED, computeQuote, type StoreDeliveryQuote } from "./quote";
 import type {
   CheckoutQuote,
   Contact,
-  FlowProblem,
   Fulfillment,
 } from "../customer-flow/contracts";
 
@@ -82,7 +89,7 @@ function fakeIntent(id: string | null | undefined): boolean {
 
 async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentIntent> {
   if (fakeIntent(id)) return getCheckoutPayments().retrievePaymentIntent(id);
-  const pi = await getStripeClient().paymentIntents.retrieve(id);
+  const pi = await getStripeClient().paymentIntents.retrieve(id, { expand: ["latest_charge"] });
   const destination = pi.transfer_data?.destination;
   return {
     id: pi.id,
@@ -99,83 +106,44 @@ async function retrieveCheckoutIntent(id: string): Promise<NormalizedPaymentInte
       : null,
     metadata: pi.metadata ?? {},
     capture_method: pi.capture_method,
+    authorized_at: holdAuthorizedAt(pi),
   };
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function validEmail(email: string): boolean {
-  return EMAIL_RE.test(email.trim());
+export interface DeliveryRequest {
+  line1: string;
+  line2?: string | null;
+  city: string;
+  state: string;
+  zip: string;
+  leaveAtDoor: boolean;
 }
 
-export function computeQuote(
-  minimumOrderCents: number,
-  cartLines: ReadonlyArray<{ price: number; qty: number; maxPerOrder: number | null }>,
-  contact: Contact,
-  fulfillment: Fulfillment,
-): CheckoutQuote {
-  const problems: FlowProblem[] = [];
-  let subtotalCents = 0;
+interface DeliveryStoreRow {
+  storeDeliveryEnabled: boolean;
+  storeDeliveryFeeCents: number;
+  deliveryRadiusMi: unknown;
+  lat: number | null;
+  lng: number | null;
+}
 
-  for (const line of cartLines) {
-    if (
-      !Number.isInteger(line.qty) ||
-      line.qty < 1
-    ) {
-      problems.push({ code: "max-quantity", message: "Check item quantity." });
-      continue;
-    }
-    if (line.maxPerOrder !== null && line.qty > line.maxPerOrder) {
-      problems.push({
-        code: "max-quantity",
-        message: `Maximum ${line.maxPerOrder} per order for this item.`,
-      });
-    }
-    subtotalCents += line.price * line.qty;
-  }
-
-  if (!cartLines.length || subtotalCents < minimumOrderCents) {
-    problems.push({
-      code: "minimum-order",
-      message: `Minimum order is $${(minimumOrderCents / 100).toFixed(2)}.`,
-    });
-  }
-
-  if (
-    !contact.name.trim() ||
-    !validEmail(contact.email) ||
-    !validPhone(contact.phone)
-  ) {
-    problems.push({
-      code: "invalid-contact",
-      message: "Name, email, and a valid phone number are required.",
-    });
-  }
-
-  if (fulfillment !== "pickup") {
-    problems.push({
-      code: "ineligible",
-      message: "Only pickup is available for this store.",
-    });
-  }
-
-  const tipCents = 0;
-  const totalCents = subtotalCents + tipCents;
-  const bufferCents = Math.min(Math.round(subtotalCents * 0.1), 2000);
-  const holdCents = totalCents + bufferCents;
-
+function deliveryQuoteInput(
+  store: DeliveryStoreRow,
+  point: { lat: number; lng: number } | null,
+  leaveAtDoor: boolean,
+): StoreDeliveryQuote {
+  const radiusMi = Number(store.deliveryRadiusMi);
+  const hasCoordinates = store.lat != null && store.lng != null;
+  const confirmed = point && hasCoordinates
+    ? { withinRadius: assessRadius(point, { lat: store.lat as number, lng: store.lng as number, radiusMi }).withinRadius }
+    : null;
   return {
-    id: crypto.randomUUID(),
-    subtotalCents,
-    deliveryFeeCents: 0,
-    courierFeeCents: 0,
-    taxCents: 0,
-    tipCents,
-    discountCents: 0,
-    totalCents,
-    bufferCents,
-    holdCents,
-    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-    problems,
+    enabled: store.storeDeliveryEnabled,
+    feeCents: store.storeDeliveryFeeCents,
+    radiusMi,
+    hasCoordinates,
+    confirmed,
+    leaveAtDoor,
   };
 }
 
@@ -185,21 +153,50 @@ export async function quoteCheckout(
   cartId: string,
   contact: Contact,
   fulfillment: Fulfillment,
+  request?: DeliveryRequest | null,
 ): Promise<CheckoutQuote> {
-  const cart = await getCartWithLines(storeId, cartId);
-  if (!cart || !cart.lines.length) {
-    return computeQuote(minimumOrderCents, [], contact, fulfillment);
-  }
-  const serverLines = cart.lines.map((l) => ({
-    price: l.variant.price,
-    qty: l.qty,
-    maxPerOrder: l.variant.listing.maxPerOrder,
+  const [cart, store, serviceFee] = await Promise.all([
+    getCartWithLines(storeId, cartId),
+    platform.store.findUnique({ where: { id: storeId } }),
+    readServiceFeeSettings(),
+  ]);
+  if (!store) throw new Error("Store not found");
+  const serverLines = (cart?.lines ?? []).map((line) => ({
+    price: line.variant.price,
+    qty: line.qty,
+    maxPerOrder: line.variant.listing.maxPerOrder,
+    frozen: line.variant.listing.frozen,
   }));
-  return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+  if (fulfillment === "courier" && !(await storeMayUse(storeId, "courier-delivery"))) {
+    const quote = computeQuote(minimumOrderCents, serverLines, contact, "pickup", serviceFee);
+    return { ...quote, problems: [...quote.problems, { code: "ineligible", message: COURIER_NOT_OFFERED }] };
+  }
+  if (fulfillment !== "store-delivery") {
+    return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee);
+  }
+  let point: { lat: number; lng: number } | null = null;
+  if (request && store.lat != null && store.lng != null) {
+    const cached = await lookupConfirmed(
+      { line1: request.line1, city: request.city, state: request.state, zip: request.zip },
+      { lat: store.lat, lng: store.lng, radiusMi: Number(store.deliveryRadiusMi) },
+    );
+    if (cached?.ok) point = { lat: cached.match.lat, lng: cached.match.lng };
+  }
+  return computeQuote(
+    minimumOrderCents,
+    serverLines,
+    contact,
+    fulfillment,
+    serviceFee,
+    deliveryQuoteInput(store, point, request?.leaveAtDoor === true),
+  );
 }
 
+export { COURIER_NOT_OFFERED, computeQuote, type StoreDeliveryQuote } from "./quote";
 export { checkoutTestHooks } from "./test-hooks";
 export { SavedCardUnavailableError } from "./saved-card-payment";
+export { LiveModeBlockedError } from "./live-mode";
+export { StoreNotTakingOrdersError } from "../order/store-queue";
 
 export interface CreatePaymentIntentOptions {
   actorUserId?: string | null;
@@ -214,7 +211,12 @@ export async function createPaymentIntent(
   holdCents: number,
   options?: CreatePaymentIntentOptions,
 ): Promise<{ clientSecret: string; paymentIntentId: string; attemptToken?: string }> {
+  assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
+  // Refuse before any Stripe call. placeOrder re-checks under the store lock.
+  if (storeAvailability(store.hours, store.timezone, new Date()).kind === "unavailable") {
+    throw new StoreNotTakingOrdersError();
+  }
   if (options?.actorUserId) {
     return prepareSignedInPaymentIntent(storeId, cartId, holdCents, {
       actorUserId: options.actorUserId,
@@ -241,6 +243,7 @@ export async function createPaymentIntent(
       }
       if (provenanceOk && OPENABLE_PAYMENT.has(existing.status)) {
         if (!existing.client_secret) throw new Error("Stripe did not return a client secret");
+        await tx.cart.update({ where: { id: cartId }, data: { orphanCheckedAt: null } });
         return {
           kind: "reuse" as const,
           clientSecret: existing.client_secret,
@@ -316,6 +319,53 @@ export async function createPaymentIntent(
   return { clientSecret: pi.client_secret, paymentIntentId: pi.id };
 }
 
+export interface DeliverySnapshot {
+  line1: string;
+  line2: string | null;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number;
+  lng: number;
+  leaveAtDoor: boolean;
+}
+
+/** Writes the confirmed address onto the cart, or clears it for pickup. */
+export async function saveDeliverySnapshot(
+  storeId: string,
+  cartId: string,
+  snapshot: DeliverySnapshot | null,
+): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await lockCart(tx, cartId);
+    await tx.cart.update({
+      where: { id: cartId },
+      data: snapshot
+        ? {
+            deliveryLine1: snapshot.line1,
+            deliveryLine2: snapshot.line2,
+            deliveryCity: snapshot.city,
+            deliveryState: snapshot.state,
+            deliveryZip: snapshot.zip,
+            deliveryLat: snapshot.lat,
+            deliveryLng: snapshot.lng,
+            leaveAtDoor: snapshot.leaveAtDoor,
+          }
+        : {
+            deliveryLine1: null,
+            deliveryLine2: null,
+            deliveryCity: null,
+            deliveryState: null,
+            deliveryZip: null,
+            deliveryLat: null,
+            deliveryLng: null,
+            leaveAtDoor: false,
+          },
+    });
+  });
+}
+
 function runTestHook(hook: (() => Promise<void>) | null): Promise<void> {
   if (process.env.NODE_ENV === "test" && hook) return hook();
   return Promise.resolve();
@@ -346,6 +396,8 @@ export interface RecordAuthorizedOrderInput {
   /** True when metadata includes purchase_epoch, including a value that is not a number. */
   epochPresent?: boolean;
   minimumOrderCents?: number;
+  /** Direct place calls can set this even when the cart snapshot does not. */
+  leaveAtDoor?: boolean;
 }
 
 function paymentIntentTaken(err: unknown): boolean {
@@ -366,10 +418,10 @@ function paymentIntentTaken(err: unknown): boolean {
 export async function recordAuthorizedOrder(
   storeId: string,
   input: RecordAuthorizedOrderInput,
-): Promise<{ orderId: string; created: boolean }> {
+): Promise<{ orderId: string; created: boolean; trackingToken: string | null }> {
   try {
-    return await storeScopedTransaction(storeId, async (tx) => {
-      await lockStoreRow(tx, storeId);
+    const recorded = await storeScopedTransaction(storeId, async (tx) => {
+      const lockedStore = await lockStoreRow(tx, storeId);
 
       const existing = await tx.order.findUnique({
         where: { paymentIntentId: input.paymentIntentId },
@@ -384,8 +436,17 @@ export async function recordAuthorizedOrder(
             throw new Error("Cart not found");
           }
         }
-        return { orderId: existing.id, created: false };
+        return { orderId: existing.id, created: false as const, notify: false, trackingToken: existing.trackingToken };
       }
+
+      // Under the store lock, after the replay branch: hours saved mid-checkout
+      // either refuse here with no write, or wait for this order to commit.
+      const now = new Date();
+      const hours = await readStoreHours(tx, storeId);
+      const availability = hours
+        ? storeAvailability(hours.hours, hours.timezone, now)
+        : ({ kind: "unavailable" } as const);
+      if (availability.kind === "unavailable") throw new StoreNotTakingOrdersError();
 
       if (input.lines.length === 0) {
         throw new Error("Order lines are required");
@@ -422,17 +483,38 @@ export async function recordAuthorizedOrder(
         swapRule: line.swapRule,
         substituteVariantId: line.substituteVariantId,
         maxPerOrder: line.variant.listing.maxPerOrder,
+        frozen: line.variant.listing.frozen,
       }));
       if (!sameBasket(current, input.lines)) throw new BasketChangedError();
+      const point = cart.deliveryLat != null && cart.deliveryLng != null
+        ? { lat: cart.deliveryLat, lng: cart.deliveryLng }
+        : null;
+      const delivery = input.fulfillment === "store-delivery"
+        ? deliveryQuoteInput(lockedStore, point, cart.leaveAtDoor || input.leaveAtDoor === true)
+        : null;
+      const serviceFee = await readServiceFeeSettings(tx);
       const currentQuote = computeQuote(
         input.minimumOrderCents ?? 0,
         current,
         input.contact,
         input.fulfillment,
+        serviceFee,
+        delivery,
       );
-      if (currentQuote.holdCents !== (input.paymentAmount ?? input.quote.holdCents)) {
+      if (
+        currentQuote.problems.length > 0
+        || currentQuote.holdCents !== (input.paymentAmount ?? input.quote.holdCents)
+      ) {
         throw new BasketChangedError();
       }
+      const delivering = input.fulfillment === "store-delivery" && point != null;
+      const distanceMi = delivering && lockedStore.lat != null && lockedStore.lng != null
+        ? assessRadius(point, {
+            lat: lockedStore.lat,
+            lng: lockedStore.lng,
+            radiusMi: lockedStore.deliveryRadiusMi,
+          }).roundedMi
+        : null;
 
       const variantIds = [
         ...new Set(
@@ -484,14 +566,35 @@ export async function recordAuthorizedOrder(
           status: "AUTHORIZED",
           fulfillment: input.fulfillment,
           pickupSlot: input.pickupSlot !== "asap" ? input.pickupSlot : null,
-          subtotalCents: input.quote.subtotalCents,
-          tipCents: input.quote.tipCents,
-          bufferCents: input.quote.bufferCents,
-          totalAuthorizedCents: input.quote.holdCents,
+          subtotalCents: currentQuote.subtotalCents,
+          tipCents: currentQuote.tipCents,
+          bufferCents: currentQuote.bufferCents,
+          totalAuthorizedCents: currentQuote.holdCents,
+          deliveryFeeCents: currentQuote.deliveryFeeCents,
+          totalCents: currentQuote.totalCents,
           paymentIntentId: input.paymentIntentId,
           sourceCartId: input.cartId,
-          platformFeeCents: platformFeeCentsForCapture(input.quote.totalCents),
+          serviceFeeCents: currentQuote.serviceFeeCents,
+          serviceFeeBps: serviceFee.rateBps,
+          serviceFeeMinCents: serviceFee.minCents,
+          serviceFeeMaxCents: serviceFee.maxCents,
+          platformFeeCents: captureSplit({
+            capturedCents: currentQuote.totalCents,
+            serviceFeeCents: currentQuote.serviceFeeCents,
+            courierFeeCents: 0,
+          }).platformFeeCents,
           notes: input.notes || null,
+          deliveryLine1: delivering ? cart.deliveryLine1 : null,
+          deliveryLine2: delivering ? cart.deliveryLine2 : null,
+          deliveryCity: delivering ? cart.deliveryCity : null,
+          deliveryState: delivering ? cart.deliveryState : null,
+          deliveryZip: delivering ? cart.deliveryZip : null,
+          deliveryLat: delivering ? cart.deliveryLat : null,
+          deliveryLng: delivering ? cart.deliveryLng : null,
+          deliveryDistanceMi: distanceMi,
+          leaveAtDoor: delivering ? cart.leaveAtDoor : false,
+          trackingToken: newTrackingToken(),
+          acceptanceClockStartsAt: availability.clockStartsAt,
         },
       });
       const orderLines = await tx.orderLine.createManyAndReturn({
@@ -517,6 +620,8 @@ export async function recordAuthorizedOrder(
         lockedStock,
       );
       await tx.cartLine.deleteMany({ where: { cartId: input.cartId } });
+      // The assistant's pickup time was for this order; the next basket starts fresh (#247).
+      await tx.aiConversation.updateMany({ where: { cartId: input.cartId }, data: { checkoutDraft: Prisma.DbNull } });
       await tx.cart.update({
         where: { id: input.cartId },
         data: {
@@ -525,8 +630,11 @@ export async function recordAuthorizedOrder(
           purchaseEpoch: { increment: 1 },
         },
       });
-      return { orderId: order.id, created: true };
+      const notify = await recordOrderNotification(tx, storeId, order.id, "placed");
+      return { orderId: order.id, created: true as const, notify, trackingToken: order.trackingToken };
     }, { timeout: 40_000, maxWait: 8_000 });
+    if (recorded.notify) scheduleOrderNotification(storeId, recorded.orderId, "placed");
+    return { orderId: recorded.orderId, created: recorded.created, trackingToken: recorded.trackingToken };
   } catch (err) {
     if (paymentIntentTaken(err)) {
       throw new Error("PaymentIntent is already recorded");
@@ -545,6 +653,7 @@ function cartLinesToOrderLines(
   swapRule: string;
   substituteVariantId: string | null;
   maxPerOrder: number | null;
+  frozen: boolean;
 }> {
   return cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -554,7 +663,12 @@ function cartLinesToOrderLines(
     swapRule: l.swapRule,
     substituteVariantId: l.substituteVariantId,
     maxPerOrder: l.variant.listing.maxPerOrder,
+    frozen: l.variant.listing.frozen,
   }));
+}
+
+function stripeIntentMissing(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "resource_missing";
 }
 
 function stripeAlreadyCanceled(error: unknown): boolean {
@@ -567,25 +681,29 @@ function stripeAlreadyCanceled(error: unknown): boolean {
 /**
  * Reserves this intent for release under the same locks placement takes, then
  * tells Stripe. An order that commits first is left capturable. A reservation
- * that commits first makes a later place refuse.
+ * that commits first makes a later place refuse. With `cartUpdatedAt`, a cart
+ * written since that read is left alone.
  */
 export async function releaseLosingHold(
   storeId: string,
   cartId: string,
   paymentIntentId: string,
+  cancellationReason?: "abandoned",
+  cartUpdatedAt?: Date,
 ): Promise<void> {
   const reserved = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     await lockCart(tx, cartId);
     if (await orderExistsForPaymentIntent(tx, paymentIntentId)) return false;
+    const cart = await tx.cart.findUnique({
+      where: { id: cartId },
+      select: { paymentIntentId: true, updatedAt: true },
+    });
+    if (cartUpdatedAt && cart && cart.updatedAt.getTime() !== cartUpdatedAt.getTime()) return false;
     await tx.paymentIntentRelease.upsert({
       where: { paymentIntentId },
       create: { paymentIntentId, storeId },
       update: {},
-    });
-    const cart = await tx.cart.findUnique({
-      where: { id: cartId },
-      select: { paymentIntentId: true },
     });
     if (cart?.paymentIntentId === paymentIntentId) {
       await tx.cart.update({
@@ -607,16 +725,71 @@ export async function releaseLosingHold(
     }
     await getStripeClient().paymentIntents.cancel(
       paymentIntentId,
-      undefined,
+      cancellationReason ? { cancellation_reason: cancellationReason } : undefined,
       { idempotencyKey: key },
     );
   } catch (error) {
-    if (stripeAlreadyCanceled(error)) return;
+    if (stripeAlreadyCanceled(error) || stripeIntentMissing(error)) return;
     console.error(JSON.stringify({
       event: "losing_hold_release_failed",
       paymentIntentId,
       message: "Platform alerted. The authorization expires on its own.",
     }));
+  }
+}
+
+/** A cart whose intent never got a card is cancelled once untouched this long. */
+const DEAD_CART_MS = 24 * 60 * 60_000;
+const UNPAID_PAYMENT = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
+/** No hold left to release; the cart's intent is cleared so it leaves the sweep. */
+const FINISHED_PAYMENT = new Set(["canceled", "succeeded"]);
+
+/**
+ * Releases card holds that never became an order: the intent is still
+ * `requires_capture` and was authorized more than the grace ago. Also cancels
+ * intents that never got a card within a day, and clears intents that are
+ * finished or that Stripe no longer has, so they leave the sweep; a returning
+ * shopper gets a fresh intent. A cart that fails its check is still moved to the
+ * back. releaseLosingHold re-checks for an order and a cart write since the find
+ * under the store and cart locks and writes the tombstone, so a placeOrder that
+ * wins the race keeps its hold and a later one is refused.
+ */
+export async function releaseOrphanHolds(
+  carts: ReadonlyArray<{ storeId: string; cartId: string; paymentIntentId: string; updatedAt: Date }>,
+): Promise<void> {
+  for (const cart of carts) {
+    const release = () => releaseLosingHold(cart.storeId, cart.cartId, cart.paymentIntentId, "abandoned", cart.updatedAt);
+    try {
+      let pi: NormalizedPaymentIntent;
+      try {
+        pi = await retrieveCheckoutIntent(cart.paymentIntentId);
+      } catch (error) {
+        if (!stripeIntentMissing(error)) throw error;
+        await release();
+        continue;
+      }
+      if (pi.status === "requires_capture" && pi.authorized_at != null) {
+        if (Date.now() - pi.authorized_at < ORPHAN_HOLD_GRACE_MS) continue;
+        await release();
+        continue;
+      }
+      if (FINISHED_PAYMENT.has(pi.status)
+        || (UNPAID_PAYMENT.has(pi.status) && Date.now() - cart.updatedAt.getTime() > DEAD_CART_MS)) {
+        await release();
+        continue;
+      }
+      if (pi.status === "requires_capture") {
+        console.error(JSON.stringify({ event: "orphan_hold_without_authorization_time", paymentIntentId: pi.id }));
+      }
+      await markOrphanHoldChecked(cart.storeId, cart.cartId, cart.paymentIntentId);
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "orphan_hold_release_failed",
+        paymentIntentId: cart.paymentIntentId,
+        message: error instanceof Error ? error.message : String(error),
+      }));
+      await markOrphanHoldChecked(cart.storeId, cart.cartId, cart.paymentIntentId).catch(() => {});
+    }
   }
 }
 
@@ -629,7 +802,7 @@ async function settleConsumedBasket(input: {
   contact: Contact;
   fulfillment: Fulfillment;
 }): Promise<
-  | { kind: "order"; result: { token: string; quote: CheckoutQuote } }
+  | { kind: "order"; result: PlacedOrder }
   | { kind: "unproved" }
   | { kind: "none"; lines: number }
 > {
@@ -657,8 +830,9 @@ async function settleConsumedBasket(input: {
     })),
     input.contact,
     input.fulfillment,
+    orderServiceFeeSettings(order),
   );
-  return { kind: "order", result: { token: order.id, quote } };
+  return { kind: "order", result: { token: order.id, trackingToken: order.trackingToken, quote } };
 }
 
 /** An emptied cart that already has an order for this actor. Pay uses this before quoting a new charge. */
@@ -666,7 +840,7 @@ export async function resumeOrderedCart(
   storeId: string,
   cartId: string,
   actorUserId: string | null,
-): Promise<{ kind: "order"; token: string } | { kind: "unproved" } | null> {
+): Promise<{ kind: "order"; token: string; trackingToken: string | null } | { kind: "unproved" } | null> {
   const scoped = storeScoped(storeId);
   const cart = await scoped.cart.findUnique({
     where: { id: cartId },
@@ -676,12 +850,15 @@ export async function resumeOrderedCart(
   const order = await scoped.order.findFirst({
     where: { sourceCartId: cartId },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true },
+    select: { id: true, trackingToken: true },
   });
   if (!order) return null;
   if (cart.userId !== actorUserId) return { kind: "unproved" };
-  return { kind: "order", token: order.id };
+  return { kind: "order", token: order.id, trackingToken: order.trackingToken };
 }
+
+/** `token` is the order id; `trackingToken` is the id for the shopper's link, null for an order made before tokens. */
+export type PlacedOrder = { token: string; trackingToken: string | null; quote: CheckoutQuote };
 
 export async function placeOrder(
   storeId: string,
@@ -693,10 +870,12 @@ export async function placeOrder(
   pickupSlot: string | null,
   paymentIntentId: string,
   actorUserId: string | null = null,
-): Promise<{ token: string; quote: CheckoutQuote }> {
+  leaveAtDoor = false,
+): Promise<PlacedOrder> {
+  assertLiveModeAllowed();
   const store = await getStripeStore(storeId);
 
-  if (fulfillment !== "pickup") {
+  if (fulfillment === "courier") {
     throw new Error("Only pickup fulfillment is supported");
   }
 
@@ -748,7 +927,7 @@ export async function placeOrder(
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
     // Idempotent replay — don't re-send the Inngest event or touch the cart.
     await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
-    return { token: existingOrder.id, quote };
+    return { token: existingOrder.id, trackingToken: existingOrder.trackingToken, quote };
   }
 
   await runTestHook(checkoutTestHooks.afterMissedOrderLookup);
@@ -769,7 +948,7 @@ export async function placeOrder(
     }
     const quote = await quoteFromCart(storeId, minimumOrderCents, cartId, contact, fulfillment);
     await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
-    return { token: replay.id, quote };
+    return { token: replay.id, trackingToken: replay.trackingToken, quote };
   }
 
   await runTestHook(checkoutTestHooks.afterPostReadLookupMiss);
@@ -796,16 +975,29 @@ export async function placeOrder(
     price: l.price,
     qty: l.qty,
     maxPerOrder: l.maxPerOrder,
+    frozen: l.frozen,
   }));
-  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+  const [storeRow, serviceFee] = await Promise.all([
+    platform.store.findUnique({ where: { id: storeId } }),
+    readServiceFeeSettings(),
+  ]);
+  if (!storeRow) throw new Error("Store not found");
+  const point = cart.delivery.lat != null && cart.delivery.lng != null
+    ? { lat: cart.delivery.lat, lng: cart.delivery.lng }
+    : null;
+  const delivery = fulfillment === "store-delivery"
+    ? deliveryQuoteInput(storeRow, point, cart.delivery.leaveAtDoor || leaveAtDoor)
+    : null;
+  const quote = computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee, delivery);
 
-  if (pi.amount !== quote.holdCents) {
+  const contactOnly = quote.problems.length > 0
+    && quote.problems.every((problem) => problem.code === "invalid-contact");
+  if (contactOnly) {
+    throw new Error(quote.problems.map((problem) => problem.message).join(" "));
+  }
+  if (quote.problems.length > 0 || pi.amount !== quote.holdCents) {
     await releaseLosingHold(storeId, cartId, paymentIntentId);
     throw new BasketChangedError();
-  }
-
-  if (quote.problems.length) {
-    throw new Error(quote.problems.map((p) => p.message).join(" "));
   }
 
   for (const line of orderLineData) {
@@ -827,7 +1019,7 @@ export async function placeOrder(
     }
   }
 
-  let recorded: { orderId: string; created: boolean };
+  let recorded: { orderId: string; created: boolean; trackingToken: string | null };
   try {
     recorded = await recordAuthorizedOrder(storeId, {
       cartId,
@@ -842,6 +1034,7 @@ export async function placeOrder(
       purchaseEpoch: epochStamp(pi.metadata).epoch,
       epochPresent: epochStamp(pi.metadata).present,
       minimumOrderCents,
+      leaveAtDoor,
       lines: orderLineData.map((line) => ({
         variantId: line.variantId,
         qty: line.qty,
@@ -870,7 +1063,7 @@ export async function placeOrder(
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw new Error("Cart is empty");
     }
-    if (error instanceof BasketChangedError) {
+    if (error instanceof BasketChangedError || error instanceof StoreNotTakingOrdersError) {
       await releaseLosingHold(storeId, cartId, paymentIntentId);
       throw error;
     }
@@ -885,7 +1078,7 @@ export async function placeOrder(
   }
   await recoverSavedCardConsent(actorUserId, paymentIntentId, pi.payment_method);
 
-  return { token: recorded.orderId, quote };
+  return { token: recorded.orderId, trackingToken: recorded.trackingToken, quote };
 }
 
 async function recoverSavedCardConsent(
@@ -908,7 +1101,7 @@ async function quoteFromCart(
   contact: Contact,
   fulfillment: Fulfillment,
 ): Promise<CheckoutQuote> {
-  const cart = await getCartWithLines(storeId, cartId);
+  const [cart, serviceFee] = await Promise.all([getCartWithLines(storeId, cartId), readServiceFeeSettings()]);
   const serverLines = cart
     ? cart.lines.map((line) => ({
         price: line.variant.price,
@@ -916,5 +1109,5 @@ async function quoteFromCart(
         maxPerOrder: line.variant.listing.maxPerOrder,
       }))
     : [];
-  return computeQuote(minimumOrderCents, serverLines, contact, fulfillment);
+  return computeQuote(minimumOrderCents, serverLines, contact, fulfillment, serviceFee);
 }

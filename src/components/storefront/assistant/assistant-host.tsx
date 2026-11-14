@@ -11,6 +11,7 @@ export async function AssistantHost({ store }: { store: ValidatedStore }) {
   return (
     <AssistantClient
       storeId={store.id}
+      storeName={store.name}
       storeStatus={store.status}
       accountId={session?.user?.id ?? null}
     />

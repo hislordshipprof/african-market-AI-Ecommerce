@@ -15,7 +15,7 @@ import { CART_COOKIE, serializeCartCookie } from "../cart/cookies";
 import { readBrowserId } from "../cart/browser";
 import { CartError, getOrCreateCart } from "../cart/service";
 import { lockConversationRow, storeScoped, storeScopedTransaction, takeRollingFileTurn } from "../db";
-import { findStore } from "../get-store";
+import { findStoreForHeaders } from "../get-store";
 import { auth } from "../auth";
 import {
   attachmentDescriptors,
@@ -37,14 +37,15 @@ import {
 } from "./contract";
 import { assistantMessageFromActions, replaceRecoveredTurn, replayAssistantMessage, replyStatus, stampAssistant } from "./replay";
 import { writeServerChoices } from "./server-choices";
-import { acceptanceForTurn } from "./shown";
+import { acceptanceForTurn, shownProductIds } from "./shown";
 import { clientIp } from "./client-ip";
 import { takeRateLimit } from "../rate-limit/app-limiter";
 import { requireSameOrigin } from "../security/same-origin";
-import { callCostMicros, type TokenUsage } from "./cost";
+import { callCostMicros, tokenUsageOf } from "./cost";
 import { AssistantConfigError, assistantModelId, assistantProviderOptions, createAssistantModel } from "./model";
 import { groundingTransform, keyedUnitPricesFromHistory } from "./grounding";
 import { assistantSpendState, claimCapAlert, utcDay } from "./spend";
+import { ASSISTANT_CAP_MESSAGE, claimAssistantChat } from "../billing/assistant-chats";
 import { ASSISTANT_STATIC_PROMPT, storeContextMessage } from "./system-prompt";
 import { assistantTools } from "./tools";
 
@@ -53,6 +54,13 @@ const IP_LIMIT = 60;
 const CART_LIMIT = 30;
 const FILE_LIMIT = 10;
 const LEASE_MS = 90_000;
+/** Exported so the shopper-assistant eval can fingerprint the step cap. */
+export const ASSISTANT_STEP_CAP = 8;
+/**
+ * Exported so the shopper-assistant eval can fingerprint the output limit.
+ * 1024 cut off a 25-item list's parallel searches mid-call and ended the turn with an empty cart (#146).
+ */
+export const ASSISTANT_MAX_OUTPUT_TOKENS = 4096;
 const FIXED_ERROR = "Sorry, something went wrong. Please try again.";
 const STEP_LIMIT_TEXT = "I've done as much as I can in one go. Tell me what you'd like next.";
 const RESTING_MESSAGE = "The helper is resting right now. You can still shop and check out as usual.";
@@ -74,8 +82,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     if (!parsed.ok) return jsonError(parsed.status, parsed.code, parsed.message);
     if (!requireSameOrigin(request)) return jsonError(403, "forbidden_origin", "This request was not sent from the store.");
 
-    const slug = request.headers.get("x-store-slug");
-    const store = slug ? await findStore(slug) : null;
+    const store = await findStoreForHeaders(request.headers);
     if (!store) return jsonError(404, "store_not_found", "Store not found.");
     if (store.status === "suspended") return jsonError(403, "store_suspended", "This store is not taking orders.");
 
@@ -200,6 +207,18 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     };
     const prior = asMessages(turn.messages);
     const alreadyThere = prior.some((message) => message.role === "user" && message.id === parsed.id);
+    if (!alreadyThere) {
+      let chat;
+      try {
+        chat = await claimAssistantChat(store.id, at);
+      } catch {
+        chat = null;
+      }
+      if (!chat?.ok) {
+        await releaseLease(store.id, turn.id);
+        return jsonError(503, "assistant_unavailable", ASSISTANT_CAP_MESSAGE);
+      }
+    }
     const withUser = alreadyThere ? prior : [...prior, userMessage];
     try {
       await storeScoped(store.id).aiConversation.update({
@@ -220,7 +239,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       turnMessageId: parsed.id,
       acceptance: acceptanceForTurn(withUser, parsed.id, scrubbed),
     };
-    const tools = assistantTools(turnCtx);
+    const tools = assistantTools(turnCtx, { lookupModel: model });
     const history = (await usableHistory(withUser, tools)).slice(-30);
     if (!history.some((message) => message.id === parsed.id)) {
       const current = withUser.find((message) => message.id === parsed.id);
@@ -230,7 +249,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
     let modelMessages: ModelMessage[];
     try {
       let attachmentIndex = 0;
-      modelMessages = await convertToModelMessages(sentHistory, {
+      modelMessages = await convertToModelMessages(withoutReasoning(sentHistory), {
         tools,
         convertDataPart: (part) => {
           if (part.type !== "data-attachment") return undefined;
@@ -254,15 +273,15 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
           content: ASSISTANT_STATIC_PROMPT,
           providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
         },
-        { role: "system", content: storeContextMessage(store, at) },
+        { role: "system", content: storeContextMessage(store, at, shownProductIds(sentHistory)) },
         ...modelMessages,
       ],
       allowSystemInMessages: true,
       tools,
       ...(fileTurn ? { activeTools: [...FILE_TURN_TOOLS] } : {}),
       toolCallConcurrency: 1,
-      stopWhen: stepCountIs(8),
-      maxOutputTokens: 1024,
+      stopWhen: stepCountIs(ASSISTANT_STEP_CAP),
+      maxOutputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
       maxRetries: 0,
       streamRetries: 0,
       timeout: { totalMs: fileTurn ? 45_000 : 55_000 },
@@ -347,7 +366,7 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
         if (openReply) replyParts.push(openReply);
         const steps = await Promise.resolve(result.steps).catch(() => []);
         const last = steps.at(-1);
-        if (steps.length >= 8 && last?.finishReason === "tool-calls") {
+        if (steps.length >= ASSISTANT_STEP_CAP && last?.finishReason === "tool-calls") {
           writer.write({ type: "text-start", id: "step-limit" });
           writer.write({ type: "text-delta", id: "step-limit", delta: STEP_LIMIT_TEXT });
           writer.write({ type: "text-end", id: "step-limit" });
@@ -411,7 +430,7 @@ async function persistTurn(args: {
   try {
     const steps = await args.result.steps;
     for (const step of steps) {
-      const usage = normalizeUsage(step.usage);
+      const usage = tokenUsageOf(step.usage);
       try {
         cost += callCostMicros(args.modelId, usage);
       } catch {
@@ -449,31 +468,6 @@ function configuredModelId(): ReturnType<typeof assistantModelId> {
   }
 }
 
-function normalizeUsage(usage: unknown): TokenUsage {
-  const value = (usage ?? {}) as {
-    inputTokens?: number | TokenUsage["inputTokens"];
-    outputTokens?: number | TokenUsage["outputTokens"];
-    inputTokenDetails?: { noCacheTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number };
-  };
-  if (value.inputTokens && typeof value.inputTokens === "object") {
-    const output = value.outputTokens;
-    return {
-      inputTokens: value.inputTokens,
-      outputTokens: output && typeof output === "object" ? output : { total: typeof output === "number" ? output : 0 },
-    };
-  }
-  const details = value.inputTokenDetails ?? {};
-  return {
-    inputTokens: {
-      total: typeof value.inputTokens === "number" ? value.inputTokens : 0,
-      noCache: details.noCacheTokens,
-      cacheRead: details.cacheReadTokens,
-      cacheWrite: details.cacheWriteTokens,
-    },
-    outputTokens: { total: typeof value.outputTokens === "number" ? value.outputTokens : 0 },
-  };
-}
-
 function retryVisible(messages: UIMessage[], clientId: string, alreadyThere: boolean): UIMessage[] {
   if (!alreadyThere) return messages;
   const index = messages.findIndex((message) => message.role === "user" && message.id === clientId);
@@ -506,6 +500,18 @@ function coerceToolInputs(messages: UIMessage[]): UIMessage[] {
       return part;
     }),
   }));
+}
+
+/**
+ * Earlier turns' thinking blocks are left out. Their signatures bind them to the
+ * exact system prompt and messages of that turn, which the next turn changes.
+ */
+function withoutReasoning(messages: UIMessage[]): UIMessage[] {
+  return messages.flatMap((message) => {
+    if (message.role !== "assistant") return [message];
+    const parts = message.parts.filter((part) => part.type !== "reasoning");
+    return parts.length === 0 ? [] : [{ ...message, parts }];
+  });
 }
 
 async function usableHistory(messages: UIMessage[], tools: ReturnType<typeof assistantTools>): Promise<UIMessage[]> {

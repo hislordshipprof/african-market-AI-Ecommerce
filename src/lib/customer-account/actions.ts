@@ -4,7 +4,13 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { auth } from "../auth";
 import { parseInput } from "../security/parse-input";
-import { ADDRESS_NOT_FOUND, SIGN_IN_MESSAGE, validateAddress, type AddressInput } from "./address-validation";
+import {
+  ADDRESS_MESSAGES,
+  ADDRESS_NOT_FOUND,
+  SIGN_IN_MESSAGE,
+  validateAddress,
+  type AddressValidation,
+} from "./address-validation";
 import {
   addAddress,
   editAddress,
@@ -31,38 +37,20 @@ function failed(error: unknown): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : "Something went wrong. Please try again." };
 }
 
-const ADDRESS_FIELDS = {
-  label: "Enter an address label of 1 to 40 characters.",
-  line1: "Enter a street address of at most 100 characters.",
-  line2: "Address line 2 must be at most 100 characters.",
-  city: "Enter a city of at most 60 characters.",
-  state: "Enter a US state or DC.",
-  zip: "Enter a 5-digit ZIP code.",
-  notes: "Notes must be at most 280 characters.",
-} as const;
-
 const addressSchema = z.strictObject({
-  label: z.string(),
-  line1: z.string(),
-  line2: z.string().nullable().optional(),
-  city: z.string(),
-  state: z.string(),
-  zip: z.string(),
-  notes: z.string().nullable().optional(),
-});
+  label: z.string({ error: ADDRESS_MESSAGES.label }),
+  line1: z.string({ error: ADDRESS_MESSAGES.line1 }),
+  line2: z.string({ error: ADDRESS_MESSAGES.line2 }).nullable().optional(),
+  city: z.string({ error: ADDRESS_MESSAGES.city }),
+  state: z.string({ error: ADDRESS_MESSAGES.state }),
+  zip: z.string({ error: ADDRESS_MESSAGES.zip }),
+  notes: z.string({ error: ADDRESS_MESSAGES.notes }).nullable().optional(),
+}, { error: ADDRESS_MESSAGES.invalid });
 
-function readAddress(input: unknown): { ok: true; value: AddressInput } | { ok: false; error: string } {
-  const parsed = addressSchema.safeParse(input);
-  if (!parsed.success) {
-    const key = parsed.error.issues[0]?.path[0];
-    const error = typeof key === "string" && key in ADDRESS_FIELDS
-      ? ADDRESS_FIELDS[key as keyof typeof ADDRESS_FIELDS]
-      : ADDRESS_FIELDS.label;
-    return { ok: false, error };
-  }
-  const checked = validateAddress(parsed.data);
-  if (!checked.ok) return checked;
-  return { ok: true, value: checked.value };
+function readAddress(input: unknown): AddressValidation {
+  const parsed = parseInput(addressSchema, input);
+  if (!parsed.ok) return { ok: false, error: parsed.issues[0] ?? ADDRESS_MESSAGES.invalid };
+  return validateAddress(parsed.data);
 }
 
 function readId(value: unknown): { ok: true; id: string } | { ok: false; error: string } {

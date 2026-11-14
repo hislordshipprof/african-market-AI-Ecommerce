@@ -10,14 +10,21 @@ import {
   quoteCheckout,
   createPaymentIntent,
   placeOrder,
+  saveDeliverySnapshot,
   resumeOrderedCart,
   SavedCardUnavailableError,
   BasketAlreadyOrderedError,
   BasketChangedError,
+  type DeliveryRequest,
 } from "./service";
 import type { CheckoutQuote, Contact, Fulfillment } from "../customer-flow/contracts";
 import { parseInput } from "../security/parse-input";
 import { takeRateLimit } from "../rate-limit/app-limiter";
+import { clientIp } from "../assistant/client-ip";
+import { confirmDeliveryAddress, lookupConfirmed } from "../address/confirm";
+import { platform } from "../db";
+import { loadCheckoutDraft } from "../assistant/checkout-draft";
+import type { PickupSlot } from "../order/pickup-slots";
 
 const contactSchema = z.strictObject({
   name: z.string().max(200),
@@ -30,8 +37,33 @@ const selectionSchema = z.strictObject({
   savedCardId: z.string().min(1).max(200).nullable().optional(),
   attemptToken: z.string().min(1).max(200).nullable().optional(),
 }).optional();
+const deliverySchema = z.strictObject({
+  line1: z.string().max(80),
+  line2: z.string().max(60).nullable().optional(),
+  city: z.string().max(40),
+  state: z.string().max(40),
+  zip: z.string().max(10),
+  leaveAtDoor: z.boolean(),
+});
 const PAYMENT_LIMIT = 30;
 const PAYMENT_WINDOW_MS = 60 * 60 * 1000;
+
+function readDelivery(
+  fulfillment: Fulfillment,
+  delivery: unknown,
+): DeliveryRequest | null | { error: string } {
+  if (fulfillment !== "store-delivery") return null;
+  const parsed = parseInput(deliverySchema, delivery);
+  if (!parsed.ok) return { error: "We couldn't find that address" };
+  return {
+    line1: parsed.data.line1,
+    line2: parsed.data.line2 ?? null,
+    city: parsed.data.city,
+    state: parsed.data.state,
+    zip: parsed.data.zip,
+    leaveAtDoor: parsed.data.leaveAtDoor,
+  };
+}
 
 function readCheckout(
   contact: unknown,
@@ -56,12 +88,20 @@ async function signedInUserId(): Promise<string | null> {
 export async function quoteCheckoutAction(
   contact: Contact,
   fulfillment: Fulfillment,
+  delivery?: unknown,
 ): Promise<
   | { ok: true; quote: CheckoutQuote; orderedToken?: string }
   | { ok: false; error: string; code?: "basket_already_ordered" }
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
+  // A store-delivery visit with no confirmed address is still a quote: the fee
+  // stays visible and Pay can ask the shopper to confirm. Payment and placement
+  // keep refusing that payload.
+  const request = input.fulfillment === "store-delivery" && delivery == null
+    ? null
+    : readDelivery(input.fulfillment, delivery);
+  if (request && "error" in request) return { ok: false, error: request.error };
   try {
     const store = await getStore();
     const resolved = await resolveShopperCart();
@@ -78,8 +118,11 @@ export async function quoteCheckoutAction(
       resolved.cartId,
       input.contact,
       input.fulfillment,
+      request,
     );
-    if (resume?.kind === "order") return { ok: true, quote, orderedToken: resume.token };
+    if (resume?.kind === "order") {
+      return { ok: true, quote, orderedToken: resume.trackingToken ?? resume.token };
+    }
     return { ok: true, quote };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Quote failed" };
@@ -90,6 +133,7 @@ export async function createPaymentIntentAction(
   contact: Contact,
   fulfillment: Fulfillment,
   selection?: { saveCard?: boolean; savedCardId?: string | null; attemptToken?: string | null },
+  delivery?: unknown,
 ): Promise<
   | { ok: true; orderedToken: string }
   | { ok: true; clientSecret: string; paymentIntentId: string; holdCents: number; attemptToken?: string }
@@ -97,6 +141,8 @@ export async function createPaymentIntentAction(
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
+  const request = readDelivery(input.fulfillment, delivery);
+  if (request && "error" in request) return { ok: false, error: request.error };
   const selectionParsed = parseInput(selectionSchema, selection);
   if (!selectionParsed.ok) return { ok: false, error: "Payment setup failed" };
   const chosen = selectionParsed.data;
@@ -111,7 +157,9 @@ export async function createPaymentIntentAction(
     const cartId = resolved.cartId;
     const actorUserId = await signedInUserId();
     const resume = await resumeOrderedCart(store.id, cartId, actorUserId);
-    if (resume?.kind === "order") return { ok: true, orderedToken: resume.token };
+    if (resume?.kind === "order") {
+      return { ok: true, orderedToken: resume.trackingToken ?? resume.token };
+    }
     if (resume?.kind === "unproved") {
       return { ok: false, error: "This order was already placed", code: "basket_already_ordered" };
     }
@@ -129,12 +177,49 @@ export async function createPaymentIntentAction(
       cartId,
       input.contact,
       input.fulfillment,
+      request,
     );
     if (quote.problems.length) {
       return { ok: false, error: quote.problems.map((p) => p.message).join(" ") };
     }
     if (quote.holdCents < 50) {
       return { ok: false, error: "Order total is too low" };
+    }
+    const fresh = await platform.store.findUnique({ where: { id: store.id } });
+    if (!fresh) return { ok: false, error: "Payment setup failed" };
+    let snapshot: {
+      line1: string;
+      line2: string | null;
+      city: string;
+      state: string;
+      zip: string;
+      lat: number;
+      lng: number;
+      leaveAtDoor: boolean;
+    } | null = null;
+    if (request) {
+      if (fresh.lat == null || fresh.lng == null) {
+        return { ok: false, error: "Only pickup is available for this store." };
+      }
+      const cached = await lookupConfirmed(
+        { line1: request.line1, city: request.city, state: request.state, zip: request.zip },
+        { lat: fresh.lat, lng: fresh.lng, radiusMi: Number(fresh.deliveryRadiusMi) },
+      );
+      if (!cached) return { ok: false, error: "We couldn't find that address" };
+      if (!cached.ok) return { ok: false, error: cached.message };
+      if (!cached.withinRadius) {
+        return { ok: false, error: "That address is outside the delivery area" };
+      }
+      snapshot = {
+        line1: cached.match.line1,
+        line2: request.line2 ?? null,
+        city: cached.match.city,
+        state: cached.match.state,
+        zip: cached.match.zip,
+        lat: cached.match.lat,
+        lng: cached.match.lng,
+        leaveAtDoor: request.leaveAtDoor,
+      };
     }
     const result = await createPaymentIntent(store.id, cartId, quote.holdCents, actorUserId
       ? {
@@ -144,6 +229,7 @@ export async function createPaymentIntentAction(
           attemptToken: chosen?.attemptToken ?? null,
         }
       : undefined);
+    await saveDeliverySnapshot(store.id, cartId, input.fulfillment === "pickup" ? null : snapshot);
     return { ok: true, ...result, holdCents: quote.holdCents };
   } catch (e) {
     if (e instanceof SavedCardUnavailableError) {
@@ -162,12 +248,15 @@ export async function placeOrderAction(
   fulfillment: Fulfillment,
   notes: string,
   slot: string,
+  delivery?: unknown,
 ): Promise<
   | { ok: true; token: string }
   | { ok: false; error: string; code?: "basket_already_ordered" | "basket_changed" }
 > {
   const input = readCheckout(contact, fulfillment);
   if (!input.ok) return input;
+  const request = readDelivery(input.fulfillment, delivery);
+  if (request && "error" in request) return { ok: false, error: request.error };
   const payment = parseInput(z.string().min(1).max(200), paymentIntentId);
   const note = parseInput(z.string().max(2000), notes);
   const when = parseInput(z.string().max(80), slot);
@@ -186,8 +275,9 @@ export async function placeOrderAction(
       when.data !== "asap" ? when.data : null,
       payment.data,
       resolved.userId,
+      request?.leaveAtDoor ?? false,
     );
-    return { ok: true, token: result.token };
+    return { ok: true, token: result.trackingToken ?? result.token };
   } catch (e) {
     if (e instanceof BasketAlreadyOrderedError) {
       return { ok: false, error: e.message, code: e.code };
@@ -199,5 +289,65 @@ export async function placeOrderAction(
       ok: false,
       error: e instanceof Error ? e.message : "Could not place order",
     };
+  }
+}
+
+export async function confirmAddressAction(delivery: unknown): Promise<
+  | {
+      ok: true;
+      formatted: string;
+      line1: string;
+      city: string;
+      state: string;
+      zip: string;
+      withinRadius: boolean;
+      distanceMi: number;
+      message: string | null;
+    }
+  | { ok: false; error: string }
+> {
+  const parsed = parseInput(deliverySchema, delivery);
+  if (!parsed.ok) return { ok: false, error: "We couldn't find that address" };
+  try {
+    const store = await getStore();
+    if (store.lat == null || store.lng == null || Number(store.deliveryRadiusMi) <= 0) {
+      return { ok: false, error: "Only pickup is available for this store." };
+    }
+    const decision = await confirmDeliveryAddress(
+      {
+        line1: parsed.data.line1,
+        city: parsed.data.city,
+        state: parsed.data.state,
+        zip: parsed.data.zip,
+      },
+      { lat: store.lat, lng: store.lng, radiusMi: Number(store.deliveryRadiusMi) },
+      { limit: true, ip: clientIp(await headers()) },
+    );
+    if (!decision.ok) return { ok: false, error: decision.message };
+    return {
+      ok: true,
+      formatted: decision.match.formattedAddress,
+      line1: decision.match.line1,
+      city: decision.match.city,
+      state: decision.match.state,
+      zip: decision.match.zip,
+      withinRadius: decision.withinRadius,
+      distanceMi: decision.roundedMi,
+      message: decision.withinRadius ? null : "That address is outside the delivery area",
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "We couldn't check that address right now. Try again." };
+  }
+}
+
+/** The pickup slot the assistant saved for this cart (#247), if the store still offers it today. */
+export async function assistantCheckoutDraftAction(): Promise<{ slot: PickupSlot } | null> {
+  try {
+    const resolved = await resolveShopperCart();
+    if (!resolved) return null;
+    const draft = await loadCheckoutDraft(resolved.storeId, resolved.cartId);
+    return draft ? { slot: draft.slot } : null;
+  } catch {
+    return null;
   }
 }

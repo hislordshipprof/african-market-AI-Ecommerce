@@ -1,11 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { addLine } from "../cart/service";
-import { healthQueryRaw, storeScoped } from "../db";
+import { healthQueryRaw, storeScoped, storeScopedTransaction, withSessionTimeZone } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 
-const { retrieve, cancel, paymentIntents } = vi.hoisted(() => {
+const { retrieve, cancel, paymentIntents, getStripeClient } = vi.hoisted(() => {
   const paymentIntents = new Map<string, Record<string, unknown>>();
   function usesConnectedAccount(arg: unknown): boolean {
     return Boolean(
@@ -32,24 +32,28 @@ const { retrieve, cancel, paymentIntents } = vi.hoisted(() => {
     fixture.status = "canceled";
     return fixture;
   });
-  return { retrieve, cancel, paymentIntents };
+  const getStripeClient = vi.fn(() => ({ paymentIntents: { retrieve, cancel } }));
+  return { retrieve, cancel, paymentIntents, getStripeClient };
 });
 
-vi.mock("../stripe/provider", () => ({
-  getStripeClient: () => ({ paymentIntents: { retrieve, cancel } }),
-}));
+vi.mock("../stripe/provider", () => ({ getStripeClient }));
 
 vi.mock("../inngest/send", () => ({
   sendOrderAuthorized: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { sendOrderAuthorized } from "../inngest/send";
+import { setAddressProvider } from "../address/provider";
 import {
+  BasketChangedError,
   checkoutTestHooks,
   computeQuote,
+  createPaymentIntent,
   placeOrder,
   recordAuthorizedOrder,
 } from "./service";
+import { fakeCheckoutCallCount, getCheckoutPayments, resetFakeCheckoutPayments } from "../stripe/checkout-payments";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "ada@t236-orch.test" };
@@ -78,7 +82,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   const storeIds: string[] = [];
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     const login = (await healthQueryRaw`SELECT current_user, session_user`) as Array<{
       current_user: string;
@@ -148,7 +152,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   }
 
   function holdFor(price: number, qty: number) {
-    return computeQuote(0, [{ price, qty, maxPerOrder: null }], CONTACT, "pickup").holdCents;
+    return computeQuote(0, [{ price, qty, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE).holdCents;
   }
 
   function paymentIntent(opts: {
@@ -416,7 +420,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     await storeScoped(other.id).cartLine.create({
       data: { storeId: other.id, cartId: ownerCart.id, variantId: ownerVariant.id, qty: 1, swapRule: "exact_only" },
     });
-    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup");
+    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE);
     const recorded = await recordAuthorizedOrder(other.id, {
       cartId: ownerCart.id,
       contact: CONTACT,
@@ -483,7 +487,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     const primaryCart = await storeScoped(store.id).cart.create({
       data: { storeId: store.id, paymentIntentId: `pi_primary_${crypto.randomUUID()}` },
     });
-    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup");
+    const quote = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE);
     await expect(recordAuthorizedOrder(store.id, {
       cartId: primaryCart.id,
       contact: { ...CONTACT, email: "primary@t236-orch.test" },
@@ -589,7 +593,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       vi.mocked(sendOrderAuthorized).mockClear();
       retrieve.mockClear();
       const seeded = await seedPricedCart(row.label.replace(/\s+/g, "-"), 500, 1);
-      expect(seeded.amount).toBe(550);
+      expect(seeded.amount).toBe(649);
       const pause = pauseOn("afterMissedOrderLookup");
       const loser = watch(
         placeOrder(
@@ -732,11 +736,11 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
   it("a new order still checks the PaymentIntent amount against the hold", async () => {
     const store = await makeStore("amount");
     const variant = await makeVariant(store.id, 555);
-    const quote = computeQuote(0, [{ price: 555, qty: 1, maxPerOrder: null }], CONTACT, "pickup");
+    const quote = computeQuote(0, [{ price: 555, qty: 1, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE);
     expect(quote.bufferCents).toBe(56);
-    expect(quote.holdCents).toBe(611);
+    expect(quote.holdCents).toBe(710);
 
-    for (const amount of [610, 612]) {
+    for (const amount of [709, 711]) {
       const paymentIntentId = `pi_${amount}_${crypto.randomUUID()}`;
       const cart = await storeScoped(store.id).cart.create({
         data: { storeId: store.id, paymentIntentId },
@@ -762,7 +766,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
 
-    const paymentIntentId = `pi_611_${crypto.randomUUID()}`;
+    const paymentIntentId = `pi_710_${crypto.randomUUID()}`;
     const cart = await storeScoped(store.id).cart.create({
       data: { storeId: store.id, paymentIntentId },
     });
@@ -772,7 +776,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     paymentIntents.set(
       paymentIntentId,
       paymentIntent({
-        amount: 611,
+        amount: 710,
         destination: store.stripeAccountId!,
         onBehalfOf: store.stripeAccountId!,
         storeId: store.id,
@@ -780,7 +784,7 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     );
     const placed = await placeOrder(store.id, 0, cart.id, CONTACT, "pickup", null, null, paymentIntentId);
     const order = await storeScoped(store.id).order.findUnique({ where: { id: placed.token } });
-    expect(order?.totalAuthorizedCents).toBe(611);
+    expect(order?.totalAuthorizedCents).toBe(710);
     expect(order?.paymentIntentId).toBe(paymentIntentId);
     expect(order?.status).toBe("AUTHORIZED");
     expect(await counts(store.id)).toEqual({ orders: 1, customers: 1 });
@@ -906,13 +910,183 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
       await expect(rejected, field.label).rejects.not.toThrow(winner.token);
     }
     await expect(
-      placeOrder(owner.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId),
+      placeOrder(owner.id, 0, seeded.cart.id, CONTACT, "courier", null, null, seeded.paymentIntentId),
     ).rejects.toThrow(/Only pickup fulfillment is supported/);
     expect(await persistedOrder(owner.id, winner.token)).toEqual(beforeRows);
     expect(sendOrderAuthorized).not.toHaveBeenCalled();
     expect(await counts(owner.id)).toEqual({ orders: 1, customers: 1 });
     expect(await counts(store.id)).toEqual({ orders: 0, customers: 0 });
   }, 20_000);
+
+  const HOUSTON = { lat: 29.693857800118, lng: -95.266257879374 };
+  const MAIN_ST = { lat: 29.73846459154, lng: -95.379640065998 };
+
+  async function seedDeliveryCart(label: string, price = 4000) {
+    const store = await makeStore(label);
+    await raw.store.update({
+      where: { id: store.id },
+      data: {
+        storeDeliveryEnabled: true,
+        storeDeliveryFeeCents: 500,
+        deliveryRadiusMi: 8,
+        addressLine1: "8400 Park Place Blvd",
+        city: "Houston",
+        state: "TX",
+        zip: "77017",
+        lat: HOUSTON.lat,
+        lng: HOUSTON.lng,
+      },
+    });
+    const variant = await makeVariant(store.id, price);
+    const paymentIntentId = `pi_${crypto.randomUUID()}`;
+    const cart = await storeScoped(store.id).cart.create({
+      data: {
+        storeId: store.id,
+        paymentIntentId,
+        deliveryLine1: "3700 MAIN ST",
+        deliveryCity: "HOUSTON",
+        deliveryState: "TX",
+        deliveryZip: "77002",
+        deliveryLat: MAIN_ST.lat,
+        deliveryLng: MAIN_ST.lng,
+        leaveAtDoor: true,
+      },
+    });
+    await storeScoped(store.id).cartLine.create({
+      data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
+    });
+    const quote = computeQuote(0, [{ price, qty: 1, maxPerOrder: null }], CONTACT, "store-delivery", ADR_0021_SERVICE_FEE, {
+      enabled: true,
+      feeCents: 500,
+      radiusMi: 8,
+      hasCoordinates: true,
+      confirmed: { withinRadius: true },
+      leaveAtDoor: true,
+    });
+    paymentIntents.set(paymentIntentId, paymentIntent({
+      amount: quote.holdCents,
+      destination: store.stripeAccountId!,
+      onBehalfOf: store.stripeAccountId!,
+      storeId: store.id,
+    }));
+    return { store, variant, cart, paymentIntentId, quote };
+  }
+
+  it("a store delivery order records the fee, address and leave-at-door", async () => {
+    const seeded = await seedDeliveryCart("deliver");
+    const placed = await placeOrder(
+      seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId,
+    );
+    const order = await storeScoped(seeded.store.id).order.findUnique({ where: { id: placed.token } });
+    expect(order?.fulfillment).toBe("store-delivery");
+    expect(order?.deliveryFeeCents).toBe(500);
+    expect(order?.deliveryLine1).toBe("3700 MAIN ST");
+    expect(order?.deliveryCity).toBe("HOUSTON");
+    expect(order?.deliveryState).toBe("TX");
+    expect(order?.deliveryZip).toBe("77002");
+    expect(order?.leaveAtDoor).toBe(true);
+    expect(order?.deliveryLat).toBeCloseTo(MAIN_ST.lat, 4);
+    expect(order?.deliveryLng).toBeCloseTo(MAIN_ST.lng, 4);
+    expect(order?.deliveryDistanceMi).toBeGreaterThan(0);
+    expect(order?.totalCents).toBe(4620);
+    expect(order?.totalAuthorizedCents).toBe(5020);
+  });
+
+  it("placement refuses leave at door when the cart has a frozen item", async () => {
+    const seeded = await seedDeliveryCart("frozen");
+    await storeScoped(seeded.store.id).listing.update({
+      where: { id: seeded.variant.listingId },
+      data: { frozen: true },
+    });
+    await expect(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId),
+    ).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+    expect(paymentIntents.get(seeded.paymentIntentId)?.status).toBe("canceled");
+  });
+
+  it("a store delivery fee raised after the hold refuses placement", async () => {
+    const seeded = await seedDeliveryCart("fee");
+    await raw.store.update({
+      where: { id: seeded.store.id },
+      data: { storeDeliveryFeeCents: 800 },
+    });
+    await expect(recordAuthorizedOrder(seeded.store.id, {
+      cartId: seeded.cart.id,
+      contact: CONTACT,
+      fulfillment: "store-delivery",
+      pickupSlot: null,
+      notes: null,
+      paymentIntentId: seeded.paymentIntentId,
+      quote: seeded.quote,
+      paymentAmount: seeded.quote.holdCents,
+      minimumOrderCents: 0,
+      lines: [{
+        variantId: seeded.variant.id,
+        qty: 1,
+        price: 4000,
+        swapRule: "exact_only",
+        substituteVariantId: null,
+      }],
+    })).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+  });
+
+  it("turning store delivery off after the hold refuses the locked recompute", async () => {
+    const seeded = await seedDeliveryCart("off");
+    await raw.store.update({
+      where: { id: seeded.store.id },
+      data: { storeDeliveryEnabled: false },
+    });
+    await expect(recordAuthorizedOrder(seeded.store.id, {
+      cartId: seeded.cart.id,
+      contact: CONTACT,
+      fulfillment: "store-delivery",
+      pickupSlot: null,
+      notes: null,
+      paymentIntentId: seeded.paymentIntentId,
+      quote: seeded.quote,
+      paymentAmount: seeded.quote.holdCents,
+      minimumOrderCents: 0,
+      lines: [{
+        variantId: seeded.variant.id,
+        qty: 1,
+        price: 4000,
+        swapRule: "exact_only",
+        substituteVariantId: null,
+      }],
+    })).rejects.toBeInstanceOf(BasketChangedError);
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+  });
+
+  it("a store delivery placement refused for the radius releases the hold", async () => {
+    const seeded = await seedDeliveryCart("radius");
+    await raw.store.update({
+      where: { id: seeded.store.id },
+      data: { deliveryRadiusMi: 1 },
+    });
+    await expect(
+      placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId),
+    ).rejects.toBeInstanceOf(BasketChangedError);
+    expect(paymentIntents.get(seeded.paymentIntentId)?.status).toBe("canceled");
+    expect(await storeScoped(seeded.store.id).order.count()).toBe(0);
+  });
+
+  it("placement after payment makes no address-service call", async () => {
+    setAddressProvider({
+      suggest: async () => { throw new Error("photon"); },
+      locate: async () => { throw new Error("census"); },
+    });
+    const seeded = await seedDeliveryCart("cached");
+    const first = await placeOrder(
+      seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId,
+    );
+    const second = await placeOrder(
+      seeded.store.id, 0, seeded.cart.id, CONTACT, "store-delivery", null, null, seeded.paymentIntentId,
+    );
+    expect(second.token).toBe(first.token);
+    setAddressProvider(null);
+  });
 
   it("store B never receives store A's order for a PaymentIntent A recorded", async () => {
     const seeded = await seedPricedCart("owner-pi");
@@ -1360,5 +1534,143 @@ describe.skipIf(!hasDb)("placeOrder orchestration (lane DB, strict Stripe double
     vi.mocked(sendOrderAuthorized).mockClear();
     await placeWithThrowingHooks("hooks-vercel", "1");
   }, 20_000);
-});
 
+  async function seedCartWithoutIntent(label: string, hours: unknown) {
+    const store = await makeStore(label);
+    await raw.store.update({
+      where: { id: store.id },
+      data: { hours: hours === null ? Prisma.DbNull : (hours as Prisma.InputJsonValue), timezone: "America/Chicago" },
+    });
+    const variant = await makeVariant(store.id);
+    const cart = await storeScoped(store.id).cart.create({ data: { storeId: store.id } });
+    await storeScoped(store.id).cartLine.create({
+      data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
+    });
+    return { store, cart, hold: holdFor(500, 1) };
+  }
+
+  it("a closed store records an AUTHORIZED order with acceptanceClockStartsAt at the next opening; a store that can't take orders is refused before any Stripe call", async () => {
+    const weekdays = {
+      mon: { open: "09:00", close: "17:00" },
+      tue: { open: "09:00", close: "17:00" },
+      wed: { open: "09:00", close: "17:00" },
+      thu: { open: "09:00", close: "17:00" },
+      fri: { open: "09:00", close: "17:00" },
+    };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // AC1: Tue 2026-11-03 20:00 CST. The hold amount is untouched for a queued order.
+      vi.setSystemTime(new Date("2026-11-04T02:00:00Z"));
+      const queued = await seedPricedCart("queued");
+      await raw.store.update({
+        where: { id: queued.store.id },
+        data: { hours: weekdays, timezone: "America/Chicago", prepTimeMinutes: 30 },
+      });
+      const placed = await placeOrder(queued.store.id, 0, queued.cart.id, CONTACT, "pickup", null, null, queued.paymentIntentId);
+      const row = await storeScoped(queued.store.id).order.findUnique({ where: { id: placed.token } });
+      expect(row?.status).toBe("AUTHORIZED");
+      expect(row?.acceptanceClockStartsAt?.toISOString()).toBe("2026-11-04T15:00:00.000Z");
+      // #383 item 9: the stored instant must not depend on the database's default zone.
+      const [stored] = await withSessionTimeZone("Europe/Berlin", () =>
+        storeScopedTransaction(queued.store.id, (tx) => tx.$queryRaw<Array<{ epoch: number }>>`
+          SELECT extract(epoch FROM acceptance_clock_starts_at)::float8 AS epoch FROM orders WHERE id = ${placed.token}`));
+      expect(new Date(stored.epoch * 1000).toISOString()).toBe("2026-11-04T15:00:00.000Z");
+      expect(row?.totalAuthorizedCents).toBe(queued.amount);
+
+      // AC5: no open day, and an opening more than 6 days out (Mon 17:00 CST, opens next Mon).
+      vi.stubEnv("E2E_FAKE_STRIPE", "1");
+      resetFakeCheckoutPayments();
+      getStripeClient.mockClear();
+      vi.setSystemTime(new Date("2026-11-02T23:00:00Z"));
+      for (const hours of [{}, { mon: { open: "09:00", close: "17:00" } }]) {
+        const refused = await seedCartWithoutIntent("refused", hours);
+        await expect(createPaymentIntent(refused.store.id, refused.cart.id, refused.hold)).rejects.toThrow(
+          "This store isn't taking orders right now",
+        );
+        const cart = await storeScoped(refused.store.id).cart.findUnique({ where: { id: refused.cart.id } });
+        expect(cart?.paymentIntentId).toBeNull();
+      }
+      expect(fakeCheckoutCallCount()).toBe(0);
+      expect(getStripeClient).not.toHaveBeenCalled();
+      vi.unstubAllEnvs();
+
+      // E21: hours saved as {} between placeOrder's replay lookups and the locked write.
+      const raced = await seedPricedCart("raced");
+      checkoutTestHooks.afterPostReadLookupMiss = async () => {
+        await raw.store.update({ where: { id: raced.store.id }, data: { hours: {} } });
+      };
+      await expect(
+        placeOrder(raced.store.id, 0, raced.cart.id, CONTACT, "pickup", null, null, raced.paymentIntentId),
+      ).rejects.toThrow("This store isn't taking orders right now");
+      expect(await counts(raced.store.id)).toEqual({ orders: 0, customers: 0 });
+      expect(cancel.mock.calls.filter((call) => call[0] === raced.paymentIntentId)).toHaveLength(1);
+      expect(paymentIntents.get(raced.paymentIntentId)?.status).toBe("canceled");
+
+      // E22: a retried submit of an order already recorded still gets its token.
+      const recorded = await seedPricedCart("recorded");
+      const first = await placeOrder(recorded.store.id, 0, recorded.cart.id, CONTACT, "pickup", null, null, recorded.paymentIntentId);
+      await raw.store.update({ where: { id: recorded.store.id }, data: { hours: {} } });
+      const retried = await placeOrder(recorded.store.id, 0, recorded.cart.id, CONTACT, "pickup", null, null, recorded.paymentIntentId);
+      expect(retried.token).toBe(first.token);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
+  }, 30_000);
+
+  it("live or mixed Stripe keys without CHECKOUT_LIVE_MODE=true make zero Stripe calls and create no PaymentIntent or Order", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      vi.stubEnv("E2E_FAKE_STRIPE", "1");
+      expect(process.env.VERCEL).toBeUndefined();
+      resetFakeCheckoutPayments();
+      getStripeClient.mockClear();
+      const refusedCases: Array<[string, string, string | undefined]> = [
+        ["sk_live_t167", "pk_live_t167", undefined],
+        ["rk_live_t167", "pk_live_t167", "false"],
+        ["sk_live_t167", "pk_live_t167", "TRUE"],
+        ["sk_live_t167", "pk_live_t167", "1"],
+        ["sk_live_t167", "pk_live_t167", " true"],
+        ["sk_test_t167", "pk_live_t167", "true"],
+        ["sk_live_t167", "pk_test_t167", "true"],
+      ];
+      for (const [secret, publishable, flag] of refusedCases) {
+        const seeded = await seedCartWithoutIntent("live-refused", null);
+        vi.stubEnv("STRIPE_SECRET_KEY", secret);
+        vi.stubEnv("STRIPE_PUBLISHABLE_KEY", publishable);
+        vi.stubEnv("CHECKOUT_LIVE_MODE", flag);
+        await expect(createPaymentIntent(seeded.store.id, seeded.cart.id, seeded.hold)).rejects.toThrow(
+          "This store isn't taking online payments yet.",
+        );
+        await expect(
+          placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, "pi_fake_t167"),
+        ).rejects.toThrow("This store isn't taking online payments yet.");
+        expect(await counts(seeded.store.id)).toEqual({ orders: 0, customers: 0 });
+        const cart = await storeScoped(seeded.store.id).cart.findUnique({ where: { id: seeded.cart.id } });
+        expect(cart?.paymentIntentId).toBeNull();
+      }
+      expect(fakeCheckoutCallCount()).toBe(0);
+      expect(spy.mock.calls.map((call) => String(call[0])).join("\n")).not.toMatch(/sk_|rk_|pk_/);
+
+      const allowedCases: Array<[string, string, string | undefined]> = [
+        ["sk_test_t167", "pk_test_t167", undefined],
+        ["sk_live_t167", "pk_live_t167", "true"],
+      ];
+      for (const [secret, publishable, flag] of allowedCases) {
+        const seeded = await seedCartWithoutIntent("live-allowed", null);
+        vi.stubEnv("STRIPE_SECRET_KEY", secret);
+        vi.stubEnv("STRIPE_PUBLISHABLE_KEY", publishable);
+        vi.stubEnv("CHECKOUT_LIVE_MODE", flag);
+        const intent = await createPaymentIntent(seeded.store.id, seeded.cart.id, seeded.hold);
+        await getCheckoutPayments().confirmPaymentIntent(intent.paymentIntentId, { payment_method: "pm_card_visa" });
+        const placed = await placeOrder(seeded.store.id, 0, seeded.cart.id, CONTACT, "pickup", null, null, intent.paymentIntentId);
+        const row = await storeScoped(seeded.store.id).order.findUnique({ where: { id: placed.token } });
+        expect(row?.status).toBe("AUTHORIZED");
+      }
+      expect(getStripeClient).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      spy.mockRestore();
+    }
+  }, 30_000);
+});

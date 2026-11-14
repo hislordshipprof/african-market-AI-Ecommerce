@@ -54,6 +54,19 @@ function readListingForm(formData: FormData) {
   return parsed.data;
 }
 
+/** A count is a whole number the owner typed. Blank or bad input is refused, never read as 0. */
+function quantityError(raw: string | null): string | null {
+  if (raw === null || !raw.trim()) return "Enter a quantity";
+  const q = Number(raw);
+  if (!Number.isInteger(q) || q < 0) return "Quantity must be a whole number, 0 or more";
+  return null;
+}
+
+/** The storefront and cart charge the variant price, so the listing price is the cheapest variant's. */
+function cheapestPrice(variants: { price: number }[]): number {
+  return Math.min(...variants.map((variant) => variant.price));
+}
+
 export async function createListingAction(formData: FormData) {
   const session = await requireStoreOwner();
   const fields = readListingForm(formData);
@@ -73,17 +86,18 @@ export async function createListingAction(formData: FormData) {
   if (!customName && !masterProductId) {
     return { error: "Product name or master product is required" };
   }
-  const price = Number(priceRaw);
-  if (!priceRaw || !isFinite(price) || price < 0 || !Number.isInteger(price)) {
-    return { error: "Valid non-negative price is required" };
+  if (priceRaw !== null) {
+    const p = Number(priceRaw);
+    if (!priceRaw.trim() || !isFinite(p) || p < 0 || !Number.isInteger(p)) {
+      return { error: "Valid non-negative price is required" };
+    }
   }
   if (!VALID_STOCK_MODES.has(stockMode)) {
     return { error: "Stock mode must be 'counted' or 'status'" };
   }
-  const qty = stockMode === "counted" ? Number(qtyRaw ?? 0) : null;
-  if (qty !== null && (!isFinite(qty) || qty < 0)) {
-    return { error: "Quantity must be a non-negative number" };
-  }
+  const qtyError = stockMode === "counted" ? quantityError(qtyRaw) : null;
+  if (qtyError) return { error: qtyError };
+  const qty = stockMode === "counted" ? Number(qtyRaw) : null;
 
   try {
     const variants = parseVariantsJson(variantsJson);
@@ -98,7 +112,7 @@ export async function createListingAction(formData: FormData) {
       storeId: session.store.id,
       customName: customName || null,
       masterProductId: masterProductId || null,
-      price,
+      price: cheapestPrice(variants),
       stockMode: stockMode as StockMode,
       qty,
       status: stockMode === "status" ? ((status as StockStatus) ?? "in_stock") : null,
@@ -141,17 +155,17 @@ export async function updateListingAction(formData: FormData) {
   }
   if (priceRaw !== null) {
     const p = Number(priceRaw);
-    if (!isFinite(p) || p < 0 || !Number.isInteger(p)) return { error: "Valid non-negative price is required" };
+    if (!priceRaw.trim() || !isFinite(p) || p < 0 || !Number.isInteger(p)) return { error: "Valid non-negative price is required" };
   }
   if (stockMode !== null && !VALID_STOCK_MODES.has(stockMode)) {
     return { error: "Stock mode must be 'counted' or 'status'" };
   }
   if (qtyRaw !== null) {
-    const q = Number(qtyRaw);
-    if (!isFinite(q) || q < 0) return { error: "Quantity must be a non-negative number" };
+    const qtyError = quantityError(qtyRaw);
+    if (qtyError) return { error: qtyError };
   }
-  if (qtyLoadedRaw !== null && !Number.isFinite(Number(qtyLoadedRaw))) {
-    return { error: "Quantity must be a non-negative number" };
+  if (qtyLoadedRaw !== null && quantityError(qtyLoadedRaw)) {
+    return { error: "Quantity must be a whole number, 0 or more" };
   }
 
   let parsedVariants: ReturnType<typeof parseVariantsJson> | undefined;
@@ -176,7 +190,7 @@ export async function updateListingAction(formData: FormData) {
       listingId,
       ...(customName !== null && { customName: customName.trim() || null }),
       ...(masterProductId !== null && { masterProductId: masterProductId || null }),
-      ...(priceRaw !== null && { price: Number(priceRaw) }),
+      ...(parsedVariants ? { price: cheapestPrice(parsedVariants) } : priceRaw !== null && { price: Number(priceRaw) }),
       ...(stockMode !== null && { stockMode: stockMode as StockMode }),
       ...(qtyRaw !== null && { qty: Number(qtyRaw) }),
       ...(qtyLoadedRaw !== null && { qtyLoaded: Number(qtyLoadedRaw) }),
@@ -189,7 +203,12 @@ export async function updateListingAction(formData: FormData) {
     });
 
     revalidateStorefront(session.store.id);
-    return { success: true, id: updated.id };
+    return {
+      success: true,
+      id: updated.id,
+      qty: updated.qty,
+      ...(updated.stockMoved && { stockMoved: updated.stockMoved }),
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update listing";
     return { error: message };

@@ -59,10 +59,12 @@ export function parseSearchSynonyms(raw: string): { term: string }[] {
     .map((term) => ({ term }));
 }
 
-/** Upsert the local-name and search-synonym rows for a catalog CSV row. */
+/** Make the product's synonym rows match the CSV row: upsert each one, delete any it no longer names. */
 export async function upsertSynonyms(tx: Prisma.TransactionClient, row: CsvRow): Promise<void> {
+  const keep: string[] = [];
   for (const syn of parseLocalNames(row.local_names)) {
     const id = synonymId(row.id, "ln", syn.term, syn.language, syn.region);
+    keep.push(id);
     await tx.productSynonym.upsert({
       where: { id },
       update: { term: syn.term, language: syn.language, region: syn.region },
@@ -71,12 +73,14 @@ export async function upsertSynonyms(tx: Prisma.TransactionClient, row: CsvRow):
   }
   for (const syn of parseSearchSynonyms(row.search_synonyms)) {
     const id = synonymId(row.id, "ss", syn.term);
+    keep.push(id);
     await tx.productSynonym.upsert({
       where: { id },
       update: { term: syn.term },
       create: { id, productId: row.id, term: syn.term },
     });
   }
+  await tx.productSynonym.deleteMany({ where: { productId: row.id, id: { notIn: keep } } });
 }
 
 export type MasterProductVariant = {

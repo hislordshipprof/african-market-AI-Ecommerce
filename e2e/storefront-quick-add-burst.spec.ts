@@ -507,7 +507,8 @@ test.describe("quick add limits and recovery", () => {
     await page.getByRole("button", { name: "Shopping cart" }).click();
     await page.getByRole("button", { name: "Remove Yellow Garri (Ijebu) from cart" }).click();
     await settle(page);
-    await expect(page.getByRole("dialog", { name: "Your cart" })).not.toContainText("Yellow Garri");
+    // The drawer's "Removed Yellow Garri (Ijebu). Undo" bar names the item, so check the lines only.
+    await expect(page.getByRole("dialog", { name: "Your cart" }).getByRole("listitem").filter({ hasText: "Yellow Garri" })).toHaveCount(0);
     await page.reload();
     await expect(garri(page).getByTestId("quick-add-btn")).toBeVisible();
     await expect(cartCount(page)).toHaveText("0");

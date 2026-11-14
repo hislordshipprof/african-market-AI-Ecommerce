@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "node:crypto";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, platformAdmin, platformSessionUser } from "./db";
 import { Client } from "pg";
 import { backendPid, pgError, waitForLockWait } from "./listing/lock-wait-test-helpers";
@@ -18,8 +18,7 @@ describe.skipIf(!hasDb)("Listing RLS isolation", () => {
   let listingAId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({
@@ -549,8 +548,7 @@ describe.skipIf(!hasDb)("MasterProduct RLS (shared read)", () => {
   const testMpIds: string[] = [];
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const store = await rawPrisma.store.upsert({

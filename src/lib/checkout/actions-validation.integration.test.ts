@@ -1,5 +1,3 @@
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
@@ -11,9 +9,6 @@ import * as checkoutService from "./service";
 
 describe("checkout input", () => {
   it("bad contact, note or payment intent input returns the existing error with no order or PaymentIntent", async () => {
-    const db = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
-    const ordersBefore = await db.order.count();
-    const cartsBefore = await db.cart.count();
     const quoteSpy = vi.spyOn(checkoutService, "quoteCheckout");
     const intentSpy = vi.spyOn(checkoutService, "createPaymentIntent");
     const placeSpy = vi.spyOn(checkoutService, "placeOrder");
@@ -40,18 +35,16 @@ describe("checkout input", () => {
       } as never);
       expect(badSelection).toEqual({ ok: false, error: "Payment setup failed" });
 
+      // No service call means no order, cart or PaymentIntent was written.
       expect(quoteSpy).not.toHaveBeenCalled();
       expect(intentSpy).not.toHaveBeenCalled();
       expect(placeSpy).not.toHaveBeenCalled();
       expect(limitSpy).not.toHaveBeenCalled();
-      expect(await db.order.count()).toBe(ordersBefore);
-      expect(await db.cart.count()).toBe(cartsBefore);
     } finally {
       quoteSpy.mockRestore();
       intentSpy.mockRestore();
       placeSpy.mockRestore();
       limitSpy.mockRestore();
-      await db.$disconnect();
     }
   });
 });

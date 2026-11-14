@@ -8,6 +8,8 @@ import { ArrowUp, FileText, Mic, Square, X } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { Sheet } from "../sheet";
 import { ProductImage } from "../product-image";
+import { QuickAddStepper } from "../quick-add-stepper";
+import { AssistantMarkdown } from "./assistant-markdown";
 import { completionAnnouncement } from "@/lib/assistant/ui/announce";
 import { cardsFromParts, cartToolCallIds, type AssistantCard } from "@/lib/assistant/ui/cards";
 import {
@@ -47,9 +49,7 @@ export const ASSISTANT_CHUNK = "assistant-chat-chunk-v1";
 const STARTERS = [
   { label: "Cook a dish", text: "I want to cook " },
   { label: "Restock my usual", text: "Restock my usual: " },
-  { label: "Show me pictures", text: "Show me pictures of " },
   { label: "Snap your shopping list", text: "Here is my shopping list: " },
-  { label: "Send a recipe PDF", text: "Here is a recipe: " },
 ] as const;
 
 const FILE_NOTE = "Read once to answer you. We don't save your files. Please don't send cards or IDs.";
@@ -73,6 +73,7 @@ export function AssistantSheet({
   open,
   onClose,
   storeId,
+  storeName,
   accountId,
   cartId,
   loading,
@@ -84,6 +85,7 @@ export function AssistantSheet({
   open: boolean;
   onClose: () => void;
   storeId: string;
+  storeName: string;
   accountId: string | null;
   cartId: string | null;
   loading: boolean;
@@ -98,11 +100,12 @@ export function AssistantSheet({
   );
   void attention;
   return (
-    <Sheet open={open} onClose={onClose} title="Shop with help">
+    <Sheet open={open} onClose={onClose} title="Shop with AI">
       <Thread
         key={chat.id}
         chat={chat}
         storeId={storeId}
+        storeName={storeName}
         loading={loading}
         lines={lines}
         onCartFailure={onCartFailure}
@@ -117,6 +120,7 @@ export function AssistantSheet({
 function Thread({
   chat,
   storeId,
+  storeName,
   loading,
   lines,
   onCartFailure,
@@ -126,6 +130,7 @@ function Thread({
 }: {
   chat: ReturnType<typeof retainSession>;
   storeId: string;
+  storeName: string;
   loading: boolean;
   lines: readonly CartLine[];
   onCartFailure: (failure: { error?: string; thrown?: unknown }) => void;
@@ -643,7 +648,7 @@ function Thread({
 
   return (
     <div className={styles.thread} data-chunk={ASSISTANT_CHUNK} data-retry={memory.retryToken} style={{ paddingBottom: keyboardInset }}>
-      <p className={styles.live} aria-live="polite" ref={liveRef} />
+      <p className={styles.live} aria-live="polite" aria-atomic="true" ref={liveRef} />
       <div
         className={styles.log}
         ref={logRef}
@@ -686,7 +691,7 @@ function Thread({
         </button>
       ) : null}
       {messages.length === 0 && tiles.length === 0 ? (
-        <p className={styles.bubble}>What are you cooking or restocking?</p>
+        <p className={styles.bubble}>{`Hi, I'm ${storeName}'s AI shopping assistant. Ask about a dish or an item.`}</p>
       ) : null}
       {messages.length === 0 && tiles.length === 0 ? (
         <div className={styles.starters}>
@@ -755,6 +760,7 @@ function Thread({
           ref={composer}
           data-testid="assistant-composer"
           maxLength={2000}
+          placeholder="Ask about a dish or an item"
           value={draft}
           disabled={!!routeError?.terminal}
           onChange={(event) => {
@@ -937,7 +943,7 @@ function MessageView({
     <div className={styles.message}>
       {message.parts.map((part, index) => {
         if (part.type === "text") {
-          return part.text ? <p key={`${message.id}-text-${index}`} className={styles.bubble}>{part.text}</p> : null;
+          return part.text ? <AssistantMarkdown key={`${message.id}-text-${index}`} className={`${styles.bubble} ${styles.reply}`} text={part.text} /> : null;
         }
         const cards = partCards[index] ?? [];
         const added = index === firstAdded ? turnAdded : [];
@@ -1025,7 +1031,23 @@ function CardView({
           <p className={styles.meta}>{card.packLabel}</p>
           <p className={styles.price}>{card.priceLabel}</p>
           {card.mayBeUnavailable ? <p className={styles.flag}>May be unavailable</p> : null}
+          {card.cannotConfirm ? <p className={styles.flag}>Can&apos;t confirm it meets your needs</p> : null}
         </div>
+        {card.listingId && card.variantId && !card.cannotConfirm ? (
+          <div className={styles.cardAdd}>
+            <QuickAddStepper
+              item={{
+                listingId: card.listingId,
+                variantId: card.variantId,
+                name: card.name,
+                price: card.priceCents,
+                imageUrl: card.imageUrl ?? undefined,
+                packLabel: card.packLabel,
+              }}
+              disabled={disabled || card.askStore}
+            />
+          </div>
+        ) : null}
       </article>
     );
   }
@@ -1060,6 +1082,42 @@ function CardView({
           </button>
         ))}
       </div>
+    );
+  }
+  if (card.kind === "review") {
+    return (
+      <section className={styles.summary} aria-label="Review your order">
+        <h3>Review your order</h3>
+        <ul>
+          {card.lines.map((line) => (
+            <li key={line.lineId}>
+              <span>
+                {line.qty} × {line.name}
+                {line.mayBeUnavailable ? <span className={styles.flag}> · May be unavailable</span> : null}
+              </span>
+              <span>{line.lineTotalLabel}</span>
+            </li>
+          ))}
+        </ul>
+        <p className={styles.meta}>{card.fulfillmentLabel}</p>
+        <ul className={styles.reviewTotals}>
+          {card.rows.map((row) => (
+            <li key={row.label}>
+              <span>{row.label}</span>
+              <span>{row.value}</span>
+            </li>
+          ))}
+        </ul>
+        <p className={styles.meta}>
+          Card hold {card.holdLabel}: the total plus up to {card.bufferLabel} for weighed items and swaps.
+          You pay only for what you get.
+        </p>
+        {card.problems.map((problem) => <p key={problem} className={styles.flag}>{problem}</p>)}
+        <p className={styles.meta}>Nothing is charged here. You add contact and card, and pay, on the checkout page.</p>
+        <div className={styles.actions}>
+          <Link className={styles.primary} href={card.href} onClick={onClose}>Review and pay</Link>
+        </div>
+      </section>
     );
   }
   return (

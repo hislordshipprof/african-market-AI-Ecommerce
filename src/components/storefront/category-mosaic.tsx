@@ -40,12 +40,13 @@ export function CategoryMosaic({
         description="The staples you know. A few new favorites."
         href={all ? undefined : "/categories"}
       />}
-      <RailScroller className={all ? "sf-category-rail sf-all-categories" : "sf-category-rail"} label="Categories" title={all ? "Find your favorites" : "Aisles full of home"} description="The staples you know. A few new favorites." href={all ? undefined : "/categories"}>
+      <RailScroller className={all ? "sf-category-rail sf-all-categories" : "sf-category-rail"} label="Categories" title={all ? "Find your favorites" : "Aisles full of home"} description="The staples you know. A few new favorites." href={all ? undefined : "/categories"} hrefLabel="See all aisles">
         {visible.map((cat) => (
           <Link
             key={cat.id}
             href={`/categories/${cat.slug}`}
             className="sf-category-tile"
+            aria-label={cat.localName ? `${cat.name}, ${cat.localName}` : cat.name}
           >
             <ProductImage src={storefrontPhoto(cat.imageUrl) || (categoryPhotos[cat.slug]?.startsWith("/images/products/") ? categoryPhotos[cat.slug] : undefined)} name={cat.name} category={cat.slug} sizes="(max-width:767px) 44vw, 320px" />
             <div>

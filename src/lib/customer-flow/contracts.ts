@@ -1,5 +1,7 @@
 import type { CartItem, CartLine } from "@/lib/storefront/cart-store";
 
+export const STORE_NOT_TAKING_ORDERS = "This store isn't taking orders right now";
+
 export type SwapRule =
   | { kind: "exact" }
   | { kind: "suggest" }
@@ -12,6 +14,7 @@ export type OrderStatus =
   | "SUBSTITUTION_PENDING"
   | "READY"
   | "AWAITING_PICKUP"
+  | "COURIER_REQUESTED"
   | "COURIER_ASSIGNED"
   | "PICKED_UP"
   | "DELIVERED"
@@ -30,8 +33,14 @@ export interface FlowStore {
   storeDeliveryFeeCents: number;
   autoRefundLimitCents: number;
   insulatedPackaging: boolean;
+  /** Closed now, and an order placed now is queued for the next opening. */
   closed: boolean;
+  /** "Wed 9:00 AM CT" while closed, else empty. */
   opensAt: string;
+  /** Opening + prep, "9:30 AM" while closed, else empty. */
+  readyAt: string;
+  /** False when no opening is close enough to hold a card for: checkout refuses. */
+  takingOrders: boolean;
 }
 export interface FlowCatalogItem extends CartItem {
   categoryId: string;
@@ -85,6 +94,8 @@ export interface CheckoutQuote {
   deliveryFeeCents: number;
   courierFeeCents: number;
   courierProvider?: "Uber Direct" | "DoorDash Drive";
+  /** Customer service fee (ADR-0021), included in totalCents. */
+  serviceFeeCents: number;
   taxCents: number;
   tipCents: number;
   discountCents: number;

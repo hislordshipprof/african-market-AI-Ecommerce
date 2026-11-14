@@ -27,14 +27,14 @@ describe("sendEmail (test double)", () => {
   });
 
   it("accumulates multiple emails", async () => {
-    await sendEmail({ to: "a@example.com", subject: "First", html: "" });
-    await sendEmail({ to: "b@example.com", subject: "Second", html: "" });
+    await sendEmail({ to: "a@example.com", subject: "First", html: "<p>First</p>" });
+    await sendEmail({ to: "b@example.com", subject: "Second", html: "<p>Second</p>" });
 
     expect(getTestSentEmails()).toHaveLength(2);
   });
 
   it("clearTestSentEmails resets the inbox", async () => {
-    await sendEmail({ to: "a@example.com", subject: "Test", html: "" });
+    await sendEmail({ to: "a@example.com", subject: "Test", html: "<p>Test</p>" });
     clearTestSentEmails();
     expect(getTestSentEmails()).toHaveLength(0);
   });

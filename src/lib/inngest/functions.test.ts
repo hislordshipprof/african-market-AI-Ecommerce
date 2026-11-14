@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import * as dbModule from "../db";
 import { storeScoped, storeScopedTransaction } from "../db";
@@ -12,6 +12,10 @@ import { inngest } from "./client";
 const hasDb = !!process.env.DATABASE_URL;
 const realFindStuck = dbModule.findStuckTransitionalOrders;
 const realFindOrphaned = dbModule.findOrphanedAuthorizedOrders;
+const realFindPending = dbModule.findPendingOrderNotifications;
+const realExpireNotifications = dbModule.expireStaleOrderNotifications;
+const realFindPickTimeout = dbModule.findPickTimeoutCandidates;
+const realFindOrphanHolds = dbModule.findOrphanHoldCarts;
 
 /** Tue 2026-11-03 14:00 America/New_York (UTC-5). */
 const OPEN_AT = "2026-11-03T19:00:00.000Z";
@@ -26,25 +30,41 @@ const WEEKDAY_HOURS = {
   sun: { open: "09:00", close: "20:00" },
 };
 
+let mockedNow: Date | null = null;
+
+/** A real sleep wakes at its target, so the mocked clock moves there (never backwards). */
+function wakeMockedClockAt(until: string) {
+  if (mockedNow && new Date(until).getTime() > mockedNow.getTime()) mockedNow = new Date(until);
+}
+
 function makeFakeStep() {
-  const sleeps: Array<{ name: string; duration: string }> = [];
+  const sleepUntils: Array<{ name: string; until: string }> = [];
   const sleepNames: string[] = [];
   const runs: string[] = [];
+  const record = (name: string, time: Date | string) => {
+    const until = new Date(time).toISOString();
+    sleepUntils.push({ name, until });
+    sleepNames.push(name);
+    return until;
+  };
   return {
-    sleeps,
+    sleepUntils,
     sleepNames,
     runs,
-    async sleep(name: string, duration: string) {
-      sleeps.push({ name, duration });
-      sleepNames.push(name);
+    record,
+    async sleepUntil(name: string, time: Date | string) {
+      wakeMockedClockAt(record(name, time));
     },
+    /** Inngest serializes every step result as JSON. */
     async run<T>(name: string, fn: () => Promise<T>): Promise<T> {
       runs.push(name);
-      return fn();
+      const value = await fn();
+      return (value === undefined ? value : JSON.parse(JSON.stringify(value))) as T;
     },
   };
 }
 
+/** Holds the first sleep until release(); the clock moves to its target on release. */
 function holdSleepUntilReleased(step: ReturnType<typeof makeFakeStep>) {
   let releaseSleep!: () => void;
   let markEntered!: () => void;
@@ -54,13 +74,36 @@ function holdSleepUntilReleased(step: ReturnType<typeof makeFakeStep>) {
   const entered = new Promise<void>((resolve) => {
     markEntered = resolve;
   });
-  const record = step.sleep.bind(step);
-  step.sleep = async (name: string, duration: string) => {
-    await record(name, duration);
+  const passThrough = step.sleepUntil.bind(step);
+  let held = false;
+  step.sleepUntil = async (name: string, time: Date | string) => {
+    if (held) return passThrough(name, time);
+    held = true;
+    const until = step.record(name, time);
     markEntered();
     await released;
+    wakeMockedClockAt(until);
   };
   return { entered, release: () => releaseSleep() };
+}
+
+function withMockedTime(date: Date, fn: () => Promise<void>): Promise<void> {
+  const OrigDate = globalThis.Date;
+  const origNow = Date.now;
+  mockedNow = new OrigDate(date);
+  const MockDate = function (this: Date, ...args: unknown[]) {
+    if (args.length === 0) return new OrigDate(mockedNow!);
+    return new (OrigDate as unknown as new (...a: unknown[]) => Date)(...args);
+  } as unknown as DateConstructor;
+  Object.setPrototypeOf(MockDate, OrigDate);
+  Object.defineProperty(MockDate, "prototype", { value: OrigDate.prototype });
+  MockDate.now = () => mockedNow!.getTime();
+  globalThis.Date = MockDate;
+  return fn().finally(() => {
+    globalThis.Date = OrigDate;
+    Date.now = origNow;
+    mockedNow = null;
+  });
 }
 
 async function waitForSleepEntry(entered: Promise<void>): Promise<void> {
@@ -83,6 +126,25 @@ describe("sweep configuration", () => {
     expect(sweepOrphanedAuthorized.opts.singleton).toEqual({ mode: "skip" });
     expect(reconcileStuckTransitional.opts.singleton).toEqual({ mode: "skip" });
   });
+
+  it("the notification function is not deduplicated per order, and an idle sweep runs its three finder steps", async () => {
+    const { sendCustomerNotification, sweepOrphanedAuthorized } = await import("./functions");
+    const idempotency = (sendCustomerNotification as { opts?: { idempotency?: unknown } }).opts?.idempotency;
+    if (idempotency != null) expect(String(idempotency)).toContain("data.event");
+    vi.spyOn(dbModule, "findOrphanedAuthorizedOrders").mockImplementation(async () => realFindOrphaned({ storeIds: [] }));
+    vi.spyOn(dbModule, "findPendingOrderNotifications").mockImplementation(async () => realFindPending({ storeIds: [] }));
+    vi.spyOn(dbModule, "expireStaleOrderNotifications").mockImplementation(async () => realExpireNotifications({ storeIds: [] }));
+    vi.spyOn(dbModule, "findPickTimeoutCandidates").mockImplementation(async (opts) => realFindPickTimeout({ ...opts, storeIds: [] }));
+    vi.spyOn(dbModule, "findOrphanHoldCarts").mockImplementation(async (opts) => realFindOrphanHolds({ ...opts, storeIds: [] }));
+    try {
+      const step = makeFakeStep();
+      const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+      await handler({ step });
+      expect(step.runs).toEqual(["find-orphaned", "find-pick-timeouts", "find-expired-substitutions", "release-orphan-holds"]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });
 type Handler = (ctx: HandlerCtx) => Promise<void>;
 
@@ -98,8 +160,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
   let variantId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
     setStripeProvider(fakeStripeProvider);
 
@@ -214,23 +275,6 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
     return row!.createdAt.toISOString();
   }
 
-  function withMockedTime(date: Date, fn: () => Promise<void>): Promise<void> {
-    const OrigDate = globalThis.Date;
-    const origNow = Date.now;
-    const MockDate = function (this: Date, ...args: unknown[]) {
-      if (args.length === 0) return new OrigDate(date);
-      return new (OrigDate as unknown as new (...a: unknown[]) => Date)(...args);
-    } as unknown as DateConstructor;
-    Object.setPrototypeOf(MockDate, OrigDate);
-    Object.defineProperty(MockDate, "prototype", { value: OrigDate.prototype });
-    MockDate.now = () => date.getTime();
-    globalThis.Date = MockDate;
-    return fn().finally(() => {
-      globalThis.Date = OrigDate;
-      Date.now = origNow;
-    });
-  }
-
   beforeEach(() => {
     resetFakeStripe();
     const ownStores = () => [storeId, storeBId].filter((id) => id.length > 0);
@@ -242,11 +286,24 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       if (opts?.storeIds) return realFindOrphaned(opts);
       return realFindOrphaned({ storeIds: ownStores() });
     });
+    vi.spyOn(dbModule, "findPendingOrderNotifications").mockImplementation(async (opts) => {
+      if (opts?.storeIds) return realFindPending(opts);
+      return realFindPending({ storeIds: ownStores() });
+    });
+    vi.spyOn(dbModule, "expireStaleOrderNotifications").mockImplementation(async (opts) => {
+      if (opts?.storeIds) return realExpireNotifications(opts);
+      return realExpireNotifications({ storeIds: ownStores() });
+    });
+    vi.spyOn(dbModule, "findPickTimeoutCandidates").mockImplementation(async (opts) => {
+      return realFindPickTimeout({ ...opts, storeIds: opts.storeIds ?? ownStores() });
+    });
+    vi.spyOn(dbModule, "findOrphanHoldCarts").mockImplementation(async (opts) => {
+      return realFindOrphanHolds({ ...opts, storeIds: opts?.storeIds ?? ownStores() });
+    });
   });
 
   afterEach(() => {
-    vi.mocked(dbModule.findStuckTransitionalOrders).mockRestore();
-    vi.mocked(dbModule.findOrphanedAuthorizedOrders).mockRestore();
+    vi.restoreAllMocks();
   });
 
   describe("dailyConfidence", () => {
@@ -340,64 +397,14 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         handler({ event: { data: { orderId: order.id, storeId } }, step }),
       );
 
-      expect(step.sleepNames).toContain("wait-15-min");
-      expect(step.runs).toContain("check-and-alert");
+      expect(step.sleepNames).toContain("alert-sleep-0");
+      expect(step.runs).toContain("alert-record");
 
       const logs = await storeScoped(storeId).auditLog.findMany({
         where: { entityId: order.id, action: "acceptance_alert" },
       });
       expect(logs.length).toBe(1);
     }, 10_000);
-
-    it("skips the alert on a day the hours mark Closed", async () => {
-      const { acceptanceAlert } = await import("./functions");
-      const handler = getHandler(acceptanceAlert);
-      const order = await createTestOrder();
-      await rawPrisma.store.update({
-        where: { id: storeId },
-        data: { hours: { monday: "10:00 AM - 7:00 PM", sunday: "Closed" } },
-      });
-      try {
-        await withMockedTime(new Date("2026-11-08T15:00:00-05:00"), () =>
-          handler({ event: { data: { orderId: order.id, storeId } }, step: makeFakeStep() }),
-        );
-        const logs = await storeScoped(storeId).auditLog.findMany({
-          where: { entityId: order.id, action: "acceptance_alert" },
-        });
-        expect(logs.length).toBe(0);
-      } finally {
-        await rawPrisma.store.update({
-          where: { id: storeId },
-          data: {
-            hours: {
-              mon: { open: "09:00", close: "20:00" },
-              tue: { open: "09:00", close: "20:00" },
-              wed: { open: "09:00", close: "20:00" },
-              thu: { open: "09:00", close: "20:00" },
-              fri: { open: "09:00", close: "20:00" },
-              sat: { open: "09:00", close: "20:00" },
-              sun: { open: "09:00", close: "20:00" },
-            },
-          },
-        });
-      }
-    });
-
-    it("skips audit log when store is closed", async () => {
-      const { acceptanceAlert } = await import("./functions");
-      const handler = getHandler(acceptanceAlert);
-      const order = await createTestOrder();
-      const step = makeFakeStep();
-
-      await withMockedTime(new Date("2026-11-03T23:00:00-05:00"), () =>
-        handler({ event: { data: { orderId: order.id, storeId } }, step }),
-      );
-
-      const logs = await storeScoped(storeId).auditLog.findMany({
-        where: { entityId: order.id, action: "acceptance_alert" },
-      });
-      expect(logs.length).toBe(0);
-    });
 
     it("skips audit log for already-accepted order", async () => {
       const { acceptanceAlert } = await import("./functions");
@@ -471,22 +478,6 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       }
     });
 
-    it("Codex-3: re-published event with old authorizedAt skips sleep and processes immediately", async () => {
-      const { acceptanceAlert } = await import("./functions");
-      const handler = getHandler(acceptanceAlert);
-      const order = await createTestOrder();
-      const step = makeFakeStep();
-
-      const mockedNow = new Date("2026-11-03T14:00:00-05:00");
-      const twentyMinAgo = new Date(mockedNow.getTime() - 20 * 60 * 1000).toISOString();
-      await withMockedTime(mockedNow, () =>
-        handler({ event: { data: { orderId: order.id, storeId, authorizedAt: twentyMinAgo } }, step }),
-      );
-
-      expect(step.sleepNames).toHaveLength(0);
-      expect(step.runs).toContain("check-and-alert");
-    });
-
     it("Codex-3: fresh event sleeps the full 15 minutes", async () => {
       const { acceptanceAlert } = await import("./functions");
       const handler = getHandler(acceptanceAlert);
@@ -501,8 +492,8 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       );
       try {
         await waitForSleepEntry(held.entered);
-        expect(step.runs).toEqual([]);
-        expect(step.sleeps).toEqual([{ name: "wait-15-min", duration: "900s" }]);
+        expect(step.runs).toEqual(["alert-plan-0"]);
+        expect(step.sleepUntils).toEqual([{ name: "alert-sleep-0", until: "2026-11-03T19:15:00.000Z" }]);
         const logsBefore = await storeScoped(storeId).auditLog.findMany({
           where: { entityId: order.id, action: "acceptance_alert", entityType: "order" },
         });
@@ -514,7 +505,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         expect(before?.status).toBe("AUTHORIZED");
         held.release();
         await finished;
-        expect(step.sleeps).toEqual([{ name: "wait-15-min", duration: "900s" }]);
+        expect(step.sleepUntils).toEqual([{ name: "alert-sleep-0", until: "2026-11-03T19:15:00.000Z" }]);
         const logs = await storeScoped(storeId).auditLog.findMany({
           where: { entityId: order.id, action: "acceptance_alert", entityType: "order" },
         });
@@ -527,40 +518,6 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       }
     });
 
-    it.each([
-      {
-        label: "10 minutes after authorization",
-        createdAt: "2026-11-03T18:50:00.000Z",
-        sleeps: [{ name: "wait-15-min", duration: "300s" }],
-      },
-      {
-        label: "one millisecond before the 15-minute deadline",
-        createdAt: "2026-11-03T18:45:00.001Z",
-        sleeps: [{ name: "wait-15-min", duration: "1s" }],
-      },
-      {
-        label: "the exact 15-minute deadline",
-        createdAt: "2026-11-03T18:45:00.000Z",
-        sleeps: [] as Array<{ name: string; duration: string }>,
-      },
-    ])("acceptanceAlert uses the remaining authorization delay ($label)", async ({ createdAt, sleeps }) => {
-      const { acceptanceAlert } = await import("./functions");
-      const handler = getHandler(acceptanceAlert);
-      const order = await createTestOrder();
-      const authorizedAt = await authorizedAtFromPersistedCreatedAt(order.id, createdAt);
-      const step = makeFakeStep();
-
-      await withMockedTime(new Date(OPEN_AT), () =>
-        handler({ event: { data: { orderId: order.id, storeId, authorizedAt } }, step }),
-      );
-
-      expect(step.sleeps).toEqual(sleeps);
-      const logs = await storeScoped(storeId).auditLog.findMany({
-        where: { entityId: order.id, action: "acceptance_alert", entityType: "order" },
-      });
-      expect(logs).toHaveLength(1);
-      expect(logs[0]?.storeId).toBe(storeId);
-    });
   });
 
   describe("autoCancel", () => {
@@ -578,8 +535,8 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       );
       try {
         await waitForSleepEntry(held.entered);
-        expect(step.runs).toEqual([]);
-        expect(step.sleeps).toEqual([{ name: "wait-30-min", duration: "1800s" }]);
+        expect(step.runs).toEqual(["cancel-plan-0"]);
+        expect(step.sleepUntils).toEqual([{ name: "cancel-sleep-0", until: "2026-11-03T19:30:00.000Z" }]);
         expect(cancelSpy.mock.calls.filter((call) => call[0] === paymentIntentId)).toHaveLength(0);
         expect(cancelledPayments.has(paymentIntentId)).toBe(false);
         expect(captureCalls).toHaveLength(0);
@@ -588,7 +545,7 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         expect(before?.status).toBe("AUTHORIZED");
         held.release();
         await finished;
-        expect(step.sleeps).toEqual([{ name: "wait-30-min", duration: "1800s" }]);
+        expect(step.sleepUntils).toEqual([{ name: "cancel-sleep-0", until: "2026-11-03T19:30:00.000Z" }]);
         expect(cancelSpy.mock.calls.filter((call) => call[0] === paymentIntentId)).toHaveLength(1);
         expect(cancelledPayments.has(paymentIntentId)).toBe(true);
         expect(captureCalls).toHaveLength(0);
@@ -602,19 +559,88 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       }
     });
 
-    it("cancels even when store is closed (spec AC#5: unconditional 30-min cancel)", async () => {
-      const { autoCancel } = await import("./functions");
-      const handler = getHandler(autoCancel);
-      const order = await createTestOrder();
-      const step = makeFakeStep();
+    it("a queued order is not alerted or cancelled before opening; alert and cancel fire at 15 and 30 open minutes", async () => {
+      const { acceptanceAlert, autoCancel } = await import("./functions");
+      // Hours 09:00–20:00 ET every day. Placed Tue 21:00 ET; checkout stored the clock at Wed 09:00 ET.
+      const placedAt = "2026-11-04T02:00:00.000Z";
+      const clockStartsAt = new Date("2026-11-04T14:00:00.000Z");
+      const cancelSpy = vi.spyOn(fakeStripeProvider, "cancelPaymentIntent");
+      try {
+        for (const timer of [
+          { fn: acceptanceAlert, sleep: { name: "alert-sleep-0", until: "2026-11-04T14:15:00.000Z" } },
+          { fn: autoCancel, sleep: { name: "cancel-sleep-0", until: "2026-11-04T14:30:00.000Z" } },
+        ]) {
+          const order = await createTestOrder();
+          const authorizedAt = await authorizedAtFromPersistedCreatedAt(order.id, placedAt);
+          await storeScopedTransaction(storeId, async (tx) => {
+            await tx.order.update({ where: { id: order.id }, data: { acceptanceClockStartsAt: clockStartsAt } });
+          });
+          const step = makeFakeStep();
+          const held = holdSleepUntilReleased(step);
+          const finished = withMockedTime(new Date(placedAt), () =>
+            getHandler(timer.fn)({ event: { data: { orderId: order.id, storeId, authorizedAt } }, step }),
+          );
+          try {
+            await waitForSleepEntry(held.entered);
+            expect(step.sleepUntils).toEqual([timer.sleep]);
+            const alertsBefore = await storeScoped(storeId).auditLog.findMany({
+              where: { entityId: order.id, action: "acceptance_alert", entityType: "order" },
+            });
+            expect(alertsBefore).toHaveLength(0);
+            expect((await storeScoped(storeId).order.findUnique({ where: { id: order.id } }))?.status).toBe("AUTHORIZED");
+            expect(cancelSpy.mock.calls.filter((call) => call[0] === order.paymentIntentId)).toHaveLength(0);
+            held.release();
+            await finished;
+          } finally {
+            held.release();
+            await finished.catch(() => undefined);
+          }
+          expect(step.sleepUntils).toEqual([timer.sleep]);
+          const after = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+          const alerts = await storeScoped(storeId).auditLog.findMany({
+            where: { entityId: order.id, action: "acceptance_alert", entityType: "order" },
+          });
+          if (timer.fn === acceptanceAlert) {
+            expect(alerts).toHaveLength(1);
+            expect(after?.status).toBe("AUTHORIZED");
+          } else {
+            expect(alerts).toHaveLength(0);
+            expect(after?.status).toBe("CANCELLED");
+            expect(cancelSpy.mock.calls.filter((call) => call[0] === order.paymentIntentId)).toHaveLength(1);
+          }
+        }
 
-      await withMockedTime(new Date("2026-11-03T23:00:00-05:00"), () =>
-        handler({ event: { data: { orderId: order.id, storeId } }, step }),
-      );
-
-      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-      expect(updated!.status).toBe("CANCELLED");
-    });
+        // A queued order whose hours become never-open is cancelled at the hold cap (created + 6 d 12 h).
+        const capped = await createTestOrder();
+        const cappedAt = await authorizedAtFromPersistedCreatedAt(capped.id, placedAt);
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({ where: { id: capped.id }, data: { acceptanceClockStartsAt: clockStartsAt } });
+        });
+        const step = makeFakeStep();
+        const held = holdSleepUntilReleased(step);
+        const finished = withMockedTime(new Date(placedAt), () =>
+          getHandler(autoCancel)({ event: { data: { orderId: capped.id, storeId, authorizedAt: cappedAt } }, step }),
+        );
+        try {
+          await waitForSleepEntry(held.entered);
+          await rawPrisma.store.update({ where: { id: storeId }, data: { hours: {} } });
+          held.release();
+          await finished;
+        } finally {
+          held.release();
+          await finished.catch(() => undefined);
+          await rawPrisma.store.update({ where: { id: storeId }, data: { hours: WEEKDAY_HOURS } });
+        }
+        expect(step.sleepUntils).toEqual([
+          { name: "cancel-sleep-0", until: "2026-11-04T14:30:00.000Z" },
+          { name: "cancel-sleep-1", until: "2026-11-10T14:00:00.000Z" },
+        ]);
+        expect(cancelSpy.mock.calls.filter((call) => call[0] === capped.paymentIntentId)).toHaveLength(1);
+        expect((await storeScoped(storeId).order.findUnique({ where: { id: capped.id } }))?.status).toBe("CANCELLED");
+      } finally {
+        cancelSpy.mockRestore();
+      }
+    }, 20_000);
 
     it("skips cancel when order is already accepted", async () => {
       const { autoCancel } = await import("./functions");
@@ -650,23 +676,6 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       expect(updated!.status).toBe("CANCELLED");
     });
 
-    it("Codex-3: re-published event with 35-min-old authorizedAt skips sleep and cancels immediately", async () => {
-      const { autoCancel } = await import("./functions");
-      const handler = getHandler(autoCancel);
-      const order = await createTestOrder();
-      const step = makeFakeStep();
-
-      const mockedNow = new Date("2026-11-03T14:00:00-05:00");
-      const thirtyFiveMinAgo = new Date(mockedNow.getTime() - 35 * 60 * 1000).toISOString();
-      await withMockedTime(mockedNow, () =>
-        handler({ event: { data: { orderId: order.id, storeId, authorizedAt: thirtyFiveMinAgo } }, step }),
-      );
-
-      expect(step.sleepNames).toHaveLength(0);
-      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-      expect(updated!.status).toBe("CANCELLED");
-    });
-
     it("returns early for invalid event data (A6 guard)", async () => {
       const { autoCancel } = await import("./functions");
       const handler = getHandler(autoCancel);
@@ -676,41 +685,57 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
       expect(step.sleepNames).toHaveLength(0);
     });
 
-    it.each([
-      {
-        label: "10 minutes after authorization",
-        createdAt: "2026-11-03T18:50:00.000Z",
-        sleeps: [{ name: "wait-30-min", duration: "1200s" }],
-      },
-      {
-        label: "one millisecond before the 30-minute deadline",
-        createdAt: "2026-11-03T18:30:00.001Z",
-        sleeps: [{ name: "wait-30-min", duration: "1s" }],
-      },
-      {
-        label: "the exact 30-minute deadline",
-        createdAt: "2026-11-03T18:30:00.000Z",
-        sleeps: [] as Array<{ name: string; duration: string }>,
-      },
-    ])("autoCancel uses the remaining authorization delay ($label)", async ({ createdAt, sleeps }) => {
-      const { autoCancel } = await import("./functions");
-      const handler = getHandler(autoCancel);
-      const order = await createTestOrder();
-      const authorizedAt = await authorizedAtFromPersistedCreatedAt(order.id, createdAt);
-      const step = makeFakeStep();
-      const paymentIntentId = order.paymentIntentId!;
+    it("a recovered event sleeps until the stored deadline, not a fresh delay", async () => {
+      const { acceptanceAlert, autoCancel } = await import("./functions");
+      // Each event is re-sent (sweep) at `now` with a misleading authorizedAt: timing comes from the order row.
+      const cases = [
+        {
+          label: "open store, placed 10 minutes earlier",
+          createdAt: "2026-11-03T18:50:00.000Z",
+          now: OPEN_AT,
+          alert: [{ name: "alert-sleep-0", until: "2026-11-03T19:05:00.000Z" }],
+          cancel: [{ name: "cancel-sleep-0", until: "2026-11-03T19:20:00.000Z" }],
+        },
+        {
+          label: "placed 08:45 ET before the 09:00 opening, no stored clock",
+          createdAt: "2026-11-03T13:45:00.000Z",
+          now: "2026-11-03T13:50:00.000Z",
+          alert: [{ name: "alert-sleep-0", until: "2026-11-03T14:15:00.000Z" }],
+          cancel: [{ name: "cancel-sleep-0", until: "2026-11-03T14:30:00.000Z" }],
+        },
+        {
+          label: "deadline already passed",
+          createdAt: "2026-11-03T18:25:00.000Z",
+          now: OPEN_AT,
+          alert: [] as Array<{ name: string; until: string }>,
+          cancel: [] as Array<{ name: string; until: string }>,
+        },
+      ];
       const cancelSpy = vi.spyOn(fakeStripeProvider, "cancelPaymentIntent");
       try {
-        await withMockedTime(new Date(OPEN_AT), () =>
-          handler({ event: { data: { orderId: order.id, storeId, authorizedAt } }, step }),
-        );
-        expect(step.sleeps).toEqual(sleeps);
-        expect(cancelSpy.mock.calls.filter((call) => call[0] === paymentIntentId)).toHaveLength(1);
-        expect(cancelledPayments.has(paymentIntentId)).toBe(true);
-        expect(captureCalls).toHaveLength(0);
-        expect(refundRequests.filter((request) => request.paymentIntentId === paymentIntentId)).toHaveLength(0);
-        const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-        expect(updated?.status).toBe("CANCELLED");
+        for (const c of cases) {
+          const alertOrder = await createTestOrder();
+          await authorizedAtFromPersistedCreatedAt(alertOrder.id, c.createdAt);
+          const alertStep = makeFakeStep();
+          await withMockedTime(new Date(c.now), () =>
+            getHandler(acceptanceAlert)({ event: { data: { orderId: alertOrder.id, storeId, authorizedAt: c.now } }, step: alertStep }),
+          );
+          expect(alertStep.sleepUntils, c.label).toEqual(c.alert);
+          const alerts = await storeScoped(storeId).auditLog.findMany({
+            where: { entityId: alertOrder.id, action: "acceptance_alert", entityType: "order" },
+          });
+          expect(alerts, c.label).toHaveLength(1);
+
+          const cancelOrder = await createTestOrder();
+          await authorizedAtFromPersistedCreatedAt(cancelOrder.id, c.createdAt);
+          const cancelStep = makeFakeStep();
+          await withMockedTime(new Date(c.now), () =>
+            getHandler(autoCancel)({ event: { data: { orderId: cancelOrder.id, storeId, authorizedAt: c.now } }, step: cancelStep }),
+          );
+          expect(cancelStep.sleepUntils, c.label).toEqual(c.cancel);
+          expect(cancelSpy.mock.calls.filter((call) => call[0] === cancelOrder.paymentIntentId), c.label).toHaveLength(1);
+          expect((await storeScoped(storeId).order.findUnique({ where: { id: cancelOrder.id } }))?.status, c.label).toBe("CANCELLED");
+        }
       } finally {
         cancelSpy.mockRestore();
       }
@@ -742,9 +767,94 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         spy.mockRestore();
       }
     });
+
+    it("cancels an ACCEPTED order 24 h after acceptance with pick_timeout; fresh and scheduled orders are untouched", async () => {
+      const { sweepOrphanedAuthorized } = await import("./functions");
+      const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+      const hour = 3600_000;
+      async function acceptedOrder(acceptedAgoMs: number, pickupSlot: string | null) {
+        const order = await createTestOrder();
+        await storeScopedTransaction(storeId, async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: {
+              status: "ACCEPTED",
+              createdAt: new Date(Date.now() - acceptedAgoMs - 60_000),
+              acceptedAt: new Date(Date.now() - acceptedAgoMs),
+              inngestEventSentAt: new Date(),
+              pickupSlot,
+            },
+          });
+        });
+        return order;
+      }
+      const timedOut = await acceptedOrder(25 * hour, null);
+      const fresh = await acceptedOrder(23 * hour, null);
+      const scheduled = await acceptedOrder(25 * hour, new Date(Date.now() + 48 * hour).toISOString());
+
+      await handler({ step: makeFakeStep() });
+
+      const status = async (id: string) => (await storeScoped(storeId).order.findUnique({ where: { id } }))!.status;
+      expect(await status(timedOut.id)).toBe("CANCELLED");
+      expect(cancelledPayments.has(timedOut.paymentIntentId!)).toBe(true);
+      const cause = await storeScoped(storeId).auditLog.findMany({ where: { entityId: timedOut.id, action: "pick_timeout" } });
+      expect(cause).toHaveLength(1);
+      expect(await status(fresh.id)).toBe("ACCEPTED");
+      expect(await status(scheduled.id)).toBe("ACCEPTED");
+      expect(cancelledPayments.has(fresh.paymentIntentId!)).toBe(false);
+      expect(cancelledPayments.has(scheduled.paymentIntentId!)).toBe(false);
+    });
+
+    it("cancels an order whose pickup slot would run past the card hold at created + 6 d 12 h", async () => {
+      const { sweepOrphanedAuthorized } = await import("./functions");
+      const handler = (sweepOrphanedAuthorized as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
+      const hour = 3600_000;
+      const createdAt = new Date(Date.now() - (6 * 24 + 12) * hour - 60_000);
+      const acceptedAt = new Date(createdAt.getTime() + hour);
+      const capped = await createTestOrder();
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({
+          where: { id: capped.id },
+          data: {
+            status: "ACCEPTED",
+            createdAt,
+            acceptedAt,
+            inngestEventSentAt: new Date(),
+            pickupSlot: new Date(acceptedAt.getTime() + 6 * 24 * hour).toISOString(),
+          },
+        });
+      });
+
+      await handler({ step: makeFakeStep() });
+
+      expect((await storeScoped(storeId).order.findUnique({ where: { id: capped.id } }))!.status).toBe("CANCELLED");
+      expect(cancelledPayments.has(capped.paymentIntentId!)).toBe(true);
+    });
   });
 
   describe("reconcileStuckTransitional", () => {
+    it("the unscoped finder the cron uses returns stale CAPTURING and REFUND_FAILED orders, not a fresh one", async () => {
+      const stale = await createTestOrder();
+      const fresh = await createTestOrder();
+      const failedRefund = await createTestOrder();
+      // Older than any other lane's rows, so LIMIT 50 across all stores keeps them.
+      const longAgo = new Date("2001-01-01T00:00:00.000Z");
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: stale.id }, data: { status: "CAPTURING", updatedAt: longAgo } });
+        await tx.order.update({ where: { id: fresh.id }, data: { status: "CAPTURING" } });
+        await tx.order.update({ where: { id: failedRefund.id }, data: { status: "REFUND_FAILED", updatedAt: longAgo } });
+      });
+      try {
+        const ids = (await realFindStuck()).map((row) => row.id);
+        expect(ids).toEqual(expect.arrayContaining([stale.id, failedRefund.id]));
+        expect(ids).not.toContain(fresh.id);
+      } finally {
+        await storeScopedTransaction(storeId, (tx) =>
+          tx.order.updateMany({ where: { id: { in: [stale.id, fresh.id, failedRefund.id] } }, data: { status: "CANCELLED" } }),
+        );
+      }
+    });
+
     it("M4: bad order does not block healthy order from reconciliation", async () => {
       const { reconcileStuckTransitional } = await import("./functions");
       const handler = (reconcileStuckTransitional as unknown as { fn: (ctx: { step: ReturnType<typeof makeFakeStep> }) => Promise<void> }).fn;
@@ -1019,6 +1129,36 @@ describe.skipIf(!hasDb)("Inngest handler orchestration (database)", () => {
         async () => {
           const order = await createTestOrder();
           return { order, run: () => sendOrderAuthorized(storeBId, order.id) };
+        },
+        async () => {
+          const order = await createTestOrder();
+          await storeScoped(storeId).notificationLog.createMany({
+            data: [
+              { storeId, orderId: order.id, event: "placed", channel: "email", status: "pending" },
+              { storeId, orderId: order.id, event: "placed", channel: "sms", status: "pending" },
+            ],
+          });
+          const { sendCustomerNotification } = await import("./functions");
+          const { clearTestSentEmails, getTestSentEmails } = await import("../email/send");
+          const { clearTestSentSms, getTestSentSms } = await import("../notifications/sms");
+          clearTestSentEmails();
+          clearTestSentSms();
+          const handler = (sendCustomerNotification as unknown as {
+            fn: (ctx: { event: { data: { orderId: string; storeId: string; event: string } }; step: ReturnType<typeof makeFakeStep> }) => Promise<void>;
+          }).fn;
+          return {
+            order,
+            run: async () => {
+              await handler({
+                event: { data: { orderId: order.id, storeId: storeBId, event: "placed" } },
+                step: makeFakeStep(),
+              });
+              const rows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: order.id } });
+              expect(rows.map((row) => row.status)).toEqual(["pending", "pending"]);
+              expect(getTestSentEmails()).toHaveLength(0);
+              expect(getTestSentSms()).toHaveLength(0);
+            },
+          };
         },
       ];
       for (const build of cases) {

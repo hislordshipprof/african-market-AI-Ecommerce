@@ -3,7 +3,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(currentSlug ? 
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound"); } }));
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { isListingId } from "@/lib/security/listing-id";
 import { GET } from "./route";
 
@@ -37,7 +37,7 @@ describe.skipIf(!hasDb)("GET /api/storefront/listings/[id]", () => {
   };
 
   beforeAll(async () => {
-    prisma = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    prisma = testPrismaClient();
     await prisma.$connect();
     const [a, b, suspended] = await Promise.all([
       prisma.store.upsert({ where: { slug: slugA }, update: { status: "active" }, create: { slug: slugA, name: "Route A", themePreset: "palm-and-shea" } }),

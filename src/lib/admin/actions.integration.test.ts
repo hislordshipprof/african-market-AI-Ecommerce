@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { generateTOTP } from "../../../e2e/totp";
 
 vi.hoisted(() => {
@@ -23,9 +23,11 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { updateStore } from "./actions";
+import { retryCourierRegistrationAction, updateStore } from "./actions";
+import { fakeAddressBackend, setAddressProvider } from "../address/provider";
 import { auth } from "../auth";
-import { authPrisma, storeScopedTransaction } from "../db";
+import { authPrisma, platformAdmin, storeScopedTransaction } from "../db";
+import { inngest } from "../inngest/client";
 
 const BASE = "http://localhost:3000/api/auth";
 const suffix = `${Date.now()}-hrs`;
@@ -104,6 +106,12 @@ describe("store hours schema", () => {
     });
   }, 60_000);
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    setAddressProvider(null);
+  });
+
   afterAll(async () => {
     await authPrisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL ROLE app_user`;
@@ -126,5 +134,93 @@ describe("store hours schema", () => {
     const storedResult = await updateStore({}, storeForm(storeId, storedShape));
     expect(storedResult).toMatchObject({ success: true, storeId });
     expect(await readHours(storeId)).toEqual(storedShape);
+  });
+
+  it("platform admin turns on store delivery with a confirmed store address, which queues courier registration (#526)", async () => {
+    setAddressProvider(fakeAddressBackend());
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
+    const data = storeForm(storeId, storedShape);
+    data.set("addressLine1", "4600 Silver Hill Rd");
+    data.set("city", "Washington");
+    data.set("state", "DC");
+    data.set("zip", "20233");
+    data.set("storeDeliveryFee", "5.00");
+    data.set("storeDeliveryEnabled", "on");
+    const saved = await updateStore({}, data);
+    expect(saved).toMatchObject({ success: true, storeId });
+    const store = await authPrisma.store.findUnique({ where: { id: storeId } });
+    expect(store?.storeDeliveryEnabled).toBe(true);
+    expect(store?.storeDeliveryFeeCents).toBe(500);
+    expect(store?.lat).toBeCloseTo(38.845, 2);
+    expect(store?.lng).toBeCloseTo(-76.928, 2);
+    expect(send).toHaveBeenCalledWith({ name: "courier/registration.requested", data: { storeId } });
+    send.mockClear();
+
+    const bad = storeForm(storeId, storedShape);
+    bad.set("addressLine1", "999 Imaginary Road");
+    bad.set("city", "Nowhere");
+    bad.set("state", "DC");
+    bad.set("zip", "20233");
+    bad.set("storeDeliveryFee", "5.00");
+    bad.set("storeDeliveryEnabled", "on");
+    const refused = await updateStore({}, bad);
+    expect(refused.fieldErrors?.addressLine1).toBeTruthy();
+    const still = await authPrisma.store.findUnique({ where: { id: storeId } });
+    expect(still?.addressLine1).toBe("4600 Silver Hill Rd");
+    expect(still?.lat).toBeCloseTo(38.845, 2);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("turning on store delivery geocodes again when the saved address has no coordinates", async () => {
+    const fake = fakeAddressBackend();
+    setAddressProvider({ ...fake, locate: async () => ({ ok: false, code: "unavailable" }) });
+    const off = storeForm(storeId, storedShape);
+    off.set("addressLine1", "8505 Fenton St");
+    off.set("city", "Silver Spring");
+    off.set("state", "MD");
+    off.set("zip", "20910");
+    off.set("storeDeliveryFee", "5.00");
+    expect(await updateStore({}, off)).toMatchObject({ success: true, storeId });
+    const saved = await authPrisma.store.findUnique({ where: { id: storeId } });
+    expect(saved?.addressLine1).toBe("8505 Fenton St");
+    expect(saved?.lat).toBeNull();
+
+    setAddressProvider(fake);
+    const on = storeForm(storeId, storedShape);
+    on.set("addressLine1", "8505 Fenton St");
+    on.set("city", "Silver Spring");
+    on.set("state", "MD");
+    on.set("zip", "20910");
+    on.set("storeDeliveryFee", "5.00");
+    on.set("storeDeliveryEnabled", "on");
+    expect(await updateStore({}, on)).toMatchObject({ success: true, storeId });
+    const enabled = await authPrisma.store.findUnique({ where: { id: storeId } });
+    expect(enabled?.storeDeliveryEnabled).toBe(true);
+    expect(enabled?.lat).toBeCloseTo(38.996, 2);
+    setAddressProvider(null);
+  });
+
+  it("platform admin retries courier registration: the job is queued and the retry is audited (#526)", async () => {
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
+    const data = new FormData();
+    data.set("storeId", storeId);
+
+    await expect(retryCourierRegistrationAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?courierRetry=queued`);
+
+    expect(send).toHaveBeenCalledWith({ name: "courier/registration.requested", data: { storeId } });
+    const audit = await platformAdmin.auditLog.findFirst({ where: { entityId: storeId, action: "store.courier_registration_retry" } });
+    expect(audit?.actorId).toBe(userId);
+  });
+
+  it("a courier registration retry whose job could not be queued tells the admin so (#526)", async () => {
+    vi.stubEnv("INNGEST_EVENT_KEY", "test-key");
+    vi.spyOn(inngest, "send").mockRejectedValue(new Error("inngest down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const data = new FormData();
+    data.set("storeId", storeId);
+
+    await expect(retryCourierRegistrationAction(data)).rejects.toThrow(`REDIRECT:/admin/stores/${storeId}?courierRetry=failed`);
   });
 });

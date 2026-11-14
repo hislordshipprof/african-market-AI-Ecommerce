@@ -48,9 +48,10 @@ function newest(current: Date | null, next: Date): Date {
 
 /**
  * How sure we are that a listing's recorded stock is still true, from 0 to 1.
- * Uses time since the last manual confirmation (`recount`, `restock` or `adjust`,
- * else `createdAt`), sales relative to recorded stock, the shortage rate, and time
- * since the last restock. Reservation events are ignored. It takes no
+ * Uses time since the last manual confirmation (`recount`, `restock`, `adjust` or
+ * `counter_sale`, else `createdAt`), sales relative to recorded stock, the shortage
+ * rate, and time since the last restock. A counter sale confirms the count and is
+ * not sales velocity. Reservation events are ignored. It takes no
  * `confidenceUpdatedAt` because the daily job rewrites that column.
  */
 export function computeConfidence(
@@ -73,6 +74,7 @@ export function computeConfidence(
         break;
       case "recount":
       case "adjust":
+      case "counter_sale":
         confirmedAt = newest(confirmedAt, event.createdAt);
         break;
       case "sale":

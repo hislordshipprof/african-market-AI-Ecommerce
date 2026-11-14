@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { upsertMasterProduct, parseLocalNames, type CsvRow } from "../../prisma/master-catalog-upsert";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -36,7 +36,7 @@ describe.skipIf(!hasDb)("upsertMasterProduct (DB integration)", () => {
     });
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
   });
   afterAll(async () => {
@@ -58,6 +58,11 @@ describe.skipIf(!hasDb)("upsertMasterProduct (DB integration)", () => {
     const again = await asAdmin((tx) => tx.masterProduct.findUniqueOrThrow({ where: { id: ids[0] }, include: { synonyms: true } }));
     expect(again).toMatchObject({ status: "active", imageUrl: "https://cdn.test/a.webp", name: `${RUN} Yam2` });
     expect(again.synonyms).toHaveLength(3);
+
+    // #89: a re-seed with edited synonyms drops the rows the CSV no longer names.
+    await asAdmin((tx) => upsertMasterProduct(tx, row(ids[0], { local_names: "Ji (Igbo, Nigeria)", search_synonyms: "white yam" }), null, { statusOnCreate: "active", statusOnUpdate: "active", confidence: "high", imageUrl: null }));
+    const edited = await asAdmin((tx) => tx.productSynonym.findMany({ where: { productId: ids[0] } }));
+    expect(edited.map((s) => s.term).sort()).toEqual(["Ji", "white yam"]);
   });
 
   it("review variant: created needs_review with no image; re-seed never resets an approved status", async () => {

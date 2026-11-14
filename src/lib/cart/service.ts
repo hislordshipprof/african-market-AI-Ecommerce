@@ -21,11 +21,23 @@ import {
 
 export type { SwapRuleValue };
 
+export interface CartDeliverySnapshot {
+  line1: string | null;
+  line2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lat: number | null;
+  lng: number | null;
+  leaveAtDoor: boolean;
+}
+
 export interface CartWithLines {
   id: string;
   storeId: string;
   lines: CartLineView[];
   subtotalCents: number;
+  delivery: CartDeliverySnapshot;
 }
 
 export interface CartLineView {
@@ -40,10 +52,11 @@ export interface CartLineView {
     label: string;
     price: number;
     weightG: number;
-    listing: {
+      listing: {
       id: string;
       customName: string | null;
       maxPerOrder: number | null;
+      frozen: boolean;
       masterProduct: { name: string; categoryId: string | null } | null;
     };
   };
@@ -576,10 +589,11 @@ export async function getCartWithLines(
         label: line.variant.label,
         price: line.variant.price,
         weightG: line.variant.weightG,
-        listing: {
+          listing: {
           id: line.variant.listing.id,
           customName: line.variant.listing.customName,
           maxPerOrder: line.variant.listing.maxPerOrder,
+          frozen: line.variant.listing.frozen,
           masterProduct: line.variant.listing.masterProduct
             ? {
                 name: line.variant.listing.masterProduct.name,
@@ -595,7 +609,22 @@ export async function getCartWithLines(
     lines.map((line) => ({ priceCents: line.variant.price, qty: line.qty })),
   );
 
-  return { id: cart.id, storeId: cart.storeId, lines, subtotalCents };
+  return {
+    id: cart.id,
+    storeId: cart.storeId,
+    lines,
+    subtotalCents,
+    delivery: {
+      line1: cart.deliveryLine1,
+      line2: cart.deliveryLine2,
+      city: cart.deliveryCity,
+      state: cart.deliveryState,
+      zip: cart.deliveryZip,
+      lat: cart.deliveryLat,
+      lng: cart.deliveryLng,
+      leaveAtDoor: cart.leaveAtDoor,
+    },
+  };
 }
 
 export async function checkMinimumOrder(

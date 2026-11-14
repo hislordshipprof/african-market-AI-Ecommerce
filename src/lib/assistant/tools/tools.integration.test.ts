@@ -18,6 +18,7 @@ import {
   updateCart,
   type AssistantContext,
 } from "./execute";
+import { acceptanceForTurn } from "../shown";
 import { addToCartInput, offerChoicesInput, searchCatalogInput, toolInputSchemas } from "./schemas";
 
 const { headerState, cartCookies } = vi.hoisted(() => ({
@@ -94,6 +95,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
   });
 
   afterAll(async () => {
+    // A parallel platform-wide confirm-request run can alert on this file's low-confidence listing.
+    if (storeA) await storeScoped(storeA).copilotAlert.deleteMany({});
+    if (storeB) await storeScoped(storeB).copilotAlert.deleteMany({});
     if (storeA) await storeScoped(storeA).cart.deleteMany({});
     if (storeB) await storeScoped(storeB).cart.deleteMany({});
     if (storeA) await storeScoped(storeA).listing.deleteMany({});
@@ -109,6 +113,10 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       await raw.$disconnect();
     }
   });
+
+  function searchItems(result: unknown) {
+    return (result as { items: Array<{ listingId: string; match: string; matchedTerm?: string; name: string }> }).items;
+  }
 
   function ctx(overrides?: Partial<AssistantContext>): AssistantContext {
     return {
@@ -291,6 +299,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
         customerText: "yes",
         lastReplyText: "Egusi and Foreign Rice",
         lastReplyEmpty: false,
+        lastReplyListingIds: [],
       },
     }), {
       items: [
@@ -339,6 +348,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       lineTotalCents: 3297,
       addedTotalCents: 2198,
       subtotalCents: 3547,
+      // #495: every cart write returns the fee and total, so the model never adds them itself.
+      serviceFeeCents: 106,
+      totalBeforeDeliveryCents: 3653,
     });
     const action = await storeScoped(storeA).aiAction.findFirst({
       where: { conversationId: talk, tool: "add_to_cart" },
@@ -348,6 +360,8 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       lineTotalCents: 3297,
       addedTotalCents: 2198,
       subtotalCents: 3547,
+      serviceFeeCents: 106,
+      totalBeforeDeliveryCents: 3653,
     });
     const doubled = await addToCart(ctx({ cartId: cart, conversationId: talk }), {
       items: [
@@ -356,7 +370,7 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
         { variant_id: variantB, qty: 1 },
       ],
     });
-    expect(doubled).toMatchObject({ ok: true, subtotalCents: 6844 });
+    expect(doubled).toMatchObject({ ok: true, subtotalCents: 6844, serviceFeeCents: 205, totalBeforeDeliveryCents: 7049 });
     const rows = (doubled as unknown as { items: Array<Record<string, unknown>> }).items;
     expect(rows[0]).toMatchObject({ ok: true, added: 1, qty: 4, lineTotalCents: 4396, addedTotalCents: 1099 });
     expect(rows[1]).toMatchObject({ ok: true, added: 2, qty: 6, lineTotalCents: 6594, addedTotalCents: 2198 });
@@ -412,6 +426,17 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(checked).toMatchObject({ ok: true, items: [{ mayBeUnavailable: true }] });
     const shown = await showProducts(ctx(), { listing_ids: [item.listingId] });
     expect(shown).toMatchObject({ cards: [{ mayBeUnavailable: true }] });
+  });
+
+  it("set_swap_rule keeps a backup on a may-be-unavailable line and refuses exact_only", async () => {
+    const item = await makeListing(storeA, { name: "Low Stock Ofada", price: 236, confidence: 0.4 });
+    await addToCart(ctx(), { items: [{ variant_id: item.variantId, qty: 1 }] });
+    const line = await storeScoped(storeA).cartLine.findFirst({ where: { variantId: item.variantId } });
+    const result = await setSwapRule(ctx(), { line_id: line!.id, rule: "exact_only" });
+    expect(result).toMatchObject({ ok: false, code: "backup_required" });
+    const still = await storeScoped(storeA).cartLine.findUnique({ where: { id: line!.id } });
+    expect(still?.swapRule).toBe("store_suggests");
+    expect(await setSwapRule(ctx(), { line_id: line!.id, rule: "store_suggests" })).toMatchObject({ ok: true, swapRule: "store_suggests" });
   });
 
   it("confidence 0.5 with a valid backup sets named_substitute", async () => {
@@ -515,6 +540,9 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       lineTotalCents: 1200,
     })]);
     expect(summary.subtotalCents).toBe(1200);
+    // #495: the total the assistant may quote includes the service fee ($0.99 minimum).
+    expect(summary.serviceFeeCents).toBe(99);
+    expect(summary.totalBeforeDeliveryCents).toBe(1299);
     expect(summary.minimumOrderCents).toBe(2000);
     expect(summary.minimumMet).toBe(false);
     expect(summary.missingCents).toBe(800);
@@ -577,6 +605,25 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     expect(rows.find((row) => row.lineId === line!.id)?.qty).toBe(2);
   });
 
+  it("add_to_cart takes a listing id with one variant, and refuses a many-variant, foreign or invented one", async () => {
+    const single = await makeListing(storeA, { name: "One Pack Egusi", price: 310, confidence: 0.5 });
+    const backup = await makeListing(storeA, { name: "One Pack Backup", price: 320 });
+    const added = await addToCart(ctx(), {
+      items: [{ variant_id: single.listingId, qty: 1, backup_variant_id: backup.listingId }],
+    });
+    expect(added).toMatchObject({ ok: true, variantId: single.variantId, swapRule: "named_substitute", substituteVariantId: backup.variantId });
+    const many = await makeListing(storeA, { name: "Two Pack Rice", price: 330 });
+    await storeScoped(storeA).listingVariant.create({
+      data: { listingId: many.listingId, label: "10 lb", price: 600, weightG: 4536 },
+    });
+    const foreignListing = await storeScoped(storeB).listingVariant.findUnique({ where: { id: variantB } });
+    for (const id of [many.listingId, foreignListing!.listingId, "cmwcn204c0034zg0mihbisxd10"]) {
+      const refused = await addToCart(ctx(), { items: [{ variant_id: id, qty: 1 }] });
+      expect(refused).toMatchObject({ ok: false, code: "variant_not_found" });
+    }
+    expect(await storeScoped(storeA).cartLine.count({ where: { variant: { listingId: many.listingId } } })).toBe(0);
+  });
+
   it("a bad backup is ignored and the line uses store_suggests", async () => {
     const item = await makeListing(storeA, { name: "Bad Backup", price: 90, confidence: 0.4 });
     const inactive = await makeListing(storeA, { name: "Inactive Backup", price: 90, active: false });
@@ -618,6 +665,304 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     await expect(searchCatalog(ctx(), { query: "a".repeat(101) })).rejects.toThrow("Invalid tool input");
   });
 
+  it("search marks an established synonym and show_products keeps the dearer pack", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const localName = `iyan${suffix}`;
+    const item = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Pounded yam flour ${suffix}`, imageUrl: null },
+      price: 450,
+      label: "70g tin",
+    });
+    const masterId = (await storeScoped(storeA).listing.findUniqueOrThrow({ where: { id: item.listingId } })).masterProductId;
+    await platformAdmin.productSynonym.create({ data: { productId: masterId!, term: localName } });
+    await platformAdmin.productSynonym.create({ data: { productId: masterId!, term: `poundo yam ${suffix}` } });
+    const dear = await storeScoped(storeA).listingVariant.create({
+      data: { listingId: item.listingId, label: "400g tin", price: 1200, weightG: 400 },
+    });
+    const established = await searchCatalog(ctx(), { query: localName });
+    expect(established).toMatchObject({
+      ok: true,
+      items: [{ listingId: item.listingId, variantId: item.variantId, priceCents: 450, match: "synonym", matchedTerm: localName }],
+    });
+    const near = await searchCatalog(ctx(), { query: `Ayoola poundo yam ${suffix}` });
+    const nearItems = (near as unknown as { items: Array<{ listingId: string; match: string }> }).items;
+    expect(nearItems.find((row) => row.listingId === item.listingId)?.match).toBe("near");
+    const shown = await showProducts(ctx(), { listing_ids: [item.listingId] });
+    expect(shown).toMatchObject({
+      ok: true,
+      cards: [{
+        variants: expect.arrayContaining([
+          { variantId: item.variantId, label: "70g tin", priceCents: 450 },
+          { variantId: dear.id, label: "400g tin", priceCents: 1200 },
+        ]),
+      }],
+    });
+  });
+
+  it("search keeps plural, script, pack, and near rows, and a name fit beats a synonym", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const rows: Array<{ query: string; name: string; pack?: string; label?: string; match: string; bare?: boolean }> = [
+      { query: "yams", name: `White yam ${suffix}`, match: "name" },
+      { query: "tomatoes", name: `Fresh tomato ${suffix}`, match: "name" },
+      { query: "maggi cube", name: `Maggi Star seasoning cubes ${suffix}`, match: "name" },
+      { query: "chocolat indigene", name: `chocolat indigène ${suffix}`, match: "name" },
+      { query: "rice", name: `Rice ${suffix}`, pack: "bag", match: "name" },
+      { query: "Gino tomato paste", name: `Gino tomato paste ${suffix}`, pack: "400 g", label: "400g tin", match: "name" },
+      { query: "Gino tomato paste", name: `Gino tomato paste ${suffix}`, pack: "70g tin", label: "70g tin", match: "name" },
+      { query: "drinks", name: `Zobo drink ${suffix}`, match: "name" },
+      { query: "onion", name: `Red onions ${suffix}`, match: "name" },
+      { query: "star", name: `Maggi cubes ${suffix}`, label: "star pack", match: "name", bare: true },
+    ];
+    for (const row of rows) {
+      const item = await makeListing(storeA, {
+        name: "ignored",
+        customName: null,
+        master: { name: row.name, imageUrl: null },
+        price: 450,
+        ...(row.label ? { label: row.label } : {}),
+      });
+      const found = await searchCatalog(ctx(), {
+        query: row.bare ? row.query : `${row.query} ${suffix}`,
+        ...(row.pack ? { pack: row.pack } : {}),
+      });
+      const hit = searchItems(found).find((itemRow) => itemRow.listingId === item.listingId);
+      expect(hit?.match, `${row.query} ${suffix}`).toBe(row.match);
+    }
+    const berbere = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Berbere ${suffix}`, imageUrl: null },
+      price: 450,
+    });
+    const berbereMaster = (await storeScoped(storeA).listing.findUniqueOrThrow({ where: { id: berbere.listingId } })).masterProductId;
+    await platformAdmin.productSynonym.create({ data: { productId: berbereMaster!, term: "በርበሬ" } });
+    const token = `zzqx${suffix}`;
+    const named = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Basket of ${token}`, imageUrl: null },
+      price: 450,
+    });
+    const decoy = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Unrelated seasoning ${suffix}`, imageUrl: null },
+      price: 450,
+    });
+    const decoyMaster = (await storeScoped(storeA).listing.findUniqueOrThrow({ where: { id: decoy.listingId } })).masterProductId;
+    await platformAdmin.productSynonym.create({ data: { productId: decoyMaster!, term: token } });
+    for (let index = 0; index < 50; index += 1) {
+      await makeListing(storeA, {
+        name: "ignored",
+        customName: null,
+        master: { name: `${token}aaa${String(index).padStart(2, "0")}`, imageUrl: null },
+        price: 450,
+      });
+    }
+    const first = await searchCatalog(ctx(), { query: token, limit: 1 });
+    expect(searchItems(first)[0]?.listingId).toBe(named.listingId);
+    const amharic = await searchCatalog(ctx(), { query: "በርበሬ" });
+    expect(searchItems(amharic).find((row) => row.listingId === berbere.listingId))
+      .toMatchObject({ match: "synonym", matchedTerm: "በርበሬ" });
+    const scotch = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Scotch bonnet ata rodo ${suffix}`, imageUrl: null },
+      price: 450,
+    });
+    const cameroon = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Cameroon pepper ${suffix}`, imageUrl: null },
+      price: 700,
+    });
+    const cameroonMaster = (await storeScoped(storeA).listing.findUniqueOrThrow({ where: { id: cameroon.listingId } })).masterProductId;
+    await platformAdmin.productSynonym.create({ data: { productId: cameroonMaster!, term: `ata rodo ${suffix}` } });
+    const both = await searchCatalog(ctx(), { query: `ata rodo ${suffix}`, limit: 1 });
+    expect(both).toMatchObject({ ok: true, items: [{ listingId: scotch.listingId, match: "name" }] });
+    const wide = await searchCatalog(ctx(), { query: `ata rodo ${suffix}` });
+    const cameroonHit = searchItems(wide).find((row) => row.listingId === cameroon.listingId);
+    expect(cameroonHit?.match).toBe("near");
+    const cartB = (await storeScoped(storeB).cart.create({ data: { storeId: storeB, source: "manual" } })).id;
+    const conversationB = (await storeScoped(storeB).aiConversation.create({
+      data: { storeId: storeB, cartId: cartB, model: "claude-haiku-5-5", messages: [] },
+    })).id;
+    const otherStore = await searchCatalog(ctx({ storeId: storeB, cartId: cartB, conversationId: conversationB }), { query: `yams ${suffix}` });
+    const otherItems = searchItems(otherStore);
+    expect(otherItems.some((row) => row.listingId === scotch.listingId || row.name.includes(suffix))).toBe(false);
+  });
+
+  it("an explicit add of a near-only variant is refused and writes nothing", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const item = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Pounded yam flour ${suffix}`, imageUrl: null },
+      price: 450,
+    });
+    const turn = `near-${suffix}`;
+    const context = ctx({ ...talk, turnMessageId: turn, acceptance: {
+      led: false,
+      customerText: `Add 1 Ayoola ${suffix}.`,
+      lastReplyText: "",
+      lastReplyEmpty: true,
+      lastReplyListingIds: [],
+    } });
+    const found = await searchCatalog(context, { query: `Ayoola poundo yam ${suffix}` });
+    expect(searchItems(found).find((row) => row.listingId === item.listingId)?.match).toBe("near");
+    const before = await storeScoped(storeA).cartLine.count({ where: { cartId: talk.cartId } });
+    const result = await addToCart(context, { items: [{ variant_id: item.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: false, code: "not_shown" });
+    expect(await storeScoped(storeA).cartLine.count({ where: { cartId: talk.cartId } })).toBe(before);
+  });
+
+  it("yes to an earlier proposal still adds a product that search labelled near", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const name = `Knorr filling seasoning ${suffix}`;
+    const item = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name, imageUrl: null },
+      price: 450,
+    });
+    const turn = `yes-${suffix}`;
+    const context = ctx({ ...talk, turnMessageId: turn, acceptance: {
+      led: true,
+      customerText: "yes",
+      lastReplyText: `I can add ${name}.`,
+      lastReplyEmpty: false,
+      lastReplyListingIds: [],
+    } });
+    await searchCatalog(context, { query: `Otherbrand ${suffix}` });
+    const result = await addToCart(context, { items: [{ variant_id: item.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: true, qty: 1 });
+  });
+
+  it("yes adds a product the proposal's search returned even when the reply shortened its name", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const item = await makeListing(storeA, {
+      name: `Eru / okazi / afang / fumbwa leaves ${suffix} (Gnetum), dried and shredded`,
+      price: 450,
+    });
+    const proposalTurn = `propose-${suffix}`;
+    const found = await searchCatalog(ctx({ ...talk, turnMessageId: proposalTurn }), { query: `eru ${suffix}` });
+    expect(searchItems(found).some((row) => row.listingId === item.listingId)).toBe(true);
+    const yes = `yes-eru-${suffix}`;
+    const messages = [
+      { role: "user", id: proposalTurn, parts: [{ type: "text", text: `Egusi soup ${suffix} for 4 people.` }] },
+      {
+        role: "assistant",
+        id: `reply-${suffix}`,
+        parts: [
+          { type: "tool-search_catalog", state: "output-available", output: found },
+          { type: "text", text: "- Eru / okazi leaves (Gnetum), dried and shredded, 1 pack\n\nWant me to add these?" },
+        ],
+      },
+      { role: "user", id: yes, parts: [{ type: "text", text: "Yes, add those." }] },
+    ];
+    const result = await addToCart(ctx({
+      ...talk,
+      turnMessageId: yes,
+      acceptance: acceptanceForTurn(messages, yes, "Yes, add those."),
+    }), { items: [{ variant_id: item.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: true, qty: 1 });
+  });
+
+  it("yes after an explicit add does not add the near product that reply named", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const name = `Pounded yam flour ${suffix}`;
+    const item = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name, imageUrl: null },
+      price: 450,
+    });
+    const asked = `asked-${suffix}`;
+    const yes = `yes-near-${suffix}`;
+    await storeScoped(storeA).aiConversation.update({
+      where: { id: talk.conversationId },
+      data: {
+        messages: [
+          { role: "user", id: asked, parts: [{ type: "text", text: `Add 1 Ayoola ${suffix}.` }] },
+          { role: "assistant", id: `reply-${suffix}`, parts: [{ type: "text", text: `The only result is ${name}.` }] },
+          { role: "user", id: yes, parts: [{ type: "text", text: "yes" }] },
+        ],
+      },
+    });
+    await searchCatalog(ctx({ ...talk, turnMessageId: asked }), { query: `Ayoola poundo yam ${suffix}` });
+    const result = await addToCart(ctx({ ...talk, turnMessageId: yes, acceptance: {
+      led: true,
+      customerText: "yes",
+      lastReplyText: `The only result is ${name}.`,
+      lastReplyEmpty: false,
+      lastReplyListingIds: [],
+    } }), { items: [{ variant_id: item.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: false, code: "not_shown" });
+    expect(await storeScoped(storeA).cartLine.count({ where: { cartId: talk.cartId } })).toBe(0);
+  });
+
+  it("a named pick from offer_choices still adds a variant search labelled near", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const picked = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Cameroon pepper ${suffix}`, imageUrl: null },
+      price: 700,
+    });
+    const other = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Scotch bonnet ${suffix}`, imageUrl: null },
+      price: 450,
+    });
+    const turn = `pick-${suffix}`;
+    const context = ctx({ ...talk, turnMessageId: turn, acceptance: {
+      led: false,
+      customerText: `Add Cameroon pepper ${suffix} (pack)`,
+      lastReplyText: "",
+      lastReplyEmpty: true,
+      lastReplyListingIds: [],
+    } });
+    await searchCatalog(context, { query: `Ayoola ${suffix}` });
+    await offerChoices(context, {
+      options: [
+        { listing_id: picked.listingId, variant_id: picked.variantId },
+        { listing_id: other.listingId, variant_id: other.variantId },
+      ],
+    });
+    const result = await addToCart(context, { items: [{ variant_id: picked.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: true, qty: 1 });
+  });
+
+  it("a recipe add is not refused when the ingredient search row is near", async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const talk = await freshCart();
+    const item = await makeListing(storeA, {
+      name: "ignored",
+      customName: null,
+      master: { name: `Knorr chicken cubes ${suffix}`, imageUrl: null },
+      price: 450,
+    });
+    const turn = `recipe-${suffix}`;
+    const context = ctx({ ...talk, turnMessageId: turn, acceptance: {
+      led: false,
+      customerText: "I want to cook jollof rice for 4 people.",
+      lastReplyText: "",
+      lastReplyEmpty: true,
+      lastReplyListingIds: [],
+    } });
+    await searchCatalog(context, { query: `seasoning ${suffix}` });
+    const result = await addToCart(context, { items: [{ variant_id: item.variantId, qty: 1 }] });
+    expect(result).toMatchObject({ ok: true, qty: 1 });
+  });
+
   it("show_products returns a null image when the listing has no photo", async () => {
     const item = await makeListing(storeA, { name: "Zz No Photo Grain", price: 50 });
     const shown = await showProducts(ctx(), { listing_ids: [item.listingId] });
@@ -635,11 +980,11 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
     await addLine(storeA, keeperCart, keeper.variantId, 1, null);
     const gone = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: item.variantId } });
     const result = await updateCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: gone!.id, qty: 0 });
-    expect(result).toMatchObject({ ok: true, removed: true, qty: 0, subtotalCents: 40 });
+    expect(result).toMatchObject({ ok: true, removed: true, qty: 0, subtotalCents: 40, serviceFeeCents: 99, totalBeforeDeliveryCents: 139 });
     expect(result).not.toHaveProperty("lineTotalCents");
     const kept = await storeScoped(storeA).cartLine.findFirst({ where: { cartId: keeperCart, variantId: keeper.variantId } });
     const removed = await removeFromCart(ctx({ cartId: keeperCart, conversationId: keeperTalk }), { line_id: kept!.id });
-    expect(removed).toMatchObject({ ok: true, removed: true, subtotalCents: 0 });
+    expect(removed).toMatchObject({ ok: true, removed: true, subtotalCents: 0, serviceFeeCents: 0, totalBeforeDeliveryCents: 0 });
     expect(removed).not.toHaveProperty("lineTotalCents");
   });
 
@@ -662,6 +1007,8 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       unitPriceCents: 80,
       lineTotalCents: 240,
       subtotalCents: 240,
+      serviceFeeCents: 99,
+      totalBeforeDeliveryCents: 339,
     });
     const result = await updateCart(ctx(), { line_id: line!.id, qty: 3 });
     expect(result).toMatchObject({
@@ -871,6 +1218,8 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       expect(result).toEqual({
         ok: true,
         subtotalCents: 5030,
+        serviceFeeCents: 151,
+        totalBeforeDeliveryCents: 5181,
         items: [
           {
             ok: true,

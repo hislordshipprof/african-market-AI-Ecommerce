@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { Client } from "pg";
 import { healthQueryRaw, storeScoped, storeScopedTransaction } from "../db";
 import { addLine } from "../cart/service";
@@ -13,6 +13,7 @@ import {
   type RecordAuthorizedOrderInput,
 } from "./service";
 import type { Contact } from "../customer-flow/contracts";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 const hasDb = !!process.env.DATABASE_URL;
 
@@ -34,7 +35,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
   let actor: Actor;
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     monitor = new Client({ connectionString: process.env.DATABASE_URL });
     await monitor.connect();
@@ -337,7 +338,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       0,
       lines.map((line) => ({ price: line.price, qty: line.qty, maxPerOrder: null })),
       { ...CONTACT, email },
-      "pickup",
+      "pickup", ADR_0021_SERVICE_FEE,
     );
     return {
       cartId,
@@ -453,7 +454,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
       expect(await storeScoped(storeId).customer.count()).toBe(8);
       for (const order of orders) {
         expect(order.lines).toHaveLength(20);
-        expect(order.totalAuthorizedCents).toBe(11_000);
+        expect(order.totalAuthorizedCents).toBe(11_299);
         for (const line of order.lines) expect(line.unitPriceCents).toBe(500);
       }
       for (const cart of carts) {
@@ -512,8 +513,9 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     const input = orderInput(cart.id, paymentIntentId, orderLines([variants[0]!.id], 1), "replay@t236.test");
     const created = await recordAuthorizedOrder(storeId, input);
     expect(created.created).toBe(true);
+    expect(created.trackingToken).toBeTruthy();
     const again = await recordAuthorizedOrder(storeId, { ...input, lines: [] });
-    expect(again).toEqual({ orderId: created.orderId, created: false });
+    expect(again).toEqual({ orderId: created.orderId, created: false, trackingToken: created.trackingToken });
     expect(await storeScoped(storeId).customer.count()).toBe(1);
     expect(await storeScoped(storeId).order.count()).toBe(1);
   });
@@ -536,7 +538,7 @@ describe.skipIf(!hasDb)("placeOrder lock order (lane DB, app_runtime)", () => {
     const secondPi = `pi_${crypto.randomUUID()}`;
     const second = await makeCart(storeId, [variants[0]!.id], 3, secondPi);
     const replay = await recordAuthorizedOrder(storeId, input);
-    expect(replay).toEqual({ orderId: created.orderId, created: false });
+    expect(replay).toEqual({ orderId: created.orderId, created: false, trackingToken: created.trackingToken });
     await expect(
       recordAuthorizedOrder(storeId, { ...input, cartId: second.cart.id }),
     ).rejects.toThrow("PaymentIntent is already recorded");

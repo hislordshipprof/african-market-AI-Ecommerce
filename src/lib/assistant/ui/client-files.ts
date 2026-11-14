@@ -1,5 +1,7 @@
 import { scrubFileNameCards } from "../card-scrub";
 
+export { jpegBlob } from "@/lib/image/client-jpeg";
+
 const NAME_CAP = 80;
 
 /**
@@ -64,27 +66,6 @@ export function fileNotice(kind: "pages" | "encrypted" | "undecodable" | "too-ma
   if (kind === "too-many") return "You can send up to 3 files.";
   if (kind === "too-large") return "Those files are too big to send. Keep them under 3 MB.";
   return "This browser can't read that photo.";
-}
-
-export async function jpegBlob(file: Blob): Promise<Blob> {
-  const bitmap = await createImageBitmap(file);
-  try {
-    const edge = Math.max(bitmap.width, bitmap.height);
-    const scale = edge > 2000 ? 2000 / edge : 1;
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("canvas");
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
-    if (!blob) throw new Error("encode");
-    return blob;
-  } finally {
-    bitmap.close();
-  }
 }
 
 export async function dataUrl(blob: Blob): Promise<string> {

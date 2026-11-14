@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({
@@ -15,9 +14,10 @@ vi.mock("next/headers", () => ({
     "x-store-slug": process.env.PRUNE_STORE_SLUG ?? "",
   }),
   cookies: async () => ({
-    get: () => undefined,
+    get: (name: string) => (name === "cart_id" && process.env.PRUNE_CART_ID ? { name, value: process.env.PRUNE_CART_ID } : undefined),
     getAll: () => [],
     has: () => false,
+    set: () => {},
   }),
 }));
 
@@ -60,13 +60,14 @@ describe.skipIf(!child)("production child prune", () => {
     const searchIp = "198.51.100.80";
     process.env.ASSISTANT_CHAT_ENABLED = "1";
     process.env.PRUNE_STORE_SLUG = slug;
-    const owner = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    const owner = testPrismaClient();
     const store = await owner.store.create({
       data: {
         slug,
         name: "Prune store",
         themePreset: "palm-and-shea",
         prepTimeMinutes: 20,
+        stripeOnboardingStatus: "complete",
       },
     });
     const keys: string[] = [];
@@ -123,7 +124,14 @@ describe.skipIf(!child)("production child prune", () => {
       const cartId = decodeURIComponent(/cart_id=([^;]+)/.exec(chat.headers.get("set-cookie") ?? "")?.[1] ?? "");
       expect(cartId).not.toBe("");
 
+      // Payment setup counts the cart before the empty basket fails its quote, so no PaymentIntent is created.
+      process.env.PRUNE_CART_ID = cartId;
+      const { createPaymentIntentAction } = await import("../checkout/actions");
+      const payment = await createPaymentIntentAction({ name: "Ada", phone: "(808) 555-0100", email: `prune-${run}@test.example` }, "pickup");
+      expect(payment.ok).toBe(false);
+
       keys.push(
+        `payment:${cartId}`,
         `invite:${store.id}`,
         "search:browser:browserprune",
         `search:ip:${searchIp}`,

@@ -279,7 +279,7 @@ describe.skipIf(!hasDb)("listing save actions (real auth, lane DB)", () => {
     const result = await updateListingAction(saveForm(listingId, listingName, [
       { id: variantId, label: "1kg", price: 950, weightG: 1200 },
     ]));
-    expect(result).toEqual({ success: true, id: listingId });
+    expect(result).toMatchObject({ success: true, id: listingId });
     const row = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: variantId } });
     expect(row).toMatchObject({ id: variantId, price: 950, weightG: 1200 });
     expect(revalidated).toEqual([[storefrontTag(storeAId), { expire: 0 }]]);

@@ -56,23 +56,23 @@
   html:has(.story-surface),
   body:has(.story-surface) {
     color-scheme: dark;
-    background-color: var(--store-bg, #0F1712);
+    background-color: var(--store-bg, #121211);
   }
 
   .story-surface {
     color-scheme: dark;
-    --background: var(--store-bg, #0F1712);
-    --foreground: var(--store-ink, #EEF2EC);
-    --card: var(--store-surface, #16211A);
-    --card-foreground: var(--store-ink, #EEF2EC);
-    --primary: var(--store-primary, #6CC08F);
+    --background: var(--store-bg, #121211);
+    --foreground: var(--store-ink, #F2F2EE);
+    --card: var(--store-surface, #21211F);
+    --card-foreground: var(--store-ink, #F2F2EE);
+    --primary: var(--store-primary, #5FD08A);
     --primary-foreground: var(--store-on-primary, #0B0B0B);
-    --secondary: var(--store-soft, #1B2E23);
-    --secondary-foreground: var(--store-ink, #EEF2EC);
-    --muted: var(--store-raised, #1F2C24);
-    --muted-foreground: var(--store-muted, #A3B1A7);
-    --border: var(--store-line, #2A3A30);
-    --ring: var(--store-primary, #6CC08F);
+    --secondary: var(--store-soft, #1F2A23);
+    --secondary-foreground: var(--store-ink, #F2F2EE);
+    --muted: var(--store-raised, #30302D);
+    --muted-foreground: var(--store-muted, #A8A8A0);
+    --border: var(--store-line, #3A3A36);
+    --ring: var(--store-primary, #5FD08A);
     --destructive: var(--store-deal, #F0707E);
   }
 

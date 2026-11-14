@@ -1,6 +1,21 @@
 import { expect, test } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { laneSmokePort, reservePort, startSpawnedServer } from "./spawned-server";
 import { storeUrl } from "./urls";
+
+// The per-IP assistant limit lives in the database, so a reused lane database carries
+// earlier runs' count for ::1 and these checks get 429 instead of the gate under test (#419).
+test.beforeEach(async () => {
+  const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL_UNPOOLED;
+  if (!url) throw new Error("DIRECT_URL is required to reset the assistant rate limit");
+  const prisma = new PrismaClient({ adapter: new PrismaPg(url) });
+  try {
+    await prisma.appRateLimit.deleteMany({ where: { key: { startsWith: "assistant:ip:" } } });
+  } finally {
+    await prisma.$disconnect();
+  }
+});
 
 test("chat returns assistant_unavailable JSON when no Anthropic key is set", async ({ page }) => {
   test.skip(process.env.E2E_FAKE_ASSISTANT === "1", "the scripted assistant replaces the keyless check");
@@ -72,8 +87,8 @@ test("production assistant gates fail closed without relying on local env files"
     await page.getByTestId("assistant-launcher").click();
     await page.getByTestId("assistant-composer").fill("hello");
     await page.getByTestId("assistant-send").click();
-    const dialog = page.getByRole("dialog", { name: "Shop with help" });
-    await expect(dialog.getByText("The helper isn't available right now.")).toBeVisible({ timeout: 20_000 });
+    const dialog = page.getByRole("dialog", { name: "Shop with AI" });
+    await expect(dialog.getByText("Shop with AI isn't available right now.")).toBeVisible({ timeout: 20_000 });
     await expect(dialog.getByRole("button", { name: "Retry" })).toHaveCount(0);
     const result = await page.evaluate(async (url) => {
       const response = await fetch(url, {
@@ -111,7 +126,7 @@ test("production assistant gates fail closed without relying on local env files"
     await page.getByTestId("assistant-launcher").click();
     await page.getByTestId("assistant-composer").fill("mid-stream");
     await page.getByTestId("assistant-send").click();
-    const dialog = page.getByRole("dialog", { name: "Shop with help" });
+    const dialog = page.getByRole("dialog", { name: "Shop with AI" });
     await expect(dialog.getByRole("button", { name: "Retry" })).toBeVisible({ timeout: 20_000 });
     await dialog.getByRole("button", { name: "Retry" }).click();
     await expect(dialog.getByText("Recovered after the interruption.")).toBeVisible({ timeout: 20_000 });

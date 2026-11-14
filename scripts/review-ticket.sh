@@ -3,6 +3,7 @@
 # No agent reviews its own work: build-ticket.sh calls this after every build and fix round.
 # Usage: scripts/review-ticket.sh <issue>
 # Writes: .builder/review-<n>.md. Its first line is "VERDICT: PASS" or "VERDICT: BLOCKING".
+# Also writes .builder/review-<n>.sha: the commit that was reviewed. merge-ticket.sh merges only that commit.
 # RISK=1 (set automatically by build-ticket.sh for money, auth and external-provider tickets) also runs a
 # second review, a fresh session on AGENT_ENGINE (CURSOR_REVIEW_MODEL on Cursor), and merges its findings into
 # the same file.
@@ -18,7 +19,9 @@ LOG="$ROOT/.builder/logs/review-$N-$(date +%Y%m%d-%H%M%S).json"
 LANE_PORT="${E2E_PORT:-3000}"
 [ -d "$WT" ] || { echo "No worktree for ticket $N at $WT"; exit 1; }
 mkdir -p "$ROOT/.builder/logs"
-rm -f "$OUT"
+SHA_FILE="$ROOT/.builder/review-$N.sha"
+rm -f "$OUT" "$SHA_FILE"
+REVIEWED_SHA=$(git -C "$WT" rev-parse HEAD)
 # A sandboxed Codex can only write inside the worktree, so it writes there and the file is moved after.
 TARGET="$OUT"
 if [ "$REVIEW_ENGINE" = codex ]; then
@@ -69,9 +72,18 @@ if [ "${RISK:-0}" = "1" ]; then
   watch_run "$OUT2" agent_run review2 "$LOG.second.json" "${PROMPT//$TARGET/$OUT2}" || true
   stop_worktree_servers "$WT"
   [ -s "$OUT2" ] || printf 'VERDICT: BLOCKING\nThe second review wrote no result; see %s\n' "$LOG.second.json" > "$OUT2"
-  head -1 "$OUT2" | grep -q '^VERDICT: PASS' || sed -i '1s/^VERDICT: PASS/VERDICT: BLOCKING/' "$OUT"
+  sed -i '1s/\*//g' "$OUT2"
+  # Exact, not a prefix: "VERDICT: PASS with two blockers" is not a pass.
+  [ "$(head -1 "$OUT2" | tr -d '\r')" = "VERDICT: PASS" ] || sed -i '1s/^VERDICT: PASS.*/VERDICT: BLOCKING/' "$OUT"
   printf '\n\n## Second review (independent, %s)\n\n' "${CURSOR_REVIEW_MODEL:-$AGENT_ENGINE}" >> "$OUT"
   cat "$OUT2" >> "$OUT"
+fi
+
+# Tie the verdict to the commit it is about. A branch that moved during the review was not reviewed as it now is.
+if [ "$(git -C "$WT" rev-parse HEAD)" = "$REVIEWED_SHA" ]; then
+  printf '%s\n' "$REVIEWED_SHA" > "$SHA_FILE"
+else
+  echo "The branch moved during the review (was $REVIEWED_SHA). This review cannot be used to merge." >&2
 fi
 
 head -1 "$OUT"

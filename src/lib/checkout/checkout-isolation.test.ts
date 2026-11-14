@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped, storeScopedTransaction } from "../db";
 import { customerRlsErrorText, isCustomerRlsRejection } from "../customer-rls-error";
 
@@ -18,8 +18,7 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
   let orderBId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     const storeA = await rawPrisma.store.upsert({
@@ -112,7 +111,13 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
         number: 1,
         customerId: customerAId,
         status: "AUTHORIZED",
-        fulfillment: "pickup",
+        fulfillment: "store-delivery",
+        deliveryFeeCents: 499,
+        deliveryLine1: "3700 MAIN ST",
+        deliveryCity: "HOUSTON",
+        deliveryState: "TX",
+        deliveryZip: "77002",
+        leaveAtDoor: true,
         subtotalCents: 2400,
         bufferCents: 240,
         totalAuthorizedCents: 2640,
@@ -138,7 +143,13 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
         number: 1,
         customerId: customerBId,
         status: "AUTHORIZED",
-        fulfillment: "pickup",
+        fulfillment: "store-delivery",
+        deliveryFeeCents: 499,
+        deliveryLine1: "8400 PARK PLACE BLVD",
+        deliveryCity: "HOUSTON",
+        deliveryState: "TX",
+        deliveryZip: "77017",
+        leaveAtDoor: false,
         subtotalCents: 900,
         bufferCents: 90,
         totalAuthorizedCents: 990,
@@ -270,6 +281,11 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
     const orders = await scoped.order.findMany();
     expect(orders.every((o) => o.storeId === storeBId)).toBe(true);
     expect(orders.find((o) => o.id === orderAId)).toBeUndefined();
+    const clock = await scoped.order.findMany({
+      where: { id: orderAId },
+      select: { acceptanceClockStartsAt: true },
+    });
+    expect(clock).toEqual([]);
   });
 
   it("cross-store order insert is rejected by RLS", async () => {
@@ -285,9 +301,18 @@ describe.skipIf(!hasDb)("Customer, Order, OrderLine RLS isolation", () => {
           subtotalCents: 100,
           bufferCents: 10,
           totalAuthorizedCents: 110,
+          acceptanceClockStartsAt: new Date("2026-11-04T15:00:00Z"),
         },
       }),
     ).rejects.toThrow();
+    const before = await storeScoped(storeAId).order.findUnique({ where: { id: orderAId } });
+    const updated = await storeScoped(storeBId).order.updateMany({
+      where: { id: orderAId },
+      data: { acceptanceClockStartsAt: new Date("2030-01-01T00:00:00Z") },
+    });
+    expect(updated.count).toBe(0);
+    const after = await storeScoped(storeAId).order.findUnique({ where: { id: orderAId } });
+    expect(after?.acceptanceClockStartsAt).toEqual(before?.acceptanceClockStartsAt);
   });
 
   // --- OrderLine isolation ---

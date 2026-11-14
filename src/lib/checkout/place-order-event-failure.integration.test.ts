@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { findOrphanedAuthorizedOrders, storeScoped } from "../db";
 import type { Contact } from "../customer-flow/contracts";
 
@@ -16,6 +16,7 @@ vi.mock("../inngest/client", () => ({
 }));
 
 import { computeQuote, placeOrder } from "./service";
+import { ADR_0021_SERVICE_FEE } from "../order/platform-fee";
 
 const hasDb = !!process.env.DATABASE_URL;
 const CONTACT: Contact = { name: "Ada Buyer", phone: "+15551234567", email: "orphan@t236.test" };
@@ -25,7 +26,7 @@ describe.skipIf(!hasDb)("placeOrder event failure (real send, mocked transport)"
   const storeIds: string[] = [];
 
   beforeAll(async () => {
-    raw = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL!) });
+    raw = testPrismaClient();
     await raw.$connect();
     send.mockRejectedValue(new Error("transport down"));
   }, 30_000);
@@ -80,7 +81,7 @@ describe.skipIf(!hasDb)("placeOrder event failure (real send, mocked transport)"
     await storeScoped(store.id).cartLine.create({
       data: { storeId: store.id, cartId: cart.id, variantId: variant.id, qty: 1, swapRule: "exact_only" },
     });
-    const hold = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup").holdCents;
+    const hold = computeQuote(0, [{ price: 500, qty: 1, maxPerOrder: null }], CONTACT, "pickup", ADR_0021_SERVICE_FEE).holdCents;
     retrieve.mockResolvedValue({
       status: "requires_capture",
       amount: hold,

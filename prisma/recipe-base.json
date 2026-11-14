@@ -1,0 +1,169 @@
+[
+  {
+    "name": "Jollof rice",
+    "aliases": ["jollof", "nigerian jollof", "ghana jollof", "party jollof"],
+    "cuisine": "West African",
+    "servings": 6,
+    "ingredients": [
+      { "name": "rice", "masterProductId": "rice-parboiled-long-grain", "qty": 3, "unit": "cup" },
+      { "name": "tomato paste", "masterProductId": "tomato-paste-gino", "qty": 140, "unit": "g" },
+      { "name": "red bell pepper", "masterProductId": "pepper-tatashe", "qty": 3, "unit": "each" },
+      { "name": "scotch bonnet pepper", "masterProductId": "pepper-scotch-bonnet", "qty": 2, "unit": "each" },
+      { "name": "onion", "qty": 2, "unit": "each" },
+      { "name": "vegetable oil", "qty": 0.5, "unit": "cup" },
+      { "name": "seasoning cubes", "masterProductId": "maggi-star-cubes", "qty": 2, "unit": "cube" },
+      { "name": "curry powder", "masterProductId": "curry-powder-nigerian", "qty": 1, "unit": "tsp" },
+      { "name": "dried thyme", "masterProductId": "thyme-dried", "qty": 1, "unit": "tsp" }
+    ]
+  },
+  {
+    "name": "Egusi soup",
+    "aliases": ["egusi", "efo elegusi"],
+    "cuisine": "West African",
+    "servings": 6,
+    "ingredients": [
+      { "name": "ground egusi", "masterProductId": "egusi-ground", "qty": 2, "unit": "cup" },
+      { "name": "red palm oil", "masterProductId": "palm-oil-red", "qty": 0.5, "unit": "cup" },
+      { "name": "fluted pumpkin leaves", "masterProductId": "ugu-leaves-frozen", "qty": 1, "unit": "pack" },
+      { "name": "ground crayfish", "masterProductId": "crayfish-ground", "qty": 2, "unit": "tbsp" },
+      { "name": "stockfish", "masterProductId": "stockfish-cut", "qty": 1, "unit": "pack" },
+      { "name": "scotch bonnet pepper", "masterProductId": "pepper-scotch-bonnet", "qty": 2, "unit": "each" },
+      { "name": "onion", "qty": 1, "unit": "each" },
+      { "name": "seasoning cubes", "masterProductId": "maggi-star-cubes", "qty": 2, "unit": "cube" }
+    ]
+  },
+  {
+    "name": "Ofada stew (ayamase)",
+    "aliases": ["ayamase", "ofada stew", "ofada rice and stew", "designer stew"],
+    "cuisine": "West African",
+    "servings": 6,
+    "ingredients": [
+      { "name": "ofada rice", "masterProductId": "rice-ofada", "qty": 3, "unit": "cup" },
+      { "name": "bleached palm oil", "masterProductId": "palm-oil-bleached-ofada", "qty": 1, "unit": "cup" },
+      { "name": "green bell pepper", "qty": 4, "unit": "each" },
+      { "name": "scotch bonnet pepper", "masterProductId": "pepper-scotch-bonnet", "qty": 4, "unit": "each" },
+      { "name": "iru (locust beans)", "masterProductId": "iru-fermented-locust-beans", "qty": 2, "unit": "tbsp" },
+      { "name": "onion", "qty": 2, "unit": "each" },
+      { "name": "seasoning cubes", "masterProductId": "maggi-star-cubes", "qty": 2, "unit": "cube" }
+    ]
+  },
+  {
+    "name": "Waakye",
+    "aliases": ["waakye rice", "rice and beans ghana"],
+    "cuisine": "West African",
+    "servings": 6,
+    "ingredients": [
+      { "name": "rice", "masterProductId": "rice-parboiled-long-grain", "qty": 2, "unit": "cup" },
+      { "name": "black-eyed peas", "masterProductId": "beans-black-eyed-peas", "qty": 1, "unit": "cup" },
+      { "name": "waakye leaves", "masterProductId": "waakye-leaves", "qty": 6, "unit": "each" },
+      { "name": "shito", "masterProductId": "shito", "qty": 1, "unit": "jar" }
+    ]
+  },
+  {
+    "name": "Ndolé",
+    "aliases": ["ndole", "ndolé soup"],
+    "cuisine": "Central African",
+    "servings": 6,
+    "ingredients": [
+      { "name": "bitter leaves", "qty": 1, "unit": "pack" },
+      { "name": "raw groundnuts", "masterProductId": "groundnuts-raw", "qty": 2, "unit": "cup" },
+      { "name": "smoked shrimp", "masterProductId": "smoked-shrimp-dried", "qty": 1, "unit": "cup" },
+      { "name": "vegetable oil", "qty": 0.5, "unit": "cup" },
+      { "name": "onion", "qty": 2, "unit": "each" },
+      { "name": "garlic", "qty": 4, "unit": "clove" },
+      { "name": "ginger root", "masterProductId": "ginger-root", "qty": 1, "unit": "piece" }
+    ]
+  },
+  {
+    "name": "Pondu (saka saka)",
+    "aliases": ["pondu", "saka saka", "sakasaka", "cassava leaf stew"],
+    "cuisine": "Central African",
+    "servings": 6,
+    "ingredients": [
+      { "name": "cassava leaves", "masterProductId": "cassava-leaves", "qty": 2, "unit": "pack" },
+      { "name": "red palm oil", "masterProductId": "palm-oil-red", "qty": 0.5, "unit": "cup" },
+      { "name": "salted cod", "masterProductId": "salt-cod-makayabu-saltfish", "qty": 1, "unit": "pack" },
+      { "name": "onion", "qty": 1, "unit": "each" },
+      { "name": "garlic", "qty": 3, "unit": "clove" },
+      { "name": "fufu flour", "masterProductId": "cassava-flour-congolese-fufu", "qty": 1, "unit": "bag" }
+    ]
+  },
+  {
+    "name": "Ugali and sukuma wiki",
+    "aliases": ["ugali", "sukuma wiki", "ugali na sukuma"],
+    "cuisine": "East African",
+    "servings": 4,
+    "ingredients": [
+      { "name": "white maize meal", "masterProductId": "white-maize-meal", "qty": 3, "unit": "cup" },
+      { "name": "collard greens", "masterProductId": "sukuma-wiki-collard-greens", "qty": 1, "unit": "bunch" },
+      { "name": "tomato", "qty": 2, "unit": "each" },
+      { "name": "onion", "qty": 1, "unit": "each" },
+      { "name": "vegetable oil", "qty": 2, "unit": "tbsp" }
+    ]
+  },
+  {
+    "name": "Misir wat",
+    "aliases": ["misir wot", "ethiopian lentil stew", "red lentil wat"],
+    "cuisine": "East African",
+    "servings": 4,
+    "ingredients": [
+      { "name": "red split lentils", "masterProductId": "misir-red-lentils", "qty": 2, "unit": "cup" },
+      { "name": "berbere", "masterProductId": "berbere", "qty": 3, "unit": "tbsp" },
+      { "name": "niter kibbeh", "masterProductId": "niter-kibbeh", "qty": 3, "unit": "tbsp" },
+      { "name": "onion", "qty": 2, "unit": "each" },
+      { "name": "garlic", "qty": 4, "unit": "clove" },
+      { "name": "injera", "masterProductId": "injera", "qty": 4, "unit": "each" }
+    ]
+  },
+  {
+    "name": "Pap and chakalaka",
+    "aliases": ["pap", "chakalaka", "pap en vleis"],
+    "cuisine": "Southern African",
+    "servings": 4,
+    "ingredients": [
+      { "name": "maize meal", "masterProductId": "iwisa-maize-meal", "qty": 3, "unit": "cup" },
+      { "name": "chakalaka", "masterProductId": "chakalaka-canned", "qty": 1, "unit": "can" },
+      { "name": "baked beans", "masterProductId": "koo-baked-beans", "qty": 1, "unit": "can" }
+    ]
+  },
+  {
+    "name": "Samp and beans (umngqusho)",
+    "aliases": ["umngqusho", "samp and beans", "isitambu"],
+    "cuisine": "Southern African",
+    "servings": 6,
+    "ingredients": [
+      { "name": "samp and beans mix", "masterProductId": "samp-and-beans-mix", "qty": 500, "unit": "g" },
+      { "name": "onion", "qty": 1, "unit": "each" },
+      { "name": "curry powder", "masterProductId": "rajah-curry-powder", "qty": 1, "unit": "tsp" },
+      { "name": "vegetable oil", "qty": 2, "unit": "tbsp" }
+    ]
+  },
+  {
+    "name": "Ackee and saltfish",
+    "aliases": ["ackee", "ackee and salt fish"],
+    "cuisine": "Caribbean",
+    "servings": 4,
+    "ingredients": [
+      { "name": "canned ackee", "masterProductId": "ackee-canned", "qty": 1, "unit": "can" },
+      { "name": "salted cod", "masterProductId": "salt-cod-makayabu-saltfish", "qty": 1, "unit": "pack" },
+      { "name": "scotch bonnet pepper", "masterProductId": "pepper-scotch-bonnet", "qty": 1, "unit": "each" },
+      { "name": "onion", "qty": 1, "unit": "each" },
+      { "name": "tomato", "qty": 2, "unit": "each" },
+      { "name": "pimento (allspice)", "masterProductId": "pimento-allspice-whole", "qty": 1, "unit": "tsp" }
+    ]
+  },
+  {
+    "name": "Jamaican rice and peas",
+    "aliases": ["rice and peas", "rice & peas"],
+    "cuisine": "Caribbean",
+    "servings": 6,
+    "ingredients": [
+      { "name": "rice", "masterProductId": "rice-parboiled-long-grain", "qty": 2, "unit": "cup" },
+      { "name": "kidney beans", "qty": 1, "unit": "can" },
+      { "name": "coconut milk", "masterProductId": "coconut-milk-canned", "qty": 1, "unit": "can" },
+      { "name": "scotch bonnet pepper", "masterProductId": "pepper-scotch-bonnet", "qty": 1, "unit": "each" },
+      { "name": "pimento (allspice)", "masterProductId": "pimento-allspice-whole", "qty": 6, "unit": "berry" },
+      { "name": "dried thyme", "masterProductId": "thyme-dried", "qty": 1, "unit": "tsp" }
+    ]
+  }
+]

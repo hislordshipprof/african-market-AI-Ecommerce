@@ -7,8 +7,11 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/cart/actions.ts",
   "src/lib/checkout/actions.ts",
   "src/app/account/actions.ts",
+  "src/lib/support/customer-actions.ts",
+  "src/lib/order/issue-actions.ts",
+  "src/lib/order/substitution-actions.ts",
 ]);
-const GUARDS = ["requireStoreOwner", "requireStoreMember", "requirePlatformAdmin", "requireUserId"];
+const GUARDS = ["requireStoreOwner", "requireStoreMember", "requireStoreWriter", "requirePlatformAdmin", "requireUserId"];
 const HTTP = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 function walk(dir: string, acc: string[] = []): string[] {
@@ -33,11 +36,16 @@ export function actionNames(source: string): string[] {
   return [...names];
 }
 
+/** A directive may follow comments and blank lines; Next still treats the file as server actions. */
+export function isServerModule(source: string): boolean {
+  return /^(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*["']use server["']/.test(source);
+}
+
 function actions(): Array<{ file: string; name: string; source: string }> {
   const found = [];
   for (const file of walk(path.join(root, "src"))) {
     const source = readFileSync(file, "utf8");
-    if (!source.startsWith('"use server"') && !source.startsWith("'use server'")) continue;
+    if (!isServerModule(source)) continue;
     for (const name of actionNames(source)) {
       found.push({ file: rel(file), name, source });
     }
@@ -130,7 +138,7 @@ describe("endpoint inventory", () => {
     const expected = [...actions(), ...routes()].map((item) => `${item.file} ${item.name}`);
     expect(expected.slice().sort()).toEqual([...rows.keys()].sort());
     for (const resolution of rows.values()) {
-      expect(resolution === "fixed in #309" || resolution === "listed, not fixed").toBe(true);
+      expect(resolution).toMatch(/^(fixed in #309|listed, not fixed|checked in #\d+)$/);
     }
   });
 
@@ -162,5 +170,7 @@ describe("endpoint inventory", () => {
     const source = `"use server";\nexport const unauditedAction = async (input: unknown) => input;\n`;
     expect(actionNames(source)).toEqual(["unauditedAction"]);
     expect(takesArguments(source, "unauditedAction")).toBe(true);
+    expect(isServerModule(`// note\n/* block */\n\n'use server';\n`)).toBe(true);
+    expect(isServerModule(`import x from "y";\n"use server";\n`)).toBe(false);
   });
 });

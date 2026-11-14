@@ -7,6 +7,13 @@ const mockFindMany = vi.fn();
 const mockAuditCreate = vi.fn();
 
 vi.mock("../db", () => ({
+  lockStoreAddress: async () => ({
+    addressLine1: null,
+    addressLine2: null,
+    city: null,
+    state: null,
+    zip: null,
+  }),
   platformAdmin: {
     store: {
       findUnique: (...args: unknown[]) => mockFindUnique(...args),
@@ -22,6 +29,13 @@ vi.mock("../db", () => ({
     auditLog: {
       create: (...args: unknown[]) => mockAuditCreate(...args),
     },
+    $queryRaw: async () => [{
+      address_line1: null,
+      address_line2: null,
+      city: null,
+      state: null,
+      zip: null,
+    }],
   }),
   authPrisma: {},
 }));

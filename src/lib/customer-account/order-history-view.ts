@@ -1,3 +1,4 @@
+import { formatInZone } from "../format";
 import type { OrderStatus } from "../order/service";
 
 export const ACCOUNT_ORDER_LIMIT = 50;
@@ -10,8 +11,10 @@ export type AccountOrderRecord = {
   subtotalCents: number;
   tipCents: number;
   deliveryFeeCents: number;
+  serviceFeeCents: number;
   capturedAmountCents: number | null;
   refundId: string | null;
+  trackingToken: string | null;
   itemCount: number;
 };
 
@@ -30,13 +33,21 @@ const CUSTOMER_STATUS_LABELS: Record<OrderStatus, string> = {
   AUTHORIZED: "Order placed",
   ACCEPTED: "Store accepted",
   PICKING: "Shopping your order",
+  SUBSTITUTION_PENDING: "Waiting for your answer",
   CANCELLING: "Cancelling",
   CAPTURING: "Finalizing your total",
   READY: "Packed and ready",
   AWAITING_PICKUP: "Ready for pickup",
+  COURIER_REQUESTED: "Finding a courier",
+  COURIER_ASSIGNED: "Courier on the way to the store",
+  PICKED_UP: "Courier on the way to you",
+  OUT_FOR_DELIVERY: "Out for delivery",
+  DELIVERED: "Delivered",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   REFUND_FAILED: "Refund in progress",
+  PARTIALLY_REFUNDED: "Partly refunded",
+  REFUNDED: "Refunded",
 };
 
 /** `orders.status` is a free string with no database check, so an unknown value still gets a label. */
@@ -55,6 +66,7 @@ const money = (cents: number) =>
  */
 function amountLabel(order: AccountOrderRecord): string {
   if (order.refundId && order.status === "CANCELLED") return "Refunded";
+  if (order.status === "REFUNDED") return "Refunded";
   if (order.refundId && order.status === "CANCELLING") return "Refund pending";
   // CAPTURING writes the amount before Stripe confirms it, so it is not a charge yet.
   if (order.capturedAmountCents != null && order.status === "CAPTURING") {
@@ -63,25 +75,15 @@ function amountLabel(order: AccountOrderRecord): string {
   if (order.capturedAmountCents != null) return money(order.capturedAmountCents);
   if (order.status === "CANCELLED" || order.status === "CANCELLING") return "Not charged";
   if (order.status === "REFUND_FAILED") return "Refund pending";
-  return `Estimated ${money(order.subtotalCents + order.tipCents + order.deliveryFeeCents)}`;
-}
-
-function dateLabel(createdAt: Date, timeZone: string): string {
-  const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
-  try {
-    return new Intl.DateTimeFormat("en-US", { ...options, timeZone }).format(createdAt);
-  } catch {
-    // `stores.timezone` is free text. A bad value must not take down the account page.
-    return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "America/New_York" }).format(createdAt);
-  }
+  return `Estimated ${money(order.subtotalCents + order.serviceFeeCents + order.tipCents + order.deliveryFeeCents)}`;
 }
 
 export function accountOrderRow(order: AccountOrderRecord, timeZone: string): AccountOrderRow {
   return {
     id: order.id,
     number: order.number,
-    href: `/order/${encodeURIComponent(order.id)}`,
-    dateLabel: dateLabel(order.createdAt, timeZone),
+    href: `/order/${encodeURIComponent(order.trackingToken ?? order.id)}`,
+    dateLabel: formatInZone(order.createdAt, timeZone, { month: "short", day: "numeric", year: "numeric" }),
     itemsLabel: `${order.itemCount} ${order.itemCount === 1 ? "item" : "items"}`,
     statusLabel: customerStatusLabel(order.status),
     amountLabel: amountLabel(order),

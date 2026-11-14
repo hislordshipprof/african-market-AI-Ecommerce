@@ -144,6 +144,11 @@ ALTER TABLE "stores" ADD COLUMN "y" TEXT;
     names: ["stores"],
   },
   {
+    name: "a statement with no semicolon",
+    script: `ALTER TABLE "stores" ADD COLUMN "probe" TEXT`,
+    error: /statement has no semicolon/,
+  },
+  {
     name: "insert",
     script: `INSERT INTO "orders" ("id") VALUES (1);\n`,
     error: /unhandled statement: INSERT/,

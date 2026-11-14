@@ -26,7 +26,9 @@ Never split the ticket and never create child issues (owner decision 2026-11-04:
 Label it ready-for-agent when it can be built without a human decision; otherwise needs-info or ready-for-human with the missing facts. Do not change any code or create branches."
 
 . "$ROOT/scripts/agent-cli.sh"
-agent_run plan "$LOG" "$PROMPT" || status=$?
+. "$ROOT/scripts/review-watch.sh"
+WATCH_WHAT="plan session" run_capped "${PLAN_TIMEOUT_MIN:-45}" agent_run plan "$LOG" "$PROMPT" || status=$?
+[ "${status:-0}" != 124 ] || echo "Plan session for #$N was stopped at its ${PLAN_TIMEOUT_MIN:-45}-minute cap."
 echo "Plan finished (exit ${status:-0}). Log: $LOG"
 
 # Brief review: a different model family attacks the brief before any code exists, so the failure modes reviewers
@@ -36,7 +38,7 @@ if [ -z "${status:-}" ] && [ "${SKIP_BRIEF_REVIEW:-0}" != "1" ] && \
    [ -z "$(gh api "repos/$REPO/issues/$N/dependencies/blocked_by" --jq '[.[]|select(.state=="open")]|length|select(.>0)')" ]; then
   BLOG="$ROOT/.builder/logs/brief-review-$N-$(date +%Y%m%d-%H%M%S).json"
   BPROMPT="Brief review for issue #$N, before any code is written. Read the issue and its 'Agent brief' comment (gh issue view $N -R $REPO --comments), the code on origin/main it touches, CLAUDE.md, GLOSSARY.md, docs/adr/, docs/spec/platform-spec.md and docs/agents/builder.md. Act as the independent code reviewer who will review the finished PR: list everything that would make you return VERDICT: BLOCKING if the builder followed this brief exactly. Cover missed edge cases, wrong integration contracts (check the provider's official docs), production-only behaviour (NODE_ENV=production, VERCEL, missing keys, hosted CI env), cross-store isolation, concurrency, and required tests that would pass while the code is broken. Post one issue comment headed 'Brief review' with: corrections to the brief, extra edge cases as rows, and extra required tests (file, name, regression caught). Do not change code, labels or other comments."
-  if agent_run review "$BLOG" "$BPROMPT"; then echo "Brief review finished. Log: $BLOG"
+  if WATCH_WHAT="brief review" run_capped "${BRIEF_REVIEW_TIMEOUT_MIN:-30}" agent_run review "$BLOG" "$BPROMPT"; then echo "Brief review finished. Log: $BLOG"
   else echo "Brief review FAILED (exit $?). Log: $BLOG"; fi
 fi
 gh issue view "$N" -R "$REPO" --json labels --jq '"labels: " + ([.labels[].name] | join(", "))'

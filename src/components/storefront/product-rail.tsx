@@ -7,12 +7,14 @@ export function ProductRail({
   title,
   listings,
   seeAllHref,
+  seeAllLabel,
   description,
 }: {
   title: string;
   categorySlug?: string;
   listings: StorefrontListing[];
   seeAllHref?: string;
+  seeAllLabel?: string;
   description?: string;
 }) {
   if (!listings.length) return null;
@@ -23,6 +25,7 @@ export function ProductRail({
         title={title}
         description={description}
         href={seeAllHref}
+        hrefLabel={seeAllLabel}
       >
         <ProductListMotion contents itemClassName="sf-rail-item">
           {listings.map((listing) => (

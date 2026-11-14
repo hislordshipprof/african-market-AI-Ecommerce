@@ -4,7 +4,6 @@ import {
   ADDRESS_CAP_MESSAGE,
   ADDRESS_NOT_FOUND,
   normalizeAccountPhone,
-  validateAddress,
   type AddressInput,
 } from "./address-validation";
 
@@ -59,16 +58,15 @@ export async function listAddresses(userId: string): Promise<AddressRecord[]> {
   });
 }
 
-export async function addAddress(userId: string, input: unknown): Promise<AddressRecord> {
-  const parsed = validateAddress(input);
-  if (!parsed.ok) throw new Error(parsed.error);
+/** `input` is already validated by `validateAddress` at the action boundary. */
+export async function addAddress(userId: string, input: AddressInput): Promise<AddressRecord> {
   return withAccount(userId, async (tx) => {
     const count = await tx.customerAddress.count({ where: { userId } });
     if (count >= ADDRESS_CAP) throw new Error(ADDRESS_CAP_MESSAGE);
     const created = await tx.customerAddress.create({
       data: {
         userId,
-        ...parsed.value,
+        ...input,
         isDefault: count === 0,
       },
     });
@@ -76,15 +74,13 @@ export async function addAddress(userId: string, input: unknown): Promise<Addres
   });
 }
 
-export async function editAddress(userId: string, addressId: string, input: unknown): Promise<AddressRecord> {
-  const parsed = validateAddress(input);
-  if (!parsed.ok) throw new Error(parsed.error);
+export async function editAddress(userId: string, addressId: string, input: AddressInput): Promise<AddressRecord> {
   return withAccount(userId, async (tx) => {
     const existing = await tx.customerAddress.findFirst({ where: { id: addressId, userId } });
     if (!existing) throw new Error(ADDRESS_NOT_FOUND);
     const updated = await tx.customerAddress.update({
       where: { id: existing.id },
-      data: parsed.value,
+      data: input,
     });
     return toRecord(updated);
   });

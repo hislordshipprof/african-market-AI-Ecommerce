@@ -16,22 +16,26 @@ import { SYSTEM_ACTOR_ID } from "../system-actor";
 
 type LedgerTx = Pick<PrismaClient, "stockEvent" | "orderLine" | "$queryRaw" | "$executeRaw">;
 
-/** A human saying what is on the shelf. Newer than a reservation, it supersedes the release (D9). */
-export const CONFIRMING_EVENT_TYPES = ["recount", "restock", "adjust"];
+/**
+ * Absolute counts. Newer than a reservation, they supersede its release.
+ * A restock or counter sale is relative, so a later cancel still returns the reserved units.
+ */
+export const SUPERSEDING_EVENT_TYPES = ["recount", "adjust"];
 
 interface LedgerLine {
   id: string;
   /** The listing the order reserved from. */
   listingId: string;
+  qtyOrdered: number;
   qtyPicked: number;
   status: string;
-  /** Only for a `substituted` line: a named substitute on a `picked` line sold nothing. */
+  /** Only for a `substituted` line: the listing its swapped units sell from. */
   substituteListingId: string | null;
 }
 
 type ReleaseMoment = "release-short" | "release-capture" | "release-cancel";
 const RELEASE_MOMENTS: ReleaseMoment[] = ["release-short", "release-capture", "release-cancel"];
-const CONSUME_MOMENTS = ["short", "sale"];
+const CONSUME_MOMENTS = ["short", "sale", "sale-swap"];
 
 function isCounted(stock: LockedListingStock | undefined): stock is LockedListingStock & { qty: number } {
   return stock?.stockMode === "counted" && stock.qty != null;
@@ -105,18 +109,20 @@ async function linesForLedger(
     where,
     select: {
       id: true,
+      qtyOrdered: true,
       qtyPicked: true,
       status: true,
       listingVariant: { select: { listingId: true } },
-      substituteVariant: { select: { listingId: true } },
+      substitutedVariant: { select: { listingId: true } },
     },
   });
   return rows.map((row) => ({
     id: row.id,
     listingId: row.listingVariant.listingId,
+    qtyOrdered: row.qtyOrdered,
     qtyPicked: row.qtyPicked,
     status: row.status,
-    substituteListingId: row.status === "substituted" ? (row.substituteVariant?.listingId ?? null) : null,
+    substituteListingId: row.status === "substituted" ? (row.substitutedVariant?.listingId ?? null) : null,
   }));
 }
 
@@ -135,7 +141,7 @@ async function openLedger(tx: LedgerTx, storeId: string, lines: LedgerLine[]) {
     }),
     tx.stockEvent.groupBy({
       by: ["listingId"],
-      where: { storeId, listingId: { in: listingIds }, type: { in: CONFIRMING_EVENT_TYPES } },
+      where: { storeId, listingId: { in: listingIds }, type: { in: SUPERSEDING_EVENT_TYPES } },
       _max: { createdAt: true },
     }),
   ]);
@@ -172,8 +178,8 @@ async function openLedger(tx: LedgerTx, storeId: string, lines: LedgerLine[]) {
       events.push({ listingId: line.listingId, type: "reservation_release", delta: moved ? units : 0, key });
     },
     /** `sale` and `short` record true units. Only the qty clamps. */
-    consume(listingId: string, type: "sale" | "short", units: number, lineId: string) {
-      const key = `${type}:${lineId}`;
+    consume(listingId: string, type: "sale" | "short", units: number, lineId: string, moment: string = type) {
+      const key = `${moment}:${lineId}`;
       if (byKey.has(key) || units <= 0) return;
       const row = stock.get(listingId);
       if (isCounted(row)) {
@@ -190,18 +196,22 @@ async function openLedger(tx: LedgerTx, storeId: string, lines: LedgerLine[]) {
   };
 }
 
-/** Capture. The line's status chooses the sale listing, never the presence of a substitute. */
+/**
+ * Capture. Found units sell from the ordered listing. A `substituted` line also sells its
+ * swapped units from the substitute; the line's status decides that, never a saved preference.
+ */
 export async function settleCapturedStock(tx: LedgerTx, storeId: string, orderId: string): Promise<void> {
   const lines = await linesForLedger(tx, { orderId });
   const ledger = await openLedger(tx, storeId, lines);
   for (const line of lines) {
     ledger.release(line, "release-capture");
-    if (line.status === "refunded") continue;
-    if (line.status === "substituted" && !line.substituteListingId) {
+    ledger.consume(line.listingId, "sale", line.qtyPicked, line.id);
+    if (line.status !== "substituted") continue;
+    if (!line.substituteListingId) {
       console.error(JSON.stringify({ event: "stock_sale_without_substitute", lineId: line.id }));
       continue;
     }
-    ledger.consume(line.substituteListingId ?? line.listingId, "sale", line.qtyPicked, line.id);
+    ledger.consume(line.substituteListingId, "sale", line.qtyOrdered - line.qtyPicked, line.id, "sale-swap");
   }
   await ledger.flush();
 }

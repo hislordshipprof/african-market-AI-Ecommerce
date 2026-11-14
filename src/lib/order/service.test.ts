@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped, storeScopedTransaction } from "../db";
 import { recordReconcileResult } from "../inngest/functions";
-import { acceptOrder, autoCancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markLineShort, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
+import { acceptOrder, autoCancelOrder, cancelOrder, completePickup, fulfilledStatus, getStoreOrders, markLinePicked, markLineShort, markReady, markTerminalRefundFailure, reconcileStuckOrder, sortPickListLines } from "./service";
 import { recordAuthorizedOrder } from "../checkout/service";
 import { updateListing } from "../listing/service";
+import { confirmProposal } from "../copilot/confirm";
 import { countedListing, placeOrder, stockOf } from "./stock-ledger-test-helpers";
 import { getStripeProvider, setStripeProvider } from "../stripe";
 import type { StripeProvider, CancelResult } from "../stripe/types";
 import { ProviderStateError } from "../stripe/types";
-import { fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
+import { FakeStripeError, fakeStripeProvider, reset as resetFakeStripe, capturedPayments, capturedFees, cancelledPayments, refundedPayments, feeRefunded, refundRequests, captureCalls, holdNextCapture, releaseHeldCaptures, setAuthorizedAmount, setNextCaptureFailure, setNextCaptureAppliedFailure, setNextIdempotencyConflict, setNextCancelFailure, setNextRefundFailure, setCancelUnexpectedState, scriptRetrieveStatuses, setNextRefundStatus, setRefundStatus } from "../stripe/fake";
 import { SYSTEM_ACTOR_ID, SYSTEM_ACTOR_EMAIL } from "../system-actor";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -64,8 +65,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   let variantPerishId: string;
 
   beforeAll(async () => {
-    const adapter = new PrismaPg(process.env.DATABASE_URL!);
-    rawPrisma = new PrismaClient({ adapter });
+    rawPrisma = testPrismaClient();
     await rawPrisma.$connect();
 
     setStripeProvider(fakeStripeProvider);
@@ -160,6 +160,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     await rawPrisma.$transaction([
       rawPrisma.$executeRaw`SET LOCAL ROLE app_user`,
       rawPrisma.$executeRaw`SELECT set_config('app.is_platform_admin', 'true', true)`,
+      rawPrisma.stockProposal.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.copilotClientMessage.deleteMany({ where: { storeId: { in: storeIds } } }),
+      rawPrisma.copilotConversation.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.auditLog.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.stockEvent.deleteMany({ where: { storeId: { in: storeIds } } }),
       rawPrisma.cartLine.deleteMany({ where: { storeId: { in: storeIds } } }),
@@ -177,7 +180,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   let orderSeq = 90000;
   async function createTestOrder(
     status: string = "AUTHORIZED",
-    opts?: { tipCents?: number; deliveryFeeCents?: number; fulfillment?: "pickup" | "delivery" },
+    opts?: { tipCents?: number; deliveryFeeCents?: number; fulfillment?: "pickup" | "delivery" | "courier" | "store-delivery" },
   ) {
     const num = ++orderSeq;
     const tipCents = opts?.tipCents ?? 0;
@@ -406,7 +409,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
   });
 
   it("markReady succeeds and captures correct amount (lines + tip + delivery)", async () => {
-    const order = await createTestOrder("AUTHORIZED", { tipCents: 200, deliveryFeeCents: 300 });
+    const order = await createTestOrder("AUTHORIZED", { tipCents: 200, deliveryFeeCents: 300, fulfillment: "courier" });
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({
@@ -425,14 +428,14 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     }
 
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
-    expect(updated!.status).toBe("AWAITING_PICKUP");
+    expect(updated!.status).toBe("READY");
     expect(updated!.readyAt).toBeTruthy();
     expect(updated!.capturedAmountCents).toBe(6000);
 
     expect(capturedPayments.get(order.paymentIntentId!)).toBe(6000);
-    // 2.9% + 30¢ of 6000 = 204, plus the $3 delivery fee.
-    expect(capturedFees.get(order.paymentIntentId!)).toBe(504);
-    expect(updated!.platformFeeCents).toBe(204);
+    // ADR-0021: the store's card fee is on its $57 part only (2.9% + 30¢ = 195), plus the $3 courier fee.
+    expect(capturedFees.get(order.paymentIntentId!)).toBe(495);
+    expect(updated!.platformFeeCents).toBe(195);
   });
 
   it("markReady rejects when capture would exceed authorized amount", async () => {
@@ -831,7 +834,7 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     const result = await autoCancelOrder(storeId, order.id);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain("not AUTHORIZED");
+      expect(result.error).toBe("Cannot cancel order in status ACCEPTED");
     }
     expect(cancelledPayments.size).toBe(0);
   });
@@ -1238,6 +1241,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       where: { entityId: order.id, action: "reconcile_capture" },
     });
     expect(logs.length).toBe(1);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(2);
+    await reconcileStuckOrder(storeId, order.id);
+    expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "ready" } })).toBe(2);
   });
 
   it("K1: sweep finalizes CAPTURING order when Phase 3 DB failure (Stripe succeeded)", async () => {
@@ -2322,31 +2328,72 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.refundId).toBe(`re_fake_${order.paymentIntentId}`);
   });
 
-  it("full cancellation refunds the application fee", async () => {
+  it("full cancellation refunds the application fee and the service fee in it", async () => {
     const order = await createTestOrder();
     setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
-    capturedPayments.set(order.paymentIntentId!, 5500);
-    capturedFees.set(order.paymentIntentId!, 190);
+    // $55 of goods + a $1.65 service fee; application fee = $1.65 + the store's card fee ($1.90).
+    capturedPayments.set(order.paymentIntentId!, 5665);
+    capturedFees.set(order.paymentIntentId!, 355);
 
     const result = await autoCancelOrder(storeId, order.id);
     expect(result.ok).toBe(true);
-    expect(refundRequests.at(-1)?.refundApplicationFee).toBe(true);
-    expect(feeRefunded.get(order.paymentIntentId!)).toBe(190);
+    expect(refundRequests.at(-1)).toMatchObject({ amountCents: 5665, refundApplicationFee: true });
+    expect(feeRefunded.get(order.paymentIntentId!)).toBe(355);
   });
 
   it("markReady for a delivery order captures and lands on READY", async () => {
-    const order = await createTestOrder("AUTHORIZED", { fulfillment: "delivery" });
-    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    const order = await createTestOrder("AUTHORIZED", {
+      fulfillment: "store-delivery",
+      deliveryFeeCents: 500,
+    });
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    setNextCaptureFailure(pi, 1);
     await acceptOrder(storeId, order.id, 15);
     const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
     for (const line of lines) await markLinePicked(storeId, line.id);
+
+    const failed = await markReady(storeId, order.id);
+    expect(failed.ok).toBe(false);
+    const capturing = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(capturing!.status).toBe("CAPTURING");
+    await backdateCaptureAttempt(order.id, 30_000);
 
     const result = await markReady(storeId, order.id);
     expect(result.ok).toBe(true);
     const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
     expect(updated!.status).toBe("READY");
     expect(updated!.readyAt).toBeTruthy();
-    expect(capturedPayments.get(order.paymentIntentId!)).toBe(5500);
+    expect(capturedPayments.get(pi)).toBe(6000);
+    expect(capturedFees.get(pi)).toBe(204);
+    expect(updated!.platformFeeCents).toBe(204);
+  });
+
+  it("markReady voids a store delivery order with nothing picked", async () => {
+    const order = await createTestOrder("AUTHORIZED", {
+      fulfillment: "store-delivery",
+      deliveryFeeCents: 500,
+      tipCents: 200,
+    });
+    setAuthorizedAmount(order.paymentIntentId!, order.totalAuthorizedCents);
+    await acceptOrder(storeId, order.id, 15);
+    const lines = await storeScoped(storeId).orderLine.findMany({ where: { orderId: order.id } });
+    await storeScopedTransaction(storeId, async (tx) => {
+      for (const line of lines) {
+        await tx.orderLine.update({
+          where: { id: line.id },
+          data: { status: "refunded", qtyPicked: 0 },
+        });
+      }
+      await tx.order.update({ where: { id: order.id }, data: { status: "PICKING" } });
+    });
+    const result = await markReady(storeId, order.id);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.capturedAmountCents).toBe(0);
+    const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+    expect(updated!.status).toBe("CANCELLED");
+    expect(capturedPayments.has(order.paymentIntentId!)).toBe(false);
+    expect(cancelledPayments.has(order.paymentIntentId!)).toBe(true);
   });
 
   it("markReady rejects a short line and does not call Stripe", async () => {
@@ -2962,6 +3009,67 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(cancelledPayments.has(pi)).toBe(true);
   });
 
+  it("a seeded e2e hold is registered before open refund requests are reconciled", async () => {
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    resetFakeStripe();
+    try {
+      const order = await createTestOrder("CANCELLING");
+      const pi = `pi_seed_${order.id}`;
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { paymentIntentId: pi } });
+        await tx.refundRequest.create({
+          data: {
+            storeId,
+            orderId: order.id,
+            paymentIntentId: pi,
+            key: `refund:${order.id}:1`,
+            amountCents: 100,
+            refundApplicationFee: false,
+            state: "UNKNOWN",
+          },
+        });
+      });
+      await expect(reconcileStuckOrder(storeId, order.id)).resolves.toBeDefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a hold release whose response is lost still writes capture_released on the next sweep", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const pi = order.paymentIntentId!;
+    setAuthorizedAmount(pi, order.totalAuthorizedCents);
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { capturedAmountCents: order.totalAuthorizedCents },
+      });
+    });
+    await seedFifthCapture(order.id);
+    setNextCaptureFailure(pi, 1);
+    const cancel = fakeStripeProvider.cancelPaymentIntent.bind(fakeStripeProvider);
+    vi.spyOn(fakeStripeProvider, "cancelPaymentIntent").mockImplementationOnce(async (id, key) => {
+      await cancel(id, key);
+      throw new FakeStripeError("api_error", "Internal server error", 500, "StripeAPIError");
+    });
+    try {
+      const first = await reconcileStuckOrder(storeId, order.id);
+      expect(first).toMatchObject({ ok: false, waiting: true });
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(cancelledPayments.has(pi)).toBe(true);
+
+    const second = await reconcileStuckOrder(storeId, order.id);
+    expect(second).toEqual({ ok: true, action: "finalized_cancel" });
+    expect((await storeScoped(storeId).order.findUnique({ where: { id: order.id } }))!.status).toBe("CANCELLED");
+    const released = await storeScoped(storeId).auditLog.findMany({
+      where: { entityId: order.id, action: "capture_released" },
+    });
+    expect(released.map((row) => row.after)).toEqual([{ alert: "store_and_platform" }]);
+  });
+
   it("settle stays pending when the fresh retrieve is neither succeeded nor canceled", async () => {
     const order = await createTestOrder("CAPTURING");
     const pi = order.paymentIntentId!;
@@ -3321,6 +3429,27 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     }
   });
 
+  it("reconcile after a restart registers a checkout harness hold before the first retrieve", async () => {
+    const order = await createTestOrder("CAPTURING");
+    const harness = `pi_fake_${order.id}`;
+    await storeScopedTransaction(storeId, async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { paymentIntentId: harness, capturedAmountCents: 5500 },
+      });
+    });
+    resetFakeStripe();
+    vi.stubEnv("E2E_FAKE_STRIPE", "1");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("CI", "true");
+    try {
+      const result = await reconcileStuckOrder(storeId, order.id);
+      expect(result).toEqual({ ok: true, action: "finalized_capture" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("reconcile after a restart registers a seeded hold before the first retrieve", async () => {
     const order = await createTestOrder("CAPTURING");
     const seeded = `pi_seed_${order.id}`;
@@ -3439,6 +3568,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       const result = await markReady(storeId, order.id);
       expect(result).toEqual({ ok: true, capturedAmountCents: 0, voided: true });
       expect(cancelledPayments.has(seeded)).toBe(true);
+      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
+      await markReady(storeId, order.id);
+      expect(await storeScoped(storeId).notificationLog.count({ where: { orderId: order.id, event: "cancelled" } })).toBe(2);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -3874,6 +4006,97 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(logs).toHaveLength(1);
   });
 
+  describe("payment-status settlement matrix (#474)", () => {
+    const PENDING = ["processing", "requires_action", "requires_payment_method", "requires_confirmation"];
+    const SETTLE_ACTIONS = ["reconcile_capture", "reconcile_cancel", "capture_released", "anomaly_refund"];
+
+    async function seedExhaustedCapture(orderId: string) {
+      await seedFifthCapture(orderId);
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.auditLog.create({
+          data: {
+            storeId,
+            actorId: SYSTEM_ACTOR_ID,
+            actorEmail: SYSTEM_ACTOR_EMAIL,
+            action: "capture_retry",
+            entityType: "order",
+            entityId: orderId,
+            after: { attempt: 5 },
+          },
+        });
+      });
+    }
+
+    /** Runs the sweep with Stripe scripted to `statuses`; the exhausted run reaches the capture settle. */
+    async function settleWith(orderStatus: "CAPTURING" | "CANCELLING", statuses: string[], exhausted: boolean) {
+      const order = await createTestOrder(orderStatus);
+      const pi = order.paymentIntentId!;
+      await storeScopedTransaction(storeId, async (tx) => {
+        await tx.order.update({ where: { id: order.id }, data: { capturedAmountCents: 5500 } });
+      });
+      if (exhausted) await seedExhaustedCapture(order.id);
+      if (statuses.includes("succeeded")) capturedPayments.set(pi, 5500);
+      scriptRetrieveStatuses(pi, statuses);
+      const result = await reconcileStuckOrder(storeId, order.id);
+      const updated = await storeScoped(storeId).order.findUnique({ where: { id: order.id } });
+      const audits = await storeScoped(storeId).auditLog.findMany({
+        where: { entityId: order.id, action: { in: SETTLE_ACTIONS } },
+      });
+      return {
+        result,
+        status: updated!.status,
+        capturedAmountCents: updated!.capturedAmountCents,
+        audits: audits.map((log) => log.action).sort(),
+        cancelled: cancelledPayments.has(pi),
+        refunded: refundedPayments.get(pi) ?? 0,
+      };
+    }
+
+    type Row = [piStatus: string, result: object, status: string, audits: string[], cancelled: boolean, refunded: number];
+    const finalizedCapture = { ok: true, action: "finalized_capture" };
+    const finalizedCancel = { ok: true, action: "finalized_cancel" };
+
+    it.each<Row>([
+      ["succeeded", finalizedCapture, "AWAITING_PICKUP", ["reconcile_capture"], false, 0],
+      ["canceled", finalizedCancel, "CANCELLED", ["reconcile_cancel"], false, 0],
+      ["requires_capture", finalizedCancel, "CANCELLED", ["capture_released"], true, 0],
+      ...PENDING.map((status): Row => [
+        status,
+        { ok: false, error: "Card capture is still confirming with the bank", waiting: true },
+        "CAPTURING",
+        [],
+        false,
+        0,
+      ]),
+    ])("capture settle after the last attempt: Stripe %s", async (piStatus, result, status, audits, cancelled) => {
+      const outcome = await settleWith("CAPTURING", ["requires_capture", piStatus], true);
+      const capturedAmountCents = status === "CANCELLED" ? null : 5500;
+      expect(outcome).toEqual({ result, status, capturedAmountCents, audits, cancelled, refunded: 0 });
+    });
+
+    it.each<Row>([
+      ["succeeded", finalizedCapture, "AWAITING_PICKUP", ["reconcile_capture"], false, 0],
+      ["canceled", finalizedCancel, "CANCELLED", ["reconcile_cancel"], false, 0],
+      ["requires_capture", finalizedCapture, "AWAITING_PICKUP", ["reconcile_capture"], false, 0],
+      ...PENDING.map((status): Row => [status, { ok: true, action: "unknown_stripe_status" }, "CAPTURING", [], false, 0]),
+    ])("sweep of a CAPTURING order: Stripe %s", async (piStatus, result, status, audits) => {
+      const outcome = await settleWith("CAPTURING", [piStatus], false);
+      const capturedAmountCents = status === "CANCELLED" ? null : 5500;
+      expect(outcome).toEqual({ result, status, capturedAmountCents, audits, cancelled: false, refunded: 0 });
+    });
+
+    it.each<Row>([
+      ["succeeded", { ok: true, action: "anomaly_refund" }, "CANCELLED", ["anomaly_refund"], false, 5500],
+      ["canceled", finalizedCancel, "CANCELLED", ["reconcile_cancel"], false, 0],
+      ["requires_capture", finalizedCancel, "CANCELLED", ["reconcile_cancel"], true, 0],
+      ...PENDING.map((status): Row => [status, { ok: true, action: "unknown_stripe_status" }, "CANCELLING", [], false, 0]),
+    ])("sweep of a CANCELLING order: Stripe %s", async (piStatus, result, status, audits, cancelled, refunded) => {
+      const outcome = await settleWith("CANCELLING", [piStatus], false);
+      const capturedAmountCents = status === "CANCELLED" ? null : 5500;
+      expect(outcome).toEqual({ result, status, capturedAmountCents, audits, cancelled, refunded });
+    });
+  });
+
   describe("stock ledger", () => {
     async function pickAll(orderId: string) {
       await acceptOrder(storeId, orderId, 15);
@@ -3895,7 +4118,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
         expect(await stockOf(storeId, listingId)).toEqual({ qty: 7, events: [["reservation", -3]] });
 
         const replay = await recordAuthorizedOrder(storeId, placed.input);
-        expect(replay).toEqual({ orderId: placed.orderId, created: false });
+        const { trackingToken } = await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: placed.orderId } });
+        expect(trackingToken).toBeTruthy();
+        expect(replay).toEqual({ orderId: placed.orderId, created: false, trackingToken });
         expect(await stockOf(storeId, listingId)).toEqual({ qty: 7, events: [["reservation", -3]] });
 
         await pickAll(placed.orderId);
@@ -3988,6 +4213,54 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
         events: [["reservation", -3], ["reservation_release", 0]],
       });
 
+      // A copilot restock does not swallow the reservation's return. A copilot recount does.
+      const copilotChat = await storeScoped(storeId).copilotConversation.create({
+        data: { storeId, userId: SYSTEM_ACTOR_ID, model: "claude-haiku-5-5", messages: [] },
+      });
+      const restocked = await countedListing(storeId, 10, "Copilot restock");
+      const restockOrder = await placeOrder(storeId, [{ variantId: restocked.variantId, qty: 2 }]);
+      const restockProposal = await storeScoped(storeId).stockProposal.create({
+        data: {
+          storeId,
+          conversationId: copilotChat.id,
+          listingId: restocked.listingId,
+          clientMessageId: `restock-${restockOrder.orderId}`,
+          kind: "restock",
+          quantity: 5,
+          before: { qty: 8, status: null },
+          state: "pending",
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        },
+      });
+      expect(await confirmProposal(storeId, restockProposal.id, { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL })).toMatchObject({ ok: true });
+      await autoCancelOrder(storeId, restockOrder.orderId);
+      expect(await stockOf(storeId, restocked.listingId)).toEqual({
+        qty: 15,
+        events: [["reservation", -2], ["restock", 5], ["reservation_release", 2]],
+      });
+
+      const copilotRecount = await countedListing(storeId, 10, "Copilot recount");
+      const copilotRecountOrder = await placeOrder(storeId, [{ variantId: copilotRecount.variantId, qty: 3 }]);
+      const recountProposal = await storeScoped(storeId).stockProposal.create({
+        data: {
+          storeId,
+          conversationId: copilotChat.id,
+          listingId: copilotRecount.listingId,
+          clientMessageId: `recount-${copilotRecountOrder.orderId}`,
+          kind: "recount",
+          quantity: 4,
+          before: { qty: 7, status: null },
+          state: "pending",
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        },
+      });
+      expect(await confirmProposal(storeId, recountProposal.id, { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL })).toMatchObject({ ok: true });
+      await autoCancelOrder(storeId, copilotRecountOrder.orderId);
+      expect(await stockOf(storeId, copilotRecount.listingId)).toEqual({
+        qty: 4,
+        events: [["reservation", -3], ["recount", -3], ["reservation_release", 0]],
+      });
+
       // An order placed before reservations existed has nothing to return.
       const legacy = await countedListing(storeId, 10, "Before this shipped");
       orderSeq += 1000; // Placed orders above took the next numbers.
@@ -3997,6 +4270,35 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       });
       await autoCancelOrder(storeId, order.id);
       expect(await stockOf(storeId, legacy.listingId)).toEqual({ qty: 10, events: [] });
+    }, 30_000);
+
+    it("a store cancel racing markReady on a picking order: one wins, stock returns at most once", async () => {
+      const { listingId, variantId } = await countedListing(storeId, 10);
+      const placed = await placeOrder(storeId, [{ variantId, qty: 3 }]);
+      await pickAll(placed.orderId);
+
+      const [ready, cancelled] = await Promise.all([
+        markReady(storeId, placed.orderId),
+        cancelOrder(storeId, placed.orderId, {
+          action: "store_cancel",
+          actor: { id: SYSTEM_ACTOR_ID, email: SYSTEM_ACTOR_EMAIL },
+          reason: "too_busy",
+          note: null,
+        }),
+      ]);
+      expect([cancelled.ok, ready.ok].filter(Boolean)).toHaveLength(1);
+      const stock = await stockOf(storeId, listingId);
+      expect(stock.events.filter(([type]) => type === "reservation_release")).toEqual([["reservation_release", 3]]);
+      if (cancelled.ok) {
+        expect(await statusOf(placed.orderId)).toBe("CANCELLED");
+        expect(stock.qty).toBe(10);
+        expect(capturedPayments.has(placed.paymentIntentId)).toBe(false);
+      } else {
+        expect(cancelled).toMatchObject({ ok: false, error: expect.stringMatching(/^Cannot cancel order in status (CAPTURING|AWAITING_PICKUP)$/) });
+        expect(await statusOf(placed.orderId)).toBe("AWAITING_PICKUP");
+        expect(stock.qty).toBe(7);
+        expect(cancelledPayments.has(placed.paymentIntentId)).toBe(false);
+      }
     }, 30_000);
 
     it("the reconcile sweep settles stock once after Stripe captured", async () => {
@@ -4029,12 +4331,12 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
       }
       expect((await stockOf(storeId, listingId)).qty).toBe(5);
 
-      expect(await markLineShort(storeId, lineId, 2)).toEqual({ ok: true, orderStatus: "PICKING" });
+      expect(await markLineShort(storeId, lineId, 2)).toEqual({ ok: true, orderStatus: "SUBSTITUTION_PENDING" });
       const shorted = { qty: 5, events: [["reservation", -5], ["reservation_release", 3], ["short", -3]] };
       expect(await stockOf(storeId, listingId)).toEqual(shorted);
       const line = await storeScoped(storeId).orderLine.findUniqueOrThrow({ where: { id: lineId } });
       expect(line).toMatchObject({ status: "short", qtyPicked: 2 });
-      expect(await statusOf(placed.orderId)).toBe("PICKING");
+      expect(await statusOf(placed.orderId)).toBe("SUBSTITUTION_PENDING");
 
       expect((await markLineShort(storeId, lineId, 2)).ok).toBe(false);
       expect(await stockOf(storeId, listingId)).toEqual(shorted);

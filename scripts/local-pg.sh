@@ -15,6 +15,13 @@ case "$LANE_PG_DATA" in
 esac
 export PGPASSWORD=postgres
 
+# Two local-ci slots can get here at once: one initialises and starts the server, the other waits for it.
+# A mutex left by a killed run is taken anyway after a minute.
+STARTING="$LANE_PG_DATA.starting"
+mkdir -p "$(dirname "$LANE_PG_DATA")"
+for _ in $(seq 1 60); do mkdir "$STARTING" 2>/dev/null && break; sleep 1; done
+trap 'rmdir "$STARTING" 2>/dev/null || true' EXIT
+
 if [ ! -f "$LANE_PG_DATA/PG_VERSION" ]; then
   mkdir -p "$LANE_PG_DATA"
   pw="$(mktemp)"; printf 'postgres\n' > "$pw"

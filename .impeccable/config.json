@@ -1,9 +1,7 @@
 {
   "detector": {
     "ignoreRules": [],
-    "ignoreFiles": [
-      "docs/build-board.html"
-    ],
+    "ignoreFiles": [],
     "ignoreValues": [
       {
         "rule": "low-contrast",

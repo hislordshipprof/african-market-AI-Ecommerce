@@ -12,6 +12,7 @@ export const ASSISTANT_FIXED_ERROR = "Sorry, something went wrong. Please try ag
 /** Tools the assistant registers. The browser and the server share this list. */
 export const ASSISTANT_TOOL_NAMES = [
   "search_catalog",
+  "set_shopper_needs",
   "show_products",
   "check_availability",
   "suggest_substitutes",
@@ -21,6 +22,14 @@ export const ASSISTANT_TOOL_NAMES = [
   "set_swap_rule",
   "get_cart_summary",
   "offer_choices",
+  "get_order_status",
+  "check_delivery_area",
+  "get_store_info",
+  "forward_to_store",
+  "get_recipe",
+  "get_fulfillment_options",
+  "set_fulfillment",
+  "prepare_checkout",
 ] as const;
 
 export type AssistantToolName = (typeof ASSISTANT_TOOL_NAMES)[number];

@@ -9,7 +9,7 @@ test.describe("Order inbox", () => {
     await storeOwnerSignIn(page);
     await page.goto("/store-admin?store=mama-ngozi");
 
-    const ordersCard = page.locator("a", { hasText: "Orders" });
+    const ordersCard = page.getByRole("link", { name: /^Orders\b/ });
     await expect(ordersCard).toBeVisible();
     await ordersCard.click();
     await page.waitForURL((url) => url.pathname.includes("/store-admin/orders"));

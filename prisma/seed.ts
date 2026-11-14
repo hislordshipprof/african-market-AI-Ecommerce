@@ -11,6 +11,8 @@ import { decideCliCatalogPrune, seedMasterCatalog, type SeedMasterCatalogDeps } 
 import { readCatalogImageReferences } from "../src/lib/catalog-prune-reader";
 import { CatalogPruneRefusal, type DatabaseIdentity } from "../src/lib/catalog-prune";
 import { revalidateSeededStores } from "../scripts/revalidate-storefront";
+import { seedRecipeBase, type SeedRecipe } from "../src/lib/assistant/recipe-base";
+import recipeBase from "./recipe-base.json";
 
 const adapter = new PrismaPg(resolveDirectUrl());
 const prisma = new PrismaClient({ adapter });
@@ -28,6 +30,14 @@ async function seedDemoStores() {
       deliveryInfo: "Same-day delivery within 8 miles · Pickup ready in 30 min",
       stripeAccountId: null,
       stripeOnboardingStatus: "not_started",
+      storeDeliveryEnabled: true,
+      storeDeliveryFeeCents: 499,
+      addressLine1: "8400 Park Place Blvd",
+      city: "Houston",
+      state: "TX",
+      zip: "77017",
+      lat: 29.693857800118,
+      lng: -95.266257879374,
       timezone: "America/Chicago",
       hours: {
         monday: "9:00 AM - 8:00 PM",
@@ -48,6 +58,14 @@ async function seedDemoStores() {
       status: "active",
       prepTimeMinutes: 30,
       deliveryRadiusMi: 8,
+      storeDeliveryEnabled: true,
+      storeDeliveryFeeCents: 499,
+      addressLine1: "8400 Park Place Blvd",
+      city: "Houston",
+      state: "TX",
+      zip: "77017",
+      lat: 29.693857800118,
+      lng: -95.266257879374,
       minimumOrderCents: 3500,
       pickupEnabled: true,
       autoRefundLimitCents: 2500,
@@ -808,6 +826,7 @@ export async function runSeed(deps: SeedMasterCatalogDeps = {}) {
   await seedStoreCollections();
 
   await seedMasterCatalog(prisma, { ...deps, execution, priorReferences });
+  await seedRecipeBase(prisma, recipeBase as SeedRecipe[]);
 
   if (process.env.SEED_TEST_ADMIN === "1") {
     await seedTestAdmin();

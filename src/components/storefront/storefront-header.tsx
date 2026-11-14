@@ -19,7 +19,7 @@ export async function StorefrontHeader({ store }: { store: ValidatedStore }) {
     <ShrinkingHeader>
       <div className="sf-header-main sf-container">
         <Link href="/" className="sf-brand">
-          {store.logoUrl && <StoreLogo src={store.logoUrl} name={store.name} />}
+          <StoreLogo src={store.logoUrl} name={store.name} />
           <h1 data-testid="store-name" title={store.name}>{store.name}</h1>
         </Link>
         <div className="sf-header-window">

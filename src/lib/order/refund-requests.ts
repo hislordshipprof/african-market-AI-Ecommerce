@@ -8,8 +8,11 @@ import {
   RefundNotCreatedError,
 } from "../stripe/errors";
 import type { RefundResult } from "../stripe/types";
-import { SYSTEM_ACTOR_EMAIL, SYSTEM_ACTOR_ID } from "../system-actor";
+import { systemAuditData } from "../system-actor";
 import { releaseOrderStock } from "./stock-ledger";
+import { serviceFeeShareOfRefund } from "./platform-fee";
+import { recordOrderNotification } from "../notifications/record";
+import { scheduleOrderNotification } from "../inngest/notify";
 
 /** Inside Stripe's 24h idempotency window. Coordinator default, pending owner confirmation. */
 export const REFUND_REQUEST_ABANDON_MS = 23 * 60 * 60 * 1000;
@@ -59,23 +62,6 @@ function countedCents(listed: RefundResult[], statuses: string[]): number {
     .reduce((sum, refund) => sum + refund.amountRefunded, 0);
 }
 
-function systemAudit(
-  storeId: string,
-  orderId: string,
-  action: string,
-  after: Prisma.InputJsonValue,
-) {
-  return {
-    storeId,
-    actorId: SYSTEM_ACTOR_ID,
-    actorEmail: SYSTEM_ACTOR_EMAIL,
-    action,
-    entityType: "order" as const,
-    entityId: orderId,
-    after,
-  };
-}
-
 async function writeAuditOnce(
   tx: Tx,
   storeId: string,
@@ -90,7 +76,7 @@ async function writeAuditOnce(
     return body?.refundId === refundId || body?.key === refundId;
   });
   if (duplicate) return false;
-  await tx.auditLog.create({ data: systemAudit(storeId, orderId, action, after) });
+  await tx.auditLog.create({ data: systemAuditData(storeId, orderId, action, after) });
   return true;
 }
 
@@ -269,10 +255,44 @@ export async function reconcileAbandonedRefundRequests(storeId: string, orderId:
   for (const row of rows) await reconcileRefundRequest(row);
 }
 
+/** Refunds that still cover the charge: succeeded, plus those the bank has not settled yet. */
+export function coveredRefundCents(listed: RefundResult[]): number {
+  return countedCents(listed, ["succeeded", "pending", "requires_action"]);
+}
+
 async function uncoveredFailure(listed: RefundResult[], captured: number): Promise<RefundResult | null> {
-  const covering = countedCents(listed, ["succeeded", "pending", "requires_action"]);
-  if (covering >= captured) return null;
+  if (coveredRefundCents(listed) >= captured) return null;
   return listed.find((refund) => refund.status === "failed" || refund.status === "canceled") ?? null;
+}
+
+/** Captured minus succeeded and pending refunds: the most any new refund can be. */
+function unrefundedCents(captured: number, listed: RefundResult[]): number {
+  return Math.max(0, captured - coveredRefundCents(listed));
+}
+
+/** What is still refundable on a payment, read from Stripe. */
+export async function remainingCaptureCents(paymentIntentId: string): Promise<number> {
+  const stripe = getStripeProvider();
+  const [pi, listed] = await Promise.all([
+    stripe.retrievePaymentIntent(paymentIntentId),
+    stripe.listRefunds(paymentIntentId),
+  ]);
+  return unrefundedCents(pi.amountReceived, listed);
+}
+
+/** `cancel` refunds the whole remaining capture. `issue` refunds an amount after delivery (#428). */
+export type RefundCause =
+  | { cause: "cancel" }
+  | { cause: "issue"; amountCents: number; issueReportId?: string };
+
+const REFUNDABLE_FROM: Record<RefundCause["cause"], readonly string[]> = {
+  cancel: ["CANCELLING"],
+  issue: ["DELIVERED", "COMPLETED", "PARTIALLY_REFUNDED"],
+};
+
+/** Courier recovery is kept on a courier order (spec §10, owner decision 3). */
+function refundsApplicationFee(cause: RefundCause, fulfillment: string): boolean {
+  return cause.cause === "cancel" || fulfillment !== "courier";
 }
 
 /**
@@ -283,15 +303,17 @@ export async function submitRefund(
   storeId: string,
   orderId: string,
   paymentIntentId: string,
+  cause: RefundCause = { cause: "cancel" },
   depth = 0,
 ): Promise<RefundResult | { inFlight: true } | { blocked: true }> {
+  const allowed = REFUNDABLE_FROM[cause.cause];
   const gate = await storeScopedTransaction(storeId, async (tx) => {
     await lockStoreRow(tx, storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     const manual = await tx.auditLog.findFirst({
       where: { entityId: orderId, action: "refund_resolved_manually" },
     });
-    if (manual || !order || order.status !== "CANCELLING") return { blocked: true as const, open: null };
+    if (manual || !order || !allowed.includes(order.status)) return { blocked: true as const, open: null };
     return { blocked: false as const, open: await openRefundRequest(tx, orderId) };
   });
   if (gate.blocked) return { blocked: true };
@@ -313,11 +335,15 @@ export async function submitRefund(
   const captured = pi.amountReceived;
   const stillOpen = await findOpenRefundRequest(storeId, orderId);
   if (stillOpen) return { inFlight: true };
-  const failed = await uncoveredFailure(listed, captured);
-  if (failed) return failed;
+  if (cause.cause === "cancel") {
+    const failed = await uncoveredFailure(listed, captured);
+    if (failed) return failed;
+  }
   const succeeded = countedCents(listed, ["succeeded"]);
-  const pending = countedCents(listed, ["pending", "requires_action"]);
-  const remaining = Math.max(0, captured - succeeded - pending);
+  const remaining = unrefundedCents(captured, listed);
+  // ADR-0019: an issue refund never exceeds what is still unrefunded.
+  const amount = cause.cause === "issue" ? Math.min(cause.amountCents, remaining) : remaining;
+  if (cause.cause === "issue" && amount <= 0) return { blocked: true };
   if (remaining === 0) {
     const pendingRefund = listed.find((refund) => refund.status === "pending" || refund.status === "requires_action");
     if (pendingRefund) return pendingRefund;
@@ -334,22 +360,29 @@ export async function submitRefund(
     const manual = await tx.auditLog.findFirst({
       where: { entityId: orderId, action: "refund_resolved_manually" },
     });
-    if (manual || !current || current.status !== "CANCELLING") return { blocked: true as const, open: null, row: null };
+    if (manual || !current || !allowed.includes(current.status)) return { blocked: true as const, open: null, row: null };
     const again = await openRefundRequest(tx, orderId);
     if (again) return { open: again, row: null };
     const count = await tx.refundRequest.count({ where: { orderId } });
     const key = `refund:${orderId}:${count + 1}`;
+    const refundApplicationFee = refundsApplicationFee(cause, current.fulfillment);
     const row = await tx.refundRequest.create({
       data: {
         storeId,
         orderId,
         paymentIntentId,
         key,
-        amountCents: remaining,
-        refundApplicationFee: true,
+        amountCents: amount,
+        refundApplicationFee,
+        // The store never received the service fee, so its share of a courier issue refund comes from the platform fee.
+        serviceFeeShareCents: cause.cause === "issue" && !refundApplicationFee ? serviceFeeShareOfRefund(amount, current) : 0,
         state: "RESERVED",
       },
     });
+    if (cause.cause === "issue" && cause.issueReportId) {
+      // The issue shows what is refunded, capped at the unrefunded capture, even if the create call then fails.
+      await tx.issueReport.update({ where: { id: cause.issueReportId }, data: { refundRequestId: row.id, amountCents: amount } });
+    }
     return { open: null, row };
   });
   if ("blocked" in created && created.blocked) return { blocked: true };
@@ -358,7 +391,7 @@ export async function submitRefund(
   callsInFlight.add(row.key);
   try {
     const refund = await stripe.refundPayment(paymentIntentId, row.amountCents, row.key, {
-      refundApplicationFee: true,
+      refundApplicationFee: row.refundApplicationFee,
       reservationKey: row.key,
       orderId,
     });
@@ -369,7 +402,7 @@ export async function submitRefund(
   } catch (err) {
     const saved = await classifyRefundRequest(row, { error: err });
     if (saved.state === "NOT_CREATED" && depth < 1) {
-      return submitRefund(storeId, orderId, paymentIntentId, depth + 1);
+      return submitRefund(storeId, orderId, paymentIntentId, cause, depth + 1);
     }
     if (isRetryableProviderError(err)) throw err;
     if (requestIsOpen(saved)) return { inFlight: true };
@@ -377,6 +410,51 @@ export async function submitRefund(
   } finally {
     callsInFlight.delete(row.key);
   }
+}
+
+/** Statuses after the customer has the goods. Only money moves them (owner decision 4). */
+const AFTER_DELIVERY = new Set(["DELIVERED", "COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"]);
+
+type IssueTx = Pick<Prisma.TransactionClient, "refundRequest" | "auditLog" | "order" | "issueReport">;
+
+/**
+ * A failed issue refund marks the issue, not the order: Refund failed resolves to Cancelled,
+ * which is wrong for a delivered order. One alert per refund.
+ */
+async function recordIssueRefundFailure(
+  tx: IssueTx,
+  storeId: string,
+  orderId: string,
+  listed: RefundResult[],
+): Promise<string | null> {
+  const issue = await tx.issueReport.findUnique({ where: { orderId } });
+  if (!issue?.refundRequestId) return null;
+  const request = await tx.refundRequest.findUnique({ where: { id: issue.refundRequestId } });
+  if (!request) return null;
+  const failed = listed.find((refund) =>
+    (refund.status === "failed" || refund.status === "canceled")
+    && (refund.reservationKey === request.key || refund.refundId === request.providerRefundId));
+  // Stripe refused the create, so no refund exists and nothing will replay it. Not ABANDONED: that can still become a refund.
+  const refused = request.state === "NOT_CREATED";
+  if (!failed && !refused) return null;
+  if (issue.state !== "refund_failed") {
+    await tx.issueReport.update({ where: { id: issue.id }, data: { state: "refund_failed" } });
+  }
+  const alertKey = failed ? failed.refundId : request.key;
+  const wrote = await writeAuditOnce(tx, storeId, orderId, "issue_refund_failed", alertKey, failed
+    ? { refundId: failed.refundId, refundStatus: failed.status, issueReportId: issue.id, alert: "store_and_platform" }
+    : { key: request.key, refundStatus: "not_created", issueReportId: issue.id, alert: "store_and_platform" });
+  return wrote ? alertKey : null;
+}
+
+/** An issue refund that threw before its request was saved: nothing exists to replay, so it is failed (#462). */
+export async function recordIssueRefundNotStarted(storeId: string, orderId: string, issueReportId: string): Promise<void> {
+  await storeScopedTransaction(storeId, async (tx) => {
+    await lockStoreRow(tx, storeId);
+    await tx.issueReport.update({ where: { id: issueReportId }, data: { state: "refund_failed" } });
+    await writeAuditOnce(tx, storeId, orderId, "issue_refund_failed", issueReportId,
+      { key: issueReportId, refundStatus: "not_started", issueReportId, alert: "store_and_platform" });
+  });
 }
 
 function succeededCents(listed: RefundResult[]): number {
@@ -400,13 +478,36 @@ function baselineBody(after: Prisma.JsonValue): { refundedCents: number; counted
 }
 
 /**
+ * Runs the evaluation after a caller's commit. An error is logged, not thrown, so it cannot hide
+ * the committed action; the next refund webhook or ledger sweep evaluates against the stored state.
+ */
+export async function evaluateOrderRefundStateAfterCommit(orderId: string): Promise<void> {
+  try {
+    await evaluateOrderRefundState(orderId);
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    console.error(JSON.stringify({
+      event: "refund_evaluation_failed",
+      orderId,
+      code: typeof code === "string" ? code : "unknown",
+    }));
+  }
+}
+
+/**
  * The only place that changes an order's refund status or writes a post-resolution alert.
  * It compares the provider balance with the ledger under the store lock.
  */
 export async function evaluateOrderRefundState(orderId: string): Promise<void> {
   const located = await platformAdminTransaction((tx) => tx.order.findUnique({ where: { id: orderId } }));
   if (!located?.paymentIntentId) return;
+  let notifyCancel = false;
+  let notifyRefunded = false;
+  let issueFailure: string | null = null;
   const recorded = await storeScopedTransaction(located.storeId, async (tx) => {
+    notifyCancel = false;
+    notifyRefunded = false;
+    issueFailure = null;
     const fresh: string[] = [];
     await lockStoreRow(tx, located.storeId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -447,7 +548,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
       if (settled > baseline.refundedCents) {
         const refundId = ids.find((id) => !baseline.countedRefundIds.includes(id)) ?? ids.at(-1) ?? "";
         await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "refund_after_manual_resolution", {
+          data: systemAuditData(order.storeId, orderId, "refund_after_manual_resolution", {
             refundId,
             overpaidCents: settled - baseline.refundedCents,
             alert: "store_and_platform",
@@ -459,7 +560,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
           ?? listed.find((refund) => refund.status === "failed" || refund.status === "canceled")?.refundId
           ?? "";
         await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "refund_reversed_after_resolution", {
+          data: systemAuditData(order.storeId, orderId, "refund_reversed_after_resolution", {
             refundId,
             underpaidCents: baseline.refundedCents - settled,
             alert: "store_and_platform",
@@ -470,7 +571,7 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
       const sameIds = ids.length === baseline.countedRefundIds.length && ids.every((id) => baseline.countedRefundIds.includes(id));
       if (settled !== baseline.refundedCents || !sameIds) {
         await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "refund_resolution_baseline", {
+          data: systemAuditData(order.storeId, orderId, "refund_resolution_baseline", {
             refundedCents: settled,
             countedRefundIds: ids,
           }),
@@ -495,13 +596,14 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
       });
       if (!existing) {
         await tx.auditLog.create({
-          data: systemAudit(order.storeId, orderId, "anomaly_refund", {
+          data: systemAuditData(order.storeId, orderId, "anomaly_refund", {
             refundId,
             amountRefunded: settled,
           }),
         });
       }
       await releaseOrderStock(tx, order.storeId, orderId);
+      notifyCancel = await recordOrderNotification(tx, order.storeId, orderId, "cancelled");
       return;
     }
     const failedRefunds = listed.filter((refund) => refund.status === "failed" || refund.status === "canceled");
@@ -527,12 +629,55 @@ export async function evaluateOrderRefundState(orderId: string): Promise<void> {
         if (wrote) fresh.push(item.refundId);
       }
     }
+    if (AFTER_DELIVERY.has(order.status)) {
+      issueFailure = await recordIssueRefundFailure(tx, order.storeId, orderId, listed);
+      // A refund can fail after it succeeded: with nothing refunded the order is back to fulfilled.
+      const refundedState = order.status === "REFUNDED" || order.status === "PARTIALLY_REFUNDED";
+      const fulfilled = order.deliveredAt ? "DELIVERED" : "COMPLETED";
+      const next = settled === 0 ? (refundedState ? fulfilled : null) : settled >= captured ? "REFUNDED" : "PARTIALLY_REFUNDED";
+      if (next && next !== order.status) {
+        await tx.order.update({ where: { id: orderId }, data: { status: next } });
+        if (next === "REFUNDED" || next === "PARTIALLY_REFUNDED") {
+          notifyRefunded = await recordOrderNotification(tx, order.storeId, orderId, "refunded");
+        }
+      }
+    }
     return fresh;
   }, { timeout: 20_000 });
+  await returnServiceFeeShares(located.storeId, orderId);
+  if (notifyCancel) scheduleOrderNotification(located.storeId, orderId, "cancelled");
+  if (notifyRefunded) scheduleOrderNotification(located.storeId, orderId, "refunded");
+  if (issueFailure) {
+    console.error(`Issue refund ${issueFailure} failed for order ${orderId}. Customer is not refunded. Store and platform alerted.`);
+  }
   for (const refundId of recorded ?? []) {
     console.error(
       `Refund failed for order ${orderId} (${refundId}). Customer is still charged. Store and platform alerted.`,
     );
+  }
+}
+
+/**
+ * Once a courier issue refund has succeeded, return its service fee share from the platform's
+ * application fee. A failure is logged and retried by the next evaluation of the order.
+ */
+async function returnServiceFeeShares(storeId: string, orderId: string): Promise<void> {
+  const due = await storeScoped(storeId).refundRequest.findMany({
+    where: { orderId, serviceFeeShareCents: { gt: 0 }, feeRefundId: null, providerStatus: "succeeded" },
+  });
+  for (const row of due) {
+    try {
+      const { feeRefundId } = await getStripeProvider().refundApplicationFeePart(row.paymentIntentId, row.serviceFeeShareCents, row.key);
+      await saveRequest(storeId, row.id, { feeRefundId });
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      console.error(JSON.stringify({
+        event: "service_fee_share_refund_failed",
+        orderId,
+        key: row.key,
+        code: typeof code === "string" ? code : "unknown",
+      }));
+    }
   }
 }
 

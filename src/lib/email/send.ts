@@ -1,9 +1,13 @@
+import { ProviderSendError } from "../notifications/provider-error";
+
 export interface EmailMessage {
   to: string;
   subject: string;
   html: string;
   /** Display name plus address. Falls back to the sender default. */
   from?: string;
+  /** Resend keeps this for 24 hours. The same key and body replay the same id. */
+  idempotencyKey?: string;
 }
 
 export interface EmailSender {
@@ -20,18 +24,21 @@ export class ResendSender implements EmailSender {
   }
 
   async send(message: EmailMessage): Promise<{ id: string }> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    };
+    if (message.idempotencyKey) headers["Idempotency-Key"] = message.idempotencyKey;
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
         from: message.from ?? this.from,
         to: message.to,
         subject: message.subject,
         html: message.html,
       }),
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!res.ok) {
@@ -45,9 +52,36 @@ export class ResendSender implements EmailSender {
 }
 
 const sent: EmailMessage[] = [];
+const emailKeys = new Map<string, { id: string; body: string }>();
 
-class TestSender implements EmailSender {
+function emailBody(message: EmailMessage): string {
+  return JSON.stringify({
+    to: message.to,
+    subject: message.subject,
+    html: message.html,
+    from: message.from ?? null,
+  });
+}
+
+export class TestSender implements EmailSender {
   async send(message: EmailMessage): Promise<{ id: string }> {
+    if (!message.to?.trim() || !message.subject?.trim() || !message.html?.trim()) {
+      throw new ProviderSendError(400, "validation_error");
+    }
+    const key = message.idempotencyKey;
+    if (key !== undefined) {
+      if (key.length < 1 || key.length > 256) throw new ProviderSendError(400, "invalid_key");
+      const body = emailBody(message);
+      const prior = emailKeys.get(key);
+      if (prior) {
+        if (prior.body !== body) throw new ProviderSendError(409, "invalid_idempotent_request");
+        return { id: prior.id };
+      }
+      const id = `test-${emailKeys.size + 1}-${Date.now()}`;
+      emailKeys.set(key, { id, body });
+      sent.push(message);
+      return { id };
+    }
     sent.push(message);
     return { id: `test-${Date.now()}` };
   }
@@ -59,6 +93,7 @@ export function getTestSentEmails(): readonly EmailMessage[] {
 
 export function clearTestSentEmails(): void {
   sent.length = 0;
+  emailKeys.clear();
 }
 
 class UnconfiguredSender implements EmailSender {

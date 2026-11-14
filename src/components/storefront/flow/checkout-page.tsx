@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, ShoppingBag, Truck } from "lucide-react";
-import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
+import { Clock, MapPin, ShoppingBag, Truck } from "lucide-react";
+import { loadStripe, type Appearance, type Stripe as StripeJs } from "@stripe/stripe-js";
 import {
   Elements,
   PaymentElement,
@@ -20,6 +20,8 @@ import {
   quoteCheckoutAction,
   createPaymentIntentAction,
   placeOrderAction,
+  confirmAddressAction,
+  assistantCheckoutDraftAction,
 } from "@/lib/checkout/actions";
 import type {
   CheckoutInput,
@@ -30,14 +32,16 @@ import type {
 import {
   AddressCard,
   DemoNotice,
-  FeeLine,
   FlowCard,
   FlowError,
   FlowHeading,
   FlowLoading,
+  QuoteLines,
 } from "./common";
 import { PayButton } from "./feedback";
 import { money, useCartReady, type ShoppingFlowProps } from "./cart-page";
+import { placeOrderLabel } from "@/lib/checkout/summary";
+import { activeSection } from "@/lib/checkout/active-section";
 import { checkoutCardView } from "@/lib/customer-account/checkout-card-view";
 import { SAVED_CARD_PURPOSE } from "@/lib/customer-account/copy";
 import type { CheckoutPrefill } from "@/lib/customer-account/checkout-profile";
@@ -82,7 +86,7 @@ function StripeCardInput({ harness }: { harness?: boolean }) {
   }
   return (
     <div className={styles.stripeCard}>
-      <PaymentElement options={{ layout: "tabs" }} />
+      <PaymentElement options={{ layout: "tabs", wallets: { link: "never" } }} />
     </div>
   );
 }
@@ -105,6 +109,10 @@ function createHarnessStripe(): StripeJs {
   };
   return {
     elements: () => elementsApi,
+    // @stripe/react-stripe-js rejects a Stripe object that lacks these.
+    createToken: async () => ({ token: undefined }),
+    createPaymentMethod: async () => ({ paymentMethod: undefined }),
+    confirmCardPayment: async () => ({ error: undefined }),
     confirmPayment: async (options: {
       clientSecret?: string;
       confirmParams?: { payment_method?: string };
@@ -127,6 +135,135 @@ function createHarnessStripe(): StripeJs {
   } as unknown as StripeJs;
 }
 
+interface AddressSuggestion {
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+  label: string;
+}
+
+interface ConfirmedDelivery {
+  formatted: string;
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+  withinRadius: boolean;
+  distanceMi: number;
+  message: string | null;
+}
+
+function StoreDeliveryFields({
+  line1,
+  setLine1,
+  line2,
+  setLine2,
+  city,
+  setCity,
+  region,
+  setRegion,
+  zip,
+  setZip,
+  suggestions,
+  onPick,
+  onConfirm,
+  confirming,
+  confirmed,
+  leaveAtDoor,
+  setLeaveAtDoor,
+  frozen,
+  onEdit,
+}: {
+  line1: string;
+  setLine1: (value: string) => void;
+  line2: string;
+  setLine2: (value: string) => void;
+  city: string;
+  setCity: (value: string) => void;
+  region: string;
+  setRegion: (value: string) => void;
+  zip: string;
+  setZip: (value: string) => void;
+  suggestions: AddressSuggestion[];
+  onPick: (row: AddressSuggestion) => void;
+  onConfirm: () => void;
+  confirming: boolean;
+  confirmed: ConfirmedDelivery | null;
+  leaveAtDoor: boolean;
+  setLeaveAtDoor: (value: boolean) => void;
+  frozen: boolean;
+  onEdit: () => void;
+}) {
+  return (
+    <div>
+      <label className={styles.field}>
+        Street address
+        <input
+          autoComplete="address-line1"
+          value={line1}
+          onChange={(event) => {
+            setLine1(event.target.value);
+            onEdit();
+          }}
+        />
+      </label>
+      <label className={styles.field}>
+        Apartment, suite (optional)
+        <input
+          autoComplete="address-line2"
+          maxLength={60}
+          value={line2}
+          onChange={(event) => setLine2(event.target.value)}
+        />
+      </label>
+      <label className={styles.field}>
+        City
+        <input autoComplete="address-level2" value={city} onChange={(event) => { setCity(event.target.value); onEdit(); }} />
+      </label>
+      <label className={styles.field}>
+        State
+        <input autoComplete="address-level1" maxLength={40} value={region} onChange={(event) => { setRegion(event.target.value); onEdit(); }} />
+      </label>
+      <label className={styles.field}>
+        ZIP
+        <input autoComplete="postal-code" maxLength={10} value={zip} onChange={(event) => { setZip(event.target.value); onEdit(); }} />
+      </label>
+      {suggestions.map((row) => (
+        <button
+          type="button"
+          className={styles.addressResult}
+          key={row.label}
+          onClick={() => onPick(row)}
+        >
+          <MapPin size={20} />
+          <span>{row.label}</span>
+        </button>
+      ))}
+      <Button type="button" onClick={onConfirm} disabled={confirming}>
+        {confirming ? "Checking address…" : "Confirm address"}
+      </Button>
+      {confirmed && (
+        <p role="status">
+          {confirmed.formatted}
+          {confirmed.withinRadius
+            ? ` · ${confirmed.distanceMi.toFixed(1)} mi`
+            : ` — ${confirmed.message}`}
+        </p>
+      )}
+      <label className={styles.check}>
+        <input
+          type="checkbox"
+          checked={!frozen && leaveAtDoor}
+          disabled={frozen}
+          onChange={(event) => setLeaveAtDoor(event.target.checked)}
+        />
+        Leave at door
+      </label>
+    </div>
+  );
+}
+
 function RealCheckoutForm({
   settings,
   catalog,
@@ -140,7 +277,7 @@ function RealCheckoutForm({
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
-  const fulfillment: Fulfillment = "pickup";
+  const [fulfillment, setFulfillment] = useState<Fulfillment>("pickup");
   const prefill = stripeConfig.prefill ?? null;
   const cardView = checkoutCardView({
     signedIn: Boolean(stripeConfig.signedIn),
@@ -163,6 +300,16 @@ function RealCheckoutForm({
   const [showCardForm, setShowCardForm] = useState(cardView.showCardForm);
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [line1, setLine1] = useState("");
+  const [line2, setLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [region, setRegion] = useState("");
+  const [zip, setZip] = useState("");
+  const [leaveAtDoor, setLeaveAtDoor] = useState(false);
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
+  const [confirmed, setConfirmed] = useState<ConfirmedDelivery | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const suggestAbort = useRef<AbortController | null>(null);
   const [schedule, setSchedule] = useState(false);
   const [slot, setSlot] = useState("asap");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
@@ -180,26 +327,58 @@ function RealCheckoutForm({
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
   );
-  const currentKey = JSON.stringify(contact);
+  const delivery = fulfillment === "store-delivery" && confirmed
+    ? {
+        line1: confirmed.line1,
+        line2: line2 || null,
+        city: confirmed.city,
+        state: confirmed.state,
+        zip: confirmed.zip,
+        leaveAtDoor: !frozen && leaveAtDoor,
+      }
+    : undefined;
+  const currentKey = JSON.stringify({ contact, fulfillment, delivery });
   const quotePending = !quote || quoteKey !== currentKey;
+
+  useEffect(() => {
+    if (confirmed || line1.trim().length < 3 || fulfillment !== "store-delivery") return;
+    const controller = new AbortController();
+    suggestAbort.current = controller;
+    const timer = setTimeout(() => {
+      fetch(`/api/address/suggest?q=${encodeURIComponent(line1)}`, { signal: controller.signal })
+        .then((response) => response.json())
+        .then((body: { suggestions?: AddressSuggestion[] }) => {
+          if (!controller.signal.aborted) setSuggestions(body.suggestions ?? []);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setSuggestions([]);
+        });
+    }, 300);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [line1, fulfillment, confirmed]);
 
   useEffect(() => {
     let active = true;
     const timer = setTimeout(() => {
-      quoteCheckoutAction(contact, "pickup").then((result) => {
+      quoteCheckoutAction(contact, fulfillment, delivery).then((result) => {
         if (!active) return;
         if (result.ok) {
           setQuote(result.quote);
-          setQuoteKey(JSON.stringify(contact));
+          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery }));
         } else {
           setError(result.error);
         }
       });
     }, 300);
     return () => { active = false; clearTimeout(timer); };
-  }, [contact]);
+    // currentKey already covers contact, fulfillment, and the confirmed address.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentKey]);
 
-  const [slots] = useState(() => {
+  const [slots, setSlots] = useState(() => {
     const first = new Date();
     first.setHours(10, 0, 0, 0);
     if (first.getTime() <= Date.now()) first.setDate(first.getDate() + 1);
@@ -215,6 +394,28 @@ function RealCheckoutForm({
     });
   });
 
+  // The pickup time chosen with the assistant, in store time (#247). It never
+  // overrides a choice the shopper made on this page before it loaded.
+  const shopperChose = useRef(false);
+  function chosenByShopper<T>(set: (value: T) => void) {
+    return (value: T) => { shopperChose.current = true; set(value); };
+  }
+  useEffect(() => {
+    let active = true;
+    assistantCheckoutDraftAction().then((draft) => {
+      if (!active || !draft || !settings.pickupEnabled || shopperChose.current) return;
+      setFulfillment("pickup");
+      if (draft.slot.id === "asap") return;
+      setSlots((current) => [
+        { value: draft.slot.id, label: `Today ${draft.slot.label}` },
+        ...current.filter((option) => option.value !== draft.slot.id),
+      ]);
+      setSchedule(true);
+      setSlot(draft.slot.id);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [settings.pickupEnabled]);
+
   async function pay(event: FormEvent) {
     event.preventDefault();
     setSubmitted(true);
@@ -224,10 +425,20 @@ function RealCheckoutForm({
       setError("Choose a pickup time within the next six days.");
       return;
     }
-    if (payState !== "idle" || !stripe || !elements) return;
+    if (fulfillment === "store-delivery" && !delivery) {
+      setError("Confirm your delivery address.");
+      return;
+    }
+    if (payState !== "idle") return;
+    if (!stripe || !elements) {
+      setError("Payment is still loading. Try again in a moment.");
+      return;
+    }
+    suggestAbort.current?.abort();
+    setSuggestions([]);
     setPayState("pending");
     try {
-      const quoteResult = await quoteCheckoutAction(contact, "pickup");
+      const quoteResult = await quoteCheckoutAction(contact, fulfillment, delivery);
       if (!quoteResult.ok) {
         if (quoteResult.code === "basket_already_ordered") {
           setErrorHref("/account");
@@ -256,7 +467,7 @@ function RealCheckoutForm({
       const payingSavedCard = Boolean(selectedCardId) && !showCardForm;
       const piResult = await createPaymentIntentAction(
         contact,
-        "pickup",
+        fulfillment,
         stripeConfig.signedIn
           ? {
               saveCard: payingSavedCard ? false : saveCard,
@@ -264,6 +475,7 @@ function RealCheckoutForm({
               attemptToken,
             }
           : undefined,
+        delivery,
       );
       if (!piResult.ok) {
         if (piResult.code === "basket_already_ordered") {
@@ -300,7 +512,7 @@ function RealCheckoutForm({
         confirmError = confirmed.error;
       } else {
         await Promise.resolve(elements.update({
-          amount: latest.holdCents,
+          amount: piResult.holdCents,
           setupFutureUsage: saveCard ? "on_session" : null,
         }));
         const { error: submitError } = await elements.submit();
@@ -318,9 +530,10 @@ function RealCheckoutForm({
       const orderResult = await placeOrderAction(
         piResult.paymentIntentId,
         contact,
-        "pickup",
+        fulfillment,
         notes,
         schedule ? slot : "asap",
+        delivery,
       );
       if (!orderResult.ok) {
         setErrorHref(orderResult.code === "basket_already_ordered" ? "/account" : null);
@@ -356,7 +569,73 @@ function RealCheckoutForm({
       lines={lines}
       subtotal={subtotal}
       fulfillment={fulfillment}
-      setFulfillment={() => {}}
+      setFulfillment={chosenByShopper(setFulfillment)}
+      deliveryEditor={
+        <StoreDeliveryFields
+          line1={line1}
+          setLine1={setLine1}
+          line2={line2}
+          setLine2={setLine2}
+          city={city}
+          setCity={setCity}
+          region={region}
+          setRegion={setRegion}
+          zip={zip}
+          setZip={setZip}
+          suggestions={suggestions}
+          onPick={(row) => {
+            setLine1(row.line1);
+            setCity(row.city);
+            setRegion(row.state);
+            setZip(row.zip);
+            setSuggestions([]);
+            setConfirmed(null);
+          }}
+          onConfirm={() => {
+            setConfirming(true);
+            confirmAddressAction({
+              line1,
+              line2: line2 || null,
+              city,
+              state: region,
+              zip,
+              leaveAtDoor: !frozen && leaveAtDoor,
+            }).then((result) => {
+              setConfirming(false);
+              if (!result.ok) {
+                setConfirmed(null);
+                setError(result.error);
+                return;
+              }
+              setError("");
+              setSuggestions([]);
+              setConfirmed({
+                formatted: result.formatted,
+                line1: result.line1,
+                city: result.city,
+                state: result.state,
+                zip: result.zip,
+                withinRadius: result.withinRadius,
+                distanceMi: result.distanceMi,
+                message: result.message,
+              });
+              setLine1(result.line1);
+              setCity(result.city);
+              setRegion(result.state);
+              setZip(result.zip);
+            });
+          }}
+          confirming={confirming}
+          confirmed={confirmed}
+          leaveAtDoor={leaveAtDoor}
+          setLeaveAtDoor={setLeaveAtDoor}
+          frozen={frozen}
+          onEdit={() => {
+            setConfirmed(null);
+            setSuggestions([]);
+          }}
+        />
+      }
       contact={contact}
       setContact={setContact}
       address={undefined}
@@ -371,9 +650,9 @@ function RealCheckoutForm({
       leaveAtDoor={false}
       setLeaveAtDoor={() => {}}
       schedule={schedule}
-      setSchedule={setSchedule}
+      setSchedule={chosenByShopper(setSchedule)}
       slot={slot}
-      setSlot={setSlot}
+      setSlot={chosenByShopper(setSlot)}
       slots={slots}
       promo=""
       setPromo={() => {}}
@@ -450,7 +729,7 @@ function RealCheckoutForm({
           ) : null}
         </>
       }
-      payLabel={quote ? `Pay · ${money(quote.holdCents)}` : "Pay"}
+      payLabel={placeOrderLabel(quote)}
       isRealPayment
     />
   );
@@ -491,6 +770,40 @@ export function CheckoutPage({
   );
 }
 
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+// Stripe renders in an iframe, so it needs the store's resolved colors, not CSS variables.
+function readStoreStripeAppearance(): Appearance {
+  const dark = window.matchMedia(DARK_QUERY).matches;
+  const css = getComputedStyle(document.body);
+  const token = (name: string) => css.getPropertyValue(`--color-${name}`).trim();
+  return {
+    theme: dark ? "night" : "stripe",
+    variables: {
+      colorPrimary: token("primary-text"),
+      colorBackground: token("surface"),
+      colorText: token("ink"),
+      colorTextSecondary: token("muted"),
+      borderRadius: "8px",
+    },
+    rules: {
+      ".Label": { color: token("ink") },
+      ...(dark ? { ".Input": { borderColor: token("line-strong") } } : {}),
+    },
+  };
+}
+
+function useStoreStripeAppearance(): Appearance {
+  const [appearance, setAppearance] = useState(readStoreStripeAppearance);
+  useEffect(() => {
+    const query = window.matchMedia(DARK_QUERY);
+    const update = () => setAppearance(readStoreStripeAppearance());
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return appearance;
+}
+
 function StripeWrapper({
   config,
   estimatedHoldCents,
@@ -505,6 +818,7 @@ function StripeWrapper({
     [config],
   );
   const amount = Math.max(estimatedHoldCents, 50);
+  const appearance = useStoreStripeAppearance();
   return (
     <Elements
       stripe={stripePromise}
@@ -514,10 +828,7 @@ function StripeWrapper({
         currency: "usd",
         captureMethod: "manual",
         onBehalfOf: config.onBehalfOf,
-        appearance: {
-          theme: "stripe",
-          variables: { colorPrimary: "#16a34a" },
-        },
+        appearance,
       }}
     >
       {children}
@@ -578,6 +889,7 @@ interface CheckoutLayoutProps {
   payLabel: string;
   isRealPayment: boolean;
   outcomeSelector?: React.ReactNode;
+  deliveryEditor?: React.ReactNode;
 }
 
 function CheckoutLayout(props: CheckoutLayoutProps) {
@@ -591,7 +903,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
-    onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector,
+    onSubmit, paymentSection, payLabel, isRealPayment, outcomeSelector, deliveryEditor,
     signedIn = false, identityLocked = false,
   } = props;
 
@@ -604,12 +916,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
         backLabel="Back to basket"
       />
       {!isRealPayment && <DemoNotice />}
-      <nav className={styles.stages} aria-label="Checkout sections">
-        <a href="#fulfillment">1. Fulfillment</a>
-        <a href="#contact">2. Contact</a>
-        <a href="#payment">3. Payment</a>
-        <a href="#review">4. Review</a>
-      </nav>
+      <CheckoutStages />
       <form className={styles.layout} onSubmit={onSubmit} noValidate>
         <fieldset className={styles.formFields} disabled={payState !== "idle"}>
           <legend className="sr-only">Checkout details</legend>
@@ -625,14 +932,14 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   <ShoppingBag size={18} />
                   Pickup · Free
                 </Chip>
-                {!isRealPayment && settings.storeDeliveryEnabled && (
+                {settings.storeDeliveryEnabled && (
                   <Chip
                     type="button"
                     selected={fulfillment === "store-delivery"}
                     onClick={() => setFulfillment("store-delivery")}
                   >
                     <Truck size={18} />
-                    Store delivery · {money(settings.storeDeliveryFeeCents)}
+                    Store delivery · {settings.storeDeliveryFeeCents === 0 ? "Free" : money(settings.storeDeliveryFeeCents)}
                   </Chip>
                 )}
                 {!isRealPayment && (
@@ -651,7 +958,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 Order weight: {(weightG / 453.592).toFixed(1)} lb. Delivery
                 radius: {settings.deliveryRadiusMi} miles.
               </p>
-              {!courierEligible && (
+              {!isRealPayment && !courierEligible && (
                 <p className={styles.error}>
                   Courier is unavailable: orders and individual items must be 50
                   lb or less; frozen goods also require confirmed insulated
@@ -669,6 +976,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                   address={settings.address}
                   title="Collect from the market"
                 />
+              ) : deliveryEditor ? (
+                deliveryEditor
               ) : (
                 <>
                   <label className={styles.field}>
@@ -725,11 +1034,16 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           </div>
           <FlowCard title="When works for you?">
             {settings.closed && (
-              <p className={styles.notice}>
-                The market is closed. Opens {settings.opensAt}. Order now to
-                join the queue; estimated ready about {settings.prepTimeMinutes}{" "}
-                minutes after opening.
-              </p>
+              <div className={styles.queueNotice}>
+                <Clock size={18} aria-hidden />
+                <p>
+                  <strong>
+                    <span>Opens {settings.opensAt} ·</span>{" "}
+                    <span>ready about {settings.readyAt}</span>
+                  </strong>
+                  The store is closed. Order now to join the queue.
+                </p>
+              </div>
             )}
             <div className={styles.options}>
               <Chip
@@ -768,7 +1082,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 value={notes}
                 maxLength={1000}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Apartment, gate code, or a note for your shopper"
+                placeholder={fulfillment === "pickup" ? "A note for your shopper" : "Apartment, gate code, or a note for your shopper"}
               />
             </label>
           </FlowCard>
@@ -831,8 +1145,8 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
           {fulfillment !== "pickup" && (
             <FlowCard title="A thank-you for your driver">
               <p className={styles.muted}>
-                100% of your tip goes to the courier. Default is 15%; you can
-                change it.
+                100% of your tip goes to the courier. No tip is added unless
+                you choose one.
               </p>
               <div className={styles.options}>
                 {[0, 10, 15, 20].map((value) => (
@@ -925,32 +1239,12 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               </>
             )}
             {quote ? (
-              <>
-                <FeeLine label="Subtotal" cents={quote.subtotalCents} />
-                <FeeLine label="Store delivery" cents={quote.deliveryFeeCents} />
-                <FeeLine
-                  label={quote.courierProvider ? `${quote.courierProvider}` : "Courier"}
-                  cents={quote.courierFeeCents}
-                />
-                <FeeLine label="Estimated tax" cents={quote.taxCents} />
-                <FeeLine label="Tip" cents={quote.tipCents} />
-                {!!quote.discountCents && (
-                  <FeeLine label="Promo savings" cents={-quote.discountCents} />
-                )}
-                <FeeLine label="Estimated total" cents={quote.totalCents} strong />
-                <FeeLine label="Temporary swap buffer" cents={quote.bufferCents} />
-                <FeeLine label="Authorization hold" cents={quote.holdCents} strong />
-              </>
+              <QuoteLines quote={quote} fulfillment={fulfillment} />
             ) : (
               <p role="status">Estimating your order…</p>
             )}
             <p className={styles.notice}>
-              {quote && (
-                <>
-                  Your card will be authorized for {money(quote.holdCents)}.
-                  You&rsquo;ll be charged the final amount after picking.{" "}
-                </>
-              )}
+              {quote && <>Your card will be authorized for {money(quote.holdCents)}. </>}
               We authorize the estimated total plus a 10% buffer, capped at $20.
               You&rsquo;ll be charged the final amount after picking; unused
               funds are released. Any higher-priced swap requires your approval
@@ -963,6 +1257,19 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
               <FlowError title="Let's review that" message={error}>
                 {errorHref ? <Link className="sf-text-link" href={errorHref}>View your orders</Link> : null}
               </FlowError>
+            )}
+            {isRealPayment && settings.closed && (
+              <p className={styles.muted}>
+                The store opens {settings.opensAt}. Your card is held now and
+                charged after picking. If the store doesn&rsquo;t accept your
+                order, the hold is released.
+              </p>
+            )}
+            {quote && (
+              <p className={styles.payTotal}>
+                <span>Estimated total</span>
+                <strong>{money(quote.totalCents)}</strong>
+              </p>
             )}
             <PayButton
               type="submit"
@@ -1014,7 +1321,7 @@ function DemoCheckoutPage({
   const [promo, setPromo] = useState("");
   const [appliedPromo, setAppliedPromo] = useState("");
   const [promoMessage, setPromoMessage] = useState("");
-  const [tipPercent, setTipPercent] = useState<number | null>(15);
+  const [tipPercent, setTipPercent] = useState<number | null>(0);
   const [customTip, setCustomTip] = useState("");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   const [quoteKey, setQuoteKey] = useState("");
@@ -1035,8 +1342,9 @@ function DemoCheckoutPage({
     weightG <= 22679.6 &&
     metadata.every(({ item }) => !!item && item.weightG <= 22679.6) &&
     (!frozen || settings.insulatedPackaging);
-  const tipCents =
-    tipPercent === null
+  const tipCents = fulfillment === "pickup"
+    ? 0
+    : tipPercent === null
       ? Math.max(0, Math.round((Number(customTip) || 0) * 100))
       : Math.round((subtotal * tipPercent) / 100);
   const input = useMemo<CheckoutInput>(
@@ -1214,5 +1522,50 @@ function DemoCheckoutPage({
       isRealPayment={false}
       outcomeSelector={demoOutcomeSelector}
     />
+  );
+}
+
+const STAGES = [
+  { id: "fulfillment", label: "1. Fulfillment" },
+  { id: "contact", label: "2. Contact" },
+  { id: "payment", label: "3. Payment" },
+  { id: "review", label: "4. Review" },
+] as const;
+
+/** Section links that mark where the shopper is with aria-current="step". */
+function CheckoutStages() {
+  const [current, setCurrent] = useState<string>(STAGES[0].id);
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const sections = STAGES.flatMap(({ id }) => {
+        const node = document.getElementById(id);
+        return node ? [{ id, top: node.getBoundingClientRect().top }] : [];
+      });
+      // Below the sticky header, about 40% down the viewport.
+      const next = activeSection(sections, Math.max(180, window.innerHeight * 0.4));
+      if (next) setCurrent(next);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, []);
+  return (
+    <nav className={styles.stages} aria-label="Checkout sections">
+      {STAGES.map(({ id, label }) => (
+        <a key={id} href={`#${id}`} aria-current={current === id ? "step" : undefined}>
+          {label}
+        </a>
+      ))}
+    </nav>
   );
 }

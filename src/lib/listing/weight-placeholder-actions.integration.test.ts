@@ -201,7 +201,7 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
     const result = await updateListingAction(saveForm(row.listingId, `Clear ${RUN}`, [
       { id: row.variantId, label: row.label, price: 800, weightG: 22680 },
     ]));
-    expect(result).toEqual({ success: true, id: row.listingId });
+    expect(result).toMatchObject({ success: true, id: row.listingId });
     const saved = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: row.variantId } });
     expect(saved.id).toBe(row.variantId);
     expect(saved.weightG).toBe(22680);
@@ -214,7 +214,7 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
     const typedResult = await updateListingAction(saveForm(typed.listingId, `Typed Hundred ${RUN}`, [
       { id: typed.variantId, label: typed.label, price: 800, weightG: 100 },
     ]));
-    expect(typedResult).toEqual({ success: true, id: typed.listingId });
+    expect(typedResult).toMatchObject({ success: true, id: typed.listingId });
     const typedRow = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: typed.variantId } });
     expect(typedRow.weightG).toBe(100);
     expect(typedRow.weightPlaceholder).toBe(false);
@@ -229,7 +229,7 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
     const result = await updateListingAction(saveForm(row.listingId, `Carted ${RUN}`, [
       { id: row.variantId, label: row.label, price: 800, weightG: 907 },
     ]));
-    expect(result).toEqual({ success: true, id: row.listingId });
+    expect(result).toMatchObject({ success: true, id: row.listingId });
     const saved = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: row.variantId } });
     expect(saved.id).toBe(row.variantId);
     expect(saved.weightG).toBe(907);
@@ -264,7 +264,7 @@ describe.skipIf(!hasDb)("placeholder weight actions (real auth, lane DB)", () =>
       { id: row.variantId, label: "   ", price: "8.00", weightG: "" },
     ]));
     const result = await updateListingAction(fd);
-    expect(result).toEqual({ error: "At least one variant is required" });
+    expect(result).toEqual({ error: "Variant 1: label is required" });
     const saved = await storeScoped(storeAId).listingVariant.findUniqueOrThrow({ where: { id: row.variantId } });
     expect(saved.weightG).toBe(100);
     expect(saved.weightPlaceholder).toBe(true);

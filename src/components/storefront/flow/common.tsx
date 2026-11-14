@@ -8,7 +8,12 @@ import {
   Info,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { FlowAddress } from "@/lib/customer-flow/contracts";
+import type {
+  CheckoutQuote,
+  FlowAddress,
+  Fulfillment,
+} from "@/lib/customer-flow/contracts";
+import { orderSummary } from "@/lib/checkout/summary";
 import { PriceDisplay } from "../price-display";
 
 export function FlowHeading({
@@ -30,7 +35,6 @@ export function FlowHeading({
           {backLabel}
         </Link>
       )}
-      <div className="flow-eyebrow">Your neighborhood, delivered</div>
       <h1>{title}</h1>
       {description && <p>{description}</p>}
     </header>
@@ -87,6 +91,47 @@ export function ClosedFlow() {
     </div>
   );
 }
+/** Checkout refused: the page's heading says why, with no payment form and a way back. */
+export function CheckoutUnavailable({ message }: { message: string }) {
+  return (
+    <div className="sf-container flow-page">
+      <div className="flow-closed">
+        <h1>{message}</h1>
+        <p>Anything in your basket stays there. You can keep browsing the store and order later.</p>
+        <div className="flow-closed-actions">
+          <Link href="/" className="sf-button">
+            Explore the store
+          </Link>
+          <Link href="/cart" className="sf-text-link">
+            Back to basket
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Basket and checkout render the same server quote through this one component. */
+export function QuoteLines({
+  quote,
+  fulfillment,
+}: {
+  quote: CheckoutQuote;
+  fulfillment: Fulfillment;
+}) {
+  const view = orderSummary(quote, fulfillment);
+  return (
+    <>
+      {view.lines.map((line) => (
+        <FeeLine key={line.key} label={line.label} cents={line.cents} />
+      ))}
+      <FeeLine label="Estimated total" cents={view.totalCents} strong />
+      <FeeLine label="Temporary swap buffer" cents={view.bufferCents} />
+      <FeeLine label="Authorization hold" cents={view.holdCents} strong />
+    </>
+  );
+}
+
 export function FeeLine({
   label,
   cents,

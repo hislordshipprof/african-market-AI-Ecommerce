@@ -6,8 +6,12 @@ const SMOKE_PORT_OFFSET = 299;
 /**
  * Port for a lane's extra production server. Playwright keeps `E2E_PORT`.
  * 3000 → 3299, 3100 → 3399, 3200 → 3499, so lanes do not share one port.
+ * Each Playwright worker adds its parallel index, so workers in one lane do not race for it.
  */
-export function laneSmokePort(e2ePort: string = process.env.E2E_PORT || "3000"): number {
+export function laneSmokePort(
+  e2ePort: string = process.env.E2E_PORT || "3000",
+  worker: string = process.env.TEST_PARALLEL_INDEX || "0",
+): number {
   if (!/^[1-9]\d*$/.test(e2ePort)) {
     throw new Error(`E2E_PORT must be a port number, received ${e2ePort}`);
   }
@@ -15,7 +19,7 @@ export function laneSmokePort(e2ePort: string = process.env.E2E_PORT || "3000"):
   if (base > 65535) {
     throw new Error(`E2E_PORT must be a port number, received ${e2ePort}`);
   }
-  const preferred = base + SMOKE_PORT_OFFSET;
+  const preferred = base + SMOKE_PORT_OFFSET + (/^\d+$/.test(worker) ? Number(worker) : 0);
   if (preferred > 65535) {
     throw new Error(`smoke port ${preferred} is outside the port range`);
   }
@@ -38,22 +42,28 @@ function bindEphemeral(avoid?: number): Promise<number> {
   });
 }
 
-/** Preferred port when it is free; otherwise a free port that is not that one. */
-export function reservePort(preferred?: number): Promise<number> {
-  if (preferred === undefined) return bindEphemeral();
+function freeOn(port: number, host: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const probe = createServer();
     probe.once("error", (error: NodeJS.ErrnoException) => {
-      if (error.code === "EADDRINUSE" || error.code === "EACCES") {
-        resolve(bindEphemeral(preferred));
-        return;
-      }
-      reject(error);
+      if (error.code === "EADDRINUSE" || error.code === "EACCES") resolve(false);
+      else reject(error);
     });
-    probe.listen(preferred, "127.0.0.1", () => {
-      probe.close((error) => (error ? reject(error) : resolve(preferred)));
+    probe.listen(port, host, () => {
+      probe.close((error) => (error ? reject(error) : resolve(true)));
     });
   });
+}
+
+/**
+ * Preferred port when it is free; otherwise a free port that is not that one.
+ * `next start` binds all interfaces (::), and macOS lets a loopback probe succeed
+ * beside a :: listener and the reverse, so both must be free.
+ */
+export async function reservePort(preferred?: number): Promise<number> {
+  if (preferred === undefined) return bindEphemeral();
+  if ((await freeOn(preferred, "127.0.0.1")) && (await freeOn(preferred, "::"))) return preferred;
+  return bindEphemeral(preferred);
 }
 
 /**
@@ -65,6 +75,7 @@ export function reservePort(preferred?: number): Promise<number> {
 function pidsListeningOn(port: number): Promise<number[]> {
   if (!Number.isInteger(port) || port < 1 || port > 65535) return Promise.resolve([]);
   if (process.platform === "win32") return windowsListeners(port);
+  if (process.platform === "darwin") return lsofListeners(port);
   return ssListeners(port);
 }
 
@@ -73,40 +84,32 @@ function windowsListeners(port: number): Promise<number[]> {
     `$rows = Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue`,
     "$rows | Where-Object { $_.RemotePort -eq 0 -and $_.OwningProcess -gt 0 } | Select-Object -ExpandProperty OwningProcess",
   ].join("; ");
-  return new Promise((resolve) => {
-    execFile(
-      "powershell",
-      ["-NoProfile", "-Command", script],
-      { windowsHide: true, encoding: "utf8", timeout: 20_000 },
-      (error, stdout) => {
-        if (error || typeof stdout !== "string") {
-          resolve([]);
-          return;
-        }
-        resolve(pidsFromLines(stdout));
-      },
-    );
-  });
+  return run("powershell", ["-NoProfile", "-Command", script], 20_000).then(({ ok, stdout }) =>
+    ok ? pidsFromLines(stdout) : [],
+  );
+}
+
+// macOS has no `ss`. lsof exits 1 when nothing listens; stdout is then empty.
+function lsofListeners(port: number): Promise<number[]> {
+  return run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], 5_000).then(({ stdout }) => pidsFromLines(stdout));
 }
 
 function ssListeners(port: number): Promise<number[]> {
+  return run("ss", ["-H", "-ltnp", `sport = :${port}`], 5_000).then(({ ok, stdout }) => {
+    if (!ok) return [];
+    const pids = new Set<number>();
+    for (const match of stdout.matchAll(/pid=(\d+)/g)) {
+      const pid = Number(match[1]);
+      if (pid > 0) pids.add(pid);
+    }
+    return [...pids];
+  });
+}
+
+function run(file: string, args: string[], timeout: number): Promise<{ ok: boolean; stdout: string }> {
   return new Promise((resolve) => {
-    execFile(
-      "ss",
-      ["-H", "-ltnp", `sport = :${port}`],
-      { encoding: "utf8", timeout: 5_000 },
-      (error, stdout) => {
-        if (error || typeof stdout !== "string") {
-          resolve([]);
-          return;
-        }
-        const pids = new Set<number>();
-        for (const match of stdout.matchAll(/pid=(\d+)/g)) {
-          const pid = Number(match[1]);
-          if (pid > 0) pids.add(pid);
-        }
-        resolve([...pids]);
-      },
+    execFile(file, args, { windowsHide: true, encoding: "utf8", timeout }, (error, stdout) =>
+      resolve({ ok: !error, stdout: typeof stdout === "string" ? stdout : "" }),
     );
   });
 }

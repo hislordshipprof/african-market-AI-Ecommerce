@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { testPrismaClient } from "@/lib/test-prisma";
 import { resolveDirectUrl } from "./env";
 
 const hasDb = !!process.env.DATABASE_URL;
@@ -41,7 +41,7 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
 
   it("full seed refuses before any mutation in every forbidden context", async () => {
     const { runSeed } = await import("../../prisma/seed");
-    const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    const prisma = testPrismaClient(resolveDirectUrl());
     const before = await prisma.$queryRaw<Array<{ updated_at: Date }>>`
       SELECT updated_at FROM stores WHERE slug = 'mama-ngozi'
     `;
@@ -144,7 +144,7 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
 
   it("off-mode hosted CI and preview keep their supported seed behaviour", async () => {
     const { runSeed } = await import("../../prisma/seed");
-    const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    const prisma = testPrismaClient(resolveDirectUrl());
     const previewId = `t225-preview-${Date.now().toString(36)}`;
     const productionId = `t225-prod-${Date.now().toString(36)}`;
     const savedAdmin = {
@@ -215,7 +215,7 @@ describe.skipIf(!hasDb)("catalog prune CLI", () => {
   it("pre-seed references survive demo reseeding with prune requested", async () => {
     const { runSeed } = await import("../../prisma/seed");
     const { createFakeR2 } = await import("./catalog-prune-fake-r2");
-    const prisma = new PrismaClient({ adapter: new PrismaPg(resolveDirectUrl()) });
+    const prisma = testPrismaClient(resolveDirectUrl());
     const prior = await prisma.store.findUnique({
       where: { slug: "mama-ngozi" },
       select: { ownerPhotoUrl: true },

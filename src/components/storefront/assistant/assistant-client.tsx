@@ -9,6 +9,7 @@ const AssistantLauncher = dynamic(
 
 export function AssistantClient(props: {
   storeId: string;
+  storeName: string;
   storeStatus: string;
   accountId: string | null;
 }) {
