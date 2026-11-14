@@ -1,6 +1,7 @@
 import Image from "next/image";
 import type { DirectoryStore } from "@/lib/directory/stores";
 import { storeInitials } from "@/lib/store-initials";
+import { cuisineLabels } from "@/lib/directory/listing-fields";
 import styles from "./directory.module.css";
 
 export function DirectoryHome({ stores }: { stores: (DirectoryStore & { href: string })[] }) {
@@ -39,6 +40,9 @@ export function DirectoryHome({ stores }: { stores: (DirectoryStore & { href: st
                       </span>
                     </span>
                     {store.listingBlurb ? <span className={styles.blurb}>{store.listingBlurb}</span> : null}
+                    {store.cuisineTags.length > 0 ? (
+                      <span className={styles.cuisines}>{cuisineLabels(store.cuisineTags).join(" · ")}</span>
+                    ) : null}
                     {store.ownerName ? <span className={styles.owner}>Run by {store.ownerName}</span> : null}
                     <span className={styles.foot}>
                       <span className={styles.flags}>
