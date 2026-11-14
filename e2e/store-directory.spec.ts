@@ -73,13 +73,16 @@ test("the root domain serves the Store directory and store hosts still serve the
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Store not found")).toHaveCount(0);
     const card = page.getByRole("link", { name: /Mama Ngozi African Market/ });
-    await expect(card).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/`);
+    await expect(card).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/?ref=directory`);
     await expect(page.getByText("Tante Marie Caribbean Grocer")).toHaveCount(0);
     await expect(page).toHaveTitle(/Store directory/);
 
     await card.click();
-    await expect(page).toHaveURL(`http://mama-ngozi.localhost:${port}/`);
+    await expect(page).toHaveURL(`http://mama-ngozi.localhost:${port}/?ref=directory`);
     await expect(page).toHaveTitle("Mama Ngozi African Market");
+    // #454: the store's own host keeps a first-party cookie that says only "directory".
+    const storeCookies = await page.context().cookies(`http://mama-ngozi.localhost:${port}`);
+    expect(storeCookies.filter((cookie) => cookie.name === "came_from").map((cookie) => cookie.value)).toEqual(["directory"]);
   } finally {
     await running.stop();
   }
@@ -119,6 +122,9 @@ test("the owner lists the store, writes the blurb and picks cuisines; the direct
 
     await storeOwnerSignIn(page, store);
     await page.goto(`${store}/store-admin?store=mama-ngozi`);
+    // #454: the dashboard counts the orders the directory sent.
+    await expect(page.getByRole("link", { name: /Directory listing/ })).toContainText(/\d+ orders? from the directory/);
+    await shoot(page, "454-dashboard", "Dashboard");
     await page.getByRole("link", { name: /Directory listing/ }).click();
     await expect(page).toHaveURL(/\/store-admin\/directory/);
     await expect(page.getByRole("heading", { name: "Directory listing" })).toBeVisible();
@@ -225,7 +231,7 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await expect(page.getByRole("heading", { name: "Stores near 77002" })).toBeVisible();
     const card = page.getByRole("link", { name: /Mama Ngozi African Market/ });
     await expect(card).toContainText(/\d\.\d mi/);
-    await expect(card).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/`);
+    await expect(card).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/?ref=directory`);
     await shoot(page, "452-near-zip", "Stores near 77002");
 
     await page.getByLabel("ZIP code or city").fill("New York, NY");
@@ -255,7 +261,7 @@ test("near me: location only on a tap, a denied location focuses the ZIP field, 
     await away.getByRole("button", { name: "Use my location" }).click();
     await expect(away.getByText("You look to be outside the US.")).toBeVisible();
     await expect(away.getByRole("heading", { name: "Browse by state" })).toBeVisible();
-    await expect(away.getByRole("link", { name: "Mama Ngozi African Market" })).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/`);
+    await expect(away.getByRole("link", { name: "Mama Ngozi African Market" })).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/?ref=directory`);
     await shoot(away, "452-near-outside", "Browse by state");
     await abroad.close();
 
@@ -304,7 +310,7 @@ test("state and city pages: cached, GroceryStore JSON-LD, sitemap and robots, 40
     await page.goto(`${root}/stores/texas`);
     await expect(page.getByRole("heading", { level: 1, name: "African grocery stores in Texas" })).toBeVisible();
     await expect(page).toHaveTitle("African grocery stores in Texas · African Markets");
-    await expect(page.getByRole("link", { name: /Mama Ngozi African Market/ })).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/`);
+    await expect(page.getByRole("link", { name: /Mama Ngozi African Market/ })).toHaveAttribute("href", `http://mama-ngozi.localhost:${port}/?ref=directory`);
     await page.getByRole("link", { name: /^Houston/ }).click();
     await expect(page).toHaveURL(`${root}/stores/texas/houston`);
     await expect(page.getByRole("heading", { level: 1, name: "African grocery stores in Houston, TX" })).toBeVisible();
