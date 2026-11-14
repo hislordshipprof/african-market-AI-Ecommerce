@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { lockPlatformSettingsRow, platformAdminTransaction } from "../db";
+import { platformAdminTransaction } from "../db";
 import {
   ASSIGNMENT_TIMEOUT_SECONDS,
   COURIER_SELECTION_MODES,
   COURIER_WEIGHT_LIMIT_LB,
-  readCourierSettings,
+  saveCourierSettings,
   type CourierSettings,
 } from "../delivery/courier-settings";
 import { parseInput, readFormFields } from "../security/parse-input";
@@ -42,7 +42,7 @@ const SCHEMAS = {
 
 /**
  * Platform admin saves the courier settings (#535). Every field is checked before anything is written; a value out
- * of range is refused, never clamped. A change writes one audit row with the settings before and after.
+ * of range is refused, never clamped. saveCourierSettings writes the audit row.
  */
 export async function saveCourierSettingsAction(_prev: CourierSettingsFormState, formData: FormData): Promise<CourierSettingsFormState> {
   const session = await requirePlatformAdmin();
@@ -63,36 +63,8 @@ export async function saveCourierSettingsAction(_prev: CourierSettingsFormState,
     weightLimitLb: read("weightLimitLb", SCHEMAS.weightLimitLb),
   };
   if (Object.keys(fieldErrors).length > 0) return { fieldErrors, submitted };
-  const next = after as CourierSettings;
 
-  await platformAdminTransaction(async (tx) => {
-    // A concurrent save waits, so each audit row's "before" is what that save replaced.
-    await lockPlatformSettingsRow(tx);
-    const before = await readCourierSettings(tx);
-    if ((Object.keys(next) as Array<keyof CourierSettings>).every((key) => before[key] === next[key])) return;
-    await tx.platformSettings.update({
-      where: { id: "platform" },
-      data: {
-        courierSelectionMode: next.selectionMode,
-        courierAssignmentTimeoutS: next.assignmentTimeoutSeconds,
-        doordashEnabled: next.doordashEnabled,
-        uberEnabled: next.uberEnabled,
-        courierWeightLimitLb: next.weightLimitLb,
-      },
-    });
-    await tx.auditLog.create({
-      data: {
-        storeId: null,
-        actorId: session.user.id,
-        actorEmail: session.user.email,
-        action: "platform.courier_settings_update",
-        entityType: "platform_settings",
-        entityId: "platform",
-        before: { ...before },
-        after: { ...next },
-      },
-    });
-  });
+  await platformAdminTransaction((tx) => saveCourierSettings(tx, { id: session.user.id, email: session.user.email }, after as CourierSettings));
   revalidatePath("/admin/settings/couriers");
   return { saved: true };
 }

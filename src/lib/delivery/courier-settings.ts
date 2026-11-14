@@ -1,4 +1,5 @@
-import { platform } from "../db";
+import type { Prisma } from "@prisma/client";
+import { lockPlatformSettingsRow, platform } from "../db";
 import type { DeliveryProvider, DeliveryProviderName } from "./provider";
 
 /** How dispatch picks among live quotes (#535): the cheapest, or one provider first while it can quote. */
@@ -64,4 +65,43 @@ export function preferredProvider(mode: CourierSelectionMode): DeliveryProviderN
   if (mode === "doordash_first") return "doordash";
   if (mode === "uber_first") return "uber";
   return null;
+}
+
+type SettingsWriter = SettingsReader & {
+  platformSettings: { update(args: { where: { id: string }; data: Prisma.PlatformSettingsUpdateInput }): Promise<unknown> };
+  auditLog: { create(args: { data: Prisma.AuditLogUncheckedCreateInput }): Promise<unknown> };
+  $queryRaw: Prisma.TransactionClient["$queryRaw"];
+};
+
+/**
+ * Writes validated settings in the caller's platform-admin transaction. The row is locked first, so a concurrent save
+ * waits and each audit row's "before" is what that save replaced. Returns false, writing nothing, when nothing changed.
+ */
+export async function saveCourierSettings(tx: SettingsWriter, actor: { id: string; email: string }, next: CourierSettings): Promise<boolean> {
+  await lockPlatformSettingsRow(tx);
+  const before = await readCourierSettings(tx);
+  if ((Object.keys(next) as Array<keyof CourierSettings>).every((key) => before[key] === next[key])) return false;
+  await tx.platformSettings.update({
+    where: { id: "platform" },
+    data: {
+      courierSelectionMode: next.selectionMode,
+      courierAssignmentTimeoutS: next.assignmentTimeoutSeconds,
+      doordashEnabled: next.doordashEnabled,
+      uberEnabled: next.uberEnabled,
+      courierWeightLimitLb: next.weightLimitLb,
+    },
+  });
+  await tx.auditLog.create({
+    data: {
+      storeId: null,
+      actorId: actor.id,
+      actorEmail: actor.email,
+      action: "platform.courier_settings_update",
+      entityType: "platform_settings",
+      entityId: "platform",
+      before: { ...before },
+      after: { ...next },
+    },
+  });
+  return true;
 }
