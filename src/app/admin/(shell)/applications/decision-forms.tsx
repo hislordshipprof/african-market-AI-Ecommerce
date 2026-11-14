@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useActionState } from "react";
 import {
   approveApplicationAction,
@@ -15,20 +14,8 @@ const input =
   "w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 function Outcome({ state, id }: { state: DecisionState; id: string }) {
-  if (state.status === "idle") return null;
-  if (state.status === "error") {
-    return <p id={id} role="alert" className="text-sm text-destructive">{state.message}</p>;
-  }
-  return (
-    <p id={id} role="status" className="text-sm text-foreground">
-      {state.message}{" "}
-      {state.storeId && (
-        <Link href={`/admin/stores/${state.storeId}`} className="font-medium text-primary underline">
-          Open the store
-        </Link>
-      )}
-    </p>
-  );
+  if (state.status !== "error") return null;
+  return <p id={id} role="alert" className="text-sm text-destructive">{state.message}</p>;
 }
 
 export function ApproveForm({ applicationId, suggestedSlug, domainSuffix }: { applicationId: string; suggestedSlug: string; domainSuffix: string | null }) {
@@ -57,7 +44,7 @@ export function ApproveForm({ applicationId, suggestedSlug, domainSuffix }: { ap
         </div>
         <button
           type="submit"
-          disabled={pending || state.status === "done"}
+          disabled={pending}
           className="min-h-10 rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {pending ? "Approving…" : "Approve"}
@@ -90,7 +77,7 @@ export function RejectForm({ applicationId }: { applicationId: string }) {
         />
         <button
           type="submit"
-          disabled={pending || state.status === "done"}
+          disabled={pending}
           className="min-h-10 w-fit rounded-full border border-destructive/40 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
         >
           {pending ? "Rejecting…" : "Reject and email the applicant"}
@@ -110,7 +97,7 @@ export function ResendRejectionForm({ applicationId }: { applicationId: string }
       <input type="hidden" name="reason" value="" />
       <button
         type="submit"
-        disabled={pending || state.status === "done"}
+        disabled={pending}
         className="text-sm font-medium text-primary underline disabled:opacity-50"
       >
         {pending ? "Sending…" : "Send email again"}

@@ -16,10 +16,15 @@ function offers(pickup: boolean, delivery: boolean): string {
   return "Neither yet";
 }
 
-export default async function ApplicationsPage() {
+type Search = { decided?: string | string[]; email?: string | string[] };
+
+export default async function ApplicationsPage({ searchParams }: { searchParams: Promise<Search> }) {
   await requirePlatformAdmin();
-  const { pending, decided } = await listStoreApplications();
+  const [{ pending, decided }, search] = await Promise.all([listStoreApplications(), searchParams]);
   const domainSuffix = process.env.PLATFORM_ROOT_DOMAIN || null;
+  // Set by the approve and reject actions; only an id from the decided list is shown.
+  const just = decided.find((application) => application.id === search.decided);
+  const emailFailed = search.email === "failed";
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-12">
@@ -30,6 +35,32 @@ export default async function ApplicationsPage() {
           : `${pending.length} ${pending.length === 1 ? "application is" : "applications are"} waiting, oldest first.`}{" "}
         Stores apply on the public /sell page.
       </p>
+
+      {just && (
+        <div
+          role="status"
+          className={`mt-6 rounded-xl border p-4 text-sm ${emailFailed ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border bg-card text-foreground"}`}
+        >
+          {just.status === "approved" ? (
+            <>
+              <span className="font-medium">{just.businessName} approved.</span> The store is in setup.{" "}
+              {emailFailed ? "The owner invite email did not send; send it again from the store page." : "The owner invite is on its way."}{" "}
+              {just.store && (
+                <Link href={`/admin/stores/${just.store.id}`} className="font-medium underline">
+                  Open the store
+                </Link>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="font-medium">{just.businessName} rejected.</span>{" "}
+              {emailFailed
+                ? "The email to the applicant did not send; use Send email again below."
+                : "The applicant got a plain email without your reason."}
+            </>
+          )}
+        </div>
+      )}
 
       {pending.length > 0 && (
         <ul className="mt-8 flex flex-col gap-4" aria-label="Waiting applications">
