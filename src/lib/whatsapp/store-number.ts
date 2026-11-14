@@ -9,7 +9,7 @@ import {
 } from "../db";
 import { readWhatsAppConfig } from "./config";
 import { WhatsAppNotConfiguredError, whatsappErrorCode } from "./errors";
-import { getWhatsAppProvider } from "./index";
+import { getWhatsAppProvider, whatsappProviderKind } from "./index";
 import { normalizeOwnerPhone, PHONE_FORMAT_ERROR } from "./phone";
 import { hasTokenKey, sealBusinessToken } from "./token-box";
 
@@ -97,6 +97,19 @@ export async function linkStoreNumber(
   });
   logLink("whatsapp_number_linked", actor.storeId);
   return { ok: true };
+}
+
+/**
+ * How a number can be linked here: "form" with the fake (ids typed in),
+ * "meta" with real keys (Embedded Signup popup, not built yet: #558 builds
+ * against the fake), "unavailable" with no keys.
+ */
+export type StoreNumberLinkMode = "form" | "meta" | "unavailable";
+
+export function storeNumberLinkMode(): StoreNumberLinkMode {
+  const kind = whatsappProviderKind();
+  if (kind === "fake") return "form";
+  return kind === "real" ? "meta" : "unavailable";
 }
 
 export function getStoreNumber(storeId: string): Promise<StoreNumberView | null> {
