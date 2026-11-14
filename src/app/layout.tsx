@@ -1,8 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Figtree, Geist } from "next/font/google";
 import { headers } from "next/headers";
 import { findStoreForHeaders } from "@/lib/get-store";
 import { resolveStoreTheme, type ResolvedTheme } from "@/lib/theme";
+import { pwaMetadata, themeColor } from "@/lib/pwa/manifest";
+import { ServiceWorker } from "@/components/pwa/service-worker";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 import { cn } from "@/lib/utils";
@@ -23,7 +25,13 @@ const figtree = Figtree({
 
 export async function generateMetadata(): Promise<Metadata> {
   const store = await findStoreForHeaders(await headers());
-  return { title: store?.name ?? "Store not found" };
+  if (!store) return { title: "Store not found" };
+  return { title: store.name, ...pwaMetadata(store, "storefront") };
+}
+
+export async function generateViewport(): Promise<Viewport> {
+  const store = await findStoreForHeaders(await headers());
+  return store ? { themeColor: themeColor(store) } : {};
 }
 
 function themeToCss(vars: Record<string, string>): string {
@@ -66,6 +74,7 @@ export default async function RootLayout({
       <body>
         {children}
         <Toaster />
+        {store ? <ServiceWorker /> : null}
       </body>
     </html>
   );

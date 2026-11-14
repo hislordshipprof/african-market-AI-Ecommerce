@@ -2,7 +2,9 @@ import { sendEmail } from "../email/send";
 import { productionRuntime } from "../inngest/event-key";
 import { ProviderSendError } from "./provider-error";
 import { normalizeUsPhone } from "./phone";
-import { renderEmail, renderSms, type NotifyOrder, type RenderedMessage } from "./messages";
+import { pushSender } from "../push/sender";
+import { pushToOrder } from "../push/order-subscriptions";
+import { renderEmail, renderPush, renderSms, type NotifyOrder, type RenderedMessage } from "./messages";
 import { smsSender, type SmsSender } from "./sms";
 import type { NotificationChannelKind } from "./channel-kinds";
 import type { OrderNotifyEvent } from "./record";
@@ -180,4 +182,21 @@ export const smsChannel: NotificationChannel = {
   },
 };
 
-export const notificationChannels: NotificationChannel[] = [emailChannel, smsChannel];
+/** Web push to the devices that opted in on the tracking page (#563). */
+export const pushChannel: NotificationChannel = {
+  kind: "push",
+  prepare(order, event, url, env) {
+    if (!pushSender(env)) return { outcome: "skipped", reason: "push_not_configured" };
+    return { outcome: "ready", message: renderPush(order, event, url) };
+  },
+  async send(message) {
+    if (!message.push) return { outcome: "skipped", reason: "no_subscription" };
+    const { storeId, orderId, message: payload } = message.push;
+    const result = await pushToOrder(storeId, orderId, payload);
+    if (result.sent > 0) return { outcome: "sent", providerMessageId: `push:${result.sent}` };
+    if (result.failed > 0) return settle({ outcome: "failed", reason: "push_failed", retryable: result.retryable });
+    return { outcome: "skipped", reason: "no_subscription" };
+  },
+};
+
+export const notificationChannels: NotificationChannel[] = [emailChannel, smsChannel, pushChannel];

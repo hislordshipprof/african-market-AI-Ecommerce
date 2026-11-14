@@ -7,6 +7,7 @@ import { StorefrontHeader } from "./storefront-header";
 import { StorefrontFooter } from "./storefront-footer";
 import { StorefrontMotion } from "./motion-provider";
 import { QuickViewProvider } from "./quick-view-provider";
+import { InstallPrompt } from "../pwa/install-prompt";
 
 export function StorefrontShell({
   store,
@@ -30,6 +31,7 @@ export function StorefrontShell({
         <main id="main-content">{children}</main>
         <StorefrontFooter store={store} />
         <MobileNav />
+        <InstallPrompt storeName={store.name} />
         <Suspense fallback={null}>
           <AssistantHost store={store} />
         </Suspense>

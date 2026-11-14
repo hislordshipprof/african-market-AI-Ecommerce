@@ -1919,3 +1919,133 @@
     font-size: 13px;
   }
 }
+
+/* Install sheet and order updates (#563). Neutral grounds; colour only on the action. */
+.sf-install-sheet {
+  position: fixed;
+  inset-inline: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 60;
+  max-width: 440px;
+  margin-inline: auto;
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+  box-shadow: 0 12px 40px rgb(var(--sf-scrim) / 0.18);
+  animation: sf-sheet-in 300ms var(--ease-out, cubic-bezier(0, 0, 0, 1)) both;
+}
+@keyframes sf-sheet-in {
+  from { transform: translateY(24px); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sf-install-sheet { animation: none; }
+}
+.sf-install-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  color: var(--color-muted);
+}
+.sf-install-close:hover { background: var(--color-raised); }
+.sf-install-head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding-right: 32px;
+}
+.sf-install-head img {
+  flex: none;
+  border-radius: 12px;
+  border: 1px solid var(--color-line);
+}
+.sf-install-head h2,
+.sf-order-updates h2 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.sf-install-head p,
+.sf-order-updates p {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-muted);
+}
+.sf-install-steps {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+  font-size: 15px;
+}
+.sf-install-steps li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.sf-install-step-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--color-raised);
+}
+.sf-install-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.sf-install-actions .sf-button { flex: 1; }
+.sf-install-later {
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-weight: 650;
+  font-size: 15px;
+  color: var(--color-ink);
+  border: 1px solid var(--color-line-strong, var(--color-line));
+  background: transparent;
+}
+.sf-install-later:hover { background: var(--color-raised); }
+.sf-order-updates {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px 14px;
+  align-items: start;
+  margin-block: 16px;
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+}
+.sf-order-updates-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--color-raised);
+}
+.sf-order-updates > button { grid-column: 1 / -1; justify-self: start; }
+@media (min-width: 640px) {
+  .sf-order-updates { grid-template-columns: auto 1fr auto; align-items: center; }
+  .sf-order-updates > button { grid-column: auto; }
+}
+.sf-order-updates-error {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--color-deal) !important;
+}

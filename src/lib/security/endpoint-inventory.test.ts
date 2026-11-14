@@ -10,6 +10,7 @@ const PUBLIC_ACTIONS = new Set([
   "src/lib/support/customer-actions.ts",
   "src/lib/order/issue-actions.ts",
   "src/lib/order/substitution-actions.ts",
+  "src/lib/push/order-actions.ts",
 ]);
 const GUARDS = ["requireStoreOwner", "requireStoreMember", "requireStoreWriter", "requirePlatformAdmin", "requireUserId"];
 const HTTP = ["GET", "POST", "PUT", "PATCH", "DELETE"];

@@ -6,6 +6,7 @@ const URL = "https://adas.markets.example/order/tok_abc";
 function order(status: string, capturedAmountCents: number | null = 2500): NotifyOrder {
   return {
     id: "order1",
+    storeId: "store1",
     number: 1042,
     status,
     fulfillment: "store-delivery",

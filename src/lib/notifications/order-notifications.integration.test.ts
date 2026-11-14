@@ -322,7 +322,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
     expect(smsKeys).toEqual([smsKeys[0], smsKeys[0]]);
     expect(emailKeys[0]).toMatch(/^notif_[A-Za-z0-9_-]+$/);
     const rows = await storeScoped(storeId).notificationLog.findMany({ where: { orderId: again, event: "placed" } });
-    expect(rows.map((row) => row.status).sort()).toEqual(["sent", "sent"]);
+    expect(rows.map((row) => row.status).sort()).toEqual(["sent", "sent", "skipped"]);
     expect(getTestSentEmails()).toHaveLength(1);
     expect(getTestSentSms()).toHaveLength(1);
   });
@@ -340,7 +340,7 @@ describe.skipIf(!hasDb)("customer notifications", () => {
         const rows = await storeScoped(storeId).notificationLog.findMany({
           where: { orderId: event.data?.orderId, event: event.data?.event as NotifyEvent },
         });
-        expect(rows).toHaveLength(2);
+        expect(rows).toHaveLength(NOTIFICATION_CHANNEL_KINDS.length);
         expect(rows.every((row) => row.status === "pending")).toBe(true);
         expect(event.id).toBe(`order-notify-${event.data?.event}-${event.data?.orderId}`);
         seen.push(event.data?.event ?? "");
