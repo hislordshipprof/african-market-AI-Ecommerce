@@ -90,7 +90,7 @@ function EditModal({
     saveStarted.current = true;
     startTransition(async () => {
       try {
-        const result = await updateReviewProduct(product.id, {
+        const result = await updateReviewProduct(product.id, product.status, {
           name: name.trim(),
           description: description.trim(),
           unit: unit.trim(),
@@ -228,10 +228,10 @@ export function ReviewTable({
 
   const totalPages = Math.ceil(total / pageSize);
 
-  function handleApprove(productId: string) {
+  function handleApprove(product: ReviewProduct) {
     setActionError(null);
     startTransition(async () => {
-      const result = await approveProduct(productId);
+      const result = await approveProduct(product.id, product.status);
       if (result.error) {
         setActionError(result.error);
       } else {
@@ -240,10 +240,10 @@ export function ReviewTable({
     });
   }
 
-  function handleReject(productId: string) {
+  function handleReject(product: ReviewProduct) {
     setActionError(null);
     startTransition(async () => {
-      const result = await rejectProduct(productId);
+      const result = await rejectProduct(product.id, product.status);
       if (result.error) {
         setActionError(result.error);
       } else {
@@ -348,7 +348,7 @@ export function ReviewTable({
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => handleApprove(p.id)}
+                onClick={() => handleApprove(p)}
                 disabled={isPending}
                 className="flex-1 rounded-full bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
@@ -364,7 +364,7 @@ export function ReviewTable({
               </button>
               <button
                 type="button"
-                onClick={() => handleReject(p.id)}
+                onClick={() => handleReject(p)}
                 disabled={isPending}
                 className="rounded-full border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10"
               >
@@ -424,7 +424,7 @@ export function ReviewTable({
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => handleApprove(p.id)}
+                      onClick={() => handleApprove(p)}
                       disabled={isPending}
                       className="rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                     >
@@ -440,7 +440,7 @@ export function ReviewTable({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleReject(p.id)}
+                      onClick={() => handleReject(p)}
                       disabled={isPending}
                       className="rounded-full border border-destructive/30 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
                     >
