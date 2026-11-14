@@ -49,11 +49,17 @@ import type { CartLineView } from "@/lib/cart/service";
 import { QuickAddStepper } from "./quick-add-stepper";
 import { Sheet } from "./sheet";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
-import { toast } from "sonner";
 import { money } from "@/lib/format";
 import { bindCartRefresh } from "@/lib/assistant/ui/cart-bridge";
 import { AssistantSlot } from "./assistant/assistant-slot";
 import styles from "./cart.module.css";
+
+type Sonner = typeof import("sonner");
+// Sonner loads on the first toast, not on the path to the first paint (#563).
+const toast = Object.assign(
+  (...args: Parameters<Sonner["toast"]>) => void import("sonner").then((mod) => mod.toast(...args)),
+  { error: (...args: Parameters<Sonner["toast"]["error"]>) => void import("sonner").then((mod) => mod.toast.error(...args)) },
+);
 
 /** Wall clock for the Undo window; only read from event handlers and timers. */
 const undoClock = () => Date.now();

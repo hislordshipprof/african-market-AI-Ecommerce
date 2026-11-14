@@ -1,7 +1,9 @@
 "use client";
 
-import { LazyMotion, domAnimation, MotionConfig } from "motion/react";
+import { LazyMotion, MotionConfig } from "motion/react";
 import { useEffect, type ReactNode } from "react";
+
+const loadAnimation = () => import("./motion-animation-features").then(module => module.default);
 
 export function StorefrontMotion({ children }: { children: ReactNode }) {
   useEffect(() => {
@@ -43,5 +45,5 @@ export function StorefrontMotion({ children }: { children: ReactNode }) {
     preference.addEventListener("change", start);
     return () => { stop(); preference.removeEventListener("change", start); };
   }, []);
-  return <LazyMotion features={domAnimation}><MotionConfig reducedMotion="user">{children}</MotionConfig></LazyMotion>;
+  return <LazyMotion features={loadAnimation}><MotionConfig reducedMotion="user">{children}</MotionConfig></LazyMotion>;
 }

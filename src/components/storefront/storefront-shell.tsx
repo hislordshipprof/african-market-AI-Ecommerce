@@ -7,7 +7,7 @@ import { StorefrontHeader } from "./storefront-header";
 import { StorefrontFooter } from "./storefront-footer";
 import { StorefrontMotion } from "./motion-provider";
 import { QuickViewProvider } from "./quick-view-provider";
-import { InstallPrompt } from "../pwa/install-prompt";
+import { InstallPrompt } from "../pwa/install-prompt-lazy";
 
 export function StorefrontShell({
   store,
