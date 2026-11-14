@@ -3,6 +3,7 @@
 import { revalidateStore } from "../get-store";
 import { platformAdmin, platformAdminTransaction, lockStoreAddress } from "../db";
 import { requirePlatformAdmin } from "./session";
+import { insertStore } from "./store-create";
 import { nudgeForContrast, getThemeTokens, VALID_PRESETS } from "../theme";
 import { isSlugRoutable } from "../slug";
 import type { ThemePreset } from "../theme";
@@ -426,67 +427,9 @@ export async function createStore(
     }
   }
 
-  const store = await platformAdminTransaction(async (tx) => {
-    const s = await tx.store.create({
-      data: {
-        slug: values.slug,
-        name: values.name,
-        logoUrl: values.logoUrl,
-        brandColor: finalBrandColor,
-        themePreset: values.themePreset,
-        status: values.status,
-        hours: values.hours !== null ? values.hours : Prisma.JsonNull,
-        prepTimeMinutes: values.prepTimeMinutes,
-        deliveryRadiusMi: values.deliveryRadiusMi,
-        minimumOrderCents: values.minimumOrderCents,
-        pickupEnabled: values.pickupEnabled,
-        autoRefundLimitCents: values.autoRefundLimitCents,
-        supportSlaMinutes: values.supportSlaMinutes,
-        timezone: values.timezone,
-        addressLine1: values.addressLine1,
-        addressLine2: values.addressLine2,
-        city: values.city,
-        state: values.state,
-        zip: values.zip,
-        lat: coords.lat,
-        lng: coords.lng,
-        storeDeliveryEnabled: values.storeDeliveryEnabled,
-        storeDeliveryFeeCents: values.storeDeliveryFeeCents,
-        pickupSlotSettings: values.pickupSlotSettings ?? Prisma.JsonNull,
-        storeDeliverySlotSettings: values.storeDeliverySlotSettings ?? Prisma.JsonNull,
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        storeId: s.id,
-        actorId: session.user.id,
-        actorEmail: session.user.email,
-        action: "store.create",
-        entityType: "store",
-        entityId: s.id,
-        after: {
-          slug: s.slug,
-          name: s.name,
-          logoUrl: s.logoUrl,
-          brandColor: s.brandColor,
-          themePreset: s.themePreset,
-          status: s.status,
-          hours: s.hours,
-          prepTimeMinutes: s.prepTimeMinutes,
-          deliveryRadiusMi: Number(s.deliveryRadiusMi),
-          minimumOrderCents: s.minimumOrderCents,
-          pickupEnabled: s.pickupEnabled,
-          autoRefundLimitCents: s.autoRefundLimitCents,
-          supportSlaMinutes: s.supportSlaMinutes,
-          timezone: s.timezone,
-          ...deliveryAudit(s),
-        },
-      },
-    });
-
-    return s;
-  });
+  const store = await platformAdminTransaction((tx) =>
+    insertStore(tx, { ...values, brandColor: finalBrandColor, lat: coords.lat, lng: coords.lng }, session.user),
+  );
 
   revalidateStore(store);
   await queueCourierRegistration(store);

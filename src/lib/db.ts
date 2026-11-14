@@ -276,6 +276,7 @@ export const platformAdmin = {
   attributeProposal: wrapPlatformAdminDelegate(prisma.attributeProposal),
   ingredient: wrapPlatformAdminDelegate(prisma.ingredient),
   storeSubscription: wrapPlatformAdminDelegate(prisma.storeSubscription),
+  storeApplication: wrapPlatformAdminDelegate(prisma.storeApplication),
 };
 
 /** A transaction as app_user, with the test session time zone applied when one is set. */
@@ -293,7 +294,7 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "storeApplication" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -322,6 +323,7 @@ export async function platformAdminTransaction<T>(
       supportThread: tx.supportThread,
       supportMessage: tx.supportMessage,
       storeSubscription: tx.storeSubscription,
+      storeApplication: tx.storeApplication,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
