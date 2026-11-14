@@ -51,7 +51,7 @@ export async function nearestStores(point: Point): Promise<{ nearby: boolean; st
     where: { slug: { in: picked.map((r) => r.slug) } },
     select: DIRECTORY_STORE_FIELDS,
   });
-  const bySlug = new Map(rows.map((row) => [row.slug, row as DirectoryStore]));
+  const bySlug = new Map(rows.map((row) => [row.slug, row]));
   const stores = picked.flatMap((r) => {
     const store = bySlug.get(r.slug);
     return store ? [{ ...store, distanceMi: r.distance }] : [];

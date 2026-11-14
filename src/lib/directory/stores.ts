@@ -3,7 +3,8 @@ import { unstable_cache } from "next/cache";
 import { platform } from "@/lib/db";
 
 // The only Store columns the public directory may read. `stores_read` is open to every
-// role, so whole rows would leak Stripe, fee, limit and address columns (#449).
+// role, so whole rows would leak Stripe, fee, limit and address columns (#449). No lat/lng:
+// they are the geocoded street address (#452).
 export const DIRECTORY_STORE_FIELDS = {
   name: true,
   slug: true,
@@ -11,8 +12,6 @@ export const DIRECTORY_STORE_FIELDS = {
   brandColor: true,
   city: true,
   state: true,
-  lat: true,
-  lng: true,
   hours: true,
   timezone: true,
   pickupEnabled: true,
@@ -24,10 +23,7 @@ export const DIRECTORY_STORE_FIELDS = {
   ownerPhotoUrl: true,
 } satisfies Prisma.StoreSelect;
 
-export type DirectoryStore = Prisma.StoreGetPayload<{ select: typeof DIRECTORY_STORE_FIELDS }> & {
-  lat: number;
-  lng: number;
-};
+export type DirectoryStore = Prisma.StoreGetPayload<{ select: typeof DIRECTORY_STORE_FIELDS }>;
 
 /** Cleared by every store save (revalidateStore), so a listing change shows at once (#450). */
 export const DIRECTORY_CACHE_TAG = "store-directory";
@@ -41,7 +37,7 @@ export function listDirectoryStores(): Promise<DirectoryStore[]> {
         select: DIRECTORY_STORE_FIELDS,
         orderBy: [{ state: "asc" }, { city: "asc" }, { name: "asc" }],
       });
-      return stores as DirectoryStore[];
+      return stores;
     },
     ["store-directory"],
     { revalidate: 300, tags: [DIRECTORY_CACHE_TAG] },

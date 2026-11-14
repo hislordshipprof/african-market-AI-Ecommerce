@@ -14,8 +14,6 @@ const PUBLIC_FIELDS = [
   "brandColor",
   "city",
   "state",
-  "lat",
-  "lng",
   "hours",
   "timezone",
   "pickupEnabled",
@@ -65,7 +63,7 @@ describe.skipIf(!hasDb)("listDirectoryStores", () => {
   it("returns a listed, active store with a point", async () => {
     const mine = (await listDirectoryStores()).filter((s) => s.slug.endsWith(stamp));
     expect(mine.map((s) => s.slug)).toEqual([slug("listed")]);
-    expect(mine[0]).toMatchObject({ name: "Listed Market", city: "Houston", state: "TX", lat: 29.76, lng: -95.37, listingBlurb: "Fresh yam every Friday.", ownerName: "Ada" });
+    expect(mine[0]).toMatchObject({ name: "Listed Market", city: "Houston", state: "TX", listingBlurb: "Fresh yam every Friday.", ownerName: "Ada" });
   });
 
   it("never returns unlisted, suspended or unlocated stores", async () => {
@@ -79,7 +77,7 @@ describe.skipIf(!hasDb)("listDirectoryStores", () => {
     const [store] = (await listDirectoryStores()).filter((s) => s.slug === slug("listed"));
     expect(Object.keys(store).sort()).toEqual(PUBLIC_FIELDS);
     const leaked = JSON.stringify(store);
-    for (const secret of [`acct_t449_${stamp}`, "complete", "12 Hidden St", "77002"]) {
+    for (const secret of [`acct_t449_${stamp}`, "complete", "12 Hidden St", "77002", "29.76"]) {
       expect(leaked).not.toContain(secret);
     }
   });

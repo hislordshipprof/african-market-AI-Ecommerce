@@ -44,6 +44,14 @@ describe.skipIf(!hasDb)("GET /api/directory/near", () => {
     expect(mine.distanceMi).toBeCloseTo(2, 0);
   });
 
+  it("never sends a store's own coordinates, which locate its street address", async () => {
+    const body = await (await call("?q=77002")).json();
+    const mine = body.stores.find((s: { slug: string }) => s.slug === slug);
+    expect(mine).not.toHaveProperty("lat");
+    expect(mine).not.toHaveProperty("lng");
+    expect(JSON.stringify(body)).not.toContain("29.7858");
+  });
+
   it("answers a point outside the US with the state list", async () => {
     const res = await call("?lat=51.5&lng=-0.12");
     expect(await res.json()).toEqual({ kind: "outside" });
