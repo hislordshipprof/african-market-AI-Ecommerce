@@ -61,6 +61,8 @@ interface StripeConfig {
   harness?: boolean;
   signedIn?: boolean;
   prefill?: CheckoutPrefill | null;
+  /** Pickup times drawn with the page, so they show before the first quote (#565). */
+  pickupSlots?: SlotOptions;
 }
 
 export interface CheckoutPageProps extends ShoppingFlowProps {
@@ -315,7 +317,7 @@ function RealCheckoutForm({
   const [slot, setSlot] = useState("asap");
   const [quote, setQuote] = useState<CheckoutQuote | null>(null);
   // Server-computed times for the chosen fulfillment, in store time (#565).
-  const [slotOptions, setSlotOptions] = useState<SlotOptions | null>(null);
+  const [slotOptions, setSlotOptions] = useState<SlotOptions | null>(stripeConfig.pickupSlots ?? null);
   const [quoteKey, setQuoteKey] = useState("");
   const [error, setError] = useState("");
   const [errorHref, setErrorHref] = useState<string | null>(null);

@@ -84,7 +84,9 @@ test("a heavy cart books a scheduled store delivery slot, and a slot that fills 
     await page.getByLabel("Phone number (required)").fill("2025550100");
     await page.getByLabel("Email (required)").fill(`ada-${slug}@example.com`);
 
-    // Another shopper takes the chosen slot's only place while this one is on the page.
+    // Once the quote for these details has landed, another shopper takes the chosen slot's only place.
+    const pay = page.getByRole("button", { name: /Place order · .* hold/ });
+    await expect(pay).toBeEnabled({ timeout: 15_000 });
     const taken = await deliveryTime.inputValue();
     await scoped(async (tx) => {
       const customer = await tx.customer.create({ data: { storeId: store.id, name: "Other", email: "other@example.com", phone: "+12025550101" } });
@@ -95,8 +97,6 @@ test("a heavy cart books a scheduled store delivery slot, and a slot that fills 
         },
       });
     });
-    const pay = page.getByRole("button", { name: /Place order · .* hold/ });
-    await expect(pay).toBeEnabled({ timeout: 15_000 });
     await pay.click();
     await expect(page.getByText("That time is no longer available. Choose another time.")).toBeVisible({ timeout: 15_000 });
     await expect(deliveryTime.locator(`option[value="${taken}"]`)).toHaveCount(0);
