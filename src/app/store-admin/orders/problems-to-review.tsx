@@ -30,17 +30,20 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
   const [reason, setReason] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  function run(action: () => Promise<{ ok: boolean; error?: string }>, done: string) {
+  function run<T extends { ok: boolean; error?: string }>(action: () => Promise<T>, done: (result: T) => string) {
     startTransition(async () => {
       const result = await action();
       if (!result.ok) {
         toast.error(result.error ?? "Something went wrong. Try again.");
         return;
       }
-      toast.success(done);
+      toast.success(done(result));
       router.refresh();
     });
   }
+
+  // The reserve can cap the amount below the one entered, so the toast shows what was refunded.
+  const refunded = (result: Awaited<ReturnType<typeof approveIssueAction>>) => (result.ok ? `Refund of ${money(result.amountCents)} sent` : "");
 
   function submitPartial() {
     const cents = Math.round(Number(dollars) * 100);
@@ -48,7 +51,7 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
       toast.error(`Enter an amount from $0.01 to ${money(issue.amountCents)}.`);
       return;
     }
-    run(() => approveIssueAction(issue.id, cents), `Refund of ${money(cents)} sent`);
+    run(() => approveIssueAction(issue.id, cents), refunded);
   }
 
   const fieldId = `issue-${issue.id}`;
@@ -122,7 +125,7 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
               variant="destructive"
               className="w-full rounded-full"
               disabled={isPending || !reason.trim()}
-              onClick={() => run(() => declineIssueAction(issue.id, reason), "Problem declined")}
+              onClick={() => run(() => declineIssueAction(issue.id, reason), () => "Problem declined")}
             >
               Decline
             </Button>
@@ -133,7 +136,7 @@ function ProblemCard({ issue }: { issue: IssueToReview }) {
           <Button
             className="rounded-full"
             disabled={isPending}
-            onClick={() => run(() => approveIssueAction(issue.id), `Refund of ${money(issue.amountCents)} sent`)}
+            onClick={() => run(() => approveIssueAction(issue.id), refunded)}
           >
             <Check className="mr-2 size-4" /> Approve {money(issue.amountCents)}
           </Button>

@@ -389,7 +389,7 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
   it("the owner approves $15 of a $60 issue: one $15 refund, issue approved, order Partly refunded, audit names the owner", async () => {
     const { orderId, issueId } = await issueToReview(601, 8000, 6000);
     asStore(storeASlug, cookiesA);
-    expect(await approveIssueAction(issueId, 1500)).toEqual({ ok: true });
+    expect(await approveIssueAction(issueId, 1500)).toEqual({ ok: true, amountCents: 1500 });
     const after = await reviewed(orderId);
     expect(after.requests.map((row) => row.amountCents)).toEqual([1500]);
     expect(after.issue.state).toBe("approved");
@@ -486,6 +486,21 @@ describe.skipIf(!hasDb)("staff order actions (real auth.handler, lane DB)", () =
     expect(after.requests).toHaveLength(0);
     expect(refundRequests.some((call) => call.paymentIntentId === pi)).toBe(false);
     expect(after.audits.map((row) => row.action).sort()).toEqual(["issue_approval_not_started", "issue_approved"]);
+  }, 30_000);
+
+  it("an outside refund that lands after the capture check returns the capped amount staff are shown", async () => {
+    const { orderId, issueId, pi } = await issueToReview(610, 8000, 6000);
+    const listRefunds = fakeStripeProvider.listRefunds.bind(fakeStripeProvider);
+    vi.spyOn(fakeStripeProvider, "listRefunds").mockImplementationOnce(async (id) => {
+      const before = await listRefunds(id);
+      await fakeStripeProvider.refundPayment(pi, 7000, `dashboard-610-${RUN}`);
+      return before;
+    });
+    asStore(storeASlug, cookiesA);
+    expect(await approveIssueAction(issueId)).toEqual({ ok: true, amountCents: 1000 });
+    const after = await reviewed(orderId);
+    expect(after.requests.map((row) => row.amountCents)).toEqual([1000]);
+    expect(after.issue.amountCents).toBe(1000);
   }, 30_000);
 
   it("an issue stranded approved or auto-refunded with no refund request returns to review and can be approved", async () => {

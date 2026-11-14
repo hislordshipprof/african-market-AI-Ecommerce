@@ -13,6 +13,8 @@ export const ISSUE_AMOUNT_ABOVE_CAPTURE_PREFIX = "That is more than is left to r
 
 type Actor = { id: string; email: string };
 type ReviewResult = { ok: true } | { ok: false; error: string };
+/** `amountCents` is what was refunded: the reserve caps it at what Stripe still holds. */
+type ApproveResult = { ok: true; amountCents: number } | { ok: false; error: string };
 
 /** Longer than any approval or auto-refund takes to reserve its refund request. */
 const STRANDED_AFTER_MS = 15 * 60 * 1000;
@@ -85,7 +87,7 @@ export type IssueToReview = Awaited<ReturnType<typeof issuesToReview>>[number];
  * A store member approves an in-review issue for its full amount or a partial one, through the
  * refund ledger. The issue row is claimed under the store lock, so a second click refunds nothing.
  */
-export async function approveIssue(storeId: string, issueId: string, actor: Actor, amountCents?: number): Promise<ReviewResult> {
+export async function approveIssue(storeId: string, issueId: string, actor: Actor, amountCents?: number): Promise<ApproveResult> {
   const issue = await storeScoped(storeId).issueReport.findUnique({
     where: { id: issueId },
     include: { order: { select: { paymentIntentId: true } } },
@@ -158,9 +160,9 @@ export async function approveIssue(storeId: string, issueId: string, actor: Acto
   }
   await evaluateOrderRefundStateAfterCommit(issue.orderId);
   // Stripe can refuse the create; the evaluation has then marked the issue refund_failed.
-  const settled = await storeScoped(storeId).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true } });
+  const settled = await storeScoped(storeId).issueReport.findUniqueOrThrow({ where: { id: issueId }, select: { state: true, amountCents: true } });
   if (settled.state === "refund_failed") return { ok: false, error: ISSUE_REFUND_FAILED };
-  return { ok: true };
+  return { ok: true, amountCents: settled.amountCents };
 }
 
 /** A store member declines an in-review issue with a reason. No money moves and the order is untouched. */
