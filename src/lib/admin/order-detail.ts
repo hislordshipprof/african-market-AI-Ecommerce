@@ -24,7 +24,9 @@ export type OrderDetail = {
     deliveryFeeCents: number;
     serviceFeeCents: number;
     authorizedCents: number;
+    /** What Stripe captured, kept after a refund or cancellation; null with `capturedAt` set when the amount was not recorded. */
     capturedCents: number | null;
+    capturedAt: Date | null;
     applicationFeeCents: number | null;
     /** Refund requests Stripe reports as succeeded. */
     refundedCents: number;
@@ -156,8 +158,9 @@ async function readOrderDetail(orderId: string, admin: { id: string; email: stri
         deliveryFeeCents: order.deliveryFeeCents,
         serviceFeeCents: order.serviceFeeCents,
         authorizedCents: order.totalAuthorizedCents,
-        capturedCents: order.capturedAmountCents,
-        applicationFeeCents: capturedApplicationFee(order),
+        capturedCents: order.captureCents,
+        capturedAt: order.capturedAt,
+        applicationFeeCents: capturedApplicationFee({ ...order, capturedAmountCents: order.captureCents }),
         refundedCents: order.refundRequests
           .filter((request) => request.providerStatus === "succeeded")
           .reduce((sum, request) => sum + request.amountCents, 0),

@@ -479,6 +479,9 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("READY");
     expect(updated!.readyAt).toBeTruthy();
     expect(updated!.capturedAmountCents).toBe(6000);
+    // The capture record (#537) outlives a later refund or cancellation that clears capturedAmountCents.
+    expect(updated!.captureCents).toBe(6000);
+    expect(updated!.capturedAt).toEqual(updated!.readyAt);
 
     expect(capturedPayments.get(order.paymentIntentId!)).toBe(6000);
     // ADR-0021: the store's card fee is on its $57 part only (2.9% + 30¢ = 195), plus the $3 courier fee.
@@ -1284,6 +1287,8 @@ describe.skipIf(!hasDb)("Order service (database)", () => {
     expect(updated!.status).toBe("AWAITING_PICKUP");
     expect(updated!.readyAt).toBeTruthy();
     expect(updated!.capturedAmountCents).toBe(capturedAmount);
+    expect(updated!.captureCents).toBe(capturedAmount);
+    expect(updated!.capturedAt).toEqual(updated!.readyAt);
 
     const logs = await storeScoped(storeId).auditLog.findMany({
       where: { entityId: order.id, action: "reconcile_capture" },

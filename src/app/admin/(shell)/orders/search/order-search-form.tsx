@@ -128,8 +128,8 @@ export function OrderSearch({ stores }: { stores: Array<{ id: string; name: stri
                       </span>
                     </span>
                     <span className="shrink-0 text-right tabular-nums text-foreground">
-                      {money(row.capturedAmountCents ?? row.totalAuthorizedCents)}
-                      <span className="block text-xs text-muted-foreground">{row.capturedAmountCents === null ? "held" : "captured"}</span>
+                      {money(row.captureCents ?? row.totalAuthorizedCents)}
+                      <span className="block text-xs text-muted-foreground">{row.captureCents === null ? "held" : "captured"}</span>
                     </span>
                     <ChevronRight aria-hidden className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
                   </Link>

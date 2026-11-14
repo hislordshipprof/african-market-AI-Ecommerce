@@ -64,6 +64,11 @@ function Lines({ lines }: { lines: OrderDetail["lines"] }) {
   );
 }
 
+function captured(pay: OrderDetail["payment"], at: (date: Date) => string): string {
+  if (!pay.capturedAt) return pay.capturedCents === null ? "Not captured" : money(pay.capturedCents);
+  return `${pay.capturedCents === null ? "Amount not recorded" : money(pay.capturedCents)} on ${at(pay.capturedAt)}`;
+}
+
 export default async function AdminOrderDetailPage({ params }: { params: Promise<{ orderId: string }> }) {
   const { orderId } = await params;
   if (!ORDER_ID.test(orderId)) notFound();
@@ -110,8 +115,8 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
               ["Delivery fee", money(pay.deliveryFeeCents)],
               ["Service fee", money(pay.serviceFeeCents)],
               ["Authorized", <span key="auth" data-testid="authorized">{money(pay.authorizedCents)}</span>],
-              ["Captured", <span key="cap" data-testid="captured">{pay.capturedCents === null ? "Not captured" : money(pay.capturedCents)}</span>],
-              ["Application fee", <span key="fee" data-testid="application-fee">{pay.applicationFeeCents === null ? "Set at capture" : money(pay.applicationFeeCents)}</span>],
+              ["Captured", <span key="cap" data-testid="captured">{captured(pay, at)}</span>],
+              ["Application fee", <span key="fee" data-testid="application-fee">{pay.applicationFeeCents === null ? (pay.capturedAt ? "Not recorded" : "Set at capture") : money(pay.applicationFeeCents)}</span>],
               ["Refunded", <span key="ref" data-testid="refunded">{money(pay.refundedCents)}</span>],
             ]}
           />

@@ -59,6 +59,8 @@ test.beforeAll(async () => {
         serviceFeeCents: 99,
         totalAuthorizedCents: 2849,
         capturedAmountCents: 2599,
+        captureCents: 2599,
+        capturedAt: new Date(),
         platformFeeCents: 99 + 102,
         paymentIntentId: `pi_${RUN}`,
         trackingToken: TOKEN,
@@ -99,7 +101,7 @@ test("an admin finds an order by store and number and reads its detail, and the 
   await expect(page.getByRole("navigation", { name: "Admin" }).locator("[aria-current='page']")).toHaveText("Search orders");
   await expect(page.getByTestId("payment-intent")).toHaveText(`pi_${RUN}`);
   await expect(page.getByTestId("authorized")).toHaveText("$28.49");
-  await expect(page.getByTestId("captured")).toHaveText("$25.99");
+  await expect(page.getByTestId("captured")).toHaveText(/^\$25\.99 on /);
   await expect(page.getByTestId("application-fee")).toHaveText("$2.01");
   await expect(page.getByTestId("refunded")).toHaveText("$12.50");
   await expect(page.getByTestId("refund-requests")).toContainText("succeeded");

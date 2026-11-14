@@ -50,7 +50,7 @@ export type OrderSearchRow = {
   status: string;
   fulfillment: string;
   totalAuthorizedCents: number;
-  capturedAmountCents: number | null;
+  captureCents: number | null;
   createdAt: Date;
 };
 

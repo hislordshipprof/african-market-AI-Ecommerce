@@ -1193,12 +1193,15 @@ export async function markReady(
       }
       return { ok: false as const, error: CAPTURE_STATUS_CHANGED };
     }
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: validation.newStatus,
-        readyAt: new Date(),
+        readyAt: now,
         capturedAmountCents: captureResult.amountCaptured,
+        captureCents: captureResult.amountCaptured,
+        capturedAt: now,
       },
     });
     await settleCapturedStock(tx, storeId, orderId);
@@ -1650,12 +1653,15 @@ async function finalizeCaptureFromSweep(
     if (!current || current.status !== "CAPTURING") return;
     finalized = true;
 
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
       data: {
         status: newStatus,
-        readyAt: new Date(),
+        readyAt: now,
         capturedAmountCents,
+        captureCents: capturedAmountCents,
+        capturedAt: now,
       },
     });
     await tx.auditLog.create({

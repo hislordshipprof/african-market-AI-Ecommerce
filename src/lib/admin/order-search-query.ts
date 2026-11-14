@@ -20,7 +20,7 @@ export async function searchOrders(
     status: row.status,
     fulfillment: row.fulfillment,
     totalAuthorizedCents: row.total_authorized_cents,
-    capturedAmountCents: row.captured_amount_cents,
+    captureCents: row.capture_cents,
     createdAt: row.created_at,
   }));
   const last = page[page.length - 1];

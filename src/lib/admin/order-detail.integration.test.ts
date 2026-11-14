@@ -58,6 +58,8 @@ beforeAll(async () => {
         serviceFeeCents: 99,
         totalAuthorizedCents: 4065,
         capturedAmountCents: 3795,
+        captureCents: 3795,
+        capturedAt: new Date("2026-03-10T15:40:00Z"),
         platformFeeCents: 239,
         paymentIntentId: `pi_${RUN}`,
         trackingToken: TOKEN,
@@ -94,6 +96,18 @@ beforeAll(async () => {
       data: { storeId, number: 7002, customerId: customer.id, subtotalCents: 500, bufferCents: 0, totalAuthorizedCents: 500, paymentIntentId: `pi_${RUN}_b` },
     });
     ids.sibling = sibling.id;
+
+    // Captured, then repaid by hand (refund-resolution) or refunded in full on cancel: capturedAmountCents is cleared.
+    for (const [key, number, captured] of [["repaid", 7003, 2599], ["cancelled", 7004, 1850]] as const) {
+      const row = await tx.order.create({
+        data: {
+          storeId, number, customerId: customer.id, status: "CANCELLED", subtotalCents: captured - 99, serviceFeeCents: 99, bufferCents: 250,
+          totalAuthorizedCents: 2849, capturedAmountCents: null, captureCents: captured, capturedAt: new Date("2026-03-11T14:30:00Z"),
+          platformFeeCents: 201, paymentIntentId: `pi_${RUN}_${key}`, readyAt: new Date("2026-03-11T14:30:00Z"), cancelledAt: new Date("2026-03-12T10:00:00Z"),
+        },
+      });
+      ids[key] = row.id;
+    }
     await tx.refundRequest.create({ data: { storeId, orderId: sibling.id, paymentIntentId: `pi_${RUN}_b`, key: `${RUN}-r3`, amountCents: 111, refundApplicationFee: false, state: "CREATED", providerStatus: "succeeded" } });
     await tx.auditLog.create({ data: { storeId, actorId: SYSTEM_ACTOR_ID, actorEmail: SYSTEM_ACTOR_EMAIL, action: "auto_cancel", entityType: "order", entityId: sibling.id } });
   });
@@ -146,6 +160,7 @@ describe.skipIf(!hasDb)("order detail for platform admins (lane DB)", () => {
       serviceFeeCents: 99,
       authorizedCents: 4065,
       capturedCents: 3795,
+      capturedAt: new Date("2026-03-10T15:40:00Z"),
       // Stored platform fee (service fee + store card fee) plus the courier fee the platform passes on.
       applicationFeeCents: 239 + 799,
       refundedCents: 300,
@@ -154,6 +169,20 @@ describe.skipIf(!hasDb)("order detail for platform admins (lane DB)", () => {
       [300, "CREATED", "succeeded"],
       [200, "CREATED", "failed"],
     ]);
+  });
+
+  it.each([
+    ["repaid by hand after a failed refund", "repaid", 2599],
+    ["refunded in full on cancellation", "cancelled", 1850],
+  ])("shows the capture of an order %s, not a hold that was never captured", async (_case, key, captured) => {
+    const detail = await viewOrderDetail(ids[key]);
+    expect(detail?.status).toBe("CANCELLED");
+    expect(detail?.payment).toMatchObject({ capturedCents: captured, capturedAt: new Date("2026-03-11T14:30:00Z"), applicationFeeCents: 201 });
+  });
+
+  it("shows an order that never reached capture as not captured", async () => {
+    const detail = await viewOrderDetail(ids.sibling);
+    expect(detail?.payment).toMatchObject({ capturedCents: null, capturedAt: null, applicationFeeCents: null });
   });
 
   it("shows deliveries, issue reports and the support thread with its messages", async () => {

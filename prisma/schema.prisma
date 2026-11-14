@@ -1231,6 +1231,9 @@ model Order {
   paymentIntentId         String?   @unique @map("payment_intent_id")
   sourceCartId            String?   @map("source_cart_id")
   capturedAmountCents     Int?      @map("captured_amount_cents")
+  /// What Stripe captured and when (#537). Kept when a refund or cancellation later clears capturedAmountCents.
+  captureCents            Int?      @map("capture_cents")
+  capturedAt              DateTime? @map("captured_at")
   refundId                String?   @map("refund_id")
   platformFeeCents        Int?      @map("platform_fee_cents")
   deliveryFeeCents        Int       @default(0) @map("delivery_fee_cents")

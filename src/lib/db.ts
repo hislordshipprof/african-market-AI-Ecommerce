@@ -1277,7 +1277,7 @@ export function orderSearchSql(filters: OrderSearchFilters, limit: number): Pris
     where.push(Prisma.sql`(o.created_at, o.id) < (${at}, ${filters.cursor.id})`);
   }
   return Prisma.sql`
-    SELECT o.id, o.number, o.status, o.fulfillment, o.total_authorized_cents, o.captured_amount_cents, o.created_at,
+    SELECT o.id, o.number, o.status, o.fulfillment, o.total_authorized_cents, o.capture_cents, o.created_at,
            s.name AS store_name, s.timezone AS store_timezone
     FROM orders o
     JOIN stores s ON s.id = o.store_id
@@ -1294,7 +1294,7 @@ export async function findOrderSearchRows(filters: OrderSearchFilters, limit: nu
     status: string;
     fulfillment: string;
     total_authorized_cents: number;
-    captured_amount_cents: number | null;
+    capture_cents: number | null;
     created_at: Date;
     store_name: string;
     store_timezone: string;
