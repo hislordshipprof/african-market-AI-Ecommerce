@@ -83,11 +83,11 @@ export function itemHandles(storeId: string, conversationId: string): ItemHandle
     return next;
   }
 
-  function mapInput(input: unknown, map: Saved, unknown: string[] | null): unknown {
+  function mapInput(input: unknown, map: Saved, unknown: string[]): unknown {
     const walk = (value: unknown, field: string): unknown => {
       if (typeof value === "string" && INPUT_FIELDS.has(field)) {
         const id = idOf(map, value);
-        if (id === null) unknown?.push(value);
+        if (id === null) unknown.push(value);
         return id ?? value;
       }
       if (Array.isArray(value)) return value.map((item) => walk(item, field));
@@ -95,6 +95,18 @@ export function itemHandles(storeId: string, conversationId: string): ItemHandle
       return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, walk(child, key)]));
     };
     return walk(input, "");
+  }
+
+  async function mapFresh(input: unknown) {
+    let unknown: string[] = [];
+    let resolved = mapInput(input, await load(), unknown);
+    if (unknown.length > 0) {
+      // Another writer may have given a handle since this map was read.
+      saved = null;
+      unknown = [];
+      resolved = mapInput(input, await load(), unknown);
+    }
+    return { resolved, unknown };
   }
 
   return {
@@ -116,12 +128,11 @@ export function itemHandles(storeId: string, conversationId: string): ItemHandle
       return swap(value);
     },
     async resolve(input) {
-      const unknown: string[] = [];
-      const resolved = mapInput(input, await load(), unknown);
+      const { resolved, unknown } = await mapFresh(input);
       return unknown.length > 0 ? { ok: false, handles: [...new Set(unknown)] } : { ok: true, input: resolved };
     },
     async toIds(input) {
-      return mapInput(input, await load(), null);
+      return (await mapFresh(input)).resolved;
     },
   };
 }

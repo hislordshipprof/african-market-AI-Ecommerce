@@ -20,6 +20,7 @@ import {
 } from "./execute";
 import { acceptanceForTurn } from "../shown";
 import { assistantTools } from "./index";
+import { itemHandles } from "../handles";
 import { addToCartInput, offerChoicesInput, searchCatalogInput, toolInputSchemas } from "./schemas";
 
 const { headerState, cartCookies } = vi.hoisted(() => ({
@@ -1534,6 +1535,17 @@ describe.skipIf(!hasDb)("assistant catalog and cart tools", () => {
       expect(await storeScoped(storeA).cartLine.count({ where: { cartId: turn.cartId } })).toBe(0);
       const audit = await storeScoped(storeA).aiAction.findFirst({ where: { conversationId: turn.conversationId, tool: "add_to_cart" } });
       expect(audit?.ok).toBe(false);
+    });
+
+    it("a handle another writer gave after this chat read its map still resolves", async () => {
+      const turn = await newConversation(storeA);
+      const tools = assistantTools(turn);
+      await runTool(tools, "search_catalog", { query: "no such thing at all" });
+      const given = await itemHandles(storeA, turn.conversationId).toModel({ variantId: variantA }) as { variantId: string };
+      const added = await runTool(tools, "add_to_cart", { items: [{ variant_id: given.variantId, qty: 1 }] });
+      expect(added.output).toMatchObject({ ok: true });
+      const lines = await storeScoped(storeA).cartLine.findMany({ where: { cartId: turn.cartId } });
+      expect(lines.map((line) => line.variantId)).toEqual([variantA]);
     });
 
     it("a handle from another conversation or another store never resolves", async () => {
