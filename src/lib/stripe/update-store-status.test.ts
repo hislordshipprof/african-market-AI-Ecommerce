@@ -25,6 +25,7 @@ function makeDbStore(overrides = {}) {
     slug: "test-store",
     stripeAccountId: "acct_fake_store_123",
     stripeOnboardingStatus: "pending",
+    customDomain: "shop.test-store.com",
     ...overrides,
   };
 }
@@ -71,10 +72,9 @@ describe("updateStoreOnboardingStatus", () => {
       where: { id: "store_123" },
       data: { stripeOnboardingStatus: "complete" },
     });
-    expect(revalidateStore).toHaveBeenCalledWith({
-      id: "store_123",
-      slug: "test-store",
-    });
+    expect(revalidateStore).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "store_123", slug: "test-store", customDomain: "shop.test-store.com" }),
+    );
   });
 
   it("skips DB write and revalidation when status is unchanged", async () => {

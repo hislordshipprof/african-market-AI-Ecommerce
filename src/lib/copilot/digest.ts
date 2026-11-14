@@ -112,6 +112,7 @@ async function readDigest(storeId: string, since: Date): Promise<DigestData> {
 const KIND_HEADINGS: Record<AlertKind, string> = {
   sold_out: "Sold out",
   running_low: "Running low",
+  running_out_soon: "Running out soon",
   order_needs_low_stock: "Orders that need low stock",
   confirm_request: "Stock checks asked",
 };

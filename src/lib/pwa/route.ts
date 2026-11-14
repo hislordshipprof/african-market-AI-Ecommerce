@@ -1,11 +1,10 @@
 import { headers } from "next/headers";
-import { findStore } from "../get-store";
+import { findStoreForHeaders } from "../get-store";
 import { buildManifest, type PwaApp } from "./manifest";
 
 /** The web app manifest for the store on this host. */
 export async function manifestResponse(app: PwaApp): Promise<Response> {
-  const slug = (await headers()).get("x-store-slug");
-  const store = slug ? await findStore(slug) : null;
+  const store = await findStoreForHeaders(await headers());
   if (!store) return new Response("Not found", { status: 404 });
   return new Response(JSON.stringify(buildManifest(store, app)), {
     headers: {

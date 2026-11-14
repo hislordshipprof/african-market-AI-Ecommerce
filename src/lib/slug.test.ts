@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slugFromHost, RESERVED_SLUGS, isSlugRoutable } from "./slug";
+import { slugFromHost, resolveHost, RESERVED_SLUGS, isSlugRoutable } from "./slug";
 
 describe("slugFromHost", () => {
   it("extracts slug from subdomain with root domain", () => {
@@ -119,6 +119,61 @@ describe("isSlugRoutable", () => {
       expect(isSlugRoutable(slug)).toBe(false);
     });
   }
+});
+
+describe("resolveHost", () => {
+  it("returns slug for subdomain", () => {
+    expect(resolveHost("mama-ngozi.example.com", "example.com")).toEqual({
+      kind: "slug",
+      slug: "mama-ngozi",
+    });
+  });
+
+  it("returns custom-domain for non-subdomain hostname when root domain is set", () => {
+    expect(resolveHost("shop.mamasmarket.com", "example.com")).toEqual({
+      kind: "custom-domain",
+      hostname: "shop.mamasmarket.com",
+    });
+  });
+
+  it("returns none for apex domain", () => {
+    expect(resolveHost("example.com", "example.com")).toEqual({ kind: "none" });
+  });
+
+  it("returns none for www", () => {
+    expect(resolveHost("www.example.com", "example.com")).toEqual({
+      kind: "none",
+    });
+  });
+
+  it("returns none for vercel.app", () => {
+    expect(resolveHost("my-app.vercel.app")).toEqual({ kind: "none" });
+  });
+
+  it("returns none for bare localhost", () => {
+    expect(resolveHost("localhost:3000")).toEqual({ kind: "none" });
+  });
+
+  it("strips port from custom domain", () => {
+    expect(resolveHost("shop.mamasmarket.com:443", "example.com")).toEqual({
+      kind: "custom-domain",
+      hostname: "shop.mamasmarket.com",
+    });
+  });
+
+  it("lowercases custom domain", () => {
+    expect(resolveHost("Shop.MamasMarket.COM", "example.com")).toEqual({
+      kind: "custom-domain",
+      hostname: "shop.mamasmarket.com",
+    });
+  });
+
+  it("returns slug without root domain (dev mode)", () => {
+    expect(resolveHost("mama-ngozi.localhost:3000")).toEqual({
+      kind: "slug",
+      slug: "mama-ngozi",
+    });
+  });
 });
 
 describe("RESERVED_SLUGS", () => {

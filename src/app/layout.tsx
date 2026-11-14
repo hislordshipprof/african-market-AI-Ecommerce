@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Figtree, Geist } from "next/font/google";
 import { headers } from "next/headers";
-import { findStore } from "@/lib/get-store";
+import { findStoreForHeaders } from "@/lib/get-store";
 import { resolveStoreTheme, type ResolvedTheme } from "@/lib/theme";
 import { pwaMetadata, themeColor } from "@/lib/pwa/manifest";
 import { ServiceWorker } from "@/components/pwa/service-worker";
@@ -24,17 +24,13 @@ const figtree = Figtree({
 });
 
 export async function generateMetadata(): Promise<Metadata> {
-  const headerList = await headers();
-  const slug = headerList.get("x-store-slug");
-  if (!slug) return { title: "Store not found" };
-  const store = await findStore(slug);
+  const store = await findStoreForHeaders(await headers());
   if (!store) return { title: "Store not found" };
   return { title: store.name, ...pwaMetadata(store, "storefront") };
 }
 
 export async function generateViewport(): Promise<Viewport> {
-  const slug = (await headers()).get("x-store-slug");
-  const store = slug ? await findStore(slug) : null;
+  const store = await findStoreForHeaders(await headers());
   return store ? { themeColor: themeColor(store) } : {};
 }
 
@@ -52,12 +48,9 @@ export default async function RootLayout({
   let theme: ResolvedTheme | null = null;
 
   const headerList = await headers();
-  const slug = headerList.get("x-store-slug");
-  if (slug) {
-    const store = await findStore(slug);
-    if (store) {
-      theme = resolveStoreTheme(store.validPreset, store.validBrandColor);
-    }
+  const store = await findStoreForHeaders(headerList);
+  if (store) {
+    theme = resolveStoreTheme(store.validPreset, store.validBrandColor);
   }
 
   // Read by the story surface, for browsers that send Save-Data without navigator.connection.
