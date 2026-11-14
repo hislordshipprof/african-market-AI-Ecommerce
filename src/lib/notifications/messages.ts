@@ -1,4 +1,5 @@
 import { customerStatusLabel } from "../customer-account/order-history-view";
+import { quotedFrom, stripHeaderChars } from "../email/from";
 import { escapeHtml, money } from "../format";
 import { fulfilledStatus } from "../order/constants";
 import type { PushMessage } from "../push/sender";
@@ -52,20 +53,6 @@ export type NotifyOrder = {
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const loggedTimezones = new Set<string>();
 const loggedMissingCapture = new Set<string>();
-
-// Whitespace collapses before control characters go, so a tab or newline between words stays a space.
-function stripHeaderChars(value: string): string {
-  return value.replace(/\s+/g, " ").replace(/["\\]/g, "").replace(/[\u0000-\u001F\u007F]/g, "").trim();
-}
-
-/** RFC 5322 quoted display name so a comma or parenthesis is not a second address. */
-export function quotedFrom(storeName: string, fromAddress: string): string {
-  const wrapped = fromAddress.match(/<([^>]+)>/);
-  const address = (wrapped?.[1] ?? fromAddress).trim();
-  const name = stripHeaderChars(storeName);
-  if (!name) return address;
-  return `"${name}" <${address}>`;
-}
 
 export function smsStoreName(name: string): string {
   const mapped = name

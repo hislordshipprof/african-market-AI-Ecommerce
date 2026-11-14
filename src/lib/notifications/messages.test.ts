@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { quotedFrom, renderEmail, renderSms, smsStoreName, type NotifyOrder } from "./messages";
+import { quotedFrom } from "../email/from";
+import { renderEmail, renderSms, smsStoreName, type NotifyOrder } from "./messages";
 
 const URL = "https://adas.markets.example/order/tok_abc";
 
