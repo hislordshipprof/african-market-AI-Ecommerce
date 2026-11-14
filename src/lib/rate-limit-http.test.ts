@@ -109,4 +109,29 @@ describe("magic-link send caps (real auth config, production rate limits)", () =
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(sent.filter((message) => message.to === victim)).toHaveLength(1);
   });
+
+  // `_` matches any one character in LIKE; `%` addresses are refused by the email check (test below).
+  it.each([
+    ["digits", (i: number) => `${i}`],
+    ["a dot", () => "."],
+  ])("links to look-alike inboxes (%s) do not count against an address containing _", async (kind, lookAlike) => {
+    const tag = kind.replace(" ", "");
+    const victim = `rl_${tag}-${stamp}@test.example`;
+    emails.push(victim);
+    for (let i = 0; i < 6; i++) {
+      const other = `rl${lookAlike(i)}${tag}-${stamp}@test.example`;
+      emails.push(other);
+      expect((await sendLink(other, `10.188.${i}.${kind.length}`)).status).toBe(200);
+    }
+    expect((await sendLink(victim, `10.189.0.${kind.length}`)).status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(sent.filter((message) => message.to === victim)).toHaveLength(1);
+  });
+
+  it("an address containing % is refused before any link is stored", async () => {
+    const victim = `rl%pct-${stamp}@test.example`;
+    expect((await sendLink(victim, "10.189.1.1")).status).toBe(400);
+    expect(await authPrisma.verification.count({ where: { value: { contains: `pct-${stamp}` } } })).toBe(0);
+    expect(sent.filter((message) => message.to === victim)).toHaveLength(0);
+  });
 });

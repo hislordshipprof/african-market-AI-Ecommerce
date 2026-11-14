@@ -129,14 +129,14 @@ if (emailFromIssue) {
 const INBOX_CAP = 5;
 
 async function inboxCapReached(email: string): Promise<boolean> {
-  const recent = await authPrisma.verification.count({
-    where: {
-      identifier: { startsWith: "magic-link:" },
-      expiresAt: { gt: new Date(Date.now() + 5 * 60_000) },
-      // The email key only: `name` comes from the request body, and JSON escaping stops it forging this.
-      value: { contains: `"email":${JSON.stringify(email)}`, mode: "insensitive" },
-    },
-  });
+  // Exact match on the parsed email key: a LIKE pattern lets `_` in one address match another inbox.
+  // CASE keeps the JSON cast off rows of other verification types.
+  const [{ recent }] = await authPrisma.$queryRaw<{ recent: number }[]>`
+    SELECT count(*)::int AS recent FROM "verifications"
+    WHERE "expires_at" > ${new Date(Date.now() + 5 * 60_000)}
+      AND CASE WHEN left("identifier", 11) = 'magic-link:'
+          THEN lower("value"::jsonb->>'email') = lower(${email})
+          ELSE false END`;
   return recent > INBOX_CAP;
 }
 
