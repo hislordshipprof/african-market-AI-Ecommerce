@@ -57,6 +57,17 @@ mk ticket-90 20261106-010000 "2026-11-06 09:00:00"      # another ticket
 mk review-9 20261106-023000 "2026-11-06 04:00:00"       # a review is not builder time
 mk plan-9 20261105-220000 "2026-11-05 22:20:00"
 eq "builder minutes add up build and fix sessions only" 150 "$(ticket_builder_minutes "$T/time" 9)"
+# #413 N6: macOS has BSD date and stat, which take other flags.
+if [ -x /usr/bin/stat ] && ! /usr/bin/stat -c %Y / >/dev/null 2>&1; then
+  eq "builder minutes add up with BSD date and stat" 150 "$(PATH=/usr/bin:/bin ticket_builder_minutes "$T/time" 9)"
+else ok "builder minutes with BSD date and stat (skipped: no BSD stat here)"; fi
+touch "$T/time/ticket-9-notastamp.json"
+eq "a log whose start time cannot be read is not counted" 150 "$(ticket_builder_minutes "$T/time" 9 2>/dev/null)"
+case "$(ticket_builder_minutes "$T/time" 9 2>&1 >/dev/null)" in
+  *ticket-9-notastamp.json*) ok "a log whose start time cannot be read is warned about" ;;
+  *) bad "a log whose start time cannot be read is warned about" ;;
+esac
+rm "$T/time/ticket-9-notastamp.json"
 eq "a ticket with no sessions has used nothing" 0 "$(ticket_builder_minutes "$T/time" 7)"
 
 eq "a fresh ticket gets the full session cap" 90 "$(ticket_session_cap 90 300 0)"
@@ -73,7 +84,6 @@ eq "a ticket with no logs has age 0" 0 "$(ticket_lane_age_min "$T/time" 7)"
 
 # A session stopped at its cap is charged its wall time. The engine opens its log at the start and writes
 # only on exit, so a killed session leaves an empty log whose last write is its start.
-. "$ROOT/scripts/review-watch.sh"
 agent_run() { : > "$2"; touch -d "-5 min" "$2"; return 124; }
 (
   ROOT="$T/capped"; N=9; mkdir -p "$ROOT/.builder/logs"

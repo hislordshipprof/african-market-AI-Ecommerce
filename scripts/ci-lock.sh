@@ -10,6 +10,8 @@
 # Two runs in one slot share its ci-runner checkout and drop each other's database.
 # Tests: bash scripts/ci-lock.test.sh
 
+. "$(dirname "${BASH_SOURCE[0]}")/review-watch.sh"
+
 # ci_lock_try <lock> <pid> <token>: take the lock if it is free.
 ci_lock_try() {
   mkdir "$1" 2>/dev/null || return 1
@@ -29,7 +31,7 @@ ci_lock_release() {
   rm -rf "$1"
 }
 
-_ci_lock_age() { echo $(( $(date +%s) - $(stat -c %Y "$1" 2>/dev/null || date +%s) )); }
+_ci_lock_age() { echo $(( $(date +%s) - $(file_mtime "$1" || date +%s) )); }
 
 # ci_lock_stale <lock>: the owner is gone (its pid is dead or now another process), or the lock never got a pid
 # (its owner died between the writes). A lock with no start time (written before it was recorded) has its pid only.

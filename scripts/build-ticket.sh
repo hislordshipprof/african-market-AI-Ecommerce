@@ -2,6 +2,7 @@
 # Stage A (build) and Fix rounds. See docs/agents/orchestration.md.
 # Round-cap helpers live above the orchestrator so tests can source this file.
 # ticket_review_count matches review-ticket.sh: review-<n>-*.json, excluding *.second.json.
+. "$(dirname "${BASH_SOURCE[0]}")/review-watch.sh"
 
 # ticket_review_count <logs-dir> <issue>: review logs for one ticket.
 # Same count as review-ticket.sh (PRIOR): review-<n>-*.json, excluding *.second.json.
@@ -50,11 +51,14 @@ ticket_round_after_review() {
 # one session is capped (BUILD_TIMEOUT_MIN, default 90), and all of a ticket's builder sessions together have a
 # budget (LANE_BUDGET_MIN, default 300), so --continue cannot restart the clock.
 
-# _log_stamp_epoch <log-file>: the start time in a log's name (…-YYYYmmdd-HHMMSS.json), as epoch seconds.
+# _log_stamp_epoch <log-file>: the start time in a log's name (…-YYYYmmdd-HHMMSS.json), as epoch seconds; GNU
+# date, then BSD date (macOS). A name it cannot read is warned about on stderr, so a log is never dropped unseen.
 _log_stamp_epoch() {
   local s
   s=$(basename "$1" | sed -nE 's/.*-([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})([0-9]{2})\.json$/\1-\2-\3 \4:\5:\6/p')
-  [ -n "$s" ] && date -d "$s" +%s 2>/dev/null
+  [ -n "$s" ] && { date -d "$s" +%s 2>/dev/null || date -j -f '%Y-%m-%d %H:%M:%S' "$s" +%s 2>/dev/null; } && return 0
+  echo "builder time: cannot read the start time in $1; it is not counted" >&2
+  return 1
 }
 
 # ticket_builder_minutes <logs-dir> <issue>: minutes of builder sessions so far (build, fix and continue logs,
@@ -64,7 +68,7 @@ ticket_builder_minutes() {
   for f in "$dir"/ticket-"$n"-*.json; do
     [ -f "$f" ] || continue
     start=$(_log_stamp_epoch "$f") || continue
-    end=$(stat -c %Y "$f" 2>/dev/null) || continue
+    end=$(file_mtime "$f") || continue
     [ "$end" -gt "$start" ] && total=$(( total + end - start ))
   done
   echo $(( total / 60 ))
@@ -132,7 +136,6 @@ mkdir -p .builder/logs
 # Every worktree shares this setting: .githooks/commit-msg strips AI co-author trailers from lane commits.
 git config core.hooksPath .githooks
 . "$ROOT/scripts/agent-cli.sh"
-. "$ROOT/scripts/review-watch.sh"
 
 # The round cap covers every mode. It used to cover --resume only, so a plain rerun or --continue could keep a
 # builder working on a ticket that had already used its 3 rounds.
