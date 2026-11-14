@@ -293,7 +293,7 @@ export async function appUserQuery<T>(
 }
 
 export async function platformAdminTransaction<T>(
-  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "$queryRaw" | "$executeRaw">) => Promise<T>,
+  fn: (tx: Pick<PrismaClient, "store" | "order" | "auditLog" | "refundRequest" | "storeMembership" | "storeInvite" | "masterProduct" | "category" | "productSynonym" | "ingredient" | "ingredientSynonym" | "masterProductIngredient" | "attributeProposal" | "aiConversation" | "aiAction" | "supportThread" | "supportMessage" | "storeSubscription" | "platformSettings" | "$queryRaw" | "$executeRaw">) => Promise<T>,
   opts?: TransactionOptions,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -322,6 +322,7 @@ export async function platformAdminTransaction<T>(
       supportThread: tx.supportThread,
       supportMessage: tx.supportMessage,
       storeSubscription: tx.storeSubscription,
+      platformSettings: tx.platformSettings,
       $queryRaw: tx.$queryRaw.bind(tx),
       $executeRaw: tx.$executeRaw.bind(tx),
     });
@@ -547,6 +548,11 @@ export async function lockStoreAddress(
     state: row.state,
     zip: row.zip,
   };
+}
+
+/** Locks the one platform settings row, so a concurrent settings save waits for this one (#535). */
+export async function lockPlatformSettingsRow(tx: Pick<PrismaClient, "$queryRaw">): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM platform_settings WHERE id = 'platform' FOR UPDATE`;
 }
 
 /** Locks the store and returns the delivery settings read under that lock. */
