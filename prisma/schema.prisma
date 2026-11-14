@@ -90,6 +90,7 @@ model Store {
   guestBrowserCarts     GuestBrowserCart[]
   paymentIntentReleases PaymentIntentRelease[]
   copilotConversations  CopilotConversation[]
+  aiReviewFlags         AiReviewFlag[]
   copilotClientMessages CopilotClientMessage[]
   stockProposals        StockProposal[]
   copilotAlerts         CopilotAlert[]
@@ -155,6 +156,7 @@ model User {
   pushSubscriptions       PushSubscription[]
   supportMessages         SupportMessage[]
   copilotConversations    CopilotConversation[]
+  aiReviewFlags           AiReviewFlag[]
   stockProposalDecisions  StockProposal[]          @relation("StockProposalDecision")
   copilotAlertResolutions CopilotAlert[]           @relation("CopilotAlertResolution")
   ownerReports            OwnerReport[]            @relation("OwnerReportActor")
@@ -625,7 +627,9 @@ model CopilotConversation {
   user      User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   proposals StockProposal[]
   receipts  CopilotClientMessage[]
+  flags     AiReviewFlag[]
 
+  @@unique([id, storeId])
   @@index([storeId])
   @@index([storeId, userId, lastMessageAt])
   @@map("copilot_conversations")
@@ -1049,14 +1053,41 @@ model AiConversation {
   cart     Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
   customer Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
   actions  AiAction[]
+  flags    AiReviewFlag[]
 
   @@unique([storeId, cartId])
+  @@unique([id, storeId])
   @@index([cartId])
   @@index([storeId])
   @@index([storeId, createdAt])
   @@index([createdAt])
   @@index([customerId])
   @@map("ai_conversations")
+}
+
+/// Platform admin review label on one shopper or copilot conversation (#544). Store-owned with RLS.
+/// Deleted with its conversation, and after 90 days by the assistant retention job.
+model AiReviewFlag {
+  id                    String   @id @default(cuid())
+  storeId               String   @map("store_id")
+  aiConversationId      String?  @map("ai_conversation_id")
+  copilotConversationId String?  @map("copilot_conversation_id")
+  label                 String
+  note                  String   @default("")
+  createdById           String   @map("created_by_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  store               Store                @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  aiConversation      AiConversation?      @relation(fields: [aiConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  copilotConversation CopilotConversation? @relation(fields: [copilotConversationId, storeId], references: [id, storeId], onDelete: Cascade)
+  createdBy           User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([storeId])
+  @@index([aiConversationId])
+  @@index([copilotConversationId])
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("ai_review_flags")
 }
 
 model AiAction {
