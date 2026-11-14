@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { isUsPoint, locate, nearestStores } from "./near";
+import { parseNearQuery } from "./near-query";
 
 const hasDb = !!process.env.DATABASE_URL;
 const MI_PER_DEG_LAT = 69.0934; // 2π × 3958.8 / 360
@@ -61,6 +62,11 @@ describe.skipIf(!hasDb)("near me", () => {
     expect(await locate({ kind: "zip", zip: "00000" })).toEqual({ kind: "none" });
     expect(await locate({ kind: "city", key: "nashville", state: "TN" })).toMatchObject({ kind: "point", label: "Nashville, TN" });
     expect(await locate({ kind: "city", key: "pflugerville", state: null })).toMatchObject({ kind: "point", label: "Pflugerville, TX" });
+    // The seed is keyed with the same placeKey, so short and long forms meet: "Mt. Bullion" is a Census name.
+    for (const typed of ["Ft Worth, TX", "Fort Worth, TX"]) {
+      expect(await locate(parseNearQuery(typed)!)).toMatchObject({ kind: "point", label: "Fort Worth, TX" });
+    }
+    expect(await locate(parseNearQuery("Mount Bullion, CA")!)).toMatchObject({ kind: "point", label: "Mt. Bullion, CA" });
   });
 
   it("asks for the state when a city name is in several states", async () => {

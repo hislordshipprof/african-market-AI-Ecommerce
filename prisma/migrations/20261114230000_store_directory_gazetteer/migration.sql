@@ -36705,7 +36705,7 @@ INSERT INTO "gazetteer_places" ("state","name_key","name","lat","lng") VALUES
 ('CA','mountain view','Mountain View',37.399686,-122.079269);
 INSERT INTO "gazetteer_places" ("state","name_key","name","lat","lng") VALUES
 ('CA','mountain view acres','Mountain View Acres',34.497558,-117.347173),
-('CA','mt bullion','Mt. Bullion',37.508618,-120.042081),
+('CA','mount bullion','Mt. Bullion',37.508618,-120.042081),
 ('CA','muir beach','Muir Beach',37.861565,-122.580322),
 ('CA','murphys','Murphys',38.136092,-120.443942),
 ('CA','murrieta','Murrieta',33.573214,-117.191007),

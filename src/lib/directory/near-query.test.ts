@@ -7,6 +7,12 @@ describe("placeKey", () => {
     expect(placeKey("San José")).toBe(placeKey("san jose"));
     expect(placeKey("Winston-Salem")).toBe(placeKey("winston salem"));
   });
+
+  it("matches Ft. and Fort, Mt. and Mount the same way", () => {
+    expect(placeKey("Ft Worth")).toBe(placeKey("Fort Worth"));
+    expect(placeKey("Mt. Vernon")).toBe(placeKey("mount vernon"));
+    expect(placeKey("Lake Mt. Pleasant")).toBe(placeKey("lake mount pleasant"));
+  });
 });
 
 describe("gazetteerPlaceName", () => {

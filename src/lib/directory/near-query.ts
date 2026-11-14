@@ -6,7 +6,7 @@ export type NearQuery =
 
 const MAX_QUERY = 80;
 
-/** The lookup key a place name is stored and searched under: lower case, no accents or punctuation, Saint as St. */
+/** The lookup key a place name is stored and searched under: lower case, no accents or punctuation, Saint as St, Ft as Fort, Mt as Mount. */
 export function placeKey(name: string): string {
   return name
     .normalize("NFD")
@@ -14,8 +14,9 @@ export function placeKey(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
-    .replace(/^saint /, "st ")
-    .replace(/ saint /g, " st ");
+    .replace(/(^| )saint /g, "$1st ")
+    .replace(/(^| )ft /g, "$1fort ")
+    .replace(/(^| )mt /g, "$1mount ");
 }
 
 const TYPE_SUFFIX =
