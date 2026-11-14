@@ -361,3 +361,31 @@ describe("proxy custom domain resolution", () => {
     expect(res.headers.get("x-middleware-request-x-custom-domain")).toBeNull();
   });
 });
+
+describe("proxy on the platform root domain (store directory)", () => {
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("E2E_STORE_OVERRIDE", "");
+    vi.stubEnv("PLATFORM_ROOT_DOMAIN", "example.com");
+  });
+
+  for (const host of ["example.com", "www.example.com"]) {
+    it(`marks ${host} as the platform root and sets no store`, () => {
+      const res = proxy(makeRequest(`http://${host}/`));
+      expect(res.headers.get("x-middleware-request-x-platform-root")).toBe("1");
+      expect(res.headers.get("x-middleware-request-x-store-slug")).toBeNull();
+      expect(res.headers.get("x-middleware-request-x-custom-domain")).toBeNull();
+    });
+  }
+
+  it("leaves a store host unmarked and drops a forged root header", () => {
+    const req = new NextRequest("http://mama-ngozi.example.com/", {
+      headers: { host: "mama-ngozi.example.com", "x-platform-root": "1" },
+    });
+    const res = proxy(req);
+    expect(res.headers.get("x-middleware-request-x-store-slug")).toBe("mama-ngozi");
+    expect(res.headers.get("x-middleware-request-x-platform-root")).toBeNull();
+  });
+});
