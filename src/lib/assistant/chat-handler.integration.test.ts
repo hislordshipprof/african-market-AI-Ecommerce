@@ -1639,7 +1639,8 @@ describe.skipIf(!hasDb)("assistant chat handler", () => {
       model: createAssistantModel({ fetch: fetchImpl }),
       now: () => clock,
     });
-    const ip = `198.51.100.${randomInt(20, 250)}`;
+    // A fixed or small-range ip reuses rate rows left by earlier runs: the 2041 clock keeps them live.
+    const ip = `198.51.100.${randomUUID().slice(0, 8)}`;
     let cookie = "";
     let sent = 0;
     const turn = async (id: string, text: string) => {

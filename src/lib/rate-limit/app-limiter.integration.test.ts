@@ -77,9 +77,12 @@ describe.skipIf(!hasDb || process.env.TZ_CHILD === "1")("app rate limit cleanup 
   it("a window refreshed while cleanup waits is kept", async () => {
     const key = `fresh-${Date.now()}-${Math.random()}`;
     const now = BigInt(Date.now());
-    // window_start 1 is the only row below cutoff 2, so an unordered LIMIT 100 cannot skip it.
-    const windowStart = BigInt(1);
-    const cutoff = BigInt(2);
+    // Another process's takeRateLimit runs cleanup with cutoff now-24h and would delete a row
+    // parked at window_start 1 before this test locks it. Park the row just inside that cutoff
+    // (so only this test's explicit cutoff reaches it) and use a cutoff one ms above it, so the
+    // only row cleanup can match is this one and an unordered LIMIT 100 cannot skip it.
+    const windowStart = now - BigInt(24 * 60 * 60 * 1000) + BigInt(5 * 60 * 1000);
+    const cutoff = windowStart + BigInt(1);
     const client = new Client({ connectionString: process.env.DATABASE_URL });
     await client.connect();
     try {
