@@ -56,6 +56,19 @@ export type OrderSearchRow = {
   createdAt: Date;
 };
 
+export type OrderSearchField = (typeof ORDER_SEARCH_FIELDS)[number];
+
+/** The search form's state: the fields as typed, then the page shown. `rows` is null before the first search. */
+export type OrderSearchState = {
+  values: Partial<Record<OrderSearchField, string>>;
+  error: string | null;
+  rows: OrderSearchRow[] | null;
+  nextCursor: string | null;
+  page: number;
+};
+
+export const INITIAL_ORDER_SEARCH: OrderSearchState = { values: {}, error: null, rows: null, nextCursor: null, page: 0 };
+
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function encodeOrderCursor(cursor: OrderCursor): string {
