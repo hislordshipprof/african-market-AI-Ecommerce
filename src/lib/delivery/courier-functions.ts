@@ -1,6 +1,7 @@
 import { inngest } from "../inngest/client";
 import { sendSkipped, sendWithTimeout } from "../inngest/notify";
 import { copyCourierProof } from "./proof";
+import { readCourierSettings } from "./courier-settings";
 import { COURIER_REGISTRATION_REQUESTED, findStoresNeedingCourierRegistration, registerStoreCouriers } from "./courier-registration";
 import {
   COURIER_BOTH_FAILED,
@@ -16,7 +17,7 @@ import {
 } from "./dispatch";
 
 function productionDeps(): DispatchDeps {
-  return { providers: courierProviders(), emit: emitCourierEvent };
+  return { providers: courierProviders(), emit: emitCourierEvent, settings: () => readCourierSettings() };
 }
 
 /** Event ids let Inngest drop a repeat from a retried step. */

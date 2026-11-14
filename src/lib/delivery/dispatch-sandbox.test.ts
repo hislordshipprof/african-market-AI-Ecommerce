@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { storeScoped } from "../db";
 import { COURIER_BOTH_FAILED, selectAndDispatch, type CourierEvent } from "./dispatch";
+import { readCourierSettings } from "./courier-settings";
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
 import { liveSandbox, providerSandbox } from "../test-live-provider";
@@ -53,7 +54,7 @@ describe.skipIf(!liveSandbox || !hasKeys)("selectAndDispatch against the Uber Di
           tipCents: 0,
         },
       },
-      { providers: [new DoorDashDriveProvider({ env: {} }), uber], emit: async (e) => void events.push(e) },
+      { providers: [new DoorDashDriveProvider({ env: {} }), uber], emit: async (e) => void events.push(e), settings: () => readCourierSettings() },
     );
 
     expect(booked).toHaveLength(1);

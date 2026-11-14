@@ -26,6 +26,7 @@ vi.mock("../inngest/send", () => ({ sendOrderAuthorized: vi.fn().mockResolvedVal
 
 import { writeGeocodeCache } from "../address/cache";
 import { dispatchReadyOrder } from "../delivery/dispatch";
+import { readCourierSettings } from "../delivery/courier-settings";
 import { placeOrder, quoteCheckout, type DeliveryRequest as CheckoutAddress } from "./service";
 import { slotOptions } from "./slots";
 import type { SlotSchedule } from "../order/slot-schedule";
@@ -143,6 +144,34 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     expect(uber.created).toEqual([]);
   });
 
+  it("#535 AC3: a switched-off provider is never quoted; with both off checkout offers no courier and logs why", async () => {
+    const { store, cart } = await seed();
+    const uber = new StubCourier("uber", 749);
+    const doordash = new StubCourier("doordash", 899);
+    const settings = { selectionMode: "cheapest" as const, assignmentTimeoutSeconds: 600, doordashEnabled: true, uberEnabled: false, weightLimitLb: 50 };
+
+    const uberOff = await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [doordash, uber], courierSettings: settings });
+    expect(uberOff).toMatchObject({ problems: [], courierFeeCents: 899, courierProvider: "DoorDash Drive" });
+    expect(uber.quoteCalls).toBe(0);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bothOff = await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [doordash, uber], courierSettings: { ...settings, doordashEnabled: false } });
+    expect(bothOff.problems).toEqual([expect.objectContaining({ code: "ineligible", message: expect.stringMatching(/does not offer courier delivery/) })]);
+    expect(bothOff.courierFeeCents).toBe(0);
+    expect(doordash.quoteCalls).toBe(1);
+    expect(uber.quoteCalls).toBe(0);
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual({ event: "courier_providers_off", referenceId: cart.id });
+    warn.mockRestore();
+  });
+
+  it("#535: DoorDash first shows DoorDash's fee although Uber quotes less", async () => {
+    const { store, cart } = await seed();
+    const settings = { selectionMode: "doordash_first" as const, assignmentTimeoutSeconds: 600, doordashEnabled: true, uberEnabled: true, weightLimitLb: 50 };
+    const quote = await quoteCheckout(store.id, 0, cart.id, CONTACT, "courier", ADDRESS, { couriers: [new StubCourier("uber", 749), new StubCourier("doordash", 899)], courierSettings: settings });
+    expect(quote).toMatchObject({ problems: [], courierFeeCents: 899, courierProvider: "DoorDash Drive" });
+    expect(quote.totalCents).toBe(4000 + 120 + 899);
+  });
+
   it("the courier gets both phones in E.164, however the shopper typed theirs", async () => {
     const { store, cart } = await seed();
     const uber = new StubCourier("uber", 749);
@@ -246,7 +275,7 @@ describe.skipIf(!hasDb)("courier delivery at checkout (#527, lane DB)", () => {
     expect(order.platformFeeCents).toBe(120 + Math.round(4000 * 0.029) + 30);
 
     await storeScoped(store.id).order.update({ where: { id: order.id }, data: { status: "READY" } });
-    const dispatched = await dispatchReadyOrder(store.id, order.id, { providers: [uber], emit: async () => {} });
+    const dispatched = await dispatchReadyOrder(store.id, order.id, { providers: [uber], emit: async () => {}, settings: () => readCourierSettings() });
     expect(dispatched).toMatchObject({ ok: true, provider: "uber" });
     expect(uber.created).toHaveLength(1);
     expect(await storeScoped(store.id).order.findUnique({ where: { id: order.id }, select: { status: true } })).toEqual({ status: "COURIER_REQUESTED" });

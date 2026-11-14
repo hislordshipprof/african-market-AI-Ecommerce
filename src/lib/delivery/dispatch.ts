@@ -1,12 +1,10 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { storeMayUse } from "../billing/plan";
 import { storeScoped } from "../db";
+import { anyCourierEnabled, enabledProviders, preferredProvider, type CourierSelectionMode, type CourierSettings } from "./courier-settings";
 import { DoorDashDriveProvider } from "./doordash";
 import { UberDirectProvider } from "./uber-direct";
 import { DeliveryProviderError, type CreatedDelivery, type DeliveryAddress, type DeliveryProvider, type DeliveryProviderName, type DeliveryQuote, type DeliveryRequest } from "./provider";
-
-/** Spec §9, §11.2: no courier assigned this long after the delivery was created → switch provider. */
-export const COURIER_ASSIGNMENT_TIMEOUT_MS = 600_000;
 
 /** Spec §11.3: above this order total, or with any frozen item, the courier checks a PIN at drop-off. */
 export const PIN_ABOVE_TOTAL_CENTS = 15_000;
@@ -42,8 +40,11 @@ export type CourierEvent =
   | { name: typeof COURIER_BOTH_FAILED; data: { storeId: string; orderId: string; orderNumber: number; options: Array<"store-delivery" | "pickup" | "cancel"> } };
 
 export interface DispatchDeps {
+  /** Every adapter. The settings decide which may be quoted; a live delivery is cancelled with its own adapter. */
   providers: DeliveryProvider[];
   emit: (event: CourierEvent) => Promise<void>;
+  /** The courier settings (#535), read each time dispatch or failover runs. */
+  settings: () => Promise<CourierSettings>;
   now?: () => Date;
 }
 
@@ -77,10 +78,10 @@ function quoteWith(input: QuoteInput, provider: DeliveryProvider): Promise<Candi
 }
 
 /**
- * Quotes every provider at once; live quotes come back cheapest first. A provider that cannot quote (missing keys,
- * HTTP error) or quotes an expired price is unavailable.
+ * Quotes every provider at once; live quotes come back cheapest first, or with the mode's provider first. A provider
+ * that cannot quote (missing keys, HTTP error) or quotes an expired price is unavailable.
  */
-async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], now: () => Date): Promise<Candidate[]> {
+async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], mode: CourierSelectionMode, now: () => Date): Promise<Candidate[]> {
   const settled = await Promise.all(
     providers.map(async (provider) => {
       try {
@@ -91,25 +92,31 @@ async function liveQuotes(input: QuoteInput, providers: DeliveryProvider[], now:
       }
     }),
   );
+  const first = preferredProvider(mode);
+  const rank = (c: Candidate) => (c.provider.name === first ? 0 : 1);
   return settled
     .filter((c): c is Candidate => c !== null && c.quote.expiresAt > now())
-    .sort((a, b) => a.quote.feeCents - b.quote.feeCents);
+    .sort((a, b) => rank(a) - rank(b) || a.quote.feeCents - b.quote.feeCents);
 }
 
 export type CheckoutCourierQuote = { provider: DeliveryProviderName; courierProvider: CourierBrand; feeCents: number; expiresAt: Date };
 
-/** The fee checkout shows (#527): the same selection dispatch books from, with nothing booked. */
-export async function quoteCheapestCourier(input: QuoteInput, providers: DeliveryProvider[], now: () => Date = () => new Date()): Promise<CheckoutCourierQuote | null> {
-  const [cheapest] = await liveQuotes(input, providers, now);
-  if (!cheapest) return null;
-  return { provider: cheapest.provider.name, courierProvider: courierBrand(cheapest.provider.name), feeCents: cheapest.quote.feeCents, expiresAt: cheapest.quote.expiresAt };
+/** The fee checkout shows (#527): the same selection dispatch books from (#535), with nothing booked. */
+export async function quoteCourier(input: QuoteInput, providers: DeliveryProvider[], settings: CourierSettings, now: () => Date = () => new Date()): Promise<CheckoutCourierQuote | null> {
+  if (!anyCourierEnabled(settings, input.referenceId)) return null;
+  const [chosen] = await liveQuotes(input, enabledProviders(providers, settings), settings.selectionMode, now);
+  if (!chosen) return null;
+  return { provider: chosen.provider.name, courierProvider: courierBrand(chosen.provider.name), feeCents: chosen.quote.feeCents, expiresAt: chosen.quote.expiresAt };
 }
 
-/** Books the cheapest live quote. A create error moves straight to the next cheapest. */
+/** Books the first live quote in the settings' order. A create error moves straight to the next one. */
 export async function selectAndDispatch(input: DispatchInput, deps: DispatchDeps): Promise<DispatchResult> {
   const now = deps.now ?? (() => new Date());
+  const settings = await deps.settings();
   const quoteInput = { ...input, referenceId: input.orderId };
-  const candidates = await liveQuotes(quoteInput, deps.providers, now);
+  const candidates = anyCourierEnabled(settings, input.orderId)
+    ? await liveQuotes(quoteInput, enabledProviders(deps.providers, settings), settings.selectionMode, now)
+    : [];
 
   for (const [i, candidate] of candidates.entries()) {
     const { provider } = candidate;
@@ -311,9 +318,12 @@ export async function runCourierFailover(
   deps: DispatchDeps,
 ): Promise<void> {
   const { storeId, deliveryId } = target;
+  // The timeout is read once, when the timer starts; a later settings change does not move this delivery's deadline.
   const deadlineIso = (await step.run("courier-timer-plan", async () => {
     const delivery = await storeScoped(storeId).delivery.findUnique({ where: { id: deliveryId }, select: { createdAt: true } });
-    return delivery ? new Date(delivery.createdAt.getTime() + COURIER_ASSIGNMENT_TIMEOUT_MS).toISOString() : null;
+    if (!delivery) return null;
+    const { assignmentTimeoutSeconds } = await deps.settings();
+    return new Date(delivery.createdAt.getTime() + assignmentTimeoutSeconds * 1000).toISOString();
   })) as string | null;
   if (!deadlineIso) return;
   await step.sleepUntil("courier-assignment-timeout", new Date(deadlineIso));
@@ -360,12 +370,13 @@ export async function runCourierFailover(
       await deps.emit({ name: COURIER_DELIVERY_CREATED, data: { storeId, deliveryId: live.id } });
       return;
     }
-    const alternates = deps.providers.filter((p) => !used.some((u) => u.provider === p.name));
+    const settings = await deps.settings();
+    const alternates = enabledProviders(deps.providers.filter((p) => !used.some((u) => u.provider === p.name)), settings);
     if (alternates.length > 0) {
       const fromProvider = delivery.provider as DeliveryProviderName;
       await deps.emit({ name: COURIER_FAILOVER_TRIGGERED, data: { storeId, orderId: delivery.orderId, fromProvider, reason: "assignment_timeout" } });
     }
-    await selectAndDispatch({ storeId, orderId: delivery.orderId, ...(await courierRequest(storeId, delivery.orderId)) }, { ...deps, providers: alternates });
+    await selectAndDispatch({ storeId, orderId: delivery.orderId, ...(await courierRequest(storeId, delivery.orderId)) }, { ...deps, providers: alternates, settings: async () => settings });
   });
 }
 

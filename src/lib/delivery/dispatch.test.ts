@@ -1,8 +1,9 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { testPrismaClient } from "@/lib/test-prisma";
 import { platformAdminTransaction, storeScoped } from "../db";
 import { makeFakeStep } from "../inngest/fake-step";
+import type { CourierSettings } from "./courier-settings";
 import { DoorDashDriveProvider } from "./doordash";
 import { fakeDoorDash } from "./doordash-fake";
 import { UberDirectProvider } from "./uber-direct";
@@ -14,7 +15,7 @@ import {
   courierFailoverFailed,
   courierRequest,
   dispatchReadyOrder,
-  quoteCheapestCourier,
+  quoteCourier,
   runCourierFailover,
   selectAndDispatch,
   type CourierEvent,
@@ -30,6 +31,13 @@ import {
 } from "./provider";
 
 const hasDb = !!process.env.DATABASE_URL;
+
+/** The migration's defaults; each test passes its own settings, so none reads the shared platform row. */
+const defaults: CourierSettings = { selectionMode: "cheapest", assignmentTimeoutSeconds: 600, doordashEnabled: true, uberEnabled: true, weightLimitLb: 50 };
+function settingsOf(over: Partial<CourierSettings> = {}): () => Promise<CourierSettings> {
+  return async () => ({ ...defaults, ...over });
+}
+const settings = settingsOf();
 
 /**
  * Stub courier with the providers' own rules: a delivery id is quoted once (DoorDash's 409); create needs a live
@@ -104,18 +112,39 @@ const request = {
   tipCents: 0,
 };
 
-describe("checkout courier quote (#527)", () => {
+describe("checkout courier quote (#527, #535)", () => {
+  it("#535: DoorDash first or Uber first shows that provider's fee even when the other is cheaper", async () => {
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+
+    expect(await quoteCourier({ referenceId: "cart-p1", request }, [doordash, uber], { ...defaults, selectionMode: "doordash_first" })).toMatchObject({ provider: "doordash", feeCents: 899 });
+    expect(await quoteCourier({ referenceId: "cart-p2", request }, [doordash, uber], { ...defaults, selectionMode: "uber_first" })).toMatchObject({ provider: "uber", feeCents: 749 });
+    doordash.failQuote = true;
+    expect(await quoteCourier({ referenceId: "cart-p3", request }, [doordash, uber], { ...defaults, selectionMode: "doordash_first" })).toMatchObject({ provider: "uber", feeCents: 749 });
+  });
+
+  it("#535 AC3: a switched-off provider is never quoted, and with both off nothing is", async () => {
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+
+    expect(await quoteCourier({ referenceId: "cart-off1", request }, [doordash, uber], { ...defaults, uberEnabled: false })).toMatchObject({ provider: "doordash", feeCents: 899 });
+    expect(uber.quoteCalls).toBe(0);
+    expect(await quoteCourier({ referenceId: "cart-off2", request }, [doordash, uber], { ...defaults, uberEnabled: false, doordashEnabled: false })).toBeNull();
+    expect(doordash.quoteCalls).toBe(1);
+    expect(uber.quoteCalls).toBe(0);
+  });
+
   it("returns the cheapest live quote with its brand and books nothing", async () => {
     const doordash = new StubProvider("doordash", 899);
     const uber = new StubProvider("uber", 749);
     const expired = new StubProvider("uber", 500);
     expired.expiresInMs = -1;
 
-    const quote = await quoteCheapestCourier({ referenceId: "cart-1", request }, [doordash, uber]);
+    const quote = await quoteCourier({ referenceId: "cart-1", request }, [doordash, uber], defaults);
 
     expect(quote).toMatchObject({ provider: "uber", feeCents: 749, courierProvider: "Uber Direct" });
     expect(doordash.created.size + uber.created.size).toBe(0);
-    expect(await quoteCheapestCourier({ referenceId: "cart-1", request }, [expired, doordash])).toMatchObject({ feeCents: 899 });
+    expect(await quoteCourier({ referenceId: "cart-1", request }, [expired, doordash], defaults)).toMatchObject({ feeCents: 899 });
   });
 
   it("skips a provider that cannot quote, and returns null when none can", async () => {
@@ -123,9 +152,9 @@ describe("checkout courier quote (#527)", () => {
     const uber = new StubProvider("uber", 749);
     uber.failQuote = true;
 
-    expect(await quoteCheapestCourier({ referenceId: "cart-2", request }, [doordash, uber])).toMatchObject({ provider: "doordash", feeCents: 899 });
+    expect(await quoteCourier({ referenceId: "cart-2", request }, [doordash, uber], defaults)).toMatchObject({ provider: "doordash", feeCents: 899 });
     doordash.failQuote = true;
-    expect(await quoteCheapestCourier({ referenceId: "cart-2", request }, [doordash, uber])).toBeNull();
+    expect(await quoteCourier({ referenceId: "cart-2", request }, [doordash, uber], defaults)).toBeNull();
   });
 });
 
@@ -199,7 +228,7 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     const doordash = new StubProvider("doordash", 899);
     const uber = new StubProvider("uber", 749);
 
-    const result = await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit });
+    const result = await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit, settings });
 
     expect(result).toMatchObject({ ok: true, courierProvider: "Uber Direct" });
     expect(doordash.quoteCalls).toBe(1);
@@ -214,13 +243,13 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     const down = new StubProvider("uber", 500);
     down.failQuote = true;
     const doordash = new StubProvider("doordash", 899);
-    expect(await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, down], emit })).toMatchObject({ ok: true, provider: "doordash" });
+    expect(await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, down], emit, settings })).toMatchObject({ ok: true, provider: "doordash" });
 
     const other = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
     const stale = new StubProvider("uber", 500);
     stale.expiresInMs = -1;
     expect(
-      await selectAndDispatch({ ...other, request }, { providers: [new StubProvider("doordash", 899), stale], emit }),
+      await selectAndDispatch({ ...other, request }, { providers: [new StubProvider("doordash", 899), stale], emit, settings }),
     ).toMatchObject({ ok: true, provider: "doordash", quoteFeeCents: 899 });
     expect(stale.quoteCalls).toBe(1);
     expect(stale.created.size).toBe(0);
@@ -232,7 +261,7 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     uber.failCreate = true;
     const doordash = new StubProvider("doordash", 899);
 
-    const result = await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit });
+    const result = await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit, settings });
 
     expect(result).toMatchObject({ ok: true, provider: "doordash", courierProvider: "DoorDash Drive", quoteFeeCents: 899 });
     expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_DELIVERY_CREATED]);
@@ -248,25 +277,25 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
       b.failQuote = true;
       return [a, b];
     };
-    expect(await selectAndDispatch({ ...both, request }, { providers: failing(), emit })).toEqual({ ok: false, reason: "both_failed" });
+    expect(await selectAndDispatch({ ...both, request }, { providers: failing(), emit, settings })).toEqual({ ok: false, reason: "both_failed" });
     expect(events.at(-1)).toEqual({
       name: COURIER_BOTH_FAILED,
       data: { storeId: both.storeId, orderId: both.orderId, orderNumber: 7, options: ["store-delivery", "pickup", "cancel"] },
     });
 
     const pickupOnly = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
-    await selectAndDispatch({ ...pickupOnly, request }, { providers: failing(), emit });
+    await selectAndDispatch({ ...pickupOnly, request }, { providers: failing(), emit, settings });
     expect(events.at(-1)?.data).toMatchObject({ options: ["pickup", "cancel"] });
 
     const neither = await courierOrder({ pickupEnabled: false, storeDeliveryEnabled: false });
-    await selectAndDispatch({ ...neither, request }, { providers: failing(), emit });
+    await selectAndDispatch({ ...neither, request }, { providers: failing(), emit, settings });
     expect(events.at(-1)?.data).toMatchObject({ options: ["cancel"] });
     expect(await storeScoped(neither.storeId).delivery.count({ where: { orderId: neither.orderId } })).toBe(0);
   });
 
   async function dispatched(cheaper: StubProvider, other: StubProvider) {
     const ids = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
-    const result = await selectAndDispatch({ ...ids, request }, { providers: [cheaper, other], emit });
+    const result = await selectAndDispatch({ ...ids, request }, { providers: [cheaper, other], emit, settings });
     if (!result.ok) throw new Error("dispatch failed");
     events = [];
     return { ...ids, deliveryId: result.deliveryId };
@@ -278,7 +307,7 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     const { storeId, orderId, deliveryId } = await dispatched(uber, doordash);
     const step = makeFakeStep();
 
-    await runCourierFailover(step, { storeId, deliveryId }, { providers: [uber, doordash], emit });
+    await runCourierFailover(step, { storeId, deliveryId }, { providers: [uber, doordash], emit, settings });
 
     const created = (await storeScoped(storeId).delivery.findUniqueOrThrow({ where: { id: deliveryId } })).createdAt;
     expect(step.sleepUntils).toEqual([{ name: "courier-assignment-timeout", until: new Date(created.getTime() + 600_000).toISOString() }]);
@@ -296,7 +325,7 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     const { storeId, deliveryId } = await dispatched(uber, doordash);
     await storeScoped(storeId).delivery.update({ where: { id: deliveryId }, data: { status: "courier_assigned" } });
 
-    await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit });
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit, settings });
 
     expect([...uber.created.values()]).toEqual(["active"]);
     expect(doordash.quoteCalls).toBe(1);
@@ -308,17 +337,17 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     const doordash = new StubProvider("doordash", 899);
     const first = await dispatched(uber, doordash);
     doordash.failCreate = true;
-    await runCourierFailover(makeFakeStep(), { storeId: first.storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit });
+    await runCourierFailover(makeFakeStep(), { storeId: first.storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit, settings });
     expect([...uber.created.values()]).toEqual(["cancelled"]);
     expect(events.map((e) => e.name)).toEqual([COURIER_FAILOVER_TRIGGERED, COURIER_BOTH_FAILED]);
 
     const u2 = new StubProvider("uber", 749);
     const d2 = new StubProvider("doordash", 899);
     const second = await dispatched(u2, d2);
-    await runCourierFailover(makeFakeStep(), { storeId: second.storeId, deliveryId: second.deliveryId }, { providers: [u2, d2], emit });
+    await runCourierFailover(makeFakeStep(), { storeId: second.storeId, deliveryId: second.deliveryId }, { providers: [u2, d2], emit, settings });
     const next = await storeScoped(second.storeId).delivery.findFirstOrThrow({ where: { orderId: second.orderId, provider: "doordash" } });
     events = [];
-    await runCourierFailover(makeFakeStep(), { storeId: second.storeId, deliveryId: next.id }, { providers: [u2, d2], emit });
+    await runCourierFailover(makeFakeStep(), { storeId: second.storeId, deliveryId: next.id }, { providers: [u2, d2], emit, settings });
     expect([...d2.created.values()]).toEqual(["cancelled"]);
     expect(u2.quoteCalls).toBe(1);
     expect(events.map((e) => e.name)).toEqual([COURIER_BOTH_FAILED]);
@@ -330,7 +359,7 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     const { storeId, deliveryId } = await dispatched(uber, doordash);
     uber.created.set([...uber.created.keys()][0], "picked_up");
 
-    await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit });
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit, settings });
 
     expect((await storeScoped(storeId).delivery.findUniqueOrThrow({ where: { id: deliveryId } })).status).toBe("requested");
     expect(doordash.created.size).toBe(0);
@@ -343,12 +372,91 @@ describe.skipIf(!hasDb)("courier selection and failover", () => {
     const a = await dispatched(uber, doordash);
     const b = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
 
-    await runCourierFailover(makeFakeStep(), { storeId: b.storeId, deliveryId: a.deliveryId }, { providers: [uber, doordash], emit });
+    await runCourierFailover(makeFakeStep(), { storeId: b.storeId, deliveryId: a.deliveryId }, { providers: [uber, doordash], emit, settings });
 
     expect([...uber.created.values()]).toEqual(["active"]);
     expect((await storeScoped(a.storeId).delivery.findUniqueOrThrow({ where: { id: a.deliveryId } })).status).toBe("requested");
     expect(await storeScoped(b.storeId).delivery.findMany()).toEqual([]);
     expect(events).toEqual([]);
+  });
+
+  it("#535 AC2: a 300 s assignment timeout makes the failover step sleep 300 s", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, deliveryId } = await dispatched(uber, doordash);
+    const step = makeFakeStep();
+
+    await runCourierFailover(step, { storeId, deliveryId }, { providers: [uber, doordash], emit, settings: settingsOf({ assignmentTimeoutSeconds: 300 }) });
+
+    const created = (await storeScoped(storeId).delivery.findUniqueOrThrow({ where: { id: deliveryId } })).createdAt;
+    expect(step.sleepUntils).toEqual([{ name: "courier-assignment-timeout", until: new Date(created.getTime() + 300_000).toISOString() }]);
+  });
+
+  it("#535 AC3: a switched-off provider is never quoted or booked, even when it is cheaper", async () => {
+    const { storeId, orderId } = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+
+    const result = await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit, settings: settingsOf({ uberEnabled: false }) });
+
+    expect(result).toMatchObject({ ok: true, provider: "doordash", quoteFeeCents: 899 });
+    expect(uber.quoteCalls).toBe(0);
+    expect(uber.created.size).toBe(0);
+  });
+
+  it("#535 AC3: with both providers off, nothing is quoted, the store gets the both-failed options and the reason is logged", async () => {
+    const { storeId, orderId } = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit, settings: settingsOf({ uberEnabled: false, doordashEnabled: false }) });
+
+    expect(result).toEqual({ ok: false, reason: "both_failed" });
+    expect(doordash.quoteCalls + uber.quoteCalls).toBe(0);
+    expect(events.map((e) => e.name)).toEqual([COURIER_BOTH_FAILED]);
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual({ event: "courier_providers_off", referenceId: orderId });
+    warn.mockRestore();
+  });
+
+  it("#535: DoorDash first books DoorDash although Uber is cheaper, and a DoorDash create error books Uber", async () => {
+    const first = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+    const doordash = new StubProvider("doordash", 899);
+    const uber = new StubProvider("uber", 749);
+    const doordashFirst = settingsOf({ selectionMode: "doordash_first" });
+
+    expect(await selectAndDispatch({ ...first, request }, { providers: [uber, doordash], emit, settings: doordashFirst })).toMatchObject({ ok: true, provider: "doordash", quoteFeeCents: 899 });
+
+    const second = await courierOrder({ pickupEnabled: true, storeDeliveryEnabled: false });
+    const failing = new StubProvider("doordash", 899);
+    failing.failCreate = true;
+    expect(await selectAndDispatch({ ...second, request }, { providers: [uber, failing], emit, settings: doordashFirst })).toMatchObject({ ok: true, provider: "uber" });
+  });
+
+  it("#535 AC6: switching a provider off leaves its live delivery alone; the timer still cancels with that provider and books an enabled one", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, orderId, deliveryId } = await dispatched(uber, doordash);
+    const uberOff = settingsOf({ uberEnabled: false });
+
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit, settings: uberOff });
+
+    expect(uber.cancelCalls).toBe(1);
+    const rows = await storeScoped(storeId).delivery.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
+    expect(rows.map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"], ["doordash", "requested"]]);
+  });
+
+  it("#535: an alternate that is switched off is not booked after a timeout; the store gets the both-failed options", async () => {
+    const uber = new StubProvider("uber", 749);
+    const doordash = new StubProvider("doordash", 899);
+    const { storeId, orderId, deliveryId } = await dispatched(uber, doordash);
+
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId }, { providers: [uber, doordash], emit, settings: settingsOf({ doordashEnabled: false }) });
+
+    expect(doordash.quoteCalls).toBe(1);
+    expect(doordash.created.size).toBe(0);
+    expect(await storeScoped(storeId).delivery.count({ where: { orderId, status: { not: "cancelled" } } })).toBe(0);
+    expect(events.map((e) => e.name)).toEqual([COURIER_BOTH_FAILED]);
   });
 });
 
@@ -430,7 +538,7 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     uber.externalId = externalId;
     const doordash = new StubProvider("doordash", 899);
 
-    await expect(selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit })).rejects.toThrow(/Unique constraint/);
+    await expect(selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit, settings })).rejects.toThrow(/Unique constraint/);
 
     expect([...uber.created.values()]).toEqual(["cancelled"]);
     expect(doordash.created.size).toBe(0);
@@ -442,7 +550,7 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const uber = new StubProvider("uber", 749);
     const doordash = new StubProvider("doordash", 899);
 
-    await selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId)) }, { providers: [doordash, uber], emit });
+    await selectAndDispatch({ storeId, orderId, ...(await courierRequest(storeId, orderId)) }, { providers: [doordash, uber], emit, settings });
 
     expect(doordash.requests[0].pickup).toMatchObject({ providerBusinessId: storeId, providerStoreId: storeId });
     expect(uber.requests[0].pickup.providerStoreId).toBeUndefined();
@@ -459,11 +567,11 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const doordash = new DoorDashDriveProvider({ env: keys, fetch: fake.fetch });
     const uber = new StubProvider("uber", 749);
     const { storeId, orderId } = await courierOrder();
-    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit });
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [doordash, uber], emit, settings });
     if (!first.ok) throw new Error("dispatch failed");
     events = [];
 
-    await runCourierFailover(makeFakeStep(), { storeId, deliveryId: first.deliveryId }, { providers: [doordash, uber], emit });
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId: first.deliveryId }, { providers: [doordash, uber], emit, settings });
 
     const rows = await storeScoped(storeId).delivery.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
     expect(rows.map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"], ["doordash", "requested"]]);
@@ -474,7 +582,7 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const uber = new StubProvider("uber", 749);
     const doordash = new StubProvider("doordash", 899);
     const { storeId, orderId } = await courierOrder();
-    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit, settings });
     if (!first.ok) throw new Error("dispatch failed");
     events = [];
     const fake = makeFakeStep();
@@ -486,7 +594,7 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
       },
     };
 
-    await runCourierFailover(replaying, { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit });
+    await runCourierFailover(replaying, { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit, settings });
 
     expect(doordash.created.size).toBe(1);
     expect(await storeScoped(storeId).delivery.count({ where: { orderId } })).toBe(2);
@@ -498,12 +606,12 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const uber = new StubProvider("uber", 749);
     const doordash = new StubProvider("doordash", 899);
     const { storeId, orderId } = await courierOrder();
-    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit, settings });
     if (!first.ok) throw new Error("dispatch failed");
     events = [];
     uber.cancelErrors.push(new DeliveryProviderError("uber", 503, "service_unavailable", "down"));
 
-    await runCourierFailover(makeFakeStep({ attempts: 3 }), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit });
+    await runCourierFailover(makeFakeStep({ attempts: 3 }), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit, settings });
 
     expect(uber.cancelCalls).toBe(2);
     expect([...uber.created.values()]).toEqual(["cancelled"]);
@@ -516,12 +624,12 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const uber = new StubProvider("uber", 749);
     const doordash = new StubProvider("doordash", 899);
     const { storeId, orderId } = await courierOrder();
-    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit, settings });
     if (!first.ok) throw new Error("dispatch failed");
     events = [];
     const down = () => new DeliveryProviderError("uber", 503, "service_unavailable", "down");
     uber.cancelErrors.push(down(), down(), down());
-    const deps = { providers: [uber, doordash], emit };
+    const deps = { providers: [uber, doordash], emit, settings };
 
     await expect(runCourierFailover(makeFakeStep({ attempts: 3 }), { storeId, deliveryId: first.deliveryId }, deps)).rejects.toThrow("down");
     await courierFailoverFailed({ storeId, deliveryId: first.deliveryId }, deps);
@@ -535,7 +643,7 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const uber = new StubProvider("uber", 749);
     const doordash = new StubProvider("doordash", 899);
     const { storeId, orderId } = await courierOrder();
-    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit, settings });
     if (!first.ok) throw new Error("dispatch failed");
     events = [];
     uber.created.set([...uber.created.keys()][0], "cancelled");
@@ -543,7 +651,7 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
       data: { storeId, orderId, deliveryId: first.deliveryId, externalEventId: "uber-evt-cancel", type: "cancelled" },
     });
 
-    await runCourierFailover(makeFakeStep(), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit });
+    await runCourierFailover(makeFakeStep(), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit, settings });
 
     const rows = await storeScoped(storeId).delivery.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
     expect(rows.map((r) => [r.provider, r.status])).toEqual([["uber", "cancelled"], ["doordash", "requested"]]);
@@ -554,7 +662,7 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
     const uber = new StubProvider("uber", 749);
     const doordash = new StubProvider("doordash", 899);
     const { storeId, orderId } = await courierOrder();
-    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit });
+    const first = await selectAndDispatch({ storeId, orderId, request }, { providers: [uber, doordash], emit, settings });
     if (!first.ok) throw new Error("dispatch failed");
     events = [];
     let lost = false;
@@ -566,7 +674,7 @@ describe.skipIf(!hasDb)("courier dispatch: review round 1", () => {
       events.push(event);
     };
 
-    await runCourierFailover(makeFakeStep({ attempts: 2 }), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit: flaky });
+    await runCourierFailover(makeFakeStep({ attempts: 2 }), { storeId, deliveryId: first.deliveryId }, { providers: [uber, doordash], emit: flaky, settings });
 
     const alternate = await storeScoped(storeId).delivery.findFirstOrThrow({ where: { orderId, provider: "doordash" } });
     expect(doordash.created.size).toBe(1);
@@ -636,7 +744,7 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     const { storeId, orderId } = await readyOrder();
     const { fake, provider } = doordashFake();
 
-    const result = await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit });
+    const result = await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit, settings });
 
     expect(result).toMatchObject({ ok: true, provider: "doordash", quoteFeeCents: 899 });
     expect(fake.calls.map((c) => c.path)).toEqual(["/drive/v2/quotes", expect.stringMatching(/\/accept$/)]);
@@ -650,7 +758,7 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     const pins = [];
     for (const opts of cases) {
       const { storeId, orderId } = await readyOrder(opts);
-      await dispatchReadyOrder(storeId, orderId, { providers: [doordashFake().provider], emit });
+      await dispatchReadyOrder(storeId, orderId, { providers: [doordashFake().provider], emit, settings });
       pins.push((await storeScoped(storeId).delivery.findFirstOrThrow({ where: { orderId } })).pin);
     }
     expect(pins).toEqual([expect.stringMatching(/^\d{4}$/), expect.stringMatching(/^\d{4}$/), null]);
@@ -659,10 +767,10 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
   it("a retried dispatch books no second courier, only re-sends the timer event", async () => {
     const { storeId, orderId } = await readyOrder();
     const { fake, provider } = doordashFake();
-    await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit });
+    await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit, settings });
     events.length = 0;
 
-    const again = await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit });
+    const again = await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit, settings });
 
     expect(again).toMatchObject({ ok: true, existing: true });
     expect(fake.calls.filter((c) => c.path === "/drive/v2/quotes")).toHaveLength(1);
@@ -675,7 +783,7 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     const fake = fakeUberDirect({ clientId: keys.UBER_DIRECT_CLIENT_ID, clientSecret: keys.UBER_DIRECT_CLIENT_SECRET, customerId: keys.UBER_DIRECT_CUSTOMER_ID, now: () => new Date() });
     const uber = new UberDirectProvider({ env: keys, fetch: (input, init) => fake.fetch(input as string, init) });
 
-    const result = await dispatchReadyOrder(storeId, orderId, { providers: [uber], emit });
+    const result = await dispatchReadyOrder(storeId, orderId, { providers: [uber], emit, settings });
 
     expect(result).toMatchObject({ ok: true, provider: "uber" });
     expect(fake.calls.find((c) => c.path.endsWith("/deliveries"))?.body).toMatchObject({ pickup_phone_number: "+13015550100" });
@@ -685,8 +793,21 @@ describe.skipIf(!hasDb)("courier order flow (#136)", () => {
     const { storeId, orderId } = await readyOrder({ plan: "starter" });
     const { fake, provider } = doordashFake();
 
-    expect(await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit })).toEqual({ ok: false, reason: "plan" });
+    expect(await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit, settings })).toEqual({ ok: false, reason: "plan" });
     expect(fake.calls).toEqual([]);
     expect((await storeScoped(storeId).order.findUniqueOrThrow({ where: { id: orderId } })).status).toBe("READY");
+  });
+
+  it("#535 AC6: an order in flight keeps the provider it was dispatched with after that provider is switched off", async () => {
+    const { storeId, orderId } = await readyOrder();
+    const { fake, provider } = doordashFake();
+    const first = await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit, settings });
+
+    const again = await dispatchReadyOrder(storeId, orderId, { providers: [provider], emit, settings: settingsOf({ doordashEnabled: false }) });
+
+    expect(again).toEqual({ ok: true, deliveryId: (first as { deliveryId: string }).deliveryId, existing: true });
+    expect(fake.calls.filter((c) => c.path === "/drive/v2/quotes")).toHaveLength(1);
+    expect(fake.calls.filter((c) => c.path.includes("cancel"))).toEqual([]);
+    expect(await storeScoped(storeId).delivery.findMany({ where: { orderId } })).toMatchObject([{ provider: "doordash", status: "requested" }]);
   });
 });
