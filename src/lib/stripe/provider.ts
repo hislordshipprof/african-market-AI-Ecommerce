@@ -77,7 +77,7 @@ function toPayout(payout: Stripe.Payout): Payout {
  * transfer group `group_<PaymentIntent id>`.
  */
 function payoutPaymentIntentId(txn: Stripe.BalanceTransaction): string | null {
-  const source = txn.source as (Stripe.Charge & Stripe.Refund) | string | null;
+  const source = txn.source as Stripe.Charge | Stripe.Refund | string | null;
   if (!source || typeof source === "string") return null;
   const charge = source.object === "refund" ? source.charge : source;
   if (!charge || typeof charge === "string") return null;
