@@ -80,6 +80,8 @@ async function shoot(page: Page, name: string) {
   mkdirSync(SHOTS, { recursive: true });
   for (const scheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: scheme });
+    // Buttons use transition-all; let the scheme change finish before the shot.
+    await page.waitForTimeout(400);
     for (const [label, size] of [["1280px", { width: 1280, height: 900 }], ["390px", { width: 390, height: 844 }]] as const) {
       await page.setViewportSize(size);
       await page.getByRole("heading", { name: "Reorder suggestions" }).scrollIntoViewIfNeeded();
@@ -142,6 +144,7 @@ test("owner edits and saves a reorder list, then downloads, prints and copies it
     await page.emulateMedia({ media: "screen" });
     for (const scheme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: scheme });
+      await page.waitForTimeout(400);
       for (const [label, width] of [["1280px", 1280], ["390px", 390]] as const) {
         await page.setViewportSize({ width, height: 844 });
         await page.screenshot({ path: `${SHOTS}/551-reorder-print-${scheme}-${label}.png` });
