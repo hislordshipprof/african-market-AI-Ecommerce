@@ -18,6 +18,8 @@ import { cartItemKey } from "@/lib/storefront/cart-store";
 import { clearCart } from "@/lib/cart/actions";
 import {
   quoteCheckoutAction,
+  applyCouponAction,
+  removeCouponAction,
   createPaymentIntentAction,
   placeOrderAction,
   confirmAddressAction,
@@ -323,6 +325,10 @@ function RealCheckoutForm({
   const [errorHref, setErrorHref] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [payState, setPayState] = useState<"idle" | "pending" | "success">("idle");
+  const [promo, setPromo] = useState("");
+  const [promoMessage, setPromoMessage] = useState("");
+  // Bumped when the cart's code changes, so the quote is asked again (#557).
+  const [couponRev, setCouponRev] = useState(0);
   const metadata = lines.map((line) => ({
     line,
     item: catalog.find((item) => cartItemKey(item) === cartItemKey(line)),
@@ -332,6 +338,21 @@ function RealCheckoutForm({
     (sum, { line, item }) => sum + (item?.weightG ?? 0) * line.quantity,
     0,
   );
+  async function applyPromo(code: string) {
+    setPromoMessage("");
+    const result = await applyCouponAction(code, contact.email);
+    if (!result.ok) {
+      setPromoMessage(result.error);
+      return;
+    }
+    setPromo("");
+    setCouponRev((rev) => rev + 1);
+  }
+  async function removePromo() {
+    setPromoMessage("");
+    await removeCouponAction();
+    setCouponRev((rev) => rev + 1);
+  }
   const delivery = fulfillment !== "pickup" && confirmed
     ? {
         line1: confirmed.line1,
@@ -342,7 +363,7 @@ function RealCheckoutForm({
         leaveAtDoor: !frozen && leaveAtDoor,
       }
     : undefined;
-  const currentKey = JSON.stringify({ contact, fulfillment, delivery });
+  const currentKey = JSON.stringify({ contact, fulfillment, delivery, couponRev });
   const quotePending = !quote || quoteKey !== currentKey;
 
   useEffect(() => {
@@ -373,7 +394,7 @@ function RealCheckoutForm({
         if (result.ok) {
           setQuote(result.quote);
           setSlotOptions(result.slots);
-          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery }));
+          setQuoteKey(JSON.stringify({ contact, fulfillment, delivery, couponRev }));
         } else {
           setError(result.error);
         }
@@ -673,12 +694,14 @@ function RealCheckoutForm({
       setSlot={chosenByShopper(setSlot)}
       slots={slots}
       slotRequired={slotRequired}
-      promo=""
-      setPromo={() => {}}
-      appliedPromo=""
+      promo={promo}
+      setPromo={setPromo}
+      appliedPromo={quote?.coupon?.code ?? ""}
       setAppliedPromo={() => {}}
-      promoMessage=""
-      setPromoMessage={() => {}}
+      promoMessage={promoMessage}
+      setPromoMessage={setPromoMessage}
+      applyPromo={applyPromo}
+      removePromo={removePromo}
       tipPercent={0}
       setTipPercent={() => {}}
       customTip=""
@@ -890,6 +913,9 @@ interface CheckoutLayoutProps {
   setAppliedPromo: (v: string) => void;
   promoMessage: string;
   setPromoMessage: (v: string) => void;
+  /** Real checkout: puts the code on the cart on the server (#557). */
+  applyPromo?: (code: string) => void;
+  removePromo?: () => void;
   tipPercent: number | null;
   setTipPercent: (v: number | null) => void;
   customTip: string;
@@ -920,7 +946,7 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
     suggestions, setSuggestions, searching, notes, setNotes,
     leaveAtDoor, setLeaveAtDoor, schedule, setSchedule,
     slot, setSlot, slots, slotRequired = false, promo, setPromo,
-    setAppliedPromo, promoMessage, setPromoMessage,
+    setAppliedPromo, promoMessage, setPromoMessage, applyPromo, removePromo,
     tipPercent, setTipPercent, customTip, setCustomTip,
     quote, quotePending, error, errorHref, submitted, payState,
     frozen, weightG, courierEligible,
@@ -1258,40 +1284,54 @@ function CheckoutLayout(props: CheckoutLayoutProps) {
                 </li>
               ))}
             </ul>
-            {!isRealPayment && (
-              <>
-                <label className={styles.field}>
-                  Promo code
-                  <div className={styles.inline}>
-                    <input
-                      value={promo}
-                      disabled={payState !== "idle"}
-                      onChange={(e) => setPromo(e.target.value)}
-                      placeholder="Try WELCOME10"
-                    />
-                    <Button
-                      type="button"
-                      disabled={payState !== "idle"}
-                      onClick={() => {
-                        const code = promo.trim().toUpperCase();
-                        setAppliedPromo(code === "WELCOME10" ? code : "");
-                        setPromoMessage(
-                          code === "WELCOME10"
-                            ? "10% off applied, up to $10."
-                            : code
-                              ? "That code is not valid."
-                              : "Promo removed.",
-                        );
-                      }}
-                    >
-                      Apply
-                    </Button>
-                  </div>
-                </label>
-                {promoMessage && (
-                  <p className={styles.muted} role="status">{promoMessage}</p>
-                )}
-              </>
+            <label className={styles.field}>
+              Promo code
+              <div className={styles.inline}>
+                <input
+                  value={promo}
+                  disabled={payState !== "idle"}
+                  onChange={(e) => setPromo(e.target.value)}
+                  placeholder={isRealPayment ? "Enter a code" : "Try WELCOME10"}
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                />
+                <Button
+                  type="button"
+                  disabled={payState !== "idle" || (isRealPayment && !promo.trim())}
+                  onClick={() => {
+                    if (applyPromo) {
+                      applyPromo(promo);
+                      return;
+                    }
+                    const code = promo.trim().toUpperCase();
+                    setAppliedPromo(code === "WELCOME10" ? code : "");
+                    setPromoMessage(
+                      code === "WELCOME10"
+                        ? "10% off applied, up to $10."
+                        : code
+                          ? "That code is not valid."
+                          : "Promo removed.",
+                    );
+                  }}
+                >
+                  Apply
+                </Button>
+              </div>
+            </label>
+            {promoMessage && (
+              <p className={styles.muted} role="status">{promoMessage}</p>
+            )}
+            {quote?.coupon && removePromo && (
+              <div className={styles.inline} data-testid="applied-coupon">
+                <p className={styles.muted} role="status">
+                  {quote.coupon.message
+                    ? `${quote.coupon.code}: ${quote.coupon.message}`
+                    : `${quote.coupon.code} applied`}
+                </p>
+                <Button type="button" disabled={payState !== "idle"} onClick={() => removePromo()}>
+                  Remove
+                </Button>
+              </div>
             )}
             {quote ? (
               <QuoteLines quote={quote} fulfillment={fulfillment} />
