@@ -11,6 +11,7 @@ import {
   orderMessagesTag,
   postCustomerMessageForOrder,
 } from "../../support/thread";
+import { mayBeUnavailable } from "./availability";
 import { recordRead, type AssistantContext, type ToolResult } from "./execute";
 import {
   checkDeliveryAreaInput,
@@ -104,7 +105,16 @@ async function ownOrders(ctx: AssistantContext, orderNumber: number | undefined)
         select: {
           qtyOrdered: true,
           listingVariant: {
-            select: { label: true, listing: { select: { customName: true, masterProduct: { select: { name: true } } } } },
+            select: {
+              id: true,
+              label: true,
+              listing: {
+                select: {
+                  id: true, customName: true, active: true, confidence: true, stockMode: true, qty: true, status: true,
+                  masterProduct: { select: { name: true } },
+                },
+              },
+            },
           },
         },
       },
@@ -123,6 +133,10 @@ function lineSummary(order: OwnOrder) {
       name: listing.customName || listing.masterProduct?.name || "Unnamed",
       packLabel: line.listingVariant.label,
       qty: line.qtyOrdered,
+      // The same variant ids reorder the line ("my usual"); only this store's own orders reach here.
+      listingId: listing.id,
+      variantId: line.listingVariant.id,
+      ...(listing.active ? { mayBeUnavailable: mayBeUnavailable(listing) } : { unavailable: true }),
     };
   });
 }

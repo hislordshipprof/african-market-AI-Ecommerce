@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { platformAdmin, storeScoped } from "../../db";
 import { readConstraints } from "../constraints";
-import { shownProductIds, type ShownMessage } from "../shown";
+import { acceptanceForTurn, shownProductIds, type ShownMessage } from "../shown";
 import { addToCart, setShopperNeeds, setSwapRule, showProducts, suggestSubstitutes, updateCart, type AssistantContext } from "./execute";
 
 vi.mock("next/cache", () => ({
@@ -128,5 +128,19 @@ describe.skipIf(!hasDb)("shopper assistant extras (#476)", () => {
     // The suggested variant id is in the chat's copy table, like a search result's.
     const messages: ShownMessage[] = [{ role: "assistant", parts: [{ type: "tool-suggest_substitutes", state: "output-available", output: suggested }] }];
     expect(shownProductIds(messages).join("\n")).toContain(listing.spinach.variantId);
+  });
+
+  it("treats a past order's lines like shown products, so yes reorders them", () => {
+    const output = {
+      ok: true,
+      orders: [{ number: 1001, lines: [{ name: "Egusi", packLabel: "1 lb", qty: 2, listingId: "listing-egusi", variantId: "variant-egusi" }] }],
+    };
+    const messages: ShownMessage[] = [
+      { role: "user", id: "u1", parts: [{ type: "text", text: "Reorder my usual" }] },
+      { role: "assistant", parts: [{ type: "tool-get_order_status", state: "output-available", output }, { type: "text", text: "Your last order had 2 Egusi. Add it again?" }] },
+      { role: "user", id: "u2", parts: [{ type: "text", text: "yes" }] },
+    ];
+    expect(shownProductIds(messages)).toEqual(["Egusi, 1 lb: variant-egusi"]);
+    expect(acceptanceForTurn(messages, "u2", "yes").lastReplyListingIds).toEqual(["listing-egusi"]);
   });
 });
