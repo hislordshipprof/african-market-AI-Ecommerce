@@ -1,11 +1,20 @@
 import { Prisma } from "@prisma/client";
 import { platformAdmin } from "./db";
-import { getVercelDomainsAdapter, VercelApiError } from "./vercel-domains";
+import { getVercelDomainsAdapter, VercelApiError, type VercelDomainsAdapter } from "./vercel-domains";
 import { revalidateStore } from "./get-store";
 
 export type DomainResult =
   | { ok: true; domain: string; verified: boolean; cname: string }
   | { ok: false; error: string; status: number };
+
+// A deployment without Vercel keys answers 503 with the missing key instead of a bare 500.
+function vercelAdapter(): VercelDomainsAdapter | { ok: false; error: string; status: number } {
+  try {
+    return getVercelDomainsAdapter();
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Vercel is not configured", status: 503 };
+  }
+}
 
 export async function addDomainToStore(
   storeId: string,
@@ -33,7 +42,8 @@ export async function addDomainToStore(
     };
   }
 
-  const adapter = getVercelDomainsAdapter();
+  const adapter = vercelAdapter();
+  if ("ok" in adapter) return adapter;
   try {
     const result = await adapter.addDomain(domain);
 
@@ -49,6 +59,8 @@ export async function addDomainToStore(
       ) {
         return { ok: false, error: "Domain is already assigned to another store", status: 409 };
       }
+      // Left on the project, the domain would block every retry with "already exists".
+      await adapter.removeDomain(domain).catch(() => {});
       throw dbErr;
     }
 
@@ -76,7 +88,8 @@ export async function getDomainStatus(
     return { ok: false, error: "Store has no custom domain", status: 404 };
   }
 
-  const adapter = getVercelDomainsAdapter();
+  const adapter = vercelAdapter();
+  if ("ok" in adapter) return adapter;
   try {
     const config = await adapter.getDomainConfig(store.customDomain);
     return { ok: true, domain: config.domain, verified: config.verified, cname: config.cname };
@@ -102,7 +115,8 @@ export async function removeDomainFromStore(
   }
 
   const oldDomain = store.customDomain;
-  const adapter = getVercelDomainsAdapter();
+  const adapter = vercelAdapter();
+  if ("ok" in adapter) return adapter;
   try {
     await adapter.removeDomain(oldDomain);
   } catch (e) {

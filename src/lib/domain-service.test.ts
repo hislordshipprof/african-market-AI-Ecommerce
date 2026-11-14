@@ -137,6 +137,28 @@ describe("domain-service", () => {
         status: 409,
       });
     });
+    it("takes the domain back off Vercel when saving it fails, so a retry can add it again", async () => {
+      mockFindUnique.mockResolvedValueOnce(storeA).mockResolvedValueOnce(null);
+      mockUpdate.mockRejectedValueOnce(new Error("connection timeout"));
+
+      await expect(addDomainToStore("store-a", "shop.mamasmarket.com")).rejects.toThrow("connection timeout");
+      await expect(fakeAdapter.getDomainConfig("shop.mamasmarket.com")).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("answers 503 naming the missing key when Vercel is not configured in production", async () => {
+      resetVercelDomainsAdapter();
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("VERCEL_TOKEN", "");
+      vi.stubEnv("VERCEL_PROJECT_ID", "");
+      mockFindUnique.mockResolvedValueOnce(storeA).mockResolvedValueOnce(null);
+      try {
+        const result = await addDomainToStore("store-a", "shop.mamasmarket.com");
+        expect(result).toMatchObject({ ok: false, status: 503, error: expect.stringContaining("VERCEL_TOKEN") });
+        expect(mockUpdate).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
   });
 
   describe("getDomainStatus", () => {
