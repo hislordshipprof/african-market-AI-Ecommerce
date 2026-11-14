@@ -1084,6 +1084,42 @@ function CardView({
       </div>
     );
   }
+  if (card.kind === "review") {
+    return (
+      <section className={styles.summary} aria-label="Review your order">
+        <h3>Review your order</h3>
+        <ul>
+          {card.lines.map((line) => (
+            <li key={line.lineId}>
+              <span>
+                {line.qty} × {line.name}
+                {line.mayBeUnavailable ? <span className={styles.flag}> · May be unavailable</span> : null}
+              </span>
+              <span>{line.lineTotalLabel}</span>
+            </li>
+          ))}
+        </ul>
+        <p className={styles.meta}>{card.fulfillmentLabel}</p>
+        <ul className={styles.reviewTotals}>
+          {card.rows.map((row) => (
+            <li key={row.label}>
+              <span>{row.label}</span>
+              <span>{row.value}</span>
+            </li>
+          ))}
+        </ul>
+        <p className={styles.meta}>
+          Card hold {card.holdLabel}: the total plus up to {card.bufferLabel} for weighed items and swaps.
+          You pay only for what you get.
+        </p>
+        {card.problems.map((problem) => <p key={problem} className={styles.flag}>{problem}</p>)}
+        <p className={styles.meta}>Nothing is charged here. You add contact and card, and pay, on the checkout page.</p>
+        <div className={styles.actions}>
+          <Link className={styles.primary} href={card.href} onClick={onClose}>Review and pay</Link>
+        </div>
+      </section>
+    );
+  }
   return (
     <section className={styles.summary}>
       <h3>Your basket</h3>

@@ -39,6 +39,7 @@ import { authPrisma, healthQueryRaw, platformAdmin, storeScoped } from "../db";
 import { clearTestSentEmails, getTestSentEmails } from "../email/send";
 import { csvCommitAction, csvPreviewAction } from "./csv-import-actions";
 import type { CommitSelection, CsvPreviewResult } from "./csv-import";
+import { verifyUrlFromEmail } from "../test-magic-link";
 
 // DATABASE_URL absent: the suite skips. Lane and hosted CI set it, so a real run skips 0.
 // APP_RUNTIME_PASSWORD absent is not a skip: under NODE_ENV=test the app falls back to the
@@ -580,7 +581,7 @@ describe.skipIf(!hasDb)("csv import actions: owner only (real auth, app_runtime)
     expect(sent.status).toBe(200);
     const message = getTestSentEmails().find((item) => item.to === emails.customer);
     expect(message?.html).toBeTruthy();
-    const href = message!.html.match(/href="([^"]+)"/)?.[1]?.replace(/&amp;/g, "&");
+    const href = verifyUrlFromEmail(message!.html);
     expect(href).toBeTruthy();
     const jar = new CookieJar();
     const verify = await authGet(href!);

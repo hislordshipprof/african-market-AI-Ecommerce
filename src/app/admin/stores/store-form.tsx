@@ -7,6 +7,7 @@ import { createStore, updateStore } from "@/lib/admin/actions";
 import type { StoreFormState } from "@/lib/admin/actions";
 import type { Store } from "@prisma/client";
 import { VALID_US_TIMEZONES } from "@/lib/admin/timezone";
+import { SLOT_FORMS, WEEKDAYS, slotFormValues, type SlotFormPrefix } from "@/lib/admin/slot-form";
 
 const PRESETS = [
   { value: "palm-and-shea", label: "Palm & Shea" },
@@ -327,6 +328,23 @@ export function StoreForm({
                 )}
               </div>
             </div>
+            <div>
+              <label htmlFor="phone" className="mb-1 block text-sm font-medium text-foreground">Store phone</label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                autoComplete="tel"
+                maxLength={40}
+                defaultValue={sv?.phone ?? store?.phone ?? ""}
+                aria-describedby="phone-help"
+                className="w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <p id="phone-help" className="mt-1 text-xs text-muted-foreground">Couriers call this number at pickup. Courier delivery needs it.</p>
+              {state.fieldErrors?.phone && (
+                <p className="mt-1 text-xs text-destructive">{state.fieldErrors.phone}</p>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -458,6 +476,25 @@ export function StoreForm({
         </div>
       </fieldset>
 
+      <fieldset className="rounded-lg border border-input p-4">
+        <legend className="px-2 text-sm font-medium text-foreground">Scheduled slots</legend>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Times customers can book at checkout, in the store&apos;s timezone. Without slots, pickup offers
+          today&apos;s half hours and store delivery stays as soon as possible.
+        </p>
+        <div className="space-y-6">
+          {SLOT_FORMS.map((form) => (
+            <SlotFields
+              key={form.prefix}
+              prefix={form.prefix}
+              title={form.title}
+              values={sv ?? slotFormValues(store?.[form.column] ?? null, form.prefix)}
+              errors={state.fieldErrors ?? {}}
+            />
+          ))}
+        </div>
+      </fieldset>
+
       <div className="flex items-center gap-3">
         <button
           type="submit"
@@ -481,5 +518,94 @@ export function StoreForm({
         </button>
       </div>
     </form>
+  );
+}
+
+const FIELD = "w-full rounded-md border border-input px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+const LABEL = "mb-1 block text-sm font-medium text-foreground";
+
+function SlotFields({
+  prefix,
+  title,
+  values,
+  errors,
+}: {
+  prefix: SlotFormPrefix;
+  title: string;
+  values: Record<string, string>;
+  errors: Record<string, string>;
+}) {
+  const error = (suffix: string) =>
+    errors[`${prefix}${suffix}`] ? (
+      <p className="mt-1 text-xs text-destructive">{errors[`${prefix}${suffix}`]}</p>
+    ) : null;
+  const numbers = [
+    { suffix: "Minutes", label: "Slot length (minutes)", min: 15, max: 240, step: 15 },
+    { suffix: "Lead", label: "Lead time (minutes)", min: 120, max: 2880, step: 15 },
+    { suffix: "Capacity", label: "Orders per slot", min: 1, max: 500, step: 1 },
+    { suffix: "DaysAhead", label: "Days ahead (1-5)", min: 1, max: 5, step: 1 },
+  ];
+  return (
+    <section aria-labelledby={`${prefix}-title`} className="space-y-4">
+      <div className="flex items-center gap-2">
+        <input
+          name={`${prefix}Enabled`}
+          type="checkbox"
+          id={`${prefix}Enabled`}
+          defaultChecked={values[`${prefix}Enabled`] === "on"}
+          className="h-4 w-4 rounded border-input text-primary focus-visible:ring-ring"
+        />
+        <label id={`${prefix}-title`} htmlFor={`${prefix}Enabled`} className="text-sm font-medium text-foreground">
+          {title}
+        </label>
+      </div>
+      {error("Enabled")}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {numbers.map((field) => (
+          <div key={field.suffix}>
+            <label htmlFor={`${prefix}${field.suffix}`} className={LABEL}>{field.label}</label>
+            <input
+              id={`${prefix}${field.suffix}`}
+              name={`${prefix}${field.suffix}`}
+              type="number"
+              min={field.min}
+              max={field.max}
+              step={field.step}
+              defaultValue={values[`${prefix}${field.suffix}`] ?? ""}
+              className={FIELD}
+            />
+            {error(field.suffix)}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {WEEKDAYS.map((day) => (
+          <div key={day}>
+            <label htmlFor={`${prefix}${day}`} className={LABEL}>{day} windows</label>
+            <input
+              id={`${prefix}${day}`}
+              name={`${prefix}${day}`}
+              type="text"
+              placeholder="9:00 AM - 12:00 PM, 2:00 PM - 6:00 PM"
+              defaultValue={values[`${prefix}${day}`] ?? ""}
+              className={FIELD}
+            />
+            {error(day)}
+          </div>
+        ))}
+      </div>
+      <div>
+        <label htmlFor={`${prefix}Closed`} className={LABEL}>Closed dates</label>
+        <input
+          id={`${prefix}Closed`}
+          name={`${prefix}Closed`}
+          type="text"
+          placeholder="2026-12-25, 2027-01-01"
+          defaultValue={values[`${prefix}Closed`] ?? ""}
+          className={FIELD}
+        />
+        {error("Closed")}
+      </div>
+    </section>
   );
 }
