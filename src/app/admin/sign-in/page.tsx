@@ -76,7 +76,7 @@ export default function AdminSignIn() {
         setStep("totp");
         setLoading(false);
       } else {
-        router.push("/admin/stores");
+        router.push("/admin");
       }
     } catch {
       setError(NETWORK_ERROR);
@@ -158,7 +158,7 @@ export default function AdminSignIn() {
             <SecondStepForm
               idPrefix="admin"
               describedBy={DESCRIPTION_ID}
-              onVerified={() => router.push("/admin/stores")}
+              onVerified={() => router.push("/admin")}
             />
           )}
         </CardContent>

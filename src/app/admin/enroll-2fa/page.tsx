@@ -133,7 +133,7 @@ export default function Enroll2FA() {
         setLoading(false);
         focusField(CODE_ID);
       } else if (backupCodes.length === 0) {
-        router.push("/admin/stores");
+        router.push("/admin");
       } else {
         setVerified(true);
         setLoading(false);
@@ -194,7 +194,7 @@ export default function Enroll2FA() {
                 Two-factor is on.
               </p>
               <BackupCodesNotice codes={backupCodes} />
-              <Button type="button" onClick={() => router.push("/admin/stores")} className={AUTH_SUBMIT}>
+              <Button type="button" onClick={() => router.push("/admin")} className={AUTH_SUBMIT}>
                 I&apos;ve saved them. Continue
               </Button>
             </div>
