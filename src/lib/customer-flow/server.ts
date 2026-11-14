@@ -5,7 +5,7 @@ import { getFlowCatalog } from "@/lib/storefront/service";
 import { describeQueue, storeAvailability } from "@/lib/order/store-queue";
 import { demoFlowsEnabled } from "./demo-gate";
 import { storeMayUse } from "@/lib/billing/plan";
-import { courierOffered } from "@/lib/checkout/service";
+import { courierOffered } from "@/lib/delivery/courier-offered";
 import { anyCourierEnabled, readCourierSettings } from "@/lib/delivery/courier-settings";
 import type { FlowStore } from "./contracts";
 
