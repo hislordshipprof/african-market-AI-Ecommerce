@@ -38,20 +38,24 @@ test.describe("Storefront brand rendering (real subdomains)", () => {
     await expect(page.locator("h1")).toHaveText("Store not found");
   });
 
-  test("stores render different theme colors", async ({ page }) => {
-    await page.goto(`${storeUrl("mama-ngozi")}/`);
-    const headerA = page.getByTestId("storefront-header");
-    const bgA = await headerA.evaluate(
-      (el) => getComputedStyle(el).backgroundColor,
-    );
+  test("stores render different theme colors on a neutral header", async ({ page }) => {
+    const read = async (slug: string) => {
+      await page.goto(`${storeUrl(slug)}/`);
+      const header = page.getByTestId("storefront-header");
+      return header.evaluate((el) => ({
+        header: getComputedStyle(el).backgroundColor,
+        cart: getComputedStyle(el.querySelector(".sf-header-cart")!).backgroundColor,
+        surface: getComputedStyle(document.body).getPropertyValue("--store-surface").trim(),
+      }));
+    };
+    const a = await read("mama-ngozi");
+    const b = await read("tante-marie");
 
-    await page.goto(`${storeUrl("tante-marie")}/`);
-    const headerB = page.getByTestId("storefront-header");
-    const bgB = await headerB.evaluate(
-      (el) => getComputedStyle(el).backgroundColor,
-    );
-
-    expect(bgA).not.toBe(bgB);
+    // #528: the header is the neutral surface; the store colour lives on the cart button.
+    expect(a.header).toBe(b.header);
+    expect(a.surface).toBe("#FFFFFF");
+    expect(a.header).toMatch(/255, 255, 255|srgb 1 1 1/);
+    expect(a.cart).not.toBe(b.cart);
   });
 
   test("?store= fallback works in development", async ({ page }) => {
