@@ -6,6 +6,8 @@ export interface StoredMessage {
   /** The owner's client message id for the turn this reply answers. */
   messageId?: string;
   choices?: ListingChoice[];
+  /** What this reply cost, for AI oversight (#544). Never sent to the panel. */
+  costMicros?: number;
 }
 
 function str(value: unknown): string | null {
@@ -46,6 +48,7 @@ export function parseStoredMessages(value: unknown): StoredMessage[] {
     const text = (item as { text?: unknown }).text;
     if ((role !== "owner" && role !== "assistant") || typeof text !== "string") continue;
     const messageId = str((item as { messageId?: unknown }).messageId);
+    const costMicros = (item as { costMicros?: unknown }).costMicros;
     const rawChoices = (item as { choices?: unknown }).choices;
     const choices = Array.isArray(rawChoices)
       ? rawChoices.map(parseChoice).filter((choice): choice is ListingChoice => choice !== null)
@@ -55,6 +58,7 @@ export function parseStoredMessages(value: unknown): StoredMessage[] {
       text,
       ...(messageId ? { messageId } : {}),
       ...(choices.length > 0 ? { choices } : {}),
+      ...(typeof costMicros === "number" && Number.isFinite(costMicros) ? { costMicros } : {}),
     });
   }
   return messages;
