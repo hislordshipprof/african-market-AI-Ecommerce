@@ -398,13 +398,13 @@ describe("action authorization", () => {
   describe("catalog", () => {
     it("guest is refused with no write", async () => {
       headerState.delete("cookie");
-      await expect(approveProduct(productId)).rejects.toThrow("REDIRECT:/admin/sign-in");
+      await expect(approveProduct(productId, "needs_review")).rejects.toThrow("REDIRECT:/admin/sign-in");
       expect(await storeScoped(storeB).auditLog.count()).toBe(1);
     });
 
     it("store A cannot touch store B audit_logs", async () => {
       asA(slugA, cookiesA);
-      await expect(approveProduct(productId)).rejects.toThrow("REDIRECT:/admin/sign-in");
+      await expect(approveProduct(productId, "needs_review")).rejects.toThrow("REDIRECT:/admin/sign-in");
       const listing = await storeScoped(storeB).listing.findUnique({ where: { id: listingId } });
       expect(listing?.masterProductId).toBe(productId);
       expect(await storeScoped(storeB).auditLog.count()).toBe(1);
