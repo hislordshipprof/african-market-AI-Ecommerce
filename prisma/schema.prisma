@@ -108,6 +108,7 @@ model Store {
   billingEvents         StripeBillingEvent[]
   assistantChatMonths   AssistantChatMonth[]
   ownerWhatsAppLinks    OwnerWhatsAppLink[]
+  driverRoutes          DriverRoute[]
 
   @@map("stores")
 }
@@ -1205,6 +1206,8 @@ model Order {
   deliveredAt             DateTime? @map("delivered_at")
   deliveryProofKey        String?   @map("delivery_proof_key")
   deliveryProofUploadedAt DateTime? @map("delivery_proof_uploaded_at")
+  /// The store's own driver route this order is on (#566).
+  driverRouteId           String?   @map("driver_route_id")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -1218,9 +1221,11 @@ model Order {
   deliveries           Delivery[]
   supportThreads       SupportThread[]
   substitutionRequests SubstitutionRequest[]
+  driverRoute          DriverRoute?          @relation(fields: [driverRouteId, storeId], references: [id, storeId], onDelete: Restrict)
 
   @@unique([id, storeId])
   @@unique([storeId, number])
+  @@index([storeId, driverRouteId])
   @@index([storeId])
   @@index([storeId, status])
   @@index([storeId, fulfillment, pickupSlot])
@@ -1355,6 +1360,30 @@ model DeliveryEvent {
   @@index([storeId])
   @@index([storeId, orderId])
   @@map("delivery_events")
+}
+
+/// A store's own driver for one slot (#566). Only the link token's hash is kept; the link dies at expiresAt or revokedAt.
+model DriverRoute {
+  id          String    @id @default(cuid())
+  storeId     String    @map("store_id")
+  /// The slot start, a UTC ISO instant as on Order.pickupSlot.
+  slot        String
+  driverName  String    @map("driver_name")
+  /// E.164.
+  driverPhone String    @map("driver_phone")
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  /// Set once the SMS is accepted. A route never sent does not hold its orders.
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  orders Order[]
+
+  @@unique([id, storeId])
+  @@index([storeId, slot])
+  @@map("driver_routes")
 }
 
 /// Platform-wide settings, one row with id "platform". Readable by every app user; platform admins write.
